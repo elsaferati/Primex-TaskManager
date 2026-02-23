@@ -389,6 +389,11 @@ export default function WeeklyPlannerPage() {
   const [checklistTaskTitle, setChecklistTaskTitle] = React.useState<string | null>(null)
   const [taskChecklists, setTaskChecklists] = React.useState<Record<string, TaskChecklist | null>>({})
   const [checklistLoading, setChecklistLoading] = React.useState<Record<string, boolean>>({})
+  const [fastTaskDescriptionDialogOpen, setFastTaskDescriptionDialogOpen] = React.useState(false)
+  const [fastTaskDescriptionTaskId, setFastTaskDescriptionTaskId] = React.useState<string | null>(null)
+  const [fastTaskDescriptionTitle, setFastTaskDescriptionTitle] = React.useState<string | null>(null)
+  const [fastTaskDescription, setFastTaskDescription] = React.useState<string | null>(null)
+  const [fastTaskDescriptionLoading, setFastTaskDescriptionLoading] = React.useState<boolean>(false)
 
   const deleteTask = React.useCallback(async (
     taskId: string,
@@ -558,6 +563,43 @@ export default function WeeklyPlannerPage() {
     setChecklistDialogOpen(true)
     void loadTaskChecklist(taskId)
   }, [loadTaskChecklist])
+
+  const loadFastTaskDescription = React.useCallback(async (taskId: string) => {
+    if (!taskId) return
+    setFastTaskDescriptionLoading(true)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`)
+      if (!res.ok) {
+        let detail = "Failed to load task description"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "Failed to load task description")
+        setFastTaskDescription(null)
+        return
+      }
+      const task = (await res.json()) as Task
+      setFastTaskDescription(task.description || null)
+    } catch (error) {
+      console.error("Failed to load fast task description", error)
+      toast.error("Failed to load task description")
+      setFastTaskDescription(null)
+    } finally {
+      setFastTaskDescriptionLoading(false)
+    }
+  }, [apiFetch])
+
+  const openFastTaskDescription = React.useCallback((taskId: string, taskTitle?: string | null) => {
+    if (!taskId) return
+    setFastTaskDescriptionTaskId(taskId)
+    setFastTaskDescriptionTitle(taskTitle || null)
+    setFastTaskDescriptionDialogOpen(true)
+    setFastTaskDescription(null)
+    void loadFastTaskDescription(taskId)
+  }, [loadFastTaskDescription])
 
   React.useEffect(() => {
     const boot = async () => {
@@ -1003,29 +1045,28 @@ export default function WeeklyPlannerPage() {
       dailyStatus?: string | null
     ) => {
       const normalized = (status || "TODO").toUpperCase()
-      // If the task was completed on this specific day, show it as DONE even if daily_status is stale.
-      if (normalized === "DONE" && completedAt && dayDate) {
-        const completedDate = completedAt.slice(0, 10)
-        const currentDate = dayDate.slice(0, 10)
-        if (completedDate === currentDate) {
-          return getStatusCardClasses("DONE")
-        }
-      }
+      
+      // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
       if (dailyStatus) {
         return getStatusCardClasses(dailyStatus)
       }
-      if (normalized !== "DONE") {
-        return getStatusCardClasses(normalized)
-      }
-      if (!completedAt || !dayDate) {
-        return getStatusCardClasses("IN_PROGRESS")
-      }
-      const completedDate = completedAt.slice(0, 10)
-      const currentDate = dayDate.slice(0, 10)
-      if (completedDate === currentDate) {
+      
+      // For non-MST/TT tasks, use timeline logic based on completion date
+      if (normalized === "DONE" && completedAt && dayDate) {
+        const completedDate = completedAt.slice(0, 10) // Extract YYYY-MM-DD
+        const currentDate = dayDate.slice(0, 10) // Extract YYYY-MM-DD
+        
+        // If the displayed day is before the completion date, show TODO/IN_PROGRESS
+        // (task wasn't done yet on that day)
+        if (currentDate < completedDate) {
+          return getStatusCardClasses("IN_PROGRESS")
+        }
+        // If the displayed day is on or after the completion date, show DONE
         return getStatusCardClasses("DONE")
       }
-      return getStatusCardClasses("IN_PROGRESS")
+      
+      // For non-DONE tasks or when dates aren't available, use the main status
+      return getStatusCardClasses(normalized)
     },
     [getStatusCardClasses]
   )
@@ -1038,30 +1079,29 @@ export default function WeeklyPlannerPage() {
       dailyStatus?: string | null
     ) => {
       const normalized = (status || "TODO").toUpperCase()
-      // If the task was completed on this specific day, treat it as DONE even if daily_status is stale.
-      if (normalized === "DONE" && completedAt && dayDate) {
-        const completedDate = completedAt.slice(0, 10)
-        const currentDate = dayDate.slice(0, 10)
-        if (completedDate === currentDate) {
-          return "DONE"
-        }
-      }
+      
+      // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
       if (dailyStatus) {
         const normalizedDaily = dailyStatus.toUpperCase()
         return normalizedDaily === "DONE" ? "DONE" : normalizedDaily === "IN_PROGRESS" ? "IN_PROGRESS" : "TODO"
       }
-      if (normalized !== "DONE") {
-        return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
-      }
-      if (!completedAt || !dayDate) {
-        return "IN_PROGRESS"
-      }
-      const completedDate = completedAt.slice(0, 10)
-      const currentDate = dayDate.slice(0, 10)
-      if (completedDate === currentDate) {
+      
+      // For non-MST/TT tasks, use timeline logic based on completion date
+      if (normalized === "DONE" && completedAt && dayDate) {
+        const completedDate = completedAt.slice(0, 10) // Extract YYYY-MM-DD
+        const currentDate = dayDate.slice(0, 10) // Extract YYYY-MM-DD
+        
+        // If the displayed day is before the completion date, show IN_PROGRESS
+        // (task wasn't done yet on that day)
+        if (currentDate < completedDate) {
+          return "IN_PROGRESS"
+        }
+        // If the displayed day is on or after the completion date, show DONE
         return "DONE"
       }
-      return "IN_PROGRESS"
+      
+      // For non-DONE tasks or when dates aren't available, use the main status
+      return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
     },
     []
   )
@@ -1829,26 +1869,121 @@ export default function WeeklyPlannerPage() {
       return ""
     }
 
-    const renderDayGroupHtml = (day: WeeklyTableDay, dayIndex: number, allUsers: WeeklyPrintUser[]) => {
+    const renderDayGroupHtml = (day: WeeklyTableDay, dayIndex: number, allUsers: WeeklyPrintUser[], departmentName?: string) => {
       const dayName = DAY_NAMES[dayIndex]
       const dayDate = formatDate(day.date)
       const dayIso = day.date
+      const isGADepartment = departmentName === "GA"
+      const rowSpan = isGADepartment ? 6 : 4
 
-      let html = `
-        <tr>
-          <td class="day-cell" rowspan="4" style="text-align: left; padding: 1px;">
-            <div style="display: flex; flex-direction: column;">
-              <strong class="print-subhead">${dayName}</strong>
-              <span class="print-subhead" style="margin-top: 0.5px;">${dayDate}</span>
-            </div>
-          </td>
-          <td class="print-subhead time-cell" rowspan="2">AM</td>
-          <td class="ll-cell print-subhead">PRJK</td>
-      `
+      let html = ""
+      
+      if (isGADepartment) {
+        // GA Department: SYS, FT, PRJK order
+        // AM SYS Row
+        html += `
+          <tr>
+            <td class="day-cell" rowspan="${rowSpan}" style="text-align: left; padding: 1px;">
+              <div style="display: flex; flex-direction: column;">
+                <strong class="print-subhead">${dayName}</strong>
+                <span class="print-subhead" style="margin-top: 0.5px;">${dayDate}</span>
+              </div>
+            </td>
+            <td class="print-subhead time-cell" rowspan="3">AM</td>
+            <td class="ll-cell print-subhead">SYS</td>
+        `
+        allUsers.forEach((user) => {
+          const userDay = day.users.find(u => u.user_id === user.user_id)
+          const systemTasks = userDay?.am_system_tasks || []
+          const block = getBlockForSlot(user.user_id, dayIso, "am")
+          const isBlocked = Boolean(block)
+
+          html += `<td>`
+          if (isBlocked) {
+            html += `<div class="pv-fest-cell">`
+            html += `<div class="pv-fest-badge">PV/FEST</div>`
+            html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+            html += `</div>`
+          } else if (systemTasks.length > 0) {
+            html += `<div style="font-size: 4pt; color: #1e40af;">`
+            systemTasks.forEach((task, taskIndex) => {
+              const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
+              const statusClass =
+                statusValue === "DONE"
+                  ? "task-status-done"
+                  : statusValue === "IN_PROGRESS"
+                    ? "task-status-in-progress"
+                    : "task-status-todo"
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}</div>`
+            })
+            html += `</div>`
+          } else {
+            html += `<div class="empty-cell">-</div>`
+          }
+          html += `</td>`
+        })
+        html += `</tr>`
+
+        // AM FT Row
+        html += `<tr>`
+        html += `<td class="ll-cell print-subhead">FT</td>`
+        allUsers.forEach((user) => {
+          const userDay = day.users.find(u => u.user_id === user.user_id)
+          const fastTasks = sortFastTasks(userDay?.am_fast_tasks || [])
+          const block = getBlockForSlot(user.user_id, dayIso, "am")
+          const isBlocked = Boolean(block)
+
+          html += `<td>`
+          if (isBlocked) {
+            html += `<div class="pv-fest-cell">`
+            html += `<div class="pv-fest-badge">PV/FEST</div>`
+            html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+            html += `</div>`
+          } else if (fastTasks.length > 0) {
+            html += `<div style="font-size: 4pt; color: #0f172a;">`
+            fastTasks.forEach((task, taskIndex) => {
+              const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
+              const statusClass =
+                statusValue === "DONE"
+                  ? "task-status-done"
+                  : statusValue === "IN_PROGRESS"
+                    ? "task-status-in-progress"
+                    : "task-status-todo"
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}`
+              const badge = getFastTaskBadge(task)
+              if (badge) {
+                html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
+              }
+              html += `</div>`
+            })
+            html += `</div>`
+          } else {
+            html += `<div class="empty-cell">-</div>`
+          }
+          html += `</td>`
+        })
+        html += `</tr>`
+
+        // AM PRJK Row
+        html += `<tr>`
+        html += `<td class="ll-cell print-subhead">PRJK</td>`
+      } else {
+        // Other Departments: PRJK, FT order (original)
+        html += `
+          <tr>
+            <td class="day-cell" rowspan="${rowSpan}" style="text-align: left; padding: 1px;">
+              <div style="display: flex; flex-direction: column;">
+                <strong class="print-subhead">${dayName}</strong>
+                <span class="print-subhead" style="margin-top: 0.5px;">${dayDate}</span>
+              </div>
+            </td>
+            <td class="print-subhead time-cell" rowspan="2">AM</td>
+            <td class="ll-cell print-subhead">PRJK</td>
+        `
+      }
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const projects = userDay?.am_projects || []
-        const systemTasks = userDay?.am_system_tasks || []
         const block = getBlockForSlot(user.user_id, dayIso, "am")
         const isBlocked = Boolean(block)
 
@@ -1858,7 +1993,7 @@ export default function WeeklyPlannerPage() {
           html += `<div class="pv-fest-badge">PV/FEST</div>`
           html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
           html += `</div>`
-        } else if (projects.length > 0 || systemTasks.length > 0) {
+        } else if (projects.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
               <div class="project-title">${projectIndex + 1}. ${project.project_title}`
@@ -1889,13 +2024,6 @@ export default function WeeklyPlannerPage() {
             }
             html += `</div>`
           })
-          if (systemTasks.length > 0) {
-            html += `<div style="margin-top: 1px; font-size: 4pt; color: #1e40af;"><strong>System Tasks:</strong>`
-            systemTasks.forEach((task, taskIndex) => {
-              html += `<div class="task-item">${taskIndex + 1}. ${task.title}</div>`
-            })
-            html += `</div>`
-          }
         } else {
           html += `<div class="empty-cell">-</div>`
         }
@@ -1903,8 +2031,10 @@ export default function WeeklyPlannerPage() {
       })
       html += `</tr>`
 
-      html += `<tr>`
-      html += `<td class="ll-cell print-subhead">FT</td>`
+      if (!isGADepartment) {
+        // FT Row for non-GA departments
+        html += `<tr>`
+        html += `<td class="ll-cell print-subhead">FT</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.am_fast_tasks || [])
@@ -1940,15 +2070,100 @@ export default function WeeklyPlannerPage() {
         }
         html += `</td>`
       })
-      html += `</tr>`
+        html += `</tr>`
+      }
 
-      html += `<tr style="border-top: 2px solid #000;">`
-      html += `<td class="print-subhead time-cell" rowspan="2">PM</td>`
-      html += `<td class="ll-cell print-subhead">PRJK</td>`
+      // PM Section
+      if (isGADepartment) {
+        // PM SYS Row
+        html += `<tr style="border-top: 2px solid #000;">`
+        html += `<td class="print-subhead time-cell" rowspan="3">PM</td>`
+        html += `<td class="ll-cell print-subhead">SYS</td>`
+        allUsers.forEach((user) => {
+          const userDay = day.users.find(u => u.user_id === user.user_id)
+          const systemTasks = userDay?.pm_system_tasks || []
+          const block = getBlockForSlot(user.user_id, dayIso, "pm")
+          const isBlocked = Boolean(block)
+
+          html += `<td>`
+          if (isBlocked) {
+            html += `<div class="pv-fest-cell">`
+            html += `<div class="pv-fest-badge">PV/FEST</div>`
+            html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+            html += `</div>`
+          } else if (systemTasks.length > 0) {
+            html += `<div style="font-size: 4pt; color: #1e40af;">`
+            systemTasks.forEach((task, taskIndex) => {
+              const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
+              const statusClass =
+                statusValue === "DONE"
+                  ? "task-status-done"
+                  : statusValue === "IN_PROGRESS"
+                    ? "task-status-in-progress"
+                    : "task-status-todo"
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}</div>`
+            })
+            html += `</div>`
+          } else {
+            html += `<div class="empty-cell">-</div>`
+          }
+          html += `</td>`
+        })
+        html += `</tr>`
+
+        // PM FT Row
+        html += `<tr>`
+        html += `<td class="ll-cell print-subhead">FT</td>`
+        allUsers.forEach((user) => {
+          const userDay = day.users.find(u => u.user_id === user.user_id)
+          const fastTasks = sortFastTasks(userDay?.pm_fast_tasks || [])
+          const block = getBlockForSlot(user.user_id, dayIso, "pm")
+          const isBlocked = Boolean(block)
+
+          html += `<td>`
+          if (isBlocked) {
+            html += `<div class="pv-fest-cell">`
+            html += `<div class="pv-fest-badge">PV/FEST</div>`
+            html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
+            html += `</div>`
+          } else if (fastTasks.length > 0) {
+            html += `<div style="font-size: 4pt; color: #0f172a;">`
+            fastTasks.forEach((task, taskIndex) => {
+              const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
+              const statusClass =
+                statusValue === "DONE"
+                  ? "task-status-done"
+                  : statusValue === "IN_PROGRESS"
+                    ? "task-status-in-progress"
+                    : "task-status-todo"
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}`
+              const badge = getFastTaskBadge(task)
+              if (badge) {
+                html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
+              }
+              html += `</div>`
+            })
+            html += `</div>`
+          } else {
+            html += `<div class="empty-cell">-</div>`
+          }
+          html += `</td>`
+        })
+        html += `</tr>`
+
+        // PM PRJK Row
+        html += `<tr>`
+        html += `<td class="ll-cell print-subhead">PRJK</td>`
+      } else {
+        // PM PRJK Row for non-GA departments
+        html += `<tr style="border-top: 2px solid #000;">`
+        html += `<td class="print-subhead time-cell" rowspan="2">PM</td>`
+        html += `<td class="ll-cell print-subhead">PRJK</td>`
+      }
+      
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const projects = userDay?.pm_projects || []
-        const systemTasks = userDay?.pm_system_tasks || []
         const block = getBlockForSlot(user.user_id, dayIso, "pm")
         const isBlocked = Boolean(block)
 
@@ -1958,7 +2173,7 @@ export default function WeeklyPlannerPage() {
           html += `<div class="pv-fest-badge">PV/FEST</div>`
           html += `<div class="pv-fest-note">${block?.note ? escapeHtml(block.note) : ""}</div>`
           html += `</div>`
-        } else if (projects.length > 0 || systemTasks.length > 0) {
+        } else if (projects.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
               <div class="project-title">${projectIndex + 1}. ${project.project_title}`
@@ -1989,13 +2204,6 @@ export default function WeeklyPlannerPage() {
             }
             html += `</div>`
           })
-          if (systemTasks.length > 0) {
-            html += `<div style="margin-top: 1px; font-size: 4pt; color: #1e40af;"><strong>System Tasks:</strong>`
-            systemTasks.forEach((task, taskIndex) => {
-              html += `<div class="task-item">${taskIndex + 1}. ${task.title}</div>`
-            })
-            html += `</div>`
-          }
         } else {
           html += `<div class="empty-cell">-</div>`
         }
@@ -2003,8 +2211,10 @@ export default function WeeklyPlannerPage() {
       })
       html += `</tr>`
 
-      html += `<tr>`
-      html += `<td class="ll-cell print-subhead">FT</td>`
+      if (!isGADepartment) {
+        // PM FT Row for non-GA departments
+        html += `<tr>`
+        html += `<td class="ll-cell print-subhead">FT</td>`
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
         const fastTasks = sortFastTasks(userDay?.pm_fast_tasks || [])
@@ -2041,6 +2251,7 @@ export default function WeeklyPlannerPage() {
         html += `</td>`
       })
       html += `</tr>`
+      }
 
       return html
     }
@@ -2087,7 +2298,7 @@ export default function WeeklyPlannerPage() {
         dept.days.forEach((day, dayIndex) => {
           const tbody = doc.createElement("tbody")
           tbody.className = "day-group"
-          tbody.innerHTML = renderDayGroupHtml(day, dayIndex, chunk)
+          tbody.innerHTML = renderDayGroupHtml(day, dayIndex, chunk, dept.department_name)
           table.appendChild(tbody)
         })
 
@@ -2757,6 +2968,51 @@ export default function WeeklyPlannerPage() {
                 })}
               </div>
             )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={fastTaskDescriptionDialogOpen}
+        onOpenChange={(open) => {
+          setFastTaskDescriptionDialogOpen(open)
+          if (!open) {
+            setFastTaskDescriptionTaskId(null)
+            setFastTaskDescriptionTitle(null)
+            setFastTaskDescription(null)
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-2xl z-[120]">
+          <DialogHeader>
+            <DialogTitle className="text-slate-800">
+              {fastTaskDescriptionTitle || "Task Description"}
+            </DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-slate-700">Description</Label>
+              {fastTaskDescriptionLoading ? (
+                <div className="text-sm text-muted-foreground">Loading description...</div>
+              ) : fastTaskDescription && fastTaskDescription.trim().length > 0 ? (
+                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 min-h-[100px] max-h-[400px] overflow-y-auto whitespace-pre-wrap text-sm text-slate-700">
+                  {fastTaskDescription}
+                </div>
+              ) : (
+                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 min-h-[100px] text-sm text-slate-500 italic">
+                  No description provided.
+                </div>
+              )}
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button 
+                variant="outline" 
+                onClick={() => setFastTaskDescriptionDialogOpen(false)}
+                className="rounded-xl"
+              >
+                Close
+              </Button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
@@ -3525,7 +3781,18 @@ export default function WeeklyPlannerPage() {
                                             getStatusCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status),
                                           ].join(" ")}
                                         >
-                                        <span className="truncate whitespace-nowrap font-semibold text-slate-900">{idx + 1}. {task.title}</span>
+                                        {task.task_id ? (
+                                          <button
+                                            type="button"
+                                            onClick={() => openFastTaskDescription(task.task_id!, task.title)}
+                                            className="truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
+                                            title="View task description"
+                                          >
+                                            {idx + 1}. {task.title}
+                                          </button>
+                                        ) : (
+                                          <span className="truncate whitespace-nowrap font-semibold text-slate-900">{idx + 1}. {task.title}</span>
+                                        )}
                                           <div className="flex items-center gap-1">
                                             {statusBadge && (
                                               <span
@@ -3583,118 +3850,301 @@ export default function WeeklyPlannerPage() {
                             renderCellContent([], [], fastTasks, timeSlot, dayDate, userId)
                           )
 
+                          const renderSystemOnly = (
+                            systemTasks: WeeklyTableTaskEntry[],
+                            dayDate: string,
+                            timeSlot: "am" | "pm",
+                            userId: string
+                          ) => (
+                            renderCellContent([], systemTasks, [], timeSlot, dayDate, userId)
+                          )
+
+                          const isGADepartment = dept.department_name === "GA"
+                          const rowSpan = isGADepartment ? 6 : 4
+
                           return (
                             <React.Fragment key={day.date}>
-                              {/* AM PRJK Row */}
-                              <TableRow>
-                                <TableCell
-                                  className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
-                                  rowSpan={4}
-                                >
-                                  <div className="flex flex-col">
-                                    <div className="font-bold text-slate-900">{DAY_NAMES[dayIndex]}</div>
-                                    <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
-                                  </div>
-                                </TableCell>
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
-                                  <div className="text-xs font-medium text-primary">AM</div>
-                                </TableCell>
-                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  PRJK
-                              </TableCell>
-                                {allUsers.map((user) => {
-                                  const userDay = day.users.find((u) => u.user_id === user.user_id)
-                                  return (
-                                    <TableCell key={`${user.user_id}-am-prjk`} className="align-top w-56 min-w-56">
-                                      {userDay
-                                        ? renderProjectsAndSystem(
-                                          userDay.am_projects || [],
-                                          userDay.am_system_tasks || [],
-                                          day.date,
-                                          "am",
-                                          user.user_id
-                                        )
-                                        : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                              {isGADepartment ? (
+                                <>
+                                  {/* GA Department: SYS, FT, PRJK order */}
+                                  {/* AM SYS Row */}
+                                  <TableRow>
+                                    <TableCell
+                                      className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
+                                      rowSpan={rowSpan}
+                                    >
+                                      <div className="flex flex-col">
+                                        <div className="font-bold text-slate-900">{DAY_NAMES[dayIndex]}</div>
+                                        <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
+                                      </div>
                                     </TableCell>
-                                  )
-                                })}
-                              </TableRow>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">AM</div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      SYS
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-am-sys`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderSystemOnly(
+                                              userDay.am_system_tasks || [],
+                                              day.date,
+                                              "am",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
 
-                              {/* AM FT Row */}
-                              <TableRow className="border-t border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
-                                  <div className="text-xs font-medium text-primary">AM</div>
-                                </TableCell>
-                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  FT
-                              </TableCell>
-                                {allUsers.map((user) => {
-                                  const userDay = day.users.find((u) => u.user_id === user.user_id)
-                                  return (
-                                    <TableCell key={`${user.user_id}-am-ft`} className="align-top w-56 min-w-56">
-                                      {userDay
-                                        ? renderFastOnly(
-                                          userDay.am_fast_tasks || [],
-                                          day.date,
-                                          "am",
-                                          user.user_id
-                                        )
-                                        : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                  {/* AM FT Row */}
+                                  <TableRow className="border-t border-border">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">AM</div>
                                     </TableCell>
-                                  )
-                                })}
-                              </TableRow>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      FT
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-am-ft`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderFastOnly(
+                                              userDay.am_fast_tasks || [],
+                                              day.date,
+                                              "am",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
 
-                              {/* PM PRJK Row */}
-                              <TableRow className="border-t-2 border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
-                                  <div className="text-xs font-medium text-primary">PM</div>
-                                </TableCell>
-                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  PRJK
-                              </TableCell>
-                                {allUsers.map((user) => {
-                                  const userDay = day.users.find((u) => u.user_id === user.user_id)
-                                  return (
-                                    <TableCell key={`${user.user_id}-pm-prjk`} className="align-top w-56 min-w-56">
-                                      {userDay
-                                        ? renderProjectsAndSystem(
-                                          userDay.pm_projects || [],
-                                          userDay.pm_system_tasks || [],
-                                          day.date,
-                                          "pm",
-                                          user.user_id
-                                        )
-                                        : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                  {/* AM PRJK Row */}
+                                  <TableRow className="border-t border-border">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">AM</div>
                                     </TableCell>
-                                  )
-                                })}
-                              </TableRow>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      PRJK
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-am-prjk`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderCellContent(
+                                              userDay.am_projects || [],
+                                              [],
+                                              [],
+                                              "am",
+                                              day.date,
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
 
-                              {/* PM FT Row */}
-                              <TableRow className="border-t border-border">
-                                <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
-                                  <div className="text-xs font-medium text-primary">PM</div>
-                                </TableCell>
-                              <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
-                                  FT
-                              </TableCell>
-                                {allUsers.map((user) => {
-                                  const userDay = day.users.find((u) => u.user_id === user.user_id)
-                                  return (
-                                    <TableCell key={`${user.user_id}-pm-ft`} className="align-top w-56 min-w-56">
-                                      {userDay
-                                        ? renderFastOnly(
-                                          userDay.pm_fast_tasks || [],
-                                          day.date,
-                                          "pm",
-                                          user.user_id
-                                        )
-                                        : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                  {/* PM SYS Row */}
+                                  <TableRow className="border-t-2 border-border">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">PM</div>
                                     </TableCell>
-                                  )
-                                })}
-                              </TableRow>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      SYS
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-pm-sys`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderSystemOnly(
+                                              userDay.pm_system_tasks || [],
+                                              day.date,
+                                              "pm",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
+
+                                  {/* PM FT Row */}
+                                  <TableRow className="border-t border-border">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">PM</div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      FT
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-pm-ft`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderFastOnly(
+                                              userDay.pm_fast_tasks || [],
+                                              day.date,
+                                              "pm",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
+
+                                  {/* PM PRJK Row */}
+                                  <TableRow className="border-t border-border">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">PM</div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      PRJK
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-pm-prjk`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderCellContent(
+                                              userDay.pm_projects || [],
+                                              [],
+                                              [],
+                                              "pm",
+                                              day.date,
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
+                                </>
+                              ) : (
+                                <>
+                                  {/* Other Departments: PRJK, FT order (original) */}
+                                  {/* AM PRJK Row */}
+                                  <TableRow>
+                                    <TableCell
+                                      className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
+                                      rowSpan={rowSpan}
+                                    >
+                                      <div className="flex flex-col">
+                                        <div className="font-bold text-slate-900">{DAY_NAMES[dayIndex]}</div>
+                                        <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
+                                      </div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">AM</div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      PRJK
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-am-prjk`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderProjectsAndSystem(
+                                              userDay.am_projects || [],
+                                              userDay.am_system_tasks || [],
+                                              day.date,
+                                              "am",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
+
+                                  {/* AM FT Row */}
+                                  <TableRow className="border-t border-border">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">AM</div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      FT
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-am-ft`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderFastOnly(
+                                              userDay.am_fast_tasks || [],
+                                              day.date,
+                                              "am",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
+
+                                  {/* PM PRJK Row */}
+                                  <TableRow className="border-t-2 border-border">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">PM</div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      PRJK
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-pm-prjk`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderProjectsAndSystem(
+                                              userDay.pm_projects || [],
+                                              userDay.pm_system_tasks || [],
+                                              day.date,
+                                              "pm",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
+
+                                  {/* PM FT Row */}
+                                  <TableRow className="border-t border-border">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">PM</div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      FT
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-pm-ft`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderFastOnly(
+                                              userDay.pm_fast_tasks || [],
+                                              day.date,
+                                              "pm",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow>
+                                </>
+                              )}
                             </React.Fragment>
                           )
                       })}
