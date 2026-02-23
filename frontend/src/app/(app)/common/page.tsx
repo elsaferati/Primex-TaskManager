@@ -162,6 +162,7 @@ type SwimlaneRow = {
   id: CommonType
   label: string
   count: number
+  countLabel?: string
   headerClass: string
   badgeClass: string
   badges?: { value: number; className: string; label?: string }[]
@@ -620,8 +621,24 @@ export default function CommonViewPage() {
     },
     [departmentsById]
   )
+  const getPersonSortKey = React.useCallback(
+    (item: { person?: string; owner?: string; assignees?: string[] }) => {
+      const primary = (item.person || item.owner || "").trim()
+      if (primary) return primary.toLowerCase()
+      const assignees = (item.assignees || [])
+        .map((name) => (name || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+      const combined = assignees.join(", ")
+      return (combined || "Unknown").trim().toLowerCase()
+    },
+    []
+  )
   const compareTaskOrder = React.useCallback(
-    (a: { isDone?: boolean; departmentId?: string; title?: string }, b: { isDone?: boolean; departmentId?: string; title?: string }) => {
+    (
+      a: { isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] },
+      b: { isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] }
+    ) => {
       const doneA = a.isDone ? 1 : 0
       const doneB = b.isDone ? 1 : 0
       if (doneA !== doneB) return doneA - doneB
@@ -632,12 +649,18 @@ export default function CommonViewPage() {
         const nameCmp = metaA.name.localeCompare(metaB.name)
         if (nameCmp) return nameCmp
       }
+      const personA = getPersonSortKey(a)
+      const personB = getPersonSortKey(b)
+      if (personA !== personB) return personA.localeCompare(personB)
       return (a.title || "").localeCompare(b.title || "")
     },
-    [getDepartmentMeta]
+    [getDepartmentMeta, getPersonSortKey]
   )
   const sortTasksByOrder = React.useCallback(
-    <T extends { date: string; isDone?: boolean; departmentId?: string; title?: string }>(items: T[], multiDate: boolean) => {
+    <T extends { date: string; isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] }>(
+      items: T[],
+      multiDate: boolean
+    ) => {
       const sorted = [...items]
       sorted.sort((a, b) => {
         if (multiDate) {
@@ -1248,9 +1271,9 @@ export default function CommonViewPage() {
             }
             if (mounted) {
               if (selectedDates.size === 0) {
-                const weekDates = getWeekdays(weekStart).map(toISODate)
-                setSelectedDates(new Set(weekDates))
-                setMultiMode(true)
+                const todayIso = toISODate(new Date())
+                setSelectedDates(new Set([todayIso]))
+                setMultiMode(false)
               }
               setDataLoaded(true)
             }
@@ -1978,9 +2001,9 @@ export default function CommonViewPage() {
 
         // Select today by default
         if (mounted && selectedDates.size === 0) {
-          const weekDates = getWeekdays(weekStart).map(toISODate)
-          setSelectedDates(new Set(weekDates))
-          setMultiMode(true)
+          const todayIso = toISODate(new Date())
+          setSelectedDates(new Set([todayIso]))
+          setMultiMode(false)
         }
         
         // Mark data as loaded
@@ -3284,6 +3307,10 @@ export default function CommonViewPage() {
   const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
+    const oneHTotal = filtered.oneH.length
+    const r1Total = filtered.r1.length
+    const oneHDone = filtered.oneH.filter((x) => x.isDone).length
+    const r1Done = filtered.r1.filter((x) => x.isDone).length
 
     const lateSource = isMultiDate
       ? sortByDate(filtered.late, (x) => x.date, (x) => x.person)
@@ -3546,7 +3573,8 @@ export default function CommonViewPage() {
       {
         id: "oneH",
         label: "1H",
-        count: filtered.oneH.length,
+        count: oneHTotal,
+        countLabel: oneHTotal === 0 ? "0" : `${oneHTotal}/${oneHDone}`,
         headerClass: "swimlane-header oneh",
         badgeClass: "swimlane-badge oneh",
         items: oneHItems,
@@ -3554,7 +3582,8 @@ export default function CommonViewPage() {
       {
         id: "r1",
         label: "R1=1H",
-        count: filtered.r1.length,
+        count: r1Total,
+        countLabel: r1Total === 0 ? "0" : `${r1Total}/${r1Done}`,
         headerClass: "swimlane-header r1",
         badgeClass: "swimlane-badge r1",
         items: r1Items,
@@ -4642,6 +4671,19 @@ export default function CommonViewPage() {
         }
         .swimlane-row {
           display: flex;
+        }
+        .swimlane-row-subtext .swimlane-index-col {
+          align-items: flex-start;
+          padding-top: 10px;
+        }
+        .swimlane-row-subtext .swimlane-header-with-subtext {
+          display: grid;
+          grid-template-rows: 1fr auto;
+          justify-content: stretch;
+          align-items: stretch;
+        }
+        .swimlane-row-subtext .swimlane-header-row {
+          align-self: start;
         }
         .swimlane-row + .swimlane-row {
           border-top: 1px solid var(--swim-border);
@@ -7893,15 +7935,19 @@ export default function CommonViewPage() {
               .filter((row) => showCard(row.id))
               .map((row, rowIndex) => {
                 const cells = buildSwimlaneCells(row.items, swimlaneColumnCount)
+                const hasSubtext = Boolean(swimlaneHeaderSubtext[row.id])
                 return (
-                  <div key={row.id} className="swimlane-row">
+                  <div
+                    key={row.id}
+                    className={["swimlane-row", hasSubtext ? "swimlane-row-subtext" : ""].filter(Boolean).join(" ")}
+                  >
                     <div className="swimlane-index-col">
                       <span className="swimlane-index">{rowIndex + 1}</span>
                     </div>
                     <div
                       className={[
                         row.headerClass,
-                        swimlaneHeaderSubtext[row.id] ? "swimlane-header-with-subtext" : "",
+                        hasSubtext ? "swimlane-header-with-subtext" : "",
                       ]
                         .filter(Boolean)
                         .join(" ")}
@@ -7917,7 +7963,7 @@ export default function CommonViewPage() {
                                 </span>
                               ))
                             ) : (
-                              <span className={row.badgeClass}>{row.count}</span>
+                              <span className={row.badgeClass}>{row.countLabel ?? row.count}</span>
                             )}
                             <button
                               type="button"
