@@ -604,6 +604,7 @@ async def get_common_view(
                         "title": e.title,
                         "person": person_name or "Unknown",
                         "date": entry_date.isoformat(),
+                        "createdDate": e.created_at.date().isoformat(),
                         "note": e.description or None,
                     }
                 )
@@ -615,6 +616,7 @@ async def get_common_view(
                         "title": e.title,
                         "person": person_name or "Unknown",
                         "date": entry_date.isoformat(),
+                        "createdDate": e.created_at.date().isoformat(),
                         "note": e.description or None,
                     }
                 )

@@ -41,8 +41,24 @@ type PersonalItem = { title: string; person: string; date: string; note?: string
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type InternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type R1Item = { title: string; date: string; owner: string; note?: string; assignees?: string[] }
-type ProblemItem = { entryId?: string; title: string; person: string; date: string; note?: string; everyday?: boolean }
-type FeedbackItem = { entryId?: string; title: string; person: string; date: string; note?: string; everyday?: boolean }
+type ProblemItem = {
+  entryId?: string
+  title: string
+  person: string
+  date: string
+  note?: string
+  everyday?: boolean
+  createdDate?: string
+}
+type FeedbackItem = {
+  entryId?: string
+  title: string
+  person: string
+  date: string
+  note?: string
+  everyday?: boolean
+  createdDate?: string
+}
 type PriorityItem = {
   project: string
   date: string
@@ -213,6 +229,34 @@ export default function CommonViewPage() {
   const commonDepartmentId = ""
   const printedAt = React.useMemo(() => new Date(), [])
   const printInitials = initials(user?.full_name || user?.username || "")
+  const stickyRef = React.useRef<HTMLDivElement | null>(null)
+  const [stickyOffset, setStickyOffset] = React.useState("0px")
+
+  React.useEffect(() => {
+    const node = stickyRef.current
+    if (!node) return
+
+    const updateOffset = () => {
+      const height = node.getBoundingClientRect().height
+      const next = `${Math.ceil(height)}px`
+      setStickyOffset((prev) => (prev === next ? prev : next))
+    }
+
+    updateOffset()
+
+    let resizeObserver: ResizeObserver | null = null
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(() => updateOffset())
+      resizeObserver.observe(node)
+    }
+
+    const handleResize = () => updateOffset()
+    window.addEventListener("resize", handleResize)
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener("resize", handleResize)
+    }
+  }, [])
 
   // Utils
   const pad2 = (n: number) => String(n).padStart(2, "0")
@@ -1397,6 +1441,7 @@ export default function CommonViewPage() {
               let note = parsed.note || ""
               note = note.replace(/Date:\s*\d{4}-\d{2}-\d{2}/i, "").trim()
               const problemDate = parsed.everyday ? weekStartIso : date
+              const createdDate = e.created_at ? toISODate(new Date(e.created_at)) : undefined
               allData.problems.push({
                 entryId: e.id,
                 title: e.title,
@@ -1404,12 +1449,14 @@ export default function CommonViewPage() {
                 date: problemDate,
                 note: note || undefined,
                 everyday: parsed.everyday,
+                createdDate,
               })
             } else if (e.category === "Complaints" || e.category === "Requests" || e.category === "Proposals") {
               const parsed = parseFeedbackNote(e.description)
               let note = parsed.note || ""
               note = note.replace(/Date:\s*\d{4}-\d{2}-\d{2}/i, "").trim()
               const feedbackDate = parsed.everyday ? weekStartIso : date
+              const createdDate = e.created_at ? toISODate(new Date(e.created_at)) : undefined
               allData.feedback.push({
                 entryId: e.id,
                 title: e.title,
@@ -1417,6 +1464,7 @@ export default function CommonViewPage() {
                 date: feedbackDate,
                 note: note || undefined,
                 everyday: parsed.everyday,
+                createdDate,
               })
             }
           }
@@ -3115,7 +3163,7 @@ export default function CommonViewPage() {
     problem: "Probleme",
     feedback: "Feedback Note",
     priority: "Projektet me prioritet- qe kane taska",
-    bz: "Barazime - AM:08:00-09:00/ 10:00-10:30/ 11:30-12:15 / PM:13:30-14:00/ 14:30-15:00 (VETEM PER URGJENCA)",
+    bz: "Barazime - AM: 08:00-09:00/ 10:00-10:30/ 11:30-12:15 / PM:13:30-14:00/ 14:30-15:00 (VETEM PER URGJENCA)",
   }
 
   const swimlaneHeaderSubtext: Partial<Record<CommonType, string>> = {
@@ -3326,11 +3374,11 @@ export default function CommonViewPage() {
       ? sortByDate(filtered.problems, (x) => x.date, (x) => x.title)
       : filtered.problems
     const problemItems: SwimlaneCell[] = problemSource.map((x) => {
-      const dateLabel = x.everyday ? "" : formatDateHuman(x.date)
+      const createdLabel = x.createdDate ? formatDateHuman(x.createdDate) : formatDateHuman(x.date)
       return {
         title: x.title,
-        subtitle: `${x.person} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
-        dateLabel,
+        subtitle: `${x.person}${x.note ? ` - ${x.note}` : ""} - Date Created: ${createdLabel}`,
+        dateLabel: `Date Created: ${createdLabel}`,
         accentClass: "swimlane-accent problem",
         entryId: x.entryId,
         assignees: x.person ? [x.person] : undefined,
@@ -3341,11 +3389,11 @@ export default function CommonViewPage() {
       ? sortByDate(filtered.feedback, (x) => x.date, (x) => x.title)
       : filtered.feedback
     const feedbackItems: SwimlaneCell[] = feedbackSource.map((x) => {
-      const dateLabel = x.everyday ? "" : formatDateHuman(x.date)
+      const createdLabel = x.createdDate ? formatDateHuman(x.createdDate) : formatDateHuman(x.date)
       return {
         title: x.title,
-        subtitle: `${x.person} - ${dateLabel}${x.note ? ` - ${x.note}` : ""}`,
-        dateLabel,
+        subtitle: `${x.person}${x.note ? ` - ${x.note}` : ""} - Date Created: ${createdLabel}`,
+        dateLabel: `Date Created: ${createdLabel}`,
         accentClass: "swimlane-accent feedback",
         entryId: x.entryId,
         assignees: x.person ? [x.person] : undefined,
@@ -3860,7 +3908,15 @@ export default function CommonViewPage() {
   )
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", minHeight: "100vh", background: "#ffffff" }}>
+    <div
+      style={{
+        display: "flex",
+        flexDirection: "column",
+        minHeight: "100vh",
+        background: "#ffffff",
+        ["--common-sticky-offset" as any]: stickyOffset,
+      }}
+    >
       <style>{`
         * { box-sizing: border-box; }
         :root {
@@ -4256,6 +4312,12 @@ export default function CommonViewPage() {
           padding: 10px 0;
           color: #0f172a;
           text-transform: uppercase;
+          position: sticky;
+          top: var(--common-sticky-offset, 0px);
+          z-index: 15;
+          background: #ffffff;
+          border-bottom: 1px solid #e2e8f0;
+          box-shadow: 0 2px 6px rgba(15, 23, 42, 0.06);
         }
         .meeting-panel {
           margin: 16px 24px 0;
@@ -5591,7 +5653,7 @@ export default function CommonViewPage() {
           }
       `}</style>
 
-      <div className="common-sticky">
+      <div className="common-sticky" ref={stickyRef}>
         <header className="top-header">
           <div className="page-title">
             <h1>Common View</h1>
@@ -7554,7 +7616,11 @@ export default function CommonViewPage() {
                       } else if (row.id === "problem" || row.id === "feedback") {
                         return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{idx + 1}. {e.title}{e.note ? ` - ${e.note}` : ""}</span>
+                            <span>
+                              {idx + 1}. {e.title}
+                              {` - ${e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)}`}
+                              {e.note ? ` - ${e.note}` : ""}
+                            </span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
