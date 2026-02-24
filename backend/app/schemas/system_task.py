@@ -26,6 +26,8 @@ class SystemTaskOut(BaseModel):
     day_of_month: int | None = None
     month_of_year: int | None = None
     occurrence_date: date | None = None
+    next_occurrence_date: date | None = None
+    effective_occurrence_date: date | None = None
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None
     status: TaskStatus

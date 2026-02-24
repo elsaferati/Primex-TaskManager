@@ -24,6 +24,7 @@ from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.refresh_token import RefreshToken
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_occurrence import SystemTaskOccurrence
+from app.models.system_task_occurrence_override import SystemTaskOccurrenceOverride
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
@@ -68,6 +69,7 @@ __all__ = [
     "RefreshToken",
     "SystemTaskTemplate",
     "SystemTaskOccurrence",
+    "SystemTaskOccurrenceOverride",
     "SystemTaskTemplateAlignmentRole",
     "SystemTaskTemplateAlignmentUser",
     "Task",

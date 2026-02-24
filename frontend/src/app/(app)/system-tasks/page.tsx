@@ -788,8 +788,6 @@ export function SystemTasksView({
   const templateDepartmentLabel = React.useCallback(
     (template: SystemTaskTemplate) => {
       const scope = resolveTemplateScope(template)
-      const department = template.department_id ? departmentMap.get(template.department_id) : null
-
       const assigneeDeptCodes = template.assignees
         ? Array.from(
             new Set(
@@ -803,15 +801,9 @@ export function SystemTasksView({
           )
         : []
 
-      if (scope === "GA") {
-        return assigneeDeptCodes.length ? assigneeDeptCodes.join(" / ") : "GA"
-      }
-      if (scope === "ALL") {
-        if (assigneeDeptCodes.length) return assigneeDeptCodes.join(" / ")
-        return "ALL"
-      }
-      if (department) return formatDepartmentName(department.name)
       if (assigneeDeptCodes.length) return assigneeDeptCodes.join(" / ")
+      if (scope === "GA") return "GA"
+      if (scope === "ALL") return "ALL"
       return "-"
     },
     [departmentMap, userMap]
@@ -1521,18 +1513,9 @@ export function SystemTasksView({
     }
 
     const body = rows.map((template) => {
-      const department = template.department_id ? departmentMap.get(template.department_id) : null
       const assignee = template.default_assignee_id ? userMap.get(template.default_assignee_id) : null
-      const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
-      const departmentLabel =
-        scope === "GA"
-          ? "GA"
-          : scope === "ALL"
-            ? "ALL"
-            : department
-              ? formatDepartmentName(department.name)
-              : ""
-      const departmentCode = scope === "DEPARTMENT" && department ? department.code : ""
+      const departmentLabel = templateDepartmentLabel(template)
+      const departmentCode = departmentLabel === "-" ? "" : departmentLabel
       return [
         template.title,
         template.description || "",
@@ -1710,18 +1693,8 @@ export function SystemTasksView({
       }
     }
 
-    const departmentShortLabel = (template: SystemTaskTemplate, department: Department | null) => {
-      if (template.scope === "GA") return "GA"
-      if (template.scope === "ALL") return "ALL"
-      if (department?.code) return department.code.toUpperCase()
-      const name = department?.name || ""
-      if (!name) return "-"
-      return name
-        .split(/\s+/)
-        .filter(Boolean)
-        .map((part) => part[0])
-        .join("")
-        .toUpperCase()
+    const departmentShortLabel = (template: SystemTaskTemplate) => {
+      return templateDepartmentLabel(template)
     }
 
     const renderTemplateRow = (template: SystemTaskTemplate, rowNumber: number) => {
@@ -1731,7 +1704,7 @@ export function SystemTasksView({
       const frequencyLabelResolved =
         FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ?? template.frequency
       const frequencyShort = frequencyShortLabel(template.frequency)
-      const departmentShort = departmentShortLabel(template, department || null)
+      const departmentShort = departmentShortLabel(template)
       const priorityShort = priorityValue === "HIGH" ? "H" : "N"
 
       return `
@@ -3344,24 +3317,7 @@ export function SystemTasksView({
                           const taskNumber = globalIndex + 1
                           globalIndex++
                         const priorityValue = normalizePriority(template.priority)
-                        // Get all departments from department_ids if available, otherwise use single department_id
-                        const departmentIds = (template as any).department_ids || (template.department_id ? [template.department_id] : [])
-                        const departments = departmentIds
-                          .map((deptId: string) => departmentMap.get(deptId))
-                          .filter((dept: Department | undefined): dept is Department => dept !== undefined)
-                        const department = departments.length > 0 ? departments[0] : (template.department_id ? departmentMap.get(template.department_id) : null)
-                        const scope = template.scope || (template.department_id ? "DEPARTMENT" : "ALL")
-                        // Display all departments if multiple, otherwise show single or ALL
-                        const departmentLabel =
-                          scope === "GA"
-                            ? "GA"
-                            : scope === "ALL"
-                              ? "ALL"
-                              : departments.length > 1
-                                ? departments.map(d => formatDepartmentName(d.name)).join(", ")
-                                : department
-                                  ? formatDepartmentName(department.name)
-                                  : "-"
+                        const departmentLabel = templateDepartmentLabel(template)
                         const ownerLabel = assigneeSummary(template.assignees)
                         const isUnassignedAll = !template.department_id && !template.default_assignee_id
                         const frequencyLabel =

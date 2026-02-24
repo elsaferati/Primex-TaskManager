@@ -80,6 +80,16 @@ def previous_occurrence_date(template: SystemTaskTemplate, target: date) -> date
     return target
 
 
+def next_occurrence_date(template: SystemTaskTemplate, target: date) -> date:
+    """Find the next occurrence date on or after target."""
+    candidate = target
+    for _ in range(370):
+        if matches_template_date(template, candidate):
+            return candidate
+        candidate = candidate + timedelta(days=1)
+    return target
+
+
 def should_reopen_system_task(
     task: Task, template: SystemTaskTemplate, now: datetime
 ) -> bool:

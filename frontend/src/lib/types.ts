@@ -26,6 +26,7 @@ export interface SystemTaskTemplate {
   description?: string | null
   internal_notes?: string | null
   department_id?: string | null
+  department_ids?: string[] | null
   default_assignee_id?: string | null
   created_by?: string | null
   assignees?: TaskAssignee[] | null
@@ -36,6 +37,8 @@ export interface SystemTaskTemplate {
   day_of_month?: number | null
   month_of_year?: number | null
   occurrence_date?: string | null
+  next_occurrence_date?: string | null
+  effective_occurrence_date?: string | null
   priority?: TaskPriority | null
   finish_period?: TaskFinishPeriod | null
   requires_alignment?: boolean | null
