@@ -7335,58 +7335,90 @@ export default function DepartmentKanban() {
               </div>
             </>
           ) : (
-            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
-              <thead>
-                <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
-                  {printDates.map((date) => (
-                    <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
-                      {formatPrintDay(date)}
-                    </th>
-                  ))}
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {printRowsByRange.map((row) => {
-                  const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
-                  return (
-                    <tr key={row.id}>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
-                        {row.label}
-                        <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
-                          {total}
-                        </span>
-                      </td>
-                      {row.itemsByDay.map((items, idx) => (
-                        <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
-                          {items.length ? (
-                            <div className="space-y-1">
-                              {items.map((item, itemIndex) => (
-                                <div
-                                  key={`${row.id}-${idx}-${itemIndex}`}
-                                  className="border-b border-dashed border-slate-300 pb-1 last:border-0"
-                                >
-                                  <div className="flex items-start gap-1 leading-tight">
-                                    <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
-                                    <span>{item}</span>
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          ) : (
-                            <div className="italic text-slate-600">No data available.</div>
-                          )}
+            <>
+              <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+                <thead>
+                  <tr className="bg-slate-100">
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Category</th>
+                    {printDates.map((date) => (
+                      <th key={date.toISOString()} className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">
+                        {formatPrintDay(date)}
+                      </th>
+                    ))}
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Status</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Comment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {printRowsByRange.map((row) => {
+                    const total = row.itemsByDay.reduce((sum, items) => sum + items.length, 0)
+                    return (
+                      <tr key={row.id}>
+                        <td className="border border-slate-900 px-2 py-2 align-top font-semibold uppercase">
+                          {row.label}
+                          <span className="ml-2 inline-flex h-5 w-5 items-center justify-center rounded-full border border-slate-900 text-[10px] font-semibold">
+                            {total}
+                          </span>
                         </td>
-                      ))}
-                      <td className="border border-slate-900 px-2 py-2 align-top" />
-                      <td className="border border-slate-900 px-2 py-2 align-top" />
+                        {row.itemsByDay.map((items, idx) => (
+                          <td key={`${row.id}-${idx}`} className="border border-slate-900 px-2 py-2 align-top">
+                            {items.length ? (
+                              <div className="space-y-1">
+                                {items.map((item, itemIndex) => (
+                                  <div
+                                    key={`${row.id}-${idx}-${itemIndex}`}
+                                    className="border-b border-dashed border-slate-300 pb-1 last:border-0"
+                                  >
+                                    <div className="flex items-start gap-1 leading-tight">
+                                      <span className="text-[10px] font-semibold">{itemIndex + 1}.</span>
+                                      <span>{item}</span>
+                                    </div>
+                                  </div>
+                                ))}
+                              </div>
+                            ) : (
+                              <div className="italic text-slate-600">No data available.</div>
+                            )}
+                          </td>
+                        ))}
+                        <td className="border border-slate-900 px-2 py-2 align-top" />
+                        <td className="border border-slate-900 px-2 py-2 align-top" />
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <div className="mt-4">
+                <table className="w-full border border-slate-900 text-[11px] weekly-notes-table">
+                  <colgroup>
+                    <col className="w-[180px]" />
+                    <col />
+                  </colgroup>
+                  <tbody>
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top weekly-notes-label">
+                        KOMENT
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2">
+                        <div className="weekly-notes-line" />
+                        <div className="weekly-notes-line" />
+                        <div className="weekly-notes-line" />
+                      </td>
                     </tr>
-                  )
-                })}
-              </tbody>
-            </table>
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top weekly-notes-label">
+                        ANKESA / KERKESA / PROPOZIME
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2">
+                        <div className="weekly-notes-line" />
+                        <div className="weekly-notes-line" />
+                        <div className="weekly-notes-line" />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
           {printPageMarkers.map((marker) => (
             <div
@@ -7424,6 +7456,22 @@ export default function DepartmentKanban() {
           padding-right: 4px;
           direction: ltr;
           text-align: left;
+        }
+        .weekly-notes-table td {
+          vertical-align: top;
+          padding: 6px;
+          direction: ltr;
+          text-align: left;
+        }
+        .weekly-notes-label {
+          letter-spacing: 0.02em;
+        }
+        .weekly-notes-line {
+          height: 12px;
+          border-bottom: 1px solid #94a3b8;
+        }
+        .weekly-notes-line:last-child {
+          border-bottom: 0;
         }
         .daily-report-table th:nth-child(3),
         .daily-report-table td:nth-child(3) {

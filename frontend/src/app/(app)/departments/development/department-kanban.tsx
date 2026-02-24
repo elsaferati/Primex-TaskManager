@@ -9071,84 +9071,116 @@ export default function DepartmentKanban() {
               </div>
             </>
           ) : (
-            <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
-              <colgroup>
-                <col className="w-[36px]" />
-                <col className="w-[44px]" />
-                <col className="w-[56px]" />
-                <col className="w-[56px]" />
-                <col className="w-[150px]" />
-                <col className="w-[110px]" />
-                <col className="w-[60px]" />
-                <col className="w-[40px]" />
-                <col className="w-[52px]" />
-                <col className="w-[48px]" />
-                <col className="w-[140px]" />
-              </colgroup>
-              <thead>
-                <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
-                    Nr
-                  </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Prioriteti</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
-                </tr>
-              </thead>
-              <tbody>
-                {weeklyTaskReportRows.length ? (
-                  weeklyTaskReportRows.map((row, index) => (
-                    <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.priority}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                        {row.typeLabel === "PRJK" && row.projectTitle ? (
-                          <>
-                            <span className="font-semibold">{row.projectTitle}</span>
-                            <span> : {row.title}</span>
-                          </>
-                        ) : (
-                          row.title
-                        )}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
-                      <td
-                        className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
-                      >
-                        {row.status}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">-</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">-</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">-</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">
-                        <input
-                          type="text"
-                          aria-label="Koment"
-                          className="h-4 w-full border-b border-slate-400 bg-transparent"
-                        />
+            <>
+              <table className="w-full border border-slate-900 text-[11px] weekly-report-table">
+                <colgroup>
+                  <col className="w-[36px]" />
+                  <col className="w-[44px]" />
+                  <col className="w-[56px]" />
+                  <col className="w-[56px]" />
+                  <col className="w-[150px]" />
+                  <col className="w-[110px]" />
+                  <col className="w-[60px]" />
+                  <col className="w-[40px]" />
+                  <col className="w-[52px]" />
+                  <col className="w-[48px]" />
+                  <col className="w-[140px]" />
+                </colgroup>
+                <thead>
+                  <tr className="bg-slate-100">
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
+                      Nr
+                    </th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">NLL</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Prioriteti</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">AM/PM</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Pershkrimi</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">T/Y/O</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {weeklyTaskReportRows.length ? (
+                    weeklyTaskReportRows.map((row, index) => (
+                      <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                        <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.subtype}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.priority}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.period}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top uppercase">
+                          {row.typeLabel === "PRJK" && row.projectTitle ? (
+                            <>
+                              <span className="font-semibold">{row.projectTitle}</span>
+                              <span> : {row.title}</span>
+                            </>
+                          ) : (
+                            row.title
+                          )}
+                        </td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">{row.description}</td>
+                        <td
+                          className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                        >
+                          {row.status}
+                        </td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">-</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">-</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">-</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">
+                          <input
+                            type="text"
+                            aria-label="Koment"
+                            className="h-4 w-full border-b border-slate-400 bg-transparent"
+                          />
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
+                        No data available.
                       </td>
                     </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
-                      No data available.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
+                  )}
+                </tbody>
+              </table>
+              <div className="mt-4">
+                <table className="w-full border border-slate-900 text-[11px] weekly-notes-table">
+                  <colgroup>
+                    <col className="w-[180px]" />
+                    <col />
+                  </colgroup>
+                  <tbody>
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top weekly-notes-label">
+                        KOMENT
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2">
+                        <div className="weekly-notes-line" />
+                        <div className="weekly-notes-line" />
+                        <div className="weekly-notes-line" />
+                      </td>
+                    </tr>
+                    <tr>
+                      <td className="border border-slate-900 px-2 py-2 text-xs font-semibold uppercase align-top weekly-notes-label">
+                        ANKESA / KERKESA / PROPOZIME
+                      </td>
+                      <td className="border border-slate-900 px-2 py-2">
+                        <div className="weekly-notes-line" />
+                        <div className="weekly-notes-line" />
+                        <div className="weekly-notes-line" />
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </>
           )}
           {printPageMarkers.map((marker) => (
             <div
@@ -9186,6 +9218,22 @@ export default function DepartmentKanban() {
           padding-right: 4px;
           direction: ltr;
           text-align: left;
+        }
+        .weekly-notes-table td {
+          vertical-align: top;
+          padding: 6px;
+          direction: ltr;
+          text-align: left;
+        }
+        .weekly-notes-label {
+          letter-spacing: 0.02em;
+        }
+        .weekly-notes-line {
+          height: 12px;
+          border-bottom: 1px solid #94a3b8;
+        }
+        .weekly-notes-line:last-child {
+          border-bottom: 0;
         }
         .daily-report-table th:nth-child(3),
         .daily-report-table td:nth-child(3) {

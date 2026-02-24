@@ -47,6 +47,8 @@ type WeeklyTableProjectTaskEntry = {
   daily_status?: string | null
   completed_at?: string | null
   daily_products: number | null
+  total_products?: number | null
+  completed_products?: number | null
   finish_period?: string | null
   is_bllok: boolean
   is_1h_report: boolean
@@ -1129,6 +1131,16 @@ export default function WeeklyPlannerPage() {
     return null // NORMAL = no badge
   }, [])
 
+  const formatTaskProducts = React.useCallback((task: WeeklyTableProjectTaskEntry) => {
+    const total = task.total_products ?? task.daily_products ?? null
+    if (total == null) return null
+    const completed = task.completed_products
+    if (completed != null) {
+      return `${completed}/${total} pcs`
+    }
+    return `${total} pcs`
+  }, [])
+
   const getFastTaskBadge = React.useCallback((task: {
     is_bllok?: boolean
     is_1h_report?: boolean
@@ -1401,6 +1413,29 @@ export default function WeeklyPlannerPage() {
             }
             .print-legend-spacer {
               height: 0.18in;
+            }
+            .notes-table {
+              width: 100%;
+              border-collapse: collapse;
+              margin-top: 0.08in;
+              font-size: 6pt;
+            }
+            .notes-table td {
+              border: 0.5px solid #000;
+              padding: 4px 6px;
+              vertical-align: top;
+            }
+            .notes-label {
+              font-weight: 700;
+              text-transform: uppercase;
+              white-space: nowrap;
+            }
+            .notes-line {
+              height: 11px;
+              border-bottom: 0.5px solid #94a3b8;
+            }
+            .notes-line:last-child {
+              border-bottom: 0;
             }
             table {
               width: 100%;
@@ -1739,6 +1774,41 @@ export default function WeeklyPlannerPage() {
       return wrapper
     }
 
+    const createNotesSection = () => {
+      const wrapper = doc.createElement("div")
+      const table = doc.createElement("table")
+      table.className = "notes-table"
+
+      const colgroup = doc.createElement("colgroup")
+      colgroup.innerHTML = `
+        <col style="width: 120px;" />
+        <col />
+      `
+      table.appendChild(colgroup)
+
+      const buildLinesHtml = () => `
+        <div class="notes-line"></div>
+        <div class="notes-line"></div>
+        <div class="notes-line"></div>
+      `
+
+      const tbody = doc.createElement("tbody")
+      tbody.innerHTML = `
+        <tr>
+          <td class="notes-label">KOMENT</td>
+          <td>${buildLinesHtml()}</td>
+        </tr>
+        <tr>
+          <td class="notes-label">ANKESA / KERKESA / PROPOZIME</td>
+          <td>${buildLinesHtml()}</td>
+        </tr>
+      `
+      table.appendChild(tbody)
+
+      wrapper.appendChild(table)
+      return wrapper
+    }
+
     const createPage = (options?: { showTitle?: boolean; showMeta?: boolean }) => {
       const { showTitle = true, showMeta = true } = options || {}
       const page = doc.createElement("div")
@@ -2012,8 +2082,9 @@ export default function WeeklyPlannerPage() {
                       : "task-status-todo"
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
-                if (task.daily_products) {
-                  html += ` <span class="products">${task.daily_products} pcs</span>`
+                const productLabel = formatTaskProducts(task)
+                if (productLabel) {
+                  html += ` <span class="products">${productLabel}</span>`
                 }
                 const badge = getTaskStatusBadge(task)
                 if (badge) {
@@ -2192,8 +2263,9 @@ export default function WeeklyPlannerPage() {
                       : "task-status-todo"
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
-                if (task.daily_products) {
-                  html += ` <span class="products">${task.daily_products} pcs</span>`
+                const productLabel = formatTaskProducts(task)
+                if (productLabel) {
+                  html += ` <span class="products">${productLabel}</span>`
                 }
                 const badge = getTaskStatusBadge(task)
                 if (badge) {
@@ -2301,6 +2373,10 @@ export default function WeeklyPlannerPage() {
           tbody.innerHTML = renderDayGroupHtml(day, dayIndex, chunk, dept.department_name)
           table.appendChild(tbody)
         })
+
+        if (chunkIndex === userChunks.length - 1) {
+          content.appendChild(createNotesSection())
+        }
 
         fitContentToWidth(content)
       })
@@ -2786,6 +2862,36 @@ export default function WeeklyPlannerPage() {
     if (normalized === "DONE") return "Done"
     return "To Do"
   }
+
+  const renderWeeklyNotesBlock = () => (
+    <div className="mt-4">
+      <table className="w-full border border-slate-300 text-xs">
+        <colgroup>
+          <col className="w-[180px]" />
+          <col />
+        </colgroup>
+        <tbody>
+          {[
+            "KOMENT",
+            "ANKESA / KERKESA / PROPOZIME",
+          ].map((label) => (
+            <tr key={label}>
+              <td className="border border-slate-300 px-2 py-2 font-semibold uppercase text-slate-700 align-top">
+                {label}
+              </td>
+              <td className="border border-slate-300 px-2 py-2">
+                <div className="space-y-2">
+                  <div className="h-4 border-b border-slate-300" />
+                  <div className="h-4 border-b border-slate-300" />
+                  <div className="h-4 border-b border-slate-300" />
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
 
   return (
     <div className="space-y-4">
@@ -3688,11 +3794,15 @@ export default function WeeklyPlannerPage() {
                                                       {statusBadge.label}
                                                     </span>
                                                   )}
-                                                  {task.daily_products != null && (
-                                                    <span className="font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px]">
-                                                      {task.daily_products} pcs
-                                                    </span>
-                                                  )}
+                                                  {(() => {
+                                                    const productLabel = formatTaskProducts(task)
+                                                    if (!productLabel) return null
+                                                    return (
+                                                      <span className="font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px]">
+                                                        {productLabel}
+                                                      </span>
+                                                    )
+                                                  })()}
                                                   <button
                                                     type="button"
                                                     onClick={(e) => {
@@ -4153,6 +4263,7 @@ export default function WeeklyPlannerPage() {
                       </DndContext>
                     )
                   })()}
+                  {renderWeeklyNotesBlock()}
                 </CardContent>
               </Card>
             ))}

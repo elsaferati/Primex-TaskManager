@@ -86,10 +86,19 @@ from app.schemas.weekly_planner_snapshot import (
 router = APIRouter()
 
 
-def _is_mst_or_tt_project(project: Project) -> bool:
+def _is_tt_project(project: Project) -> bool:
     title = (project.title or "").upper().strip()
-    is_tt = title == "TT" or title.startswith("TT ") or title.startswith("TT-")
-    return project.project_type == ProjectType.MST.value or ("MST" in title) or is_tt
+    return title == "TT" or title.startswith("TT ") or title.startswith("TT-")
+
+
+def _is_mst_project(project: Project) -> bool:
+    title = (project.title or "").upper().strip()
+    is_mst = project.project_type == ProjectType.MST.value or ("MST" in title)
+    return is_mst and not _is_tt_project(project)
+
+
+def _is_mst_or_tt_project(project: Project) -> bool:
+    return _is_mst_project(project) or _is_tt_project(project)
 
 
 def _parse_ko_user_id(internal_notes: str | None) -> uuid.UUID | None:
@@ -134,6 +143,38 @@ def _parse_total_products(internal_notes: str | None) -> int | None:
         return int(match.group(1))
     except Exception:
         return None
+
+
+COMPLETED_PRODUCTS_RE = re.compile(r"completed_products[:=]\s*(\d+)", re.IGNORECASE)
+
+
+def _parse_completed_products(internal_notes: str | None) -> int | None:
+    """Parse completed_products from task internal_notes."""
+    if not internal_notes:
+        return None
+    match = COMPLETED_PRODUCTS_RE.search(internal_notes)
+    if not match:
+        return None
+    try:
+        value = int(match.group(1))
+    except Exception:
+        return None
+    if value < 0:
+        return 0
+    return value
+
+
+def _extract_total_and_completed(
+    total_hint: int | None,
+    internal_notes: str | None,
+) -> tuple[int | None, int | None]:
+    total = total_hint
+    if total is None:
+        total = _parse_total_products(internal_notes)
+    if total is not None and total < 0:
+        total = 0
+    completed = _parse_completed_products(internal_notes)
+    return total, completed
 
 
 def _parse_production_date(internal_notes: str | None) -> date | None:
@@ -1722,30 +1763,34 @@ async def weekly_table_planner(
                 f"start_date_tzinfo={task.start_date.tzinfo if task.start_date and hasattr(task.start_date, 'tzinfo') else None}"
             )
         
-        # MST/TT project tasks: show only on due_date (ignore start_date)
+        # MST project tasks: show only on due_date (ignore start_date)
         task_dept_id = task.department_id
         project_dept_id = None
-        is_mst_tt_project = False
+        is_mst_project = False
+        is_tt_project = False
         if task.project_id:
             # Try to get project from map
             if task.project_id in project_map:
                 project = project_map[task.project_id]
                 if project:
                     project_dept_id = project.department_id
-                    is_mst_tt_project = _is_mst_or_tt_project(project)
+                    is_mst_project = _is_mst_project(project)
+                    is_tt_project = _is_tt_project(project)
             # If project not in map, try to find it (shouldn't happen, but defensive)
             else:
                 # Project should already be in map, but if not, we'll check task's department
                 pass
-        if is_mst_tt_project and task.project_id is not None:
+        if is_mst_project and task.project_id is not None:
             return due, due
 
         # For Product Content department, tasks should only show on due_date, not from start_date to due_date
         # Check both task's department_id and project's department_id (in case task doesn't have department_id set)
         is_pc_task = (task_dept_id in pc_dept_ids) or (project_dept_id in pc_dept_ids)
         if is_pc_task and task.project_id is not None:
-            # Product Content project tasks: show only on due_date (ignore start_date)
-            return due, due
+            # Product Content project tasks: show only on due_date (ignore start_date),
+            # except for TT tasks which should span start_date -> due_date.
+            if not is_tt_project:
+                return due, due
         
         # For all other tasks (including fast tasks), use start_date if available
         if task.start_date is not None:
@@ -1816,15 +1861,15 @@ async def weekly_table_planner(
         if not is_fast_task_model(task) and task.completed_at:
             completed_date = _as_utc_date(task.completed_at)
             if completed_date is not None:
-                # Check if this is an MST/TT task
-                is_mst_tt_task = False
+                # Check if this is an MST task (TT should follow normal clamping)
+                is_mst_task = False
                 if task.project_id and task.project_id in project_map:
                     project = project_map[task.project_id]
                     if project:
-                        is_mst_tt_task = _is_mst_or_tt_project(project)
+                        is_mst_task = _is_mst_project(project)
                 
-                if is_mst_tt_task:
-                    # For MST/TT tasks, if completed, show on the completion day
+                if is_mst_task:
+                    # For MST tasks, if completed, show on the completion day
                     # Use completed_date as both start and end to ensure it shows on that day
                     start = completed_date
                     end = completed_date
@@ -1880,21 +1925,55 @@ async def weekly_table_planner(
         if project is not None and _is_mst_or_tt_project(project):
             mst_tt_task_ids.add(t.id)
 
-    daily_progress_map: dict[tuple[uuid.UUID, date], TaskStatus] = {}
+    daily_progress_status_map: dict[tuple[uuid.UUID, date], TaskStatus] = {}
+    daily_progress_counts_map: dict[tuple[uuid.UUID, date], tuple[int, int]] = {}
     if mst_tt_task_ids:
         rows = (
             await db.execute(
-                select(TaskDailyProgress.task_id, TaskDailyProgress.day_date, TaskDailyProgress.daily_status)
+                select(
+                    TaskDailyProgress.task_id,
+                    TaskDailyProgress.day_date,
+                    TaskDailyProgress.daily_status,
+                    TaskDailyProgress.completed_value,
+                    TaskDailyProgress.total_value,
+                )
                 .where(TaskDailyProgress.task_id.in_(list(mst_tt_task_ids)))
                 .where(TaskDailyProgress.day_date >= working_days[0])
                 .where(TaskDailyProgress.day_date <= working_days[-1])
             )
         ).all()
-        for task_id_row, day_date_row, daily_status_row in rows:
+        for task_id_row, day_date_row, daily_status_row, completed_value_row, total_value_row in rows:
             try:
-                daily_progress_map[(task_id_row, day_date_row)] = TaskStatus(daily_status_row)
+                daily_progress_status_map[(task_id_row, day_date_row)] = TaskStatus(daily_status_row)
             except Exception:
-                daily_progress_map[(task_id_row, day_date_row)] = TaskStatus.TODO
+                daily_progress_status_map[(task_id_row, day_date_row)] = TaskStatus.TODO
+            try:
+                completed_value = int(completed_value_row or 0)
+            except Exception:
+                completed_value = 0
+            try:
+                total_value = int(total_value_row or 0)
+            except Exception:
+                total_value = 0
+            daily_progress_counts_map[(task_id_row, day_date_row)] = (completed_value, total_value)
+
+    def _task_product_counts(task: Task) -> tuple[int | None, int | None]:
+        total_hint = task.daily_products
+        if total_hint is None:
+            total_hint = mst_tt_control_total_by_task_id.get(task.id)
+        return _extract_total_and_completed(total_hint, task.internal_notes)
+
+    def _progress_counts_for_day(
+        task_id: uuid.UUID,
+        day_date: date,
+    ) -> tuple[int, int] | None:
+        if task_id not in mst_tt_task_ids:
+            return None
+        for check_date in sorted([d for d in working_days if d <= day_date], reverse=True):
+            key = (task_id, check_date)
+            if key in daily_progress_counts_map:
+                return daily_progress_counts_map[key]
+        return None
     
     # Get task assignees for all week tasks
     task_ids = [t.id for t in week_tasks]
@@ -2466,93 +2545,111 @@ async def weekly_table_planner(
                 # Include all projects, even if not in project_map (they'll show as "Unknown Project")
                 am_projects: list[WeeklyTableProjectEntry] = []
                 for project_id, tasks_list in am_projects_map.items():
+                    task_entries: list[WeeklyTableProjectTaskEntry] = []
+                    for t in tasks_list:
+                        total_products, completed_products = _task_product_counts(t)
+                        progress_counts = _progress_counts_for_day(t.id, day_date)
+                        if progress_counts is not None:
+                            progress_completed, progress_total = progress_counts
+                            completed_products = progress_completed
+                            if progress_total > 0:
+                                total_products = progress_total
+                        elif t.id in mst_tt_task_ids and total_products is not None:
+                            completed_products = 0
+                        task_entries.append(
+                            WeeklyTableProjectTaskEntry(
+                                task_id=t.id,
+                                task_title=t.title,
+                                status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
+                                daily_status=(
+                                    # For MST/TT tasks, find the most recent daily_status on or before the displayed day
+                                    # This ensures we get the status from the day it was actually changed, not just the due_date
+                                    next(
+                                        (daily_progress_status_map[(t.id, check_date)]
+                                         for check_date in sorted(
+                                             [d for d in working_days if d <= day_date],
+                                             reverse=True
+                                         )
+                                         if (t.id, check_date) in daily_progress_status_map),
+                                        TaskStatus.TODO  # Default if no record found
+                                    )
+                                    if t.id in mst_tt_task_ids
+                                    else None
+                                ),
+                                completed_at=t.completed_at,
+                                daily_products=total_products,
+                                total_products=total_products,
+                                completed_products=completed_products,
+                                finish_period=t.finish_period,
+                                is_bllok=t.is_bllok,
+                                is_1h_report=t.is_1h_report,
+                                is_r1=t.is_r1,
+                                is_personal=t.is_personal,
+                                ga_note_origin_id=t.ga_note_origin_id,
+                            )
+                        )
                     am_projects.append(
                         WeeklyTableProjectEntry(
                             project_id=project_id,
                             project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
                             project_total_products=project_map[project_id].total_products if project_id in project_map else None,
                             task_count=len(tasks_list),
-                            tasks=[
-                                WeeklyTableProjectTaskEntry(
-                                    task_id=t.id,
-                                    task_title=t.title,
-                                    status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
-                                    daily_status=(
-                                        # For MST/TT tasks, find the most recent daily_status on or before the displayed day
-                                        # This ensures we get the status from the day it was actually changed, not just the due_date
-                                        next(
-                                            (daily_progress_map[(t.id, check_date)] 
-                                             for check_date in sorted(
-                                                 [d for d in working_days if d <= day_date],
-                                                 reverse=True
-                                             )
-                                             if (t.id, check_date) in daily_progress_map),
-                                            TaskStatus.TODO  # Default if no record found
-                                        )
-                                        if t.id in mst_tt_task_ids
-                                        else None
-                                    ),
-                                    completed_at=t.completed_at,
-                                    daily_products=(
-                                        t.daily_products
-                                        if t.daily_products is not None
-                                        else mst_tt_control_total_by_task_id.get(t.id)
-                                    ),
-                                    finish_period=t.finish_period,
-                                    is_bllok=t.is_bllok,
-                                    is_1h_report=t.is_1h_report,
-                                    is_r1=t.is_r1,
-                                    is_personal=t.is_personal,
-                                    ga_note_origin_id=t.ga_note_origin_id,
-                                )
-                                for t in tasks_list
-                            ],
+                            tasks=task_entries,
                             is_late=False,
                         )
                     )
                 pm_projects: list[WeeklyTableProjectEntry] = []
                 for project_id, tasks_list in pm_projects_map.items():
+                    task_entries: list[WeeklyTableProjectTaskEntry] = []
+                    for t in tasks_list:
+                        total_products, completed_products = _task_product_counts(t)
+                        progress_counts = _progress_counts_for_day(t.id, day_date)
+                        if progress_counts is not None:
+                            progress_completed, progress_total = progress_counts
+                            completed_products = progress_completed
+                            if progress_total > 0:
+                                total_products = progress_total
+                        elif t.id in mst_tt_task_ids and total_products is not None:
+                            completed_products = 0
+                        task_entries.append(
+                            WeeklyTableProjectTaskEntry(
+                                task_id=t.id,
+                                task_title=t.title,
+                                status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
+                                daily_status=(
+                                    # For MST/TT tasks, find the most recent daily_status on or before the displayed day
+                                    # This ensures we get the status from the day it was actually changed, not just the due_date
+                                    next(
+                                        (daily_progress_status_map[(t.id, check_date)]
+                                         for check_date in sorted(
+                                             [d for d in working_days if d <= day_date],
+                                             reverse=True
+                                         )
+                                         if (t.id, check_date) in daily_progress_status_map),
+                                        TaskStatus.TODO  # Default if no record found
+                                    )
+                                    if t.id in mst_tt_task_ids
+                                    else None
+                                ),
+                                completed_at=t.completed_at,
+                                daily_products=total_products,
+                                total_products=total_products,
+                                completed_products=completed_products,
+                                finish_period=t.finish_period,
+                                is_bllok=t.is_bllok,
+                                is_1h_report=t.is_1h_report,
+                                is_r1=t.is_r1,
+                                is_personal=t.is_personal,
+                                ga_note_origin_id=t.ga_note_origin_id,
+                            )
+                        )
                     pm_projects.append(
                         WeeklyTableProjectEntry(
                             project_id=project_id,
                             project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
                             project_total_products=project_map[project_id].total_products if project_id in project_map else None,
                             task_count=len(tasks_list),
-                            tasks=[
-                                WeeklyTableProjectTaskEntry(
-                                    task_id=t.id,
-                                    task_title=t.title,
-                                    status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
-                                    daily_status=(
-                                        # For MST/TT tasks, find the most recent daily_status on or before the displayed day
-                                        # This ensures we get the status from the day it was actually changed, not just the due_date
-                                        next(
-                                            (daily_progress_map[(t.id, check_date)] 
-                                             for check_date in sorted(
-                                                 [d for d in working_days if d <= day_date],
-                                                 reverse=True
-                                             )
-                                             if (t.id, check_date) in daily_progress_map),
-                                            TaskStatus.TODO  # Default if no record found
-                                        )
-                                        if t.id in mst_tt_task_ids
-                                        else None
-                                    ),
-                                    completed_at=t.completed_at,
-                                    daily_products=(
-                                        t.daily_products
-                                        if t.daily_products is not None
-                                        else mst_tt_control_total_by_task_id.get(t.id)
-                                    ),
-                                    finish_period=t.finish_period,
-                                    is_bllok=t.is_bllok,
-                                    is_1h_report=t.is_1h_report,
-                                    is_r1=t.is_r1,
-                                    is_personal=t.is_personal,
-                                    ga_note_origin_id=t.ga_note_origin_id,
-                                )
-                                for t in tasks_list
-                            ],
+                            tasks=task_entries,
                             is_late=False,
                         )
                     )
