@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -39,6 +40,27 @@ async def _assignee_ids_for_template(db: AsyncSession, template_id: uuid.UUID) -
     return assignee_ids
 
 
+def _template_start_date(template: SystemTaskTemplate) -> date | None:
+    """First eligible schedule date for a template (creation boundary)."""
+    created_at = getattr(template, "created_at", None)
+    if created_at is None:
+        return None
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is not None:
+            return created_at.astimezone(ZoneInfo("Europe/Tirane")).date()
+        return created_at.date()
+    if isinstance(created_at, date):
+        return created_at
+    return None
+
+
+def _is_occurrence_eligible_for_template(template: SystemTaskTemplate, occurrence_day: date) -> bool:
+    template_start = _template_start_date(template)
+    if template_start is not None and occurrence_day < template_start:
+        return False
+    return matches_template_date(template, occurrence_day)
+
+
 async def ensure_occurrences_in_range(
     *,
     db: AsyncSession,
@@ -65,7 +87,7 @@ async def ensure_occurrences_in_range(
     current = start
     while current <= end:
         for tmpl in templates:
-            if not matches_template_date(tmpl, current):
+            if not _is_occurrence_eligible_for_template(tmpl, current):
                 continue
             assignee_ids = await _assignee_ids_for_template(db, tmpl.id)
             if not assignee_ids:

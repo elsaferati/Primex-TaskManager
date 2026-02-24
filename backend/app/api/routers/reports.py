@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import and_, func, or_, select
@@ -33,7 +34,10 @@ from app.schemas.daily_report import (
 )
 from app.schemas.task import TaskAssigneeOut, TaskOut
 from app.services.system_task_occurrences import (
+    DONE,
+    NOT_DONE,
     OPEN,
+    SKIPPED,
     ensure_occurrences_in_range,
 )
 from app.services.daily_report_logic import (
@@ -45,6 +49,34 @@ from app.services.daily_report_logic import (
 
 
 router = APIRouter()
+TIRANA_TZ = ZoneInfo("Europe/Tirane")
+
+
+def _is_on_or_after_template_created_day(
+    occurrence_day: date,
+    template_created_at: datetime | None,
+) -> bool:
+    if template_created_at is None:
+        return True
+    if template_created_at.tzinfo is not None:
+        created_day = template_created_at.astimezone(TIRANA_TZ).date()
+    else:
+        created_day = template_created_at.date()
+    return occurrence_day >= created_day
+
+
+def _tirana_day_utc_bounds(day: date) -> tuple[datetime, datetime]:
+    day_start_local = datetime.combine(day, time.min, tzinfo=TIRANA_TZ)
+    day_end_local = day_start_local + timedelta(days=1)
+    return day_start_local.astimezone(timezone.utc), day_end_local.astimezone(timezone.utc)
+
+
+def _acted_on_report_day_in_tirana(acted_at: datetime | None, day: date) -> bool:
+    if acted_at is None:
+        return False
+    start_utc, end_utc = _tirana_day_utc_bounds(day)
+    acted_at_utc = acted_at if acted_at.tzinfo is not None else acted_at.replace(tzinfo=timezone.utc)
+    return start_utc <= acted_at_utc < end_utc
 
 
 def _resolve_effective_department_id(
@@ -387,9 +419,45 @@ async def daily_report(
             .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
             .where(SystemTaskOccurrence.user_id == user_id)
             .where(SystemTaskOccurrence.occurrence_date == day)
+            .where(
+                SystemTaskOccurrence.occurrence_date
+                >= func.coalesce(func.date(SystemTaskTemplate.created_at), SystemTaskOccurrence.occurrence_date)
+            )
             .order_by(SystemTaskTemplate.title)
         )
     ).all()
+    occ_today_rows = [
+        (occ, tmpl)
+        for occ, tmpl in occ_today_rows
+        if _is_on_or_after_template_created_day(occ.occurrence_date, tmpl.created_at)
+    ]
+    day_start_utc, day_end_utc = _tirana_day_utc_bounds(day)
+    acted_today_statuses = (DONE, NOT_DONE, SKIPPED)
+
+    occ_acted_today_rows = (
+        await db.execute(
+            select(SystemTaskOccurrence, SystemTaskTemplate)
+            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
+            .where(SystemTaskOccurrence.user_id == user_id)
+            .where(SystemTaskOccurrence.occurrence_date < day)
+            .where(SystemTaskOccurrence.status.in_(acted_today_statuses))
+            .where(SystemTaskOccurrence.acted_at.is_not(None))
+            .where(SystemTaskOccurrence.acted_at >= day_start_utc)
+            .where(SystemTaskOccurrence.acted_at < day_end_utc)
+            .where(
+                SystemTaskOccurrence.occurrence_date
+                >= func.coalesce(func.date(SystemTaskTemplate.created_at), SystemTaskOccurrence.occurrence_date)
+            )
+            .order_by(SystemTaskOccurrence.acted_at.desc(), SystemTaskTemplate.title)
+        )
+    ).all()
+    occ_acted_today_rows = [
+        (occ, tmpl)
+        for occ, tmpl in occ_acted_today_rows
+        if _is_on_or_after_template_created_day(occ.occurrence_date, tmpl.created_at)
+        and _acted_on_report_day_in_tirana(occ.acted_at, day)
+    ]
+
     latest_occurrence = (
         select(
             SystemTaskOccurrence.template_id,
@@ -411,13 +479,42 @@ async def daily_report(
             .where(SystemTaskOccurrence.user_id == latest_occurrence.c.user_id)
             .where(SystemTaskOccurrence.user_id == user_id)
             .where(SystemTaskOccurrence.occurrence_date < day)
+            .where(
+                SystemTaskOccurrence.occurrence_date
+                >= func.coalesce(func.date(SystemTaskTemplate.created_at), SystemTaskOccurrence.occurrence_date)
+            )
             .where(SystemTaskOccurrence.status == OPEN)
             .order_by(SystemTaskOccurrence.occurrence_date.desc(), SystemTaskTemplate.title)
         )
     ).all()
+    occ_overdue_rows = [
+        (occ, tmpl)
+        for occ, tmpl in occ_overdue_rows
+        if _is_on_or_after_template_created_day(occ.occurrence_date, tmpl.created_at)
+    ]
+
+    today_row_map: dict[tuple[uuid.UUID, date], tuple[SystemTaskOccurrence, SystemTaskTemplate]] = {}
+    for occ, tmpl in occ_today_rows:
+        today_row_map[(tmpl.id, occ.occurrence_date)] = (occ, tmpl)
+    for occ, tmpl in occ_acted_today_rows:
+        key = (tmpl.id, occ.occurrence_date)
+        existing = today_row_map.get(key)
+        if existing is None:
+            today_row_map[key] = (occ, tmpl)
+            continue
+        existing_occ, _ = existing
+        if existing_occ.acted_at is None and occ.acted_at is not None:
+            today_row_map[key] = (occ, tmpl)
+
+    sorted_today_rows = sorted(
+        today_row_map.values(),
+        key=lambda row: ((row[1].title or "").lower(), row[0].occurrence_date),
+    )
 
     system_today: list[DailyReportSystemOccurrence] = []
-    for occ, tmpl in occ_today_rows:
+    for occ, tmpl in sorted_today_rows:
+        is_from_overdue = occ.occurrence_date < day
+        late_days = business_days_between(occ.occurrence_date, day) if is_from_overdue else None
         system_today.append(
             DailyReportSystemOccurrence(
                 template_id=tmpl.id,
@@ -429,8 +526,8 @@ async def daily_report(
                 status=occ.status,
                 comment=occ.comment,
                 acted_at=occ.acted_at,
-                is_overdue=False,
-                late_days=None,
+                is_overdue=is_from_overdue,
+                late_days=late_days,
             )
         )
 
