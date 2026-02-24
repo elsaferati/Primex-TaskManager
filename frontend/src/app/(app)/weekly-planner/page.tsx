@@ -1049,27 +1049,34 @@ export default function WeeklyPlannerPage() {
       dailyStatus?: string | null
     ) => {
       const normalized = (status || "TODO").toUpperCase()
-      
-      // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
-      if (dailyStatus) {
-        return getStatusCardClasses(dailyStatus)
-      }
-      
-      // For non-MST/TT tasks, use timeline logic based on completion date
-      if (normalized === "DONE" && completedAt && dayDate) {
-        const completedDate = completedAt.slice(0, 10) // Extract YYYY-MM-DD
-        const currentDate = dayDate.slice(0, 10) // Extract YYYY-MM-DD
-        
-        // If the displayed day is before the completion date, show TODO/IN_PROGRESS
-        // (task wasn't done yet on that day)
-        if (currentDate < completedDate) {
-          return getStatusCardClasses("IN_PROGRESS")
-        }
-        // If the displayed day is on or after the completion date, show DONE
+      const normalizedDaily = dailyStatus ? dailyStatus.toUpperCase() : null
+
+      if (normalizedDaily === "DONE") {
         return getStatusCardClasses("DONE")
       }
-      
-      // For non-DONE tasks or when dates aren't available, use the main status
+
+      if (completedAt && dayDate) {
+        const completedDate = completedAt.slice(0, 10)
+        const currentDate = dayDate.slice(0, 10)
+        if (currentDate >= completedDate) {
+          return getStatusCardClasses("DONE")
+        }
+        if (normalized === "DONE") {
+          return getStatusCardClasses("IN_PROGRESS")
+        }
+      }
+
+      if (normalized === "DONE") {
+        return getStatusCardClasses("DONE")
+      }
+
+      if (normalizedDaily === "IN_PROGRESS") {
+        return getStatusCardClasses("IN_PROGRESS")
+      }
+      if (normalizedDaily) {
+        return getStatusCardClasses("TODO")
+      }
+
       return getStatusCardClasses(normalized)
     },
     [getStatusCardClasses]
@@ -1091,28 +1098,34 @@ export default function WeeklyPlannerPage() {
       dailyStatus?: string | null
     ) => {
       const normalized = (status || "TODO").toUpperCase()
-      
-      // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
-      if (dailyStatus) {
-        const normalizedDaily = dailyStatus.toUpperCase()
-        return normalizedDaily === "DONE" ? "DONE" : normalizedDaily === "IN_PROGRESS" ? "IN_PROGRESS" : "TODO"
-      }
-      
-      // For non-MST/TT tasks, use timeline logic based on completion date
-      if (normalized === "DONE" && completedAt && dayDate) {
-        const completedDate = completedAt.slice(0, 10) // Extract YYYY-MM-DD
-        const currentDate = dayDate.slice(0, 10) // Extract YYYY-MM-DD
-        
-        // If the displayed day is before the completion date, show IN_PROGRESS
-        // (task wasn't done yet on that day)
-        if (currentDate < completedDate) {
-          return "IN_PROGRESS"
-        }
-        // If the displayed day is on or after the completion date, show DONE
+      const normalizedDaily = dailyStatus ? dailyStatus.toUpperCase() : null
+
+      if (normalizedDaily === "DONE") {
         return "DONE"
       }
-      
-      // For non-DONE tasks or when dates aren't available, use the main status
+
+      if (completedAt && dayDate) {
+        const completedDate = completedAt.slice(0, 10)
+        const currentDate = dayDate.slice(0, 10)
+        if (currentDate >= completedDate) {
+          return "DONE"
+        }
+        if (normalized === "DONE") {
+          return "IN_PROGRESS"
+        }
+      }
+
+      if (normalized === "DONE") {
+        return "DONE"
+      }
+
+      if (normalizedDaily === "IN_PROGRESS") {
+        return "IN_PROGRESS"
+      }
+      if (normalizedDaily) {
+        return "TODO"
+      }
+
       return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
     },
     []
@@ -1132,11 +1145,14 @@ export default function WeeklyPlannerPage() {
         if (statusValue === "DONE") {
           return "border-[#059669] bg-[#02e6c7] text-[#064e3b]"
         }
+        if (statusValue === "IN_PROGRESS") {
+          return getStatusCardClasses("IN_PROGRESS")
+        }
         return "border-[#1d4ed8] bg-[#dbeafe] text-[#0f172a]"
       }
       return getStatusCardClassesForDay(status, completedAt, dayDate, dailyStatus)
     },
-    [data?.week_start, getStatusCardClassesForDay, getStatusValueForDay, isTaskNewForWeek]
+    [data?.week_start, getStatusCardClasses, getStatusCardClassesForDay, getStatusValueForDay, isTaskNewForWeek]
   )
 
   const getTaskStatusBadge = React.useCallback((task: {
@@ -1460,6 +1476,16 @@ export default function WeeklyPlannerPage() {
               font-weight: 700;
               text-transform: uppercase;
               white-space: nowrap;
+            }
+            .notes-columns {
+              display: grid;
+              width: 100%;
+            }
+            .notes-column {
+              padding: 0 6px;
+            }
+            .notes-column + .notes-column {
+              border-left: 0.5px solid #94a3b8;
             }
             .notes-line {
               height: 11px;
@@ -1830,22 +1856,34 @@ export default function WeeklyPlannerPage() {
       return wrapper
     }
 
-    const createNotesSection = () => {
+    const createNotesSection = (userCount: number) => {
+      const notesLabelWidth = dayColWidth + timeColWidth + llColWidth
+      const columns = Math.max(1, userCount)
       const wrapper = doc.createElement("div")
       const table = doc.createElement("table")
       table.className = "notes-table"
 
       const colgroup = doc.createElement("colgroup")
       colgroup.innerHTML = `
-        <col style="width: 120px;" />
+        <col style="width: ${notesLabelWidth}px;" />
         <col />
       `
       table.appendChild(colgroup)
 
       const buildLinesHtml = () => `
-        <div class="notes-line"></div>
-        <div class="notes-line"></div>
-        <div class="notes-line"></div>
+        <div class="notes-columns" style="grid-template-columns: repeat(${columns}, minmax(0, 1fr));">
+          ${Array.from({ length: columns })
+            .map(
+              () => `
+            <div class="notes-column">
+              <div class="notes-line"></div>
+              <div class="notes-line"></div>
+              <div class="notes-line"></div>
+            </div>
+          `
+            )
+            .join("")}
+        </div>
       `
 
       const tbody = doc.createElement("tbody")
@@ -2003,6 +2041,7 @@ export default function WeeklyPlannerPage() {
       const isNew = isTaskNewForWeek(task.created_at, data.week_start)
       if (isNew) {
         if (statusValue === "DONE") return "task-status-new-done"
+        if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
         return "task-status-new-open"
       }
       if (statusValue === "DONE") return "task-status-done"
@@ -2409,7 +2448,7 @@ export default function WeeklyPlannerPage() {
         })
 
         if (chunkIndex === userChunks.length - 1) {
-          content.appendChild(createNotesSection())
+          content.appendChild(createNotesSection(chunk.length))
         }
 
         fitContentToWidth(content)

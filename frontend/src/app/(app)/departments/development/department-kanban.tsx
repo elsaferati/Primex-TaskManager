@@ -1650,6 +1650,7 @@ export default function DepartmentKanban() {
     () => (department ? users.filter((u) => u.department_id === department.id) : []),
     [department, users]
   )
+  const weeklyNotesColumns = Math.max(1, departmentUsers.length)
   const noProjectAssigneeLabel = React.useMemo(() => {
     if (noProjectAssignees.length === 0) return "Unassigned"
     if (users.length && noProjectAssignees.length === users.length) return "All users"
@@ -9534,9 +9535,18 @@ export default function DepartmentKanban() {
                         KOMENT
                       </td>
                       <td className="border border-slate-900 px-2 py-2">
-                        <div className="weekly-notes-line" />
-                        <div className="weekly-notes-line" />
-                        <div className="weekly-notes-line" />
+                        <div
+                          className="weekly-notes-columns"
+                          style={{ gridTemplateColumns: `repeat(${weeklyNotesColumns}, minmax(0, 1fr))` }}
+                        >
+                          {Array.from({ length: weeklyNotesColumns }).map((_, idx) => (
+                            <div key={`weekly-notes-comment-${idx}`} className="weekly-notes-column">
+                              <div className="weekly-notes-line" />
+                              <div className="weekly-notes-line" />
+                              <div className="weekly-notes-line" />
+                            </div>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                     <tr>
@@ -9544,9 +9554,18 @@ export default function DepartmentKanban() {
                         ANKESA / KERKESA / PROPOZIME
                       </td>
                       <td className="border border-slate-900 px-2 py-2">
-                        <div className="weekly-notes-line" />
-                        <div className="weekly-notes-line" />
-                        <div className="weekly-notes-line" />
+                        <div
+                          className="weekly-notes-columns"
+                          style={{ gridTemplateColumns: `repeat(${weeklyNotesColumns}, minmax(0, 1fr))` }}
+                        >
+                          {Array.from({ length: weeklyNotesColumns }).map((_, idx) => (
+                            <div key={`weekly-notes-requests-${idx}`} className="weekly-notes-column">
+                              <div className="weekly-notes-line" />
+                              <div className="weekly-notes-line" />
+                              <div className="weekly-notes-line" />
+                            </div>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                   </tbody>
@@ -9599,6 +9618,16 @@ export default function DepartmentKanban() {
         }
         .weekly-notes-label {
           letter-spacing: 0.02em;
+        }
+        .weekly-notes-columns {
+          display: grid;
+          width: 100%;
+        }
+        .weekly-notes-column {
+          padding: 0 6px;
+        }
+        .weekly-notes-column + .weekly-notes-column {
+          border-left: 1px solid #94a3b8;
         }
         .weekly-notes-line {
           height: 12px;
