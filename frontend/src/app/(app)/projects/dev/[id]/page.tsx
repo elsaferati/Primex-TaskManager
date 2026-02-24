@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown, Eye } from "lucide-react"
 import { useAuth } from "@/lib/auth"
-import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import type {
   ChecklistItem,
   GaNote,
@@ -105,10 +105,7 @@ function initials(src: string) {
 }
 
 function toDateInput(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toISOString().slice(0, 10)
+  return toDateInputValue(value)
 }
 
 function formatDateDisplay(value?: string | null) {
@@ -468,7 +465,7 @@ export default function DevelopmentProjectPage() {
   // Sync the edit date when dialog opens or project changes
   React.useEffect(() => {
     if (editProjectDueDateOpen && project) {
-      setEditProjectDueDate(project.due_date ? new Date(project.due_date).toISOString().slice(0, 10) : "")
+      setEditProjectDueDate(toDateInput(project.due_date))
     }
   }, [editProjectDueDateOpen, project?.due_date])
 
@@ -1552,7 +1549,7 @@ export default function DevelopmentProjectPage() {
                       <button
                         type="button"
                         onClick={() => {
-                          setEditProjectDueDate(project.due_date ? new Date(project.due_date).toISOString().slice(0, 10) : "")
+                          setEditProjectDueDate(toDateInput(project.due_date))
                           setEditProjectDueDateOpen(true)
                         }}
                         className="text-sm text-sky-600/70 hover:text-sky-700 transition-colors"

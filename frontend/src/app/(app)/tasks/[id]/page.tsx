@@ -13,7 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
-import { formatDateDMY, normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
 
 const TASK_STATUS_OPTIONS = [
@@ -65,11 +65,7 @@ function isFastTask(task: Task | null): boolean {
 }
 
 function toDateInput(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  const adjusted = new Date(date.getTime() - date.getTimezoneOffset() * 60 * 1000)
-  return adjusted.toISOString().slice(0, 10)
+  return toDateInputValue(value)
 }
 
 function formatDate(value?: string | null) {

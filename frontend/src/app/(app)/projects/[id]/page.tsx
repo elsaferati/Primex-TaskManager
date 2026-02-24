@@ -18,7 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ChevronDown, Eye, Pencil } from "lucide-react"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
-import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import type {
   ChecklistItem,
   Department,
@@ -137,10 +137,7 @@ function initials(src: string) {
 }
 
 function toDateInput(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toISOString().slice(0, 10)
+  return toDateInputValue(value)
 }
 
 function formatDateDisplay(value?: string | null) {

@@ -2430,6 +2430,7 @@ async def weekly_table_planner(
                             title=tmpl.title,
                             status=task_status,
                             daily_status=None,  # System tasks use occurrence status
+                            created_at=tmpl.created_at,
                             completed_at=completed_at,
                             daily_products=None,
                             finish_period=tmpl.finish_period,
@@ -2481,6 +2482,7 @@ async def weekly_table_planner(
                             title=task.title,
                             status=TaskStatus(task.status) if task.status else TaskStatus.TODO,
                             daily_status=None,
+                            created_at=task.created_at,
                             completed_at=task.completed_at,
                             daily_products=task.daily_products,
                             finish_period=task.finish_period,
@@ -2576,6 +2578,7 @@ async def weekly_table_planner(
                                     if t.id in mst_tt_task_ids
                                     else None
                                 ),
+                                created_at=t.created_at,
                                 completed_at=t.completed_at,
                                 daily_products=total_products,
                                 total_products=total_products,
@@ -2631,6 +2634,7 @@ async def weekly_table_planner(
                                     if t.id in mst_tt_task_ids
                                     else None
                                 ),
+                                created_at=t.created_at,
                                 completed_at=t.completed_at,
                                 daily_products=total_products,
                                 total_products=total_products,
