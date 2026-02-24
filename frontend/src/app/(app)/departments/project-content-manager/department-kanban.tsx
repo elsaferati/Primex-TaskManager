@@ -3731,7 +3731,6 @@ export default function DepartmentKanban() {
   const noProjectBuckets = React.useMemo(() => {
     const normal: Task[] = []
     const personal: Task[] = []
-    const ga: Task[] = []
     const blocked: Task[] = []
     const oneHour: Task[] = []
     const r1: Task[] = []
@@ -3745,7 +3744,7 @@ export default function DepartmentKanban() {
       } else if (t.is_personal) {
         personal.push(t)
       } else if (t.ga_note_origin_id) {
-        ga.push(t)
+        continue
       } else if (isFastNormalTask(t)) {
         normal.push(t)
       }
@@ -3753,7 +3752,6 @@ export default function DepartmentKanban() {
     return {
       normal: sortDoneLast(normal, (task) => taskStatusValue(task) === "DONE"),
       personal: sortDoneLast(personal, (task) => taskStatusValue(task) === "DONE"),
-      ga: sortDoneLast(ga, (task) => taskStatusValue(task) === "DONE"),
       blocked: sortDoneLast(blocked, (task) => taskStatusValue(task) === "DONE"),
       oneHour: sortDoneLast(oneHour, (task) => taskStatusValue(task) === "DONE"),
       r1: sortDoneLast(r1, (task) => taskStatusValue(task) === "DONE"),
@@ -3796,18 +3794,6 @@ export default function DepartmentKanban() {
       borderClass: "border-emerald-500",
       itemBadge: "R1",
       itemBadgeClass: "bg-white text-emerald-600 border-emerald-200",
-    },
-    {
-      id: "ga",
-      title: "GA TASKS",
-      count: noProjectBuckets.ga.length,
-      items: noProjectBuckets.ga,
-      headerBg: "bg-white",
-      headerText: "text-slate-700",
-      badgeClass: "bg-white text-sky-600 border border-slate-200",
-      borderClass: "border-sky-500",
-      itemBadge: "GA",
-      itemBadgeClass: "bg-white text-sky-600 border-slate-200",
     },
     {
       id: "personal",
