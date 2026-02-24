@@ -314,7 +314,37 @@ def _apply_preview_limit(rows: list[list[str]], limit: int | None) -> tuple[list
     return rows[:limit], total, True
 
 
-def _planner_cell_items(*, projects, system_tasks, fast_tasks, include_fast: bool, day_date: date) -> list[dict[str, str | None]]:
+def _is_new_for_week(created_at: datetime | None, week_start_date: date) -> bool:
+    if created_at is None:
+        return False
+    return created_at.date() >= week_start_date
+
+
+def _planner_status_for_export(
+    *,
+    status: str | None,
+    completed_at: datetime | None,
+    day_date: date,
+    created_at: datetime | None,
+    week_start_date: date,
+) -> str:
+    base_status = _effective_status(status, completed_at, day_date)
+    if _is_new_for_week(created_at, week_start_date):
+        if base_status == "DONE":
+            return "DONE_NEW"
+        return "NEW_OPEN"
+    return base_status
+
+
+def _planner_cell_items(
+    *,
+    projects,
+    system_tasks,
+    fast_tasks,
+    include_fast: bool,
+    day_date: date,
+    week_start_date: date,
+) -> list[dict[str, str | None]]:
     """
     Returns list of task display items with status for coloring.
     Each item has: number, title, rest, status.
@@ -336,7 +366,13 @@ def _planner_cell_items(*, projects, system_tasks, fast_tasks, include_fast: boo
                     task_name = f"{task_name} {completed_products}/{total_products} pcs"
                 else:
                     task_name = f"{task_name} {total_products} pcs"
-            status_value = _effective_status(task.status, task.completed_at, day_date)
+            status_value = _planner_status_for_export(
+                status=task.status,
+                completed_at=task.completed_at,
+                day_date=day_date,
+                created_at=getattr(task, "created_at", None),
+                week_start_date=week_start_date,
+            )
             if project_title:
                 items.append(
                     {
@@ -365,7 +401,13 @@ def _planner_cell_items(*, projects, system_tasks, fast_tasks, include_fast: boo
                     "number": str(task_num),
                     "title": title,
                     "rest": "",
-                    "status": _effective_status(task.status, task.completed_at, day_date),
+                    "status": _planner_status_for_export(
+                        status=task.status,
+                        completed_at=task.completed_at,
+                        day_date=day_date,
+                        created_at=getattr(task, "created_at", None),
+                        week_start_date=week_start_date,
+                    ),
                 }
             )
             task_num += 1
@@ -382,7 +424,13 @@ def _planner_cell_items(*, projects, system_tasks, fast_tasks, include_fast: boo
                         "number": str(task_num),
                         "title": label,
                         "rest": "",
-                        "status": _effective_status(task.status, task.completed_at, day_date),
+                        "status": _planner_status_for_export(
+                            status=task.status,
+                            completed_at=task.completed_at,
+                            day_date=day_date,
+                            created_at=getattr(task, "created_at", None),
+                            week_start_date=week_start_date,
+                        ),
                     }
                 )
                 task_num += 1
@@ -1192,9 +1240,11 @@ async def export_fast_tasks_xlsx(
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
 
     status_fills = {
-        "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
-        "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
-        "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+        "TODO": PatternFill(start_color="FFFFC4ED", end_color="FFFFC4ED", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FFFFFF00", end_color="FFFFFF00", fill_type="solid"),
+        "DONE": PatternFill(start_color="FFC4FDC4", end_color="FFC4FDC4", fill_type="solid"),
+        "NEW_OPEN": PatternFill(start_color="FFDBEAFE", end_color="FFDBEAFE", fill_type="solid"),
+        "DONE_NEW": PatternFill(start_color="FF6EE7B7", end_color="FF6EE7B7", fill_type="solid"),
     }
 
     for idx, (task, department, assigned, created) in enumerate(rows, start=1):
@@ -2294,9 +2344,11 @@ async def export_daily_report_xlsx(
     ws.title = "Daily Report"
 
     status_fills = {
-        "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
-        "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
-        "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+        "TODO": PatternFill(start_color="FFFFC4ED", end_color="FFFFC4ED", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FFFFFF00", end_color="FFFFFF00", fill_type="solid"),
+        "DONE": PatternFill(start_color="FFC4FDC4", end_color="FFC4FDC4", fill_type="solid"),
+        "NEW_OPEN": PatternFill(start_color="FFDBEAFE", end_color="FFDBEAFE", fill_type="solid"),
+        "DONE_NEW": PatternFill(start_color="FF6EE7B7", end_color="FF6EE7B7", fill_type="solid"),
     }
 
     title_row = 1
@@ -3564,9 +3616,11 @@ async def export_weekly_planner_xlsx(
     ws.title = dept_label[:31] if dept_label else "Weekly Planner"
 
     status_fills = {
-        "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
-        "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
-        "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+        "TODO": PatternFill(start_color="FFFFC4ED", end_color="FFFFC4ED", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FFFFFF00", end_color="FFFFFF00", fill_type="solid"),
+        "DONE": PatternFill(start_color="FFC4FDC4", end_color="FFC4FDC4", fill_type="solid"),
+        "NEW_OPEN": PatternFill(start_color="FFDBEAFE", end_color="FFDBEAFE", fill_type="solid"),
+        "DONE_NEW": PatternFill(start_color="FF6EE7B7", end_color="FF6EE7B7", fill_type="solid"),
     }
 
     last_col = 4 + len(user_names)  # NR, DAY, LL, TIME + users
@@ -3642,6 +3696,7 @@ async def export_weekly_planner_xlsx(
                     fast_tasks=fast_tasks,
                     include_fast=include_fast,
                     day_date=day.date,
+                    week_start_date=week_start_date,
                 )
                 per_user_items.append(items)
                 max_items = max(max_items, len(items))
@@ -3888,9 +3943,11 @@ async def export_weekly_snapshot_xlsx(
     ws.title = dept_label[:31] if dept_label else "Weekly Snapshot"
 
     status_fills = {
-        "TODO": PatternFill(start_color="FFC4ED", end_color="FFC4ED", fill_type="solid"),
-        "IN_PROGRESS": PatternFill(start_color="FFFF00", end_color="FFFF00", fill_type="solid"),
-        "DONE": PatternFill(start_color="C4FDC4", end_color="C4FDC4", fill_type="solid"),
+        "TODO": PatternFill(start_color="FFFFC4ED", end_color="FFFFC4ED", fill_type="solid"),
+        "IN_PROGRESS": PatternFill(start_color="FFFFFF00", end_color="FFFFFF00", fill_type="solid"),
+        "DONE": PatternFill(start_color="FFC4FDC4", end_color="FFC4FDC4", fill_type="solid"),
+        "NEW_OPEN": PatternFill(start_color="FFDBEAFE", end_color="FFDBEAFE", fill_type="solid"),
+        "DONE_NEW": PatternFill(start_color="FF6EE7B7", end_color="FF6EE7B7", fill_type="solid"),
     }
 
     last_col = 4 + len(user_names)  # NR, DAY, LL, TIME + users
@@ -3964,6 +4021,7 @@ async def export_weekly_snapshot_xlsx(
                     fast_tasks=fast_tasks,
                     include_fast=include_fast,
                     day_date=day.date,
+                    week_start_date=week_start_date,
                 )
                 per_user_items.append(items)
                 max_items = max(max_items, len(items))

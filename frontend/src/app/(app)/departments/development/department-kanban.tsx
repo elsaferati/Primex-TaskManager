@@ -121,7 +121,7 @@ const TODAY_TASK_CELL_CLASS = "h-12 align-middle"
 const TODAY_TASK_TEXT_CLAMP_CLASS = "max-h-10 overflow-hidden leading-4"
 
 // Grid layout for system tasks table - matches system-tasks page
-const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-2 xl:gap-4 items-center px-4"
+const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_96px_56px_80px_88px] xl:grid-cols-[36px_1fr_150px_150px_120px_120px_64px_100px_100px] gap-2 xl:gap-4 items-center px-4"
 
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
@@ -134,6 +134,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
+const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "DONE"] as const
 
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
@@ -258,6 +259,10 @@ function formatDateOnly(value?: string | null) {
   return formatDateDMY(value)
 }
 
+function systemTaskDisplayDate(task: SystemTaskTemplate): string | null {
+  return task.effective_occurrence_date || task.next_occurrence_date || task.occurrence_date || null
+}
+
 function todayInputValue() {
   const now = new Date()
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000)
@@ -280,6 +285,30 @@ function abbreviateDepartmentName(name: string): string {
   if (lowerName.includes("project content")) return "PCM"
   // Return first 3 letters as fallback
   return name.slice(0, 3).toUpperCase()
+}
+
+function systemTaskDepartmentLabel(
+  template: SystemTaskTemplate,
+  departmentMap: Map<string, Department>,
+  userMap: Map<string, UserLookup>
+): string {
+  const assigneeDeptCodes = template.assignees
+    ? Array.from(
+        new Set(
+          template.assignees
+            .map((assignee) => {
+              const userDeptId = assignee.department_id || userMap.get(assignee.id || "")?.department_id
+              return userDeptId ? departmentMap.get(userDeptId)?.code : null
+            })
+            .filter(Boolean) as string[]
+        )
+      )
+    : []
+
+  if (assigneeDeptCodes.length) return assigneeDeptCodes.join(" / ")
+  if (template.scope === "GA") return "GA"
+  if (template.scope === "ALL") return "ALL"
+  return "-"
 }
 
 const PRIORITY_BADGE: Record<"NORMAL" | "HIGH", string> = {
@@ -1077,6 +1106,17 @@ export default function DepartmentKanban() {
   const [editTaskAssignees, setEditTaskAssignees] = React.useState<string[]>([])
   const [selectEditTaskAssigneesOpen, setSelectEditTaskAssigneesOpen] = React.useState(false)
   const [updatingTask, setUpdatingTask] = React.useState(false)
+  const [allTodayEditingTaskId, setAllTodayEditingTaskId] = React.useState<string | null>(null)
+  const [allTodayEditStatus, setAllTodayEditStatus] = React.useState<string>("TODO")
+  const [allTodayEditStartDate, setAllTodayEditStartDate] = React.useState("")
+  const [allTodayEditDueDate, setAllTodayEditDueDate] = React.useState("")
+  const [allTodayUpdating, setAllTodayUpdating] = React.useState(false)
+  const [editingSystemDateTemplateId, setEditingSystemDateTemplateId] = React.useState<string | null>(null)
+  const [editingSystemDateSource, setEditingSystemDateSource] = React.useState("")
+  const [editingSystemDateTarget, setEditingSystemDateTarget] = React.useState("")
+  const [editingSystemDateStatus, setEditingSystemDateStatus] = React.useState<"TODO" | "DONE">("TODO")
+  const [editingSystemDateTitle, setEditingSystemDateTitle] = React.useState("")
+  const [savingSystemDateOverride, setSavingSystemDateOverride] = React.useState(false)
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
   const [pendingProjectTitle, setPendingProjectTitle] = React.useState("")
   const [meetingTitle, setMeetingTitle] = React.useState("")
@@ -1525,6 +1565,7 @@ export default function DepartmentKanban() {
     }
   }, [isTabId, normalizedTab])
 
+  const departmentMap = React.useMemo(() => new Map(departments.map((dep) => [dep.id, dep])), [departments])
   const userMap = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   const isGaTask = React.useCallback(
     (task: Task | SystemTaskTemplate) => {
@@ -1609,6 +1650,7 @@ export default function DepartmentKanban() {
     () => (department ? users.filter((u) => u.department_id === department.id) : []),
     [department, users]
   )
+  const weeklyNotesColumns = Math.max(1, departmentUsers.length)
   const noProjectAssigneeLabel = React.useMemo(() => {
     if (noProjectAssignees.length === 0) return "Unassigned"
     if (users.length && noProjectAssignees.length === users.length) return "All users"
@@ -1924,7 +1966,7 @@ export default function DepartmentKanban() {
       if (!map.has(templateId)) map.set(templateId, status)
     }
 
-    if (selectedUserId !== "__all__") {
+    if (viewMode === "mine" || selectedUserId !== "__all__") {
       if (dailyReport?.system_today) {
         for (const occ of dailyReport.system_today) {
           addIfMissing(occ.template_id, occ.status)
@@ -1969,7 +2011,7 @@ export default function DepartmentKanban() {
       if (result) map.set(templateId, result)
     }
     return map
-  }, [allUsersDailyReports, dailyReport?.system_overdue, dailyReport?.system_today, selectedUserId])
+  }, [allUsersDailyReports, dailyReport?.system_overdue, dailyReport?.system_today, selectedUserId, viewMode])
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
@@ -3182,7 +3224,7 @@ export default function DepartmentKanban() {
     () =>
       sortDoneLast(todaySystemTasks, (task) => {
         const templateId = task.template_id || task.id
-        const statusValue = templateId ? systemOccurrenceStatusByTemplate.get(templateId) : null
+        const statusValue = templateId ? (systemOccurrenceStatusByTemplate.get(templateId) ?? task.status ?? null) : (task.status ?? null)
         return statusValue === "DONE"
       }),
     [sortDoneLast, todaySystemTasks, systemOccurrenceStatusByTemplate]
@@ -3468,6 +3510,7 @@ export default function DepartmentKanban() {
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "STAFF"
   const isReadOnly = viewMode === "mine"
   const canManage = canCreate && !isReadOnly
+  const canManageDepartmentSystemDateEdit = user?.role === "ADMIN" || user?.role === "MANAGER"
   const showSystemActions = viewMode === "mine"
   const canDeleteProjects = user?.role === "ADMIN" && !isReadOnly
   const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
@@ -3491,7 +3534,6 @@ export default function DepartmentKanban() {
   const noProjectBuckets = React.useMemo(() => {
     const normal: Task[] = []
     const personal: Task[] = []
-    const ga: Task[] = []
     const blocked: Task[] = []
     const oneHour: Task[] = []
     const r1: Task[] = []
@@ -3506,7 +3548,7 @@ export default function DepartmentKanban() {
       } else if (t.is_personal) {
         personal.push(t)
       } else if (t.ga_note_origin_id) {
-        ga.push(t)
+        continue
       } else if (isFastNormalTask(t)) {
         normal.push(t)
       }
@@ -3514,7 +3556,6 @@ export default function DepartmentKanban() {
     return {
       normal: sortDoneLast(normal, (task) => taskStatusValue(task) === "DONE"),
       personal: sortDoneLast(personal, (task) => taskStatusValue(task) === "DONE"),
-      ga: sortDoneLast(ga, (task) => taskStatusValue(task) === "DONE"),
       blocked: sortDoneLast(blocked, (task) => taskStatusValue(task) === "DONE"),
       oneHour: sortDoneLast(oneHour, (task) => taskStatusValue(task) === "DONE"),
       r1: sortDoneLast(r1, (task) => taskStatusValue(task) === "DONE"),
@@ -3557,18 +3598,6 @@ export default function DepartmentKanban() {
       borderClass: "border-emerald-500",
       itemBadge: "R1",
       itemBadgeClass: "bg-white text-emerald-600 border-emerald-200",
-    },
-    {
-      id: "ga",
-      title: "GA TASKS",
-      count: noProjectBuckets.ga.length,
-      items: noProjectBuckets.ga,
-      headerBg: "bg-white",
-      headerText: "text-slate-700",
-      badgeClass: "bg-white text-sky-600 border border-slate-200",
-      borderClass: "border-sky-500",
-      itemBadge: "GA",
-      itemBadgeClass: "bg-white text-sky-600 border-slate-200",
     },
     {
       id: "personal",
@@ -3831,6 +3860,137 @@ export default function DepartmentKanban() {
       setClosingTask(false)
     }
   }
+
+  const canEditSystemDateRow = React.useCallback(
+    (task: SystemTaskTemplate, occurrenceStatus?: string | null) => {
+      if (!user?.id) return false
+      const normalizedStatus = (occurrenceStatus || task.status || "").toUpperCase()
+      if (normalizedStatus === "DONE") return false
+      const isAssigned =
+        task.default_assignee_id === user.id ||
+        Boolean(task.assignees?.some((assignee) => assignee.id === user.id))
+      if (viewMode === "mine") return isAssigned
+      return canManageDepartmentSystemDateEdit
+    },
+    [canManageDepartmentSystemDateEdit, user?.id, viewMode]
+  )
+
+  const openSystemDateEditor = React.useCallback(
+    (task: SystemTaskTemplate, occurrenceStatus?: string | null) => {
+      const normalizedStatus = (occurrenceStatus || task.status || "").toUpperCase()
+      if (normalizedStatus === "DONE") {
+        toast.error("Done system tasks cannot be edited")
+        return
+      }
+      const templateId = task.template_id || task.id
+      const source = normalizeDueDateInput(systemTaskDisplayDate(task) || todayInputValue())
+      setEditingSystemDateTemplateId(templateId)
+      setEditingSystemDateSource(source)
+      setEditingSystemDateTarget(source)
+      setEditingSystemDateStatus("TODO")
+      setEditingSystemDateTitle(task.title || "System task")
+    },
+    []
+  )
+
+  const closeSystemDateEditor = React.useCallback(() => {
+    setEditingSystemDateTemplateId(null)
+    setEditingSystemDateSource("")
+    setEditingSystemDateTarget("")
+    setEditingSystemDateStatus("TODO")
+    setEditingSystemDateTitle("")
+    setSavingSystemDateOverride(false)
+  }, [])
+
+  const saveSystemDateOverride = React.useCallback(async () => {
+    if (!editingSystemDateTemplateId || !editingSystemDateSource || !editingSystemDateTarget) return
+    setSavingSystemDateOverride(true)
+    try {
+      const targetOccurrenceDate = editingSystemDateTarget
+      const dateChanged = editingSystemDateSource !== editingSystemDateTarget
+      if (dateChanged) {
+        const res = await apiFetch("/system-tasks/occurrence-date", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            template_id: editingSystemDateTemplateId,
+            source_occurrence_date: editingSystemDateSource,
+            target_occurrence_date: editingSystemDateTarget,
+          }),
+        })
+        if (!res.ok) {
+          let detail = "Failed to update system task date"
+          try {
+            const payload = (await res.json()) as { detail?: string }
+            if (payload?.detail) detail = payload.detail
+          } catch {
+            // ignore parse failures
+          }
+          toast.error(detail)
+          return
+        }
+      }
+
+      const statusRes = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          template_id: editingSystemDateTemplateId,
+          occurrence_date: targetOccurrenceDate,
+          status: editingSystemDateStatus === "DONE" ? "DONE" : "OPEN",
+        }),
+      })
+      if (!statusRes.ok) {
+        let detail = "Failed to update system task status"
+        try {
+          const payload = (await statusRes.json()) as { detail?: string }
+          if (payload?.detail) detail = payload.detail
+        } catch {
+          // ignore parse failures
+        }
+        toast.error(detail)
+        return
+      }
+
+      setSystemTasks((prev) =>
+        prev.map((task) => {
+          const rowTemplateId = task.template_id || task.id
+          if (rowTemplateId !== editingSystemDateTemplateId) return task
+          return {
+            ...task,
+            next_occurrence_date: editingSystemDateSource,
+            effective_occurrence_date: editingSystemDateTarget,
+            status: editingSystemDateStatus,
+          }
+        })
+      )
+
+      const sysRes = await apiFetch(
+        `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
+      )
+      if (sysRes.ok) {
+        setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
+      }
+
+      void refreshDailyReport()
+      closeSystemDateEditor()
+      toast.success("System task updated")
+    } catch {
+      toast.error("Failed to update system task date")
+    } finally {
+      setSavingSystemDateOverride(false)
+    }
+  }, [
+    apiFetch,
+    closeSystemDateEditor,
+    department?.id,
+    editingSystemDateSource,
+    editingSystemDateStatus,
+    editingSystemDateTarget,
+    editingSystemDateTemplateId,
+    refreshDailyReport,
+    systemDate,
+  ])
 
   const updateTaskCommentState = (taskId: string, comment: string | null) => {
     setDepartmentTasks((prev) =>
@@ -4281,6 +4441,61 @@ export default function DepartmentKanban() {
       toast.success("Task updated")
     } finally {
       setUpdatingTask(false)
+    }
+  }
+
+  const startAllTodayTaskEdit = (task: Task) => {
+    setAllTodayEditingTaskId(task.id)
+    const statusValue = (task.status || "").toUpperCase()
+    setAllTodayEditStatus(
+      ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
+        ? statusValue
+        : "TODO"
+    )
+    setAllTodayEditStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
+    setAllTodayEditDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+  }
+
+  const cancelAllTodayTaskEdit = () => {
+    setAllTodayEditingTaskId(null)
+    setAllTodayEditStatus("TODO")
+    setAllTodayEditStartDate("")
+    setAllTodayEditDueDate("")
+  }
+
+  const updateAllTodayTask = async () => {
+    if (!allTodayEditingTaskId || !allTodayEditStatus) return
+    setAllTodayUpdating(true)
+    try {
+      const startDateValue = allTodayEditStartDate ? new Date(allTodayEditStartDate).toISOString() : null
+      const dueDateValue = allTodayEditDueDate ? new Date(allTodayEditDueDate).toISOString() : null
+      const res = await apiFetch(`/tasks/${allTodayEditingTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: allTodayEditStatus,
+          start_date: startDateValue,
+          due_date: dueDateValue,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Task
+      setDepartmentTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
+      setNoProjectTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
+      cancelAllTodayTaskEdit()
+      toast.success("Task updated")
+    } finally {
+      setAllTodayUpdating(false)
     }
   }
 
@@ -6071,7 +6286,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "DESCRIPTION", "STATUS", "PRIORITY", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "DESCRIPTION", "STATUS", "PRIORITY", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -6132,6 +6347,18 @@ export default function DepartmentKanban() {
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.created_at)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                title="Edit"
+                                aria-label={`Edit ${task.title}`}
+                                onClick={() => startAllTodayTaskEdit(task)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         )
                       })}
@@ -6157,7 +6384,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE"].map((label) => (
+                        {["NR", "TYPE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -6207,6 +6434,18 @@ export default function DepartmentKanban() {
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.created_at)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                title="Edit"
+                                aria-label={`Edit ${task.title}`}
+                                onClick={() => startAllTodayTaskEdit(task)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </TableCell>
                           </TableRow>
                         )
                       })}
@@ -6232,7 +6471,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "FREQUENCY", "ASSIGNED", "TASK TITLE", "FINISH BY", "STATUS", "PRIORITY"].map((label) => (
+                        {["NR", "FREQUENCY", "ASSIGNED", "TASK TITLE", "DATE", "FINISH BY", "STATUS", "PRIORITY", "ACTIONS"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -6245,10 +6484,12 @@ export default function DepartmentKanban() {
                     <TableBody>
                       {todaySystemTasksSorted.map((task, index) => {
                         const templateId = task.template_id || task.id
-                        const statusValue = templateId ? systemOccurrenceStatusByTemplate.get(templateId) : null
+                        const statusValue = templateId ? (systemOccurrenceStatusByTemplate.get(templateId) ?? task.status ?? null) : (task.status ?? null)
                         const statusLabel = formatSystemOccurrenceStatus(statusValue)
+                        const isDoneStatus = String(statusValue || "").toUpperCase() === "DONE"
                         const assignees = systemAssigneeInitials(task)
                         const priorityValue = normalizePriority(task.priority)
+                        const canEditSystemDate = canEditSystemDateRow(task, statusValue)
                         return (
                           <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
@@ -6280,9 +6521,27 @@ export default function DepartmentKanban() {
                                 ) : null}
                               </div>
                             </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(systemTaskDisplayDate(task))}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{task.finish_period || "-"}</TableCell>
-                            <TableCell className={TODAY_TASK_CELL_CLASS}>{statusLabel}</TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} ${isDoneStatus ? "bg-emerald-100 text-emerald-800 font-medium" : ""}`}>{statusLabel}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{PRIORITY_LABELS[priorityValue]}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
+                              {canEditSystemDate ? (
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                  title="Edit date"
+                                  aria-label={`Edit date ${task.title || "system task"}`}
+                                  disabled={savingSystemDateOverride}
+                                  onClick={() => openSystemDateEditor(task, statusValue)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                              ) : (
+                                <span className="text-slate-400">-</span>
+                              )}
+                            </TableCell>
                           </TableRow>
                         )
                       })}
@@ -6292,6 +6551,111 @@ export default function DepartmentKanban() {
                   <div className="mt-3 text-sm text-slate-500">No system tasks today.</div>
                 )}
               </Card>
+
+              <Dialog open={Boolean(allTodayEditingTaskId)} onOpenChange={(open) => { if (!open) cancelAllTodayTaskEdit() }}>
+                <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+                  <DialogHeader>
+                    <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="space-y-2">
+                      <Label className="text-slate-700">Status</Label>
+                      <Select value={allTodayEditStatus} onValueChange={setAllTodayEditStatus}>
+                        <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
+                            <SelectItem key={value} value={value}>
+                              {reportStatusLabel(value)}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Start date</Label>
+                        <Input
+                          type="date"
+                          value={allTodayEditStartDate}
+                          onChange={(e) => setAllTodayEditStartDate(normalizeDueDateInput(e.target.value))}
+                          className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Due date</Label>
+                        <Input
+                          type="date"
+                          value={allTodayEditDueDate}
+                          onChange={(e) => setAllTodayEditDueDate(normalizeDueDateInput(e.target.value))}
+                          className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={cancelAllTodayTaskEdit} className="rounded-xl border-slate-200">
+                        Cancel
+                      </Button>
+                      <Button
+                        disabled={!allTodayEditStatus || allTodayUpdating}
+                        onClick={() => void updateAllTodayTask()}
+                        className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                      >
+                        {allTodayUpdating ? "Updating..." : "Update"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
+              <Dialog open={Boolean(editingSystemDateTemplateId)} onOpenChange={(open) => { if (!open) closeSystemDateEditor() }}>
+                <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+                  <DialogHeader>
+                    <DialogTitle className="text-slate-800">Edit System Task Date</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-4">
+                    <div className="text-sm text-slate-600">{editingSystemDateTitle}</div>
+                    <div className="space-y-2">
+                      <Label className="text-slate-700">Status</Label>
+                      <Select value={editingSystemDateStatus} onValueChange={(v) => setEditingSystemDateStatus(v as "TODO" | "DONE")}>
+                        <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                          <SelectValue placeholder="Select status" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="TODO">To Do</SelectItem>
+                          <SelectItem value="DONE">Done</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-slate-700">Current date</Label>
+                      <Input type="date" value={editingSystemDateSource} disabled className="border-slate-200 rounded-xl w-full bg-slate-50" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-slate-700">New date</Label>
+                      <Input
+                        type="date"
+                        value={editingSystemDateTarget}
+                        onChange={(e) => setEditingSystemDateTarget(normalizeDueDateInput(e.target.value))}
+                        className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={closeSystemDateEditor} className="rounded-xl border-slate-200">
+                        Cancel
+                      </Button>
+                      <Button
+                        disabled={!editingSystemDateTarget || savingSystemDateOverride}
+                        onClick={() => void saveSystemDateOverride()}
+                        className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                      >
+                        {savingSystemDateOverride ? "Saving..." : "Save"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
 
             </div>
           </div>
@@ -6463,6 +6827,7 @@ export default function DepartmentKanban() {
                         <div>Department</div>
                         <div>Owner</div>
                         <div>Frequency</div>
+                        <div>Date</div>
                         <div>Finish by</div>
                         <div>Priority</div>
                         <div className="text-right">Actions</div>
@@ -6478,14 +6843,7 @@ export default function DepartmentKanban() {
                           const taskNumber = globalIndex + 1
                           globalIndex++
                           const priorityValue = normalizePriority(template.priority)
-                          const departmentLabel =
-                            template.scope === "GA"
-                              ? "GA"
-                              : template.scope === "ALL"
-                                ? "ALL"
-                                : department
-                                  ? formatDepartmentName(department.name)
-                                  : "-"
+                          const departmentLabel = systemTaskDepartmentLabel(template, departmentMap, userMap)
                           const ownerLabel = assigneeSummary(template.assignees) ||
                             (template.default_assignee_id ? users.find((u) => u.id === template.default_assignee_id)?.full_name || users.find((u) => u.id === template.default_assignee_id)?.username || "-" : "-")
                           const frequencyLabel = FREQUENCY_LABELS[template.frequency] || template.frequency
@@ -6495,6 +6853,7 @@ export default function DepartmentKanban() {
                             Boolean(user?.id) &&
                             (template.default_assignee_id === user?.id ||
                               template.assignees?.some((assignee) => assignee.id === user?.id))
+                          const canEditSystemDate = canEditSystemDateRow(template, statusValue)
                           const isInactive = template.is_active === false
 
                           return (
@@ -6532,6 +6891,9 @@ export default function DepartmentKanban() {
                                 </span>
                               </div>
                               <div className="text-sm text-slate-700 font-normal">
+                                {formatDateOnly(systemTaskDisplayDate(template))}
+                              </div>
+                              <div className="text-sm text-slate-700 font-normal">
                                 {template.finish_period || "-"}
                               </div>
                               <div>
@@ -6544,6 +6906,17 @@ export default function DepartmentKanban() {
                               </div>
                               <div className="text-right">
                                 <div className="flex flex-col items-end gap-2">
+                                  {canEditSystemDate ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      disabled={savingSystemDateOverride}
+                                      onClick={() => openSystemDateEditor(template, statusValue)}
+                                      className="h-7 text-xs"
+                                    >
+                                      Edit date
+                                    </Button>
+                                  ) : null}
                                   {showSystemActions && isAssigned && !isClosed && (
                                     <Button
                                       variant="outline"
@@ -9162,9 +9535,18 @@ export default function DepartmentKanban() {
                         KOMENT
                       </td>
                       <td className="border border-slate-900 px-2 py-2">
-                        <div className="weekly-notes-line" />
-                        <div className="weekly-notes-line" />
-                        <div className="weekly-notes-line" />
+                        <div
+                          className="weekly-notes-columns"
+                          style={{ gridTemplateColumns: `repeat(${weeklyNotesColumns}, minmax(0, 1fr))` }}
+                        >
+                          {Array.from({ length: weeklyNotesColumns }).map((_, idx) => (
+                            <div key={`weekly-notes-comment-${idx}`} className="weekly-notes-column">
+                              <div className="weekly-notes-line" />
+                              <div className="weekly-notes-line" />
+                              <div className="weekly-notes-line" />
+                            </div>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                     <tr>
@@ -9172,9 +9554,18 @@ export default function DepartmentKanban() {
                         ANKESA / KERKESA / PROPOZIME
                       </td>
                       <td className="border border-slate-900 px-2 py-2">
-                        <div className="weekly-notes-line" />
-                        <div className="weekly-notes-line" />
-                        <div className="weekly-notes-line" />
+                        <div
+                          className="weekly-notes-columns"
+                          style={{ gridTemplateColumns: `repeat(${weeklyNotesColumns}, minmax(0, 1fr))` }}
+                        >
+                          {Array.from({ length: weeklyNotesColumns }).map((_, idx) => (
+                            <div key={`weekly-notes-requests-${idx}`} className="weekly-notes-column">
+                              <div className="weekly-notes-line" />
+                              <div className="weekly-notes-line" />
+                              <div className="weekly-notes-line" />
+                            </div>
+                          ))}
+                        </div>
                       </td>
                     </tr>
                   </tbody>
@@ -9227,6 +9618,16 @@ export default function DepartmentKanban() {
         }
         .weekly-notes-label {
           letter-spacing: 0.02em;
+        }
+        .weekly-notes-columns {
+          display: grid;
+          width: 100%;
+        }
+        .weekly-notes-column {
+          padding: 0 6px;
+        }
+        .weekly-notes-column + .weekly-notes-column {
+          border-left: 1px solid #94a3b8;
         }
         .weekly-notes-line {
           height: 12px;

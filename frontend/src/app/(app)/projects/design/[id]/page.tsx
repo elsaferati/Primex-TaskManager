@@ -18,14 +18,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown } from "lucide-react"
 import { useAuth } from "@/lib/auth"
-import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
 
 function toDateInput(value?: string | null) {
-  if (!value) return ""
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
-  return date.toISOString().slice(0, 10)
+  return toDateInputValue(value)
 }
 
 function todayInputValue() {

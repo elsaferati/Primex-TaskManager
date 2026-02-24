@@ -626,6 +626,37 @@ def _entry_is_completed(
     return False
 
 
+def _status_for_day(
+    *,
+    status: str | None,
+    daily_status: str | None,
+    completed_at: datetime | None,
+    day_date: date | None,
+) -> str:
+    normalized = _normalize_task_status(status)
+    normalized_daily = _normalize_task_status(daily_status) if daily_status is not None else None
+
+    if normalized_daily == "DONE":
+        return "DONE"
+
+    completed_date = _as_local_date(completed_at) if completed_at is not None else None
+    if completed_date is not None and day_date is not None:
+        if day_date >= completed_date:
+            return "DONE"
+        if normalized == "DONE":
+            return "IN_PROGRESS"
+
+    if normalized == "DONE":
+        return "DONE"
+
+    if normalized_daily == "IN_PROGRESS":
+        return "IN_PROGRESS"
+    if normalized_daily is not None:
+        return "TODO"
+
+    return "TODO" if normalized == "TODO" else "IN_PROGRESS"
+
+
 def _build_task_fallback_key(
     *,
     title: str,
@@ -2430,6 +2461,7 @@ async def weekly_table_planner(
                             title=tmpl.title,
                             status=task_status,
                             daily_status=None,  # System tasks use occurrence status
+                            created_at=tmpl.created_at,
                             completed_at=completed_at,
                             daily_products=None,
                             finish_period=tmpl.finish_period,
@@ -2481,6 +2513,7 @@ async def weekly_table_planner(
                             title=task.title,
                             status=TaskStatus(task.status) if task.status else TaskStatus.TODO,
                             daily_status=None,
+                            created_at=task.created_at,
                             completed_at=task.completed_at,
                             daily_products=task.daily_products,
                             finish_period=task.finish_period,
@@ -2556,26 +2589,35 @@ async def weekly_table_planner(
                                 total_products = progress_total
                         elif t.id in mst_tt_task_ids and total_products is not None:
                             completed_products = 0
+                        daily_status_value = (
+                            next(
+                                (daily_progress_status_map[(t.id, check_date)]
+                                 for check_date in sorted(
+                                     [d for d in working_days if d <= day_date],
+                                     reverse=True
+                                 )
+                                 if (t.id, check_date) in daily_progress_status_map),
+                                None
+                            )
+                            if t.id in mst_tt_task_ids
+                            else None
+                        )
+                        status_for_day = _status_for_day(
+                            status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
+                            daily_status=daily_status_value,
+                            completed_at=t.completed_at,
+                            day_date=day_date,
+                        )
+                        if total_products is not None and status_for_day == "DONE":
+                            if completed_products is None or completed_products < total_products:
+                                completed_products = total_products
                         task_entries.append(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
                                 task_title=t.title,
                                 status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
-                                daily_status=(
-                                    # For MST/TT tasks, find the most recent daily_status on or before the displayed day
-                                    # This ensures we get the status from the day it was actually changed, not just the due_date
-                                    next(
-                                        (daily_progress_status_map[(t.id, check_date)]
-                                         for check_date in sorted(
-                                             [d for d in working_days if d <= day_date],
-                                             reverse=True
-                                         )
-                                         if (t.id, check_date) in daily_progress_status_map),
-                                        TaskStatus.TODO  # Default if no record found
-                                    )
-                                    if t.id in mst_tt_task_ids
-                                    else None
-                                ),
+                                daily_status=daily_status_value,
+                                created_at=t.created_at,
                                 completed_at=t.completed_at,
                                 daily_products=total_products,
                                 total_products=total_products,
@@ -2611,26 +2653,35 @@ async def weekly_table_planner(
                                 total_products = progress_total
                         elif t.id in mst_tt_task_ids and total_products is not None:
                             completed_products = 0
+                        daily_status_value = (
+                            next(
+                                (daily_progress_status_map[(t.id, check_date)]
+                                 for check_date in sorted(
+                                     [d for d in working_days if d <= day_date],
+                                     reverse=True
+                                 )
+                                 if (t.id, check_date) in daily_progress_status_map),
+                                None
+                            )
+                            if t.id in mst_tt_task_ids
+                            else None
+                        )
+                        status_for_day = _status_for_day(
+                            status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
+                            daily_status=daily_status_value,
+                            completed_at=t.completed_at,
+                            day_date=day_date,
+                        )
+                        if total_products is not None and status_for_day == "DONE":
+                            if completed_products is None or completed_products < total_products:
+                                completed_products = total_products
                         task_entries.append(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
                                 task_title=t.title,
                                 status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
-                                daily_status=(
-                                    # For MST/TT tasks, find the most recent daily_status on or before the displayed day
-                                    # This ensures we get the status from the day it was actually changed, not just the due_date
-                                    next(
-                                        (daily_progress_status_map[(t.id, check_date)]
-                                         for check_date in sorted(
-                                             [d for d in working_days if d <= day_date],
-                                             reverse=True
-                                         )
-                                         if (t.id, check_date) in daily_progress_status_map),
-                                        TaskStatus.TODO  # Default if no record found
-                                    )
-                                    if t.id in mst_tt_task_ids
-                                    else None
-                                ),
+                                daily_status=daily_status_value,
+                                created_at=t.created_at,
                                 completed_at=t.completed_at,
                                 daily_products=total_products,
                                 total_products=total_products,
