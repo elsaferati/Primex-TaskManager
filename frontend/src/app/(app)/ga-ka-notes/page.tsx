@@ -1733,6 +1733,12 @@ export default function GaKaNotesPage() {
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
                         : normalizeTaskStatus(taskInfo?.taskStatus)
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
+                    const editDisabled = hasTask || isClosed
+                    const editDisabledTitle = hasTask
+                      ? "Edit disabled when task exists"
+                      : isClosed
+                        ? "Edit disabled when note is closed"
+                        : "Edit"
                     const canCreateTask = !isClosed && (!hasProject || isDevLinked)
                     const showManualOnly = hasProject && !isDevLinked
                     const shenimiCellClass = isClosed
@@ -1810,10 +1816,12 @@ export default function GaKaNotesPage() {
                                   <Button
                                     variant="outline"
                                     size="icon"
-                                    className="h-7 w-7 shrink-0 sm:hidden"
-                                    aria-label="Edit note"
-                                    title="Edit"
-                                    onClick={() => openEditNote(note)}
+                                    disabled={editDisabled}
+                                    aria-disabled={editDisabled}
+                                    className={`h-7 w-7 shrink-0 sm:hidden ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    aria-label={editDisabledTitle}
+                                    title={editDisabledTitle}
+                                    onClick={() => !editDisabled && openEditNote(note)}
                                   >
                                     <Pencil className="h-4 w-4" />
                                   </Button>
@@ -2013,11 +2021,11 @@ export default function GaKaNotesPage() {
                             <Button
                               variant="outline"
                               size="sm"
-                              disabled={hasTask}
-                              aria-disabled={hasTask}
-                              title={hasTask ? "Edit disabled when task exists" : "Edit"}
-                              className={`h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 ${hasTask ? "opacity-50 cursor-not-allowed" : ""}`}
-                              onClick={() => openEditNote(note)}
+                              disabled={editDisabled}
+                              aria-disabled={editDisabled}
+                              title={editDisabledTitle}
+                              className={`h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                              onClick={() => !editDisabled && openEditNote(note)}
                             >
                               Edit
                             </Button>

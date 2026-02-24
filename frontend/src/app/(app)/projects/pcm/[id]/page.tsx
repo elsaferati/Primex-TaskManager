@@ -1189,6 +1189,7 @@ export default function PcmProjectPage() {
   const [controlFinishPeriod, setControlFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
   >(FINISH_PERIOD_NONE_VALUE)
+  const [controlStartDate, setControlStartDate] = React.useState("")
   const [controlProductionDate, setControlProductionDate] = React.useState("")
   const [controlTotal, setControlTotal] = React.useState("0")
   const [controlCompleted, setControlCompleted] = React.useState("0")
@@ -1196,6 +1197,7 @@ export default function PcmProjectPage() {
   // Inline task form state for Produkte phase
   const [newInlineTaskTitle, setNewInlineTaskTitle] = React.useState("")
   const [newInlineTaskAssignee, setNewInlineTaskAssignee] = React.useState<string>("__unassigned__")
+  const [newInlineTaskStartDate, setNewInlineTaskStartDate] = React.useState("")
   const [newInlineTaskDueDate, setNewInlineTaskDueDate] = React.useState("")
   const [newInlineTaskFinishPeriod, setNewInlineTaskFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
@@ -1227,6 +1229,7 @@ export default function PcmProjectPage() {
   const [editingTaskTitle, setEditingTaskTitle] = React.useState("")
   const [editingTaskAssignee, setEditingTaskAssignee] = React.useState<string>("__unassigned__")
   const [editingTaskKoUserId, setEditingTaskKoUserId] = React.useState<string>("__unassigned__")
+  const [editingTaskStartDate, setEditingTaskStartDate] = React.useState("")
   const [editingTaskDueDate, setEditingTaskDueDate] = React.useState("")
   const [editingTaskFinishPeriod, setEditingTaskFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
@@ -2990,6 +2993,7 @@ export default function PcmProjectPage() {
               status: "TODO",
               priority: task.priority || "NORMAL",
               phase: "CONTROL",
+              start_date: task.start_date || null,
               internal_notes: serializeInternalNotes({
                 originTaskId: task.id,
                 total: totalValue,
@@ -5801,6 +5805,8 @@ export default function PcmProjectPage() {
       setEditingTaskId(latestTask.id)
       setEditingTaskTitle(latestTask.title || "")
       setEditingTaskAssignee(latestTask.assigned_to || "__unassigned__")
+      // Set start date for editing (format: YYYY-MM-DD for input[type=date])
+      setEditingTaskStartDate(latestTask.start_date ? latestTask.start_date.split("T")[0] : "")
       // Set due date for editing (format: YYYY-MM-DD for input[type=date])
       setEditingTaskDueDate(latestTask.due_date ? latestTask.due_date.split("T")[0] : "")
       setEditingTaskFinishPeriod(latestTask.finish_period || FINISH_PERIOD_NONE_VALUE)
@@ -5837,6 +5843,7 @@ export default function PcmProjectPage() {
       setEditingTaskTitle("")
       setEditingTaskAssignee("__unassigned__")
       setEditingTaskKoUserId("__unassigned__")
+      setEditingTaskStartDate("")
       setEditingTaskDueDate("")
       setEditingTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setEditingTaskTotal("")
@@ -5888,6 +5895,7 @@ export default function PcmProjectPage() {
           body: JSON.stringify({
             title: editingTaskTitle.trim(),
             assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
+            start_date: editingTaskStartDate ? new Date(editingTaskStartDate).toISOString() : null,
             due_date: task.phase === "CONTROL" && productionDate
               ? new Date(productionDate).toISOString()
               : (editingTaskDueDate ? new Date(editingTaskDueDate).toISOString() : null),
@@ -6333,7 +6341,8 @@ export default function PcmProjectPage() {
                     <div className="sticky top-0 z-40 -mx-6 px-6 py-3 grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider bg-white border-b border-slate-100 shadow-sm">
                       <div className="col-span-3">Task</div>
                       <div className="col-span-1">Assigned</div>
-                      <div className="col-span-2">Due Date</div>
+                      <div className="col-span-1">Start Date</div>
+                      <div className="col-span-1">Due Date</div>
                       <div className="col-span-1">Finish</div>
                       <div className="col-span-1">Daily Products</div>
                       <div className="col-span-2">Completed</div>
@@ -6366,7 +6375,15 @@ export default function PcmProjectPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="col-span-2">
+                      <div className="col-span-1">
+                        <input
+                          type="date"
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
+                          value={newInlineTaskStartDate}
+                          onChange={(e) => setNewInlineTaskStartDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="col-span-1">
                         <input
                           type="date"
                           className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
@@ -6430,6 +6447,7 @@ export default function PcmProjectPage() {
                                   assigned_to: newInlineTaskAssignee === "__unassigned__" ? null : newInlineTaskAssignee,
                                   priority: "NORMAL",
                                   phase: "PRODUCT",
+                                  start_date: newInlineTaskStartDate ? new Date(newInlineTaskStartDate).toISOString() : null,
                                   due_date: newInlineTaskDueDate ? new Date(newInlineTaskDueDate).toISOString() : null,
                                   finish_period:
                                     newInlineTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE
@@ -6447,6 +6465,7 @@ export default function PcmProjectPage() {
                               setTasks((prev) => [...prev, created])
                               setNewInlineTaskTitle("")
                               setNewInlineTaskAssignee("__unassigned__")
+                              setNewInlineTaskStartDate("")
                               setNewInlineTaskDueDate("")
                               setNewInlineTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                               setNewInlineTaskTotal("")
@@ -6509,7 +6528,19 @@ export default function PcmProjectPage() {
                                 <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
                               )}
                             </div>
-                            <div className="col-span-2 px-2">
+                            <div className="col-span-1 px-2">
+                              {isEditing ? (
+                                <input
+                                  type="date"
+                                  value={editingTaskStartDate}
+                                  onChange={(e) => setEditingTaskStartDate(e.target.value)}
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                                />
+                              ) : (
+                                <span className="text-slate-500">{formatDateDMY(task.start_date) || "-"}</span>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
                               {isEditing ? (
                                 <input
                                   type="date"
@@ -7319,9 +7350,10 @@ export default function PcmProjectPage() {
                     <div className="sticky top-0 z-40 -mx-6 px-6 py-3 grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider bg-white border-b border-slate-100 shadow-sm">
                       <div className="col-span-2">Task</div>
                       <div className="col-span-1">Assigned</div>
+                      <div className="col-span-1">Start Date</div>
                       <div className="col-span-1">Date</div>
                       <div className="col-span-1">Finish</div>
-                      <div className="col-span-2">Total</div>
+                      <div className="col-span-1">Total</div>
                       <div className="col-span-2">Completed</div>
                       <div className="col-span-1">KO</div>
                       <div className="col-span-1">Status</div>
@@ -7357,6 +7389,14 @@ export default function PcmProjectPage() {
                         <input
                           type="date"
                           className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm"
+                          value={controlStartDate}
+                          onChange={(e) => setControlStartDate(e.target.value)}
+                        />
+                      </div>
+                      <div className="col-span-1">
+                        <input
+                          type="date"
+                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm"
                           value={controlProductionDate}
                           onChange={(e) => setControlProductionDate(e.target.value)}
                         />
@@ -7381,7 +7421,7 @@ export default function PcmProjectPage() {
                           </SelectContent>
                         </Select>
                       </div>
-                      <div className="col-span-2">
+                      <div className="col-span-1">
                         <input
                           type="number"
                           placeholder="0"
@@ -7434,6 +7474,7 @@ export default function PcmProjectPage() {
                                   phase: "CONTROL",
                                   finish_period:
                                     controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
+                                  start_date: controlStartDate ? new Date(controlStartDate).toISOString() : null,
                                   due_date: controlProductionDate ? new Date(controlProductionDate).toISOString() : null,
                                   internal_notes: serializeInternalNotes({
                                     total: controlTotal || "0",
@@ -7453,6 +7494,7 @@ export default function PcmProjectPage() {
                               setControlAssignee("__unassigned__")
                               setControlKoUserId("__unassigned__")
                               setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+                              setControlStartDate("")
                               setControlTotal("0")
                               setControlCompleted("0")
                               toast.success("Task added")
@@ -7523,6 +7565,18 @@ export default function PcmProjectPage() {
                                 </Select>
                               ) : (
                                 <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
+                              )}
+                            </div>
+                            <div className="col-span-1 px-2">
+                              {isEditing ? (
+                                <input
+                                  type="date"
+                                  value={editingTaskStartDate}
+                                  onChange={(e) => setEditingTaskStartDate(e.target.value)}
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm"
+                                />
+                              ) : (
+                                <span className="text-slate-500">{formatDateDMY(task.start_date) || "-"}</span>
                               )}
                             </div>
                             <div className="col-span-1 px-2">

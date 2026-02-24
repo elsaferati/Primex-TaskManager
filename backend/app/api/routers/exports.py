@@ -327,8 +327,15 @@ def _planner_cell_items(*, projects, system_tasks, fast_tasks, include_fast: boo
         for task in project.tasks or []:
             task_title = task.task_title or ""
             task_name = task_title
-            if task.daily_products is not None:
-                task_name = f"{task_name} {task.daily_products} pcs"
+            total_products = getattr(task, "total_products", None)
+            completed_products = getattr(task, "completed_products", None)
+            if total_products is None:
+                total_products = task.daily_products
+            if total_products is not None:
+                if completed_products is not None:
+                    task_name = f"{task_name} {completed_products}/{total_products} pcs"
+                else:
+                    task_name = f"{task_name} {total_products} pcs"
             status_value = _effective_status(task.status, task.completed_at, day_date)
             if project_title:
                 items.append(
@@ -3696,17 +3703,33 @@ async def export_weekly_planner_xlsx(
 
         current_row = base_row + total_day_rows
 
-    last_row = current_row - 1
+    data_last_row = current_row - 1
+
+    def _append_notes_row(row_idx: int, label: str, height: float) -> None:
+        ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=4)
+        ws.merge_cells(start_row=row_idx, start_column=5, end_row=row_idx, end_column=last_col)
+        label_cell = ws.cell(row=row_idx, column=1, value=label)
+        label_cell.font = Font(bold=True)
+        label_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        notes_cell = ws.cell(row=row_idx, column=5, value="")
+        notes_cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
+        ws.row_dimensions[row_idx].height = height
+
+    notes_row_start = data_last_row + 1
+    _append_notes_row(notes_row_start, "KOMENT", 48)
+    _append_notes_row(notes_row_start + 1, "ANKESA / KERKESA / PROPOZIME", 60)
+
+    final_last_row = notes_row_start + 1
 
     # Borders
     thin = Side(style="thin", color="000000")
     thick = Side(style="medium", color="000000")
-    for r in range(header_row, last_row + 1):
+    for r in range(header_row, final_last_row + 1):
         for c in range(1, last_col + 1):
             left = thick if c == 1 else thin
             right = thick if c == last_col else thin
             top = thick if r == header_row else thin
-            bottom = thick if r == last_row else thin
+            bottom = thick if r == final_last_row else thin
             ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
 
     # Header row thicker outline
@@ -3720,7 +3743,7 @@ async def export_weekly_planner_xlsx(
         )
 
     # Alignment and formats
-    for r in range(header_row, last_row + 1):
+    for r in range(header_row, final_last_row + 1):
         for c in range(1, last_col + 1):
             cell = ws.cell(row=r, column=c)
             if not cell.alignment:
@@ -3732,10 +3755,10 @@ async def export_weekly_planner_xlsx(
                     wrap_text=True,
                 )
 
-    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{data_last_row}"
     ws.freeze_panes = "B5"
     ws.print_title_rows = f"{header_row}:{header_row}"
-    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{final_last_row}"
     ws.page_setup.orientation = "landscape"
     ws.page_setup.paperSize = 9
     ws.page_margins.left = 0.1
@@ -3760,7 +3783,7 @@ async def export_weekly_planner_xlsx(
     ws.firstFooter.right.text = ws.oddFooter.right.text
 
     # Number column formatting
-    for r in range(data_start_row, last_row + 1):
+    for r in range(data_start_row, data_last_row + 1):
         cell = ws.cell(row=r, column=1)
         cell.number_format = "#,##0"
 
