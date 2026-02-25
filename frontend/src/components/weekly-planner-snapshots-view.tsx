@@ -369,7 +369,7 @@ function SnapshotLegend({ snapshot }: { snapshot: SnapshotData }) {
         <CardTitle>Legend / Questions (Read-only)</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-4 md:grid-cols-[300px_minmax(0,1fr)]">
+        <div className="grid gap-4 md:grid-cols-[400px_minmax(0,1fr)]">
           <div className="overflow-x-auto rounded-lg border border-slate-300 bg-slate-50/40 p-3">
             <div className="mb-2 text-sm font-semibold text-slate-800">Color Labels</div>
             <Table>

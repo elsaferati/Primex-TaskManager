@@ -40,10 +40,7 @@ export const LEGEND_COLORS: Record<string, string> = {
   "NUK ESHTE PUNUAR": "#FFC4ED", // Pink
   PROCES: "#FFD700", // Yellow
   PV: "#D3D3D3", // Light Grey
-  "MBINGARKESE?": "#D3D3D3", // Light Grey
-  "KOMPLET (100% PROJEKTE)": "#D3D3D3", // Light Grey
-  "DETYRE E RE (RE)": "#DBEAFE", // Blue (new task)
-  "DETYRE E RE KRYER": "#02E6C7", // Green (new task done)
+  "KOMPLET (100% PROJEKTE)": "#D3D3D3", // Light task)
   // Alternative/new labels (for backward compatibility)
   "NEW TASK / TO DO": "#FF0000", // Red
   DONE: "#C4FDC4", // Green
@@ -59,22 +56,29 @@ const LEGEND_LABEL_DISPLAY: Record<string, string> = {
 export const getLegendLabelDisplay = (label: string) => LEGEND_LABEL_DISPLAY[label] ?? label
 
 export const LEGEND_EXTRA_SWATCHES: ReadonlyArray<{ label: string; color: string }> = [
-  { label: "DETYRE E RE (RE)", color: "#DBEAFE" },
+  { label: "DETYRE E RE E KRIJUAR KETE JAVE", color: "#DBEAFE" },
   { label: "DETYRE E RE KRYER", color: "#02E6C7" },
 ]
 
-export const buildLegendSwatches = (entries: Array<Pick<LegendEntry, "label">>): LegendSwatchItem[] => {
+export const buildLegendSwatches = (
+  entries: Array<Pick<LegendEntry, "label">>,
+  options?: { hideUnknown?: boolean }
+): LegendSwatchItem[] => {
   const swatches: LegendSwatchItem[] = []
   const seen = new Set<string>()
+  const hideUnknown = options?.hideUnknown ?? false
 
   const addSwatch = (label: string, fallbackColor?: string) => {
     if (!label || seen.has(label)) return
+    const resolvedColor = LEGEND_COLORS[label] || fallbackColor
+    if (hideUnknown && !resolvedColor) return
+    if (getLegendLabelDisplay(label) === "-") return
     seen.add(label)
     swatches.push({
       key: label,
       label,
       displayLabel: getLegendLabelDisplay(label),
-      color: LEGEND_COLORS[label] || fallbackColor || "#E5E7EB",
+      color: resolvedColor || "#E5E7EB",
     })
   }
 
@@ -437,7 +441,8 @@ export function WeeklyPlannerLegendTable({
     weekStart,
     departmentName,
   })
-  const legendSwatches = buildLegendSwatches(displayEntries)
+  const isProductContent = normalizeDepartmentKey(departmentName) === "productcontent"
+  const legendSwatches = buildLegendSwatches(displayEntries, { hideUnknown: isProductContent })
 
   return (
     <Card>
@@ -445,7 +450,7 @@ export function WeeklyPlannerLegendTable({
         <CardTitle>Legend / Questions</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="grid gap-4 md:grid-cols-[300px_minmax(0,1fr)]">
+        <div className="grid gap-4 md:grid-cols-[400px_minmax(0,1fr)]">
           <div className="overflow-x-auto rounded-lg border border-slate-300 bg-slate-50/40 p-3">
             <div className="mb-2 text-sm font-semibold text-slate-800">Color Labels</div>
             <Table>
