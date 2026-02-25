@@ -19,12 +19,11 @@ export function toDateInputValue(value?: string | Date | null): string {
   if (!value) return ""
 
   if (typeof value === "string") {
-    const datePrefix = value.match(/^(\d{4}-\d{2}-\d{2})/)
-    if (datePrefix) return datePrefix[1]
+    if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
   }
 
-  const date = value instanceof Date ? value : new Date(value)
-  if (Number.isNaN(date.getTime())) return ""
+  const date = toLocalDate(value)
+  if (!date) return ""
 
   const year = date.getFullYear()
   const month = String(date.getMonth() + 1).padStart(2, "0")
