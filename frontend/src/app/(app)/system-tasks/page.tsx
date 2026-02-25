@@ -174,13 +174,15 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
 }))
 
 // Define the grid layout once so header and body always match.
-// Columns: Order, Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
+// Base columns: Order, Title (Flex), Department, Owner, Frequency, Finish, Priority, Actions
+// Optional column: BZ Time (between Owner and Frequency)
 // Responsive breakpoints:
 // - sm (640px+): Compact layout with essential columns
 // - md (768px+): Add more columns
 // - lg (1024px+): More columns visible
 // - xl (1280px+): Full columns
-const GRID_CLASS = "grid grid-cols-[28px_minmax(150px,1fr)_80px_80px_70px_40px_60px_60px] sm:grid-cols-[32px_minmax(180px,1fr)_100px_100px_80px_50px_70px_70px] md:grid-cols-[32px_minmax(200px,1fr)_110px_110px_90px_56px_75px_70px] lg:grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
+const BASE_GRID_CLASS = "grid grid-cols-[28px_minmax(150px,1fr)_80px_80px_70px_40px_60px_60px] sm:grid-cols-[32px_minmax(180px,1fr)_100px_100px_80px_50px_70px_70px] md:grid-cols-[32px_minmax(200px,1fr)_110px_110px_90px_56px_75px_70px] lg:grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
+const GRID_WITH_BZ_TIME_CLASS = "grid grid-cols-[28px_minmax(140px,1fr)_70px_70px_58px_70px_40px_60px_60px] sm:grid-cols-[32px_minmax(170px,1fr)_88px_88px_64px_80px_50px_70px_70px] md:grid-cols-[32px_minmax(190px,1fr)_98px_98px_72px_90px_56px_75px_70px] lg:grid-cols-[32px_minmax(190px,1fr)_108px_108px_78px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_140px_140px_84px_120px_64px_100px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
 
 type Section = {
   id: string
@@ -399,6 +401,7 @@ type SystemTasksViewProps = {
   externalDayFilter?: string | "all"
   externalDateFilter?: string | null
   alignmentUsernameFilter?: string | null
+  showBzTimeColumn?: boolean
 }
 
 export function SystemTasksView({
@@ -413,6 +416,7 @@ export function SystemTasksView({
   externalDayFilter = "all",
   externalDateFilter = null,
   alignmentUsernameFilter = null,
+  showBzTimeColumn = false,
 }: SystemTasksViewProps) {
   const { apiFetch, user } = useAuth()
   type AssigneeUser = User | UserLookup
@@ -635,6 +639,10 @@ export function SystemTasksView({
   // In Department View, only ADMIN or gane.arifaj can mark tasks as done
   const canMarkDone = allowMarkAsDone || (
     user?.role === "ADMIN" || user?.username?.toLowerCase() === "gane.arifaj"
+  )
+  const gridClass = React.useMemo(
+    () => (showBzTimeColumn ? GRID_WITH_BZ_TIME_CLASS : BASE_GRID_CLASS),
+    [showBzTimeColumn]
   )
 
   const toggleTaskStatus = React.useCallback(async (template: SystemTaskTemplate) => {
@@ -3290,7 +3298,7 @@ export function SystemTasksView({
                 <div className="border-b bg-slate-50/95 backdrop-blur py-2 sm:py-2.5 md:py-3 px-2 sm:px-3 md:px-4 print:bg-white print:backdrop-blur-0 print:px-2 print:py-2 print:border-slate-900">
                   <div
                     className={cn(
-                      GRID_CLASS,
+                      gridClass,
                       "text-[10px] sm:text-[10.5px] md:text-[11px] font-bold uppercase tracking-wider text-slate-500 print:border print:border-slate-900 print:px-2 print:gap-0 print:divide-x print:divide-slate-900 print:text-slate-900 print:[&>*]:px-2 print:[&>*]:py-2"
                     )}
                   >
@@ -3298,6 +3306,7 @@ export function SystemTasksView({
                     <div>Task Title</div>
                     <div>Department</div>
                     <div>Owner</div>
+                    {showBzTimeColumn ? <div>BZ Time</div> : null}
                     <div className="hidden sm:block">Frequency</div>
                     <div className="hidden md:block">Finish by</div>
                     <div>Priority</div>
@@ -3323,6 +3332,9 @@ export function SystemTasksView({
                         const frequencyLabel =
                           FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
                           template.frequency
+                        const bzTimeValue = timeInputValue(template.alignment_time)
+                        const bzTimeLabel =
+                          template.requires_alignment && bzTimeValue ? bzTimeValue : "-"
 
                         const isInactive = template.is_active === false
                         const showInactiveDivider =
@@ -3365,7 +3377,7 @@ export function SystemTasksView({
                             {/* Task Row (Card Style) */}
                             <div
                               className={cn(
-                                GRID_CLASS,
+                                gridClass,
                                 "py-3 bg-white border border-slate-200 border-l-4 transition-colors hover:bg-slate-50 print:gap-0 print:divide-x print:divide-slate-900 print:border-slate-900 print:border-l-slate-900 print:rounded-none print:shadow-none print:px-2 print:[&>*]:px-2 print:[&>*]:py-2",
                                 PRIORITY_BORDER_STYLES[priorityValue],
                                 isInactive && "opacity-60 grayscale"
@@ -3393,6 +3405,12 @@ export function SystemTasksView({
                               <div className="truncate text-xs sm:text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
                                 {ownerLabel === "-" && isUnassignedAll ? <span className="text-slate-400">-</span> : ownerLabel}
                               </div>
+
+                              {showBzTimeColumn ? (
+                                <div className="text-xs sm:text-sm text-slate-700 font-normal">
+                                  {bzTimeLabel}
+                                </div>
+                              ) : null}
 
                               <div className="hidden sm:block">
                                 <span className="text-xs sm:text-sm text-slate-700 font-normal">

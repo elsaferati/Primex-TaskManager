@@ -9,9 +9,8 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import {
-  LEGEND_COLORS,
+  buildLegendSwatches,
   buildLegendDisplayEntries,
-  getLegendLabelDisplay,
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
@@ -360,6 +359,7 @@ function SnapshotLegend({ snapshot }: { snapshot: SnapshotData }) {
     weekStart: snapshot.payload.week_start,
     departmentName: department.department_name,
   })
+  const legendSwatches = buildLegendSwatches(displayEntries)
 
   if (displayEntries.length === 0) return null
 
@@ -369,34 +369,52 @@ function SnapshotLegend({ snapshot }: { snapshot: SnapshotData }) {
         <CardTitle>Legend / Questions (Read-only)</CardTitle>
       </CardHeader>
       <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead className="w-16 text-center">Color</TableHead>
-              <TableHead className="w-36">Label</TableHead>
-              <TableHead>Question</TableHead>
-              <TableHead>Answer</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {displayEntries.map((entry) => {
-              const color = LEGEND_COLORS[entry.label] || "#E5E7EB"
-              return (
-                <TableRow key={entry.id}>
-                  <TableCell className="p-2">
-                    <div
-                      className="h-8 w-12 rounded border border-gray-300"
-                      style={{ backgroundColor: color }}
-                    />
-                  </TableCell>
-                  <TableCell className="font-semibold">{getLegendLabelDisplay(entry.label)}</TableCell>
-                  <TableCell>{entry.question_text || "-"}</TableCell>
-                  <TableCell>{entry.answer_text?.trim() ? entry.answer_text : "-"}</TableCell>
+        <div className="grid gap-4 md:grid-cols-[400px_minmax(0,1fr)]">
+          <div className="overflow-x-auto rounded-lg border border-slate-300 bg-slate-50/40 p-3">
+            <div className="mb-2 text-sm font-semibold text-slate-800">Color Labels</div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-16 text-center">Color</TableHead>
+                  <TableHead>Label</TableHead>
                 </TableRow>
-              )
-            })}
-          </TableBody>
-        </Table>
+              </TableHeader>
+              <TableBody>
+                {legendSwatches.map((swatch) => (
+                  <TableRow key={swatch.key}>
+                    <TableCell className="p-2">
+                      <div
+                        className="h-8 w-12 rounded border border-gray-300"
+                        style={{ backgroundColor: swatch.color }}
+                      />
+                    </TableCell>
+                    <TableCell className="font-semibold">{swatch.displayLabel}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-300 bg-white p-3">
+            <div className="mb-2 text-sm font-semibold text-slate-800">Questions / Answers</div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Question</TableHead>
+                  <TableHead>Answer</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {displayEntries.map((entry) => (
+                  <TableRow key={entry.id}>
+                    <TableCell>{entry.question_text || "-"}</TableCell>
+                    <TableCell>{entry.answer_text?.trim() ? entry.answer_text : "-"}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
       </CardContent>
     </Card>
   )
@@ -1423,7 +1441,27 @@ export function WeeklyPlannerSnapshotsView({
               margin-bottom: 2px;
               color: #0f172a;
             }
+            .legend-panels {
+              display: flex;
+              gap: 6px;
+              align-items: stretch;
+            }
+            .legend-panel {
+              border: 0.5px solid #cbd5e1;
+              border-radius: 3px;
+              padding: 2px;
+            }
+            .legend-panel-colors {
+              width: 35%;
+              flex: 0 0 35%;
+            }
+            .legend-panel-qa {
+              width: 65%;
+              flex: 0 0 65%;
+            }
             .legend-table {
+              width: 100%;
+              border-collapse: collapse;
               margin: 0;
             }
             .legend-table th,
@@ -1431,6 +1469,9 @@ export function WeeklyPlannerSnapshotsView({
               font-size: 6pt;
               padding: 1px;
               vertical-align: middle;
+            }
+            .legend-table th {
+              border-bottom: 0.5px solid #000;
             }
             .legend-color-box {
               width: 18px;
@@ -1715,44 +1756,56 @@ export function WeeklyPlannerSnapshotsView({
       title.textContent = "Legend / Questions"
       wrapper.appendChild(title)
 
-      const table = doc.createElement("table")
-      table.className = "legend-table"
+      const panels = doc.createElement("div")
+      panels.className = "legend-panels"
 
-      const colgroup = doc.createElement("colgroup")
-      colgroup.innerHTML = `
-        <col style="width: 28px;" />
-        <col style="width: 70px;" />
-        <col />
-        <col style="width: 120px;" />
+      const swatches = buildLegendSwatches(entries)
+      const colorPanel = doc.createElement("div")
+      colorPanel.className = "legend-panel legend-panel-colors"
+      const colorTable = doc.createElement("table")
+      colorTable.className = "legend-table"
+      colorTable.innerHTML = `
+        <thead>
+          <tr>
+            <th>Color</th>
+            <th>Label</th>
+          </tr>
+        </thead>
       `
-      table.appendChild(colgroup)
-
-      const thead = doc.createElement("thead")
-      thead.innerHTML = `
-        <tr>
-          <th>Color</th>
-          <th>Label</th>
-          <th>Question</th>
-          <th>Answer</th>
-        </tr>
-      `
-      table.appendChild(thead)
-
-      const tbody = doc.createElement("tbody")
-      entries.forEach((entry) => {
+      const colorBody = doc.createElement("tbody")
+      swatches.forEach((swatch) => {
         const row = doc.createElement("tr")
-
         const colorCell = doc.createElement("td")
         const colorBox = doc.createElement("div")
         colorBox.className = "legend-color-box"
-        colorBox.style.backgroundColor = LEGEND_COLORS[entry.label] || "#E5E7EB"
+        colorBox.style.backgroundColor = swatch.color
         colorCell.appendChild(colorBox)
         row.appendChild(colorCell)
 
         const labelCell = doc.createElement("td")
-        labelCell.textContent = getLegendLabelDisplay(entry.label)
+        labelCell.textContent = swatch.displayLabel
         row.appendChild(labelCell)
+        colorBody.appendChild(row)
+      })
+      colorTable.appendChild(colorBody)
+      colorPanel.appendChild(colorTable)
+      panels.appendChild(colorPanel)
 
+      const qaPanel = doc.createElement("div")
+      qaPanel.className = "legend-panel legend-panel-qa"
+      const qaTable = doc.createElement("table")
+      qaTable.className = "legend-table"
+      qaTable.innerHTML = `
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Answer</th>
+          </tr>
+        </thead>
+      `
+      const qaBody = doc.createElement("tbody")
+      entries.forEach((entry) => {
+        const row = doc.createElement("tr")
         const questionCell = doc.createElement("td")
         if (entry.question_text) {
           const question = doc.createElement("span")
@@ -1774,12 +1827,13 @@ export function WeeklyPlannerSnapshotsView({
           answerCell.appendChild(answerLine)
         }
         row.appendChild(answerCell)
-
-        tbody.appendChild(row)
+        qaBody.appendChild(row)
       })
-      table.appendChild(tbody)
+      qaTable.appendChild(qaBody)
+      qaPanel.appendChild(qaTable)
+      panels.appendChild(qaPanel)
 
-      wrapper.appendChild(table)
+      wrapper.appendChild(panels)
       return wrapper
     }
 

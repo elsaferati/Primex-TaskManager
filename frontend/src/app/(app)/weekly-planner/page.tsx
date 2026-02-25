@@ -30,10 +30,9 @@ import {
 } from "@/components/ui/dropdown-menu"
 import {
   WeeklyPlannerLegendTable,
-  LEGEND_COLORS,
+  buildLegendSwatches,
   buildLegendDisplayEntries,
   getLegendQuestions,
-  getLegendLabelDisplay,
   type LegendEntry,
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
@@ -1404,7 +1403,27 @@ export default function WeeklyPlannerPage() {
               margin-bottom: 2px;
               color: #0f172a;
             }
+            .legend-panels {
+              display: flex;
+              gap: 6px;
+              align-items: stretch;
+            }
+            .legend-panel {
+              border: 0.5px solid #cbd5e1;
+              border-radius: 3px;
+              padding: 2px;
+            }
+            .legend-panel-colors {
+              width: 35%;
+              flex: 0 0 35%;
+            }
+            .legend-panel-qa {
+              width: 65%;
+              flex: 0 0 65%;
+            }
             .legend-table {
+              width: 100%;
+              border-collapse: collapse;
               margin: 0;
             }
             .legend-table th,
@@ -1412,6 +1431,9 @@ export default function WeeklyPlannerPage() {
               font-size: 6pt;
               padding: 1px;
               vertical-align: middle;
+            }
+            .legend-table th {
+              border-bottom: 0.5px solid #000;
             }
             .legend-color-box {
               width: 18px;
@@ -1471,6 +1493,7 @@ export default function WeeklyPlannerPage() {
               border: 1px solid #000;
               padding: 4px 6px;
               vertical-align: top;
+              min-height: 56px;
             }
             .notes-label {
               font-weight: 700;
@@ -1480,9 +1503,11 @@ export default function WeeklyPlannerPage() {
             .notes-columns {
               display: grid;
               width: 100%;
+              min-height: 36px;
             }
             .notes-column {
               padding: 0 6px;
+              min-height: 36px;
             }
             .notes-column + .notes-column {
               border-left: 0.5px solid #94a3b8;
@@ -1788,44 +1813,56 @@ export default function WeeklyPlannerPage() {
       title.textContent = "Legend / Questions"
       wrapper.appendChild(title)
 
-      const table = doc.createElement("table")
-      table.className = "legend-table"
+      const panels = doc.createElement("div")
+      panels.className = "legend-panels"
 
-      const colgroup = doc.createElement("colgroup")
-      colgroup.innerHTML = `
-        <col style="width: 28px;" />
-        <col style="width: 70px;" />
-        <col />
-        <col style="width: 120px;" />
+      const swatches = buildLegendSwatches(entries)
+      const colorPanel = doc.createElement("div")
+      colorPanel.className = "legend-panel legend-panel-colors"
+      const colorTable = doc.createElement("table")
+      colorTable.className = "legend-table"
+      colorTable.innerHTML = `
+        <thead>
+          <tr>
+            <th>Color</th>
+            <th>Label</th>
+          </tr>
+        </thead>
       `
-      table.appendChild(colgroup)
-
-      const thead = doc.createElement("thead")
-      thead.innerHTML = `
-        <tr>
-          <th>Color</th>
-          <th>Label</th>
-          <th>Question</th>
-          <th>Answer</th>
-        </tr>
-      `
-      table.appendChild(thead)
-
-      const tbody = doc.createElement("tbody")
-      entries.forEach((entry) => {
+      const colorBody = doc.createElement("tbody")
+      swatches.forEach((swatch) => {
         const row = doc.createElement("tr")
-
         const colorCell = doc.createElement("td")
         const colorBox = doc.createElement("div")
         colorBox.className = "legend-color-box"
-        colorBox.style.backgroundColor = LEGEND_COLORS[entry.label] || "#E5E7EB"
+        colorBox.style.backgroundColor = swatch.color
         colorCell.appendChild(colorBox)
         row.appendChild(colorCell)
 
         const labelCell = doc.createElement("td")
-        labelCell.textContent = getLegendLabelDisplay(entry.label)
+        labelCell.textContent = swatch.displayLabel
         row.appendChild(labelCell)
+        colorBody.appendChild(row)
+      })
+      colorTable.appendChild(colorBody)
+      colorPanel.appendChild(colorTable)
+      panels.appendChild(colorPanel)
 
+      const qaPanel = doc.createElement("div")
+      qaPanel.className = "legend-panel legend-panel-qa"
+      const qaTable = doc.createElement("table")
+      qaTable.className = "legend-table"
+      qaTable.innerHTML = `
+        <thead>
+          <tr>
+            <th>Question</th>
+            <th>Answer</th>
+          </tr>
+        </thead>
+      `
+      const qaBody = doc.createElement("tbody")
+      entries.forEach((entry) => {
+        const row = doc.createElement("tr")
         const questionCell = doc.createElement("td")
         if (entry.question_text) {
           const question = doc.createElement("span")
@@ -1839,7 +1876,10 @@ export default function WeeklyPlannerPage() {
 
         const answerCell = doc.createElement("td")
         const answer = entry.answer_text?.trim() || ""
-        if (answer) {
+        const isPlaceholder = entry.id.startsWith("__placeholder__")
+        if (isPlaceholder) {
+          answerCell.textContent = "-"
+        } else if (answer) {
           answerCell.textContent = answer
         } else {
           const answerLine = doc.createElement("div")
@@ -1847,12 +1887,13 @@ export default function WeeklyPlannerPage() {
           answerCell.appendChild(answerLine)
         }
         row.appendChild(answerCell)
-
-        tbody.appendChild(row)
+        qaBody.appendChild(row)
       })
-      table.appendChild(tbody)
+      qaTable.appendChild(qaBody)
+      qaPanel.appendChild(qaTable)
+      panels.appendChild(qaPanel)
 
-      wrapper.appendChild(table)
+      wrapper.appendChild(panels)
       return wrapper
     }
 
@@ -1876,9 +1917,6 @@ export default function WeeklyPlannerPage() {
             .map(
               () => `
             <div class="notes-column">
-              <div class="notes-line"></div>
-              <div class="notes-line"></div>
-              <div class="notes-line"></div>
             </div>
           `
             )

@@ -44,7 +44,7 @@ const MST_PHASE_LABELS: Record<(typeof MST_PHASES)[number], string> = {
 
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
-const FINISH_PERIOD_NONE_LABEL = "None (all day)"
+const FINISH_PERIOD_NONE_LABEL = "All day"
 
 const VS_VL_PHASES = ["PLANNING", "AMAZON", "CHECK", "DREAMROBOT"] as const
 const VS_VL_PHASE_LABELS: Record<(typeof VS_VL_PHASES)[number], string> = {
@@ -3572,7 +3572,7 @@ export default function PcmProjectPage() {
 
     return (
       <>
-        <div className="space-y-5 max-w-6xl mx-auto px-4">
+        <div className="space-y-5  mx-auto px-4">
           <div className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-4">
               <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">
@@ -5979,7 +5979,7 @@ export default function PcmProjectPage() {
 
     return (
       <>
-        <div className="space-y-5 max-w-6xl mx-auto px-4">
+        <div className="space-y-5 mx-auto px-4">
           <div className="flex flex-wrap items-start justify-between gap-4">
             <div className="space-y-3">
               <button type="button" onClick={() => router.back()} className="text-sm text-muted-foreground hover:text-foreground">
@@ -6492,7 +6492,7 @@ export default function PcmProjectPage() {
                         const completedNum = toNonNegativeInt(completedValue)
                         const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
                         return (
-                          <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                          <div key={task.id} className="grid grid-cols-12 gap-4 py-4 -mx-6 px-6 text-sm items-center hover:bg-slate-50/70 transition-colors group">
                             <div className="col-span-3 pr-2">
                               {isEditing ? (
                                 <input
@@ -6611,10 +6611,10 @@ export default function PcmProjectPage() {
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
                                     }))
                                   }}
-                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-center"
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-left"
                                 />
                               ) : (
-                                <div className="flex items-center justify-center gap-2">
+                                <div className="flex items-center justify-start gap-2">
                                   <button
                                     type="button"
                                     className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"
@@ -7527,7 +7527,7 @@ export default function PcmProjectPage() {
                         const completedNum = toNonNegativeInt(completedValue)
                         const autoStatus = computeStatusFromCompleted(totalVal, completedNum)
                         return (
-                          <div key={task.id} className="grid grid-cols-12 gap-4 py-4 px-2 text-sm items-center hover:bg-slate-50/70 transition-colors group">
+                          <div key={task.id} className="grid grid-cols-12 gap-4 py-4 -mx-6 px-6 text-sm items-center hover:bg-slate-50/70 transition-colors group">
                             <div className="col-span-2 pr-2">
                               {isEditing ? (
                                 <input
@@ -7614,7 +7614,7 @@ export default function PcmProjectPage() {
                                 <span className="text-slate-500">{task.finish_period || "-"}</span>
                               )}
                             </div>
-                            <div className="col-span-2 px-2">
+                            <div className="col-span-1 px-2">
                               {isEditing ? (
                                 <input
                                   type="number"
@@ -7648,10 +7648,10 @@ export default function PcmProjectPage() {
                                       [task.id]: { ...prev[task.id], completed: newCompleted, status: newStatus },
                                     }))
                                   }}
-                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-center"
+                                  className="w-full bg-transparent border-0 border-b-2 border-blue-500 outline-none py-1 text-sm text-left"
                                 />
                               ) : (
-                                <div className="flex items-center justify-center gap-2">
+                                <div className="flex items-center justify-start gap-2">
                                   <button
                                     type="button"
                                     className="h-6 w-6 rounded-full border border-slate-300 text-slate-500 hover:text-slate-700"

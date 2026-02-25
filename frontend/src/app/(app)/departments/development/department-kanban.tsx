@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
-import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
@@ -4383,8 +4383,8 @@ export default function DepartmentKanban() {
     setEditingTaskId(task.id)
     setEditTaskTitle(task.title || "")
     setEditTaskDescription(task.description || "")
-    setEditTaskStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
-    setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+    setEditTaskStartDate(toDateInputValue(task.start_date))
+    setEditTaskDueDate(toDateInputValue(task.due_date))
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
     const assigneeIds = task.assignees && task.assignees.length > 0
@@ -4452,8 +4452,8 @@ export default function DepartmentKanban() {
         ? statusValue
         : "TODO"
     )
-    setAllTodayEditStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
-    setAllTodayEditDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+    setAllTodayEditStartDate(toDateInputValue(task.start_date))
+    setAllTodayEditDueDate(toDateInputValue(task.due_date))
   }
 
   const cancelAllTodayTaskEdit = () => {

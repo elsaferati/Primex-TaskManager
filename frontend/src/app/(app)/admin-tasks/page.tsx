@@ -316,6 +316,7 @@ function getDisplayPriority(task: Task): TaskPriority {
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "To Do"
   if (status === "DONE") return "Done"
   return status
@@ -2483,6 +2484,35 @@ export default function AdminTasksPage() {
         </DialogContent>
       </Dialog>
 
+      {viewFilter !== "tasks" ? (
+        <div className="print:hidden">
+          <SystemTasksView
+            headingTitle="BZ With Gane Arifaj"
+            headingDescription="System tasks where BZ-with includes Gane Arifaj."
+            showSystemActions={false}
+            showFilters={false}
+            showBzTimeColumn={true}
+            allowMarkAsDone={true}
+            forceLoadAll={isAdmin}
+            externalPriorityFilter={priorityFilter}
+            externalDayFilter={dayFilter}
+            externalDateFilter={dateFilter}
+            alignmentUsernameFilter="gane.arifaj"
+          />
+          <SystemTasksView
+            scopeFilter="GA"
+            headingTitle="Admin System Tasks"
+            headingDescription="System tasks assigned to Gane Arifaj or scoped to GA department."
+            showSystemActions={false}
+            showFilters={false}
+            allowMarkAsDone={true}
+            forceLoadAll={isAdmin}
+            externalPriorityFilter={priorityFilter}
+            externalDayFilter={dayFilter}
+            externalDateFilter={dateFilter}
+          />
+        </div>
+      ) : null}
       {showAllTasksReport ? (
         <div className="hidden print:block print:!p-0 print:!m-0">
           <div className="print-page">
