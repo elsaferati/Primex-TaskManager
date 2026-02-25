@@ -453,7 +453,7 @@ const MEETING_TABS = [
 
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
-const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
 const MEETING_POINTS = [
@@ -831,6 +831,10 @@ export default function PcmProjectPage() {
   const [allUsers, setAllUsers] = React.useState<User[]>([])
   const [members, setMembers] = React.useState<User[]>([])
   const [checklistItems, setChecklistItems] = React.useState<ChecklistItem[]>([])
+  const hasIncompleteChecklist = React.useMemo(
+    () => checklistItems.some((item) => item.item_type === "CHECKBOX" && !item.is_checked),
+    [checklistItems]
+  )
   const [initialDataLoaded, setInitialDataLoaded] = React.useState(false)
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [prompts, setPrompts] = React.useState<ProjectPrompt[]>([])
@@ -1932,6 +1936,10 @@ export default function PcmProjectPage() {
     }
     if (!newDueDate || !newDueDate.trim()) {
       toast.error("Due date is required")
+      return
+    }
+    if ((newStatus === "DONE" || newStatus === "WAITING_CONFIRMATION") && hasIncompleteChecklist) {
+      toast.error("Complete all checklist items before marking this task as done.")
       return
     }
     setCreating(true)
@@ -4712,6 +4720,13 @@ export default function PcmProjectPage() {
                         disabled={creatingVsVlTask || !vsVlTaskTitle.trim()}
                         onClick={async () => {
                           if (!project || !vsVlTaskTitle.trim()) return
+                          if (
+                            (vsVlTaskStatus === "DONE" || vsVlTaskStatus === "WAITING_CONFIRMATION") &&
+                            hasIncompleteChecklist
+                          ) {
+                            toast.error("Complete all checklist items before marking this task as done.")
+                            return
+                          }
                           setCreatingVsVlTask(true)
                           try {
                             const meta: VsVlTaskMeta = {
@@ -4919,6 +4934,13 @@ export default function PcmProjectPage() {
                               value={task.status || "TODO"}
                               onValueChange={(value) => {
                                 if (isLocked || !isEditing) return
+                                if (
+                                  (value === "DONE" || value === "WAITING_CONFIRMATION") &&
+                                  hasIncompleteChecklist
+                                ) {
+                                  toast.error("Complete all checklist items before marking this task as done.")
+                                  return
+                                }
                                 void patchTask(task.id, { status: value }, "Failed to update status")
                               }}
                               disabled={isLocked || !isEditing}
@@ -4926,6 +4948,8 @@ export default function PcmProjectPage() {
                               <SelectTrigger
                                 className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${task.status === "DONE"
                                     ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    : task.status === "WAITING_CONFIRMATION"
+                                      ? "bg-blue-50 text-blue-700 border-blue-200"
                                     : task.status === "IN_PROGRESS"
                                       ? "bg-amber-50 text-amber-700 border-amber-200"
                                       : "bg-slate-50 text-slate-700 border-slate-200"

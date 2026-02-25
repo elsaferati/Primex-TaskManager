@@ -19,6 +19,7 @@ import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
+  { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
   { value: "DONE", label: "Done" },
 ] as const
 
@@ -62,10 +63,6 @@ function isFastTask(task: Task | null): boolean {
     task.dependency_task_id === null &&
     task.system_template_origin_id === null
   )
-}
-
-function toDateInput(value?: string | null) {
-  return toDateInputValue(value)
 }
 
 function formatDate(value?: string | null) {
@@ -160,8 +157,8 @@ export default function TaskDetailsPage() {
     if (!task) return
     setDescription(task.description || "")
     setStatusValue(task.status || "")
-    setStartDate(toDateInput(task.start_date))
-    setDueDate(toDateInput(task.due_date))
+    setStartDate(toDateInputValue(task.start_date))
+    setDueDate(toDateInputValue(task.due_date))
     setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
     const assigneeIds = task.assignees && task.assignees.length > 0

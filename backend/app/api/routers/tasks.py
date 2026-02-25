@@ -1470,6 +1470,8 @@ async def update_task(
                     # If status is DONE, always set to DONE
                     if task.status == TaskStatus.DONE:
                         existing_progress.daily_status = TaskStatus.DONE.value
+                    elif task.status == TaskStatus.WAITING_CONFIRMATION:
+                        existing_progress.daily_status = TaskStatus.WAITING_CONFIRMATION.value
                     elif task.status == TaskStatus.IN_PROGRESS:
                         # Only set to IN_PROGRESS if it was TODO before
                         # This ensures we don't override a DONE status from a previous day

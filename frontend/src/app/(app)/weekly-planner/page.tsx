@@ -1031,6 +1031,9 @@ export default function WeeklyPlannerPage() {
     if (normalized === "IN_PROGRESS") {
       return "border-[#000000] bg-[#FFFF00] text-[#000000]"
     }
+    if (normalized === "WAITING_CONFIRMATION") {
+      return "border-[#1E3A8A] bg-[#DBEAFE] text-[#1E3A8A]"
+    }
     if (normalized === "DONE") {
       return "border-[#000000] bg-[#C4FDC4] text-[#000000]"
     }
@@ -1052,6 +1055,9 @@ export default function WeeklyPlannerPage() {
 
       if (normalizedDaily === "DONE") {
         return getStatusCardClasses("DONE")
+      }
+      if (normalizedDaily === "WAITING_CONFIRMATION") {
+        return getStatusCardClasses("WAITING_CONFIRMATION")
       }
 
       if (completedAt && dayDate) {
@@ -1076,6 +1082,9 @@ export default function WeeklyPlannerPage() {
         return getStatusCardClasses("TODO")
       }
 
+      if (normalized === "WAITING_CONFIRMATION") {
+        return getStatusCardClasses("WAITING_CONFIRMATION")
+      }
       return getStatusCardClasses(normalized)
     },
     [getStatusCardClasses]
@@ -1102,6 +1111,9 @@ export default function WeeklyPlannerPage() {
       if (normalizedDaily === "DONE") {
         return "DONE"
       }
+      if (normalizedDaily === "WAITING_CONFIRMATION") {
+        return "WAITING_CONFIRMATION"
+      }
 
       if (completedAt && dayDate) {
         const completedDate = completedAt.slice(0, 10)
@@ -1125,6 +1137,9 @@ export default function WeeklyPlannerPage() {
         return "TODO"
       }
 
+      if (normalized === "WAITING_CONFIRMATION") {
+        return "WAITING_CONFIRMATION"
+      }
       return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
     },
     []
@@ -1642,6 +1657,7 @@ export default function WeeklyPlannerPage() {
             }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
+            .task-status-waiting { background-color: #DBEAFE; border-color: #1E3A8A; }
             .task-status-done { background-color: #C4FDC4; }
             .task-status-new-open { background-color: #dbeafe; border-color: #1d4ed8; }
             .task-status-new-done { background-color: #6ee7b7; border-color: #059669; }
@@ -2079,10 +2095,12 @@ export default function WeeklyPlannerPage() {
       const isNew = isTaskNewForWeek(task.created_at, data.week_start)
       if (isNew) {
         if (statusValue === "DONE") return "task-status-new-done"
+        if (statusValue === "WAITING_CONFIRMATION") return "task-status-waiting"
         if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
         return "task-status-new-open"
       }
       if (statusValue === "DONE") return "task-status-done"
+      if (statusValue === "WAITING_CONFIRMATION") return "task-status-waiting"
       if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
       return "task-status-todo"
     }
@@ -2971,6 +2989,7 @@ export default function WeeklyPlannerPage() {
       .toUpperCase()
       .replace(/\s+/g, "_")
     if (normalized === "IN_PROGRESS") return "In Progress"
+    if (normalized === "WAITING_CONFIRMATION") return "Waiting Confirmation"
     if (normalized === "DONE") return "Done"
     return "To Do"
   }

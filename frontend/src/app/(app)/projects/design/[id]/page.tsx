@@ -98,7 +98,7 @@ type TabId =
   | (typeof FINAL_TABS)[number]["id"]
 
 // Task statuses and priorities
-const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
 
@@ -3986,7 +3986,9 @@ export default function DesignProjectPage() {
                           <SelectContent>
                             {TASK_STATUSES.map((status) => {
                               // Disable DONE option if can't mark done, or disable all non-DONE options if task is DONE and user is not admin
-                              const isDisabled = (status === "DONE" && !canMarkDone) || (task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN")
+                              const isDisabled =
+                                ((status === "DONE" || status === "WAITING_CONFIRMATION") && !canMarkDone) ||
+                                (task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN")
                               return (
                                 <SelectItem key={status} value={status} disabled={isDisabled}>
                                   {statusLabel(status)}

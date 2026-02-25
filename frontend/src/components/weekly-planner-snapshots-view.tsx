@@ -199,6 +199,9 @@ const getStatusCardClasses = (status?: string | null) => {
   if (normalized === "IN_PROGRESS") {
     return "border-[#000000] bg-[#FFFF00] text-[#000000]"
   }
+  if (normalized === "WAITING_CONFIRMATION") {
+    return "border-[#1E3A8A] bg-[#DBEAFE] text-[#1E3A8A]"
+  }
   if (normalized === "DONE") {
     return "border-[#000000] bg-[#C4FDC4] text-[#000000]"
   }
@@ -250,7 +253,10 @@ const getStatusValueForDay = (
   // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
   if (dailyStatus) {
     const normalizedDaily = dailyStatus.toUpperCase()
-    return normalizedDaily === "DONE" ? "DONE" : normalizedDaily === "IN_PROGRESS" ? "IN_PROGRESS" : "TODO"
+    if (normalizedDaily === "DONE") return "DONE"
+    if (normalizedDaily === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
+    if (normalizedDaily === "IN_PROGRESS") return "IN_PROGRESS"
+    return "TODO"
   }
   
   // For non-MST/TT tasks, use timeline logic based on completion date
@@ -268,6 +274,7 @@ const getStatusValueForDay = (
   }
   
   // For non-DONE tasks or when dates aren't available, use the main status
+  if (normalized === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
   return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
 }
 
@@ -1180,9 +1187,11 @@ export function WeeklyPlannerSnapshotsView({
                 const statusClass =
                   statusValue === "DONE"
                     ? "task-status-done"
-                    : statusValue === "IN_PROGRESS"
-                      ? "task-status-in-progress"
-                      : "task-status-todo"
+                    : statusValue === "WAITING_CONFIRMATION"
+                      ? "task-status-waiting"
+                      : statusValue === "IN_PROGRESS"
+                        ? "task-status-in-progress"
+                        : "task-status-todo"
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${getTaskDisplayTitle(task)}`
                 if (task.daily_products) {
@@ -1225,9 +1234,11 @@ export function WeeklyPlannerSnapshotsView({
             const statusClass =
               statusValue === "DONE"
                 ? "task-status-done"
-                : statusValue === "IN_PROGRESS"
-                  ? "task-status-in-progress"
-                  : "task-status-todo"
+                : statusValue === "WAITING_CONFIRMATION"
+                  ? "task-status-waiting"
+                  : statusValue === "IN_PROGRESS"
+                    ? "task-status-in-progress"
+                    : "task-status-todo"
             html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
             const badge = getFastTaskBadge(task)
             if (badge) {
@@ -1266,9 +1277,11 @@ export function WeeklyPlannerSnapshotsView({
                 const statusClass =
                   statusValue === "DONE"
                     ? "task-status-done"
-                    : statusValue === "IN_PROGRESS"
-                      ? "task-status-in-progress"
-                      : "task-status-todo"
+                    : statusValue === "WAITING_CONFIRMATION"
+                      ? "task-status-waiting"
+                      : statusValue === "IN_PROGRESS"
+                        ? "task-status-in-progress"
+                        : "task-status-todo"
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${getTaskDisplayTitle(task)}`
                 if (task.daily_products) {
@@ -1311,9 +1324,11 @@ export function WeeklyPlannerSnapshotsView({
             const statusClass =
               statusValue === "DONE"
                 ? "task-status-done"
-                : statusValue === "IN_PROGRESS"
-                  ? "task-status-in-progress"
-                  : "task-status-todo"
+                : statusValue === "WAITING_CONFIRMATION"
+                  ? "task-status-waiting"
+                  : statusValue === "IN_PROGRESS"
+                    ? "task-status-in-progress"
+                    : "task-status-todo"
             html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
             const badge = getFastTaskBadge(task)
             if (badge) {
@@ -1604,6 +1619,7 @@ export function WeeklyPlannerSnapshotsView({
             }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
+            .task-status-waiting { background-color: #DBEAFE; }
             .task-status-done { background-color: #C4FDC4; }
             .badge {
               display: inline-block;

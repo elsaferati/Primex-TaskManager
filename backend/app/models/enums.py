@@ -22,6 +22,7 @@ class TaskFinishPeriod(str, enum.Enum):
 class TaskStatus(str, enum.Enum):
     TODO = "TODO"
     IN_PROGRESS = "IN_PROGRESS"
+    WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
     DONE = "DONE"
 
 
