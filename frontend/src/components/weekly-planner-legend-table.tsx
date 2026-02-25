@@ -41,6 +41,9 @@ export const LEGEND_COLORS: Record<string, string> = {
   PROCES: "#FFD700", // Yellow
   PV: "#D3D3D3", // Light Grey
   "KOMPLET (100% PROJEKTE)": "#D3D3D3", // Light task)
+  "WAITING CONFIRMATION": "#FFEDD5", // Amber
+  WAITING_CONFIRMATION: "#FFEDD5", // Amber
+  "KONFIRMIM NE PRITJE": "#FFEDD5", // Amber
   // Alternative/new labels (for backward compatibility)
   "NEW TASK / TO DO": "#FF0000", // Red
   DONE: "#C4FDC4", // Green
@@ -52,11 +55,11 @@ const LEGEND_LABEL_DISPLAY: Record<string, string> = {
   "MBINGARKESE?": "-",
   "KOMPLET (100% PROJEKTE)": "-",
 }
-
 export const getLegendLabelDisplay = (label: string) => LEGEND_LABEL_DISPLAY[label] ?? label
 
 export const LEGEND_EXTRA_SWATCHES: ReadonlyArray<{ label: string; color: string }> = [
   { label: "DETYRE E RE E KRIJUAR KETE JAVE", color: "#DBEAFE" },
+  { label: "KONFIRMIM NE PRITJE", color: "#FFEDD5" },
   { label: "DETYRE E RE KRYER", color: "#02E6C7" },
 ]
 
@@ -535,5 +538,3 @@ export function WeeklyPlannerLegendTable({
     </Card>
   )
 }
-
-
