@@ -20,6 +20,13 @@ export type LegendEntry = {
   updated_at: string
 }
 
+export type LegendSwatchItem = {
+  key: string
+  label: string
+  displayLabel: string
+  color: string
+}
+
 // Color mapping for legend labels:
 // - RED = TO DO (New task)
 // - GREEN = KRYER (Done)
@@ -35,6 +42,8 @@ export const LEGEND_COLORS: Record<string, string> = {
   PV: "#D3D3D3", // Light Grey
   "MBINGARKESE?": "#D3D3D3", // Light Grey
   "KOMPLET (100% PROJEKTE)": "#D3D3D3", // Light Grey
+  "DETYRE E RE (RE)": "#DBEAFE", // Blue (new task)
+  "DETYRE E RE KRYER": "#02E6C7", // Green (new task done)
   // Alternative/new labels (for backward compatibility)
   "NEW TASK / TO DO": "#FF0000", // Red
   DONE: "#C4FDC4", // Green
@@ -48,6 +57,32 @@ const LEGEND_LABEL_DISPLAY: Record<string, string> = {
 }
 
 export const getLegendLabelDisplay = (label: string) => LEGEND_LABEL_DISPLAY[label] ?? label
+
+export const LEGEND_EXTRA_SWATCHES: ReadonlyArray<{ label: string; color: string }> = [
+  { label: "DETYRE E RE (RE)", color: "#DBEAFE" },
+  { label: "DETYRE E RE KRYER", color: "#02E6C7" },
+]
+
+export const buildLegendSwatches = (entries: Array<Pick<LegendEntry, "label">>): LegendSwatchItem[] => {
+  const swatches: LegendSwatchItem[] = []
+  const seen = new Set<string>()
+
+  const addSwatch = (label: string, fallbackColor?: string) => {
+    if (!label || seen.has(label)) return
+    seen.add(label)
+    swatches.push({
+      key: label,
+      label,
+      displayLabel: getLegendLabelDisplay(label),
+      color: LEGEND_COLORS[label] || fallbackColor || "#E5E7EB",
+    })
+  }
+
+  entries.forEach((entry) => addSwatch(entry.label))
+  LEGEND_EXTRA_SWATCHES.forEach((swatch) => addSwatch(swatch.label, swatch.color))
+
+  return swatches
+}
 
 type WeeklyPlannerLegendTableProps = {
   departmentId: string
@@ -402,6 +437,7 @@ export function WeeklyPlannerLegendTable({
     weekStart,
     departmentName,
   })
+  const legendSwatches = buildLegendSwatches(displayEntries)
 
   return (
     <Card>
@@ -409,70 +445,86 @@ export function WeeklyPlannerLegendTable({
         <CardTitle>Legend / Questions</CardTitle>
       </CardHeader>
       <CardContent>
-        <div className="overflow-x-auto">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead className="w-16 text-center">Color</TableHead>
-                <TableHead className="w-32">Label</TableHead>
-                <TableHead>Question</TableHead>
-                <TableHead className="w-48">Answer</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {displayEntries.map((entry) => {
-                const color = LEGEND_COLORS[entry.label] || "#E5E7EB"
-                const saveState = saveStates.get(entry.id) || "idle"
-                const isPlaceholder = entry.id.startsWith("__placeholder__")
-                return (
-                  <TableRow key={entry.id}>
+        <div className="grid gap-4 md:grid-cols-[300px_minmax(0,1fr)]">
+          <div className="overflow-x-auto rounded-lg border border-slate-300 bg-slate-50/40 p-3">
+            <div className="mb-2 text-sm font-semibold text-slate-800">Color Labels</div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead className="w-16 text-center">Color</TableHead>
+                  <TableHead>Label</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {legendSwatches.map((swatch) => (
+                  <TableRow key={swatch.key}>
                     <TableCell className="p-2">
                       <div
-                        className="w-12 h-8 rounded border border-gray-300"
-                        style={{ backgroundColor: color }}
+                        className="h-8 w-12 rounded border border-gray-300"
+                        style={{ backgroundColor: swatch.color }}
                       />
                     </TableCell>
-                    <TableCell className="font-semibold">{getLegendLabelDisplay(entry.label)}</TableCell>
-                    <TableCell>
-                      {entry.question_text ? (
-                        <span className="text-sm text-red-600 font-medium">{entry.question_text}</span>
-                      ) : (
-                        <span className="text-sm text-muted-foreground">-</span>
-                      )}
-                    </TableCell>
-                    <TableCell>
-                      {isPlaceholder ? (
-                        <span className="text-sm text-muted-foreground">-</span>
-                      ) : (
-                        <div className="relative">
-                          <Input
-                            value={entry.answer_text || ""}
-                            onChange={(e) => handleInputChange(entry.id, e.target.value)}
-                            onBlur={(e) => handleBlur(entry.id, e.target.value)}
-                            onKeyDown={(e) => handleKeyDown(e, entry.id, e.currentTarget.value)}
-                            placeholder="Enter answer..."
-                            className="w-full"
-                            disabled={saveState === "saving"}
-                          />
-                          <div className="absolute right-2 top-1/2 -translate-y-1/2 flex items-center">
-                            {saveState === "saving" && (
-                              <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
-                            )}
-                            {saveState === "saved" && (
-                              <Check className="h-4 w-4 text-green-600" />
-                            )}
-                            {saveState === "error" && (
-                              <AlertCircle className="h-4 w-4 text-red-600" title="Failed to save" />
-                            )}
-                          </div>
-                        </div>
-                      )}
-                    </TableCell>
+                    <TableCell className="font-semibold">{swatch.displayLabel}</TableCell>
                   </TableRow>
-                )
-              })}
-            </TableBody>
-          </Table>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+
+          <div className="overflow-x-auto rounded-lg border border-slate-300 bg-white p-3">
+            <div className="mb-2 text-sm font-semibold text-slate-800">Questions / Answers</div>
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Question</TableHead>
+                  <TableHead className="w-48">Answer</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {displayEntries.map((entry) => {
+                  const saveState = saveStates.get(entry.id) || "idle"
+                  const isPlaceholder = entry.id.startsWith("__placeholder__")
+                  return (
+                    <TableRow key={entry.id}>
+                      <TableCell>
+                        {entry.question_text ? (
+                          <span className="text-sm font-medium text-red-600">{entry.question_text}</span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        )}
+                      </TableCell>
+                      <TableCell>
+                        {isPlaceholder ? (
+                          <span className="text-sm text-muted-foreground">-</span>
+                        ) : (
+                          <div className="relative">
+                            <Input
+                              value={entry.answer_text || ""}
+                              onChange={(e) => handleInputChange(entry.id, e.target.value)}
+                              onBlur={(e) => handleBlur(entry.id, e.target.value)}
+                              onKeyDown={(e) => handleKeyDown(e, entry.id, e.currentTarget.value)}
+                              placeholder="Enter answer..."
+                              className="w-full"
+                              disabled={saveState === "saving"}
+                            />
+                            <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center">
+                              {saveState === "saving" && (
+                                <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                              )}
+                              {saveState === "saved" && <Check className="h-4 w-4 text-green-600" />}
+                              {saveState === "error" && (
+                                <AlertCircle className="h-4 w-4 text-red-600" title="Failed to save" />
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          </div>
         </div>
       </CardContent>
     </Card>
