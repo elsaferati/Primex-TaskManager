@@ -82,7 +82,7 @@ type TaskChecklist = {
   items: ChecklistItem[]
 }
 
-const TASK_STATUSES = ["TODO", "IN_PROGRESS", "DONE"] as const
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
@@ -92,6 +92,7 @@ const ME_FILTER = "__me__"
 const TASK_STATUS_LABELS: Record<(typeof TASK_STATUSES)[number], string> = {
   TODO: "To Do",
   IN_PROGRESS: "In Progress",
+  WAITING_CONFIRMATION: "Waiting Confirmation",
   DONE: "Done",
 }
 
@@ -1147,7 +1148,7 @@ export default function ProjectPage() {
       return
     }
     
-    if (nextStatus === "DONE") {
+    if (nextStatus === "DONE" || nextStatus === "WAITING_CONFIRMATION") {
       if (taskChecklists[taskId] === undefined) {
         await loadTaskChecklist(taskId)
       }
@@ -1288,7 +1289,7 @@ export default function ProjectPage() {
       toast.error("Due date is required")
       return
     }
-    if (editStatus === "DONE") {
+    if (editStatus === "DONE" || editStatus === "WAITING_CONFIRMATION") {
       if (taskChecklists[editingTaskId] === undefined) {
         await loadTaskChecklist(editingTaskId)
       }
@@ -2645,12 +2646,15 @@ export default function ProjectPage() {
     const buckets: Record<(typeof TASK_STATUSES)[number], Task[]> = {
       TODO: [],
       IN_PROGRESS: [],
+      WAITING_CONFIRMATION: [],
       DONE: [],
     }
     for (const task of filteredVisibleTasks) {
       const statusValue = (task.status || "TODO") as (typeof TASK_STATUSES)[number]
       if (statusValue === "IN_PROGRESS") {
         buckets.IN_PROGRESS.push(task)
+      } else if (statusValue === "WAITING_CONFIRMATION") {
+        buckets.WAITING_CONFIRMATION.push(task)
       } else if (statusValue === "DONE") {
         buckets.DONE.push(task)
       } else {
@@ -2667,6 +2671,7 @@ export default function ProjectPage() {
     }
     buckets.TODO.sort(sortNewestFirst)
     buckets.IN_PROGRESS.sort(sortNewestFirst)
+    buckets.WAITING_CONFIRMATION.sort(sortNewestFirst)
     buckets.DONE.sort(sortNewestFirst)
     return buckets
   }, [filteredVisibleTasks])
@@ -3727,7 +3732,7 @@ export default function ProjectPage() {
           </div>
           <Card className="p-0">
             <div className="space-y-3 p-3">
-              {(["TODO", "IN_PROGRESS", "DONE"] as const).map((statusKey) => {
+              {TASK_STATUSES.map((statusKey) => {
                 const sectionTasks = tasksByStatus[statusKey]
                 const statusLabelText = TASK_STATUS_LABELS[statusKey]
                 return (
@@ -3756,9 +3761,11 @@ export default function ProjectPage() {
                   const statusValue = (task.status || "TODO") as (typeof TASK_STATUSES)[number]
                   const statusRowClass = statusValue === "DONE"
                     ? "border-green-200 border-l-green-500 bg-green-50/30 opacity-80"
-                    : statusValue === "IN_PROGRESS"
-                      ? "border-amber-200 border-l-amber-500"
-                      : "border-slate-200 border-l-slate-400"
+                    : statusValue === "WAITING_CONFIRMATION"
+                      ? "border-blue-200 border-l-blue-500 bg-blue-50/40"
+                      : statusValue === "IN_PROGRESS"
+                        ? "border-amber-200 border-l-amber-500"
+                        : "border-slate-200 border-l-slate-400"
                   const checklist = taskChecklists[task.id]
                   const checklistItems = checklist?.items
                     ? [...checklist.items].sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
@@ -3820,7 +3827,9 @@ export default function ProjectPage() {
                               {TASK_STATUSES.map((status) => {
                                 // Disable all non-DONE options if task is DONE and user is not admin
                                 const isDisabled = task.status === "DONE" && status !== "DONE" && user?.role !== "ADMIN"
-                                const isChecklistBlocking = status === "DONE" && !isChecklistComplete(task.id)
+                                const isChecklistBlocking =
+                                  (status === "DONE" || status === "WAITING_CONFIRMATION") &&
+                                  !isChecklistComplete(task.id)
                                 return (
                                   <SelectItem
                                     key={status}

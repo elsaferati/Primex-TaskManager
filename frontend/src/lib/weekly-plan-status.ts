@@ -17,6 +17,9 @@ export function weeklyPlanStatusBgClass(status?: string | null): string {
   if (resolved === "IN_PROGRESS") {
     return "bg-[#FFFF00] text-[#000000]"
   }
+  if (resolved === "WAITING_CONFIRMATION") {
+    return "bg-[#DBEAFE] text-[#1E3A8A]"
+  }
   if (resolved === "DONE") {
     return "bg-[#C4FDC4] text-[#000000]"
   }

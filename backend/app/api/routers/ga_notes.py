@@ -8,19 +8,26 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, s
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
+from pydantic import BaseModel
 
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.ga_note import GaNote
 from app.models.ga_note_attachment import GaNoteAttachment
-from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, UserRole
+from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, TaskStatus, UserRole
 from app.models.project import Project
+from app.models.task import Task
 from app.schemas.ga_note import GaNoteAttachmentOut, GaNoteCreate, GaNoteOut, GaNoteUpdate
 from app.config import settings
 
 
 router = APIRouter()
+
+
+class MarkWaitingDoneResponse(BaseModel):
+    updated_count: int
+    skipped_count: int
 
 
 def _attachment_out(attachment: GaNoteAttachment) -> GaNoteAttachmentOut:
@@ -251,6 +258,38 @@ async def update_ga_note(
     await db.commit()
     await db.refresh(note)
     return _note_out(note)
+
+
+@router.post("/{note_id}/mark-waiting-done", response_model=MarkWaitingDoneResponse)
+async def mark_note_waiting_tasks_done(
+    note_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> MarkWaitingDoneResponse:
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    note = await _get_note_or_404(note_id, db)
+    await _ensure_note_access(note, user, db)
+
+    tasks = (
+        await db.execute(
+            select(Task).where(Task.ga_note_origin_id == note_id)
+        )
+    ).scalars().all()
+
+    updated_count = 0
+    for task in tasks:
+        if task.status == TaskStatus.WAITING_CONFIRMATION:
+            task.status = TaskStatus.DONE
+            updated_count += 1
+
+    await db.commit()
+
+    return MarkWaitingDoneResponse(
+        updated_count=updated_count,
+        skipped_count=len(tasks) - updated_count,
+    )
 
 
 @router.get("/{note_id}", response_model=GaNoteOut)

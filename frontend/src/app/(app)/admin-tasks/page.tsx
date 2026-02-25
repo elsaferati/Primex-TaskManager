@@ -2254,38 +2254,6 @@ export default function AdminTasksPage() {
           </AdminTasksSection>
         ) : null}
 
-        {viewFilter !== "tasks" ? (
-          <div className={sectionCardClass}>
-            <div className="p-4">
-              <SystemTasksView
-                headingTitle="Barazime"
-                headingDescription=""
-                showSystemActions={false}
-                showFilters={false}
-                allowMarkAsDone={true}
-                forceLoadAll={isAdmin}
-                externalPriorityFilter={priorityFilter}
-                externalDayFilter={dayFilter}
-                externalDateFilter={dateFilter}
-                alignmentUsernameFilter="gane.arifaj"
-              />
-              <div className="mt-6">
-                <SystemTasksView
-                  scopeFilter="GA"
-                  headingTitle="Admin System Tasks"
-                  headingDescription="System tasks assigned to Gane Arifaj GA department."
-                  showSystemActions={false}
-                  showFilters={false}
-                  allowMarkAsDone={true}
-                  forceLoadAll={isAdmin}
-                  externalPriorityFilter={priorityFilter}
-                  externalDayFilter={dayFilter}
-                  externalDateFilter={dateFilter}
-                />
-              </div>
-            </div>
-          </div>
-        ) : null}
       </div>
 
       {/* Edit Task Dialog */}
@@ -2487,7 +2455,7 @@ export default function AdminTasksPage() {
       {viewFilter !== "tasks" ? (
         <div className="print:hidden">
           <SystemTasksView
-            headingTitle="BZ With Gane Arifaj"
+            headingTitle="Barazime"
             headingDescription="System tasks where BZ-with includes Gane Arifaj."
             showSystemActions={false}
             showFilters={false}

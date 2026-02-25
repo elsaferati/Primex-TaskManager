@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Clock, Image as ImageIcon, ListTodo, Pencil, Printer, Mic, Square } from "lucide-react"
+import { Check, Clock, Image as ImageIcon, ListTodo, Pencil, Printer, Mic, Square } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -55,13 +55,14 @@ const TASK_PRIORITY_STYLES: Record<string, string> = {
 const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: string }> = {
   TODO: { label: "TODO", dot: "bg-slate-500", pill: "bg-slate-100 text-slate-700" },
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
+  WAITING_CONFIRMATION: { label: "Waiting Confirmation", dot: "bg-blue-600", pill: "bg-blue-50 text-blue-700" },
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
 }
 const MAX_ATTACHMENT_FILES = 20
 const MAX_ATTACHMENT_MB = 25
 const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024
 
-type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "DONE" | "UNKNOWN"
+type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
 
 function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
@@ -69,6 +70,7 @@ function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, "_")
   if (["todo", "to_do", "to-do", "to do"].includes(normalized)) return "TODO"
   if (["in_progress", "in-progress", "in progress"].includes(normalized)) return "IN_PROGRESS"
+  if (["waiting_confirmation", "waiting-confirmation", "waiting confirmation"].includes(normalized)) return "WAITING_CONFIRMATION"
   if (["done"].includes(normalized)) return "DONE"
   return "UNKNOWN"
 }
@@ -81,8 +83,14 @@ function aggregateTaskStatus(statuses: Array<string | null | undefined>): Normal
   if (normalized.length === 0) return "UNKNOWN"
   const allDone = normalized.every((status) => status === "DONE")
   if (allDone) return "DONE"
+  const allWaiting = normalized.every((status) => status === "WAITING_CONFIRMATION")
+  if (allWaiting) return "WAITING_CONFIRMATION"
   const anyInProgress = normalized.some((status) => status === "IN_PROGRESS")
   if (anyInProgress) return "IN_PROGRESS"
+  const anyWaiting = normalized.some((status) => status === "WAITING_CONFIRMATION")
+  const anyTodo = normalized.some((status) => status === "TODO")
+  if (anyWaiting && anyTodo) return "IN_PROGRESS"
+  if (anyWaiting) return "WAITING_CONFIRMATION"
   const anyDone = normalized.some((status) => status === "DONE")
   if (anyDone) return "IN_PROGRESS"
   return "TODO"
@@ -151,6 +159,7 @@ function isDevelopmentDepartment(dept?: Department | null) {
 export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
   const searchParams = useSearchParams()
+  const canMarkDone = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [notes, setNotes] = React.useState<GaNote[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
@@ -201,6 +210,7 @@ export default function GaKaNotesPage() {
   const [editContent, setEditContent] = React.useState("")
   const [editDescription, setEditDescription] = React.useState("")
   const [savingEdit, setSavingEdit] = React.useState(false)
+  const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
@@ -353,96 +363,99 @@ export default function GaKaNotesPage() {
     void fetchNotes()
   }, [fetchNotes])
 
+  const loadNoteTasks = React.useCallback(async (noteIdsOverride?: string[]) => {
+    const noteIds = noteIdsOverride ?? notes.map((note) => note.id).filter(Boolean)
+    if (!noteIds.length) {
+      if (!noteIdsOverride) {
+        setNoteTaskInfo(new Map())
+      }
+      return
+    }
+    const chunkSize = 50
+    const chunks: string[][] = []
+    for (let i = 0; i < noteIds.length; i += chunkSize) {
+      chunks.push(noteIds.slice(i, i + chunkSize))
+    }
+
+    const data: Task[] = []
+    for (const chunk of chunks) {
+      const params = new URLSearchParams()
+      params.set("include_done", "true")
+      params.set("include_all_departments", "true")
+      chunk.forEach((id) => params.append("ga_note_origin_ids", id))
+      const res = await apiFetch(`/tasks?${params.toString()}`)
+      if (!res?.ok) return
+      const chunkData = (await res.json()) as Task[]
+      data.push(...chunkData)
+    }
+    const userMapById = new Map(users.map((u) => [u.id, u]))
+
+    const map = new Map<string, {
+      assignees: TaskAssignee[]
+      description: string | null
+      taskId: string | null
+      taskDepartmentId: string | null
+      taskProjectId: string | null
+      taskStatus: string | null
+      taskStatuses: string[]
+    }>()
+    const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
+      const result: TaskAssignee[] = []
+      const seen = new Set<string>()
+      const add = (assignee: TaskAssignee) => {
+        const key =
+          assignee.id ||
+          assignee.username ||
+          assignee.full_name ||
+          assignee.email ||
+          Math.random().toString()
+        if (seen.has(key)) return
+        seen.add(key)
+        result.push(assignee)
+      }
+      base.forEach(add)
+      incoming.forEach(add)
+      return result
+    }
+    for (const t of data) {
+      if (!t.ga_note_origin_id) continue
+      let assignees: TaskAssignee[] = []
+      if (t.assignees && t.assignees.length > 0) {
+        // Use TaskAssignee directly from API - it has all the info we need for display
+        assignees = t.assignees
+      }
+      if (assignees.length === 0 && t.assigned_to) {
+        // Fallback to assigned_to if no assignees in TaskAssignee table
+        const fallback = userMapById.get(t.assigned_to)
+        if (fallback) {
+          // Convert UserLookup to TaskAssignee format for consistency
+          assignees = [{
+            id: fallback.id,
+            email: null,
+            username: fallback.username || null,
+            full_name: fallback.full_name || null,
+            department_id: fallback.department_id || null,
+          }]
+        }
+      }
+      const existing = map.get(t.ga_note_origin_id)
+      map.set(t.ga_note_origin_id, {
+        assignees: mergeAssignees(existing?.assignees ?? [], assignees),
+        description: existing?.description ?? t.description ?? null,
+        taskId: existing?.taskId ?? t.id,
+        taskDepartmentId: existing?.taskDepartmentId ?? t.department_id ?? null,
+        taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
+        taskStatus: existing?.taskStatus ?? t.status ?? null,
+        taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
+      })
+    }
+    setNoteTaskInfo(map)
+  }, [apiFetch, notes, users])
+
   // Load tasks linked to notes to show assignees/descriptions
   React.useEffect(() => {
-    const loadNoteTasks = async () => {
-      if (!notes.length) {
-        setNoteTaskInfo(new Map())
-        return
-      }
-      const noteIds = notes.map((note) => note.id).filter(Boolean)
-      const chunkSize = 50
-      const chunks: string[][] = []
-      for (let i = 0; i < noteIds.length; i += chunkSize) {
-        chunks.push(noteIds.slice(i, i + chunkSize))
-      }
-
-      const data: Task[] = []
-      for (const chunk of chunks) {
-        const params = new URLSearchParams()
-        params.set("include_done", "true")
-        params.set("include_all_departments", "true")
-        chunk.forEach((id) => params.append("ga_note_origin_ids", id))
-        const res = await apiFetch(`/tasks?${params.toString()}`)
-        if (!res?.ok) return
-        const chunkData = (await res.json()) as Task[]
-        data.push(...chunkData)
-      }
-      const userMapById = new Map(users.map((u) => [u.id, u]))
-
-      const map = new Map<string, {
-        assignees: TaskAssignee[]
-        description: string | null
-        taskId: string | null
-        taskDepartmentId: string | null
-        taskProjectId: string | null
-        taskStatus: string | null
-        taskStatuses: string[]
-      }>()
-      const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
-        const result: TaskAssignee[] = []
-        const seen = new Set<string>()
-        const add = (assignee: TaskAssignee) => {
-          const key =
-            assignee.id ||
-            assignee.username ||
-            assignee.full_name ||
-            assignee.email ||
-            Math.random().toString()
-          if (seen.has(key)) return
-          seen.add(key)
-          result.push(assignee)
-        }
-        base.forEach(add)
-        incoming.forEach(add)
-        return result
-      }
-      for (const t of data) {
-        if (!t.ga_note_origin_id) continue
-        let assignees: TaskAssignee[] = []
-        if (t.assignees && t.assignees.length > 0) {
-          // Use TaskAssignee directly from API - it has all the info we need for display
-          assignees = t.assignees
-        }
-        if (assignees.length === 0 && t.assigned_to) {
-          // Fallback to assigned_to if no assignees in TaskAssignee table
-          const fallback = userMapById.get(t.assigned_to)
-          if (fallback) {
-            // Convert UserLookup to TaskAssignee format for consistency
-            assignees = [{
-              id: fallback.id,
-              email: null,
-              username: fallback.username || null,
-              full_name: fallback.full_name || null,
-              department_id: fallback.department_id || null,
-            }]
-          }
-        }
-        const existing = map.get(t.ga_note_origin_id)
-        map.set(t.ga_note_origin_id, {
-          assignees: mergeAssignees(existing?.assignees ?? [], assignees),
-          description: existing?.description ?? t.description ?? null,
-          taskId: existing?.taskId ?? t.id,
-          taskDepartmentId: existing?.taskDepartmentId ?? t.department_id ?? null,
-          taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
-          taskStatus: existing?.taskStatus ?? t.status ?? null,
-          taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
-        })
-      }
-      setNoteTaskInfo(map)
-    }
     void loadNoteTasks()
-  }, [apiFetch, notes, users])
+  }, [loadNoteTasks])
 
 
 
@@ -938,6 +951,40 @@ export default function GaKaNotesPage() {
     }
   }
 
+  const markWaitingTasksDone = async (noteId: string) => {
+    if (!canMarkDone) {
+      toast.error("Only admins and managers can mark tasks done")
+      return
+    }
+
+    setMarkingDoneNoteId(noteId)
+    try {
+      const res = await apiFetch(`/ga-notes/${noteId}/mark-waiting-done`, {
+        method: "POST",
+      })
+      if (!res?.ok) {
+        if (res?.status === 403) {
+          toast.error("Only admins and managers can mark tasks done")
+        } else {
+          toast.error("Failed to update tasks")
+        }
+        return
+      }
+      const result = (await res.json()) as { updated_count?: number; skipped_count?: number }
+      if ((result.updated_count ?? 0) === 0) {
+        toast.info("No tasks to update")
+      } else {
+        toast.success("Tasks marked as done")
+      }
+    } catch (error) {
+      console.error("Failed to mark tasks done:", error)
+      toast.error("Failed to update tasks")
+    } finally {
+      await loadNoteTasks([noteId])
+      setMarkingDoneNoteId(null)
+    }
+  }
+
   const exportDailyReport = async () => {
     if (!user?.id) return
     setExportingDailyReport(true)
@@ -1406,9 +1453,15 @@ export default function GaKaNotesPage() {
                   </SelectItem>
                   <SelectItem
                     value="IN_PROGRESS"
-                    className="bg-amber-100 text-amber-900 focus:bg-amber-200 focus:text-amber-900"
+                    className="bg-yellow-100 text-amber-900 focus:bg-amber-200 focus:text-amber-900"
                   >
                     In progress
+                  </SelectItem>
+                  <SelectItem
+                    value="WAITING_CONFIRMATION"
+                    className="bg-amber-50 text-blue-900 focus:bg-blue-200 focus:text-blue-900"
+                  >
+                    Waiting Confirmation
                   </SelectItem>
                   <SelectItem
                     value="DONE"
@@ -1667,8 +1720,8 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1350px]">
-                <table className="w-full caption-bottom text-sm min-w-[1350px]">
+              <div className="w-full min-w-[1450px]">
+                <table className="w-full caption-bottom text-sm min-w-[1450px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
@@ -1680,7 +1733,8 @@ export default function GaKaNotesPage() {
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
                       <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
-                      <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
+                      <th className="min-w-[110px] w-[110px] max-w-[110px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MARK DONE</th>
+                      <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
                   </thead>
@@ -1742,15 +1796,17 @@ export default function GaKaNotesPage() {
                     const canCreateTask = !isClosed && (!hasProject || isDevLinked)
                     const showManualOnly = hasProject && !isDevLinked
                     const shenimiCellClass = isClosed
-                      ? "bg-slate-200 opacity-70"
+                      ? "bg-slate-300 opacity-70"
                       : hasTask
                         ? aggregatedStatus === "TODO"
                           ? "bg-pink-200"
                           : aggregatedStatus === "IN_PROGRESS"
-                            ? "bg-amber-200"
+                            ? "bg-yellow-200"
                             : aggregatedStatus === "DONE"
                               ? "bg-emerald-200"
-                              : "bg-amber-50"
+                              : aggregatedStatus === "WAITING_CONFIRMATION"
+                                ? "bg-amber-50"
+                                : "bg-slate-100"
                         : "bg-sky-200"
 
                     // Only show department if:
@@ -1799,7 +1855,7 @@ export default function GaKaNotesPage() {
                                 ) : null}
                                 <span className="text-sm">{note.content}</span>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-end gap-2 flex-wrap">
                                 {attachments.length > 0 ? (
                                   <Button
                                     variant="outline"
@@ -1824,6 +1880,19 @@ export default function GaKaNotesPage() {
                                     onClick={() => !editDisabled && openEditNote(note)}
                                   >
                                     <Pencil className="h-4 w-4" />
+                                  </Button>
+                                ) : null}
+                                {canMarkDone && hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    disabled={markingDoneNoteId === note.id}
+                                    className="h-7 w-7 shrink-0 sm:hidden border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                    aria-label="Mark done"
+                                    title="Mark done"
+                                    onClick={() => void markWaitingTasksDone(note.id)}
+                                  >
+                                    <Check className="h-4 w-4" />
                                   </Button>
                                 ) : null}
                                 {!hasTask && canCreateTask ? (
@@ -1995,7 +2064,24 @@ export default function GaKaNotesPage() {
                             )}
                           </div>
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[110px] w-[110px] max-w-[110px]" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            {canMarkDone && hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={markingDoneNoteId === note.id}
+                                className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                onClick={() => void markWaitingTasksDone(note.id)}
+                              >
+                                Mark Done
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-slate-400">-</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[80px] w-[80px] max-w-[80px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {note.status !== "CLOSED" ? (
                               <Button

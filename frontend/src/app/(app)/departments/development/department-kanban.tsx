@@ -134,7 +134,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
-const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "DONE"] as const
+const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
 
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
@@ -764,6 +764,7 @@ function systemFrequencyShortLabel(freq?: SystemTaskTemplate["frequency"] | stri
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "To Do"
   if (status === "DONE") return "Done"
   return status
@@ -771,12 +772,14 @@ function reportStatusLabel(status?: Task["status"] | null) {
 
 function taskStatusValue(task: Task): Task["status"] {
   if (task.status === "DONE" || task.completed_at) return "DONE"
+  if (task.status === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
   if (task.status === "IN_PROGRESS") return "IN_PROGRESS"
   return "TODO"
 }
 
 function statusBadgeClasses(status: Task["status"]) {
   if (status === "DONE") return "bg-green-100 text-green-700 border-green-200"
+  if (status === "WAITING_CONFIRMATION") return "bg-blue-100 text-blue-700 border-blue-200"
   if (status === "IN_PROGRESS") return "bg-amber-100 text-amber-800 border-amber-200"
   return "bg-slate-100 text-slate-700 border-slate-200"
 }

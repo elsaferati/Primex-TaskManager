@@ -19,7 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
-import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
@@ -122,6 +122,7 @@ const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
   HIGH: "border-l-red-600",
 }
 
+
 const TODAY_TASK_ROW_CLASS = "h-12"
 const TODAY_TASK_CELL_CLASS = "h-12 align-middle"
 const TODAY_TASK_TEXT_CLAMP_CLASS = "max-h-10 overflow-hidden leading-4"
@@ -140,7 +141,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
-const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "DONE"] as const
+const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
 
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
@@ -668,6 +669,7 @@ function systemFrequencyReportLabel(freq?: SystemTaskTemplate["frequency"] | str
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "To Do"
   if (status === "DONE") return "Done"
   return status
@@ -675,12 +677,14 @@ function reportStatusLabel(status?: Task["status"] | null) {
 
 function taskStatusValue(task: Task): Task["status"] {
   if (task.status === "DONE" || task.completed_at) return "DONE"
+  if (task.status === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
   if (task.status === "IN_PROGRESS") return "IN_PROGRESS"
   return "TODO"
 }
 
 function statusBadgeClasses(status: Task["status"]) {
   if (status === "DONE") return "bg-green-100 text-green-700 border-green-200"
+  if (status === "WAITING_CONFIRMATION") return "bg-blue-100 text-blue-700 border-blue-200"
   if (status === "IN_PROGRESS") return "bg-amber-100 text-amber-800 border-amber-200"
   return "bg-slate-100 text-slate-700 border-slate-200"
 }
@@ -3975,8 +3979,8 @@ export default function DepartmentKanban() {
     setEditingTaskId(task.id)
     setEditTaskTitle(task.title || "")
     setEditTaskDescription(task.description || "")
-    setEditTaskStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
-    setEditTaskDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+    setEditTaskStartDate(toDateInputValue(task.start_date))
+    setEditTaskDueDate(toDateInputValue(task.due_date))
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
     const assigneeIds = task.assignees && task.assignees.length > 0
@@ -4044,8 +4048,8 @@ export default function DepartmentKanban() {
         ? statusValue
         : "TODO"
     )
-    setAllTodayEditStartDate(task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : "")
-    setAllTodayEditDueDate(task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : "")
+    setAllTodayEditStartDate(toDateInputValue(task.start_date))
+    setAllTodayEditDueDate(toDateInputValue(task.due_date))
   }
 
   const cancelAllTodayTaskEdit = () => {
@@ -8078,3 +8082,4 @@ export default function DepartmentKanban() {
     </div>
   )
 }
+

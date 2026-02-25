@@ -716,6 +716,8 @@ def _format_task_status(status: str | None) -> str:
         return "-"
     if status == "IN_PROGRESS":
         return "In Progress"
+    if status == "WAITING_CONFIRMATION":
+        return "Waiting Confirmation"
     if status == "TODO":
         return "To Do"
     if status == "DONE":

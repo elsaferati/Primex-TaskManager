@@ -119,6 +119,41 @@ class TestWeeklySnapshotPlanVsActualHelpers(unittest.TestCase):
         self.assertIsNotNone(tasks[0]["fallback_key"])
         self.assertEqual(len(tasks[0]["occurrences"]), 2)
 
+    def test_waiting_confirmation_not_completed(self) -> None:
+        assignee_id = uuid.uuid4()
+        department_payload = {
+            "days": [
+                {
+                    "date": "2026-02-04",
+                    "users": [
+                        {
+                            "user_id": str(assignee_id),
+                            "user_name": "Mira",
+                            "am_projects": [],
+                            "pm_projects": [],
+                            "am_system_tasks": [],
+                            "pm_system_tasks": [],
+                            "am_fast_tasks": [
+                                {
+                                    "task_id": None,
+                                    "title": "Await review",
+                                    "status": "WAITING_CONFIRMATION",
+                                    "daily_status": "WAITING_CONFIRMATION",
+                                    "completed_at": None,
+                                    "finish_period": "AM",
+                                }
+                            ],
+                            "pm_fast_tasks": [],
+                        }
+                    ],
+                }
+            ]
+        }
+
+        tasks = _flatten_weekly_department_tasks(department_payload)
+        self.assertEqual(len(tasks), 1)
+        self.assertFalse(tasks[0]["is_completed"])
+
     def test_grouping_by_assignee_and_unassigned(self) -> None:
         assignee_id = uuid.uuid4()
         completed_task = _to_compare_task_out(
