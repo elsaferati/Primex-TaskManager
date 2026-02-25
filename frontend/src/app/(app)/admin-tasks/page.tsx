@@ -316,6 +316,7 @@ function getDisplayPriority(task: Task): TaskPriority {
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "To Do"
   if (status === "DONE") return "Done"
   return status
@@ -2422,6 +2423,7 @@ export default function AdminTasksPage() {
             headingDescription="System tasks where BZ-with includes Gane Arifaj."
             showSystemActions={false}
             showFilters={false}
+            showBzTimeColumn={true}
             allowMarkAsDone={true}
             forceLoadAll={isAdmin}
             externalPriorityFilter={priorityFilter}
