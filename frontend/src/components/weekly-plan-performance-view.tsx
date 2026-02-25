@@ -109,7 +109,7 @@ const formatDateTime = (iso: string) => {
 const getStatusCardClasses = (status?: string | null) => {
   const normalized = (status || "TODO").toUpperCase()
   if (normalized === "IN_PROGRESS") return "border-[#000000] bg-[#FFFF00] text-[#000000]"
-  if (normalized === "WAITING_CONFIRMATION") return "border-[#1E3A8A] bg-[#DBEAFE] text-[#1E3A8A]"
+  if (normalized === "WAITING_CONFIRMATION") return "border-[#C2410C] bg-[#FFEDD5] text-[#9A3412]"
   if (normalized === "DONE") return "border-[#000000] bg-[#C4FDC4] text-[#000000]"
   if (normalized === "TODO") return "border-[#000000] bg-[#FFC4ED] text-[#000000]"
   return "border-[#000000] bg-[#f1f5f9] text-[#000000]"

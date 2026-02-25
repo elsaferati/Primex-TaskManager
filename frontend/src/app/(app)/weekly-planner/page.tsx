@@ -1032,7 +1032,7 @@ export default function WeeklyPlannerPage() {
       return "border-[#000000] bg-[#FFFF00] text-[#000000]"
     }
     if (normalized === "WAITING_CONFIRMATION") {
-      return "border-[#1E3A8A] bg-[#DBEAFE] text-[#1E3A8A]"
+      return "border-[#C2410C] bg-[#FFEDD5] text-[#9A3412]"
     }
     if (normalized === "DONE") {
       return "border-[#000000] bg-[#C4FDC4] text-[#000000]"
@@ -1158,6 +1158,9 @@ export default function WeeklyPlannerPage() {
       if (isNew) {
         if (statusValue === "DONE") {
           return "border-[#059669] bg-[#02e6c7] text-[#064e3b]"
+        }
+        if (statusValue === "WAITING_CONFIRMATION") {
+          return getStatusCardClasses("WAITING_CONFIRMATION")
         }
         if (statusValue === "IN_PROGRESS") {
           return getStatusCardClasses("IN_PROGRESS")
@@ -1657,7 +1660,7 @@ export default function WeeklyPlannerPage() {
             }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
-            .task-status-waiting { background-color: #DBEAFE; border-color: #1E3A8A; }
+            .task-status-waiting { background-color: #FFEDD5; border-color: #C2410C; color: #9A3412; }
             .task-status-done { background-color: #C4FDC4; }
             .task-status-new-open { background-color: #dbeafe; border-color: #1d4ed8; }
             .task-status-new-done { background-color: #6ee7b7; border-color: #059669; }
@@ -2994,7 +2997,7 @@ export default function WeeklyPlannerPage() {
     return "To Do"
   }
 
-  const renderWeeklyNotesBlock = () => (
+  const renderWeeklyNotesBlock = (personCount: number) => (
     <div className="mt-4">
       <table className="w-full border border-slate-300 text-xs">
         <colgroup>
@@ -3011,10 +3014,16 @@ export default function WeeklyPlannerPage() {
                 {label}
               </td>
               <td className="border border-slate-300 px-2 py-2">
-                <div className="space-y-2">
-                  <div className="h-4 border-b border-slate-300" />
-                  <div className="h-4 border-b border-slate-300" />
-                  <div className="h-4 border-b border-slate-300" />
+                <div
+                  className="grid min-h-16"
+                  style={{ gridTemplateColumns: `repeat(${Math.max(1, personCount)}, minmax(0, 1fr))` }}
+                >
+                  {Array.from({ length: Math.max(1, personCount) }).map((_, index) => (
+                    <div
+                      key={`${label}-${index}`}
+                      className={index === 0 ? "min-h-16" : "min-h-16 border-l border-slate-300"}
+                    />
+                  ))}
                 </div>
               </td>
             </tr>
@@ -4412,7 +4421,7 @@ export default function WeeklyPlannerPage() {
                       </DndContext>
                     )
                   })()}
-                  {renderWeeklyNotesBlock()}
+                  {renderWeeklyNotesBlock(getOrderedUsersForDept(dept).length)}
                 </CardContent>
               </Card>
             ))}

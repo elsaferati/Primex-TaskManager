@@ -200,7 +200,7 @@ const getStatusCardClasses = (status?: string | null) => {
     return "border-[#000000] bg-[#FFFF00] text-[#000000]"
   }
   if (normalized === "WAITING_CONFIRMATION") {
-    return "border-[#1E3A8A] bg-[#DBEAFE] text-[#1E3A8A]"
+    return "border-[#C2410C] bg-[#FFEDD5] text-[#9A3412]"
   }
   if (normalized === "DONE") {
     return "border-[#000000] bg-[#C4FDC4] text-[#000000]"
@@ -1619,7 +1619,7 @@ export function WeeklyPlannerSnapshotsView({
             }
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
-            .task-status-waiting { background-color: #DBEAFE; }
+            .task-status-waiting { background-color: #FFEDD5; border-color: #C2410C; color: #9A3412; }
             .task-status-done { background-color: #C4FDC4; }
             .badge {
               display: inline-block;
