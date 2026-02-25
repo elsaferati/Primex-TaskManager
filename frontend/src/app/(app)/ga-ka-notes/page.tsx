@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Clock, Image as ImageIcon, ListTodo, Pencil, Printer, Mic, Square } from "lucide-react"
+import { Check, Clock, Image as ImageIcon, ListTodo, Pencil, Printer, Mic, Square } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -159,6 +159,7 @@ function isDevelopmentDepartment(dept?: Department | null) {
 export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
   const searchParams = useSearchParams()
+  const canMarkDone = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [notes, setNotes] = React.useState<GaNote[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
@@ -951,35 +952,27 @@ export default function GaKaNotesPage() {
   }
 
   const markWaitingTasksDone = async (noteId: string) => {
+    if (!canMarkDone) {
+      toast.error("Only admins and managers can mark tasks done")
+      return
+    }
+
     setMarkingDoneNoteId(noteId)
     try {
-      const params = new URLSearchParams()
-      params.set("include_done", "true")
-      params.set("include_all_departments", "true")
-      params.append("ga_note_origin_ids", noteId)
-      const res = await apiFetch(`/tasks?${params.toString()}`)
+      const res = await apiFetch(`/ga-notes/${noteId}/mark-waiting-done`, {
+        method: "POST",
+      })
       if (!res?.ok) {
-        toast.error("Failed to load tasks")
+        if (res?.status === 403) {
+          toast.error("Only admins and managers can mark tasks done")
+        } else {
+          toast.error("Failed to update tasks")
+        }
         return
       }
-      const tasks = (await res.json()) as Task[]
-      const pendingTasks = tasks.filter((task) => task.status !== "DONE")
-      if (pendingTasks.length === 0) {
+      const result = (await res.json()) as { updated_count?: number; skipped_count?: number }
+      if ((result.updated_count ?? 0) === 0) {
         toast.info("No tasks to update")
-        return
-      }
-      const results = await Promise.all(
-        pendingTasks.map((task) =>
-          apiFetch(`/tasks/${task.id}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ status: "DONE" }),
-          })
-        )
-      )
-      const failedCount = results.filter((r) => !r?.ok).length
-      if (failedCount > 0) {
-        toast.error("Some tasks failed to update")
       } else {
         toast.success("Tasks marked as done")
       }
@@ -1460,13 +1453,13 @@ export default function GaKaNotesPage() {
                   </SelectItem>
                   <SelectItem
                     value="IN_PROGRESS"
-                    className="bg-amber-100 text-amber-900 focus:bg-amber-200 focus:text-amber-900"
+                    className="bg-yellow-100 text-amber-900 focus:bg-amber-200 focus:text-amber-900"
                   >
                     In progress
                   </SelectItem>
                   <SelectItem
                     value="WAITING_CONFIRMATION"
-                    className="bg-blue-100 text-blue-900 focus:bg-blue-200 focus:text-blue-900"
+                    className="bg-amber-50 text-blue-900 focus:bg-blue-200 focus:text-blue-900"
                   >
                     Waiting Confirmation
                   </SelectItem>
@@ -1727,8 +1720,8 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1350px]">
-                <table className="w-full caption-bottom text-sm min-w-[1350px]">
+              <div className="w-full min-w-[1450px]">
+                <table className="w-full caption-bottom text-sm min-w-[1450px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
@@ -1740,7 +1733,8 @@ export default function GaKaNotesPage() {
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
                       <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
-                      <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
+                      <th className="min-w-[110px] w-[110px] max-w-[110px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MARK DONE</th>
+                      <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
                   </thead>
@@ -1807,7 +1801,7 @@ export default function GaKaNotesPage() {
                         ? aggregatedStatus === "TODO"
                           ? "bg-pink-200"
                           : aggregatedStatus === "IN_PROGRESS"
-                            ? "bg-amber-200"
+                            ? "bg-yellow-200"
                             : aggregatedStatus === "DONE"
                               ? "bg-emerald-200"
                               : aggregatedStatus === "WAITING_CONFIRMATION"
@@ -1861,7 +1855,7 @@ export default function GaKaNotesPage() {
                                 ) : null}
                                 <span className="text-sm">{note.content}</span>
                               </div>
-                              <div className="flex items-center gap-2">
+                              <div className="flex items-center justify-end gap-2 flex-wrap">
                                 {attachments.length > 0 ? (
                                   <Button
                                     variant="outline"
@@ -1886,6 +1880,19 @@ export default function GaKaNotesPage() {
                                     onClick={() => !editDisabled && openEditNote(note)}
                                   >
                                     <Pencil className="h-4 w-4" />
+                                  </Button>
+                                ) : null}
+                                {canMarkDone && hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    disabled={markingDoneNoteId === note.id}
+                                    className="h-7 w-7 shrink-0 sm:hidden border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                    aria-label="Mark done"
+                                    title="Mark done"
+                                    onClick={() => void markWaitingTasksDone(note.id)}
+                                  >
+                                    <Check className="h-4 w-4" />
                                   </Button>
                                 ) : null}
                                 {!hasTask && canCreateTask ? (
@@ -2057,33 +2064,37 @@ export default function GaKaNotesPage() {
                             )}
                           </div>
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[110px] w-[110px] max-w-[110px]" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            {canMarkDone && hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={markingDoneNoteId === note.id}
+                                className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                onClick={() => void markWaitingTasksDone(note.id)}
+                              >
+                                Mark Done
+                              </Button>
+                            ) : (
+                              <span className="text-xs text-slate-400">-</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[80px] w-[80px] max-w-[80px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {note.status !== "CLOSED" ? (
-                              <div className="flex items-center gap-2">
-                                {hasTask && aggregatedStatus === "WAITING_CONFIRMATION" ? (
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={markingDoneNoteId === note.id}
-                                    className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
-                                    onClick={() => void markWaitingTasksDone(note.id)}
-                                  >
-                                    Mark Done
-                                  </Button>
-                                ) : null}
-                                <Button
-                                  variant="outline"
-                                  size="sm"
-                                  disabled={hasTask}
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                disabled={hasTask}
                                 aria-disabled={hasTask}
                                 title={hasTask ? "Close disabled when task exists" : "Close"}
                                 className={`h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 ${hasTask ? "opacity-50 cursor-not-allowed" : ""}`}
-                                  onClick={() => void closeNote(note.id)}
-                                >
-                                  Close
-                                </Button>
-                              </div>
+                                onClick={() => void closeNote(note.id)}
+                              >
+                                Close
+                              </Button>
                             ) : (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200 h-7 flex items-center">
                                 Closed
