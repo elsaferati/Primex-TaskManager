@@ -25,6 +25,7 @@ from app.api.routers.common_view import router as common_view_router
 from app.api.routers.task_statuses import router as task_statuses_router
 from app.api.routers.exports import router as exports_router
 from app.api.routers.speech import router as speech_router
+from app.api.routers.public import router as public_router
 
 
 api_router = APIRouter()
@@ -53,4 +54,5 @@ api_router.include_router(common_entries_router, prefix="/common-entries", tags=
 api_router.include_router(common_view_router, prefix="/common-view", tags=["common-view"])
 api_router.include_router(exports_router, prefix="/exports", tags=["exports"])
 api_router.include_router(speech_router, prefix="/speech", tags=["speech"])
+api_router.include_router(public_router, prefix="/public", tags=["public"])
 

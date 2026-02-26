@@ -36,6 +36,14 @@ class GaNoteOut(BaseModel):
     attachments: list[GaNoteAttachmentOut] = []
 
 
+class GaNotePublicOut(BaseModel):
+    id: uuid.UUID
+    content: str
+    note_type: GaNoteType
+    status: GaNoteStatus
+    created_at: datetime
+
+
 class GaNoteCreate(BaseModel):
     content: str
     created_by: uuid.UUID | None = None
