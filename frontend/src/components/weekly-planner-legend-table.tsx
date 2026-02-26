@@ -38,7 +38,7 @@ export const LEGEND_COLORS: Record<string, string> = {
   "TO DO": "#FF0000", // Red
   KRYER: "#C4FDC4", // Green
   "NUK ESHTE PUNUAR": "#FFC4ED", // Pink
-  PROCES: "#FFD700", // Yellow
+  PROCES: "#FFFF00", // Yellow (match IN_PROGRESS)
   PV: "#D3D3D3", // Light Grey
   "KOMPLET (100% PROJEKTE)": "#D3D3D3", // Light task)
   "WAITING CONFIRMATION": "#FFEDD5", // Amber
@@ -47,7 +47,7 @@ export const LEGEND_COLORS: Record<string, string> = {
   // Alternative/new labels (for backward compatibility)
   "NEW TASK / TO DO": "#FF0000", // Red
   DONE: "#C4FDC4", // Green
-  "NË PROCES": "#FFC4ED", // Pink
+  "NË PROCES": "#FFFF00", // Yellow (match IN_PROGRESS)
 }
 
 const LEGEND_LABEL_DISPLAY: Record<string, string> = {
@@ -538,3 +538,4 @@ export function WeeklyPlannerLegendTable({
     </Card>
   )
 }
+

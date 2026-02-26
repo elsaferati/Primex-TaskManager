@@ -32,6 +32,7 @@ from app.models.common_entry import CommonEntry
 from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.department import Department
+from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
@@ -67,9 +68,13 @@ router = APIRouter()
 class AllTasksReportRowIn(BaseModel):
     typeLabel: str = Field(default="-")
     subtype: str = Field(default="-")
+    dateLabel: str | None = None
+    bzMe: str | None = None
     period: str = Field(default="-")
     department: str = Field(default="-")
     title: str = Field(default="-")
+    description: str | None = None
+    details: str | None = None
     status: str = Field(default="-")
     bz: str = Field(default="-")
     kohaBz: str = Field(default="-")
@@ -89,6 +94,11 @@ class ExportPreviewOut(BaseModel):
     rows: list[list[str]]
     total: int | None = None
     truncated: bool = False
+
+class CommonViewExportIn(BaseModel):
+    title: str
+    columns: list[str]
+    rows: list[list[str]]
 
 
 DATE_LABEL_RE = re.compile(r"Date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
@@ -119,6 +129,19 @@ def _initials_filename(label: str | None) -> str:
     return "_".join(list(compact))
 
 
+GA_USERNAME = "gane.arifaj"
+GA_EMAIL = "ga@primexeu.com"
+
+
+async def _resolve_ga_user(db: AsyncSession) -> User | None:
+    stmt = select(User).where(func.lower(User.username) == GA_USERNAME)
+    ga_user = (await db.execute(stmt)).scalar_one_or_none()
+    if ga_user:
+        return ga_user
+    stmt = select(User).where(func.lower(User.email) == GA_EMAIL)
+    return (await db.execute(stmt)).scalar_one_or_none()
+
+
 def _format_excel_date(d: date) -> str:
     return f"{d.day:02d}-{d.month:02d}-{d.year}"
 
@@ -129,6 +152,14 @@ def _format_excel_datetime(value: date | datetime | None) -> str:
     if isinstance(value, datetime):
         return _format_excel_date(value.date())
     return _format_excel_date(value)
+
+def _format_date_dot(d: date) -> str:
+    return f"{d.day:02d}.{d.month:02d}.{d.year}"
+
+def _format_time(value: time | None) -> str:
+    if value is None:
+        return ""
+    return f"{value.hour:02d}:{value.minute:02d}"
 
 
 def _day_code(d: date) -> str:
@@ -172,6 +203,18 @@ def _frequency_label(value: str | None) -> str:
 
 _WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
+
+GA_TIME_SLOTS: list[tuple[str, str]] = [
+    ("08:00", "09:00"),
+    ("09:00", "10:00"),
+    ("10:00", "11:00"),
+    ("11:00", "12:00"),
+    ("12:00", "13:00"),
+    ("13:00", "14:00"),
+    ("14:00", "15:00"),
+    ("15:00", "16:00"),
+    ("16:00", "17:00"),
+]
 
 
 def _month_cycle_labels(start_month: int, interval: int) -> list[str]:
@@ -1069,6 +1112,154 @@ async def export_tasks_xlsx(
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
+@router.get("/ga-time.xlsx")
+async def export_ga_time_xlsx(
+    week_start: date,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_manager_or_admin(user)
+
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
+
+    week_dates = [week_start + timedelta(days=i) for i in range(5)]
+    week_isos = [d.isoformat() for d in week_dates]
+
+    entries = (
+        await db.execute(
+            select(GaTimeSlotTemplate)
+            .where(GaTimeSlotTemplate.user_id == ga_user.id)
+            .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.created_at)
+        )
+    ).scalars().all()
+
+    entry_map: dict[tuple[int, str], list[str]] = {}
+    for entry in entries:
+        day_value = int(entry.day_of_week or 0)
+        start_label = _format_time(entry.start_time)
+        key = (day_value, start_label)
+        entry_map.setdefault(key, []).append(entry.content or "")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "GA Time Table"[:31]
+
+    last_col = 2 + len(week_dates)
+
+    title_text = f"GA TIME TABLE ({_format_date_dot(week_dates[0])} - {_format_date_dot(week_dates[-1])})"
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title_text)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    user_initials = _initials(user.full_name or user.username or "")
+
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+
+    header_row = 4
+    data_start_row = 5
+
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 16
+    for idx in range(3, last_col + 1):
+        ws.column_dimensions[get_column_letter(idx)].width = 40
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    headers = ["NR", "TIME"] + [f"{_day_code(d)} = {_format_date_dot(d)}" for d in week_dates]
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+
+    row_idx = data_start_row
+    for slot_index, (start_label, end_label) in enumerate(GA_TIME_SLOTS, start=1):
+        nr_cell = ws.cell(row=row_idx, column=1, value=slot_index)
+        nr_cell.font = Font(bold=True)
+        nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        time_cell = ws.cell(row=row_idx, column=2, value=f"{start_label} - {end_label}")
+        time_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        for day_offset, _iso in enumerate(week_isos):
+            day_value = day_offset
+            cell_values = entry_map.get((day_value, start_label), [])
+            value = "\n".join(v for v in cell_values if v)
+            cell = ws.cell(row=row_idx, column=3 + day_offset, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        row_idx += 1
+
+    last_row = row_idx - 1
+
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.freeze_panes = "C5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == header_row else thin
+            bottom = thick if r == last_row else thin
+            ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for c in range(1, last_col + 1):
+        cell = ws.cell(row=header_row, column=c)
+        cell.border = Border(
+            left=thick if c == 1 else thin,
+            right=thick if c == last_col else thin,
+            top=thick,
+            bottom=thick,
+        )
+
+    for r in range(data_start_row, last_row + 1):
+        max_lines = 1
+        for c in range(1, last_col + 1):
+            value = ws.cell(row=r, column=c).value
+            lines = str(value).count("\n") + 1 if value else 1
+            max_lines = max(max_lines, lines)
+        ws.row_dimensions[r].height = max(18, min(240, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    filename_date = f"{week_start.day:02d}_{week_start.month:02d}_{str(week_start.year)[-2:]}"
+    initials_value = (user_initials or "USER").upper()
+    filename = f"GA TIME TABLE {filename_date}_EF ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
 
 @router.get("/project-tasks-preview", response_model=ExportPreviewOut)
 async def preview_project_tasks(
@@ -1488,7 +1679,20 @@ async def export_all_tasks_report_xlsx(
 ):
     ensure_reports_access(user)
 
-    headers = ["NR", "LL", "NLL", "AM/PM", "DEP", "TITULLI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "PUNOI"]
+    headers = [
+        "NR",
+        "LL",
+        "NLL",
+        "DITA",
+        "BZ ME",
+        "KOHA BZ",
+        "DEP",
+        "AM/PM",
+        "TITULLI",
+        "PERSHKRIMI",
+        "REGJ/PATH/CHECKLISTA/TRAINING/GROUP",
+        "USER",
+    ]
     title_text = _safe_filename(payload.title or "ALL TASKS REPORT")
 
     wb = Workbook()
@@ -1523,14 +1727,14 @@ async def export_all_tasks_report_xlsx(
             idx,
             (r.typeLabel or "-"),
             (r.subtype or "-"),
-            (r.period or "-"),
-            (r.department or "-"),
-            (r.title or "-"),
-            (r.status or "-"),
-            (r.bz or "-"),
+            (r.dateLabel or "-"),
+            (r.bzMe or ""),
             (r.kohaBz or "-"),
-            (r.tyo or "-"),
-            (r.comment or ""),
+            (r.department or "-"),
+            (r.period or "-"),
+            (r.title or "-"),
+            (r.description or ""),
+            (r.details or ""),
             (r.userInitials or "-"),
         ]
         for col_idx, value in enumerate(values, start=1):
@@ -1547,15 +1751,15 @@ async def export_all_tasks_report_xlsx(
         1: 5,   # NR
         2: 6,   # LL
         3: 7,   # NLL
-        4: 7,   # AM/PM
-        5: 7,   # DEP
-        6: 42,  # TITULLI
-        7: 10,  # STS
-        8: 10,  # BZ
-        9: 12,  # KOHA BZ
-        10: 6,  # T/Y/O
-        11: 22, # KOMENT
-        12: 10, # PUNOI
+        4: 12,  # DITA
+        5: 14,  # BZ ME
+        6: 12,  # KOHA BZ
+        7: 8,   # DEP
+        8: 7,   # AM/PM
+        9: 42,  # TITULLI
+        10: 46, # PERSHKRIMI
+        11: 46, # REGJ/PATH/CHECKLISTA/TRAINING/GROUP
+        12: 10, # USER
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
@@ -1628,6 +1832,134 @@ async def export_all_tasks_report_xlsx(
     # Standard required filename:
     # ALL ADMIN TASK REPORT_DD_MM_YY_USERS_INITIALS.xlsx
     filename = f"ALL_ADMIN_TASK_REPORT_{filename_date}_{filename_users}.xlsx".replace("__", "_")
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+@router.post("/common-view.xlsx")
+async def export_common_view_xlsx(
+    payload: CommonViewExportIn,
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+
+    if not payload.columns:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="columns are required")
+    for row in payload.rows:
+        if len(row) != len(payload.columns):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="row length mismatch")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = (payload.title or "Common View")[:31]
+
+    last_col = len(payload.columns)
+
+    # Row 1: merged title
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=payload.title or "COMMON VIEW")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    header_row = 4
+    data_row = header_row + 1
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    for col_idx, header in enumerate(payload.columns, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=str(header))
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        cell.number_format = "@"
+
+    # Data rows
+    for row in payload.rows:
+        for col_idx, value in enumerate(row, start=1):
+            cell = ws.cell(row=data_row, column=col_idx, value=value or "")
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            if col_idx == 1:
+                cell.font = Font(bold=True)
+        data_row += 1
+
+    last_row = data_row - 1
+
+    ws.column_dimensions["A"].width = 5
+    ws.column_dimensions["B"].width = 14
+    for col_idx in range(3, last_col + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = 44
+
+    if last_row >= header_row:
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+
+    ws.freeze_panes = "C5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials_compact = _initials_compact(user.full_name or user.username or "") or "____"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials_compact}"
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    if last_row >= header_row:
+        for r_idx in range(header_row, last_row + 1):
+            for c_idx in range(1, last_col + 1):
+                is_header = r_idx == header_row
+                is_first_col = c_idx == 1
+                is_last_col = c_idx == last_col
+                is_last_row = r_idx == last_row
+
+                left = thick if is_first_col else thin
+                right = thick if is_last_col else thin
+                top = thick if is_header else thin
+                bottom = thick if is_last_row else thin
+
+                if is_header:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=thick, right=thick, top=thick, bottom=thick)
+                else:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for r in range(data_row, last_row + 1):
+        max_lines = 1
+        for c in range(1, last_col + 1):
+            value = ws.cell(row=r, column=c).value
+            lines = str(value).count("\n") + 1 if value else 1
+            max_lines = max(max_lines, lines)
+        ws.row_dimensions[r].height = max(18, min(240, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+
+    title_match = re.search(r"(\d{2})\.(\d{2})\.(\d{4})", payload.title or "")
+    if title_match:
+        dd, mm, yyyy = title_match.groups()
+        filename_date = f"{dd}_{mm}_{yyyy[-2:]}"
+
+    initials_value = (_initials_compact(user.full_name or user.username or "") or "USER").upper()
+    filename = f"COMMON VIEW {filename_date}_EF ({initials_value}).xlsx"
 
     return StreamingResponse(
         bio,
