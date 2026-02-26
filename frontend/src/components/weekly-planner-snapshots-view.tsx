@@ -68,10 +68,13 @@ type SnapshotTaskEntry = {
   task_id: string | null
   task_title?: string
   title?: string
+  phase?: string | null
   status?: string | null
   daily_status?: string | null
   completed_at?: string | null
   daily_products: number | null
+  total_products?: number | null
+  completed_products?: number | null
   finish_period?: string | null
   fast_task_type?: string | null
   is_bllok: boolean
@@ -85,6 +88,8 @@ type SnapshotProjectEntry = {
   project_id: string
   project_title: string
   project_total_products: number | null
+  project_current_phase?: string | null
+  project_type?: string | null
   task_count: number
   tasks: SnapshotTaskEntry[]
   is_late?: boolean
@@ -239,7 +244,10 @@ const getStatusCardClassesForDay = (
   }
   
   // For non-DONE tasks or when dates aren't available, use the main status
-  return getStatusCardClasses(normalized)
+  if (normalized === "WAITING_CONFIRMATION") {
+    return getStatusCardClasses("TODO")
+  }
+  return getStatusCardClasses(normalized === "TODO" ? "TODO" : "IN_PROGRESS")
 }
 
 const getStatusValueForDay = (
@@ -274,7 +282,7 @@ const getStatusValueForDay = (
   }
   
   // For non-DONE tasks or when dates aren't available, use the main status
-  if (normalized === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
+  if (normalized === "WAITING_CONFIRMATION") return "TODO"
   return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
 }
 
@@ -332,6 +340,10 @@ const sortFastTasks = (tasks: SnapshotTaskEntry[]) => {
       return a.index - b.index
     })
     .map((entry) => entry.task)
+}
+
+const getProjectDisplayTitle = (project: SnapshotProjectEntry) => {
+  return project.project_title || "Untitled project"
 }
 
 const getBlockForSlot = (
@@ -497,7 +509,7 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                   >
                     <div className="flex items-start justify-between gap-2">
                       <div className="min-w-0 truncate whitespace-nowrap text-sm font-semibold text-slate-900">
-                        {projectIndex + 1}. {project.project_title}
+                        {projectIndex + 1}. {getProjectDisplayTitle(project)}
                       </div>
                       {project.is_late ? (
                         <span className="inline-flex h-5 items-center justify-center rounded-full bg-red-500 px-2 text-[10px] font-semibold text-white">
@@ -1176,11 +1188,7 @@ export function WeeklyPlannerSnapshotsView({
         if (projects.length > 0 || systemTasks.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
-              <div class="project-title">${projectIndex + 1}. ${project.project_title}`
-            if (project.project_total_products) {
-              html += ` <span style="color: #666; font-size: 4pt;">(${project.project_total_products})</span>`
-            }
-            html += `</div>`
+              <div class="project-title">${projectIndex + 1}. ${getProjectDisplayTitle(project)}</div>`
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
                 const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
@@ -1266,11 +1274,7 @@ export function WeeklyPlannerSnapshotsView({
         if (projects.length > 0 || systemTasks.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
-              <div class="project-title">${projectIndex + 1}. ${project.project_title}`
-            if (project.project_total_products) {
-              html += ` <span style="color: #666; font-size: 4pt;">(${project.project_total_products})</span>`
-            }
-            html += `</div>`
+              <div class="project-title">${projectIndex + 1}. ${getProjectDisplayTitle(project)}</div>`
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
                 const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)

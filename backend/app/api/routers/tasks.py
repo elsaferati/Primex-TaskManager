@@ -1446,63 +1446,38 @@ async def update_task(
         )
 
     if payload.status is not None and payload.status != task.status:
-        old_status = task.status
         task.status = payload.status
         status_changed = True
         if task.status == TaskStatus.DONE:
             task.completed_at = task.completed_at or datetime.now(timezone.utc)
         else:
             task.completed_at = None
-        
-        # Update TaskDailyProgress for MST/TT tasks when status changes
-        # This ensures the color (yellow/green) only appears on the day status changed
-        # Use "today" (the day status is being changed) instead of due_date
-        if task.project_id is not None and task.phase in (
-            ProjectPhaseStatus.PRODUCT.value,
-            ProjectPhaseStatus.CONTROL.value,
-        ):
-            project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
-            if project is not None and _is_mst_or_tt_project(project):
-                # Use today (the day status is being changed) instead of due_date
-                today = datetime.now(timezone.utc).date()
-                
-                # Get or create TaskDailyProgress for today
-                existing_progress = (
-                    await db.execute(
-                        select(TaskDailyProgress).where(
-                            TaskDailyProgress.task_id == task.id,
-                            TaskDailyProgress.day_date == today,
-                        )
-                    )
-                ).scalar_one_or_none()
-                
-                if existing_progress is None:
-                    # Create new entry with explicit status
-                    total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
-                    db.add(
-                        TaskDailyProgress(
-                            task_id=task.id,
-                            day_date=today,
-                            completed_value=completed or 0,
-                            total_value=total or 0,
-                            completed_delta=0,
-                            daily_status=task.status.value,
-                        )
-                    )
-                else:
-                    # Update existing entry's daily_status based on status change
-                    # If status is DONE, always set to DONE
-                    if task.status == TaskStatus.DONE:
-                        existing_progress.daily_status = TaskStatus.DONE.value
-                    elif task.status == TaskStatus.WAITING_CONFIRMATION:
-                        existing_progress.daily_status = TaskStatus.WAITING_CONFIRMATION.value
-                    elif task.status == TaskStatus.IN_PROGRESS:
-                        # Only set to IN_PROGRESS if it was TODO before
-                        # This ensures we don't override a DONE status from a previous day
-                        if old_status == TaskStatus.TODO:
-                            existing_progress.daily_status = TaskStatus.IN_PROGRESS.value
-                        # If it was already IN_PROGRESS or DONE, keep the current daily_status
-                    # If status is TODO, don't change daily_status (keep existing or default to TODO)
+
+        # Record explicit per-day status change for all tasks (not just MST/TT).
+        # This powers weekly planner day-by-day colors.
+        today = datetime.now(timezone.utc).date()
+        existing_progress = (
+            await db.execute(
+                select(TaskDailyProgress).where(
+                    TaskDailyProgress.task_id == task.id,
+                    TaskDailyProgress.day_date == today,
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_progress is None:
+            total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
+            db.add(
+                TaskDailyProgress(
+                    task_id=task.id,
+                    day_date=today,
+                    completed_value=completed or 0,
+                    total_value=total or 0,
+                    completed_delta=0,
+                    daily_status=task.status.value,
+                )
+            )
+        else:
+            existing_progress.daily_status = task.status.value
     
     if payload.is_personal is not None:
         task.is_personal = payload.is_personal
@@ -1631,12 +1606,12 @@ async def update_task(
                                     )
                                 )
                             ).scalar_one_or_none()
-                            if existing_today_progress and existing_today_progress.daily_status in (
-                                TaskStatus.IN_PROGRESS.value,
-                                TaskStatus.DONE.value,
-                            ):
+                            if existing_today_progress and existing_today_progress.daily_status:
                                 # Preserve the explicit status that was set today
-                                explicit_status_for_today = TaskStatus(existing_today_progress.daily_status)
+                                try:
+                                    explicit_status_for_today = TaskStatus(existing_today_progress.daily_status)
+                                except Exception:
+                                    explicit_status_for_today = None
                         
                         await upsert_task_daily_progress(
                             db,

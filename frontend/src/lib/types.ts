@@ -108,6 +108,7 @@ export interface Board {
 export interface Project {
   id: string
   title?: string
+  display_title?: string | null
   name?: string
   description?: string | null
   department_id?: string | null

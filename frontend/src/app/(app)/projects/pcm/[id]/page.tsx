@@ -3119,10 +3119,53 @@ export default function PcmProjectPage() {
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
+  const backendDisplayTitle = project.display_title?.trim()
   const baseTitle = project.title || project.name || "Project"
-  const title = project.project_type === "MST" && project.total_products != null && project.total_products > 0
-    ? `${baseTitle} - ${project.total_products}`
-    : baseTitle
+  const isTtOrMst = isMstProject(project)
+  const controlTasks = tasks.filter((task) => task.phase === "CONTROL")
+  const hasControlTasks = controlTasks.length > 0
+  const fallbackControlTotals = controlTasks
+    .map((task) => {
+      const originTaskId = getOriginTaskId(task.internal_notes)
+      const originTask = originTaskId ? tasks.find((t) => t.id === originTaskId) : null
+      if (originTask?.daily_products != null && originTask.daily_products > 0) return originTask.daily_products
+      const totals = parseTaskTotals(task.internal_notes)
+      return totals.total > 0 ? totals.total : 0
+    })
+    .filter((value) => value > 0)
+  const totalForTitle =
+    project.total_products != null && project.total_products > 0
+      ? project.total_products
+      : fallbackControlTotals.length
+        ? Math.max(...fallbackControlTotals)
+        : null
+
+  const completedSum = controlTasks.reduce((acc, task) => {
+    const editCompleted = controlEdits[task.id]?.completed
+    if (editCompleted != null && editCompleted !== "") {
+      return acc + toNonNegativeInt(editCompleted)
+    }
+    const totals = parseTaskTotals(task.internal_notes)
+    return acc + toNonNegativeInt(totals.completed)
+  }, 0)
+
+  const title = (() => {
+    if (backendDisplayTitle) return backendDisplayTitle
+
+    if (!(isTtOrMst && hasControlTasks && totalForTitle != null && totalForTitle > 0)) {
+      if (project.project_type === "MST" && project.total_products != null && project.total_products > 0) {
+        return `${baseTitle} - ${project.total_products}`
+      }
+      return baseTitle
+    }
+    const completed = Math.min(completedSum, totalForTitle)
+    let normalizedBase = baseTitle.trim()
+    const trailingTotalMatch = normalizedBase.match(/\((\d+)\)\s*$/)
+    if (trailingTotalMatch && Number.parseInt(trailingTotalMatch[1], 10) === totalForTitle) {
+      normalizedBase = normalizedBase.replace(/\s*\(\d+\)\s*$/, "").trim()
+    }
+    return `${normalizedBase} (${totalForTitle}/${completed})`
+  })()
 
   const renderProjectTitle = () => {
     if (!canEditProjectTitle) {

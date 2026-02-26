@@ -19,6 +19,7 @@ import { ChevronDown, Plus, X, Printer, GripVertical, Download } from "lucide-re
 import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
+import { resolveProjectTitle } from "@/lib/project-display-title"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -42,6 +43,7 @@ import type { ChecklistItem, Department, Project, Task, UserLookup } from "@/lib
 type WeeklyTableProjectTaskEntry = {
   task_id: string
   task_title: string
+  phase?: string | null
   status?: string | null
   daily_status?: string | null
   created_at?: string | null
@@ -61,6 +63,8 @@ type WeeklyTableProjectEntry = {
   project_id: string
   project_title: string
   project_total_products: number | null
+  project_current_phase?: string | null
+  project_type?: string | null
   task_count: number
   tasks: WeeklyTableProjectTaskEntry[]
   is_late?: boolean
@@ -847,7 +851,7 @@ export default function WeeklyPlannerPage() {
   }, [])
 
   const projectLabel = React.useCallback((project: Project) => {
-    return project.title || project.name || "Untitled project"
+    return resolveProjectTitle(project) || "Untitled project"
   }, [])
 
   const availableProjects = React.useMemo(() => {
@@ -1083,9 +1087,9 @@ export default function WeeklyPlannerPage() {
       }
 
       if (normalized === "WAITING_CONFIRMATION") {
-        return getStatusCardClasses("WAITING_CONFIRMATION")
+        return getStatusCardClasses("TODO")
       }
-      return getStatusCardClasses(normalized)
+      return getStatusCardClasses(normalized === "TODO" ? "TODO" : "IN_PROGRESS")
     },
     [getStatusCardClasses]
   )
@@ -1138,7 +1142,7 @@ export default function WeeklyPlannerPage() {
       }
 
       if (normalized === "WAITING_CONFIRMATION") {
-        return "WAITING_CONFIRMATION"
+        return "TODO"
       }
       return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
     },
@@ -1200,9 +1204,13 @@ export default function WeeklyPlannerPage() {
     if (total == null) return null
     const completed = task.completed_products
     if (completed != null) {
-      return `${completed}/${total} pcs`
+      return `${total}/${completed} pcs`
     }
     return `${total} pcs`
+  }, [])
+
+  const getProjectDisplayTitle = React.useCallback((project: WeeklyTableProjectEntry) => {
+    return project.project_title || "Untitled project"
   }, [])
 
   const getFastTaskBadge = React.useCallback((task: {
@@ -2229,11 +2237,7 @@ export default function WeeklyPlannerPage() {
         } else if (projects.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
-              <div class="project-title">${projectIndex + 1}. ${project.project_title}`
-            if (project.project_total_products) {
-              html += ` <span style="color: #666; font-size: 4pt;">(${project.project_total_products})</span>`
-            }
-            html += `</div>`
+              <div class="project-title">${projectIndex + 1}. ${escapeHtml(getProjectDisplayTitle(project))}</div>`
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
@@ -2389,11 +2393,7 @@ export default function WeeklyPlannerPage() {
         } else if (projects.length > 0) {
           projects.forEach((project, projectIndex) => {
             html += `<div class="project-card">
-              <div class="project-title">${projectIndex + 1}. ${project.project_title}`
-            if (project.project_total_products) {
-              html += ` <span style="color: #666; font-size: 4pt;">(${project.project_total_products})</span>`
-            }
-            html += `</div>`
+              <div class="project-title">${projectIndex + 1}. ${escapeHtml(getProjectDisplayTitle(project))}</div>`
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
@@ -2544,6 +2544,7 @@ export default function WeeklyPlannerPage() {
     departments,
     getFastTaskBadge,
     getBlockForSlot,
+    getProjectDisplayTitle,
     getStatusValueForDay,
     getTaskStatusBadge,
     isTaskNewForWeek,
@@ -3879,7 +3880,7 @@ export default function WeeklyPlannerPage() {
                                     >
                                         <div className="font-semibold text-sm text-slate-900 flex items-start justify-between gap-2">
                                           <div className="flex items-center gap-2 min-w-0">
-                                            <span className="truncate whitespace-nowrap">{projectIndex + 1}. {project.project_title}</span>
+                                            <span className="truncate whitespace-nowrap">{projectIndex + 1}. {getProjectDisplayTitle(project)}</span>
                                           {project.is_late && (
                                             <span className="inline-flex h-5 items-center justify-center rounded-full bg-red-500 text-white px-2 text-[10px] font-semibold">
                                               LATE

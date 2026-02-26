@@ -24,6 +24,7 @@ import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
+import { resolveProjectTitle } from "@/lib/project-display-title"
 import type {
   DailyReportGaEntry,
   DailyReportGaTableResponse,
@@ -1982,7 +1983,7 @@ export default function DepartmentKanban() {
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
     for (const p of projects) {
-      const title = p.title || p.name
+      const title = resolveProjectTitle(p)
       if (title) {
         existingTitles.set(p.id, title)
       }
@@ -2003,7 +2004,7 @@ export default function DepartmentKanban() {
       setProjectTitleLookup((prev) => {
         const next = new Map(prev)
         for (const item of data) {
-          if (item?.id && item?.title) next.set(item.id, item.title)
+          if (item?.id) next.set(item.id, resolveProjectTitle(item))
         }
         return next
       })
@@ -2399,7 +2400,7 @@ export default function DepartmentKanban() {
 
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-        const projectLabel = project?.title || project?.name || projectTitleByTaskId.get(task.id) || null
+        const projectLabel = resolveProjectTitle(project) || projectTitleByTaskId.get(task.id) || null
 
         if (isProject) {
           projectRows.push({
@@ -2489,7 +2490,7 @@ export default function DepartmentKanban() {
         })
         .map((task) => {
           const project = projects.find((p) => p.id === task.project_id) || null
-          const projectLabel = project?.title || project?.name || "Project"
+          const projectLabel = resolveProjectTitle(project) || "Project"
           return `${projectLabel}: ${task.title}`
         })
         .sort((a, b) => a.localeCompare(b))
@@ -2563,7 +2564,7 @@ export default function DepartmentKanban() {
     return todayProjectTasks
       .map((task) => {
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-        const projectLabel = project?.title || project?.name || "Project"
+        const projectLabel = resolveProjectTitle(project) || "Project"
         return `${projectLabel}: ${task.title}`
       })
       .sort((a, b) => a.localeCompare(b))
@@ -2841,7 +2842,7 @@ export default function DepartmentKanban() {
     }> = []
     for (const task of todayProjectTasks) {
       const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-      const projectLabel = project?.title || project?.name || "Project"
+      const projectLabel = resolveProjectTitle(project) || "Project"
       const period = resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at)
       const userId = task.assigned_to || task.assigned_to_user_id || task.created_by || "__unassigned__"
       items.push({
@@ -2993,7 +2994,7 @@ export default function DepartmentKanban() {
       const project = projects.find((p) => p.id === projectId) || null
       return {
         id: projectId,
-        name: project?.title || project?.name || "Project",
+        name: resolveProjectTitle(project) || "Project",
         tasks,
       }
     })
@@ -3847,7 +3848,7 @@ export default function DepartmentKanban() {
 
   const deleteProject = async (projectId: string) => {
     const project = projects.find((p) => p.id === projectId)
-    const projectLabel = project?.title || project?.name || "this project"
+    const projectLabel = resolveProjectTitle(project) || "this project"
     if (!window.confirm(`Delete "${projectLabel}"? This cannot be undone.`)) return
 
     setDeletingProjectId(projectId)
@@ -5325,7 +5326,7 @@ export default function DepartmentKanban() {
                     {todayProjectTasksSorted.map((task, index) => {
                             const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
                             const meta = task.project_id ? projectMetaLookup.get(task.project_id) || null : null
-                            const projectTitle = project?.title || project?.name || meta?.title || "-"
+                            const projectTitle = resolveProjectTitle(project) || meta?.title || "-"
                             const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "-"
                             const assignees = taskAssigneeInitials(task)
                         return (
@@ -6802,7 +6803,7 @@ export default function DepartmentKanban() {
                                   <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
                                     {project ? (
                                       <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
-                                        {project.title || project.name || "Project"}
+                                        {resolveProjectTitle(project) || "Project"}
                                       </Badge>
                                     ) : null}
                                   </td>
@@ -6982,7 +6983,7 @@ export default function DepartmentKanban() {
                               <SelectContent>
                                 {internalNoteProjects.map((project) => (
                                   <SelectItem key={project.id} value={project.id}>
-                                    {project.title || project.name || "Untitled project"}
+                                    {resolveProjectTitle(project) || "Untitled project"}
                                   </SelectItem>
                                 ))}
                               </SelectContent>
@@ -7122,7 +7123,7 @@ export default function DepartmentKanban() {
                               <SelectContent>
                                 {editInternalNoteProjects.map((project) => (
                                   <SelectItem key={project.id} value={project.id}>
-                                    {project.title || project.name || "Untitled project"}
+                                    {resolveProjectTitle(project) || "Untitled project"}
                                   </SelectItem>
                                 ))}
                               </SelectContent>

@@ -33,8 +33,9 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     """A task within a project entry in the weekly table"""
     task_id: uuid.UUID
     task_title: str
+    phase: str | None = None
     status: TaskStatus = TaskStatus.TODO
-    # Optional per-day status override for MST/TT tasks (driven by task_daily_progress).
+    # Optional per-day status override (driven by task_daily_progress).
     daily_status: TaskStatus | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None
@@ -54,6 +55,8 @@ class WeeklyTableProjectEntry(BaseModel):
     project_id: uuid.UUID
     project_title: str
     project_total_products: int | None = None
+    project_current_phase: str | None = None
+    project_type: str | None = None
     task_count: int = 0
     tasks: list[WeeklyTableProjectTaskEntry] = []
     is_late: bool = False
@@ -64,7 +67,7 @@ class WeeklyTableTaskEntry(BaseModel):
     task_id: uuid.UUID | None = None
     title: str
     status: TaskStatus = TaskStatus.TODO
-    # Optional per-day status override for MST/TT tasks (driven by task_daily_progress).
+    # Optional per-day status override (driven by task_daily_progress).
     daily_status: TaskStatus | None = None
     created_at: datetime | None = None
     completed_at: datetime | None = None

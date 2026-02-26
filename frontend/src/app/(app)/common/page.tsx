@@ -4,6 +4,7 @@ import * as React from "react"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateTimeDMY } from "@/lib/dates"
+import { resolveProjectTitle } from "@/lib/project-display-title"
 import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
 type CommonType =
@@ -1616,12 +1617,8 @@ export default function CommonViewPage() {
           if (projectIds.length) {
             const lookupMap = await fetchProjectLookup(projectIds)
             for (const project of lookupMap.values()) {
-              const baseTitle = (project.title || project.name || "").trim()
-              if (!baseTitle) continue
-              const projectName =
-                project.project_type === "MST" && project.total_products != null && project.total_products > 0
-                  ? `${baseTitle} - ${project.total_products}`
-                  : baseTitle
+              const projectName = resolveProjectTitle(project)
+              if (!projectName) continue
               projectNameById.set(project.id, projectName)
               projectInfoById.set(project.id, project)
             }
