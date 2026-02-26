@@ -858,6 +858,9 @@ export default function PcmProjectPage() {
   const [savingMembers, setSavingMembers] = React.useState(false)
   const [advancingPhase, setAdvancingPhase] = React.useState(false)
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
+  const canCloseProject = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false)
+  const [pendingCloseSource, setPendingCloseSource] = React.useState<"mst" | "vsvl" | null>(null)
   const mstCommentTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const vsVlDescriptionTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const vsVlMetaTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -1099,6 +1102,35 @@ export default function PcmProjectPage() {
               }}
             >
               {savingStartDate ? "Saving..." : "Save"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
+
+  const renderCloseConfirmDialog = () => (
+    <Dialog open={closeConfirmOpen} onOpenChange={setCloseConfirmOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Close Project?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            This will close the {pendingCloseSource === "vsvl" ? "VS/VL project" : "project"} and return you to the
+            Project Content Manager list.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCloseConfirmOpen(false)}
+              disabled={advancingPhase}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void confirmCloseProject()} disabled={advancingPhase}>
+              {advancingPhase ? "Closing..." : "Close Project"}
             </Button>
           </div>
         </div>
@@ -2744,6 +2776,17 @@ export default function PcmProjectPage() {
     }
   }
 
+  const requestCloseProject = (source: "mst" | "vsvl") => {
+    setPendingCloseSource(source)
+    setCloseConfirmOpen(true)
+  }
+
+  const confirmCloseProject = async () => {
+    setCloseConfirmOpen(false)
+    setPendingCloseSource(null)
+    await closeProjectFromFinal()
+  }
+
   const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
   const visibleTabs = React.useMemo(() => {
     // PCM: meetings phase shows meeting tabs + GA
@@ -3691,6 +3734,17 @@ export default function PcmProjectPage() {
                     </Button>
                   )
                 ) : null}
+                {isVsVl && vsVlPhase === "DREAMROBOT" && canCloseProject && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-7"
+                    disabled={advancingPhase}
+                    onClick={() => requestCloseProject("vsvl")}
+                  >
+                    {advancingPhase ? "Closing..." : "Close Project"}
+                  </Button>
+                )}
                 {user?.role === "ADMIN" && (
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <Checkbox
@@ -5333,6 +5387,7 @@ export default function PcmProjectPage() {
         {renderEditDueDateDialog()}
         {renderStartDateDialog()}
         {renderEditStartDateDialog()}
+        {renderCloseConfirmDialog()}
       </>
     )
   }
@@ -6127,20 +6182,6 @@ export default function PcmProjectPage() {
                     </button>
                   )
                 })}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {MST_PHASES.map((p, idx) => (
-                  <span key={p}>
-                    <button
-                      type="button"
-                      onClick={() => setMstPhase(p)}
-                      className={p === mstPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
-                    >
-                      {MST_PHASE_LABELS[p]}
-                    </button>
-                    {idx < MST_PHASES.length - 1 ? " -> " : ""}
-                  </span>
-                ))}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -7998,9 +8039,9 @@ export default function PcmProjectPage() {
                       {finalizationItems
                         .slice()
                         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                        .map((item) => {
+                        .map((item, index) => {
                           const isEditing = editingFinalizationId === item.id
-                          const itemNumber = item.position ?? 0
+                          const itemNumber = item.position ?? index + 1
                           return (
                             <div
                               key={item.id}
@@ -8137,17 +8178,17 @@ export default function PcmProjectPage() {
                         </div>
                       </div>
                     )}
-                    {isFinalizationComplete && canCloseFromFinal ? (
+                    {isFinalizationComplete && canCloseFromFinal && canCloseProject ? (
                       <div className="flex justify-end">
                         <Button
                           variant="outline"
                           disabled={advancingPhase}
-                          onClick={() => void closeProjectFromFinal()}
+                          onClick={() => requestCloseProject("mst")}
                         >
                           {advancingPhase ? "Closing..." : "Close Project"}
                         </Button>
                       </div>
-                    ) : null}
+                  ) : null}
                   </div>
                 </Card>
               )}
@@ -8164,6 +8205,7 @@ export default function PcmProjectPage() {
         {renderEditDueDateDialog()}
         {renderStartDateDialog()}
         {renderEditStartDateDialog()}
+        {renderCloseConfirmDialog()}
       </>
     )
   }
