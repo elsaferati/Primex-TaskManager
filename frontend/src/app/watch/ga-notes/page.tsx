@@ -58,51 +58,51 @@ export default function WatchGaNotesPage() {
   }, [loadNotes])
 
   return (
-    <div className="space-y-3">
+    <div className="space-y-3 text-sm">
       <header className="space-y-1">
         <div className="flex items-center justify-between gap-2">
-          <h1 className="text-base font-semibold">GA Notes</h1>
+          <h1 className="text-lg font-semibold">GA Notes</h1>
           <Button
             variant="outline"
             size="sm"
-            className="h-7 px-2 text-xs"
+            className="h-8 px-3 text-sm"
             onClick={() => void loadNotes()}
             disabled={loading}
           >
             {loading ? "Loading..." : "Refresh"}
           </Button>
         </div>
-        <div className="text-[11px] text-slate-500">Watch view</div>
+        <div className="text-xs text-slate-500">Watch view</div>
       </header>
 
       {error ? (
-        <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-xs text-rose-700">{error}</div>
+        <div className="rounded-md border border-rose-200 bg-rose-50 p-3 text-sm text-rose-700">{error}</div>
       ) : null}
 
       {loading && notes.length === 0 ? (
-        <div className="rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-500">Loading notes...</div>
+        <div className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-500">Loading notes...</div>
       ) : null}
 
       {!loading && notes.length === 0 ? (
-        <div className="rounded-md border border-slate-200 bg-white p-3 text-xs text-slate-500">
+        <div className="rounded-md border border-slate-200 bg-white p-3 text-sm text-slate-500">
           No notes to show.
         </div>
       ) : null}
 
       <div className="space-y-2">
         {notes.map((note) => (
-          <div key={note.id} className="rounded-md border border-slate-200 bg-white p-2 shadow-sm">
+          <div key={note.id} className="rounded-md border border-slate-200 bg-white p-3 shadow-sm">
             <div className="flex items-center justify-between gap-2">
-              <Badge variant="outline" className={`h-5 px-1.5 text-[10px] ${TYPE_BADGE[note.note_type]}`}>
+              <Badge variant="outline" className={`h-6 px-2 text-xs ${TYPE_BADGE[note.note_type]}`}>
                 {note.note_type}
               </Badge>
-              <span className="text-[10px] text-slate-500">{formatShortDate(note.created_at)}</span>
+              <span className="text-xs text-slate-500">{formatShortDate(note.created_at)}</span>
             </div>
             <div
-              className="mt-1 text-[11px] text-slate-800"
+              className="mt-1 text-sm text-slate-800"
               style={{
                 display: "-webkit-box",
-                WebkitLineClamp: 3,
+                WebkitLineClamp: 4,
                 WebkitBoxOrient: "vertical",
                 overflow: "hidden",
               }}

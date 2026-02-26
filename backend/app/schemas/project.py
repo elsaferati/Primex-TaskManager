@@ -12,6 +12,7 @@ from app.models.enums import ProjectPhaseStatus, ProjectType, TaskStatus
 class ProjectOut(BaseModel):
     id: uuid.UUID
     title: str
+    display_title: str | None = None
     description: str | None = None
     department_id: uuid.UUID | None = None
     manager_id: uuid.UUID | None = None

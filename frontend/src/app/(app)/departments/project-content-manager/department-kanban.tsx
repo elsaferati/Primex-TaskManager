@@ -24,6 +24,7 @@ import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/
 import { formatDepartmentName } from "@/lib/department-name"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
+import { resolveProjectTitle } from "@/lib/project-display-title"
 import type {
   ChecklistItem,
   DailyReportGaEntry,
@@ -73,7 +74,7 @@ const PHASE_LABELS: Record<string, string> = {
 // Get project-specific phases based on project type
 function getProjectPhases(project: Project): string[] {
   const projectType = project.project_type
-  const title = (project.title || project.name || "").toUpperCase()
+  const title = (resolveProjectTitle(project) || "").toUpperCase()
 
   // MST and TT projects (both use MST phases)
   if (projectType === "MST" || title.includes("MST") || title === "TT" || title.startsWith("TT ")) {
@@ -805,7 +806,7 @@ function parseKoUserId(notes?: string | null): string | null {
 function isMstOrTtProject(project: Project | null): boolean {
   if (!project) return false
   const projectType = project.project_type
-  const title = (project.title || project.name || "").toUpperCase().trim()
+  const title = (resolveProjectTitle(project) || "").toUpperCase().trim()
   const isTt = title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")
   return projectType === "MST" || title.includes("MST") || isTt
 }
@@ -1871,7 +1872,14 @@ export default function DepartmentKanban() {
         return members.some((m) => m.id === user.id)
       })
     }
-    return next
+    const withIndex = next.map((project, index) => ({ project, index }))
+    withIndex.sort((a, b) => {
+      const aClosed = (a.project.current_phase || "").toUpperCase() === "CLOSED"
+      const bClosed = (b.project.current_phase || "").toUpperCase() === "CLOSED"
+      if (aClosed === bClosed) return a.index - b.index
+      return aClosed ? 1 : -1
+    })
+    return withIndex.map((entry) => entry.project)
   }, [projects, projectMembers, showTemplates, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(() => departmentTasks, [departmentTasks])
@@ -2335,7 +2343,7 @@ export default function DepartmentKanban() {
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
     for (const p of projects) {
-      const title = p.title || p.name
+      const title = resolveProjectTitle(p)
       if (title) {
         existingTitles.set(p.id, title)
       }
@@ -2356,7 +2364,7 @@ export default function DepartmentKanban() {
       setProjectTitleLookup((prev) => {
         const next = new Map(prev)
         for (const item of data) {
-          if (item?.id && item?.title) next.set(item.id, item.title)
+          if (item?.id) next.set(item.id, resolveProjectTitle(item))
         }
         return next
       })
@@ -2732,7 +2740,7 @@ export default function DepartmentKanban() {
         const dueDate = task.due_date ? toDate(task.due_date) : null
         const isProject = Boolean(task.project_id)
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-        const projectLabel = project?.title || project?.name || projectTitleByTaskId.get(task.id) || null
+        const projectLabel = resolveProjectTitle(project) || projectTitleByTaskId.get(task.id) || null
 
         if (isProject) {
           projectRows.push({
@@ -2821,7 +2829,7 @@ export default function DepartmentKanban() {
         })
         .map((task) => {
           const project = projects.find((p) => p.id === task.project_id) || null
-          const projectLabel = project?.title || project?.name || "Project"
+          const projectLabel = resolveProjectTitle(project) || "Project"
           return `${projectLabel}: ${task.title}`
         })
         .sort((a, b) => a.localeCompare(b))
@@ -2897,7 +2905,7 @@ export default function DepartmentKanban() {
     return todayProjectTasks
       .map((task) => {
         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-        const projectLabel = project?.title || project?.name || "Project"
+        const projectLabel = resolveProjectTitle(project) || "Project"
         return `${projectLabel}: ${task.title}`
       })
       .sort((a, b) => a.localeCompare(b))
@@ -3203,7 +3211,7 @@ export default function DepartmentKanban() {
     }> = []
     for (const task of todayProjectTasks) {
       const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-      const projectLabel = project?.title || project?.name || "Project"
+      const projectLabel = resolveProjectTitle(project) || "Project"
       const period = resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at)
       const userId = task.assigned_to || task.assigned_to_user_id || task.created_by || "__unassigned__"
       items.push({
@@ -3423,7 +3431,7 @@ export default function DepartmentKanban() {
       const project = projects.find((p) => p.id === projectId) || null
       return {
         id: projectId,
-        name: project?.title || project?.name || "Project",
+        name: resolveProjectTitle(project) || "Project",
         tasks,
       }
     })
@@ -4404,7 +4412,7 @@ export default function DepartmentKanban() {
 
   const deleteProject = async (projectId: string) => {
     const project = projects.find((p) => p.id === projectId)
-    const projectLabel = project?.title || project?.name || "this project"
+    const projectLabel = resolveProjectTitle(project) || "this project"
     if (!window.confirm(`Delete "${projectLabel}"? This cannot be undone.`)) return
 
     setDeletingProjectId(projectId)
@@ -5485,6 +5493,7 @@ export default function DepartmentKanban() {
                     ? `Manager: ${manager.full_name || manager.username || "-"}`
                     : "No creator"
                 const phase = project.current_phase || "MEETINGS"
+                const isClosed = phase === "CLOSED"
                 const projectPhases = getProjectPhases(project)
                 const membersForProject = projectMembers[project.id] || []
                 const memberColors = [
@@ -5497,12 +5506,17 @@ export default function DepartmentKanban() {
                 return (
                   <Card
                     key={project.id}
-                    className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md dark:border-slate-700 dark:bg-slate-800"
+                    className={[
+                      "rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md dark:border-slate-700 dark:bg-slate-800",
+                      isClosed ? "opacity-70 border-slate-300 bg-slate-50" : "",
+                    ].join(" ")}
                   >
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5">
-                          <span className="text-sm font-semibold leading-tight text-slate-900 dark:text-slate-100 truncate">{project.title || project.name}</span>
+                          <span className={`text-sm font-semibold leading-tight truncate ${isClosed ? "text-slate-600 dark:text-slate-300" : "text-slate-900 dark:text-slate-100"}`}>
+                            {resolveProjectTitle(project)}
+                          </span>
                           {isTemplateProject(project) && (
                             <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-amber-700 border-amber-300 bg-amber-50 flex-shrink-0">Template</Badge>
                           )}
@@ -5525,9 +5539,16 @@ export default function DepartmentKanban() {
                             {deletingProjectId === project.id ? "Deleting..." : "Delete"}
                           </Button>
                         ) : null}
-                        <Badge variant="outline" className="text-[10px]">
-                          {PHASE_LABELS[phase] || "Meetings"}
-                        </Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className="text-[10px]">
+                            {PHASE_LABELS[phase] || "Meetings"}
+                          </Badge>
+                          {isClosed ? (
+                            <Badge variant="secondary" className="text-[10px]">
+                              Closed
+                            </Badge>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                     <div className="mt-3 text-xs text-slate-600 dark:text-slate-400">
@@ -6041,7 +6062,7 @@ export default function DepartmentKanban() {
                       {todayProjectTasksSorted.map((task, index) => {
                         const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
                         const meta = task.project_id ? projectMetaLookup.get(task.project_id) || null : null
-                        const projectTitle = project?.title || project?.name || meta?.title || "-"
+                        const projectTitle = resolveProjectTitle(project) || meta?.title || "-"
                         const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "-"
                         const assignees = taskAssigneeInitials(task)
                         return (
@@ -7208,7 +7229,7 @@ export default function DepartmentKanban() {
                             <SelectItem value="__none__">No project (General)</SelectItem>
                             {projects.map((project) => (
                               <SelectItem key={project.id} value={project.id}>
-                                {project.title || project.name || "Project"}
+                                {resolveProjectTitle(project) || "Project"}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -7599,7 +7620,7 @@ export default function DepartmentKanban() {
                               <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
                                 {project ? (
                                   <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
-                                    {project.title || project.name || "Project"}
+                                    {resolveProjectTitle(project) || "Project"}
                                   </Badge>
                                 ) : null}
                               </td>
@@ -7774,7 +7795,7 @@ export default function DepartmentKanban() {
                           <SelectContent>
                             {internalNoteProjects.map((project) => (
                               <SelectItem key={project.id} value={project.id}>
-                                {project.title || project.name || "Untitled project"}
+                                {resolveProjectTitle(project) || "Untitled project"}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -7911,7 +7932,7 @@ export default function DepartmentKanban() {
                           <SelectContent>
                             {editInternalNoteProjects.map((project) => (
                               <SelectItem key={project.id} value={project.id}>
-                                {project.title || project.name || "Untitled project"}
+                                {resolveProjectTitle(project) || "Untitled project"}
                               </SelectItem>
                             ))}
                           </SelectContent>
@@ -8162,7 +8183,7 @@ export default function DepartmentKanban() {
                           <SelectItem value="__none__">No project</SelectItem>
                           {filteredProjects.map((project) => (
                             <SelectItem key={project.id} value={project.id}>
-                              {project.title || project.name}
+                              {resolveProjectTitle(project)}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -8226,7 +8247,7 @@ export default function DepartmentKanban() {
                                 <div className="text-sm font-semibold">{formatMeetingLabel(meeting)}</div>
                                 {project ? (
                                   <div className="mt-1 text-xs text-muted-foreground">
-                                    Project: {project.title || project.name}
+                                    Project: {resolveProjectTitle(project)}
                                   </div>
                                 ) : null}
                               </div>

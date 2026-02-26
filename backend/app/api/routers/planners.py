@@ -42,6 +42,7 @@ from app.models.department import Department
 from app.services.task_classification import is_fast_task as is_fast_task_model
 from app.services.system_task_schedule import matches_template_date
 from app.services.system_task_occurrences import ensure_occurrences_in_range
+from app.services.project_display_title import build_project_display_title_map
 from app.schemas.planner import (
     MonthlyPlannerResponse,
     MonthlyPlannerSummary,
@@ -656,8 +657,6 @@ def _status_for_day(
 
     if normalized == "DONE":
         return "DONE"
-    if normalized == "WAITING_CONFIRMATION":
-        return "WAITING_CONFIRMATION"
 
     if normalized_daily == "IN_PROGRESS":
         return "IN_PROGRESS"
@@ -1945,6 +1944,8 @@ async def weekly_table_planner(
         week_tasks.append(t)
         if t.project_id is not None:
             task_project_ids.add(t.project_id)
+
+    week_task_ids = [t.id for t in week_tasks]
     
     # Ensure project_map includes all projects referenced by tasks
     missing_project_ids = task_project_ids - set(project_map.keys())
@@ -1954,6 +1955,78 @@ async def weekly_table_planner(
         )).scalars().all()
         for p in missing_projects:
             project_map[p.id] = p
+    project_display_title_by_id = await build_project_display_title_map(
+        db,
+        list(project_map.values()),
+        week_start=week_start_date,
+        week_end=week_start_date + timedelta(days=6),
+    )
+
+    # Prefetch per-day status history for all tasks so we can paint each day cell independently.
+    daily_status_by_task_day: dict[tuple[uuid.UUID, date], TaskStatus] = {}
+    prior_status_by_task: dict[uuid.UUID, TaskStatus] = {}
+    if week_task_ids:
+        in_week_rows = (
+            await db.execute(
+                select(
+                    TaskDailyProgress.task_id,
+                    TaskDailyProgress.day_date,
+                    TaskDailyProgress.daily_status,
+                )
+                .where(TaskDailyProgress.task_id.in_(week_task_ids))
+                .where(TaskDailyProgress.day_date >= working_days[0])
+                .where(TaskDailyProgress.day_date <= working_days[-1])
+            )
+        ).all()
+        for task_id_row, day_date_row, daily_status_row in in_week_rows:
+            try:
+                daily_status_by_task_day[(task_id_row, day_date_row)] = TaskStatus(daily_status_row)
+            except Exception:
+                daily_status_by_task_day[(task_id_row, day_date_row)] = TaskStatus.TODO
+
+        pre_week_subq = (
+            select(
+                TaskDailyProgress.task_id,
+                func.max(TaskDailyProgress.day_date).label("day_date"),
+            )
+            .where(TaskDailyProgress.task_id.in_(week_task_ids))
+            .where(TaskDailyProgress.day_date < working_days[0])
+            .group_by(TaskDailyProgress.task_id)
+            .subquery()
+        )
+        pre_week_rows = (
+            await db.execute(
+                select(
+                    TaskDailyProgress.task_id,
+                    TaskDailyProgress.day_date,
+                    TaskDailyProgress.daily_status,
+                ).join(
+                    pre_week_subq,
+                    (TaskDailyProgress.task_id == pre_week_subq.c.task_id)
+                    & (TaskDailyProgress.day_date == pre_week_subq.c.day_date),
+                )
+            )
+        ).all()
+        for task_id_row, _, daily_status_row in pre_week_rows:
+            try:
+                prior_status_by_task[task_id_row] = TaskStatus(daily_status_row)
+            except Exception:
+                prior_status_by_task[task_id_row] = TaskStatus.TODO
+
+    def _daily_status_for_task_day(task: Task, day_date: date) -> TaskStatus | None:
+        for check_date in sorted([d for d in working_days if d <= day_date], reverse=True):
+            key = (task.id, check_date)
+            if key in daily_status_by_task_day:
+                return daily_status_by_task_day[key]
+        if task.id in prior_status_by_task:
+            return prior_status_by_task[task.id]
+        updated_day = _as_local_date(task.updated_at)
+        if updated_day is not None and day_date >= updated_day:
+            try:
+                return TaskStatus(task.status)
+            except Exception:
+                return TaskStatus.TODO
+        return None
 
     # Prefetch per-day progress statuses for MST/TT tasks so we can paint each day cell independently.
     mst_tt_task_ids: set[uuid.UUID] = set()
@@ -1966,7 +2039,6 @@ async def weekly_table_planner(
         if project is not None and _is_mst_or_tt_project(project):
             mst_tt_task_ids.add(t.id)
 
-    daily_progress_status_map: dict[tuple[uuid.UUID, date], TaskStatus] = {}
     daily_progress_counts_map: dict[tuple[uuid.UUID, date], tuple[int, int]] = {}
     if mst_tt_task_ids:
         rows = (
@@ -1974,7 +2046,6 @@ async def weekly_table_planner(
                 select(
                     TaskDailyProgress.task_id,
                     TaskDailyProgress.day_date,
-                    TaskDailyProgress.daily_status,
                     TaskDailyProgress.completed_value,
                     TaskDailyProgress.total_value,
                 )
@@ -1983,11 +2054,7 @@ async def weekly_table_planner(
                 .where(TaskDailyProgress.day_date <= working_days[-1])
             )
         ).all()
-        for task_id_row, day_date_row, daily_status_row, completed_value_row, total_value_row in rows:
-            try:
-                daily_progress_status_map[(task_id_row, day_date_row)] = TaskStatus(daily_status_row)
-            except Exception:
-                daily_progress_status_map[(task_id_row, day_date_row)] = TaskStatus.TODO
+        for task_id_row, day_date_row, completed_value_row, total_value_row in rows:
             try:
                 completed_value = int(completed_value_row or 0)
             except Exception:
@@ -2518,11 +2585,12 @@ async def weekly_table_planner(
                         continue
                     # Fast tasks (standalone ad-hoc tasks only)
                     elif is_fast_task_model(task):
+                        daily_status_value = _daily_status_for_task_day(task, day_date)
                         entry = WeeklyTableTaskEntry(
                             task_id=task.id,
                             title=task.title,
                             status=TaskStatus(task.status) if task.status else TaskStatus.TODO,
-                            daily_status=None,
+                            daily_status=daily_status_value,
                             created_at=task.created_at,
                             completed_at=task.completed_at,
                             daily_products=task.daily_products,
@@ -2597,21 +2665,9 @@ async def weekly_table_planner(
                             completed_products = progress_completed
                             if progress_total > 0:
                                 total_products = progress_total
-                        elif t.id in mst_tt_task_ids and total_products is not None:
+                        elif t.id in mst_tt_task_ids and total_products is not None and completed_products is None:
                             completed_products = 0
-                        daily_status_value = (
-                            next(
-                                (daily_progress_status_map[(t.id, check_date)]
-                                 for check_date in sorted(
-                                     [d for d in working_days if d <= day_date],
-                                     reverse=True
-                                 )
-                                 if (t.id, check_date) in daily_progress_status_map),
-                                None
-                            )
-                            if t.id in mst_tt_task_ids
-                            else None
-                        )
+                        daily_status_value = _daily_status_for_task_day(t, day_date)
                         status_for_day = _status_for_day(
                             status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                             daily_status=daily_status_value,
@@ -2625,6 +2681,7 @@ async def weekly_table_planner(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
                                 task_title=t.title,
+                                phase=t.phase,
                                 status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                                 daily_status=daily_status_value,
                                 created_at=t.created_at,
@@ -2643,8 +2700,11 @@ async def weekly_table_planner(
                     am_projects.append(
                         WeeklyTableProjectEntry(
                             project_id=project_id,
-                            project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
+                            project_title=project_display_title_by_id.get(project_id)
+                            or (project_map[project_id].title if project_id in project_map else "Unknown Project"),
                             project_total_products=project_map[project_id].total_products if project_id in project_map else None,
+                            project_current_phase=project_map[project_id].current_phase if project_id in project_map else None,
+                            project_type=project_map[project_id].project_type if project_id in project_map else None,
                             task_count=len(tasks_list),
                             tasks=task_entries,
                             is_late=False,
@@ -2661,21 +2721,9 @@ async def weekly_table_planner(
                             completed_products = progress_completed
                             if progress_total > 0:
                                 total_products = progress_total
-                        elif t.id in mst_tt_task_ids and total_products is not None:
+                        elif t.id in mst_tt_task_ids and total_products is not None and completed_products is None:
                             completed_products = 0
-                        daily_status_value = (
-                            next(
-                                (daily_progress_status_map[(t.id, check_date)]
-                                 for check_date in sorted(
-                                     [d for d in working_days if d <= day_date],
-                                     reverse=True
-                                 )
-                                 if (t.id, check_date) in daily_progress_status_map),
-                                None
-                            )
-                            if t.id in mst_tt_task_ids
-                            else None
-                        )
+                        daily_status_value = _daily_status_for_task_day(t, day_date)
                         status_for_day = _status_for_day(
                             status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                             daily_status=daily_status_value,
@@ -2689,6 +2737,7 @@ async def weekly_table_planner(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
                                 task_title=t.title,
+                                phase=t.phase,
                                 status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                                 daily_status=daily_status_value,
                                 created_at=t.created_at,
@@ -2707,8 +2756,11 @@ async def weekly_table_planner(
                     pm_projects.append(
                         WeeklyTableProjectEntry(
                             project_id=project_id,
-                            project_title=project_map[project_id].title if project_id in project_map else "Unknown Project",
+                            project_title=project_display_title_by_id.get(project_id)
+                            or (project_map[project_id].title if project_id in project_map else "Unknown Project"),
                             project_total_products=project_map[project_id].total_products if project_id in project_map else None,
+                            project_current_phase=project_map[project_id].current_phase if project_id in project_map else None,
+                            project_type=project_map[project_id].project_type if project_id in project_map else None,
                             task_count=len(tasks_list),
                             tasks=task_entries,
                             is_late=False,

@@ -858,6 +858,9 @@ export default function PcmProjectPage() {
   const [savingMembers, setSavingMembers] = React.useState(false)
   const [advancingPhase, setAdvancingPhase] = React.useState(false)
   const [viewedPhase, setViewedPhase] = React.useState<string | null>(null)
+  const canCloseProject = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const [closeConfirmOpen, setCloseConfirmOpen] = React.useState(false)
+  const [pendingCloseSource, setPendingCloseSource] = React.useState<"mst" | "vsvl" | null>(null)
   const mstCommentTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const vsVlDescriptionTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
   const vsVlMetaTimersRef = React.useRef<Record<string, ReturnType<typeof setTimeout>>>({})
@@ -1105,6 +1108,35 @@ export default function PcmProjectPage() {
       </DialogContent>
     </Dialog>
   )
+
+  const renderCloseConfirmDialog = () => (
+    <Dialog open={closeConfirmOpen} onOpenChange={setCloseConfirmOpen}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Close Project?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            This will close the {pendingCloseSource === "vsvl" ? "VS/VL project" : "project"} and return you to the
+            Project Content Manager list.
+          </p>
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setCloseConfirmOpen(false)}
+              disabled={advancingPhase}
+            >
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void confirmCloseProject()} disabled={advancingPhase}>
+              {advancingPhase ? "Closing..." : "Close Project"}
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  )
   const [mstPhase, setMstPhase] = React.useState<(typeof MST_PHASES)[number]>("PLANNING")
   const [vsVlPhase, setVsVlPhase] = React.useState<(typeof VS_VL_PHASES)[number]>("PLANNING")
   const [vsVlTab, setVsVlTab] = React.useState<"description" | "tasks" | "checklists" | "workflow" | "ga">("description")
@@ -1271,6 +1303,8 @@ export default function PcmProjectPage() {
         const items = (await cRes.json()) as ChecklistItem[]
         setChecklistItems(items)
 
+        const pTitleUpper = (p.title || p.name || "").toUpperCase()
+        const isTtProject = pTitleUpper.includes("TT")
         try {
           if (isVsVlProject(p)) {
             const hasVsVlItems = items.some(
@@ -1286,7 +1320,7 @@ export default function PcmProjectPage() {
           }
 
           // Initialize MST checklist items only if none exist yet
-          if (isMstProject(p)) {
+          if (isMstProject(p) || isTtProject) {
             const hasMstItems = items.some((item) => {
               if (item.item_type !== "CHECKBOX") return false
               if (!item.path || !item.title) return false
@@ -1318,7 +1352,9 @@ export default function PcmProjectPage() {
         setAllUsers(users)
         setDepartmentUsers(users.filter((u) => u.department_id === p.department_id))
       }
-      if (isMstProject(p)) {
+      const pTitleUpper = (p.title || p.name || "").toUpperCase()
+      const isTtProject = pTitleUpper.includes("TT")
+      if (isMstProject(p) || isTtProject) {
         setMstPhase(MST_PHASES[0])
       }
       if (isVsVlProject(p)) {
@@ -1334,6 +1370,9 @@ export default function PcmProjectPage() {
   }, [project?.current_phase])
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
+  const titleUpper = (project?.title || project?.name || "").toUpperCase()
+  const isTtProject = titleUpper.includes("TT")
+  const isMstLike = isMst || isTtProject
   const planningItems = React.useMemo(
     () => checklistItems.filter((item) => item.item_type === "CHECKBOX" && item.path === "PLANNING"),
     [checklistItems]
@@ -2712,6 +2751,42 @@ export default function PcmProjectPage() {
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
   }
 
+  const closeProjectFromFinal = async () => {
+    if (!project) return
+    setAdvancingPhase(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}/close`, { method: "POST" })
+      if (!res.ok) {
+        let detail = "Failed to close project"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      toast.success("Project closed")
+      router.push("/departments/project-content-manager?tab=projects")
+    } finally {
+      setAdvancingPhase(false)
+    }
+  }
+
+  const requestCloseProject = (source: "mst" | "vsvl") => {
+    setPendingCloseSource(source)
+    setCloseConfirmOpen(true)
+  }
+
+  const confirmCloseProject = async () => {
+    setCloseConfirmOpen(false)
+    setPendingCloseSource(null)
+    await closeProjectFromFinal()
+  }
+
   const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
   const visibleTabs = React.useMemo(() => {
     // PCM: meetings phase shows meeting tabs + GA
@@ -3119,10 +3194,53 @@ export default function PcmProjectPage() {
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
+  const backendDisplayTitle = project.display_title?.trim()
   const baseTitle = project.title || project.name || "Project"
-  const title = project.project_type === "MST" && project.total_products != null && project.total_products > 0
-    ? `${baseTitle} - ${project.total_products}`
-    : baseTitle
+  const isTtOrMst = isMstProject(project)
+  const controlTasks = tasks.filter((task) => task.phase === "CONTROL")
+  const hasControlTasks = controlTasks.length > 0
+  const fallbackControlTotals = controlTasks
+    .map((task) => {
+      const originTaskId = getOriginTaskId(task.internal_notes)
+      const originTask = originTaskId ? tasks.find((t) => t.id === originTaskId) : null
+      if (originTask?.daily_products != null && originTask.daily_products > 0) return originTask.daily_products
+      const totals = parseTaskTotals(task.internal_notes)
+      return totals.total > 0 ? totals.total : 0
+    })
+    .filter((value) => value > 0)
+  const totalForTitle =
+    project.total_products != null && project.total_products > 0
+      ? project.total_products
+      : fallbackControlTotals.length
+        ? Math.max(...fallbackControlTotals)
+        : null
+
+  const completedSum = controlTasks.reduce((acc, task) => {
+    const editCompleted = controlEdits[task.id]?.completed
+    if (editCompleted != null && editCompleted !== "") {
+      return acc + toNonNegativeInt(editCompleted)
+    }
+    const totals = parseTaskTotals(task.internal_notes)
+    return acc + toNonNegativeInt(totals.completed)
+  }, 0)
+
+  const title = (() => {
+    if (backendDisplayTitle) return backendDisplayTitle
+
+    if (!(isTtOrMst && hasControlTasks && totalForTitle != null && totalForTitle > 0)) {
+      if (project.project_type === "MST" && project.total_products != null && project.total_products > 0) {
+        return `${baseTitle} - ${project.total_products}`
+      }
+      return baseTitle
+    }
+    const completed = Math.min(completedSum, totalForTitle)
+    let normalizedBase = baseTitle.trim()
+    const trailingTotalMatch = normalizedBase.match(/\((\d+)\)\s*$/)
+    if (trailingTotalMatch && Number.parseInt(trailingTotalMatch[1], 10) === totalForTitle) {
+      normalizedBase = normalizedBase.replace(/\s*\(\d+\)\s*$/, "").trim()
+    }
+    return `${normalizedBase} (${totalForTitle}/${completed})`
+  })()
 
   const renderProjectTitle = () => {
     if (!canEditProjectTitle) {
@@ -3616,6 +3734,17 @@ export default function PcmProjectPage() {
                     </Button>
                   )
                 ) : null}
+                {isVsVl && vsVlPhase === "DREAMROBOT" && canCloseProject && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="text-xs h-7"
+                    disabled={advancingPhase}
+                    onClick={() => requestCloseProject("vsvl")}
+                  >
+                    {advancingPhase ? "Closing..." : "Close Project"}
+                  </Button>
+                )}
                 {user?.role === "ADMIN" && (
                   <label className="flex items-center gap-2 text-sm cursor-pointer">
                     <Checkbox
@@ -5258,16 +5387,21 @@ export default function PcmProjectPage() {
         {renderEditDueDateDialog()}
         {renderStartDateDialog()}
         {renderEditStartDateDialog()}
+        {renderCloseConfirmDialog()}
       </>
     )
   }
 
-  if (isMst) {
+  if (isMstLike) {
     const planningTopItems = planningItemsOrdered.slice(0, 2)
     const planningOtherItems = planningItemsOrdered.slice(2)
     const planningIndexMap = new Map(
       planningItemsOrdered.map((item, index) => [item.id, index + 1])
     )
+    const isFinalizationComplete =
+      finalizationItems.length > 0 &&
+      Object.values(finalizationChecks).filter(Boolean).length === finalizationItems.length
+    const canCloseFromFinal = mstPhase === "FINAL" && isMstLike
     const togglePlanning = async (item: ChecklistItem) => {
       const newChecked = !mstPlanningChecks[item.id]
       setMstPlanningChecks((prev) => ({ ...prev, [item.id]: newChecked }))
@@ -6048,20 +6182,6 @@ export default function PcmProjectPage() {
                     </button>
                   )
                 })}
-              </div>
-              <div className="text-sm text-muted-foreground">
-                {MST_PHASES.map((p, idx) => (
-                  <span key={p}>
-                    <button
-                      type="button"
-                      onClick={() => setMstPhase(p)}
-                      className={p === mstPhase ? "text-blue-700 font-semibold" : "hover:text-foreground"}
-                    >
-                      {MST_PHASE_LABELS[p]}
-                    </button>
-                    {idx < MST_PHASES.length - 1 ? " -> " : ""}
-                  </span>
-                ))}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -7919,9 +8039,9 @@ export default function PcmProjectPage() {
                       {finalizationItems
                         .slice()
                         .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-                        .map((item) => {
+                        .map((item, index) => {
                           const isEditing = editingFinalizationId === item.id
-                          const itemNumber = item.position ?? 0
+                          const itemNumber = item.position ?? index + 1
                           return (
                             <div
                               key={item.id}
@@ -8050,7 +8170,7 @@ export default function PcmProjectPage() {
                         {savingFinalization ? "Adding..." : "Add"}
                       </Button>
                     </div>
-                    {finalizationItems.length > 0 && Object.values(finalizationChecks).filter(Boolean).length === finalizationItems.length && (
+                    {isFinalizationComplete && (
                       <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
                         <div className="flex items-center gap-2 text-emerald-700 font-medium">
                           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
@@ -8058,6 +8178,17 @@ export default function PcmProjectPage() {
                         </div>
                       </div>
                     )}
+                    {isFinalizationComplete && canCloseFromFinal && canCloseProject ? (
+                      <div className="flex justify-end">
+                        <Button
+                          variant="outline"
+                          disabled={advancingPhase}
+                          onClick={() => requestCloseProject("mst")}
+                        >
+                          {advancingPhase ? "Closing..." : "Close Project"}
+                        </Button>
+                      </div>
+                  ) : null}
                   </div>
                 </Card>
               )}
@@ -8074,6 +8205,7 @@ export default function PcmProjectPage() {
         {renderEditDueDateDialog()}
         {renderStartDateDialog()}
         {renderEditStartDateDialog()}
+        {renderCloseConfirmDialog()}
       </>
     )
   }

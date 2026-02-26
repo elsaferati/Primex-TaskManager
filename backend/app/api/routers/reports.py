@@ -40,6 +40,7 @@ from app.services.system_task_occurrences import (
     SKIPPED,
     ensure_occurrences_in_range,
 )
+from app.services.project_display_title import build_project_display_title_map
 from app.services.daily_report_logic import (
     completed_on_day,
     planned_range_for_daily_report,
@@ -330,8 +331,9 @@ async def daily_report(
             await db.execute(select(Project).where(Project.id.in_(project_ids)))
         ).scalars().all()
     project_by_id = {p.id: p for p in projects}
+    display_title_by_id = await build_project_display_title_map(db, projects)
     project_title_by_id: dict[uuid.UUID, str] = {
-        p.id: (p.title or p.name or "") for p in projects if (p.title or p.name)
+        p.id: (display_title_by_id.get(p.id) or p.title or p.name or "") for p in projects if (p.title or p.name)
     }
 
     tasks_today: list[DailyReportTaskItem] = []

@@ -12,14 +12,14 @@ function chunk<T>(items: T[], size: number): T[][] {
 export async function fetchProjectTitlesById(
   apiFetch: ApiFetch,
   ids: string[]
-): Promise<Array<{ id: string; title: string }>> {
+): Promise<Array<{ id: string; title: string; display_title?: string | null }>> {
   const uniqueIds = Array.from(new Set(ids.map((id) => id.trim()).filter(Boolean)))
   if (!uniqueIds.length) return []
 
-  const out: Array<{ id: string; title: string }> = []
+  const out: Array<{ id: string; title: string; display_title?: string | null }> = []
 
   for (const batch of chunk(uniqueIds, 50)) {
-    const found = new Map<string, string>()
+    const found = new Map<string, { title: string; display_title?: string | null }>()
 
     const qs = new URLSearchParams()
     for (const id of batch) qs.append("ids", id)
@@ -27,9 +27,14 @@ export async function fetchProjectTitlesById(
     // Prefer the batched lookup endpoint, but still fall back for any missing IDs.
     const lookupRes = await apiFetch(`/projects/lookup?${qs.toString()}`)
     if (lookupRes.ok) {
-      const data = (await lookupRes.json()) as Array<{ id: string; title: string }>
+      const data = (await lookupRes.json()) as Array<{ id: string; title: string; display_title?: string | null }>
       for (const item of data) {
-        if (item?.id && item?.title) found.set(item.id, item.title)
+        if (item?.id && item?.title) {
+          found.set(item.id, {
+            title: item.title,
+            display_title: item.display_title ?? item.title,
+          })
+        }
       }
     }
 
@@ -39,19 +44,29 @@ export async function fetchProjectTitlesById(
         missing.map(async (id) => {
           const res = await apiFetch(`/projects/${encodeURIComponent(id)}`)
           if (!res.ok) return null
-          const data = (await res.json()) as { id?: string; title?: string | null; name?: string | null }
+          const data = (await res.json()) as {
+            id?: string
+            title?: string | null
+            display_title?: string | null
+            name?: string | null
+          }
           const title = data.title || data.name
           if (!data.id || !title) return null
-          return { id: data.id, title }
+          return { id: data.id, title, display_title: data.display_title ?? title }
         })
       )
       for (const item of fallbackResults) {
-        if (item?.id && item?.title) found.set(item.id, item.title)
+        if (item?.id && item?.title) {
+          found.set(item.id, {
+            title: item.title,
+            display_title: item.display_title ?? item.title,
+          })
+        }
       }
     }
 
-    for (const [id, title] of found.entries()) {
-      out.push({ id, title })
+    for (const [id, value] of found.entries()) {
+      out.push({ id, title: value.title, display_title: value.display_title })
     }
   }
 

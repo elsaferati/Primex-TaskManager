@@ -4,6 +4,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from datetime import datetime
 from pydantic import BaseModel
 from sqlalchemy import func, select, update, cast, String as SQLString, or_, insert, delete
 from sqlalchemy.orm import Session
@@ -33,6 +34,7 @@ from app.services.workflow_service import (
     get_active_workflow_items,
     dependency_item_ids_from_info,
 )
+from app.services.project_display_title import build_project_display_title_map
 from datetime import datetime, timedelta
 
 
@@ -42,6 +44,7 @@ router = APIRouter()
 class ProjectTitleLookupOut(BaseModel):
     id: uuid.UUID
     title: str
+    display_title: str | None = None
     project_type: str | None = None
     total_products: int | None = None
     department_id: uuid.UUID | None = None
@@ -57,32 +60,50 @@ async def lookup_project_titles(
     # Title-only lookup for UI display (safe to return across departments).
     if not ids:
         return []
-    rows = (
+    projects = (
         await db.execute(
-            select(
-                Project.id,
-                Project.title,
-                Project.project_type,
-                Project.total_products,
-                Project.department_id,
-                Project.due_date,
-            )
+            select(Project)
             .where(Project.is_template == False)
             .where(Project.id.in_(list(dict.fromkeys(ids))))
         )
-    ).all()
+    ).scalars().all()
+    display_title_by_id = await build_project_display_title_map(db, projects)
     return [
         ProjectTitleLookupOut(
-            id=pid,
-            title=title,
-            project_type=project_type,
-            total_products=total_products,
-            department_id=department_id,
-            due_date=due_date,
+            id=project.id,
+            title=project.title,
+            display_title=display_title_by_id.get(project.id) or project.title,
+            project_type=project.project_type,
+            total_products=project.total_products,
+            department_id=project.department_id,
+            due_date=project.due_date,
         )
-        for pid, title, project_type, total_products, department_id, due_date in rows
-        if title
+        for project in projects
+        if project.title
     ]
+
+
+def _project_to_out(project: Project, display_title: str | None = None) -> ProjectOut:
+    return ProjectOut(
+        id=project.id,
+        title=project.title,
+        display_title=display_title,
+        description=project.description,
+        department_id=project.department_id,
+        manager_id=project.manager_id,
+        created_by=project.created_by,
+        project_type=project.project_type,
+        current_phase=project.current_phase,
+        status=project.status,
+        progress_percentage=project.progress_percentage,
+        total_products=project.total_products,
+        is_template=project.is_template,
+        start_date=project.start_date,
+        due_date=project.due_date,
+        completed_at=project.completed_at,
+        created_at=project.created_at,
+        updated_at=project.updated_at,
+    )
 
 
 async def _copy_tasks_from_template_project(
@@ -363,28 +384,8 @@ async def list_projects(
         stmt = stmt.where(Project.department_id == department_id)
 
     projects = (await db.execute(stmt.order_by(Project.created_at))).scalars().all()
-    return [
-        ProjectOut(
-            id=p.id,
-            title=p.title,
-            description=p.description,
-            department_id=p.department_id,
-            manager_id=p.manager_id,
-            created_by=p.created_by,
-            project_type=p.project_type,
-            current_phase=p.current_phase,
-            status=p.status,
-            progress_percentage=p.progress_percentage,
-            total_products=p.total_products,
-            is_template=p.is_template,
-            start_date=p.start_date,
-            due_date=p.due_date,
-            completed_at=p.completed_at,
-            created_at=p.created_at,
-            updated_at=p.updated_at,
-        )
-        for p in projects
-    ]
+    display_title_by_id = await build_project_display_title_map(db, projects)
+    return [_project_to_out(p, display_title_by_id.get(p.id) or p.title) for p in projects]
 
 
 @router.post("", response_model=ProjectOut)
@@ -460,25 +461,8 @@ async def create_project(
     
     await db.commit()
     await db.refresh(project)
-    return ProjectOut(
-        id=project.id,
-        title=project.title,
-        description=project.description,
-        department_id=project.department_id,
-        manager_id=project.manager_id,
-        created_by=project.created_by,
-        project_type=project.project_type,
-        current_phase=project.current_phase,
-        status=project.status,
-        progress_percentage=project.progress_percentage,
-        total_products=project.total_products,
-        is_template=project.is_template,
-        start_date=project.start_date,
-        due_date=project.due_date,
-        completed_at=project.completed_at,
-        created_at=project.created_at,
-        updated_at=project.updated_at,
-    )
+    display_title_by_id = await build_project_display_title_map(db, [project])
+    return _project_to_out(project, display_title_by_id.get(project.id) or project.title)
 
 
 @router.get("/{project_id}", response_model=ProjectOut)
@@ -490,25 +474,8 @@ async def get_project(
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    return ProjectOut(
-        id=project.id,
-        title=project.title,
-        description=project.description,
-        department_id=project.department_id,
-        manager_id=project.manager_id,
-        created_by=project.created_by,
-        project_type=project.project_type,
-        current_phase=project.current_phase,
-        status=project.status,
-        progress_percentage=project.progress_percentage,
-        total_products=project.total_products,
-        is_template=project.is_template,
-        start_date=project.start_date,
-        due_date=project.due_date,
-        completed_at=project.completed_at,
-        created_at=project.created_at,
-        updated_at=project.updated_at,
-    )
+    display_title_by_id = await build_project_display_title_map(db, [project])
+    return _project_to_out(project, display_title_by_id.get(project.id) or project.title)
 
 
 @router.patch("/{project_id}", response_model=ProjectOut)
@@ -573,25 +540,8 @@ async def update_project(
 
     await db.commit()
     await db.refresh(project)
-    return ProjectOut(
-        id=project.id,
-        title=project.title,
-        description=project.description,
-        department_id=project.department_id,
-        manager_id=project.manager_id,
-        created_by=project.created_by,
-        project_type=project.project_type,
-        current_phase=project.current_phase,
-        status=project.status,
-        progress_percentage=project.progress_percentage,
-        total_products=project.total_products,
-        is_template=project.is_template,
-        start_date=project.start_date,
-        due_date=project.due_date,
-        completed_at=project.completed_at,
-        created_at=project.created_at,
-        updated_at=project.updated_at,
-    )
+    display_title_by_id = await build_project_display_title_map(db, [project])
+    return _project_to_out(project, display_title_by_id.get(project.id) or project.title)
 
 
 @router.post("/{project_id}/advance-phase", response_model=ProjectOut)
@@ -675,25 +625,31 @@ async def advance_project_phase(
     project.current_phase = sequence[current_idx + 1]
     await db.commit()
     await db.refresh(project)
-    return ProjectOut(
-        id=project.id,
-        title=project.title,
-        description=project.description,
-        department_id=project.department_id,
-        manager_id=project.manager_id,
-        created_by=project.created_by,
-        project_type=project.project_type,
-        current_phase=project.current_phase,
-        status=project.status,
-        progress_percentage=project.progress_percentage,
-        total_products=project.total_products,
-        is_template=project.is_template,
-        start_date=project.start_date,
-        due_date=project.due_date,
-        completed_at=project.completed_at,
-        created_at=project.created_at,
-        updated_at=project.updated_at,
-    )
+    display_title_by_id = await build_project_display_title_map(db, [project])
+    return _project_to_out(project, display_title_by_id.get(project.id) or project.title)
+
+
+@router.post("/{project_id}/close", response_model=ProjectOut)
+async def close_project(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> ProjectOut:
+    ensure_project_creator(user)
+    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.department_id is not None:
+        ensure_department_access(user, project.department_id)
+
+    project.current_phase = ProjectPhaseStatus.CLOSED
+    project.status = TaskStatus.DONE
+    project.completed_at = datetime.utcnow()
+
+    await db.commit()
+    await db.refresh(project)
+    display_title_by_id = await build_project_display_title_map(db, [project])
+    return _project_to_out(project, display_title_by_id.get(project.id) or project.title)
 
 
 @router.delete("/{project_id}", status_code=status.HTTP_200_OK)
