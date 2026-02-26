@@ -1271,6 +1271,8 @@ export default function PcmProjectPage() {
         const items = (await cRes.json()) as ChecklistItem[]
         setChecklistItems(items)
 
+        const pTitleUpper = (p.title || p.name || "").toUpperCase()
+        const isTtProject = pTitleUpper.includes("TT")
         try {
           if (isVsVlProject(p)) {
             const hasVsVlItems = items.some(
@@ -1286,7 +1288,7 @@ export default function PcmProjectPage() {
           }
 
           // Initialize MST checklist items only if none exist yet
-          if (isMstProject(p)) {
+          if (isMstProject(p) || isTtProject) {
             const hasMstItems = items.some((item) => {
               if (item.item_type !== "CHECKBOX") return false
               if (!item.path || !item.title) return false
@@ -1318,7 +1320,9 @@ export default function PcmProjectPage() {
         setAllUsers(users)
         setDepartmentUsers(users.filter((u) => u.department_id === p.department_id))
       }
-      if (isMstProject(p)) {
+      const pTitleUpper = (p.title || p.name || "").toUpperCase()
+      const isTtProject = pTitleUpper.includes("TT")
+      if (isMstProject(p) || isTtProject) {
         setMstPhase(MST_PHASES[0])
       }
       if (isVsVlProject(p)) {
@@ -1334,6 +1338,9 @@ export default function PcmProjectPage() {
   }, [project?.current_phase])
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
+  const titleUpper = (project?.title || project?.name || "").toUpperCase()
+  const isTtProject = titleUpper.includes("TT")
+  const isMstLike = isMst || isTtProject
   const planningItems = React.useMemo(
     () => checklistItems.filter((item) => item.item_type === "CHECKBOX" && item.path === "PLANNING"),
     [checklistItems]
@@ -2710,6 +2717,31 @@ export default function PcmProjectPage() {
     }
     const updated = (await res.json()) as GaNote
     setGaNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
+  }
+
+  const closeProjectFromFinal = async () => {
+    if (!project) return
+    setAdvancingPhase(true)
+    try {
+      const res = await apiFetch(`/projects/${project.id}/close`, { method: "POST" })
+      if (!res.ok) {
+        let detail = "Failed to close project"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      const updated = (await res.json()) as Project
+      setProject(updated)
+      toast.success("Project closed")
+      router.push("/departments/project-content-manager?tab=projects")
+    } finally {
+      setAdvancingPhase(false)
+    }
   }
 
   const phaseValue = viewedPhase || project?.current_phase || "MEETINGS"
@@ -5305,12 +5337,16 @@ export default function PcmProjectPage() {
     )
   }
 
-  if (isMst) {
+  if (isMstLike) {
     const planningTopItems = planningItemsOrdered.slice(0, 2)
     const planningOtherItems = planningItemsOrdered.slice(2)
     const planningIndexMap = new Map(
       planningItemsOrdered.map((item, index) => [item.id, index + 1])
     )
+    const isFinalizationComplete =
+      finalizationItems.length > 0 &&
+      Object.values(finalizationChecks).filter(Boolean).length === finalizationItems.length
+    const canCloseFromFinal = mstPhase === "FINAL" && isMstLike
     const togglePlanning = async (item: ChecklistItem) => {
       const newChecked = !mstPlanningChecks[item.id]
       setMstPlanningChecks((prev) => ({ ...prev, [item.id]: newChecked }))
@@ -8093,7 +8129,7 @@ export default function PcmProjectPage() {
                         {savingFinalization ? "Adding..." : "Add"}
                       </Button>
                     </div>
-                    {finalizationItems.length > 0 && Object.values(finalizationChecks).filter(Boolean).length === finalizationItems.length && (
+                    {isFinalizationComplete && (
                       <div className="p-4 rounded-lg bg-emerald-50 border border-emerald-200">
                         <div className="flex items-center gap-2 text-emerald-700 font-medium">
                           <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" /><polyline points="22 4 12 14.01 9 11.01" /></svg>
@@ -8101,6 +8137,17 @@ export default function PcmProjectPage() {
                         </div>
                       </div>
                     )}
+                    {isFinalizationComplete && canCloseFromFinal ? (
+                      <div className="flex justify-end">
+                        <Button
+                          variant="outline"
+                          disabled={advancingPhase}
+                          onClick={() => void closeProjectFromFinal()}
+                        >
+                          {advancingPhase ? "Closing..." : "Close Project"}
+                        </Button>
+                      </div>
+                    ) : null}
                   </div>
                 </Card>
               )}

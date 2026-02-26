@@ -4,6 +4,7 @@ import uuid
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from datetime import datetime
 from pydantic import BaseModel
 from sqlalchemy import func, select, update, cast, String as SQLString, or_, insert, delete
 from sqlalchemy.orm import Session
@@ -622,6 +623,29 @@ async def advance_project_phase(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=detail)
 
     project.current_phase = sequence[current_idx + 1]
+    await db.commit()
+    await db.refresh(project)
+    display_title_by_id = await build_project_display_title_map(db, [project])
+    return _project_to_out(project, display_title_by_id.get(project.id) or project.title)
+
+
+@router.post("/{project_id}/close", response_model=ProjectOut)
+async def close_project(
+    project_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> ProjectOut:
+    ensure_project_creator(user)
+    project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
+    if project is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+    if project.department_id is not None:
+        ensure_department_access(user, project.department_id)
+
+    project.current_phase = ProjectPhaseStatus.CLOSED
+    project.status = TaskStatus.DONE
+    project.completed_at = datetime.utcnow()
+
     await db.commit()
     await db.refresh(project)
     display_title_by_id = await build_project_display_title_map(db, [project])

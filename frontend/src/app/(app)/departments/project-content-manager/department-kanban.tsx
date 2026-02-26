@@ -1872,7 +1872,14 @@ export default function DepartmentKanban() {
         return members.some((m) => m.id === user.id)
       })
     }
-    return next
+    const withIndex = next.map((project, index) => ({ project, index }))
+    withIndex.sort((a, b) => {
+      const aClosed = (a.project.current_phase || "").toUpperCase() === "CLOSED"
+      const bClosed = (b.project.current_phase || "").toUpperCase() === "CLOSED"
+      if (aClosed === bClosed) return a.index - b.index
+      return aClosed ? 1 : -1
+    })
+    return withIndex.map((entry) => entry.project)
   }, [projects, projectMembers, showTemplates, user?.id, viewMode])
 
   const visibleDepartmentTasks = React.useMemo(() => departmentTasks, [departmentTasks])
@@ -5486,6 +5493,7 @@ export default function DepartmentKanban() {
                     ? `Manager: ${manager.full_name || manager.username || "-"}`
                     : "No creator"
                 const phase = project.current_phase || "MEETINGS"
+                const isClosed = phase === "CLOSED"
                 const projectPhases = getProjectPhases(project)
                 const membersForProject = projectMembers[project.id] || []
                 const memberColors = [
@@ -5498,12 +5506,17 @@ export default function DepartmentKanban() {
                 return (
                   <Card
                     key={project.id}
-                    className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md dark:border-slate-700 dark:bg-slate-800"
+                    className={[
+                      "rounded-xl border border-slate-200 bg-white p-4 shadow-sm transition-all hover:-translate-y-1 hover:shadow-md dark:border-slate-700 dark:bg-slate-800",
+                      isClosed ? "opacity-70 border-slate-300 bg-slate-50" : "",
+                    ].join(" ")}
                   >
                     <div className="flex items-start justify-between gap-3 mb-3">
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 mb-1.5">
-                          <span className="text-sm font-semibold leading-tight text-slate-900 dark:text-slate-100 truncate">{resolveProjectTitle(project)}</span>
+                          <span className={`text-sm font-semibold leading-tight truncate ${isClosed ? "text-slate-600 dark:text-slate-300" : "text-slate-900 dark:text-slate-100"}`}>
+                            {resolveProjectTitle(project)}
+                          </span>
                           {isTemplateProject(project) && (
                             <Badge variant="secondary" className="text-[10px] px-1.5 py-0 text-amber-700 border-amber-300 bg-amber-50 flex-shrink-0">Template</Badge>
                           )}
@@ -5526,9 +5539,16 @@ export default function DepartmentKanban() {
                             {deletingProjectId === project.id ? "Deleting..." : "Delete"}
                           </Button>
                         ) : null}
-                        <Badge variant="outline" className="text-[10px]">
-                          {PHASE_LABELS[phase] || "Meetings"}
-                        </Badge>
+                        <div className="flex items-center gap-1.5">
+                          <Badge variant="outline" className="text-[10px]">
+                            {PHASE_LABELS[phase] || "Meetings"}
+                          </Badge>
+                          {isClosed ? (
+                            <Badge variant="secondary" className="text-[10px]">
+                              Closed
+                            </Badge>
+                          ) : null}
+                        </div>
                       </div>
                     </div>
                     <div className="mt-3 text-xs text-slate-600 dark:text-slate-400">
