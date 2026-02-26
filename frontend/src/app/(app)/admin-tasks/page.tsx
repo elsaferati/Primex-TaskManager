@@ -1,26 +1,45 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { toast } from "sonner"
-import { Printer } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth"
-import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY, toDateInputValue } from "@/lib/dates"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
-import type { DailyReportResponse, Department, SystemTaskOut, Task, TaskFinishPeriod, TaskPriority, User, UserLookup } from "@/lib/types"
-
-import { SystemTasksView } from "../system-tasks/page"
+import { Pencil } from "lucide-react"
+import type {
+  DailyReportResponse,
+  DailyReportSystemOccurrence,
+  Department,
+  SystemTaskOut,
+  Task,
+  TaskFinishPeriod,
+  TaskPriority,
+  User,
+  UserLookup,
+} from "@/lib/types"
 
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH", "BLLOK"]
+const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+const FINISH_PERIOD_NONE_LABEL = "None (all day)"
+const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
+const SYSTEM_STATUS_OPTIONS = ["OPEN", "DONE"] as const
+const NO_PROJECT_TYPES = [
+  { id: "normal", label: "Normal", description: "General tasks without a project." },
+  { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
+  { id: "blocked", label: "BLLOK", description: "Blocked all day by a single task." },
+  { id: "hourly", label: "1H", description: "Hourly meeting/reporting task." },
+  { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
+] as const
 
 // Date utility functions
 const pad2 = (n: number) => String(n).padStart(2, "0")
@@ -278,6 +297,57 @@ function toDate(value?: string | null) {
   return date
 }
 
+function toDateOnlyIso(value?: string | null) {
+  const date = toDate(value)
+  if (!date) return ""
+  return toISODate(new Date(date.getFullYear(), date.getMonth(), date.getDate()))
+}
+
+function systemTaskDisplayDate(task: SystemTaskOut): string | null {
+  return task.effective_occurrence_date || task.next_occurrence_date || task.occurrence_date || null
+}
+
+function getTaskDateIso(task: Task): string {
+  return toDateOnlyIso(task.due_date || task.start_date || null)
+}
+
+function getSystemDateIso(task: SystemTaskOut): string {
+  return toDateOnlyIso(systemTaskDisplayDate(task) || null)
+}
+
+function parseInternalNotes(notes?: string | null) {
+  if (!notes) return {}
+  const values: Record<string, string> = {}
+  for (const raw of notes.split("\n")) {
+    if (!raw.includes(":")) continue
+    const [key, ...rest] = raw.split(":")
+    const value = rest.join(":").trim()
+    const normalizedKey = (key || "").trim().toUpperCase()
+    if (!normalizedKey || !value) continue
+    values[normalizedKey] = value
+  }
+  return values
+}
+
+function formatInternalDetails(notes?: string | null) {
+  const values = parseInternalNotes(notes)
+  const regj = values["REGJ"] || "-"
+  const path = values["PATH"] || "-"
+  const check = values["CHECKLISTA"] || values["CHECK"] || "-"
+  const training = values["TRAINING"] || "-"
+  const bzGroup = values["BZ GROUP"] || "-"
+  if ([regj, path, check, training, bzGroup].every((value) => value === "-")) {
+    return ""
+  }
+  return [
+    `1.REGJ: ${regj}`,
+    `2.PATH: ${path}`,
+    `3.CHECKLISTA: ${check}`,
+    `4.TRAINING: ${training}`,
+    `5.BZ GROUP: ${bzGroup}`,
+  ].join("\n")
+}
+
 function periodFromDate(value?: string | null) {
   if (!value) return "AM"
   const date = new Date(value)
@@ -352,6 +422,299 @@ function isSameDay(a: Date, b: Date) {
   return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate()
 }
 
+type CommonType =
+  | "late"
+  | "absent"
+  | "leave"
+  | "blocked"
+  | "oneH"
+  | "personal"
+  | "external"
+  | "internal"
+  | "r1"
+  | "problem"
+  | "feedback"
+  | "priority"
+  | "bz"
+  | "det_ga"
+
+type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
+type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string }
+type LeaveItem = {
+  entryId?: string
+  person: string
+  startDate: string
+  endDate: string
+  fullDay: boolean
+  from?: string
+  to?: string
+  note?: string
+  isAllUsers?: boolean
+  userId?: string
+}
+type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type OneHItem = {
+  title: string
+  person: string
+  date: string
+  note?: string
+  assignees?: string[]
+  departmentId?: string
+  isDone?: boolean
+}
+type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type ExternalItem = {
+  title: string
+  date: string
+  time: string
+  platform: string
+  owner: string
+  assignees?: string[]
+  department?: string
+}
+type InternalItem = {
+  title: string
+  date: string
+  time: string
+  platform: string
+  owner: string
+  assignees?: string[]
+  department?: string
+}
+type R1Item = {
+  title: string
+  date: string
+  owner: string
+  note?: string
+  assignees?: string[]
+  departmentId?: string
+  isDone?: boolean
+}
+type ProblemItem = {
+  entryId?: string
+  title: string
+  person: string
+  date: string
+  note?: string
+  everyday?: boolean
+  createdDate?: string
+}
+type FeedbackItem = {
+  entryId?: string
+  title: string
+  person: string
+  date: string
+  note?: string
+  everyday?: boolean
+  createdDate?: string
+}
+type PriorityItem = {
+  project: string
+  date: string
+  assignees: string[]
+  department_id?: string | null
+  department_name?: string | null
+}
+type BzItem = {
+  title: string
+  date: string
+  time: string
+  assignees?: string[]
+  bzWithLabel?: string
+}
+
+type GaTimeSlotEntry = {
+  id: string
+  user_id: string
+  day_of_week: number
+  start_time: string
+  end_time: string
+  content: string
+  created_at: string
+  updated_at: string
+}
+
+type CommonBucket =
+  | "late"
+  | "absent"
+  | "leave"
+  | "blocked"
+  | "oneH"
+  | "personal"
+  | "external"
+  | "internal"
+  | "r1"
+  | "problems"
+  | "feedback"
+  | "priority"
+  | "bz"
+type CommonViewCounts = Record<CommonBucket, number>
+type CommonViewGuardrails = {
+  max_items_per_bucket: number
+  truncated: Record<CommonBucket, boolean>
+}
+type CommonViewPayload = {
+  schema_version: number
+  generated_at: string
+  week_start: string
+  week_end: string
+  requested: string[]
+  included: string[]
+  missing: string[]
+  counts: CommonViewCounts
+  items: {
+    late: LateItem[]
+    absent: AbsentItem[]
+    leave: LeaveItem[]
+    blocked: BlockedItem[]
+    oneH: OneHItem[]
+    personal: PersonalItem[]
+    external: ExternalItem[]
+    internal: InternalItem[]
+    r1: R1Item[]
+    problems: ProblemItem[]
+    feedback: FeedbackItem[]
+    priority: PriorityItem[]
+    bz: BzItem[]
+  }
+  guardrails: CommonViewGuardrails
+  trace_id: string
+  timings_ms?: Record<string, number> | null
+  users?: User[]
+  departments?: Department[]
+}
+
+const ALL_USERS_INITIALS = "ALL"
+const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
+
+const GA_TIME_SLOTS = Array.from({ length: 9 }, (_, idx) => {
+  const startHour = 8 + idx
+  const endHour = startHour + 1
+  const pad = (value: number) => String(value).padStart(2, "0")
+  return {
+    start: `${pad(startHour)}:00`,
+    end: `${pad(endHour)}:00`,
+    label: `${pad(startHour)}:00 - ${pad(endHour)}:00`,
+  }
+})
+
+const parseFeedbackNote = (note: string | null | undefined) => {
+  const raw = note || ""
+  const everyday = raw.includes(FEEDBACK_DAILY_MARKER)
+  const cleaned = raw.split(FEEDBACK_DAILY_MARKER).join("").trim()
+  return { note: cleaned || undefined, everyday }
+}
+
+const commonViewInitials = (name: string) => {
+  const cleaned = name.trim()
+  if (!cleaned) return "?"
+  const parts = cleaned.split(/\s+/)
+  const first = parts[0]?.[0] || ""
+  const last = parts.length > 1 ? parts[parts.length - 1]?.[0] || "" : ""
+  return `${first}${last}`.toUpperCase()
+}
+
+const stripInitialsPrefix = (value: string) => value
+
+const fromISODate = (s: string) => {
+  const [y, m, d] = s.split("-").map(Number)
+  return new Date(y, (m || 1) - 1, d || 1)
+}
+const addDays = (d: Date, n: number) => {
+  const x = new Date(d)
+  x.setDate(x.getDate() + n)
+  return x
+}
+const getMonday = (d: Date) => {
+  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate())
+  const day = date.getDay()
+  const diff = (day === 0 ? -6 : 1) - day
+  date.setDate(date.getDate() + diff)
+  return date
+}
+const getWeekdays = (monday: Date) => [0, 1, 2, 3, 4].map((i) => addDays(monday, i))
+const formatDateHuman = (s: string) => {
+  const d = fromISODate(s)
+  return `${pad2(d.getDate())}.${pad2(d.getMonth() + 1)}.${d.getFullYear()}`
+}
+const formatTime = (d: Date) =>
+  d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true })
+const parseTimeValue = (value: string) => {
+  const match = /^(\d{2}):(\d{2})$/.exec(value)
+  if (!match) return null
+  const hours = Number(match[1])
+  const minutes = Number(match[2])
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+  return { hours, minutes }
+}
+const parseTimeToMinutes = (value?: string | null) => {
+  if (!value) return null
+  let normalized = value.trim()
+  if (!normalized) return null
+  normalized = normalized.replace(/[()]/g, "").trim()
+  const lower = normalized.toLowerCase()
+  if (lower === "tbd" || lower === "n/a" || lower === "na") return null
+  if (
+    normalized.includes("–") ||
+    normalized.includes("—") ||
+    normalized.includes("â€“") ||
+    normalized.includes("â€”") ||
+    normalized.includes("-")
+  ) {
+    const separator = normalized.includes("–")
+      ? "–"
+      : normalized.includes("—")
+        ? "—"
+        : normalized.includes("â€“")
+          ? "â€“"
+          : normalized.includes("â€”")
+            ? "â€”"
+            : "-"
+    normalized = normalized.split(separator)[0].trim()
+  }
+  const amPmMatch = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i.exec(normalized)
+  if (amPmMatch) {
+    let hours = Number(amPmMatch[1])
+    const minutes = Number(amPmMatch[2] ?? "0")
+    if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+    if (hours < 1 || hours > 12 || minutes < 0 || minutes > 59) return null
+    const isPm = amPmMatch[3].toLowerCase() === "pm"
+    hours = hours % 12
+    if (isPm) hours += 12
+    return hours * 60 + minutes
+  }
+  const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(normalized)
+  if (!timeMatch) return null
+  const hours = Number(timeMatch[1])
+  const minutes = Number(timeMatch[2])
+  if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
+  if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+  return hours * 60 + minutes
+}
+const formatTimeLabel = (value?: string) => {
+  if (!value) return ""
+  const normalized = value.trim()
+  if (!normalized || normalized.toLowerCase() === "tbd") return normalized
+  if (/am|pm/i.test(normalized)) return normalized
+  if (normalized.includes("-")) {
+    const [startRaw, endRaw] = normalized.split("-").map((part) => part.trim())
+    const startLabel = formatTimeLabel(startRaw)
+    const endLabel = formatTimeLabel(endRaw)
+    if (startLabel && endLabel) return `${startLabel} - ${endLabel}`
+    return normalized
+  }
+  const parsed = parseTimeValue(normalized)
+  if (!parsed) return normalized
+  const temp = new Date()
+  temp.setHours(parsed.hours, parsed.minutes, 0, 0)
+  return formatTime(temp)
+}
+const getDayCode = (d: Date) => {
+  const codes = ["H", "M", "MR", "E", "P", "S", "D"]
+  return codes[d.getDay() === 0 ? 6 : d.getDay() - 1] || ""
+}
+
 export default function AdminTasksPage() {
   const { apiFetch, user } = useAuth()
   type AssigneeUser = User | UserLookup
@@ -377,6 +740,18 @@ export default function AdminTasksPage() {
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
+  const [fastTaskOpen, setFastTaskOpen] = React.useState(false)
+  const [creatingFastTask, setCreatingFastTask] = React.useState(false)
+  const [fastTaskTitle, setFastTaskTitle] = React.useState("")
+  const [fastTaskDescription, setFastTaskDescription] = React.useState("")
+  const [fastTaskType, setFastTaskType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
+  const [fastTaskAssignees, setFastTaskAssignees] = React.useState<string[]>([])
+  const [selectFastTaskAssigneesOpen, setSelectFastTaskAssigneesOpen] = React.useState(false)
+  const [fastTaskStartDate, setFastTaskStartDate] = React.useState("")
+  const [fastTaskDueDate, setFastTaskDueDate] = React.useState("")
+  const [fastTaskFinishPeriod, setFastTaskFinishPeriod] = React.useState<
+    TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
+  >(FINISH_PERIOD_NONE_VALUE)
 
   // Edit task state
   const [editOpen, setEditOpen] = React.useState(false)
@@ -399,6 +774,21 @@ export default function AdminTasksPage() {
   const printInitials = initials(user?.full_name || user?.username || "")
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
+  const [allTasksDateFilter, setAllTasksDateFilter] = React.useState(() => todayIso)
+  const [taskStatusUpdating, setTaskStatusUpdating] = React.useState<Record<string, boolean>>({})
+  const [systemStatusOverrides, setSystemStatusOverrides] = React.useState<Record<string, string>>({})
+  const [fastEditOpen, setFastEditOpen] = React.useState(false)
+  const [fastEditTaskId, setFastEditTaskId] = React.useState<string | null>(null)
+  const [fastEditTitle, setFastEditTitle] = React.useState("")
+  const [fastEditStartDate, setFastEditStartDate] = React.useState("")
+  const [fastEditDueDate, setFastEditDueDate] = React.useState("")
+  const [fastEditPriority, setFastEditPriority] = React.useState<TaskPriority>("NORMAL")
+  const [fastEditStatus, setFastEditStatus] = React.useState("TODO")
+  const [fastEditOriginalIsBllok, setFastEditOriginalIsBllok] = React.useState(false)
+  const [fastEditSaving, setFastEditSaving] = React.useState(false)
+
+  const [printTarget, setPrintTarget] = React.useState<"common" | "ga-time" | "all-tasks" | null>(null)
+  const [printTotalPages, setPrintTotalPages] = React.useState(1)
 
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
@@ -410,9 +800,219 @@ export default function AdminTasksPage() {
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [showAllTasksReport, setShowAllTasksReport] = React.useState(false)
   const [exportingAllTasks, setExportingAllTasks] = React.useState(false)
+  const [exportingCommonView, setExportingCommonView] = React.useState(false)
+  const [exportingGaTime, setExportingGaTime] = React.useState(false)
   const dailyReportScrollRef = React.useRef<HTMLDivElement | null>(null)
   const dailyReportDragRef = React.useRef({ isDragging: false, startX: 0, startScrollLeft: 0 })
   const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
+
+  const [commonWeekStart] = React.useState<Date>(() => getMonday(new Date()))
+  const commonWeekISOs = React.useMemo(() => getWeekdays(commonWeekStart).map(toISODate), [commonWeekStart])
+  const [commonUsers, setCommonUsers] = React.useState<User[]>([])
+  const [commonDepartments, setCommonDepartments] = React.useState<Department[]>([])
+  const [commonData, setCommonData] = React.useState({
+    late: [] as LateItem[],
+    absent: [] as AbsentItem[],
+    leave: [] as LeaveItem[],
+    blocked: [] as BlockedItem[],
+    oneH: [] as OneHItem[],
+    personal: [] as PersonalItem[],
+    external: [] as ExternalItem[],
+    internal: [] as InternalItem[],
+    r1: [] as R1Item[],
+    problems: [] as ProblemItem[],
+    feedback: [] as FeedbackItem[],
+    priority: [] as PriorityItem[],
+    bz: [] as BzItem[],
+  })
+  const [commonLoading, setCommonLoading] = React.useState(false)
+  const [commonError, setCommonError] = React.useState<string | null>(null)
+  const [gaSystemByDay, setGaSystemByDay] = React.useState<Record<string, DailyReportSystemOccurrence[]>>({})
+  const [gaSystemLoading, setGaSystemLoading] = React.useState(false)
+  const [gaSystemError, setGaSystemError] = React.useState<string | null>(null)
+  const [gaTimeEntries, setGaTimeEntries] = React.useState<GaTimeSlotEntry[]>([])
+  const [gaTimeLoading, setGaTimeLoading] = React.useState(false)
+  const [gaTimeError, setGaTimeError] = React.useState<string | null>(null)
+  const [gaTimeSaving, setGaTimeSaving] = React.useState<Record<string, boolean>>({})
+  const [gaTimeDeleting, setGaTimeDeleting] = React.useState<Record<string, boolean>>({})
+  const [gaTimeEditingId, setGaTimeEditingId] = React.useState<string | null>(null)
+  const [gaTimeDrafts, setGaTimeDrafts] = React.useState<Record<string, string>>({})
+  const [gaTimeAddingCell, setGaTimeAddingCell] = React.useState<string | null>(null)
+  const [gaTimeAddDrafts, setGaTimeAddDrafts] = React.useState<Record<string, string>>({})
+
+  const parseFilenameFromDisposition = React.useCallback((headerValue: string | null) => {
+    if (!headerValue) return ""
+    const match =
+      /filename\*=(?:UTF-8'')?([^;]+)/i.exec(headerValue) || /filename=\"?([^\";]+)\"?/i.exec(headerValue)
+    if (!match) return ""
+    try {
+      return decodeURIComponent(match[1].trim().replace(/^\"|\"$/g, ""))
+    } catch {
+      return match[1].trim().replace(/^\"|\"$/g, "")
+    }
+  }, [])
+
+  const handleSectionPrint = React.useCallback((target: "common" | "ga-time" | "all-tasks") => {
+    setPrintTarget(target)
+    window.setTimeout(() => window.print(), 80)
+  }, [])
+
+  const commonDepartmentsById = React.useMemo(
+    () => new Map(commonDepartments.map((d) => [d.id, d])),
+    [commonDepartments]
+  )
+  const getDepartmentMeta = React.useCallback(
+    (departmentId?: string) => {
+      const dept = departmentId ? commonDepartmentsById.get(departmentId) : undefined
+      const name = (dept?.name || "").trim()
+      const code = (dept?.code || "").trim().toUpperCase()
+      const lower = name.toLowerCase()
+      let rank = 3
+      if (lower.includes("development")) rank = 0
+      else if (lower.includes("graphic design")) rank = 1
+      else if (code === "PCM" || lower.includes("project content") || lower.includes("content manager")) rank = 2
+      const sortName = name || "ZZZ"
+      return { rank, name: sortName }
+    },
+    [commonDepartmentsById]
+  )
+  const getPersonSortKey = React.useCallback(
+    (item: { person?: string; owner?: string; assignees?: string[] }) => {
+      const primary = (item.person || item.owner || "").trim()
+      if (primary) return primary.toLowerCase()
+      const assignees = (item.assignees || [])
+        .map((name) => (name || "").trim())
+        .filter(Boolean)
+        .sort((a, b) => a.localeCompare(b))
+      const combined = assignees.join(", ")
+      return (combined || "Unknown").trim().toLowerCase()
+    },
+    []
+  )
+  const compareTaskOrder = React.useCallback(
+    (
+      a: { isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] },
+      b: { isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] }
+    ) => {
+      const doneA = a.isDone ? 1 : 0
+      const doneB = b.isDone ? 1 : 0
+      if (doneA !== doneB) return doneA - doneB
+      const metaA = getDepartmentMeta(a.departmentId)
+      const metaB = getDepartmentMeta(b.departmentId)
+      if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank
+      if (metaA.rank === 3) {
+        const nameCmp = metaA.name.localeCompare(metaB.name)
+        if (nameCmp) return nameCmp
+      }
+      const personA = getPersonSortKey(a)
+      const personB = getPersonSortKey(b)
+      if (personA !== personB) return personA.localeCompare(personB)
+      return (a.title || "").localeCompare(b.title || "")
+    },
+    [getDepartmentMeta, getPersonSortKey]
+  )
+  const sortTasksByOrder = React.useCallback(
+    <T extends { date: string; isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] }>(
+      items: T[]
+    ) => {
+      const sorted = [...items]
+      sorted.sort((a, b) => compareTaskOrder(a, b))
+      return sorted
+    },
+    [compareTaskOrder]
+  )
+  const sortByTime = React.useCallback(
+    <T,>(
+      items: T[],
+      getTimeKey: (item: T) => string | null | undefined,
+      getTitle: (item: T) => string
+    ) => {
+      return [...items].sort((a, b) => {
+        const aMinutes = parseTimeToMinutes(getTimeKey(a))
+        const bMinutes = parseTimeToMinutes(getTimeKey(b))
+        if (aMinutes === null && bMinutes === null) return getTitle(a).localeCompare(getTitle(b))
+        if (aMinutes === null) return 1
+        if (bMinutes === null) return -1
+        if (aMinutes !== bMinutes) return aMinutes - bMinutes
+        return getTitle(a).localeCompare(getTitle(b))
+      })
+    },
+    []
+  )
+
+  React.useEffect(() => {
+    let mounted = true
+    async function loadCommonWeek() {
+      setCommonLoading(true)
+      setCommonError(null)
+      try {
+        const weekStartIso = toISODate(commonWeekStart)
+        const include = "users,departments,entries,meetings,system_tasks,tasks"
+        const res = await apiFetch(
+          `/common-view?week_start=${encodeURIComponent(weekStartIso)}&include=${encodeURIComponent(include)}&include_all_departments=true`
+        )
+        if (!res?.ok) {
+          throw new Error(`common_view_failed_${res?.status}`)
+        }
+        const payload = (await res.json()) as CommonViewPayload
+        const normalizedFeedback = payload.items.feedback.map((item) => {
+          const parsed = parseFeedbackNote(item.note)
+          return {
+            ...item,
+            note: parsed.note,
+            everyday: parsed.everyday,
+            date: parsed.everyday ? payload.week_start : item.date,
+          }
+        })
+        const normalizedProblems = payload.items.problems.map((item) => {
+          const parsed = parseFeedbackNote(item.note)
+          return {
+            ...item,
+            note: parsed.note,
+            everyday: parsed.everyday,
+            date: parsed.everyday ? payload.week_start : item.date,
+          }
+        })
+        const normalizedOneH = payload.items.oneH.map((item: any) => ({
+          ...item,
+          departmentId: item.departmentId || item.department_id || undefined,
+          isDone: Boolean(item.isDone),
+        }))
+        const normalizedR1 = payload.items.r1.map((item: any) => ({
+          ...item,
+          departmentId: item.departmentId || item.department_id || undefined,
+          isDone: Boolean(item.isDone),
+        }))
+        if (!mounted) return
+        setCommonUsers(payload.users || [])
+        setCommonDepartments(payload.departments || [])
+        setCommonData({
+          late: payload.items.late,
+          absent: payload.items.absent,
+          leave: payload.items.leave,
+          blocked: payload.items.blocked,
+          oneH: normalizedOneH,
+          personal: payload.items.personal,
+          external: payload.items.external,
+          internal: payload.items.internal,
+          r1: normalizedR1,
+          problems: normalizedProblems,
+          feedback: normalizedFeedback,
+          priority: payload.items.priority,
+          bz: payload.items.bz,
+        })
+      } catch (err) {
+        console.error("Failed to load common view data", err)
+        if (mounted) setCommonError("Failed to load common week table.")
+      } finally {
+        if (mounted) setCommonLoading(false)
+      }
+    }
+    void loadCommonWeek()
+    return () => {
+      mounted = false
+    }
+  }, [apiFetch, commonWeekStart])
 
   const isAdmin = user?.role === "ADMIN"
   const ganeUser = React.useMemo(
@@ -460,6 +1060,84 @@ export default function AdminTasksPage() {
     return byName?.id ?? null
   }, [departments])
 
+  const fastTaskAssigneeLabel = React.useMemo(() => {
+    if (fastTaskAssignees.length === 0) return "Unassigned"
+    if (users.length && fastTaskAssignees.length === users.length) return "All users"
+    if (fastTaskAssignees.length === 1) {
+      const selected = users.find((u) => u.id === fastTaskAssignees[0])
+      return selected?.full_name || selected?.username || "1 selected"
+    }
+    return `${fastTaskAssignees.length} selected`
+  }, [fastTaskAssignees, users])
+
+  React.useEffect(() => {
+    let mounted = true
+    async function loadGaTimeSlots() {
+      setGaTimeLoading(true)
+      setGaTimeError(null)
+      try {
+        const weekStartIso = toISODate(commonWeekStart)
+        const res = await apiFetch(`/ga-time-slots?week_start=${encodeURIComponent(weekStartIso)}`)
+        if (!res.ok) {
+          throw new Error(`ga_time_slots_failed_${res.status}`)
+        }
+        const data = (await res.json()) as GaTimeSlotEntry[]
+        if (!mounted) return
+        setGaTimeEntries(data)
+      } catch (err) {
+        console.error("Failed to load GA time slots", err)
+        if (mounted) setGaTimeError("Failed to load GA time slots.")
+      } finally {
+        if (mounted) setGaTimeLoading(false)
+      }
+    }
+    void loadGaTimeSlots()
+    return () => {
+      mounted = false
+    }
+  }, [apiFetch, commonWeekStart])
+
+  React.useEffect(() => {
+    let mounted = true
+    async function loadGaSystemByDay() {
+      if (!ganeUserId) {
+        setGaSystemByDay({})
+        return
+      }
+      setGaSystemLoading(true)
+      setGaSystemError(null)
+      try {
+        const results = await Promise.all(
+          commonWeekISOs.map(async (iso) => {
+            const params: Record<string, string> = { day: iso, user_id: ganeUserId }
+            if (adminDepartmentId) params.department_id = adminDepartmentId
+            const qs = new URLSearchParams(params)
+            const res = await apiFetch(`/reports/daily?${qs.toString()}`)
+            if (!res.ok) throw new Error(`daily_report_failed_${res.status}`)
+            const payload = (await res.json()) as DailyReportResponse
+            const occurrences = [...(payload.system_today || []), ...(payload.system_overdue || [])]
+            return [iso, occurrences] as const
+          })
+        )
+        if (!mounted) return
+        const nextMap: Record<string, DailyReportSystemOccurrence[]> = {}
+        for (const [iso, occurrences] of results) {
+          nextMap[iso] = occurrences
+        }
+        setGaSystemByDay(nextMap)
+      } catch (err) {
+        console.error("Failed to load GA system occurrences", err)
+        if (mounted) setGaSystemError("Failed to load DET GA system tasks.")
+      } finally {
+        if (mounted) setGaSystemLoading(false)
+      }
+    }
+    void loadGaSystemByDay()
+    return () => {
+      mounted = false
+    }
+  }, [adminDepartmentId, apiFetch, commonWeekISOs, ganeUserId])
+
   const loadDailyReport = React.useCallback(async () => {
     if (!user?.id) return
     setLoadingDailyReport(true)
@@ -495,6 +1173,27 @@ export default function AdminTasksPage() {
     if (!showDailyUserReport) return
     void loadDailyReport()
   }, [loadDailyReport, showDailyUserReport])
+
+  React.useEffect(() => {
+    const handleBeforePrint = () => {
+      const dpi = 96
+      const pageHeightPx = 11 * dpi - (0.36 + 0.51) * dpi
+      const bodyHeight = Math.max(
+        document.body.scrollHeight,
+        document.documentElement.scrollHeight,
+        document.body.offsetHeight
+      )
+      const totalPages = Math.max(1, Math.ceil(bodyHeight / pageHeightPx))
+      setPrintTotalPages(totalPages)
+    }
+    const handleAfterPrint = () => setPrintTarget(null)
+    window.addEventListener("beforeprint", handleBeforePrint)
+    window.addEventListener("afterprint", handleAfterPrint)
+    return () => {
+      window.removeEventListener("beforeprint", handleBeforePrint)
+      window.removeEventListener("afterprint", handleAfterPrint)
+    }
+  }, [])
 
 
   const submitTask = async () => {
@@ -587,6 +1286,135 @@ export default function AdminTasksPage() {
     },
     [userMap]
   )
+  const systemAssigneeInitials = React.useCallback(
+    (task: SystemTaskOut) => {
+      const ids = new Set<string>()
+      if (task.default_assignee_id) ids.add(task.default_assignee_id)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      if (!ids.size) return ""
+      const labels = Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          if (userFromMap) return userFromMap.full_name || userFromMap.username || ""
+          const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
+          return assigneeFromArray?.full_name || assigneeFromArray?.username || ""
+        })
+        .filter(Boolean)
+      if (!labels.length) return ""
+      return labels.map((label) => initials(label)).join(", ")
+    },
+    [userMap]
+  )
+  const taskAssigneeDepartments = React.useCallback(
+    (task: Task) => {
+      const ids = new Set<string>()
+      if (task.assigned_to) ids.add(task.assigned_to)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      if (!ids.size) return ""
+      const labels = Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          const deptId =
+            userFromMap?.department_id || task.assignees?.find((assignee) => assignee.id === userId)?.department_id
+          if (!deptId) return ""
+          const dept = departmentMap.get(deptId)
+          if (!dept) return ""
+          const code = (dept.code || "").trim().toUpperCase()
+          return code || (dept.name || "").trim()
+        })
+        .filter(Boolean)
+      if (!labels.length) return ""
+      return Array.from(new Set(labels)).sort().join(", ")
+    },
+    [departmentMap, userMap]
+  )
+  const systemAssigneeDepartments = React.useCallback(
+    (task: SystemTaskOut) => {
+      const ids = new Set<string>()
+      if (task.default_assignee_id) ids.add(task.default_assignee_id)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      if (!ids.size) return ""
+      const labels = Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          const deptId =
+            userFromMap?.department_id || task.assignees?.find((assignee) => assignee.id === userId)?.department_id
+          if (!deptId) return ""
+          const dept = departmentMap.get(deptId)
+          if (!dept) return ""
+          const code = (dept.code || "").trim().toUpperCase()
+          return code || (dept.name || "").trim()
+        })
+        .filter(Boolean)
+      if (!labels.length) return ""
+      return Array.from(new Set(labels)).sort().join(", ")
+    },
+    [departmentMap, userMap]
+  )
+  const taskAssigneeBadges = React.useCallback(
+    (task: Task) => {
+      const ids = new Set<string>()
+      if (task.assigned_to) ids.add(task.assigned_to)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      if (!ids.size) return []
+      const labels = Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          if (userFromMap) return userFromMap.full_name || userFromMap.username || ""
+          const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
+          return assigneeFromArray?.full_name || assigneeFromArray?.username || ""
+        })
+        .filter(Boolean)
+      return labels.map((label, index) => ({
+        id: `${task.id}-${index}`,
+        value: initials(label),
+        label,
+      }))
+    },
+    [userMap]
+  )
+  const systemAssigneeBadges = React.useCallback(
+    (task: SystemTaskOut) => {
+      const ids = new Set<string>()
+      if (task.default_assignee_id) ids.add(task.default_assignee_id)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      if (!ids.size) return []
+      const labels = Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          if (userFromMap) return userFromMap.full_name || userFromMap.username || ""
+          const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
+          return assigneeFromArray?.full_name || assigneeFromArray?.username || ""
+        })
+        .filter(Boolean)
+      return labels.map((label, index) => ({
+        id: `${task.id}-${index}`,
+        value: initials(label),
+        label,
+      }))
+    },
+    [userMap]
+  )
 
   const adminTaskRows = React.useMemo(() => {
     const rows: Task[] = []
@@ -656,6 +1484,125 @@ export default function AdminTasksPage() {
     }
     return map
   }, [tasks])
+
+  const allTasksTableRows = React.useMemo(() => {
+    const rows: Array<{
+      id: string
+      ll: "SYS" | "FT"
+      nll: string
+      assigned: { id: string; value: string; label: string }[]
+      dateIso: string
+      period: string
+      title: string
+      bz: string
+      kohaBz: string
+      status: string
+      priority: TaskPriority
+      comment?: string | null
+      taskId?: string
+      systemTemplateId?: string
+      systemOccurrenceDate?: string
+      isFastTask?: boolean
+    }> = []
+
+    if (!ganeUserId) return rows
+
+    const frequencyShort = (value?: string | null) => {
+      if (!value) return "SYS"
+      if (value === "DAILY") return "D"
+      if (value === "WEEKLY") return "W"
+      if (value === "MONTHLY") return "M"
+      if (value === "YEARLY") return "Y"
+      if (value === "3_MONTHS") return "3M"
+      if (value === "6_MONTHS") return "6M"
+      return "SYS"
+    }
+
+    for (const task of tasks) {
+      const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
+      if (isSystem) continue
+      if (task.is_active === false) continue
+
+      const isAssigned =
+        task.assigned_to === ganeUserId ||
+        task.assignees?.some((assignee) => assignee.id === ganeUserId) ||
+        task.alignment_user_ids?.includes(ganeUserId)
+      if (!isAssigned) continue
+
+      const dateIso = getTaskDateIso(task)
+      const statusValue = task.status || (task.completed_at ? "DONE" : "TODO")
+      rows.push({
+        id: `task:${task.id}`,
+        ll: "FT",
+        nll: task.project_id ? "-" : fastReportSubtypeShort(task),
+        assigned: taskAssigneeBadges(task),
+        dateIso,
+        period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
+        title: task.title || "-",
+        bz: "-",
+        kohaBz: "-",
+        status: statusValue,
+        priority: getDisplayPriority(task),
+        comment: taskCommentMap.get(task.id) ?? null,
+        taskId: task.id,
+        isFastTask: !task.project_id,
+      })
+    }
+
+    for (const systemTask of systemTasks) {
+      if (systemTask.is_active === false) continue
+
+      const isAssignedToGane =
+        systemTask.default_assignee_id === ganeUserId ||
+        systemTask.assignees?.some((assignee) => assignee.id === ganeUserId)
+      const isGaScope =
+        systemTask.scope === "GA" ||
+        (adminDepartmentId && systemTask.department_id === adminDepartmentId)
+      if (!isAssignedToGane && !isGaScope) continue
+
+      const dateIso = getSystemDateIso(systemTask)
+      const templateId = systemTask.template_id || systemTask.id
+      const statusKey = `${templateId}:${dateIso}`
+      const statusValue = systemStatusOverrides[statusKey] || systemTask.status || "OPEN"
+      rows.push({
+        id: `system:${templateId}:${dateIso}`,
+        ll: "SYS",
+        nll: frequencyShort(systemTask.frequency),
+        assigned: systemAssigneeBadges(systemTask),
+        dateIso,
+        period: systemTask.finish_period || "AM",
+        title: systemTask.title || "-",
+        bz: "-",
+        kohaBz: "-",
+        status: statusValue,
+        priority: (systemTask.priority || "NORMAL") as TaskPriority,
+        comment: systemTask.user_comment ?? null,
+        systemTemplateId: templateId,
+        systemOccurrenceDate: dateIso,
+      })
+    }
+
+    rows.sort((a, b) => {
+      if (a.dateIso !== b.dateIso) return b.dateIso.localeCompare(a.dateIso)
+      return a.title.localeCompare(b.title)
+    })
+
+    return rows
+  }, [
+    tasks,
+    systemTasks,
+    ganeUserId,
+    adminDepartmentId,
+    taskAssigneeBadges,
+    systemAssigneeBadges,
+    taskCommentMap,
+    systemStatusOverrides,
+  ])
+
+  const filteredAllTasksRows = React.useMemo(() => {
+    if (!allTasksDateFilter) return allTasksTableRows
+    return allTasksTableRows.filter((row) => row.dateIso === allTasksDateFilter)
+  }, [allTasksDateFilter, allTasksTableRows])
 
   const dailyUserReportRows = React.useMemo(() => {
     const rows: Array<{
@@ -941,6 +1888,122 @@ export default function AdminTasksPage() {
     }
   }
 
+  const updateTaskStatus = async (taskId: string, status: string) => {
+    const key = `task:${taskId}`
+    setTaskStatusUpdating((prev) => ({ ...prev, [key]: true }))
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status }),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update task status")
+        return
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+    } catch (error) {
+      console.error("Failed to update task status", error)
+      toast.error("Failed to update task status")
+    } finally {
+      setTaskStatusUpdating((prev) => ({ ...prev, [key]: false }))
+    }
+  }
+
+  const updateSystemOccurrenceStatus = async (
+    templateId: string,
+    occurrenceDate: string,
+    status: string,
+    comment?: string | null
+  ) => {
+    const key = `system:${templateId}:${occurrenceDate}`
+    setTaskStatusUpdating((prev) => ({ ...prev, [key]: true }))
+    try {
+      const payload: { template_id: string; occurrence_date: string; status: string; comment?: string | null } = {
+        template_id: templateId,
+        occurrence_date: occurrenceDate,
+        status,
+      }
+      if (typeof comment !== "undefined") {
+        payload.comment = comment
+      }
+      const res = await apiFetch("/system-tasks/occurrences", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update system task status")
+        return
+      }
+      const overrideKey = `${templateId}:${occurrenceDate}`
+      setSystemStatusOverrides((prev) => ({ ...prev, [overrideKey]: status }))
+      setSystemTasks((prev) =>
+        prev.map((task) =>
+          task.template_id === templateId ? { ...task, status } : task
+        )
+      )
+    } catch (error) {
+      console.error("Failed to update system task status", error)
+      toast.error("Failed to update system task status")
+    } finally {
+      setTaskStatusUpdating((prev) => ({ ...prev, [key]: false }))
+    }
+  }
+
+  const startFastTaskEdit = (taskId: string) => {
+    const task = tasks.find((item) => item.id === taskId)
+    if (!task) return
+    setFastEditTaskId(task.id)
+    setFastEditTitle(task.title || "")
+    setFastEditStartDate(toDateInputValue(task.start_date))
+    setFastEditDueDate(toDateInputValue(task.due_date))
+    setFastEditPriority((task.is_bllok ? "BLLOK" : (task.priority || "NORMAL")) as TaskPriority)
+    setFastEditStatus(task.status || "TODO")
+    setFastEditOriginalIsBllok(Boolean(task.is_bllok))
+    setFastEditOpen(true)
+  }
+
+  const saveFastTaskEdit = async () => {
+    if (!fastEditTaskId || !fastEditTitle.trim()) return
+    setFastEditSaving(true)
+    try {
+      const startDateValue = fastEditStartDate ? new Date(fastEditStartDate).toISOString() : null
+      const dueDateValue = fastEditDueDate ? new Date(fastEditDueDate).toISOString() : null
+      const isBllok = fastEditPriority === "BLLOK"
+      const actualPriority: "NORMAL" | "HIGH" = isBllok ? "NORMAL" : (fastEditPriority === "HIGH" ? "HIGH" : "NORMAL")
+      const payload: Record<string, unknown> = {
+        title: fastEditTitle.trim(),
+        start_date: startDateValue,
+        due_date: dueDateValue,
+        priority: actualPriority,
+        status: fastEditStatus,
+      }
+      if (isBllok !== fastEditOriginalIsBllok) {
+        payload.is_bllok = isBllok
+      }
+      const res = await apiFetch(`/tasks/${fastEditTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        toast.error("Failed to update task")
+        return
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      setFastEditOpen(false)
+      setFastEditTaskId(null)
+    } catch (error) {
+      console.error("Failed to update task", error)
+      toast.error("Failed to update task")
+    } finally {
+      setFastEditSaving(false)
+    }
+  }
+
   const updateTaskCommentState = (taskId: string, comment: string | null) => {
     setTasks((prev) => prev.map((task) => (task.id === taskId ? { ...task, user_comment: comment } : task)))
   }
@@ -1204,6 +2267,10 @@ export default function AdminTasksPage() {
       department: string
       title: string
       description: string
+      details: string
+      dateIso: string
+      ditaLabel: string
+      bzMe: string
       status: string
       bz: string
       kohaBz: string
@@ -1248,13 +2315,25 @@ export default function AdminTasksPage() {
       const baseDate = toDate(task.due_date || task.start_date || task.created_at)
       const createdDate = task.created_at ? new Date(task.created_at).toISOString().slice(0, 10) : undefined
 
+      const dateIso = getTaskDateIso(task)
+      const assigneeDepartments = taskAssigneeDepartments(task)
       rows.push({
         typeLabel: isProject ? "PRJK" : "FT",
         subtype: isProject ? "-" : fastReportSubtypeShort(task),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
-        department: resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
+        department: assigneeDepartments || resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
         title: task.title || "-",
-        description: task.description || "-",
+        description: task.description || "",
+        details: formatInternalDetails(task.internal_notes),
+        dateIso,
+        ditaLabel: dateIso ? formatDateDMY(dateIso) : "-",
+        bzMe: (task.alignment_user_ids || [])
+          .map((id) => {
+            const userFromMap = userMap.get(id)
+            return userFromMap ? initials(userFromMap.full_name || userFromMap.username || "") : ""
+          })
+          .filter(Boolean)
+          .join(", "),
         status: taskStatusLabel(task),
         bz: "-",
         kohaBz: "-",
@@ -1296,19 +2375,32 @@ export default function AdminTasksPage() {
       const createdDate = systemTask.created_at ? new Date(systemTask.created_at).toISOString().slice(0, 10) : undefined
       const baseDate = createdDate ? toDate(createdDate) : null
 
+      const dateIso = getSystemDateIso(systemTask)
+      const assigneeDepartments = systemAssigneeDepartments(systemTask)
       rows.push({
         typeLabel: "SYS",
         subtype: systemSubtype,
         period: systemTask.finish_period || "AM",
-        department: resolveDepartmentLabel(systemTask.department_id, systemTask.scope || null, false),
+        department:
+          assigneeDepartments || resolveDepartmentLabel(systemTask.department_id, systemTask.scope || null, false),
         title: systemTask.title || "-",
-        description: systemTask.description || "-",
+        description: systemTask.description || "",
+        details: formatInternalDetails(systemTask.internal_notes),
+        dateIso,
+        ditaLabel: dateIso ? formatDateDMY(dateIso) : "-",
+        bzMe: (systemTask.alignment_user_ids || [])
+          .map((id) => {
+            const userFromMap = userMap.get(id)
+            return userFromMap ? initials(userFromMap.full_name || userFromMap.username || "") : ""
+          })
+          .filter(Boolean)
+          .join(", "),
         status: formatSystemOccurrenceStatus(systemTask.status),
         bz: "-",
         kohaBz: "-",
         tyo: baseDate ? getTyoLabel(baseDate, null, todayDate) : "-",
         comment: systemTask.user_comment ?? null,
-        userInitials: ganeUser ? initials(ganeUser.full_name || ganeUser.username || "") : "",
+        userInitials: systemAssigneeInitials(systemTask),
         systemTemplateId: systemTask.template_id,
         createdDate,
       })
@@ -1323,7 +2415,20 @@ export default function AdminTasksPage() {
     })
 
     return rows
-  }, [tasks, systemTasks, ganeUserId, ganeUser, departments, taskAssigneeInitials, taskCommentMap, todayDate, adminDepartmentId])
+  }, [
+    tasks,
+    systemTasks,
+    ganeUserId,
+    departments,
+    taskAssigneeInitials,
+    systemAssigneeInitials,
+    taskAssigneeDepartments,
+    systemAssigneeDepartments,
+    taskCommentMap,
+    todayDate,
+    adminDepartmentId,
+    userMap,
+  ])
 
   const exportAllTasks = async () => {
     if (!user?.id) return
@@ -1333,33 +2438,18 @@ export default function AdminTasksPage() {
     }
     setExportingAllTasks(true)
     try {
-      const parseFilenameFromDisposition = (headerValue: string | null) => {
-        if (!headerValue) return null
-        const match = headerValue.match(/filename=\"?([^\";]+)\"?/i)
-        return match?.[1] || null
-      }
-
       const rowsPayload = allTasksReportRows.map((row) => {
-        const commentKey = row.taskId
-          ? `all-task:${row.taskId}`
-          : row.systemTemplateId && row.systemOccurrenceDate
-            ? `all-system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
-            : row.systemTemplateId
-              ? `all-system:${row.systemTemplateId}`
-              : ""
-        const previousValue = row.comment ?? ""
-        const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : previousValue
         return {
           typeLabel: row.typeLabel,
           subtype: row.subtype,
-          period: row.period,
-          department: row.department,
-          title: row.title,
-          status: row.status,
-          bz: row.bz,
+          dateLabel: row.ditaLabel,
+          bzMe: row.bzMe,
           kohaBz: row.kohaBz,
-          tyo: row.tyo,
-          comment: commentValue || "",
+          department: row.department,
+          period: row.period,
+          title: row.title,
+          description: row.description,
+          details: row.details,
           userInitials: row.userInitials || "",
         }
       })
@@ -1404,9 +2494,151 @@ export default function AdminTasksPage() {
     }
   }
 
+  const resetFastTaskForm = React.useCallback(() => {
+    setFastTaskTitle("")
+    setFastTaskDescription("")
+    setFastTaskType("normal")
+    setFastTaskAssignees([])
+    setFastTaskStartDate("")
+    setFastTaskDueDate("")
+    setFastTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+  }, [])
+
+  const submitFastTask = async () => {
+    if (!fastTaskTitle.trim()) {
+      toast.error("Task title is required")
+      return
+    }
+    if (!fastTaskStartDate) {
+      toast.error("Start date is required")
+      return
+    }
+    if (!adminDepartmentId) {
+      toast.error("Department is required")
+      return
+    }
+    setCreatingFastTask(true)
+    try {
+      const startDate = fastTaskStartDate ? new Date(fastTaskStartDate).toISOString() : null
+      const dueDate = fastTaskDueDate ? new Date(fastTaskDueDate).toISOString() : null
+      const payload = {
+        title: fastTaskTitle.trim(),
+        description: fastTaskDescription.trim() || null,
+        project_id: null,
+        department_id: adminDepartmentId,
+        status: "TODO",
+        priority: "NORMAL",
+        finish_period: fastTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : fastTaskFinishPeriod,
+        is_bllok: fastTaskType === "blocked",
+        is_1h_report: fastTaskType === "hourly",
+        is_r1: fastTaskType === "r1",
+        is_personal: fastTaskType === "personal",
+        ga_note_origin_id: null,
+        start_date: startDate,
+        due_date: dueDate,
+      }
+      const assigneeIds = fastTaskAssignees.length > 0 ? fastTaskAssignees : null
+      const res = await apiFetch("/tasks", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ...payload,
+          assigned_to: assigneeIds && assigneeIds.length > 0 ? assigneeIds[0] : null,
+          assignees: assigneeIds,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as Task
+      created.is_bllok = fastTaskType === "blocked" ? true : (created.is_bllok ?? false)
+      created.is_1h_report = fastTaskType === "hourly" ? true : (created.is_1h_report ?? false)
+      created.is_r1 = fastTaskType === "r1" ? true : (created.is_r1 ?? false)
+      created.is_personal = fastTaskType === "personal" ? true : (created.is_personal ?? false)
+      if (fastTaskType === "normal") {
+        created.ga_note_origin_id = created.ga_note_origin_id || null
+        created.priority = created.priority || "NORMAL"
+      }
+      setTasks((prev) => [created, ...prev])
+      setFastTaskOpen(false)
+      resetFastTaskForm()
+      toast.success("Task created")
+    } finally {
+      setCreatingFastTask(false)
+    }
+  }
+
+  const exportCommonView = async (payload: { title: string; columns: string[]; rows: string[][] }) => {
+    if (exportingCommonView) return
+    setExportingCommonView(true)
+    try {
+      const res = await apiFetch(`/exports/common-view.xlsx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res?.ok) {
+        const detail = await res.text()
+        toast.error(detail || "Failed to export common view.")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      link.download = filename || "COMMON_VIEW.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export common view", error)
+      toast.error("Failed to export common view")
+    } finally {
+      setExportingCommonView(false)
+    }
+  }
+
+  const exportGaTime = async () => {
+    if (exportingGaTime) return
+    setExportingGaTime(true)
+    try {
+      const weekStartIso = toISODate(commonWeekStart)
+      const res = await apiFetch(`/exports/ga-time.xlsx?week_start=${encodeURIComponent(weekStartIso)}`)
+      if (!res?.ok) {
+        const detail = await res.text()
+        toast.error(detail || "Failed to export GA time.")
+        return
+      }
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      link.download = filename || "GA_TIME_TABLE.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export GA time", error)
+      toast.error("Failed to export GA time")
+    } finally {
+      setExportingGaTime(false)
+    }
+  }
+
   const sectionCardClass = "rounded-xl border border-slate-200 bg-white shadow-sm"
-  const sectionHeaderClass = "flex flex-wrap items-center justify-between gap-3"
-  const badgeBaseClass = "h-6 rounded-md px-2 text-[11px] font-semibold uppercase"
+  const sectionHeaderClass = "flex flex-wrap items-center justify-center gap-3"
 
   const AdminTasksSection = ({
     title,
@@ -1431,849 +2663,1496 @@ export default function AdminTasksPage() {
     </Card>
   )
 
-  const AdminTasksHeaderCard = () => (
-    <Card className={sectionCardClass}>
-      <CardHeader className="space-y-4">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <CardTitle className="text-2xl font-semibold text-slate-900">Admin Tasks</CardTitle>
-          </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs">
-            <Badge variant="outline" className="border-slate-200 bg-white">
-              Admin items: {adminTaskRows.length}
-            </Badge>
-            <Badge variant="outline" className="border-slate-200 bg-white">
-              Filtered: {sortedTasks.length}
-            </Badge>
-          </div>
-        </div>
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-          <div className="min-w-[160px]">
-            <Label className="text-xs text-muted-foreground">View</Label>
-            <Select value={viewFilter} onValueChange={(value) => setViewFilter(value as "all" | "tasks" | "system")}>
-              <SelectTrigger className="h-10 rounded-lg text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">Tasks + System</SelectItem>
-                <SelectItem value="tasks">Tasks only</SelectItem>
-                <SelectItem value="system">System only</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="min-w-[160px]">
-            <Label className="text-xs text-muted-foreground">Priority</Label>
-            <Select value={priorityFilter} onValueChange={(value) => setPriorityFilter(value as "all" | TaskPriority)}>
-              <SelectTrigger className="h-10 rounded-lg text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="all">All priorities</SelectItem>
-                {PRIORITY_OPTIONS.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="min-w-[160px]">
-            <Label className="text-xs text-muted-foreground">Day</Label>
-            <Select value={dayFilter} onValueChange={setDayFilter}>
-              <SelectTrigger className="h-10 rounded-lg text-sm">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {DAY_OPTIONS.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-          <div className="min-w-[160px]">
-            <Label className="text-xs text-muted-foreground">Due date</Label>
-            <Input
-              type="date"
-              className="h-10 rounded-lg text-sm"
-              value={dateFilter}
-              onChange={(event) => setDateFilter(event.target.value)}
-            />
-          </div>
-        </div>
-        <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button
-            variant="ghost"
-            className="h-10 px-3 text-xs text-slate-600"
-            onClick={() => {
-              setViewFilter("all")
-              setPriorityFilter("all")
-              setDayFilter("all")
-              setDateFilter("")
-            }}
-          >
-            Clear filters
-          </Button>
-        </div>
-      </CardHeader>
-    </Card>
+  const commonFiltered = React.useMemo(() => {
+    const datesToUse = commonWeekISOs
+    const activeUserIds = commonUsers.filter((u) => u.is_active).map((u) => u.id)
+    const fullyCoveredDates = new Set<string>()
+    if (activeUserIds.length) {
+      for (const dateStr of datesToUse) {
+        const coveredUsers = new Set(
+          commonData.leave
+            .filter((x) => x.userId && dateStr >= x.startDate && dateStr <= x.endDate)
+            .map((x) => x.userId as string)
+        )
+        if (coveredUsers.size >= activeUserIds.length) {
+          fullyCoveredDates.add(dateStr)
+        }
+      }
+    }
+
+    const inSelectedDates = (dateStr: string) => datesToUse.includes(dateStr)
+    const late = commonData.late.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const absent = commonData.absent.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const leave = commonData.leave.filter((x) => {
+      const visibleDates = datesToUse.filter((d) => d >= x.startDate && d <= x.endDate)
+      if (!visibleDates.length) return false
+      return visibleDates.some((d) => !fullyCoveredDates.has(d))
+    })
+    const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const personal = commonData.personal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const external = commonData.external.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const internal = commonData.internal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const r1 = commonData.r1.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const problems = commonData.problems.filter(
+      (x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    )
+    const feedback = commonData.feedback.filter(
+      (x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    )
+    const bz = commonData.bz.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const priority = commonData.priority.filter((p) => inSelectedDates(p.date))
+
+    const filteredPriority = priority.filter((p) => !fullyCoveredDates.has(p.date))
+
+    return {
+      late,
+      absent,
+      leave,
+      blocked,
+      oneH,
+      personal,
+      external,
+      internal,
+      r1,
+      problems,
+      feedback,
+      bz,
+      priority: filteredPriority,
+      fullyCoveredDates,
+    }
+  }, [commonData, commonUsers, commonWeekISOs])
+
+  const tableDataByDay = React.useMemo(() => {
+    const dataByDay: Record<
+      string,
+      {
+        late: LateItem[]
+        absent: AbsentItem[]
+        leave: LeaveItem[]
+        blocked: BlockedItem[]
+        oneH: OneHItem[]
+        personal: PersonalItem[]
+        external: ExternalItem[]
+        internal: InternalItem[]
+        bz: BzItem[]
+        r1: R1Item[]
+        problems: ProblemItem[]
+        feedback: FeedbackItem[]
+        priority: PriorityItem[]
+      }
+    > = {}
+    const dailyFeedback = commonFiltered.feedback.filter((x) => x.everyday)
+    const dailyProblems = commonFiltered.problems.filter((x) => x.everyday)
+
+    commonWeekISOs.forEach((iso) => {
+      if (commonFiltered.fullyCoveredDates.has(iso)) {
+        dataByDay[iso] = {
+          late: [],
+          absent: [],
+          leave: [
+            {
+              person: ALL_USERS_INITIALS,
+              startDate: iso,
+              endDate: iso,
+              fullDay: true,
+              isAllUsers: true,
+            },
+          ],
+          blocked: [],
+          oneH: [],
+          personal: [],
+          external: [],
+          internal: [],
+          bz: [],
+          r1: [],
+          problems: dailyProblems,
+          feedback: dailyFeedback,
+          priority: [],
+        }
+        return
+      }
+      dataByDay[iso] = {
+        late: commonFiltered.late.filter((x) => x.date === iso),
+        absent: commonFiltered.absent.filter((x) => x.date === iso),
+        leave: commonFiltered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
+        blocked: commonFiltered.blocked.filter((x) => x.date === iso),
+        oneH: sortTasksByOrder(commonFiltered.oneH.filter((x) => x.date === iso)),
+        personal: commonFiltered.personal.filter((x) => x.date === iso),
+        external: sortByTime(commonFiltered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        internal: sortByTime(commonFiltered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        bz: sortByTime(commonFiltered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        r1: sortTasksByOrder(commonFiltered.r1.filter((x) => x.date === iso)),
+        problems: [
+          ...commonFiltered.problems.filter((x) => !x.everyday && x.date === iso),
+          ...dailyProblems,
+        ],
+        feedback: [
+          ...commonFiltered.feedback.filter((x) => !x.everyday && x.date === iso),
+          ...dailyFeedback,
+        ],
+        priority: commonFiltered.priority.filter((x) => x.date === iso),
+      }
+    })
+
+    return dataByDay
+  }, [commonFiltered, commonWeekISOs, sortByTime, sortTasksByOrder])
+
+  const weekTableRows = React.useMemo(
+    () => [
+      { id: "leave", label: "PV/FESTE" },
+      { id: "blocked", label: "BLL" },
+      { id: "external", label: "TAK EXT" },
+      { id: "internal", label: "TAK INT" },
+      { id: "bz", label: "BZ GA" },
+      { id: "det_ga", label: "DET GA" },
+      { id: "oneH", label: "1H" },
+      { id: "r1", label: "R1=1H" },
+      { id: "personal", label: "P:" },
+    ],
+    []
   )
 
-  const AdminTasksTable = () => (
-    <div className="overflow-x-auto">
-      <table className="min-w-[720px] w-full text-sm">
-        <colgroup>
-          <col className="w-[56px]" />
-          <col />
-          <col className="w-[120px]" />
-          <col className="w-[120px]" />
-          <col className="w-[120px]" />
-          {isAdmin ? <col className="w-[140px]" /> : null}
-        </colgroup>
-        <thead className="sticky top-0 z-10 bg-slate-50/95">
-          <tr className="border-b border-slate-200">
-            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              No.
-            </th>
-            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Task Title
-            </th>
-            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Status
-            </th>
-            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Priority
-            </th>
-            <th className="text-left py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-              Due Date
-            </th>
-            {isAdmin ? (
-              <th className="text-right py-2.5 px-4 text-[11px] font-semibold text-slate-500 uppercase tracking-wider">
-                Actions
-              </th>
-            ) : null}
-          </tr>
-        </thead>
-        <tbody className="divide-y divide-slate-100">
-          {sortedTasks.map((task, index) => (
-            <tr key={task.id} className="transition-colors hover:bg-slate-50/70">
-              <td className="py-2.5 px-4">
-                <span className="text-sm text-slate-700">{index + 1}</span>
-              </td>
-              <td className="py-2.5 px-4">
-                <div className="min-w-0">
-                  <Link
-                    href={`/tasks/${task.id}`}
-                    className="block truncate font-medium text-slate-900 hover:text-blue-600"
-                    title={task.title}
-                  >
-                    {task.title}
-                  </Link>
-                </div>
-              </td>
-              <td className="py-2.5 px-4">
-                {task.status ? (
-                  <Badge variant="secondary" className={badgeBaseClass}>
-                    {task.status}
-                  </Badge>
-                ) : (
-                  <span className="text-sm text-muted-foreground">-</span>
-                )}
-              </td>
-              <td className="py-2.5 px-4">
-                {getDisplayPriority(task) ? (
-                  <Badge variant="outline" className={`${badgeBaseClass} border-slate-200 text-slate-700`}>
-                    {getDisplayPriority(task)}
-                  </Badge>
-                ) : (
-                  <span className="text-sm text-muted-foreground">-</span>
-                )}
-              </td>
-              <td className="py-2.5 px-4">
-                <span className="text-sm text-slate-700">{formatDate(task.due_date)}</span>
-              </td>
-              {isAdmin ? (
-                <td className="py-2.5 px-4">
-                  <div className="flex items-center justify-end gap-2">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-3 text-xs"
-                      onClick={() => startEditTask(task)}
-                    >
-                      Edit
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 px-3 text-xs text-red-600 hover:bg-red-50 hover:text-red-700"
-                      disabled={deletingTaskId === task.id}
-                      onClick={() => void deleteTask(task.id)}
-                    >
-                      {deletingTaskId === task.id ? "Deleting..." : "Delete"}
-                    </Button>
-                  </div>
-                </td>
-              ) : null}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+  const gaTasksByDay = React.useMemo(() => {
+    const byDay: Record<string, Task[]> = {}
+    commonWeekISOs.forEach((iso) => {
+      byDay[iso] = []
+    })
+    if (!ganeUserId) return byDay
+    for (const task of tasks) {
+      const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
+      if (isSystem) continue
+      const assignedToGane =
+        task.assigned_to === ganeUserId ||
+        task.assignees?.some((assignee) => assignee.id === ganeUserId) ||
+        task.alignment_user_ids?.includes(ganeUserId)
+      if (!assignedToGane) continue
+
+      const startDate = toDate(task.start_date || task.due_date || task.created_at)
+      const endDate = toDate(task.due_date || task.start_date || task.created_at)
+      if (!startDate || !endDate) continue
+      const startIso = toISODate(startDate)
+      const endIso = toISODate(endDate)
+      for (const iso of commonWeekISOs) {
+        if (iso >= startIso && iso <= endIso) {
+          byDay[iso].push(task)
+        }
+      }
+    }
+    return byDay
+  }, [commonWeekISOs, ganeUserId, tasks])
+
+  const canEditGaTimeSlots =
+    isAdmin || (user?.username ? user.username.toLowerCase() === "gane.arifaj" : false)
+
+  const normalizeSlotTime = (value: string) => (value ? value.slice(0, 5) : "")
+  const toDayOfWeek = (iso: string) => getMondayBasedDay(fromISODate(iso))
+
+  const gaTimeEntriesByCell = React.useMemo(() => {
+    const map = new Map<string, GaTimeSlotEntry[]>()
+    for (const entry of gaTimeEntries) {
+      const day = entry.day_of_week
+      const start = normalizeSlotTime(entry.start_time)
+      const key = `${day}|${start}`
+      const list = map.get(key) || []
+      list.push(entry)
+      map.set(key, list)
+    }
+    return map
+  }, [gaTimeEntries])
+
+  const createGaTimeEntry = React.useCallback(
+    async (dayOfWeek: string, startTime: string, endTime: string, content: string) => {
+      const trimmed = content.trim()
+      if (!trimmed) return
+      const key = `${dayOfWeek}|${startTime}`
+      setGaTimeSaving((prev) => ({ ...prev, [key]: true }))
+      try {
+        const res = await apiFetch("/ga-time-slots", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            day_of_week: Number(dayOfWeek),
+            start_time: startTime,
+            end_time: endTime,
+            content: trimmed,
+          }),
+        })
+        if (!res.ok) {
+          throw new Error(`ga_time_slot_create_failed_${res.status}`)
+        }
+        const created = (await res.json()) as GaTimeSlotEntry
+        setGaTimeEntries((prev) => [...prev, created])
+      } catch (err) {
+        console.error("Failed to create GA time slot entry", err)
+        toast.error("Failed to save time slot entry.")
+      } finally {
+        setGaTimeSaving((prev) => ({ ...prev, [key]: false }))
+      }
+    },
+    [apiFetch]
   )
+
+  const updateGaTimeEntry = React.useCallback(
+    async (entryId: string, content: string) => {
+      const trimmed = content.trim()
+      if (!trimmed) return
+      setGaTimeSaving((prev) => ({ ...prev, [entryId]: true }))
+      try {
+        const res = await apiFetch(`/ga-time-slots/${entryId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content: trimmed }),
+        })
+        if (!res.ok) {
+          throw new Error(`ga_time_slot_update_failed_${res.status}`)
+        }
+        const updated = (await res.json()) as GaTimeSlotEntry
+        setGaTimeEntries((prev) => prev.map((entry) => (entry.id === entryId ? updated : entry)))
+      } catch (err) {
+        console.error("Failed to update GA time slot entry", err)
+        toast.error("Failed to update time slot entry.")
+      } finally {
+        setGaTimeSaving((prev) => ({ ...prev, [entryId]: false }))
+      }
+    },
+    [apiFetch]
+  )
+
+  const deleteGaTimeEntry = React.useCallback(
+    async (entryId: string) => {
+      setGaTimeDeleting((prev) => ({ ...prev, [entryId]: true }))
+      try {
+        const res = await apiFetch(`/ga-time-slots/${entryId}`, { method: "DELETE" })
+        if (!res.ok) {
+          throw new Error(`ga_time_slot_delete_failed_${res.status}`)
+        }
+        setGaTimeEntries((prev) => prev.filter((entry) => entry.id !== entryId))
+      } catch (err) {
+        console.error("Failed to delete GA time slot entry", err)
+        toast.error("Failed to delete time slot entry.")
+      } finally {
+        setGaTimeDeleting((prev) => ({ ...prev, [entryId]: false }))
+      }
+    },
+    [apiFetch]
+  )
+
+  const AdminCommonWeekTable = () => {
+    const weekTitleRange =
+      commonWeekISOs.length >= 2
+        ? `${formatDateHuman(commonWeekISOs[0])} - ${formatDateHuman(commonWeekISOs[commonWeekISOs.length - 1])}`
+        : ""
+    const exportPayload = React.useMemo(() => {
+      const columns = ["NR", "LLOJI", ...commonWeekISOs.map((iso) => `${getDayCode(fromISODate(iso))} = ${formatDateHuman(iso)}`)]
+
+      const entryAssignees = (entry: any) =>
+        entry.assignees && entry.assignees.length
+          ? entry.assignees
+          : (entry.person || entry.owner)
+            ? String(entry.person || entry.owner)
+                .split(",")
+                .map((v) => v.trim())
+                .filter(Boolean)
+            : []
+
+      const assigneesSuffix = (entry: any) => {
+        const initialsList = entryAssignees(entry).map((name: string) => commonViewInitials(name)).filter(Boolean)
+        return initialsList.length ? ` (${initialsList.join(", ")})` : ""
+      }
+
+      const renderCellLines = (rowId: CommonType, iso: string) => {
+        const dayData = tableDataByDay?.[iso]
+        if (!dayData) return []
+        if (rowId === "det_ga") {
+          const systemEntries = gaSystemByDay[iso] || []
+          const taskEntries = gaTasksByDay[iso] || []
+          const combined = [
+            ...systemEntries.map((entry) => ({ kind: "system" as const, title: entry.title })),
+            ...taskEntries.map((entry) => ({ kind: "task" as const, title: entry.title || "-" })),
+          ]
+          if (!combined.length) return []
+          return combined.map((entry, idx) => `${idx + 1}. ${entry.title}`)
+        }
+
+        const entries =
+          rowId === "late"
+            ? dayData.late
+            : rowId === "absent"
+              ? dayData.absent
+              : rowId === "leave"
+                ? dayData.leave
+                : rowId === "blocked"
+                  ? dayData.blocked
+                  : rowId === "oneH"
+                    ? dayData.oneH
+                    : rowId === "r1"
+                      ? dayData.r1
+                      : rowId === "personal"
+                        ? dayData.personal
+                        : rowId === "external"
+                          ? dayData.external
+                          : rowId === "internal"
+                            ? dayData.internal
+                            : rowId === "bz"
+                              ? dayData.bz
+                              : rowId === "priority"
+                                ? dayData.priority
+                                : rowId === "problem"
+                                  ? dayData.problems
+                                  : rowId === "feedback"
+                                    ? dayData.feedback
+                                    : []
+
+        if (!entries.length) return []
+
+        if (rowId === "late") {
+          return entries.map((e: LateItem, idx: number) =>
+            `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`
+          )
+        }
+        if (rowId === "absent") {
+          return entries.map((e: AbsentItem, idx: number) => `${idx + 1}. ${e.from} - ${e.to}${assigneesSuffix(e)}`)
+        }
+        if (rowId === "leave") {
+          return entries.map((e: LeaveItem, idx: number) => {
+            const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
+            const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
+            const label = isAllUsers ? `${timeLabel} ALL` : timeLabel
+            return `${idx + 1}. ${label}${isAllUsers ? "" : assigneesSuffix(e)}`
+          })
+        }
+        if (rowId === "blocked") {
+          return entries.map((e: BlockedItem, idx: number) =>
+            `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+          )
+        }
+        if (rowId === "problem" || rowId === "feedback") {
+          return entries.map((e: ProblemItem | FeedbackItem, idx: number) => {
+            const dateLabel = e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)
+            const noteLabel = e.note ? ` - ${e.note}` : ""
+            return `${idx + 1}. ${e.title} - ${dateLabel}${noteLabel}${assigneesSuffix(e)}`
+          })
+        }
+        if (rowId === "oneH" || rowId === "r1") {
+          return entries.map((e: any, idx: number) =>
+            `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+          )
+        }
+        if (rowId === "personal") {
+          return entries.map((e: PersonalItem, idx: number) =>
+            `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+          )
+        }
+        if (rowId === "external") {
+          return entries.map((e: ExternalItem, idx: number) =>
+            `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
+          )
+        }
+        if (rowId === "internal") {
+          return entries.map((e: InternalItem, idx: number) =>
+            `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
+          )
+        }
+        if (rowId === "bz") {
+          return entries.map((e: BzItem, idx: number) => {
+            const bzLabel = e.bzWithLabel ? ` - ${e.bzWithLabel}` : ""
+            return `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${bzLabel}${assigneesSuffix(e)}`
+          })
+        }
+        if (rowId === "priority") {
+          return entries.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
+        }
+        return []
+      }
+
+      const rows = weekTableRows.map((row, rowIndex) => {
+        const cells = commonWeekISOs.map((iso) => renderCellLines(row.id as CommonType, iso).join("\n"))
+        return [String(rowIndex + 1), row.label.toUpperCase(), ...cells]
+      })
+
+      return {
+        title: `COMMON VIEW - GANE TASKS${weekTitleRange ? ` (${weekTitleRange})` : ""}`,
+        columns,
+        rows,
+      }
+    }, [commonWeekISOs, gaSystemByDay, gaTasksByDay, tableDataByDay, weekTableRows, weekTitleRange])
+    const renderCellContent = (rowId: CommonType, iso: string) => {
+      const dayData = tableDataByDay?.[iso]
+      if (!dayData) return null
+      if (rowId === "det_ga") {
+        const systemEntries = gaSystemByDay[iso] || []
+        const taskEntries = gaTasksByDay[iso] || []
+        const combined = [
+          ...systemEntries.map((entry) => ({ kind: "system" as const, title: entry.title })),
+          ...taskEntries.map((entry) => ({ kind: "task" as const, title: entry.title || "-" })),
+        ]
+        if (!combined.length) return null
+        return combined.map((entry, idx) => (
+          <div key={`${entry.kind}-${idx}`} className="week-table-entry">
+            <span>{idx + 1}. {entry.title}</span>
+          </div>
+        ))
+      }
+      const entryAssignees = (entry: any) =>
+        entry.assignees && entry.assignees.length
+          ? entry.assignees
+          : (entry.person || entry.owner)
+            ? String(entry.person || entry.owner)
+                .split(",")
+                .map((v) => v.trim())
+                .filter(Boolean)
+            : []
+      const entries =
+        rowId === "late"
+          ? dayData.late
+          : rowId === "absent"
+            ? dayData.absent
+            : rowId === "leave"
+              ? dayData.leave
+              : rowId === "blocked"
+                ? dayData.blocked
+                : rowId === "oneH"
+                  ? dayData.oneH
+                  : rowId === "r1"
+                    ? dayData.r1
+                    : rowId === "personal"
+                      ? dayData.personal
+                      : rowId === "external"
+                        ? dayData.external
+                        : rowId === "internal"
+                          ? dayData.internal
+                          : rowId === "bz"
+                            ? dayData.bz
+                            : rowId === "priority"
+                              ? dayData.priority
+                              : rowId === "problem"
+                                ? dayData.problems
+                                : rowId === "feedback"
+                                  ? dayData.feedback
+                                  : []
+
+      if (!entries.length) return null
+
+      if (rowId === "late") {
+        return entries.map((e: LateItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>{idx + 1}. {e.start || "08:00"}-{e.until}</span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.start}-${name}`} className="week-table-avatar" title={name}>
+                  {commonViewInitials(name)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+      if (rowId === "absent") {
+        return entries.map((e: AbsentItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>{idx + 1}. {e.from} - {e.to}</span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.from}-${name}`} className="week-table-avatar" title={name}>
+                  {commonViewInitials(name)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+      if (rowId === "leave") {
+        return entries.map((e: LeaveItem, idx: number) => {
+          const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
+          const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
+          return (
+            <div key={idx} className="week-table-entry">
+              <span>
+                {idx + 1}. {isAllUsers ? `${timeLabel} ALL` : timeLabel}
+              </span>
+              {!isAllUsers ? (
+                <div className="week-table-avatars">
+                  {entryAssignees(e).map((name: string) => (
+                    <span key={`${e.from}-${name}`} className="week-table-avatar" title={name}>
+                      {commonViewInitials(name)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )
+        })
+      }
+      if (rowId === "blocked") {
+        return entries.map((e: BlockedItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                  {commonViewInitials(name)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+      if (rowId === "problem" || rowId === "feedback") {
+        return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>
+              {idx + 1}. {e.title}
+              {` - ${e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)}`}
+              {e.note ? ` - ${e.note}` : ""}
+            </span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                  {commonViewInitials(name)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+      if (rowId === "oneH" || rowId === "r1") {
+        return entries.map((e: any, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                  {commonViewInitials(name)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+      if (rowId === "personal") {
+        return entries.map((e: PersonalItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                  {commonViewInitials(name)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+      if (rowId === "external") {
+        return entries.map((e: ExternalItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                  {commonViewInitials(name)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+      if (rowId === "internal") {
+        return entries.map((e: InternalItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+            <div className="week-table-avatars">
+              {entryAssignees(e).map((name: string) => (
+                <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                  {commonViewInitials(name)}
+                </span>
+              ))}
+            </div>
+          </div>
+        ))
+      }
+      if (rowId === "bz") {
+        return entries.map((e: BzItem, idx: number) => (
+          <div key={idx} className="week-table-entry">
+            <span>
+              {idx + 1}. {stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
+              {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
+            </span>
+            {e.assignees && e.assignees.length ? (
+              <div className="week-table-avatars">
+                {e.assignees.map((name: string) => (
+                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                    {commonViewInitials(name)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))
+      }
+      if (rowId === "priority") {
+        const groupMap = new Map<string, PriorityItem[]>()
+        for (const item of entries as PriorityItem[]) {
+          const departmentName = item.department_name || "Other"
+          const existing = groupMap.get(departmentName) || []
+          existing.push(item)
+          groupMap.set(departmentName, existing)
+        }
+        const preferredOrder = ["DEVELOPMENT", "GRAPHIC DESIGN", "PRODUCT CONTENT"]
+        const orderIndex = new Map(preferredOrder.map((name, idx) => [name, idx]))
+        const normalizeDept = (value: string) => value.trim().toUpperCase()
+        const isOther = (value: string) => normalizeDept(value) === "OTHER"
+        const groupKeys = Array.from(groupMap.keys()).sort((a, b) => {
+          const aKey = normalizeDept(a)
+          const bKey = normalizeDept(b)
+          const aIdx = orderIndex.get(aKey)
+          const bIdx = orderIndex.get(bKey)
+          if (aIdx != null && bIdx != null) return aIdx - bIdx
+          if (aIdx != null) return -1
+          if (bIdx != null) return 1
+          if (isOther(a) && !isOther(b)) return 1
+          if (!isOther(a) && isOther(b)) return -1
+          return a.localeCompare(b)
+        })
+        let entryIndex = 0
+        return groupKeys.map((departmentName, groupIdx) => (
+          <React.Fragment key={departmentName}>
+            {(groupMap.get(departmentName) || []).map((e, idx) => (
+              <div key={`${departmentName}-${idx}`} className="week-table-entry">
+                <span>{++entryIndex}. {e.project}</span>
+                <div className="week-table-avatars">
+                  {e.assignees.map((name) => (
+                    <span key={`${e.project}-${name}`} className="week-table-avatar" title={name}>
+                      {commonViewInitials(name)}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ))}
+            {groupIdx < groupKeys.length - 1 ? <div className="week-table-prjk-divider" /> : null}
+          </React.Fragment>
+        ))
+      }
+      return null
+    }
+
+    const renderAssignedBadges = (badges: { id: string; value: string; label: string }[]) => {
+      if (!badges.length) return <span className="text-slate-500">-</span>
+      return (
+        <div className="flex items-center gap-1">
+          {badges.map((item) => (
+            <div
+              key={item.id}
+              className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+              title={item.label}
+            >
+              {item.value}
+            </div>
+          ))}
+        </div>
+      )
+    }
+
+    return (
+      <div className="admin-week-table">
+        <div className="print-section" data-print-section="common">
+          <div className="print-only week-table-view">
+            <div className="print-page">
+              <div className="print-header">
+                <div />
+                <div className="print-title">COMMON VIEW - WEEK PLAN</div>
+                <div className="print-datetime">{formatDateTimeDMY(printedAt)}</div>
+              </div>
+              <table className="week-table">
+                <thead>
+                <tr>
+                  <th style={{ width: "40px" }}>NR</th>
+                  <th style={{ width: "110px" }}>LLOJI</th>
+                  {commonWeekISOs.map((iso) => {
+                    const d = fromISODate(iso)
+                    const dayCode = getDayCode(d)
+                    return (
+                      <th key={iso} colSpan={1} className="week-table-date-header">
+                        <div>{dayCode} = {formatDateHuman(iso)}</div>
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+                <tbody>
+                  {weekTableRows.map((row, rowIndex) => {
+                    const rowLabel = row.label.toUpperCase()
+                    const weekRowClass =
+                      row.id === "late"
+                        ? "delay"
+                        : row.id === "absent"
+                          ? "absence"
+                          : row.id === "oneH"
+                            ? "oneh"
+                            : row.id
+                    return (
+                      <tr key={`print-${row.id}`} className={`week-table-row ${weekRowClass}`}>
+                        <td className="week-table-number">{rowIndex + 1}</td>
+                        <td className="week-table-label">{rowLabel}</td>
+                        {commonWeekISOs.map((iso) => {
+                          const content = renderCellContent(row.id as CommonType, iso)
+                          return (
+                            <td key={`print-${row.id}-${iso}`} className="week-table-cell">
+                              {content ? (
+                                <div className="week-table-entries">{content}</div>
+                              ) : (
+                                <span className="week-table-empty">-</span>
+                              )}
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+              <div className="print-footer">
+                <span />
+                <div className="print-page-count">1/{printTotalPages}</div>
+                <div className="print-initials">PUNOI: {printInitials}</div>
+              </div>
+            </div>
+          </div>
+          <div className="print:hidden">
+            <AdminTasksSection
+              title={`COMMON VIEW - GANE TASKS${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
+              description=""
+              actions={
+                <div className="flex items-center gap-2 print:hidden">
+                  <Button variant="outline" size="sm" onClick={() => handleSectionPrint("common")}>
+                    Print
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void exportCommonView(exportPayload)}
+                    disabled={exportingCommonView}
+                  >
+                    {exportingCommonView ? "Exporting..." : "Export"}
+                  </Button>
+                </div>
+              }
+            >
+              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 print:hidden">
+                {commonLoading ? <span>Loading...</span> : null}
+                {commonError ? <span className="text-red-600">{commonError}</span> : null}
+                {gaSystemLoading ? <span>Loading DET GA...</span> : null}
+                {gaSystemError ? <span className="text-red-600">{gaSystemError}</span> : null}
+              </div>
+              <div className="mt-3 overflow-x-auto print:hidden">
+                <table className="week-table">
+                  <thead>
+                  <tr>
+                    <th style={{ width: "40px" }}>NR</th>
+                    <th style={{ width: "110px" }}>LLOJI</th>
+                    {commonWeekISOs.map((iso) => {
+                      const d = fromISODate(iso)
+                      const dayCode = getDayCode(d)
+                      return (
+                        <th key={iso} colSpan={1} className="week-table-date-header">
+                          <div>{dayCode} = {formatDateHuman(iso)}</div>
+                        </th>
+                      )
+                    })}
+                  </tr>
+                </thead>
+                  <tbody>
+                    {weekTableRows.map((row, rowIndex) => {
+                      const rowLabel = row.label.toUpperCase()
+                      const weekRowClass =
+                        row.id === "late"
+                          ? "delay"
+                          : row.id === "absent"
+                            ? "absence"
+                            : row.id === "oneH"
+                              ? "oneh"
+                              : row.id
+                      return (
+                        <tr key={row.id} className={`week-table-row ${weekRowClass}`}>
+                          <td className="week-table-number">{rowIndex + 1}</td>
+                          <td className="week-table-label">{rowLabel}</td>
+                          {commonWeekISOs.map((iso) => {
+                            const content = renderCellContent(row.id as CommonType, iso)
+                            return (
+                              <td key={iso} className="week-table-cell">
+                                {content ? (
+                                  <div className="week-table-entries">{content}</div>
+                                ) : (
+                                  <span className="week-table-empty">-</span>
+                                )}
+                              </td>
+                            )
+                          })}
+                        </tr>
+                      )
+                    })}
+                  </tbody>
+                </table>
+              </div>
+            </AdminTasksSection>
+          </div>
+        </div>
+        <div className="print-section" data-print-section="ga-time">
+          <div className="print-only">
+            <div className="print-page">
+              <div className="print-header">
+                <div />
+                <div className="print-title">GA TIME TABLE{weekTitleRange ? ` (${weekTitleRange})` : ""}</div>
+                <div className="print-datetime">{formatDateTimeDMY(printedAt)}</div>
+              </div>
+              <div className="ga-time-table">
+                <table className="ga-time-table-table">
+                  <thead>
+                    <tr>
+                      <th className="ga-time-header ga-time-nr">NR</th>
+                      <th className="ga-time-header">Time</th>
+                      {commonWeekISOs.map((iso) => {
+                        const d = fromISODate(iso)
+                        const dayCode = getDayCode(d)
+                        return (
+                          <th key={`ga-print-${iso}`} className="ga-time-header">
+                            <div>{dayCode} = {formatDateHuman(iso)}</div>
+                          </th>
+                        )
+                      })}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {GA_TIME_SLOTS.map((slot, index) => (
+                      <tr key={`ga-print-${slot.start}`}>
+                        <td className="ga-time-slot-label ga-time-nr">{index + 1}</td>
+                        <td className="ga-time-slot-label">{slot.label}</td>
+                        {commonWeekISOs.map((iso) => {
+                          const dayOfWeek = toDayOfWeek(iso)
+                          const cellKey = `${dayOfWeek}|${slot.start}`
+                          const entries = gaTimeEntriesByCell.get(cellKey) || []
+                          return (
+                            <td key={`ga-print-${cellKey}`} className="ga-time-cell">
+                              <div className="ga-time-cell-content">
+                                {entries.length ? (
+                                  entries.map((entry) => (
+                                    <div key={`ga-print-${entry.id}`} className="ga-time-entry">
+                                      <span>{entry.content}</span>
+                                    </div>
+                                  ))
+                                ) : (
+                                  <span className="week-table-empty">-</span>
+                                )}
+                              </div>
+                            </td>
+                          )
+                        })}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+              <div className="print-footer">
+                <span />
+                <div className="print-page-count">1/{printTotalPages}</div>
+                <div className="print-initials">PUNOI: {printInitials}</div>
+              </div>
+            </div>
+          </div>
+          <div className="print:hidden">
+          <AdminTasksSection
+            title={`GA TIME TABLE${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
+            description=""
+            actions={
+              <div className="flex items-center gap-2 print:hidden">
+                <Button variant="outline" size="sm" onClick={() => handleSectionPrint("ga-time")}>
+                  Print
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void exportGaTime()}
+                  disabled={exportingGaTime}
+                >
+                  {exportingGaTime ? "Exporting..." : "Export"}
+                </Button>
+              </div>
+            }
+          >
+          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500">
+            {gaTimeLoading ? <span>Loading GA time slots...</span> : null}
+            {gaTimeError ? <span className="text-red-600">{gaTimeError}</span> : null}
+          </div>
+          <div className="mt-3 overflow-x-auto ga-time-table">
+            <table className="ga-time-table-table">
+              <thead>
+                <tr>
+                  <th className="ga-time-header ga-time-nr">NR</th>
+                  <th className="ga-time-header">Time</th>
+                  {commonWeekISOs.map((iso) => {
+                    const d = fromISODate(iso)
+                    const dayCode = getDayCode(d)
+                    return (
+                      <th key={`ga-${iso}`} className="ga-time-header">
+                        <div>{dayCode} = {formatDateHuman(iso)}</div>
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {GA_TIME_SLOTS.map((slot, index) => (
+                  <tr key={slot.start}>
+                    <td className="ga-time-slot-label ga-time-nr">{index + 1}</td>
+                    <td className="ga-time-slot-label">{slot.label}</td>
+                    {commonWeekISOs.map((iso) => {
+                      const dayOfWeek = toDayOfWeek(iso)
+                      const cellKey = `${dayOfWeek}|${slot.start}`
+                      const entries = gaTimeEntriesByCell.get(cellKey) || []
+                      const addDraft = gaTimeAddDrafts[cellKey] ?? ""
+                      return (
+                        <td key={`${cellKey}`} className="ga-time-cell">
+                          <div className="ga-time-cell-content">
+                            {entries.map((entry) => {
+                              const isEditing = gaTimeEditingId === entry.id
+                              const draft = gaTimeDrafts[entry.id] ?? entry.content
+                              return (
+                                <div key={entry.id} className="ga-time-entry">
+                                  {isEditing ? (
+                                    <input
+                                      className="ga-time-input"
+                                      value={draft}
+                                      onChange={(event) =>
+                                        setGaTimeDrafts((prev) => ({
+                                          ...prev,
+                                          [entry.id]: event.target.value,
+                                        }))
+                                      }
+                                      onBlur={async () => {
+                                        const nextValue = (gaTimeDrafts[entry.id] ?? entry.content).trim()
+                                        setGaTimeEditingId(null)
+                                        if (!nextValue || nextValue === entry.content) return
+                                        await updateGaTimeEntry(entry.id, nextValue)
+                                      }}
+                                      onKeyDown={async (event) => {
+                                        if (event.key === "Enter") {
+                                          event.preventDefault()
+                                          const nextValue = (gaTimeDrafts[entry.id] ?? entry.content).trim()
+                                          setGaTimeEditingId(null)
+                                          if (!nextValue || nextValue === entry.content) return
+                                          await updateGaTimeEntry(entry.id, nextValue)
+                                        }
+                                        if (event.key === "Escape") {
+                                          setGaTimeEditingId(null)
+                                        }
+                                      }}
+                                      autoFocus
+                                    />
+                                  ) : (
+                                    <button
+                                      type="button"
+                                      className="ga-time-entry-text"
+                                      onClick={() => {
+                                        if (!canEditGaTimeSlots) return
+                                        setGaTimeEditingId(entry.id)
+                                        setGaTimeDrafts((prev) => ({ ...prev, [entry.id]: entry.content }))
+                                      }}
+                                    >
+                                      {entry.content}
+                                    </button>
+                                  )}
+                                  {canEditGaTimeSlots ? (
+                                    <button
+                                      type="button"
+                                      className="ga-time-delete"
+                                      disabled={gaTimeDeleting[entry.id]}
+                                      onClick={() => void deleteGaTimeEntry(entry.id)}
+                                      title="Delete entry"
+                                    >
+                                      {gaTimeDeleting[entry.id] ? "..." : "×"}
+                                    </button>
+                                  ) : null}
+                                </div>
+                              )
+                            })}
+                            {canEditGaTimeSlots ? (
+                              gaTimeAddingCell === cellKey ? (
+                                <input
+                                  className="ga-time-input"
+                                  value={addDraft}
+                                  onChange={(event) =>
+                                    setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: event.target.value }))
+                                  }
+                                  onBlur={async () => {
+                                    const nextValue = (gaTimeAddDrafts[cellKey] ?? "").trim()
+                                    setGaTimeAddingCell(null)
+                                    setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
+                                    if (!nextValue) return
+                                    await createGaTimeEntry(String(dayOfWeek), slot.start, slot.end, nextValue)
+                                  }}
+                                  onKeyDown={async (event) => {
+                                    if (event.key === "Enter") {
+                                      event.preventDefault()
+                                      const nextValue = (gaTimeAddDrafts[cellKey] ?? "").trim()
+                                      setGaTimeAddingCell(null)
+                                      setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
+                                      if (!nextValue) return
+                                      await createGaTimeEntry(String(dayOfWeek), slot.start, slot.end, nextValue)
+                                    }
+                                    if (event.key === "Escape") {
+                                      setGaTimeAddingCell(null)
+                                      setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
+                                    }
+                                  }}
+                                  autoFocus
+                                />
+                              ) : (
+                                <button
+                                  type="button"
+                                  className="ga-time-add"
+                                  onClick={() => {
+                                    setGaTimeAddingCell(cellKey)
+                                    setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
+                                  }}
+                                >
+                                  + 
+                                </button>
+                              )
+                            ) : null}
+                          </div>
+                        </td>
+                      )
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          </AdminTasksSection>
+          </div>
+        </div>
+        <div className="print-section" data-print-section="all-tasks">
+          <AdminTasksSection
+            title="ALL TASKS"
+            description=""
+            actions={
+              <div className="flex items-center gap-2 print:hidden">
+                <Button variant="outline" size="sm" onClick={() => setFastTaskOpen(true)}>
+                  + Add Fast Task
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => handleSectionPrint("all-tasks")}>
+                  Print
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void exportAllTasks()}
+                  disabled={exportingAllTasks}
+                >
+                  {exportingAllTasks ? "Exporting..." : "Export"}
+                </Button>
+              </div>
+            }
+          >
+          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
+            <div>Total: {filteredAllTasksRows.length}</div>
+            <div className="flex items-center gap-2">
+              <span>Date</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={allTasksDateFilter ? "" : "border-blue-500 bg-blue-50 text-blue-700"}
+                onClick={() => setAllTasksDateFilter("")}
+              >
+                All
+              </Button>
+              <Input
+                type="date"
+                className="h-8 w-[160px] text-xs"
+                value={allTasksDateFilter || ""}
+                onChange={(event) => setAllTasksDateFilter(event.target.value)}
+              />
+            </div>
+          </div>
+          <Table
+            containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+            className="min-w-[1200px] text-[11px]"
+          >
+            <TableHeader>
+              <TableRow className="bg-slate-50">
+                {[
+                  "NR",
+                  "LL",
+                  "NLL",
+                  "ASSIGNED",
+                  "DATE",
+                  "AM/PM",
+                  "TITLE",
+                  "BZ",
+                  "KOHA BZ",
+                  "STATUS",
+                  "PRIORITY",
+                  "KOMENT",
+                  "ACTIONS",
+                ].map((label) => (
+                  <TableHead
+                    key={label}
+                    className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                  >
+                    {label}
+                  </TableHead>
+                ))}
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {filteredAllTasksRows.length ? (
+                filteredAllTasksRows.map((row, index) => {
+                  const isSystem = row.ll === "SYS"
+                  const statusValue = isSystem
+                    ? (SYSTEM_STATUS_OPTIONS.includes(row.status as (typeof SYSTEM_STATUS_OPTIONS)[number])
+                        ? row.status
+                        : "OPEN")
+                    : (TASK_STATUS_OPTIONS.includes(row.status as (typeof TASK_STATUS_OPTIONS)[number])
+                        ? row.status
+                        : "TODO")
+                  const statusLabel = isSystem ? formatSystemOccurrenceStatus(statusValue) : reportStatusLabel(statusValue)
+                  const statusClass = isSystem
+                    ? statusValue === "DONE"
+                      ? "bg-emerald-100 text-emerald-800 font-medium"
+                      : ""
+                    : weeklyPlanStatusBgClass(statusValue)
+                  const occurrenceDate = row.systemOccurrenceDate || row.dateIso || todayIso
+                  const actionKey = isSystem
+                    ? `system:${row.systemTemplateId || "na"}:${occurrenceDate}`
+                    : `task:${row.taskId || "na"}`
+                  const isUpdating = Boolean(taskStatusUpdating[actionKey])
+                  const commentKey = row.taskId
+                    ? `all-task:${row.taskId}`
+                    : row.systemTemplateId && occurrenceDate
+                      ? `all-system:${row.systemTemplateId}:${occurrenceDate}`
+                      : row.systemTemplateId
+                        ? `all-system:${row.systemTemplateId}`
+                        : ""
+                  const previousValue = row.comment ?? ""
+                  const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
+                  const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
+                  return (
+                    <TableRow key={row.id} className="h-12">
+                      <TableCell className="h-12 align-middle font-semibold text-slate-700">{index + 1}</TableCell>
+                      <TableCell className="h-12 align-middle font-semibold">{row.ll}</TableCell>
+                      <TableCell className="h-12 align-middle">{row.nll}</TableCell>
+                      <TableCell className="h-12 align-middle">{renderAssignedBadges(row.assigned)}</TableCell>
+                      <TableCell className="h-12 align-middle">{row.dateIso ? formatDateDMY(row.dateIso) : "-"}</TableCell>
+                      <TableCell className="h-12 align-middle">{row.period || "-"}</TableCell>
+                      <TableCell className="h-12 align-middle whitespace-normal break-words font-medium text-slate-800">
+                        {row.title}
+                      </TableCell>
+                      <TableCell className="h-12 align-middle">{row.bz}</TableCell>
+                      <TableCell className="h-12 align-middle">{row.kohaBz}</TableCell>
+                      <TableCell className={`h-12 align-middle uppercase ${statusClass}`}>
+                        {statusLabel}
+                      </TableCell>
+                      <TableCell className="h-12 align-middle uppercase">{row.priority}</TableCell>
+                      <TableCell className="h-12 align-middle">
+                        <div className="flex items-center gap-2">
+                          <input
+                            type="text"
+                            aria-label="Koment"
+                            className="h-4 w-full border-b border-slate-300 bg-transparent"
+                            value={commentValue}
+                            onChange={(e) => {
+                              if (!commentKey) return
+                              setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: e.target.value }))
+                            }}
+                            onBlur={(e) => {
+                              if (!commentKey) return
+                              const nextValue = e.target.value
+                              if (row.taskId) {
+                                void saveAllTasksReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
+                                return
+                              }
+                              if (row.systemTemplateId) {
+                                void saveAllTasksReportSystemComment(
+                                  row.systemTemplateId,
+                                  occurrenceDate,
+                                  row.status || "OPEN",
+                                  nextValue,
+                                  previousValue,
+                                  commentKey
+                                )
+                              }
+                            }}
+                            disabled={!commentKey}
+                          />
+                          <span className="text-[10px] text-slate-400">{isSaving ? "Saving" : ""}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell className="h-12 align-middle">
+                        <div className="flex items-center gap-2">
+                          <Select
+                            value={statusValue}
+                            onValueChange={(value) => {
+                              if (isSystem && row.systemTemplateId) {
+                                void updateSystemOccurrenceStatus(row.systemTemplateId, occurrenceDate, value, row.comment)
+                                return
+                              }
+                              if (!isSystem && row.taskId) {
+                                void updateTaskStatus(row.taskId, value)
+                              }
+                            }}
+                            disabled={isUpdating}
+                          >
+                            <SelectTrigger className="h-7 text-xs">
+                              <SelectValue />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {(isSystem ? SYSTEM_STATUS_OPTIONS : TASK_STATUS_OPTIONS).map((value) => (
+                                <SelectItem key={value} value={value}>
+                                  {isSystem ? formatSystemOccurrenceStatus(value) : reportStatusLabel(value)}
+                                </SelectItem>
+                            ))}
+                          </SelectContent>
+                          </Select>
+                          {!isSystem && row.isFastTask && row.taskId ? (
+                            <Button
+                              variant="outline"
+                              size="icon"
+                              className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                              title="Edit"
+                              aria-label={`Edit ${row.title}`}
+                              onClick={() => startFastTaskEdit(row.taskId as string)}
+                            >
+                              <Pencil className="h-3 w-3" />
+                            </Button>
+                          ) : null}
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })
+              ) : (
+                <TableRow>
+                  <TableCell colSpan={13} className="py-8 text-center text-sm text-muted-foreground">
+                    No tasks available.
+                  </TableCell>
+                </TableRow>
+              )}
+            </TableBody>
+          </Table>
+          </AdminTasksSection>
+        </div>
+      </div>
+    )
+  }
 
   return (
-    <div className="bg-slate-50/30">
-      <div className="mx-auto max-w-7xl space-y-8 px-6 py-6">
-        <div className="space-y-8 print:hidden">
-          <AdminTasksHeaderCard />
-          <AdminTasksSection
-            title="Daily Report"
-            description="Tasks and system occurrences for today."
-            actions={
-              <>
-                <Button
-                  variant="outline"
-                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                  onClick={() => {
-                    setShowDailyUserReport(true)
-                    setShowAllTasksReport(false)
-                    setTimeout(() => window.print(), 100)
-                  }}
-                >
-                  <Printer className="mr-2 h-4 w-4" />
-                  Print Daily
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                  disabled={exportingDailyReport}
-                  onClick={() => void exportDailyReport()}
-                >
-                  {exportingDailyReport ? "Exporting..." : "Export Daily Excel"}
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                  onClick={() => {
-                    setShowAllTasksReport(true)
-                    setShowDailyUserReport(false)
-                    setTimeout(() => window.print(), 100)
-                  }}
-                >
-                  <Printer className="mr-2 h-4 w-4" />
-                  Print All
-                </Button>
-                <Button
-                  variant="outline"
-                  className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                  disabled={exportingAllTasks}
-                  onClick={() => void exportAllTasks()}
-                >
-                  {exportingAllTasks ? "Exporting..." : "Export All Excel"}
-                </Button>
-              </>
-            }
-          >
-            {showDailyUserReport ? (
-              <div className="space-y-3">
-              <div className="flex items-center gap-3">
-                <div className="text-xs text-slate-500">
-                  {formatDateDMY(todayDate)}
-                </div>
-                {loadingDailyReport ? <div className="text-xs text-slate-500">Loading...</div> : null}
-              </div>
-              <div
-                ref={dailyReportScrollRef}
-                className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${
-                  isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
-                }`}
-                onMouseDown={handleDailyReportMouseDown}
-                onMouseMove={handleDailyReportMouseMove}
-                onMouseUp={handleDailyReportMouseEnd}
-                onMouseLeave={handleDailyReportMouseEnd}
-              >
-                <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
-                  <colgroup>
-                    <col className="w-[36px]" />
-                    <col className="w-[44px]" />
-                    <col className="w-[56px]" />
-                    <col className="w-[56px]" />
-                    <col className="w-[56px]" />
-                    <col className="w-[150px]" />
-                    <col className="w-[60px]" />
-                    <col className="w-[40px]" />
-                    <col className="w-[52px]" />
-                    <col className="w-[48px]" />
-                    <col className="w-[140px]" />
-                    <col className="w-[70px]" />
-                  </colgroup>
-                  <thead className="sticky top-0 z-10 bg-slate-50">
-                    <tr className="bg-slate-50">
-                      <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
-                        Nr
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
-                      <th className="border border-slate-200 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
-                        NLL
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                        <span className="block">AM/</span>
-                        <span className="block">PM</span>
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">DEP</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                        KOHA BZ
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
-                        T/Y/O
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">User</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {dailyUserReportRows.length ? (
-                      dailyUserReportRows.map((row, index) => {
-                        const commentKey = row.taskId
-                          ? `task:${row.taskId}`
-                          : row.systemTemplateId && row.systemOccurrenceDate
-                            ? `system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
-                            : ""
-                        const previousValue = row.comment ?? ""
-                        const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
-                        const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
-                        return (
-                          <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                            <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
-                              {index + 1}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
-                              {row.subtype}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
-                              {row.period}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.department}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
-                              {row.typeLabel === "PRJK" && row.projectTitle ? (
-                                <>
-                                  <span className="font-semibold">{row.projectTitle}</span>
-                                  <span> : {row.title}</span>
-                                </>
-                              ) : (
-                                row.title
-                              )}
-                            </td>
-                            <td
-                              className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
-                            >
-                              {row.status}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
-                              {row.tyo}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  aria-label="Koment"
-                                  className="h-4 w-full border-b border-slate-300 bg-transparent"
-                                  value={commentValue}
-                                  onChange={(e) => {
-                                    if (!commentKey) return
-                                    const nextValue = e.target.value
-                                    setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
-                                  }}
-                                  onBlur={(e) => {
-                                    if (!commentKey) return
-                                    const nextValue = e.target.value
-                                    if (row.taskId) {
-                                      void saveDailyReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
-                                      return
-                                    }
-                                    if (row.systemTemplateId && row.systemOccurrenceDate) {
-                                      void saveDailyReportSystemComment(
-                                        row.systemTemplateId,
-                                        row.systemOccurrenceDate,
-                                        row.systemStatus || "OPEN",
-                                        nextValue,
-                                        previousValue,
-                                        commentKey
-                                      )
-                                    }
-                                  }}
-                                  disabled={!commentKey}
-                                />
-                                <button
-                                  type="button"
-                                  className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
-                                  disabled={!commentKey || isSaving}
-                                  onClick={() => {
-                                    if (!commentKey) return
-                                    if (row.taskId) {
-                                      void saveDailyReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
-                                      return
-                                    }
-                                    if (row.systemTemplateId && row.systemOccurrenceDate) {
-                                      void saveDailyReportSystemComment(
-                                        row.systemTemplateId,
-                                        row.systemOccurrenceDate,
-                                        row.systemStatus || "OPEN",
-                                        commentValue,
-                                        previousValue,
-                                        commentKey
-                                      )
-                                    }
-                                  }}
-                                >
-                                  {isSaving ? "Saving" : "Save"}
-                                </button>
-                              </div>
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
-                              {row.userInitials || "-"}
-                            </td>
-                          </tr>
-                        )
-                      })
-                    ) : (
-                      <tr>
-                        <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={12}>
-                          No data available.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          ) : null}
-        </AdminTasksSection>
-
-        {showAllTasksReport ? (
-          <AdminTasksSection
-            title="All Tasks Report"
-            description="All tasks assigned to Gane Arifaj."
-            actions={
-              <Button
-                variant="outline"
-                className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-                onClick={() => setShowAllTasksReport(false)}
-              >
-                Hide All Tasks Report
-              </Button>
-            }
-          >
-            <div className="flex items-center gap-3">
-              <div className="text-xs text-slate-500">
-                Total tasks: {allTasksReportRows.length}
-              </div>
-            </div>
-            <div className="mt-3 max-h-[320px] overflow-x-auto overflow-y-auto">
-                <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
-                  <colgroup>
-                    <col className="w-[36px]" />
-                    <col className="w-[44px]" />
-                    <col className="w-[56px]" />
-                    <col className="w-[56px]" />
-                    <col className="w-[56px]" />
-                    <col className="w-[150px]" />
-                    <col className="w-[60px]" />
-                    <col className="w-[40px]" />
-                    <col className="w-[52px]" />
-                    <col className="w-[48px]" />
-                    <col className="w-[140px]" />
-                    <col className="w-[70px]" />
-                  </colgroup>
-                  <thead className="sticky top-0 z-10 bg-slate-50">
-                    <tr className="bg-slate-50">
-                      <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
-                        Nr
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
-                      <th className="border border-slate-200 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
-                        NLL
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                        <span className="block">AM/</span>
-                        <span className="block">PM</span>
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">DEP</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                        KOHA BZ
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
-                        T/Y/O
-                      </th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
-                      <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">User</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {allTasksReportRows.length ? (
-                      allTasksReportRows.map((row, index) => {
-                        const commentKey = row.taskId
-                          ? `all-task:${row.taskId}`
-                          : row.systemTemplateId && row.systemOccurrenceDate
-                            ? `all-system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
-                            : row.systemTemplateId
-                              ? `all-system:${row.systemTemplateId}`
-                              : ""
-                        const previousValue = row.comment ?? ""
-                        const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
-                        const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
-                        return (
-                          <tr key={`${row.taskId || row.systemTemplateId}-${index}`}>
-                            <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold shadow-[2px_0_4px_rgba(0,0,0,0.05)]">
-                              {index + 1}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
-                              {row.subtype}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
-                              {row.period}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.department}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
-                              {row.typeLabel === "PRJK" && row.projectTitle ? (
-                                <>
-                                  <span className="font-semibold">{row.projectTitle}</span>
-                                  <span> : {row.title}</span>
-                                </>
-                              ) : (
-                                row.title
-                              )}
-                            </td>
-                            <td
-                              className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
-                            >
-                              {row.status}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
-                            <td className="border border-slate-200 px-2 py-2 align-top whitespace-normal break-words">
-                              {row.tyo}
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top">
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="text"
-                                  aria-label="Koment"
-                                  className="h-4 w-full border-b border-slate-300 bg-transparent"
-                                  value={commentValue}
-                                  onChange={(e) => {
-                                    if (!commentKey) return
-                                    const nextValue = e.target.value
-                                    setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
-                                  }}
-                                  onBlur={(e) => {
-                                    if (!commentKey) return
-                                    const nextValue = e.target.value
-                                    if (row.taskId) {
-                                      void saveAllTasksReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
-                                      return
-                                    }
-                                    if (row.systemTemplateId) {
-                                      // For system tasks, use today's date as occurrence date if not provided
-                                      const occurrenceDate = row.systemOccurrenceDate || todayIso
-                                      void saveAllTasksReportSystemComment(
-                                        row.systemTemplateId,
-                                        occurrenceDate,
-                                        row.systemStatus || "OPEN",
-                                        nextValue,
-                                        previousValue,
-                                        commentKey
-                                      )
-                                    }
-                                  }}
-                                  disabled={!commentKey}
-                                />
-                                <button
-                                  type="button"
-                                  className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
-                                  disabled={!commentKey || isSaving}
-                                  onClick={() => {
-                                    if (!commentKey) return
-                                    if (row.taskId) {
-                                      void saveAllTasksReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
-                                      return
-                                    }
-                                    if (row.systemTemplateId) {
-                                      const occurrenceDate = row.systemOccurrenceDate || todayIso
-                                      void saveAllTasksReportSystemComment(
-                                        row.systemTemplateId,
-                                        occurrenceDate,
-                                        row.systemStatus || "OPEN",
-                                        commentValue,
-                                        previousValue,
-                                        commentKey
-                                      )
-                                    }
-                                  }}
-                                >
-                                  {isSaving ? "Saving" : "Save"}
-                                </button>
-                              </div>
-                            </td>
-                            <td className="border border-slate-200 px-2 py-2 align-top uppercase">
-                              {row.userInitials || "-"}
-                            </td>
-                          </tr>
-                        )
-                      })
-                    ) : (
-                      <tr>
-                        <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
-                          No tasks available.
-                        </td>
-                      </tr>
-                    )}
-                  </tbody>
-                </table>
-              </div>
-          </AdminTasksSection>
-        ) : null}
-
-        {viewFilter !== "system" ? (
-          <AdminTasksSection
-            title="Fast Tasks"
-            actions={
-              <Dialog open={createOpen} onOpenChange={setCreateOpen}>
-                <DialogTrigger asChild>
-                  <Button size="sm">+ Add Task</Button>
-                </DialogTrigger>
-                <DialogContent className="sm:max-w-lg">
-                  <DialogHeader>
-                    <DialogTitle>Add GA Task</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label>Title</Label>
-                      <Input value={title} onChange={(event) => setTitle(event.target.value)} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Description</Label>
-                      <BoldOnlyEditor value={description} onChange={setDescription} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select value={taskPriority} onValueChange={(value) => setTaskPriority(value as TaskPriority)}>
-                        <SelectTrigger>
-                          <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {PRIORITY_OPTIONS.map((value) => (
-                            <SelectItem key={value} value={value}>
-                              {value}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Finish period</Label>
-                        <Select
-                          value={finishPeriod}
-                          onValueChange={(value) =>
-                            setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                          }
-                        >
-                          <SelectTrigger>
-                            <SelectValue placeholder="All day" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>All day</SelectItem>
-                            <SelectItem value="AM">AM</SelectItem>
-                            <SelectItem value="PM">PM</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-2">
-                        <Label>Start date </Label>
-                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                          <Input
-                            type="text"
-                            placeholder="DD/MM/YYYY"
-                            value={startDateDisplay}
-                            onChange={(e) => {
-                              const value = e.target.value
-                              setStartDateDisplay(value)
-                              const isoDate = fromDDMMYYYY(value)
-                              if (isoDate) {
-                                setStartDate(isoDate)
-                              }
-                            }}
-                            pattern="\d{2}/\d{2}/\d{4}"
-                            style={{ paddingRight: "35px" }}
-                          />
-                          <Input
-                            type="date"
-                            value={startDate}
-                            onChange={(e) => {
-                              const value = e.target.value
-                              if (value) {
-                                setStartDate(value)
-                                setStartDateDisplay(toDDMMYYYY(value))
-                              }
-                            }}
-                            style={{
-                              position: "absolute",
-                              right: "8px",
-                              opacity: 0,
-                              width: "24px",
-                              height: "24px",
-                              cursor: "pointer",
-                              zIndex: 1
-                            }}
-                            title="Open calendar"
-                          />
-                          <svg
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            style={{
-                              position: "absolute",
-                              right: "10px",
-                              pointerEvents: "none",
-                              color: "#666"
-                            }}
-                          >
-                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                            <line x1="16" y1="2" x2="16" y2="6"></line>
-                            <line x1="8" y1="2" x2="8" y2="6"></line>
-                            <line x1="3" y1="10" x2="21" y2="10"></line>
-                          </svg>
-                        </div>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Due date (optional) </Label>
-                        <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                          <Input
-                            type="text"
-                            placeholder="DD/MM/YYYY"
-                            value={dueDateDisplay}
-                            onChange={(e) => {
-                              const value = e.target.value
-                              setDueDateDisplay(value)
-                              const isoDate = fromDDMMYYYY(value)
-                              if (isoDate) {
-                                setDueDate(isoDate)
-                              }
-                            }}
-                            pattern="\d{2}/\d{2}/\d{4}"
-                            style={{ paddingRight: "35px" }}
-                          />
-                          <Input
-                            type="date"
-                            value={dueDate}
-                            onChange={(e) => {
-                              const value = e.target.value
-                              if (value) {
-                                setDueDate(value)
-                                setDueDateDisplay(toDDMMYYYY(value))
-                              } else {
-                                setDueDate("")
-                                setDueDateDisplay("")
-                              }
-                            }}
-                            style={{
-                              position: "absolute",
-                              right: "8px",
-                              opacity: 0,
-                              width: "24px",
-                              height: "24px",
-                              cursor: "pointer",
-                              zIndex: 1
-                            }}
-                            title="Open calendar"
-                          />
-                          <svg
-                            width="20"
-                            height="20"
-                            viewBox="0 0 24 24"
-                            fill="none"
-                            stroke="currentColor"
-                            strokeWidth="2"
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            style={{
-                              position: "absolute",
-                              right: "10px",
-                              pointerEvents: "none",
-                              color: "#666"
-                            }}
-                          >
-                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                            <line x1="16" y1="2" x2="16" y2="6"></line>
-                            <line x1="8" y1="2" x2="8" y2="6"></line>
-                            <line x1="3" y1="10" x2="21" y2="10"></line>
-                          </svg>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={() => setCreateOpen(false)}>
-                        Cancel
-                      </Button>
-                      <Button disabled={creating || !title.trim()} onClick={() => void submitTask()}>
-                        {creating ? "Saving..." : "Save task"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-            }
-          >
-            {loadingTasks ? (
-              <div className="text-sm text-muted-foreground">Loading tasks...</div>
-            ) : sortedTasks.length ? (
-              <AdminTasksTable />
-            ) : (
-              <div className="text-sm text-muted-foreground">No items found.</div>
-            )}
-          </AdminTasksSection>
-        ) : null}
-
+    <div className="bg-slate-50/30" data-print-target={printTarget || ""}>
+      <div className="mx-auto max-w-none space-y-6 px-16 py-4">
+        <div className="space-y-8">
+          <AdminCommonWeekTable />
+        </div>
       </div>
-
-      {/* Edit Task Dialog */}
-      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+      <Dialog
+        open={fastTaskOpen}
+        onOpenChange={(open) => {
+          setFastTaskOpen(open)
+          if (!open) resetFastTaskForm()
+        }}
+      >
+        <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-slate-800">New Fast Task</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-slate-700">Type</Label>
+              <Select
+                value={fastTaskType}
+                onValueChange={(v) => setFastTaskType(v as (typeof NO_PROJECT_TYPES)[number]["id"])}
+              >
+                <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                  <SelectValue placeholder="Select type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {NO_PROJECT_TYPES.map((opt) => (
+                    <SelectItem key={opt.id} value={opt.id}>
+                      {opt.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <div className="text-xs text-slate-500">
+                {NO_PROJECT_TYPES.find((opt) => opt.id === fastTaskType)?.description}
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-700">Title</Label>
+              <Input
+                value={fastTaskTitle}
+                onChange={(e) => setFastTaskTitle(e.target.value)}
+                className="border-slate-200 focus:border-slate-400 rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-700">Description</Label>
+              <BoldOnlyEditor value={fastTaskDescription} onChange={setFastTaskDescription} />
+            </div>
+            <div className="grid gap-4 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label className="text-slate-700">Assign to</Label>
+                <Dialog open={selectFastTaskAssigneesOpen} onOpenChange={setSelectFastTaskAssigneesOpen}>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
+                    onClick={() => setSelectFastTaskAssigneesOpen(true)}
+                  >
+                    {fastTaskAssigneeLabel}
+                  </Button>
+                  <DialogContent className="sm:max-w-md z-[110]">
+                    <DialogHeader>
+                      <DialogTitle>Select Assignees</DialogTitle>
+                    </DialogHeader>
+                    <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
+                      {users.length ? (
+                        users.map((u) => {
+                          const isSelected = fastTaskAssignees.includes(u.id)
+                          return (
+                            <div
+                              key={u.id}
+                              className="flex items-center space-x-2 p-2 rounded-lg hover:bg-slate-50 cursor-pointer"
+                              onClick={() => {
+                                if (isSelected) {
+                                  setFastTaskAssignees((prev) => prev.filter((id) => id !== u.id))
+                                } else {
+                                  setFastTaskAssignees((prev) => [...prev, u.id])
+                                }
+                              }}
+                            >
+                              <Checkbox checked={isSelected} />
+                              <Label className="cursor-pointer flex-1">
+                                {u.full_name || u.username || "-"}
+                              </Label>
+                            </div>
+                          )
+                        })
+                      ) : (
+                        <div className="text-sm text-slate-600">No users available.</div>
+                      )}
+                    </div>
+                    <div className="mt-4 flex justify-end gap-2">
+                      <Button variant="outline" onClick={() => setFastTaskAssignees([])}>
+                        Clear
+                      </Button>
+                      <Button
+                        variant="outline"
+                        onClick={() => setFastTaskAssignees(users.map((u) => u.id))}
+                        disabled={!users.length}
+                      >
+                        All users
+                      </Button>
+                      <Button onClick={() => setSelectFastTaskAssigneesOpen(false)}>
+                        Done
+                      </Button>
+                    </div>
+                  </DialogContent>
+                </Dialog>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-slate-700">Finish by (optional)</Label>
+                <Select
+                  value={fastTaskFinishPeriod}
+                  onValueChange={(value) =>
+                    setFastTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                  }
+                >
+                  <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                    <SelectValue placeholder="Select period" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                    {FINISH_PERIOD_OPTIONS.map((value) => (
+                      <SelectItem key={value} value={value}>
+                        {value}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label className="text-slate-700">Start date</Label>
+                <Input
+                  type="date"
+                  required
+                  value={fastTaskStartDate}
+                  onChange={(e) => setFastTaskStartDate(e.target.value)}
+                  className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-slate-700">Due date (optional)</Label>
+                <Input
+                  type="date"
+                  value={fastTaskDueDate}
+                  onChange={(e) => setFastTaskDueDate(e.target.value)}
+                  className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                />
+              </div>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setFastTaskOpen(false)} className="rounded-xl border-slate-200">
+                Cancel
+              </Button>
+              <Button
+                disabled={!fastTaskTitle.trim() || !fastTaskStartDate || creatingFastTask}
+                onClick={() => void submitFastTask()}
+                className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+              >
+                {creatingFastTask ? "Creating..." : "Create"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={fastEditOpen}
+        onOpenChange={(open) => {
+          setFastEditOpen(open)
+          if (!open) setFastEditTaskId(null)
+        }}
+      >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Edit Task</DialogTitle>
+            <DialogTitle>Edit Fast Task</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
               <Label>Title</Label>
-              <Input value={editTitle} onChange={(event) => setEditTitle(event.target.value)} />
+              <Input value={fastEditTitle} onChange={(event) => setFastEditTitle(event.target.value)} />
             </div>
-            <div className="space-y-2">
-              <Label>Description</Label>
-              <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Start date</Label>
+                <Input
+                  type="date"
+                  value={fastEditStartDate}
+                  onChange={(event) => setFastEditStartDate(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Due date</Label>
+                <Input
+                  type="date"
+                  value={fastEditDueDate}
+                  onChange={(event) => setFastEditDueDate(event.target.value)}
+                />
+              </div>
             </div>
             <div className="space-y-2">
               <Label>Priority</Label>
-              <Select value={editPriority} onValueChange={(value) => setEditPriority(value as TaskPriority)}>
+              <Select value={fastEditPriority} onValueChange={(value) => setFastEditPriority(value as TaskPriority)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -2286,414 +4165,32 @@ export default function AdminTasksPage() {
                 </SelectContent>
               </Select>
             </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Finish period</Label>
-                <Select
-                  value={editFinishPeriod}
-                  onValueChange={(value) =>
-                    setEditFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                  }
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="All day" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value={FINISH_PERIOD_NONE_VALUE}>All day</SelectItem>
-                    <SelectItem value="AM">AM</SelectItem>
-                    <SelectItem value="PM">PM</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Start date (DD/MM/YYYY)</Label>
-                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                  <Input
-                    type="text"
-                    placeholder="DD/MM/YYYY"
-                    value={editStartDateDisplay}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      setEditStartDateDisplay(value)
-                      const isoDate = fromDDMMYYYY(value)
-                      if (isoDate) {
-                        setEditStartDate(isoDate)
-                      }
-                    }}
-                    pattern="\d{2}/\d{2}/\d{4}"
-                    style={{ paddingRight: "35px" }}
-                  />
-                  <Input
-                    type="date"
-                    value={editStartDate}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      if (value) {
-                        setEditStartDate(value)
-                        setEditStartDateDisplay(toDDMMYYYY(value))
-                      } else {
-                        setEditStartDate("")
-                        setEditStartDateDisplay("")
-                      }
-                    }}
-                    style={{
-                      position: "absolute",
-                      right: "8px",
-                      opacity: 0,
-                      width: "24px",
-                      height: "24px",
-                      cursor: "pointer",
-                      zIndex: 1
-                    }}
-                    title="Open calendar"
-                  />
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{
-                      position: "absolute",
-                      right: "10px",
-                      pointerEvents: "none",
-                      color: "#666"
-                    }}
-                  >
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                    <line x1="16" y1="2" x2="16" y2="6"></line>
-                    <line x1="8" y1="2" x2="8" y2="6"></line>
-                    <line x1="3" y1="10" x2="21" y2="10"></line>
-                  </svg>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Due date (optional) (DD/MM/YYYY)</Label>
-                <div style={{ position: "relative", display: "flex", alignItems: "center" }}>
-                  <Input
-                    type="text"
-                    placeholder="DD/MM/YYYY"
-                    value={editDueDateDisplay}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      setEditDueDateDisplay(value)
-                      const isoDate = fromDDMMYYYY(value)
-                      if (isoDate) {
-                        setEditDueDate(isoDate)
-                      } else if (!value) {
-                        setEditDueDate("")
-                      }
-                    }}
-                    pattern="\d{2}/\d{2}/\d{4}"
-                    style={{ paddingRight: "35px" }}
-                  />
-                  <Input
-                    type="date"
-                    value={editDueDate}
-                    onChange={(e) => {
-                      const value = e.target.value
-                      if (value) {
-                        setEditDueDate(value)
-                        setEditDueDateDisplay(toDDMMYYYY(value))
-                      } else {
-                        setEditDueDate("")
-                        setEditDueDateDisplay("")
-                      }
-                    }}
-                    style={{
-                      position: "absolute",
-                      right: "8px",
-                      opacity: 0,
-                      width: "24px",
-                      height: "24px",
-                      cursor: "pointer",
-                      zIndex: 1
-                    }}
-                    title="Open calendar"
-                  />
-                  <svg
-                    width="20"
-                    height="20"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    strokeWidth="2"
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    style={{
-                      position: "absolute",
-                      right: "10px",
-                      pointerEvents: "none",
-                      color: "#666"
-                    }}
-                  >
-                    <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                    <line x1="16" y1="2" x2="16" y2="6"></line>
-                    <line x1="8" y1="2" x2="8" y2="6"></line>
-                    <line x1="3" y1="10" x2="21" y2="10"></line>
-                  </svg>
-                </div>
-              </div>
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select value={fastEditStatus} onValueChange={setFastEditStatus}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TASK_STATUS_OPTIONS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {reportStatusLabel(value)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex justify-end gap-2">
-              <Button variant="outline" onClick={() => setEditOpen(false)}>
+              <Button variant="outline" onClick={() => setFastEditOpen(false)}>
                 Cancel
               </Button>
-              <Button disabled={savingEdit || !editTitle.trim()} onClick={() => void saveEditTask()}>
-                {savingEdit ? "Saving..." : "Save changes"}
+              <Button disabled={fastEditSaving || !fastEditTitle.trim()} onClick={() => void saveFastTaskEdit()}>
+                {fastEditSaving ? "Saving..." : "Save"}
               </Button>
             </div>
           </div>
         </DialogContent>
       </Dialog>
-
-      {viewFilter !== "tasks" ? (
-        <div className="print:hidden">
-          <SystemTasksView
-            headingTitle="Barazime"
-            headingDescription="System tasks where BZ-with includes Gane Arifaj."
-            showSystemActions={false}
-            showFilters={false}
-            showBzTimeColumn={true}
-            allowMarkAsDone={true}
-            forceLoadAll={isAdmin}
-            externalPriorityFilter={priorityFilter}
-            externalDayFilter={dayFilter}
-            externalDateFilter={dateFilter}
-            alignmentUsernameFilter="gane.arifaj"
-          />
-          <SystemTasksView
-            scopeFilter="GA"
-            headingTitle="Admin System Tasks"
-            headingDescription="System tasks assigned to Gane Arifaj or scoped to GA department."
-            showSystemActions={false}
-            showFilters={false}
-            allowMarkAsDone={true}
-            forceLoadAll={isAdmin}
-            externalPriorityFilter={priorityFilter}
-            externalDayFilter={dayFilter}
-            externalDateFilter={dateFilter}
-          />
-        </div>
-      ) : null}
-      {showAllTasksReport ? (
-        <div className="hidden print:block print:!p-0 print:!m-0">
-          <div className="print-page">
-            <div className="print-header">
-              <span />
-              <div className="print-title">All Tasks Report</div>
-              <div className="print-datetime">
-                {formatDateTimeDMY(printedAt)}
-              </div>
-            </div>
-            <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
-              <colgroup>
-                <col className="w-[36px]" />
-                <col className="w-[44px]" />
-                <col className="w-[30px]" />
-                <col className="w-[36px]" />
-                <col className="w-[48px]" />
-                <col className="w-[150px]" />
-                <col className="w-[60px]" />
-                <col className="w-[30px]" />
-                <col className="w-[52px]" />
-                <col className="w-[36px]" />
-                <col className="w-[140px]" />
-                <col className="w-[70px]" />
-              </colgroup>
-              <thead>
-                <tr className="bg-slate-100">
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
-                    Nr
-                  </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                  <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
-                    NLL
-                  </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                    <span className="block">AM/</span>
-                    <span className="block">PM</span>
-                  </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">DEP</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
-                    T/Y/O
-                  </th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
-                  <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">User</th>
-                </tr>
-              </thead>
-              <tbody>
-                {allTasksReportRows.length ? (
-                  allTasksReportRows.map((row, index) => (
-                    <tr key={`${row.taskId || row.systemTemplateId}-${index}`}>
-                      <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                        {row.subtype}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                        {row.period}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.department}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                        {row.typeLabel === "PRJK" && row.projectTitle ? (
-                          <>
-                            <span className="font-semibold">{row.projectTitle}</span>
-                            <span> : {row.title}</span>
-                          </>
-                        ) : (
-                          row.title
-                        )}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                        {(row.status || "-").toString().toUpperCase()}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                      <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                        {row.tyo}
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top">
-                        <div className="h-4 w-full border-b border-slate-400" />
-                      </td>
-                      <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                        {row.userInitials || "-"}
-                      </td>
-                    </tr>
-                  ))
-                ) : (
-                  <tr>
-                    <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
-                      No data available.
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-            <div className="print-footer">
-              <span />
-              <span className="print-page-count">1/1</span>
-              <div className="print-initials">PUNOI: {printInitials || "—"}</div>
-            </div>
-          </div>
-        </div>
-      ) : null}
-
-      {showDailyUserReport ? (
-        <div className="hidden print:block print:!p-0 print:!m-0">
-          <div className="print-page">
-            <div className="print-header">
-              <span />
-              <div className="print-title">Daily Report</div>
-              <div className="print-datetime">
-                {formatDateTimeDMY(printedAt)}
-              </div>
-            </div>
-          <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
-            <colgroup>
-              <col className="w-[36px]" />
-              <col className="w-[44px]" />
-              <col className="w-[30px]" />
-              <col className="w-[36px]" />
-              <col className="w-[48px]" />
-              <col className="w-[150px]" />
-              <col className="w-[60px]" />
-              <col className="w-[30px]" />
-              <col className="w-[52px]" />
-              <col className="w-[36px]" />
-              <col className="w-[140px]" />
-              <col className="w-[70px]" />
-            </colgroup>
-            <thead>
-              <tr className="bg-slate-100">
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
-                  Nr
-                </th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
-                  NLL
-                </th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                  <span className="block">AM/</span>
-                  <span className="block">PM</span>
-                </th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">DEP</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
-                  T/Y/O
-                </th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
-                <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">User</th>
-              </tr>
-            </thead>
-            <tbody>
-              {dailyUserReportRows.length ? (
-                dailyUserReportRows.map((row, index) => (
-                  <tr key={`${row.typeLabel}-${row.title}-${index}`}>
-                    <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                      {row.subtype}
-                    </td>
-                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                      {row.period}
-                    </td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.department}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                      {row.typeLabel === "PRJK" && row.projectTitle ? (
-                        <>
-                          <span className="font-semibold">{row.projectTitle}</span>
-                          <span> : {row.title}</span>
-                        </>
-                      ) : (
-                        row.title
-                      )}
-                    </td>
-                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                      {(row.status || "-").toString().toUpperCase()}
-                    </td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                    <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                      {row.tyo}
-                    </td>
-                    <td className="border border-slate-900 px-2 py-2 align-top">
-                      <div className="h-4 w-full border-b border-slate-400" />
-                    </td>
-                    <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                      {row.userInitials || "-"}
-                    </td>
-                  </tr>
-                ))
-              ) : (
-                <tr>
-                  <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
-                    No data available.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-          <div className="print-footer">
-            <span />
-            <span className="print-page-count">1/1</span>
-            <div className="print-initials">PUNOI: {printInitials || "—"}</div>
-          </div>
-        </div>
-      </div>
-      ) : null}
       <style jsx global>{`
         .daily-report-table th,
         .daily-report-table td {
@@ -2732,6 +4229,275 @@ export default function AdminTasksPage() {
           border-left: 2px solid #475569 !important;
           border-right: 2px solid #475569 !important;
         }
+        .admin-week-table {
+          --delay-bg: #fff4e6;
+          --absence-bg: #ffe9e9;
+          --leave-bg: #e9f9ef;
+          --blocked-bg: #ffe7ea;
+          --oneh-bg: #e0f2fe;
+          --personal-bg: #f3e8ff;
+          --external-bg: #e0f2fe;
+          --internal-bg: #f1f5f9;
+          --bz-bg: #e6fffb;
+          --r1-bg: #dcfce7;
+          --problem-bg: #ecfeff;
+          --feedback-bg: #e2e8f0;
+          --priority-bg: #fef3c7;
+        }
+        .admin-week-table .week-table {
+          width: 100%;
+          border-collapse: collapse;
+          border: 2px solid #111827;
+          font-size: 11px;
+          direction: ltr;
+        }
+        .admin-week-table .week-table th {
+          border: 1px solid #111827;
+          background: #dbeafe;
+          padding: 8px 6px;
+          text-align: left;
+          font-weight: 700;
+          vertical-align: bottom;
+          position: sticky;
+          top: 0;
+          z-index: 2;
+        }
+        .admin-week-table .week-table thead tr:first-child th {
+          border-top-width: 2px;
+        }
+        .admin-week-table .week-table thead tr:last-child th {
+          border-bottom-width: 2px;
+        }
+        .admin-week-table .week-table thead th:first-child {
+          border-left-width: 2px;
+        }
+        .admin-week-table .week-table thead th:last-child {
+          border-right-width: 2px;
+        }
+        .admin-week-table .week-table thead tr:nth-child(2) th {
+          top: 30px;
+          z-index: 1;
+        }
+        .admin-week-table .week-table-date-header {
+          background: #bfdbfe !important;
+          font-size: 10px;
+        }
+        .admin-week-table .week-table-subheader {
+          background: #dbeafe !important;
+          font-size: 9px;
+          font-weight: 600;
+        }
+        .admin-week-table .week-table td {
+          border: 1px solid #dee2e6;
+          padding: 6px 8px;
+          vertical-align: bottom;
+          font-size: 10px;
+          text-align: left;
+        }
+        .admin-week-table .week-table-number {
+          text-align: center;
+          font-weight: 700;
+          background: #f8f9fa;
+        }
+        .admin-week-table .week-table-label {
+          font-weight: 700;
+          background: #f8f9fa;
+        }
+        .admin-week-table .week-table-row.delay .week-table-label {
+          background: var(--delay-bg);
+        }
+        .admin-week-table .week-table-row.absence .week-table-label {
+          background: var(--absence-bg);
+        }
+        .admin-week-table .week-table-row.leave .week-table-label {
+          background: var(--leave-bg);
+        }
+        .admin-week-table .week-table-row.blocked .week-table-label {
+          background: var(--blocked-bg);
+        }
+        .admin-week-table .week-table-row.oneh .week-table-label {
+          background: var(--oneh-bg);
+        }
+        .admin-week-table .week-table-row.personal .week-table-label {
+          background: var(--personal-bg);
+        }
+        .admin-week-table .week-table-row.external .week-table-label {
+          background: var(--external-bg);
+        }
+        .admin-week-table .week-table-row.internal .week-table-label {
+          background: var(--internal-bg);
+        }
+        .admin-week-table .week-table-row.bz .week-table-label {
+          background: var(--bz-bg);
+        }
+        .admin-week-table .week-table-row.r1 .week-table-label {
+          background: var(--r1-bg);
+        }
+        .admin-week-table .week-table-row.problem .week-table-label {
+          background: var(--problem-bg);
+        }
+        .admin-week-table .week-table-row.feedback .week-table-label {
+          background: var(--feedback-bg);
+        }
+        .admin-week-table .week-table-row.priority .week-table-label {
+          background: var(--priority-bg);
+        }
+        .admin-week-table .week-table-cell {
+          min-height: 30px;
+        }
+        .admin-week-table .week-table-entries {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .admin-week-table .week-table-entry {
+          font-size: 10px;
+          line-height: 1.4;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          border: 1px solid #cbd5e1;
+          border-radius: 4px;
+          padding: 4px 6px;
+          background: #ffffff;
+          margin-bottom: 2px;
+        }
+        .admin-week-table .week-table-prjk-divider {
+          border-top: 1px solid #64748b;
+          margin: 1px 0;
+        }
+        .admin-week-table .week-table-entry span {
+          flex: 1;
+        }
+        .admin-week-table .week-table-avatars {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 4px;
+          margin-top: 2px;
+        }
+        .admin-week-table .week-table-avatar {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 20px;
+          height: 20px;
+          border-radius: 999px;
+          background: #e2e8f0;
+          color: #0f172a;
+          font-weight: 700;
+          font-size: 9px;
+          border: 1px solid #cbd5e1;
+        }
+        .admin-week-table .week-table-empty {
+          color: #adb5bd;
+          font-style: italic;
+        }
+        .admin-week-table .ga-time-table-table {
+          width: 100%;
+          border-collapse: collapse;
+          border: 1px solid #e2e8f0;
+          font-size: 11px;
+        }
+        .admin-week-table .ga-time-header {
+          border: 1px solid #e2e8f0;
+          background: #f8fafc;
+          padding: 8px 6px;
+          text-align: left;
+          font-weight: 700;
+          font-size: 10px;
+          vertical-align: bottom;
+          position: sticky;
+          top: 0;
+          z-index: 2;
+        }
+        .admin-week-table .ga-time-nr {
+          width: 40px;
+          text-align: center;
+        }
+        .admin-week-table .ga-time-slot-label {
+          border: 1px solid #e2e8f0;
+          background: #f1f5f9;
+          font-weight: 700;
+          font-size: 10px;
+          text-align: center;
+          padding: 6px;
+          white-space: nowrap;
+        }
+        .admin-week-table .ga-time-cell {
+          border: 1px solid #e2e8f0;
+          padding: 6px;
+          vertical-align: top;
+          min-width: 140px;
+        }
+        .admin-week-table .ga-time-cell-content {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .admin-week-table .ga-time-entry {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          background: #ffffff;
+          border: 1px solid #e2e8f0;
+          border-radius: 6px;
+          padding: 4px 6px;
+          font-size: 11px;
+        }
+        .admin-week-table .ga-time-entry-text {
+          background: transparent;
+          border: none;
+          text-align: left;
+          padding: 0;
+          font-size: 11px;
+          color: #0f172a;
+          flex: 1;
+          cursor: pointer;
+        }
+        .admin-week-table .ga-time-entry-text:disabled {
+          cursor: default;
+        }
+        .admin-week-table .ga-time-input {
+          width: 100%;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          padding: 4px 6px;
+          font-size: 11px;
+          color: #0f172a;
+          background: #ffffff;
+        }
+        .admin-week-table .ga-time-delete {
+          border: 1px solid #fecaca;
+          background: #fff1f2;
+          color: #b91c1c;
+          width: 20px;
+          height: 20px;
+          border-radius: 6px;
+          font-weight: 700;
+          line-height: 1;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+        }
+        .admin-week-table .ga-time-add {
+          align-self: flex-start;
+          border: 1px dashed #cbd5e1;
+          background: #f8fafc;
+          color: #475569;
+          font-size: 10px;
+          font-weight: 600;
+          padding: 4px 8px;
+          border-radius: 6px;
+          cursor: pointer;
+        }
+        .print-header,
+        .print-footer {
+          display: none;
+        }
+        .print-only {
+          display: none;
+        }
         @media print {
           * {
             box-sizing: border-box;
@@ -2741,29 +4507,145 @@ export default function AdminTasksPage() {
             min-height: 0 !important;
             overflow: visible !important;
             background: white;
+            margin: 0;
+            padding: 0;
           }
           aside, header, nav {
             display: none !important;
           }
           @page {
-            margin: 0.25in 0.1in 0.35in 0.1in;
+            margin: 0;
             size: landscape;
+          }
+          .print-only {
+            display: block !important;
           }
           .print-page {
             position: relative;
-            padding: 0.1in !important;
-            margin: 0 !important;
-            min-height: 0 !important;
-            max-height: none !important;
-            height: auto !important;
-            overflow: visible !important;
+            padding: 0;
+            padding-left: 0;
+            padding-right: 0;
+            margin: 0;
+            width: 100%;
+            max-width: 100%;
+            overflow: visible;
+            page-break-before: auto;
           }
           .print-header {
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             align-items: center;
-            margin-top: 0.15in;
-            margin-bottom: 0.2in;
+            margin-bottom: 8px;
+            margin-top: 0;
+            padding-top: 0;
+            position: static !important;
+            transform: none !important;
+            page-break-after: avoid;
+          }
+          .admin-week-table .week-table-view {
+            display: block !important;
+            page-break-inside: avoid;
+            page-break-after: auto;
+            padding-top: 0;
+            padding-bottom: 0.35in;
+            padding-left: 0;
+            padding-right: 0;
+            margin: 0;
+            width: 100%;
+            max-width: 100%;
+            overflow: visible;
+            page-break-before: auto;
+          }
+          .admin-week-table .week-table {
+            page-break-inside: avoid;
+            margin-top: 0;
+            table-layout: fixed;
+            width: 100%;
+            font-size: 9px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+          }
+          .admin-week-table .week-table thead {
+            display: table-header-group;
+          }
+          .admin-week-table .week-table th,
+          .admin-week-table .week-table td {
+            border: 1px solid #111827 !important;
+            position: static !important;
+            top: auto !important;
+            z-index: auto !important;
+            padding: 4px 5px;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+          }
+          .admin-week-table .week-table thead tr:nth-child(2) th {
+            top: auto !important;
+          }
+          .admin-week-table .week-table-number {
+            width: 36px !important;
+          }
+          .admin-week-table .week-table-label {
+            width: 100px !important;
+          }
+          .admin-week-table .week-table-cell,
+          .admin-week-table .week-table-entry span {
+            white-space: normal;
+          }
+          .admin-week-table .week-table-date-header,
+          .admin-week-table .week-table-subheader {
+            background: #e5e7eb !important;
+            color: #111827 !important;
+          }
+          .admin-week-table .week-table thead th {
+            background: #e5e7eb !important;
+          }
+          .admin-week-table .week-table-entry {
+            border: 1px solid #111827 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            page-break-inside: avoid;
+            margin-bottom: 3px;
+            font-size: 9px;
+            padding: 2px 4px;
+          }
+          .admin-week-table .week-table-entries {
+            gap: 2px;
+          }
+          .admin-week-table .ga-time-table-table {
+            table-layout: fixed;
+            width: 100%;
+            font-size: 9px;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            border: 1px solid #111827 !important;
+          }
+          .admin-week-table .ga-time-table-table th,
+          .admin-week-table .ga-time-table-table td {
+            border: 1px solid #111827 !important;
+            position: static !important;
+            top: auto !important;
+            z-index: auto !important;
+            padding: 4px 5px;
+            white-space: normal;
+            overflow-wrap: anywhere;
+            word-break: break-word;
+          }
+          .admin-week-table .ga-time-header {
+            background: #e5e7eb !important;
+            color: #111827 !important;
+          }
+          .admin-week-table .ga-time-slot-label {
+            background: #f3f4f6 !important;
+          }
+          .admin-week-table .ga-time-entry {
+            border: 1px solid #111827 !important;
+            -webkit-print-color-adjust: exact;
+            print-color-adjust: exact;
+            page-break-inside: avoid;
+            margin-bottom: 3px;
+            font-size: 9px;
+            padding: 2px 4px;
           }
           .print-title {
             font-size: 16px;
@@ -2779,21 +4661,31 @@ export default function AdminTasksPage() {
           }
           .print-footer {
             position: fixed;
-            bottom: 0.1in;
+            bottom: 0.2in;
             left: 0;
             right: 0;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
-            padding-left: 0.2in;
-            padding-right: 0.2in;
+            padding-left: 0.1in;
+            padding-right: 0.1in;
             font-size: 10px;
             color: #334155;
           }
           .print-page-count {
+            grid-column: 2;
             text-align: center;
           }
           .print-initials {
+            grid-column: 3;
             text-align: right;
+          }
+          [data-print-target]:not([data-print-target=""]) .print-section {
+            display: none !important;
+          }
+          [data-print-target="common"] .print-section[data-print-section="common"],
+          [data-print-target="ga-time"] .print-section[data-print-section="ga-time"],
+          [data-print-target="all-tasks"] .print-section[data-print-section="all-tasks"] {
+            display: block !important;
           }
           .daily-report-table thead {
             display: table-header-group;
@@ -2828,6 +4720,6 @@ export default function AdminTasksPage() {
         }
       `}</style>
     </div>
-    </div>
   )
 }
+

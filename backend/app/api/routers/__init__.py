@@ -5,6 +5,7 @@ from app.api.routers.checklist_items import router as checklist_items_router
 from app.api.routers.checklists import router as checklists_router
 from app.api.routers.departments import router as departments_router
 from app.api.routers.ga_notes import router as ga_notes_router
+from app.api.routers.ga_time_slots import router as ga_time_slots_router
 from app.api.routers.internal_meeting_sessions import router as internal_meeting_sessions_router
 from app.api.routers.internal_notes import router as internal_notes_router
 from app.api.routers.microsoft import router as microsoft_router
@@ -34,6 +35,7 @@ api_router.include_router(checklist_items_router, prefix="/checklist-items", tag
 api_router.include_router(checklists_router, prefix="/checklists", tags=["checklists"])
 api_router.include_router(departments_router, prefix="/departments", tags=["departments"])
 api_router.include_router(ga_notes_router, prefix="/ga-notes", tags=["ga-notes"])
+api_router.include_router(ga_time_slots_router, prefix="/ga-time-slots", tags=["ga-time-slots"])
 api_router.include_router(internal_meeting_sessions_router, prefix="/internal-meeting-sessions", tags=["internal-meeting-sessions"])
 api_router.include_router(internal_notes_router, prefix="/internal-notes", tags=["internal-notes"])
 api_router.include_router(microsoft_router, prefix="/microsoft", tags=["microsoft"])

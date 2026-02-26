@@ -3685,8 +3685,8 @@ export default function CommonViewPage() {
         blocked: filtered.blocked.filter((x) => x.date === iso),
         oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
         personal: filtered.personal.filter((x) => x.date === iso),
-        external: filtered.external.filter((x) => x.date === iso),
-        internal: filtered.internal.filter((x) => x.date === iso),
+        external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso), false),
         problems: [

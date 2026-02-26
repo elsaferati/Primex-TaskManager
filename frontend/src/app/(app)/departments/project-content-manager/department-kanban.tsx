@@ -7064,15 +7064,18 @@ export default function DepartmentKanban() {
                   <div className="mt-2 flex flex-col max-h-[300px] overflow-y-auto">
                     {row.items.length ? (
                       <div className="flex flex-col gap-2">
-                        <div className="hidden sm:grid sm:gap-0 sm:divide-x sm:divide-slate-200 sm:grid-cols-[minmax(0,2.2fr)_minmax(0,0.5fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,0.6fr)] px-2 py-1 border border-slate-200 rounded-md bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                        <div className="hidden sm:grid sm:gap-0 sm:divide-x sm:divide-slate-200 sm:grid-cols-[36px_minmax(0,2.2fr)_minmax(0,0.5fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.6fr)] px-2 py-1 border border-slate-200 rounded-md bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                          <div className="sm:px-2 text-center">Nr</div>
                           <div className="sm:px-3">Title</div>
                           <div className="sm:px-3">GA</div>
                           <div className="sm:px-3">Status</div>
                           <div className="sm:px-3">Type</div>
                           <div className="sm:px-3">Assignees</div>
+                          <div className="sm:px-3">Start</div>
+                          <div className="sm:px-3">Due</div>
                           <div className="sm:px-3 text-right">Actions</div>
                         </div>
-                        {row.items.map((t) => {
+                        {row.items.map((t, index) => {
                           const statusValue = taskStatusValue(t)
                           const isCompleted = statusValue === "DONE"
                           return (
@@ -7085,7 +7088,10 @@ export default function DepartmentKanban() {
                                 : `${row.borderClass} bg-white`
                                 }`}
                             >
-                              <div className="grid gap-2 sm:gap-0 sm:grid-cols-[minmax(0,2.2fr)_minmax(0,0.5fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,0.6fr)] sm:divide-x sm:divide-slate-200">
+                              <div className="grid gap-2 sm:gap-0 sm:grid-cols-[36px_minmax(0,2.2fr)_minmax(0,0.5fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.6fr)] sm:divide-x sm:divide-slate-200">
+                                <div className="sm:px-2 text-center text-[11px] font-semibold text-slate-500">
+                                  {index + 1}
+                                </div>
                                 <div className="sm:px-3">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <div className={`font-medium text-[12px] ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
@@ -7154,6 +7160,12 @@ export default function DepartmentKanban() {
                                       <span className="text-[11px] text-slate-400">-</span>
                                     )
                                   })()}
+                                </div>
+                                <div className="sm:px-3 flex items-start text-[11px] text-slate-600">
+                                  {formatDateOnly(t.start_date)}
+                                </div>
+                                <div className="sm:px-3 flex items-start text-[11px] text-slate-600">
+                                  {formatDateOnly(t.due_date)}
                                 </div>
                                 <div className="sm:px-3 flex items-start justify-end gap-2">
                                   {canDeleteNoProject ? (
