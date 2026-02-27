@@ -888,6 +888,27 @@ function reportStatusLabel(status?: Task["status"] | null) {
   return status
 }
 
+function normalizeDailyReportStatusKey(status?: string | null) {
+  const normalized = (status || "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_")
+  if (!normalized) return ""
+  if (normalized === "TODO" || normalized === "TO_DO") return "TODO"
+  if (normalized === "IN_PROGRESS" || normalized === "INPROGRESS") return "IN_PROGRESS"
+  if (normalized === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
+  if (normalized === "DONE") return "DONE"
+  return normalized
+}
+
+function dailyReportStatusChipLabel(key: string) {
+  if (key === "TODO") return "TO DO"
+  if (key === "IN_PROGRESS") return "IN PROGRESS"
+  if (key === "WAITING_CONFIRMATION") return "WAITING CONFIRMATION"
+  if (key === "DONE") return "DONE"
+  return key.replace(/_/g, " ")
+}
+
 function dailyReportTypeLabel(typeLabel?: string | null) {
   if (typeLabel === "FT") return "FAST TASK"
   if (typeLabel === "SYS") return "SYSTEM TASK"
@@ -926,6 +947,9 @@ function statusBadgeClasses(status: Task["status"]) {
 
 function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
+  if (status === "TODO") return "To Do"
+  if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "NOT_DONE") return "Not Done"
   if (status === "DONE") return "Done"
   if (status === "OPEN") return "Open"
@@ -2731,10 +2755,10 @@ export default function DepartmentKanban() {
     const seen = new Set<string>()
     const list: Array<{ key: string; label: string }> = []
     for (const row of dailyUserReportDisplayRows) {
-      const key = row.status?.toUpperCase().trim()
+      const key = normalizeDailyReportStatusKey(row.status)
       if (!key || seen.has(key)) continue
       seen.add(key)
-      list.push({ key, label: row.status })
+      list.push({ key, label: dailyReportStatusChipLabel(key) })
     }
     return list
   }, [dailyUserReportDisplayRows])
@@ -2755,7 +2779,7 @@ export default function DepartmentKanban() {
         if (!periodMatch) return false
 
         if (selectedStatuses.size === 0) return true
-        const rowStatus = row.status?.toUpperCase().trim()
+        const rowStatus = normalizeDailyReportStatusKey(row.status)
         return Boolean(rowStatus && selectedStatuses.has(rowStatus))
       })
   }, [dailyReportPeriodFilter, dailyReportStatusFilter, dailyUserReportDisplayRows])
@@ -5977,7 +6001,7 @@ export default function DepartmentKanban() {
                       <button
                         key={statusOption.key}
                         type="button"
-                        className={`rounded-md border px-2 py-1 ${isActive
+                        className={`rounded-md border px-2 py-1 uppercase ${isActive
                           ? "border-blue-500 bg-blue-50 text-blue-700"
                           : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
                           }`}
