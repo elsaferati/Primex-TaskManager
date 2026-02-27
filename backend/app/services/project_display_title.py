@@ -14,6 +14,7 @@ from app.models.task import Task
 from app.models.task_daily_progress import TaskDailyProgress
 
 TOTAL_PRODUCTS_RE = re.compile(r"total_products[:=]\s*(\d+)", re.IGNORECASE)
+COMPLETED_PRODUCTS_RE = re.compile(r"completed_products[:=]\s*(\d+)", re.IGNORECASE)
 ORIGIN_TASK_ID_RE = re.compile(r"origin_task_id[:=]\s*([a-f0-9-]+)", re.IGNORECASE)
 TRAILING_TOTAL_RE = re.compile(r"\((\d+)\)\s*$")
 
@@ -141,7 +142,7 @@ async def compute_project_control_week_metrics(
     ).all()
 
     progress: dict[uuid.UUID, dict[str, int | bool | None]] = {
-        pid: {"total": None, "planned": 0, "realised": 0, "has_control": False} for pid in unique_ids
+        pid: {"total": None, "done_total": 0, "realised_week": 0, "has_control": False} for pid in unique_ids
     }
 
     origin_ids: set[uuid.UUID] = set()
@@ -171,7 +172,7 @@ async def compute_project_control_week_metrics(
 
     for task_id, project_id, daily_products, notes, start_date, due_date in controls:
         task_project_map[task_id] = project_id
-        bucket = progress.setdefault(project_id, {"total": None, "planned": 0, "realised": 0, "has_control": False})
+        bucket = progress.setdefault(project_id, {"total": None, "done_total": 0, "realised_week": 0, "has_control": False})
         bucket["has_control"] = True
 
         task_total = _parse_int(TOTAL_PRODUCTS_RE, notes)
@@ -186,56 +187,88 @@ async def compute_project_control_week_metrics(
             current_total = bucket.get("total")
             if current_total is None or int(current_total) < task_total:
                 bucket["total"] = task_total
-            if _overlaps_week(
-                start_date=start_date,
-                due_date=due_date,
-                week_start=normalized_week_start,
-                week_end=normalized_week_end,
-            ):
-                bucket["planned"] = int(bucket.get("planned", 0) or 0) + int(task_total)
-
-    if task_project_map:
-        weekly_rows = (
+    task_ids = list(task_project_map.keys())
+    done_by_task: dict[uuid.UUID, int] = {}
+    if task_ids:
+        all_time_rows = (
             await db.execute(
                 select(TaskDailyProgress.task_id, TaskDailyProgress.completed_value)
-                .where(TaskDailyProgress.task_id.in_(list(task_project_map.keys())))
+                .where(TaskDailyProgress.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, completed_value in all_time_rows:
+            try:
+                completed = max(0, int(completed_value or 0))
+            except Exception:
+                completed = 0
+            existing = done_by_task.get(task_id, 0)
+            if completed > existing:
+                done_by_task[task_id] = completed
+
+        weekly_rows = (
+            await db.execute(
+                select(TaskDailyProgress.task_id, TaskDailyProgress.completed_delta)
+                .where(TaskDailyProgress.task_id.in_(task_ids))
                 .where(TaskDailyProgress.day_date >= normalized_week_start)
                 .where(TaskDailyProgress.day_date <= normalized_week_end)
             )
         ).all()
-        for task_id, completed_value in weekly_rows:
+        for task_id, completed_delta in weekly_rows:
             project_id = task_project_map.get(task_id)
             if project_id is None:
                 continue
             bucket = progress.setdefault(
-                project_id, {"total": None, "planned": 0, "realised": 0, "has_control": False}
+                project_id, {"total": None, "done_total": 0, "realised_week": 0, "has_control": False}
             )
-            realised_delta = 0
+            realized_delta = 0
             try:
-                realised_delta = max(0, int(completed_value or 0))
+                realized_delta = max(0, int(completed_delta or 0))
             except Exception:
-                realised_delta = 0
-            bucket["realised"] = int(bucket.get("realised", 0) or 0) + realised_delta
+                realized_delta = 0
+            bucket["realised_week"] = int(bucket.get("realised_week", 0) or 0) + realized_delta
+
+    for task_id, project_id, daily_products, notes, _start_date, _due_date in controls:
+        bucket = progress.setdefault(project_id, {"total": None, "done_total": 0, "realised_week": 0, "has_control": False})
+
+        task_total = _parse_int(TOTAL_PRODUCTS_RE, notes)
+        if task_total is None and daily_products is not None and daily_products > 0:
+            task_total = int(daily_products)
+        if task_total is None:
+            origin_id = origin_by_task_id.get(task_id)
+            if origin_id is not None:
+                task_total = origin_totals.get(origin_id)
+        if task_total is not None and task_total < 0:
+            task_total = 0
+
+        task_done = done_by_task.get(task_id)
+        if task_done is None:
+            parsed_done = _parse_int(COMPLETED_PRODUCTS_RE, notes)
+            task_done = parsed_done if parsed_done is not None else 0
+        task_done = max(0, int(task_done))
+        if task_total is not None and task_total > 0:
+            task_done = min(task_done, int(task_total))
+
+        bucket["done_total"] = int(bucket.get("done_total", 0) or 0) + task_done
 
     if project_total_by_id:
         for pid, project_total in project_total_by_id.items():
             if project_total is None or project_total <= 0:
                 continue
-            bucket = progress.setdefault(pid, {"total": None, "planned": 0, "realised": 0, "has_control": False})
+            bucket = progress.setdefault(pid, {"total": None, "done_total": 0, "realised_week": 0, "has_control": False})
             bucket["total"] = int(project_total)
 
     for pid, bucket in progress.items():
         total = bucket.get("total")
-        planned = max(0, int(bucket.get("planned", 0) or 0))
-        realised = max(0, int(bucket.get("realised", 0) or 0))
-        if realised > planned:
-            realised = planned
+        done_total = max(0, int(bucket.get("done_total", 0) or 0))
+        realized_week = max(0, int(bucket.get("realised_week", 0) or 0))
         if total is not None:
             resolved_total = int(total)
-            planned = min(planned, resolved_total)
-            realised = min(realised, resolved_total)
-        bucket["planned"] = planned
-        bucket["realised"] = realised
+            done_total = min(done_total, resolved_total)
+            realized_week = min(realized_week, resolved_total)
+            remaining_capacity = max(0, resolved_total - done_total)
+            realized_week = min(realized_week, remaining_capacity)
+        bucket["done_total"] = done_total
+        bucket["realised_week"] = realized_week
         progress[pid] = bucket
 
     return progress
@@ -252,10 +285,6 @@ def build_display_title(
     if not is_tt_or_mst(raw_title, project_type):
         return raw_title
 
-    has_control = bool(progress.get("has_control")) if progress else False
-    if not has_control:
-        return raw_title
-
     progress_total = progress.get("total") if progress else None
     resolved_total = int(progress_total) if isinstance(progress_total, int) else None
     if resolved_total is None or resolved_total <= 0:
@@ -264,17 +293,19 @@ def build_display_title(
     if resolved_total is None or resolved_total <= 0:
         return raw_title
 
-    planned = 0
-    realised = 0
-    if progress and isinstance(progress.get("planned"), int):
-        planned = int(progress["planned"] or 0)
-    if progress and isinstance(progress.get("realised"), int):
-        realised = int(progress["realised"] or 0)
-    planned = max(0, min(planned, resolved_total))
-    realised = max(0, min(realised, planned))
+    done_total = 0
+    realized_week = 0
+    if progress and isinstance(progress.get("done_total"), int):
+        done_total = int(progress["done_total"] or 0)
+    if progress and isinstance(progress.get("realised_week"), int):
+        realized_week = int(progress["realised_week"] or 0)
+    done_total = max(0, min(done_total, resolved_total))
+    realized_week = max(0, min(realized_week, resolved_total))
+    remaining_capacity = max(0, resolved_total - done_total)
+    realized_week = min(realized_week, remaining_capacity)
 
     base = normalize_base_title(raw_title, resolved_total)
-    return f"{base} ({resolved_total}/{planned}/{realised})"
+    return f"{base} (TOTAL {resolved_total}/TOTAL DONE {done_total}/REALIZED FOR THAT WEEK {realized_week})"
 
 
 async def build_project_display_title_map(
