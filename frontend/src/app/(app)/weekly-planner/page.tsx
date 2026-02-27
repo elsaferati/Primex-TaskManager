@@ -51,6 +51,9 @@ type WeeklyTableProjectTaskEntry = {
   daily_products: number | null
   total_products?: number | null
   completed_products?: number | null
+  weekly_planned_products?: number | null
+  day_total_products?: number | null
+  day_done_products?: number | null
   finish_period?: string | null
   is_bllok: boolean
   is_1h_report: boolean
@@ -161,6 +164,15 @@ const normalizeDepartmentKey = (name?: string) => {
   if (normalized === "productcontent" || normalized === "produktcontent") return "productcontent"
   if (normalized === "projectcontentmanager") return "productcontent"
   return normalized
+}
+
+const isMstOrTtProjectForWeeklyPlanner = (project?: WeeklyTableProjectEntry | null) => {
+  if (!project) return false
+  const title = (project.project_title || "").trim().toUpperCase()
+  const projectType = (project.project_type || "").trim().toUpperCase()
+  const isTt = title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")
+  const isMst = projectType === "MST" || title.includes("MST")
+  return isTt || (isMst && !isTt)
 }
 
 function mondayISO(today = new Date()) {
@@ -1199,13 +1211,27 @@ export default function WeeklyPlannerPage() {
     return null // NORMAL = no badge
   }, [])
 
-  const formatTaskProducts = React.useCallback((task: WeeklyTableProjectTaskEntry) => {
+  const formatTaskProducts = React.useCallback((
+    task: WeeklyTableProjectTaskEntry,
+    project?: WeeklyTableProjectEntry | null,
+    departmentName?: string
+  ) => {
+    const isProductContentDepartment = normalizeDepartmentKey(departmentName) === "productcontent"
+    const isScopedMstOrTt = isProductContentDepartment && isMstOrTtProjectForWeeklyPlanner(project)
+
+    if (isScopedMstOrTt) {
+      const weeklyPlanned = task.weekly_planned_products ?? null
+      const dayTotal = task.day_total_products ?? null
+      const dayDone = task.day_done_products ?? null
+      if (weeklyPlanned == null && dayTotal == null && dayDone == null) return null
+      const toLabel = (value: number | null) => (value == null ? "-" : String(value))
+      return `${toLabel(weeklyPlanned)}/${toLabel(dayTotal)}/${toLabel(dayDone)} pcs`
+    }
+
     const total = task.total_products ?? task.daily_products ?? null
     if (total == null) return null
     const completed = task.completed_products
-    if (completed != null) {
-      return `${total}/${completed} pcs`
-    }
+    if (completed != null) return `${total}/${completed} pcs`
     return `${total} pcs`
   }, [])
 
@@ -2243,7 +2269,7 @@ export default function WeeklyPlannerPage() {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
-                const productLabel = formatTaskProducts(task)
+                const productLabel = formatTaskProducts(task, project, dept.department_name)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
                 }
@@ -2399,7 +2425,7 @@ export default function WeeklyPlannerPage() {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
-                const productLabel = formatTaskProducts(task)
+                const productLabel = formatTaskProducts(task, project, dept.department_name)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
                 }
@@ -3942,7 +3968,7 @@ export default function WeeklyPlannerPage() {
                                                     </span>
                                                   )}
                                                   {(() => {
-                                                    const productLabel = formatTaskProducts(task)
+                                                    const productLabel = formatTaskProducts(task, project, dept.department_name)
                                                     if (!productLabel) return null
                                                     return (
                                                       <span className="font-medium bg-primary/10 text-primary px-1.5 py-0.5 rounded text-[10px]">

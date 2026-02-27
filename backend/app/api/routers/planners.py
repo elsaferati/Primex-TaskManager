@@ -178,6 +178,45 @@ def _extract_total_and_completed(
     return total, completed
 
 
+def _build_weekly_task_product_metrics(
+    *,
+    base_total: int | None,
+    base_completed: int | None,
+    progress_counts: tuple[int, int] | None,
+    is_mst_tt_task: bool,
+    status_for_day: str,
+) -> tuple[int | None, int | None, int | None, int | None, int | None]:
+    """
+    Build legacy and extended product metrics for weekly planner task entries.
+
+    Returns:
+    - effective_total (legacy total_products)
+    - effective_completed (legacy completed_products)
+    - weekly_planned (base weekly planned target)
+    - day_total (total target for the rendered day)
+    - day_done (cumulative done value as of the rendered day)
+    """
+    effective_total = base_total
+    effective_completed = base_completed
+
+    if progress_counts is not None:
+        progress_completed, progress_total = progress_counts
+        effective_completed = progress_completed
+        if progress_total > 0:
+            effective_total = progress_total
+    elif is_mst_tt_task and effective_total is not None and effective_completed is None:
+        effective_completed = 0
+
+    if effective_total is not None and status_for_day == "DONE":
+        if effective_completed is None or effective_completed < effective_total:
+            effective_completed = effective_total
+
+    weekly_planned = base_total
+    day_total = effective_total
+    day_done = effective_completed
+    return effective_total, effective_completed, weekly_planned, day_total, day_done
+
+
 def _parse_production_date(internal_notes: str | None) -> date | None:
     """Parse production_date (YYYY-MM-DD) from task internal_notes."""
     if not internal_notes:
@@ -2658,15 +2697,8 @@ async def weekly_table_planner(
                 for project_id, tasks_list in am_projects_map.items():
                     task_entries: list[WeeklyTableProjectTaskEntry] = []
                     for t in tasks_list:
-                        total_products, completed_products = _task_product_counts(t)
+                        base_total_products, base_completed_products = _task_product_counts(t)
                         progress_counts = _progress_counts_for_day(t.id, day_date)
-                        if progress_counts is not None:
-                            progress_completed, progress_total = progress_counts
-                            completed_products = progress_completed
-                            if progress_total > 0:
-                                total_products = progress_total
-                        elif t.id in mst_tt_task_ids and total_products is not None and completed_products is None:
-                            completed_products = 0
                         daily_status_value = _daily_status_for_task_day(t, day_date)
                         status_for_day = _status_for_day(
                             status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
@@ -2674,9 +2706,13 @@ async def weekly_table_planner(
                             completed_at=t.completed_at,
                             day_date=day_date,
                         )
-                        if total_products is not None and status_for_day == "DONE":
-                            if completed_products is None or completed_products < total_products:
-                                completed_products = total_products
+                        total_products, completed_products, weekly_planned_products, day_total_products, day_done_products = _build_weekly_task_product_metrics(
+                            base_total=base_total_products,
+                            base_completed=base_completed_products,
+                            progress_counts=progress_counts,
+                            is_mst_tt_task=t.id in mst_tt_task_ids,
+                            status_for_day=status_for_day,
+                        )
                         task_entries.append(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
@@ -2689,6 +2725,9 @@ async def weekly_table_planner(
                                 daily_products=total_products,
                                 total_products=total_products,
                                 completed_products=completed_products,
+                                weekly_planned_products=weekly_planned_products,
+                                day_total_products=day_total_products,
+                                day_done_products=day_done_products,
                                 finish_period=t.finish_period,
                                 is_bllok=t.is_bllok,
                                 is_1h_report=t.is_1h_report,
@@ -2714,15 +2753,8 @@ async def weekly_table_planner(
                 for project_id, tasks_list in pm_projects_map.items():
                     task_entries: list[WeeklyTableProjectTaskEntry] = []
                     for t in tasks_list:
-                        total_products, completed_products = _task_product_counts(t)
+                        base_total_products, base_completed_products = _task_product_counts(t)
                         progress_counts = _progress_counts_for_day(t.id, day_date)
-                        if progress_counts is not None:
-                            progress_completed, progress_total = progress_counts
-                            completed_products = progress_completed
-                            if progress_total > 0:
-                                total_products = progress_total
-                        elif t.id in mst_tt_task_ids and total_products is not None and completed_products is None:
-                            completed_products = 0
                         daily_status_value = _daily_status_for_task_day(t, day_date)
                         status_for_day = _status_for_day(
                             status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
@@ -2730,9 +2762,13 @@ async def weekly_table_planner(
                             completed_at=t.completed_at,
                             day_date=day_date,
                         )
-                        if total_products is not None and status_for_day == "DONE":
-                            if completed_products is None or completed_products < total_products:
-                                completed_products = total_products
+                        total_products, completed_products, weekly_planned_products, day_total_products, day_done_products = _build_weekly_task_product_metrics(
+                            base_total=base_total_products,
+                            base_completed=base_completed_products,
+                            progress_counts=progress_counts,
+                            is_mst_tt_task=t.id in mst_tt_task_ids,
+                            status_for_day=status_for_day,
+                        )
                         task_entries.append(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
@@ -2745,6 +2781,9 @@ async def weekly_table_planner(
                                 daily_products=total_products,
                                 total_products=total_products,
                                 completed_products=completed_products,
+                                weekly_planned_products=weekly_planned_products,
+                                day_total_products=day_total_products,
+                                day_done_products=day_done_products,
                                 finish_period=t.finish_period,
                                 is_bllok=t.is_bllok,
                                 is_1h_report=t.is_1h_report,
