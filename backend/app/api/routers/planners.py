@@ -2214,6 +2214,24 @@ async def weekly_table_planner(
             ids.add(task.assigned_to)
         return ids
 
+    # Weekly planned target for MST/TT should reflect the full weekly load per user+project,
+    # not just the current task row.
+    weekly_mst_tt_planned_by_user_project: dict[tuple[uuid.UUID, uuid.UUID], int] = {}
+    for task in week_tasks:
+        if task.project_id is None:
+            continue
+        if task.id not in mst_tt_task_ids:
+            continue
+        base_total_products, _ = _task_product_counts(task)
+        if base_total_products is None or base_total_products <= 0:
+            continue
+        assignee_ids = _effective_weekly_assignee_ids(task)
+        for assignee_id in assignee_ids:
+            key = (assignee_id, task.project_id)
+            weekly_mst_tt_planned_by_user_project[key] = (
+                weekly_mst_tt_planned_by_user_project.get(key, 0) + int(base_total_products)
+            )
+
     exclusion_map: dict[tuple[uuid.UUID, uuid.UUID, date], set[str]] = {}
     if task_ids and all_users:
         user_ids = [u.id for u in all_users]
@@ -2713,6 +2731,11 @@ async def weekly_table_planner(
                             is_mst_tt_task=t.id in mst_tt_task_ids,
                             status_for_day=status_for_day,
                         )
+                        if t.id in mst_tt_task_ids and t.project_id is not None:
+                            weekly_planned_products = weekly_mst_tt_planned_by_user_project.get(
+                                (dept_user.id, t.project_id),
+                                weekly_planned_products if weekly_planned_products is not None else 0,
+                            )
                         task_entries.append(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,
@@ -2769,6 +2792,11 @@ async def weekly_table_planner(
                             is_mst_tt_task=t.id in mst_tt_task_ids,
                             status_for_day=status_for_day,
                         )
+                        if t.id in mst_tt_task_ids and t.project_id is not None:
+                            weekly_planned_products = weekly_mst_tt_planned_by_user_project.get(
+                                (dept_user.id, t.project_id),
+                                weekly_planned_products if weekly_planned_products is not None else 0,
+                            )
                         task_entries.append(
                             WeeklyTableProjectTaskEntry(
                                 task_id=t.id,

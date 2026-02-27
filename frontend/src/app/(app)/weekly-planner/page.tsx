@@ -2269,7 +2269,7 @@ export default function WeeklyPlannerPage() {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
-                const productLabel = formatTaskProducts(task, project, dept.department_name)
+                const productLabel = formatTaskProducts(task, project, departmentName)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
                 }
@@ -2425,7 +2425,7 @@ export default function WeeklyPlannerPage() {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
-                const productLabel = formatTaskProducts(task, project, dept.department_name)
+                const productLabel = formatTaskProducts(task, project, departmentName)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
                 }
