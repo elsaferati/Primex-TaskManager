@@ -671,7 +671,7 @@ function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
-  if (status === "TODO") return "To Do"
+  if (status === "TODO") return "TO DO"
   if (status === "DONE") return "Done"
   return status
 }
@@ -695,6 +695,12 @@ function dailyReportStatusChipLabel(key: string) {
   if (key === "WAITING_CONFIRMATION") return "WAITING CONFIRMATION"
   if (key === "DONE") return "DONE"
   return key.replace(/_/g, " ")
+}
+
+function dailyReportStatusDisplay(status?: string | null) {
+  const key = normalizeDailyReportStatusKey(status)
+  if (!key) return "-"
+  return dailyReportStatusChipLabel(key)
 }
 
 function dailyReportTypeLabel(typeLabel?: string | null) {
@@ -735,7 +741,7 @@ function statusBadgeClasses(status: Task["status"]) {
 
 function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
-  if (status === "TODO") return "To Do"
+  if (status === "TODO") return "TO DO"
   if (status === "IN_PROGRESS") return "In Progress"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "NOT_DONE") return "Not Done"
@@ -2414,12 +2420,23 @@ export default function DepartmentKanban() {
   const dailyReportAvailableStatuses = React.useMemo(() => {
     const seen = new Set<string>()
     const list: Array<{ key: string; label: string }> = []
+    const statusOrder: Record<string, number> = {
+      TODO: 0,
+      IN_PROGRESS: 1,
+      WAITING_CONFIRMATION: 2,
+      DONE: 3,
+    }
     for (const row of dailyUserReportDisplayRows) {
       const key = normalizeDailyReportStatusKey(row.status)
       if (!key || seen.has(key)) continue
       seen.add(key)
       list.push({ key, label: dailyReportStatusChipLabel(key) })
     }
+    list.sort((a, b) => {
+      const orderDiff = (statusOrder[a.key] ?? Number.MAX_SAFE_INTEGER) - (statusOrder[b.key] ?? Number.MAX_SAFE_INTEGER)
+      if (orderDiff !== 0) return orderDiff
+      return a.label.localeCompare(b.label)
+    })
     return list
   }, [dailyUserReportDisplayRows])
 
@@ -5380,9 +5397,9 @@ export default function DepartmentKanban() {
                                     )}
                                   </td>
                                   <td
-                                    className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                                    className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
                                   >
-                                    {row.status}
+                                    {dailyReportStatusDisplay(row.status)}
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -5960,7 +5977,7 @@ export default function DepartmentKanban() {
                               <SelectValue placeholder="Select status" />
                             </SelectTrigger>
                             <SelectContent>
-                              <SelectItem value="TODO">To Do</SelectItem>
+                              <SelectItem value="TODO">TO DO</SelectItem>
                               <SelectItem value="DONE">Done</SelectItem>
                             </SelectContent>
                           </Select>
@@ -7924,9 +7941,9 @@ export default function DepartmentKanban() {
                               )}
                             </td>
                             <td
-                              className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                              className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
                             >
-                              {row.status}
+                              {dailyReportStatusDisplay(row.status)}
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -8002,9 +8019,9 @@ export default function DepartmentKanban() {
                           )}
                         </td>
                         <td
-                          className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(row.status)}`}
+                          className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
                         >
-                          {row.status}
+                          {dailyReportStatusDisplay(row.status)}
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
