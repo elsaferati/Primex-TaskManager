@@ -305,7 +305,7 @@ def build_display_title(
     realized_week = min(realized_week, remaining_capacity)
 
     base = normalize_base_title(raw_title, resolved_total)
-    return f"{base} (TOTAL {resolved_total}/TOTAL DONE {done_total}/REALIZED FOR THAT WEEK {realized_week})"
+    return f"{base} ({resolved_total}/{done_total}/{realized_week})"
 
 
 async def build_project_display_title_map(

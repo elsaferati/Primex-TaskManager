@@ -42,6 +42,9 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     daily_products: int | None = None
     total_products: int | None = None
     completed_products: int | None = None
+    weekly_planned_products: int | None = None
+    day_total_products: int | None = None
+    day_done_products: int | None = None
     finish_period: str | None = None
     is_bllok: bool = False
     is_1h_report: bool = False
