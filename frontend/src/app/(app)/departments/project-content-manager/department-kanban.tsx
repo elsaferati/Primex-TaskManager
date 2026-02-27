@@ -888,6 +888,28 @@ function reportStatusLabel(status?: Task["status"] | null) {
   return status
 }
 
+function dailyReportTypeLabel(typeLabel?: string | null) {
+  if (typeLabel === "FT") return "FAST TASK"
+  if (typeLabel === "SYS") return "SYSTEM TASK"
+  if (typeLabel === "PRJK" || typeLabel === "PRJ") return "PROJEKT"
+  return typeLabel || "-"
+}
+
+function getDailyReportRowId(
+  row: {
+    taskId?: string
+    systemTemplateId?: string
+    systemOccurrenceDate?: string
+    typeLabel?: string
+    title?: string
+  },
+  fallbackIndex: number
+) {
+  if (row.taskId) return `task:${row.taskId}`
+  if (row.systemTemplateId) return `system:${row.systemTemplateId}:${row.systemOccurrenceDate || "na"}`
+  return `misc:${row.typeLabel || "na"}:${row.title || "untitled"}:${fallbackIndex}`
+}
+
 function taskStatusValue(task: Task): Task["status"] {
   if (task.status === "DONE" || task.completed_at) return "DONE"
   if (task.status === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
@@ -1201,6 +1223,11 @@ export default function DepartmentKanban() {
     bootstrapInternalNoteProjectsRef.current = payload.internalNoteProjects
   }, [])
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
+  const [dailyReportManualOrder, setDailyReportManualOrder] = React.useState<string[]>([])
+  const [dailyReportPeriodFilter, setDailyReportPeriodFilter] = React.useState<"all" | "am_side" | "pm_side">("all")
+  const [dailyReportStatusFilter, setDailyReportStatusFilter] = React.useState<string[]>([])
+  const [dragDailyReportRowId, setDragDailyReportRowId] = React.useState<string | null>(null)
+  const [overDailyReportRowId, setOverDailyReportRowId] = React.useState<string | null>(null)
   const [multiSelect, setMultiSelect] = React.useState(false)
   const [printRange, setPrintRange] = React.useState<"today" | "week">("week")
   const dailyReportScrollRef = React.useRef<HTMLDivElement | null>(null)
@@ -2060,21 +2087,43 @@ export default function DepartmentKanban() {
     }
     return tasks
   }, [visibleDepartmentTasks, isMineView, user?.id, isTaskAssignedToUser])
+  const shouldIncludeOverdueInAllToday = React.useMemo(
+    () =>
+      activeTab === "all" &&
+      allRange === "today" &&
+      (viewMode === "mine" || (viewMode === "department" && selectedUserId !== "__all__")),
+    [activeTab, allRange, selectedUserId, viewMode]
+  )
+  const overdueTaskIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    if (!shouldIncludeOverdueInAllToday) return ids
+    for (const item of dailyReport?.tasks_overdue || []) {
+      if (item?.task?.id) ids.add(item.task.id)
+    }
+    return ids
+  }, [dailyReport?.tasks_overdue, shouldIncludeOverdueInAllToday])
+  const overdueSystemTemplateIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    if (!shouldIncludeOverdueInAllToday) return ids
+    for (const occ of dailyReport?.system_overdue || []) {
+      if (occ?.template_id) ids.add(occ.template_id)
+    }
+    return ids
+  }, [dailyReport?.system_overdue, shouldIncludeOverdueInAllToday])
   const todaySystemTasks = React.useMemo(
     () => {
       const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
 
-      // If in "my view", also include overdue system tasks where next occurrence has passed
-      if (isMineView && user?.id && dailyReport?.system_overdue?.length) {
+      // Include overdue system tasks in All -> Today for my view and selected-user department view.
+      if (shouldIncludeOverdueInAllToday && overdueSystemTemplateIds.size > 0) {
         const todayTaskIds = new Set(todayTasks.map((t) => t.template_id || t.id))
-        const overdueTaskIds = new Set(dailyReport.system_overdue.map((occ) => occ.template_id))
 
         const overdueTasks = visibleSystemTemplates.filter((t) => {
           const templateId = t.template_id || t.id
           // Skip if already in today's tasks
           if (todayTaskIds.has(templateId)) return false
           // Only include if it's in overdue list
-          if (!overdueTaskIds.has(templateId)) return false
+          if (!overdueSystemTemplateIds.has(templateId)) return false
 
           // Check if next occurrence date has passed
           const nextOccurrence = getNextOccurrenceDate(t, todayDate)
@@ -2090,7 +2139,7 @@ export default function DepartmentKanban() {
 
       return todayTasks
     },
-    [visibleSystemTemplates, todayDate, isMineView, user?.id, dailyReport?.system_overdue]
+    [overdueSystemTemplateIds, shouldIncludeOverdueInAllToday, todayDate, visibleSystemTemplates]
   )
   const systemOccurrenceStatusByTemplate = React.useMemo(() => {
     const map = new Map<string, string>()
@@ -2151,7 +2200,8 @@ export default function DepartmentKanban() {
       const matchesRange =
         allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
       const completedToday = isTaskCompletedToday(task)
-      if (!matchesRange && !completedToday) return false
+      const isOverdue = overdueTaskIds.has(task.id)
+      if (!matchesRange && !completedToday && !isOverdue) return false
       if (selectedUserId !== "__all__") {
         return isTaskAssignedToUser(task, selectedUserId)
       }
@@ -2166,6 +2216,7 @@ export default function DepartmentKanban() {
     isTaskAssignedToUser,
     isTaskCompletedToday,
     isTaskOverlappingWeek,
+    overdueTaskIds,
   ])
   React.useEffect(() => {
     let cancelled = false
@@ -2210,7 +2261,8 @@ export default function DepartmentKanban() {
       const matchesRange =
         allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
       const completedToday = isTaskCompletedToday(task)
-      if (!matchesRange && !completedToday) return false
+      const isOverdue = overdueTaskIds.has(task.id)
+      if (!matchesRange && !completedToday && !isOverdue) return false
       if (selectedUserId !== "__all__") {
         return isTaskAssignedToUser(task, selectedUserId)
       }
@@ -2225,6 +2277,7 @@ export default function DepartmentKanban() {
     isTaskAssignedToUser,
     isTaskCompletedToday,
     isTaskOverlappingWeek,
+    overdueTaskIds,
   ])
   const todayOpenNotes = React.useMemo(() => {
     return openNotes.filter((note) => {
@@ -2389,6 +2442,7 @@ export default function DepartmentKanban() {
       projectTitle?: string | null
       description: string
       status: string
+      statusKey?: "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE"
       bz: string
       kohaBz: string
       tyo: string
@@ -2403,6 +2457,26 @@ export default function DepartmentKanban() {
     const fastRows: Array<{ order: number; index: number; row: (typeof rows)[number] }> = []
     const projectRows: typeof rows = []
     let fastIndex = 0
+    const statusOrder = {
+      TODO: 0,
+      IN_PROGRESS: 1,
+      WAITING_CONFIRMATION: 2,
+      DONE: 3,
+    } as const
+    type StatusKey = keyof typeof statusOrder
+    const normalizeTaskStatusKey = (task: Task): StatusKey => {
+      const raw = task.status?.toUpperCase() || ""
+      if (raw === "TODO" || raw === "IN_PROGRESS" || raw === "WAITING_CONFIRMATION" || raw === "DONE") {
+        return raw
+      }
+      if (task.completed_at) return "DONE"
+      return "TODO"
+    }
+    const normalizeSystemStatusKey = (status?: string | null): StatusKey => {
+      const raw = status?.toUpperCase() || ""
+      if (raw === "DONE" || raw === "SKIPPED") return "DONE"
+      return "TODO"
+    }
     const isRowDone = (row: (typeof rows)[number]) => {
       if (row.systemStatus === "DONE") return true
       return row.status?.toUpperCase() === "DONE"
@@ -2489,6 +2563,7 @@ export default function DepartmentKanban() {
         title: occ.title || "-",
         description: tmpl?.description || "-",
         status: formatSystemOccurrenceStatus(occ.status),
+        statusKey: normalizeSystemStatusKey(occ.status),
         bz: alignmentEnabled
           ? bzUsers !== "-"
             ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
@@ -2522,6 +2597,7 @@ export default function DepartmentKanban() {
         title: occ?.title || tmpl.title || "-",
         description: tmpl.description || "-",
         status: formatSystemOccurrenceStatus(occ?.status || tmpl.status),
+        statusKey: normalizeSystemStatusKey(occ?.status || tmpl.status),
         bz: alignmentEnabled
           ? bzUsers !== "-"
             ? formatAlignmentInitials(tmpl.alignment_user_ids, userMap)
@@ -2551,6 +2627,7 @@ export default function DepartmentKanban() {
           title: task.title || "-",
           description: task.description || "-",
           status: taskStatusLabel(task),
+          statusKey: normalizeTaskStatusKey(task),
           bz: "-",
           kohaBz: "-",
           tyo: getDailyReportTyo({
@@ -2583,6 +2660,7 @@ export default function DepartmentKanban() {
         projectTitle: projectLabel,
         description: task.description || "-",
         status: taskStatusLabel(task),
+        statusKey: normalizeTaskStatusKey(task),
         bz: "-",
         kohaBz: "-",
         tyo: getDailyReportTyo({
@@ -2604,6 +2682,13 @@ export default function DepartmentKanban() {
     rows.push(...doneLast(systemPmRows))
 
     return rows
+      .map((row, index) => ({ row, index }))
+      .sort((a, b) => {
+        const statusDiff =
+          statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
+        return statusDiff !== 0 ? statusDiff : a.index - b.index
+      })
+      .map((entry) => entry.row)
   }, [
     dailyReport,
     dailyReportFastTasks,
@@ -2617,6 +2702,96 @@ export default function DepartmentKanban() {
     userMap,
   ])
 
+  const dailyUserReportDisplayRows = React.useMemo(() => {
+    if (!dailyReportManualOrder.length) return dailyUserReportRows
+
+    const entries = dailyUserReportRows.map((row, index) => ({
+      id: getDailyReportRowId(row, index),
+      row,
+    }))
+    const entryMap = new Map(entries.map((entry) => [entry.id, entry.row]))
+    const ordered: (typeof dailyUserReportRows)[number][] = []
+    const used = new Set<string>()
+
+    for (const id of dailyReportManualOrder) {
+      const match = entryMap.get(id)
+      if (!match) continue
+      ordered.push(match)
+      used.add(id)
+    }
+
+    for (const entry of entries) {
+      if (used.has(entry.id)) continue
+      ordered.push(entry.row)
+    }
+    return ordered
+  }, [dailyReportManualOrder, dailyUserReportRows])
+
+  const dailyReportAvailableStatuses = React.useMemo(() => {
+    const seen = new Set<string>()
+    const list: Array<{ key: string; label: string }> = []
+    for (const row of dailyUserReportDisplayRows) {
+      const key = row.status?.toUpperCase().trim()
+      if (!key || seen.has(key)) continue
+      seen.add(key)
+      list.push({ key, label: row.status })
+    }
+    return list
+  }, [dailyUserReportDisplayRows])
+
+  const dailyUserReportFilteredEntries = React.useMemo(() => {
+    const selectedStatuses = new Set(dailyReportStatusFilter)
+    return dailyUserReportDisplayRows
+      .map((row, index) => ({
+        id: getDailyReportRowId(row, index),
+        row,
+      }))
+      .filter(({ row }) => {
+        const rowPeriod = row.period?.toUpperCase().trim()
+        const periodMatch =
+          dailyReportPeriodFilter === "all" ||
+          (dailyReportPeriodFilter === "am_side" && (rowPeriod === "AM" || rowPeriod === "AM/PM")) ||
+          (dailyReportPeriodFilter === "pm_side" && (rowPeriod === "PM" || rowPeriod === "AM/PM"))
+        if (!periodMatch) return false
+
+        if (selectedStatuses.size === 0) return true
+        const rowStatus = row.status?.toUpperCase().trim()
+        return Boolean(rowStatus && selectedStatuses.has(rowStatus))
+      })
+  }, [dailyReportPeriodFilter, dailyReportStatusFilter, dailyUserReportDisplayRows])
+
+  const toggleDailyReportStatusFilter = React.useCallback((statusKey: string) => {
+    setDailyReportStatusFilter((prev) =>
+      prev.includes(statusKey) ? prev.filter((entry) => entry !== statusKey) : [...prev, statusKey]
+    )
+  }, [])
+
+  const dailyUserReportDisplayIds = React.useMemo(
+    () => dailyUserReportDisplayRows.map((row, index) => getDailyReportRowId(row, index)),
+    [dailyUserReportDisplayRows]
+  )
+
+  const handleDailyReportRowDrop = React.useCallback(
+    (targetRowId: string) => {
+      if (!dragDailyReportRowId) return
+      if (dragDailyReportRowId === targetRowId) return
+
+      setDailyReportManualOrder((prev) => {
+        const base = prev.length ? [...prev] : [...dailyUserReportDisplayIds]
+        const dragIndex = base.indexOf(dragDailyReportRowId)
+        const targetIndex = base.indexOf(targetRowId)
+        if (dragIndex < 0 || targetIndex < 0) return base
+        const next = [...base]
+        const [moved] = next.splice(dragIndex, 1)
+        next.splice(targetIndex, 0, moved)
+        return next
+      })
+      setOverDailyReportRowId(null)
+      setDragDailyReportRowId(null)
+    },
+    [dailyUserReportDisplayIds, dragDailyReportRowId]
+  )
+
   // Helper function to convert DailyReportResponse to rows for print view
   const convertDailyReportToRows = React.useCallback(
     (report: DailyReportResponse, userId: string): Array<{
@@ -2627,6 +2802,7 @@ export default function DepartmentKanban() {
       projectTitle?: string | null
       description: string
       status: string
+      statusKey?: "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE"
       bz: string
       kohaBz: string
       tyo: string
@@ -2642,6 +2818,26 @@ export default function DepartmentKanban() {
       const fastRows: Array<{ order: number; index: number; row: (typeof rows)[number] }> = []
       const projectRows: typeof rows = []
       let fastIndex = 0
+      const statusOrder = {
+        TODO: 0,
+        IN_PROGRESS: 1,
+        WAITING_CONFIRMATION: 2,
+        DONE: 3,
+      } as const
+      type StatusKey = keyof typeof statusOrder
+      const normalizeTaskStatusKey = (task: Task): StatusKey => {
+        const raw = task.status?.toUpperCase() || ""
+        if (raw === "TODO" || raw === "IN_PROGRESS" || raw === "WAITING_CONFIRMATION" || raw === "DONE") {
+          return raw
+        }
+        if (task.completed_at) return "DONE"
+        return "TODO"
+      }
+      const normalizeSystemStatusKey = (status?: string | null): StatusKey => {
+        const raw = status?.toUpperCase() || ""
+        if (raw === "DONE" || raw === "SKIPPED") return "DONE"
+        return "TODO"
+      }
       const isRowDone = (row: (typeof rows)[number]) => {
         if (row.systemStatus === "DONE") return true
         return row.status?.toUpperCase() === "DONE"
@@ -2707,6 +2903,7 @@ export default function DepartmentKanban() {
           title: occ.title || "-",
           description: tmpl?.description || "-",
           status: formatSystemOccurrenceStatus(occ.status),
+          statusKey: normalizeSystemStatusKey(occ.status),
           bz: alignmentEnabled
             ? bzUsers !== "-"
               ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
@@ -2751,6 +2948,7 @@ export default function DepartmentKanban() {
             projectTitle: projectLabel,
             description: task.description || "-",
             status: taskStatusLabel(task),
+            statusKey: normalizeTaskStatusKey(task),
             bz: "-",
             kohaBz: "-",
             tyo: getDailyReportTyo({
@@ -2772,6 +2970,7 @@ export default function DepartmentKanban() {
               title: task.title || "-",
               description: task.description || "-",
               status: taskStatusLabel(task),
+              statusKey: normalizeTaskStatusKey(task),
               bz: "-",
               kohaBz: "-",
               tyo: getDailyReportTyo({
@@ -2817,6 +3016,13 @@ export default function DepartmentKanban() {
       rows.push(...doneLast(systemPmRows.sort(sortByTyo)))
 
       return rows
+        .map((row, index) => ({ row, index }))
+        .sort((a, b) => {
+          const statusDiff =
+            statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
+          return statusDiff !== 0 ? statusDiff : a.index - b.index
+        })
+        .map((entry) => entry.row)
     },
     [projects, systemTemplateById, todayDate, userMap]
   )
@@ -5688,15 +5894,6 @@ export default function DepartmentKanban() {
                     >
                       {showDailyUserReport ? "Hide Daily Report" : "Daily Report"}
                     </Button>
-                    <span className="text-[11px] font-semibold uppercase text-slate-500">Print range</span>
-                    <Select value={printRange} onValueChange={(value) => setPrintRange(value as "today" | "week")}>
-                      <SelectTrigger className="h-8 w-28 border-0 shadow-none focus:border-transparent focus:ring-0">
-                        <SelectValue placeholder="Today" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="today">Today</SelectItem>
-                      </SelectContent>
-                    </Select>
                     <Button
                       variant="outline"
                       className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
@@ -5731,6 +5928,66 @@ export default function DepartmentKanban() {
                     </Button>
                   </div>
                 </div>
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs">
+                  <span className="font-medium text-slate-600">Period:</span>
+                  <button
+                    type="button"
+                    className={`rounded-md border px-2 py-1 ${dailyReportPeriodFilter === "all"
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    onClick={() => setDailyReportPeriodFilter("all")}
+                  >
+                    All
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-md border px-2 py-1 ${dailyReportPeriodFilter === "am_side"
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    onClick={() => setDailyReportPeriodFilter("am_side")}
+                  >
+                    AM + AM/PM
+                  </button>
+                  <button
+                    type="button"
+                    className={`rounded-md border px-2 py-1 ${dailyReportPeriodFilter === "pm_side"
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    onClick={() => setDailyReportPeriodFilter("pm_side")}
+                  >
+                    PM + AM/PM
+                  </button>
+                  <span className="ml-2 font-medium text-slate-600">Status:</span>
+                  <button
+                    type="button"
+                    className={`rounded-md border px-2 py-1 ${dailyReportStatusFilter.length === 0
+                      ? "border-blue-500 bg-blue-50 text-blue-700"
+                      : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                      }`}
+                    onClick={() => setDailyReportStatusFilter([])}
+                  >
+                    All
+                  </button>
+                  {dailyReportAvailableStatuses.map((statusOption) => {
+                    const isActive = dailyReportStatusFilter.includes(statusOption.key)
+                    return (
+                      <button
+                        key={statusOption.key}
+                        type="button"
+                        className={`rounded-md border px-2 py-1 ${isActive
+                          ? "border-blue-500 bg-blue-50 text-blue-700"
+                          : "border-slate-300 bg-white text-slate-700 hover:bg-slate-50"
+                          }`}
+                        onClick={() => toggleDailyReportStatusFilter(statusOption.key)}
+                      >
+                        {statusOption.label}
+                      </button>
+                    )
+                  })}
+                </div>
                 <div
                   ref={dailyReportScrollRef}
                   className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
@@ -5740,44 +5997,40 @@ export default function DepartmentKanban() {
                   onMouseUp={handleDailyReportMouseEnd}
                   onMouseLeave={handleDailyReportMouseEnd}
                 >
-                  <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
+                  <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
                     <colgroup>
+                      <col className="w-[24px]" />
                       <col className="w-[28px]" />
                       <col className="w-[32px]" />
-                      <col className="w-[32px]" />
-                      <col className="w-[36px]" />
+                      <col className="w-[24px]" />
+                      <col className="w-[64px]" />
                       <col className="w-[150px]" />
                       <col className="w-[48px]" />
-                      <col className="w-[32px]" />
+                      <col className="w-[64px]" />
                       <col className="w-[48px]" />
                       <col className="w-[32px]" />
                       <col className="w-[140px]" />
                     </colgroup>
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr>
+                        <th className="border border-slate-200 px-1 py-2 text-center text-xs uppercase">#</th>
                         <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
                           Nr
                         </th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LL</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">NLL</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                          <span className="block">AM/</span>
-                          <span className="block">PM</span>
-                        </th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LLOJI</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">NENLLOJI</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-nowrap">AM/PM</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STS</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
-                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">
-                          <span className="block">T/Y</span>
-                          <span className="block">/O</span>
-                        </th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BARAZIMI</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
+                        <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-nowrap">T/Y/O</th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                       </tr>
                     </thead>
                     <tbody>
-                      {dailyUserReportRows.length ? (
-                        dailyUserReportRows.map((row, index) => {
+                      {dailyUserReportFilteredEntries.length ? (
+                        dailyUserReportFilteredEntries.map(({ id: rowId, row }, index) => {
                           const commentKey = row.taskId
                             ? `task:${row.taskId}`
                             : row.systemTemplateId && row.systemOccurrenceDate
@@ -5787,17 +6040,51 @@ export default function DepartmentKanban() {
                           const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
                           const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
                           return (
-                            <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                            <tr
+                              key={rowId}
+                              className={overDailyReportRowId === rowId ? "bg-blue-50/60" : ""}
+                              onDragOver={(event) => {
+                                event.preventDefault()
+                                if (dragDailyReportRowId && dragDailyReportRowId !== rowId) {
+                                  setOverDailyReportRowId(rowId)
+                                }
+                              }}
+                              onDrop={(event) => {
+                                event.preventDefault()
+                                handleDailyReportRowDrop(rowId)
+                              }}
+                            >
+                              <td className="border border-slate-200 px-1 py-2 align-top text-center">
+                                <button
+                                  type="button"
+                                  draggable
+                                  className="inline-flex h-5 w-5 cursor-grab items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
+                                  aria-label="Move row"
+                                  title="Move row"
+                                  onMouseDown={(event) => event.stopPropagation()}
+                                  onDragStart={(event) => {
+                                    setDragDailyReportRowId(rowId)
+                                    event.dataTransfer.effectAllowed = "move"
+                                    event.dataTransfer.setData("text/plain", rowId)
+                                  }}
+                                  onDragEnd={() => {
+                                    setDragDailyReportRowId(null)
+                                    setOverDailyReportRowId(null)
+                                  }}
+                                >
+                                  ::
+                                </button>
+                              </td>
                               <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
                                 {index + 1}
                               </td>
-                              <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                              <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
-                              <td className="border border-slate-200 px-2 py-2 align-top uppercase">
+                              <td className="border border-slate-200 px-2 py-2 align-top uppercase font-semibold">
                                 {row.typeLabel === "PRJK" && row.projectTitle ? (
                                   <>
-                                    <span className="font-semibold">{row.projectTitle}</span>
+                                    <span>{row.projectTitle}</span>
                                     <span> : {row.title}</span>
                                   </>
                                 ) : (
@@ -5875,7 +6162,7 @@ export default function DepartmentKanban() {
                         })
                       ) : (
                         <tr>
-                          <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={11}>
+                          <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={12}>
                             No data available.
                           </td>
                         </tr>
@@ -5884,7 +6171,7 @@ export default function DepartmentKanban() {
                   </table>
                 </div>
                 <div className="mt-4">
-                  <table className="min-w-[900px] w-[80%] border border-slate-200 text-[11px] daily-report-table">
+                  <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
                     <colgroup>
                       <col className="w-[180px]" />
                       <col />
@@ -7508,7 +7795,7 @@ export default function DepartmentKanban() {
                 <table className="w-full caption-bottom text-sm min-w-[1050px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
-                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>Nr</th>
+                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NUMRI</th>
                       <th className="w-[450px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
@@ -8021,7 +8308,7 @@ export default function DepartmentKanban() {
                 <table className="w-full caption-bottom text-sm min-w-[900px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: "sticky", top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: "1px solid rgb(51 65 85)" }}>
-                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)", whiteSpace: "normal" }}>Nr</th>
+                      <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)", whiteSpace: "normal" }}>NUMRI</th>
                       <th className="w-[300px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>NOTE</th>
                       <th className="w-[360px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>DESCRIPTION</th>
                       <th className="w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: "bottom", borderBottom: "1px solid rgb(51 65 85)" }}>DEPARTMENT</th>
@@ -8401,7 +8688,7 @@ export default function DepartmentKanban() {
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">
                           Nr
                         </th>
-                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LLOJI</th>
                         <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">
                           NLL
                         </th>
@@ -8410,9 +8697,9 @@ export default function DepartmentKanban() {
                           <span className="block">PM</span>
                         </th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BARAZIMI</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
                           T/Y/O
                         </th>
@@ -8425,7 +8712,7 @@ export default function DepartmentKanban() {
                         allTodayPrintRows.map((row, index) => (
                           <tr key={`${row.typeLabel}-${row.title}-${index}`}>
                             <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                            <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                            <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
                               {row.subtype}
                             </td>
@@ -8488,17 +8775,17 @@ export default function DepartmentKanban() {
                   </colgroup>
                   <thead>
                     <tr className="bg-slate-100">
-                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">Nr</th>
-                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LL</th>
-                      <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NLL</th>
+                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">NUMRI</th>
+                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LLOJI</th>
+                      <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NENLLOJI</th>
                       <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
                         <span className="block">AM/</span>
                         <span className="block">PM</span>
                       </th>
                       <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
-                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STS</th>
-                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
-                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BZ</th>
+                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
+                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BARAZIMI</th>
+                      <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                       <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
                       <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>
                     </tr>
@@ -8508,7 +8795,7 @@ export default function DepartmentKanban() {
                       dailyUserReportRows.map((row, index) => (
                         <tr key={`${row.typeLabel}-${row.title}-${index}`}>
                           <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
-                          <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{row.typeLabel}</td>
+                          <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
                           <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
                           <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
                           <td className="border border-slate-900 px-2 py-2 align-top uppercase">
@@ -8924,4 +9211,5 @@ export default function DepartmentKanban() {
     </div>
   )
 }
+
 
