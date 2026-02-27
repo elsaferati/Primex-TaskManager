@@ -1115,7 +1115,9 @@ export default function AdminTasksPage() {
             const res = await apiFetch(`/reports/daily?${qs.toString()}`)
             if (!res.ok) throw new Error(`daily_report_failed_${res.status}`)
             const payload = (await res.json()) as DailyReportResponse
-            const occurrences = [...(payload.system_today || []), ...(payload.system_overdue || [])]
+            const occurrences = [...(payload.system_today || []), ...(payload.system_overdue || [])].filter(
+              (occ) => occ.occurrence_date === iso
+            )
             return [iso, occurrences] as const
           })
         )
@@ -1583,6 +1585,9 @@ export default function AdminTasksPage() {
     }
 
     rows.sort((a, b) => {
+      const aFast = Boolean(a.isFastTask)
+      const bFast = Boolean(b.isFastTask)
+      if (aFast !== bFast) return aFast ? 1 : -1
       if (a.dateIso !== b.dateIso) return b.dateIso.localeCompare(a.dateIso)
       return a.title.localeCompare(b.title)
     })
