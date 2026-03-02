@@ -653,7 +653,8 @@ export function SystemTasksView({
     if (currentStatus === "DONE") return
     const newStatus = "DONE"
     const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
-    const occurrenceDate = template.occurrence_date || today
+    const occurrenceDate =
+      template.origin_run_at?.slice(0, 10) || template.occurrence_date || today
     
     setUpdatingTaskIds((prev) => new Set(prev).add(String(templateId)))
     try {

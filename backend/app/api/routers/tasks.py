@@ -16,13 +16,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import NotificationType, ProjectPhaseStatus, ProjectType, TaskPriority, TaskStatus, UserRole
+from app.models.enums import NotificationType, ProjectPhaseStatus, ProjectType, SystemTaskOutcome, TaskPriority, TaskStatus, UserRole
 from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
-from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
@@ -37,8 +36,6 @@ from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
-from app.services.system_task_occurrences import ensure_occurrences_in_range
-from app.services.system_task_schedule import previous_occurrence_date
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 
 
@@ -251,6 +248,8 @@ def _task_to_out(
         daily_products=task.daily_products,
         start_date=task.start_date,
         due_date=task.due_date,
+        origin_run_at=task.origin_run_at,
+        system_outcome=task.system_outcome,
         completed_at=task.completed_at,
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
@@ -1866,37 +1865,11 @@ async def update_task(
 
     await ensure_ko_user_is_task_assignee(db, task=task)
 
-    if status_changed and task.system_template_origin_id and task.assigned_to is not None:
-        tmpl = (
-            await db.execute(
-                select(SystemTaskTemplate).where(SystemTaskTemplate.id == task.system_template_origin_id)
-            )
-        ).scalar_one_or_none()
-        if tmpl is not None:
-            base_dt = task.start_date or task.created_at
-            if base_dt is None:
-                base_day = datetime.now(timezone.utc).date()
-            else:
-                base_day = base_dt.astimezone(timezone.utc).date() if base_dt.tzinfo else base_dt.date()
-            occurrence_date = previous_occurrence_date(tmpl, base_day)
-            await ensure_occurrences_in_range(
-                db=db,
-                start=occurrence_date,
-                end=occurrence_date,
-                template_ids=[tmpl.id],
-            )
-            occ = (
-                await db.execute(
-                    select(SystemTaskOccurrence)
-                    .where(SystemTaskOccurrence.template_id == tmpl.id)
-                    .where(SystemTaskOccurrence.user_id == task.assigned_to)
-                    .where(SystemTaskOccurrence.occurrence_date == occurrence_date)
-                )
-            ).scalar_one_or_none()
-            if occ is not None:
-                occ_status = "DONE" if task.status == TaskStatus.DONE else "OPEN"
-                occ.status = occ_status
-                occ.acted_at = None if occ_status == "OPEN" else datetime.now(timezone.utc)
+    if status_changed and task.system_template_origin_id and task.origin_run_at is not None:
+        if task.status == TaskStatus.DONE:
+            task.system_outcome = SystemTaskOutcome.DONE.value
+        else:
+            task.system_outcome = SystemTaskOutcome.OPEN.value
 
     after = {
         "title": task.title,

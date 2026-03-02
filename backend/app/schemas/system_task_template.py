@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, time
+from datetime import date, datetime, time
 
 from pydantic import BaseModel, Field
 
@@ -22,6 +22,16 @@ class SystemTaskTemplateOut(BaseModel):
     days_of_week: list[int] | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
+    timezone: str | None = None
+    start_at: datetime | None = None
+    due_time: time | None = None
+    interval: int | None = None
+    lookahead_days: int | None = None
+    recurrence_kind: str | None = None
+    byweekday: list[int] | None = None
+    bymonthday: int | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
     priority: TaskPriority | None = None
     finish_period: TaskFinishPeriod | None = None
     requires_alignment: bool = False
@@ -45,6 +55,16 @@ class SystemTaskTemplateCreate(BaseModel):
     days_of_week: list[int] | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
+    timezone: str | None = None
+    start_at: datetime | None = None
+    due_time: time | None = None
+    interval: int | None = None
+    lookahead_days: int | None = None
+    recurrence_kind: str | None = None
+    byweekday: list[int] | None = None
+    bymonthday: int | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
     priority: TaskPriority | None = None
     finish_period: TaskFinishPeriod | None = None
     requires_alignment: bool | None = None
@@ -67,6 +87,16 @@ class SystemTaskTemplateUpdate(BaseModel):
     days_of_week: list[int] | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
+    timezone: str | None = None
+    start_at: datetime | None = None
+    due_time: time | None = None
+    interval: int | None = None
+    lookahead_days: int | None = None
+    recurrence_kind: str | None = None
+    byweekday: list[int] | None = None
+    bymonthday: int | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
     priority: TaskPriority | None = None
     finish_period: TaskFinishPeriod | None = None
     requires_alignment: bool | None = None

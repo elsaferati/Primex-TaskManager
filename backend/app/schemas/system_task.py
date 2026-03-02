@@ -28,8 +28,20 @@ class SystemTaskOut(BaseModel):
     occurrence_date: date | None = None
     next_occurrence_date: date | None = None
     effective_occurrence_date: date | None = None
+    origin_run_at: datetime | None = None
+    system_outcome: str | None = None
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None
+    timezone: str | None = None
+    start_at: datetime | None = None
+    due_time: time | None = None
+    interval: int | None = None
+    lookahead_days: int | None = None
+    recurrence_kind: str | None = None
+    byweekday: list[int] | None = None
+    bymonthday: int | None = None
+    effective_from: date | None = None
+    effective_to: date | None = None
     status: TaskStatus
     is_active: bool
     user_comment: str | None = None

@@ -37,6 +37,8 @@ class TaskOut(BaseModel):
     daily_products: int | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
+    origin_run_at: datetime | None = None
+    system_outcome: str | None = None
     completed_at: datetime | None = None
     is_bllok: bool
     is_1h_report: bool

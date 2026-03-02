@@ -47,6 +47,20 @@ class SystemTaskScope(str, enum.Enum):
     GA = "GA"
 
 
+class SystemTaskRecurrenceKind(str, enum.Enum):
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+    YEARLY = "YEARLY"
+
+
+class SystemTaskOutcome(str, enum.Enum):
+    OPEN = "OPEN"
+    DONE = "DONE"
+    NOT_DONE = "NOT_DONE"
+    SKIPPED = "SKIPPED"
+
+
 class TemplateRecurrence(str, enum.Enum):
     daily = "daily"
     weekly = "weekly"

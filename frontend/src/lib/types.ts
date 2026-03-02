@@ -39,8 +39,20 @@ export interface SystemTaskTemplate {
   occurrence_date?: string | null
   next_occurrence_date?: string | null
   effective_occurrence_date?: string | null
+  origin_run_at?: string | null
+  system_outcome?: "OPEN" | "DONE" | "NOT_DONE" | "SKIPPED" | null
   priority?: TaskPriority | null
   finish_period?: TaskFinishPeriod | null
+  timezone?: string | null
+  start_at?: string | null
+  due_time?: string | null
+  interval?: number | null
+  lookahead_days?: number | null
+  recurrence_kind?: string | null
+  byweekday?: number[] | null
+  bymonthday?: number | null
+  effective_from?: string | null
+  effective_to?: string | null
   requires_alignment?: boolean | null
   alignment_time?: string | null
   alignment_roles?: string[] | null
@@ -122,6 +134,8 @@ export interface Project {
   is_template?: boolean
   start_date?: string | null
   due_date?: string | null
+  origin_run_at?: string | null
+  system_outcome?: "OPEN" | "DONE" | "NOT_DONE" | "SKIPPED" | null
   completed_at?: string | null
   created_at?: string
   updated_at?: string

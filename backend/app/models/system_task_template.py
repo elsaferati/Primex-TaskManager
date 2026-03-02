@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, time
+from datetime import date, datetime, time
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Time, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Time, func
 from sqlalchemy.dialects.postgresql import ARRAY
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
@@ -43,6 +43,17 @@ class SystemTaskTemplate(Base):
     finish_period: Mapped[str | None] = mapped_column(
         String(50), nullable=True
     )
+
+    timezone: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    start_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    due_time: Mapped[time | None] = mapped_column(Time, nullable=True)
+    interval: Mapped[int | None] = mapped_column(Integer)
+    lookahead_days: Mapped[int | None] = mapped_column(Integer)
+    recurrence_kind: Mapped[str | None] = mapped_column(String(50))
+    byweekday: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)
+    bymonthday: Mapped[int | None] = mapped_column(Integer)
+    effective_from: Mapped[date | None] = mapped_column(Date)
+    effective_to: Mapped[date | None] = mapped_column(Date)
 
     # Optional coordination/alignment settings (informational; does not affect scheduling directly).
     requires_alignment: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")

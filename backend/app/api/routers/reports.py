@@ -13,11 +13,10 @@ from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.department import Department
-from app.models.enums import GaNoteStatus, UserRole, TaskStatus
+from app.models.enums import GaNoteStatus, SystemTaskOutcome, UserRole, TaskStatus
 from app.models.ga_note import GaNote
 from app.models.project import Project
 from app.models.daily_report_ga_entry import DailyReportGaEntry
-from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
@@ -33,13 +32,6 @@ from app.schemas.daily_report import (
     DailyReportGaTableResponse,
 )
 from app.schemas.task import TaskAssigneeOut, TaskOut
-from app.services.system_task_occurrences import (
-    DONE,
-    NOT_DONE,
-    OPEN,
-    SKIPPED,
-    ensure_occurrences_in_range,
-)
 from app.services.project_display_title import build_project_display_title_map
 from app.services.daily_report_logic import (
     completed_on_day,
@@ -409,114 +401,108 @@ async def daily_report(
                 )
             )
 
-    # --- System/recurring occurrences ---
-    # Ensure occurrences exist so overdue logic is consistent.
-    # Backfill a limited window; older overdue occurrences should already exist if the scheduler ran.
-    await ensure_occurrences_in_range(db=db, start=day - timedelta(days=60), end=day)
-    await db.commit()
-
+    # --- System/recurring instances ---
     occ_today_rows = (
         await db.execute(
-            select(SystemTaskOccurrence, SystemTaskTemplate)
-            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskOccurrence.user_id == user_id)
-            .where(SystemTaskOccurrence.occurrence_date == day)
-            .where(
-                SystemTaskOccurrence.occurrence_date
-                >= func.coalesce(func.date(SystemTaskTemplate.created_at), SystemTaskOccurrence.occurrence_date)
-            )
+            select(Task, SystemTaskTemplate)
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .where(Task.assigned_to == user_id)
+            .where(Task.origin_run_at.is_not(None))
+            .where(func.date(Task.origin_run_at) == day)
             .order_by(SystemTaskTemplate.title)
         )
     ).all()
     occ_today_rows = [
-        (occ, tmpl)
-        for occ, tmpl in occ_today_rows
-        if _is_on_or_after_template_created_day(occ.occurrence_date, tmpl.created_at)
+        (task, tmpl)
+        for task, tmpl in occ_today_rows
+        if _is_on_or_after_template_created_day(task.origin_run_at.date() if task.origin_run_at else day, tmpl.created_at)
     ]
     day_start_utc, day_end_utc = _tirana_day_utc_bounds(day)
-    acted_today_statuses = (DONE, NOT_DONE, SKIPPED)
+    acted_today_statuses = (
+        SystemTaskOutcome.DONE.value,
+        SystemTaskOutcome.NOT_DONE.value,
+        SystemTaskOutcome.SKIPPED.value,
+    )
 
     occ_acted_today_rows = (
         await db.execute(
-            select(SystemTaskOccurrence, SystemTaskTemplate)
-            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskOccurrence.user_id == user_id)
-            .where(SystemTaskOccurrence.occurrence_date < day)
-            .where(SystemTaskOccurrence.status.in_(acted_today_statuses))
-            .where(SystemTaskOccurrence.acted_at.is_not(None))
-            .where(SystemTaskOccurrence.acted_at >= day_start_utc)
-            .where(SystemTaskOccurrence.acted_at < day_end_utc)
-            .where(
-                SystemTaskOccurrence.occurrence_date
-                >= func.coalesce(func.date(SystemTaskTemplate.created_at), SystemTaskOccurrence.occurrence_date)
-            )
-            .order_by(SystemTaskOccurrence.acted_at.desc(), SystemTaskTemplate.title)
+            select(Task, SystemTaskTemplate)
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .where(Task.assigned_to == user_id)
+            .where(Task.origin_run_at.is_not(None))
+            .where(func.date(Task.origin_run_at) < day)
+            .where(Task.system_outcome.in_(acted_today_statuses))
+            .where(Task.updated_at >= day_start_utc)
+            .where(Task.updated_at < day_end_utc)
+            .order_by(Task.updated_at.desc(), SystemTaskTemplate.title)
         )
     ).all()
     occ_acted_today_rows = [
-        (occ, tmpl)
-        for occ, tmpl in occ_acted_today_rows
-        if _is_on_or_after_template_created_day(occ.occurrence_date, tmpl.created_at)
-        and _acted_on_report_day_in_tirana(occ.acted_at, day)
+        (task, tmpl)
+        for task, tmpl in occ_acted_today_rows
+        if _is_on_or_after_template_created_day(task.origin_run_at.date() if task.origin_run_at else day, tmpl.created_at)
     ]
 
     latest_occurrence = (
         select(
-            SystemTaskOccurrence.template_id,
-            SystemTaskOccurrence.user_id,
-            func.max(SystemTaskOccurrence.occurrence_date).label("latest_date"),
+            Task.system_template_origin_id.label("template_id"),
+            Task.assigned_to.label("user_id"),
+            func.max(Task.origin_run_at).label("latest_run_at"),
         )
-        .where(SystemTaskOccurrence.occurrence_date <= day)
-        .where(SystemTaskOccurrence.user_id == user_id)
-        .group_by(SystemTaskOccurrence.template_id)
-        .group_by(SystemTaskOccurrence.user_id)
+        .where(Task.origin_run_at.is_not(None))
+        .where(Task.assigned_to == user_id)
+        .where(func.date(Task.origin_run_at) <= day)
+        .group_by(Task.system_template_origin_id)
+        .group_by(Task.assigned_to)
     ).subquery()
 
     occ_overdue_rows = (
         await db.execute(
-            select(SystemTaskOccurrence, SystemTaskTemplate)
-            .join(latest_occurrence, SystemTaskOccurrence.template_id == latest_occurrence.c.template_id)
-            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskOccurrence.occurrence_date == latest_occurrence.c.latest_date)
-            .where(SystemTaskOccurrence.user_id == latest_occurrence.c.user_id)
-            .where(SystemTaskOccurrence.user_id == user_id)
-            .where(SystemTaskOccurrence.occurrence_date < day)
-            .where(
-                SystemTaskOccurrence.occurrence_date
-                >= func.coalesce(func.date(SystemTaskTemplate.created_at), SystemTaskOccurrence.occurrence_date)
-            )
-            .where(SystemTaskOccurrence.status == OPEN)
-            .order_by(SystemTaskOccurrence.occurrence_date.desc(), SystemTaskTemplate.title)
+            select(Task, SystemTaskTemplate)
+            .join(latest_occurrence, Task.system_template_origin_id == latest_occurrence.c.template_id)
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .where(Task.origin_run_at == latest_occurrence.c.latest_run_at)
+            .where(Task.assigned_to == latest_occurrence.c.user_id)
+            .where(Task.assigned_to == user_id)
+            .where(func.date(Task.origin_run_at) < day)
+            .where(Task.system_outcome == SystemTaskOutcome.OPEN.value)
+            .order_by(Task.origin_run_at.desc(), SystemTaskTemplate.title)
         )
     ).all()
     occ_overdue_rows = [
-        (occ, tmpl)
-        for occ, tmpl in occ_overdue_rows
-        if _is_on_or_after_template_created_day(occ.occurrence_date, tmpl.created_at)
+        (task, tmpl)
+        for task, tmpl in occ_overdue_rows
+        if _is_on_or_after_template_created_day(task.origin_run_at.date() if task.origin_run_at else day, tmpl.created_at)
     ]
 
-    today_row_map: dict[tuple[uuid.UUID, date], tuple[SystemTaskOccurrence, SystemTaskTemplate]] = {}
-    for occ, tmpl in occ_today_rows:
-        today_row_map[(tmpl.id, occ.occurrence_date)] = (occ, tmpl)
-    for occ, tmpl in occ_acted_today_rows:
-        key = (tmpl.id, occ.occurrence_date)
+    today_row_map: dict[tuple[uuid.UUID, date], tuple[Task, SystemTaskTemplate]] = {}
+    for task, tmpl in occ_today_rows:
+        origin_day = task.origin_run_at.date() if task.origin_run_at else day
+        today_row_map[(tmpl.id, origin_day)] = (task, tmpl)
+    for task, tmpl in occ_acted_today_rows:
+        origin_day = task.origin_run_at.date() if task.origin_run_at else day
+        key = (tmpl.id, origin_day)
         existing = today_row_map.get(key)
         if existing is None:
-            today_row_map[key] = (occ, tmpl)
+            today_row_map[key] = (task, tmpl)
             continue
-        existing_occ, _ = existing
-        if existing_occ.acted_at is None and occ.acted_at is not None:
-            today_row_map[key] = (occ, tmpl)
+        existing_task, _ = existing
+        if existing_task.system_outcome == SystemTaskOutcome.OPEN.value:
+            today_row_map[key] = (task, tmpl)
 
     sorted_today_rows = sorted(
         today_row_map.values(),
-        key=lambda row: ((row[1].title or "").lower(), row[0].occurrence_date),
+        key=lambda row: ((row[1].title or "").lower(), row[0].origin_run_at or datetime.min),
     )
 
     system_today: list[DailyReportSystemOccurrence] = []
-    for occ, tmpl in sorted_today_rows:
-        is_from_overdue = occ.occurrence_date < day
-        late_days = business_days_between(occ.occurrence_date, day) if is_from_overdue else None
+    for task, tmpl in sorted_today_rows:
+        origin_day = task.origin_run_at.date() if task.origin_run_at else day
+        is_from_overdue = origin_day < day
+        late_days = business_days_between(origin_day, day) if is_from_overdue else None
+        acted_at = task.completed_at
+        if acted_at is None and task.system_outcome in acted_today_statuses:
+            acted_at = task.updated_at
         system_today.append(
             DailyReportSystemOccurrence(
                 template_id=tmpl.id,
@@ -524,18 +510,19 @@ async def daily_report(
                 frequency=tmpl.frequency,
                 department_id=tmpl.department_id,
                 scope=tmpl.scope,
-                occurrence_date=occ.occurrence_date,
-                status=occ.status,
-                comment=occ.comment,
-                acted_at=occ.acted_at,
+                occurrence_date=origin_day,
+                status=task.system_outcome or SystemTaskOutcome.OPEN.value,
+                comment=None,
+                acted_at=acted_at,
                 is_overdue=is_from_overdue,
                 late_days=late_days,
             )
         )
 
     system_overdue: list[DailyReportSystemOccurrence] = []
-    for occ, tmpl in occ_overdue_rows:
-        late_days = business_days_between(occ.occurrence_date, day)
+    for task, tmpl in occ_overdue_rows:
+        origin_day = task.origin_run_at.date() if task.origin_run_at else day
+        late_days = business_days_between(origin_day, day)
         system_overdue.append(
             DailyReportSystemOccurrence(
                 template_id=tmpl.id,
@@ -543,10 +530,10 @@ async def daily_report(
                 frequency=tmpl.frequency,
                 department_id=tmpl.department_id,
                 scope=tmpl.scope,
-                occurrence_date=occ.occurrence_date,
-                status=occ.status,
-                comment=occ.comment,
-                acted_at=occ.acted_at,
+                occurrence_date=origin_day,
+                status=task.system_outcome or SystemTaskOutcome.OPEN.value,
+                comment=None,
+                acted_at=task.completed_at,
                 is_overdue=True,
                 late_days=late_days,
             )
