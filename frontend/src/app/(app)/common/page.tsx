@@ -4639,7 +4639,8 @@ export default function CommonViewPage() {
             grid-template-columns: 1fr auto 1fr;
             padding-left: 0.1in;
             padding-right: 0.1in;
-            font-size: 10px;
+            font-size: 8px;
+            line-height: 1;
             color: #334155;
           }
           .print-page-count {
@@ -5638,8 +5639,13 @@ export default function CommonViewPage() {
           .week-table-entry span {
             white-space: normal;
           }
+          .week-table-entry span {
+            display: flex;
+            align-items: center;
+            line-height: 1.1;
+          }
           .week-table-entry {
-            border: 0.1px solid #111827 !important;
+            border: 1px solid #94a3b8 !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
             page-break-inside: avoid;
@@ -5648,11 +5654,15 @@ export default function CommonViewPage() {
             line-height: 1.15;
             gap: 3px;
             padding: 0px 3px;
+            display: flex;
+            align-items: center;
           }
           .week-table-entries {
             gap: 1px;
           }
           .week-table-avatars {
+            display: inline-flex;
+            align-items: center;
             gap: 1px;
             margin-top: 0;
             line-height: 1;
