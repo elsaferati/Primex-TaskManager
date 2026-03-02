@@ -24,6 +24,7 @@ class TaskOut(BaseModel):
     dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
+    confirmation_assignee_id: uuid.UUID | None = None
     assignees: list[TaskAssigneeOut] = Field(default_factory=list)
     created_by: uuid.UUID | None = None
     ga_note_origin_id: uuid.UUID | None = None
@@ -56,6 +57,7 @@ class TaskCreate(BaseModel):
     dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = Field(default=None)
     assigned_to: uuid.UUID | None = None
+    confirmation_assignee_id: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
     ga_note_origin_id: uuid.UUID | None = None
     status: TaskStatus | None = None
@@ -88,6 +90,7 @@ class TaskUpdate(BaseModel):
     dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
+    confirmation_assignee_id: uuid.UUID | None = None
     assignees: list[uuid.UUID] | None = None
     status: TaskStatus | None = None
     priority: TaskPriority | None = None

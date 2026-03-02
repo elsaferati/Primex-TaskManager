@@ -4,6 +4,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from sqlalchemy import select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.checklist import Checklist
@@ -103,9 +104,24 @@ async def ensure_internal_meeting_session(
             ends_at=now + timedelta(hours=duration_hours),
         )
         db.add(session)
-        await db.commit()
-        await db.refresh(session)
-        return session
+        try:
+            await db.commit()
+            await db.refresh(session)
+            return session
+        except IntegrityError:
+            # Another concurrent request created the same checklist/day session.
+            await db.rollback()
+            session = (
+                await db.execute(
+                    select(InternalMeetingSession).where(
+                        InternalMeetingSession.checklist_id == checklist_id,
+                        InternalMeetingSession.session_date == session_date,
+                    )
+                )
+            ).scalar_one_or_none()
+            if session is None:
+                raise
+            return session
 
     if session.reset_at is None and session.ends_at <= now:
         await reset_internal_meeting_checklist(db, checklist_id=checklist_id)
