@@ -5636,13 +5636,16 @@ export default function CommonViewPage() {
             width: 72px !important;
           }
           .week-table-cell,
-          .week-table-entry span {
+          .week-table-entry > span:not(.week-table-avatar) {
             white-space: normal;
           }
-          .week-table-entry span {
-            display: flex;
-            align-items: center;
-            line-height: 1.1;
+          .week-table-entry > span:not(.week-table-avatar) {
+            flex: 1 1 auto;
+            display: block;
+            margin: 0;
+            padding: 0;
+            line-height: 1;
+            align-self: center;
           }
           .week-table-entry {
             border: 1px solid #94a3b8 !important;
@@ -5650,10 +5653,10 @@ export default function CommonViewPage() {
             print-color-adjust: exact;
             page-break-inside: avoid;
             margin-bottom: 0px;
-            font-size: 9.5px;
-            line-height: 1.15;
-            gap: 3px;
-            padding: 0px 3px;
+            font-size: 10px;
+            line-height: 1;
+            gap: 2px;
+            padding: 0;
             display: flex;
             align-items: center;
           }
@@ -5663,6 +5666,7 @@ export default function CommonViewPage() {
           .week-table-avatars {
             display: inline-flex;
             align-items: center;
+            justify-content: center;
             gap: 1px;
             margin-top: 0;
             line-height: 1;
@@ -5671,15 +5675,18 @@ export default function CommonViewPage() {
             display: inline-flex;
             align-items: center;
             justify-content: center;
+            flex: 0 0 auto !important;
             min-width: 0;
-            height: auto;
-            padding: 0 0px;
+            height: 8px;
+            padding: 0 1px;
             border-radius: 2px;
             font-size: 6px;
-            line-height: 1;
+            line-height: 8px;
             font-weight: 700;
             white-space: nowrap;
             border-width: 0.8px;
+            align-self: center;
+            vertical-align: middle;
           }
         }
           align-items: center;
