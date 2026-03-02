@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, toDateInputValue } from "@/lib/dates"
+import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { Pencil } from "lucide-react"
 import type {
@@ -787,8 +788,12 @@ export default function AdminTasksPage() {
   const [fastEditDueDate, setFastEditDueDate] = React.useState("")
   const [fastEditPriority, setFastEditPriority] = React.useState<TaskPriority>("NORMAL")
   const [fastEditStatus, setFastEditStatus] = React.useState("TODO")
+  const [fastEditConfirmationAssigneeId, setFastEditConfirmationAssigneeId] = React.useState("")
   const [fastEditOriginalIsBllok, setFastEditOriginalIsBllok] = React.useState(false)
   const [fastEditSaving, setFastEditSaving] = React.useState(false)
+  const [pendingStatusTaskId, setPendingStatusTaskId] = React.useState<string | null>(null)
+  const [pendingStatusValue, setPendingStatusValue] = React.useState("TODO")
+  const [pendingConfirmationAssigneeId, setPendingConfirmationAssigneeId] = React.useState("")
 
   const [printTarget, setPrintTarget] = React.useState<"common" | "ga-time" | "all-tasks" | null>(null)
   const [printTotalPages, setPrintTotalPages] = React.useState(1)
@@ -842,6 +847,10 @@ export default function AdminTasksPage() {
   const [gaTimeDrafts, setGaTimeDrafts] = React.useState<Record<string, string>>({})
   const [gaTimeAddingCell, setGaTimeAddingCell] = React.useState<string | null>(null)
   const [gaTimeAddDrafts, setGaTimeAddDrafts] = React.useState<Record<string, string>>({})
+  const confirmerCandidates = React.useMemo(
+    () => getConfirmerCandidates(users as UserLookup[]),
+    [users]
+  )
 
   const parseFilenameFromDisposition = React.useCallback((headerValue: string | null) => {
     if (!headerValue) return ""
@@ -1897,13 +1906,25 @@ export default function AdminTasksPage() {
   }
 
   const updateTaskStatus = async (taskId: string, status: string) => {
+    const task = tasks.find((t) => t.id === taskId)
+    if (!task) return
+    if (isWaitingConfirmation(status) && !task.confirmation_assignee_id) {
+      setPendingStatusTaskId(taskId)
+      setPendingStatusValue(status)
+      setPendingConfirmationAssigneeId("")
+      return
+    }
     const key = `task:${taskId}`
     setTaskStatusUpdating((prev) => ({ ...prev, [key]: true }))
     try {
+      const payload: Record<string, unknown> = { status }
+      if (isWaitingConfirmation(status) && task.confirmation_assignee_id) {
+        payload.confirmation_assignee_id = task.confirmation_assignee_id
+      }
       const res = await apiFetch(`/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         toast.error("Failed to update task status")
@@ -1969,12 +1990,18 @@ export default function AdminTasksPage() {
     setFastEditDueDate(toDateInputValue(task.due_date))
     setFastEditPriority((task.is_bllok ? "BLLOK" : (task.priority || "NORMAL")) as TaskPriority)
     setFastEditStatus(task.status || "TODO")
+    setFastEditConfirmationAssigneeId(task.confirmation_assignee_id || "")
     setFastEditOriginalIsBllok(Boolean(task.is_bllok))
     setFastEditOpen(true)
   }
 
   const saveFastTaskEdit = async () => {
     if (!fastEditTaskId || !fastEditTitle.trim()) return
+    const confirmationValidation = validateWaitingConfirmation(fastEditStatus, fastEditConfirmationAssigneeId)
+    if (confirmationValidation) {
+      toast.error(confirmationValidation)
+      return
+    }
     setFastEditSaving(true)
     try {
       const startDateValue = fastEditStartDate ? new Date(fastEditStartDate).toISOString() : null
@@ -1987,6 +2014,9 @@ export default function AdminTasksPage() {
         due_date: dueDateValue,
         priority: actualPriority,
         status: fastEditStatus,
+      }
+      if (isWaitingConfirmation(fastEditStatus)) {
+        payload.confirmation_assignee_id = fastEditConfirmationAssigneeId
       }
       if (isBllok !== fastEditOriginalIsBllok) {
         payload.is_bllok = isBllok
@@ -2004,6 +2034,7 @@ export default function AdminTasksPage() {
       setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
       setFastEditOpen(false)
       setFastEditTaskId(null)
+      setFastEditConfirmationAssigneeId("")
     } catch (error) {
       console.error("Failed to update task", error)
       toast.error("Failed to update task")
@@ -2499,6 +2530,48 @@ export default function AdminTasksPage() {
       toast.error("Failed to export all tasks")
     } finally {
       setExportingAllTasks(false)
+    }
+  }
+
+  const submitPendingStatusUpdate = async () => {
+    if (!pendingStatusTaskId) return
+    const validation = validateWaitingConfirmation(pendingStatusValue, pendingConfirmationAssigneeId)
+    if (validation) {
+      toast.error(validation)
+      return
+    }
+    const key = `task:${pendingStatusTaskId}`
+    setTaskStatusUpdating((prev) => ({ ...prev, [key]: true }))
+    try {
+      const res = await apiFetch(`/tasks/${pendingStatusTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: pendingStatusValue,
+          confirmation_assignee_id: pendingConfirmationAssigneeId,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task status"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string" && data.detail.trim()) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      setPendingStatusTaskId(null)
+      setPendingStatusValue("TODO")
+      setPendingConfirmationAssigneeId("")
+    } catch (error) {
+      console.error("Failed to update task status", error)
+      toast.error("Failed to update task status")
+    } finally {
+      setTaskStatusUpdating((prev) => ({ ...prev, [key]: false }))
     }
   }
 
@@ -4188,12 +4261,98 @@ export default function AdminTasksPage() {
                 </SelectContent>
               </Select>
             </div>
+            {isWaitingConfirmation(fastEditStatus) ? (
+              <div className="space-y-2">
+                <Label>Confirm by (Manager/Admin)</Label>
+                <Select
+                  value={fastEditConfirmationAssigneeId || "__none__"}
+                  onValueChange={(value) => setFastEditConfirmationAssigneeId(value === "__none__" ? "" : value)}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select confirmer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select confirmer</SelectItem>
+                    {confirmerCandidates.map((candidate) => (
+                      <SelectItem key={candidate.id} value={candidate.id}>
+                        {candidate.full_name || candidate.username || "-"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setFastEditOpen(false)}>
                 Cancel
               </Button>
-              <Button disabled={fastEditSaving || !fastEditTitle.trim()} onClick={() => void saveFastTaskEdit()}>
+              <Button
+                disabled={
+                  fastEditSaving ||
+                  !fastEditTitle.trim() ||
+                  (isWaitingConfirmation(fastEditStatus) && !fastEditConfirmationAssigneeId)
+                }
+                onClick={() => void saveFastTaskEdit()}
+              >
                 {fastEditSaving ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(pendingStatusTaskId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingStatusTaskId(null)
+            setPendingStatusValue("TODO")
+            setPendingConfirmationAssigneeId("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Confirmer</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-slate-600">
+              This task is moving to Waiting Confirmation. Select the manager/admin who will confirm it.
+            </div>
+            <div className="space-y-2">
+              <Label>Confirm by (Manager/Admin)</Label>
+              <Select
+                value={pendingConfirmationAssigneeId || "__none__"}
+                onValueChange={(value) => setPendingConfirmationAssigneeId(value === "__none__" ? "" : value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select confirmer" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Select confirmer</SelectItem>
+                  {confirmerCandidates.map((candidate) => (
+                    <SelectItem key={candidate.id} value={candidate.id}>
+                      {candidate.full_name || candidate.username || "-"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setPendingStatusTaskId(null)
+                  setPendingStatusValue("TODO")
+                  setPendingConfirmationAssigneeId("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                disabled={!pendingConfirmationAssigneeId}
+                onClick={() => void submitPendingStatusUpdate()}
+              >
+                Confirm
               </Button>
             </div>
           </div>

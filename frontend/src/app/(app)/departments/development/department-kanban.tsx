@@ -22,6 +22,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
+import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
@@ -1054,6 +1055,7 @@ export default function DepartmentKanban() {
   const [closingTask, setClosingTask] = React.useState(false)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
+  const [crossDepartmentConfirmTasks, setCrossDepartmentConfirmTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
   const [internalNotes, setInternalNotes] = React.useState<InternalNote[]>([])
@@ -1167,10 +1169,14 @@ export default function DepartmentKanban() {
   const [selectEditTaskAssigneesOpen, setSelectEditTaskAssigneesOpen] = React.useState(false)
   const [updatingTask, setUpdatingTask] = React.useState(false)
   const [allTodayEditingTaskId, setAllTodayEditingTaskId] = React.useState<string | null>(null)
+  const [allTodayEditTitle, setAllTodayEditTitle] = React.useState("")
+  const [allTodayEditDescription, setAllTodayEditDescription] = React.useState("")
   const [allTodayEditStatus, setAllTodayEditStatus] = React.useState<string>("TODO")
+  const [allTodayEditConfirmationAssigneeId, setAllTodayEditConfirmationAssigneeId] = React.useState("")
   const [allTodayEditStartDate, setAllTodayEditStartDate] = React.useState("")
   const [allTodayEditDueDate, setAllTodayEditDueDate] = React.useState("")
   const [allTodayUpdating, setAllTodayUpdating] = React.useState(false)
+  const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
   const [editingSystemDateTemplateId, setEditingSystemDateTemplateId] = React.useState<string | null>(null)
   const [editingSystemDateSource, setEditingSystemDateSource] = React.useState("")
   const [editingSystemDateTarget, setEditingSystemDateTarget] = React.useState("")
@@ -1751,6 +1757,14 @@ export default function DepartmentKanban() {
     },
     []
   )
+  const isTaskOwnedByViewUser = React.useCallback(
+    (task: Task, userId?: string | null) => {
+      if (!userId) return false
+      if (isTaskAssignedToUser(task, userId)) return true
+      return task.confirmation_assignee_id === userId
+    },
+    [isTaskAssignedToUser]
+  )
   const isTaskActiveForDate = React.useCallback((task: Task, targetDate: Date) => {
     const targetKey = dayKey(targetDate)
     const start = toDate(task.start_date || task.created_at || task.due_date)
@@ -1778,6 +1792,15 @@ export default function DepartmentKanban() {
     (task: Task) => {
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
       return completedDate ? isSameDay(completedDate, todayDate) : false
+    },
+    [todayDate]
+  )
+  const isTaskOverdue = React.useCallback(
+    (task: Task) => {
+      if (taskStatusValue(task) === "DONE") return false
+      const dueDate = task.due_date ? toDate(task.due_date) : null
+      if (!dueDate) return false
+      return dayKey(dueDate) < dayKey(todayDate)
     },
     [todayDate]
   )
@@ -1869,10 +1892,10 @@ export default function DepartmentKanban() {
 
     let deduped = Array.from(taskMapById.values())
     if (isMineView && user?.id) {
-      deduped = deduped.filter((task) => isTaskAssignedToUser(task, user.id))
+      deduped = deduped.filter((task) => isTaskOwnedByViewUser(task, user.id))
     }
     return deduped
-  }, [noProjectTasks, userMap, isMineView, user?.id, isTaskAssignedToUser])
+  }, [noProjectTasks, userMap, isMineView, user?.id, isTaskOwnedByViewUser])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
     [gaNotes, isMineView, user?.id]
@@ -1983,10 +2006,46 @@ export default function DepartmentKanban() {
   const projectTasks = React.useMemo(() => {
     const tasks = visibleDepartmentTasks.filter((t) => t.project_id)
     if (isMineView && user?.id) {
-      return tasks.filter((task) => isTaskAssignedToUser(task, user.id))
+      return tasks.filter((task) => isTaskOwnedByViewUser(task, user.id))
     }
     return tasks
-  }, [visibleDepartmentTasks, isMineView, user?.id, isTaskAssignedToUser])
+  }, [visibleDepartmentTasks, isMineView, user?.id, isTaskOwnedByViewUser])
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (viewMode !== "mine" || !user?.id) {
+        setCrossDepartmentConfirmTasks([])
+        return
+      }
+      try {
+        const qs = new URLSearchParams({
+          include_done: "true",
+          status: "WAITING_CONFIRMATION",
+          confirmation_assignee_id: user.id,
+        })
+        const res = await apiFetch(`/tasks?${qs.toString()}`)
+        if (!res.ok) {
+          console.warn("Failed to load cross-department waiting confirmation tasks", res.status)
+          if (!cancelled) setCrossDepartmentConfirmTasks([])
+          return
+        }
+        const payload = (await res.json()) as Task[]
+        if (cancelled) return
+        const localTaskIds = new Set([...departmentTasks, ...noProjectTasks].map((task) => task.id))
+        const filtered = payload.filter(
+          (task) => task.confirmation_assignee_id === user.id && !localTaskIds.has(task.id)
+        )
+        setCrossDepartmentConfirmTasks(filtered)
+      } catch (error) {
+        console.warn("Failed to load cross-department waiting confirmation tasks", error)
+        if (!cancelled) setCrossDepartmentConfirmTasks([])
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, departmentTasks, noProjectTasks, user?.id, viewMode])
   const shouldIncludeOverdueInAllToday = React.useMemo(
     () =>
       activeTab === "all" &&
@@ -2103,7 +2162,7 @@ export default function DepartmentKanban() {
       const isOverdue = overdueTaskIds.has(task.id)
       if (!matchesRange && !completedToday && !isOverdue) return false
       if (selectedUserId !== "__all__") {
-        return isTaskAssignedToUser(task, selectedUserId)
+        return isTaskOwnedByViewUser(task, selectedUserId)
       }
       return true
     })
@@ -2113,16 +2172,43 @@ export default function DepartmentKanban() {
     selectedUserId,
     allRange,
     isTaskActiveForDate,
-    isTaskAssignedToUser,
+    isTaskOwnedByViewUser,
     isTaskCompletedToday,
     isTaskOverlappingWeek,
     overdueTaskIds,
+  ])
+  const waitingProjectTasksForMeta = React.useMemo(() => {
+    if (!isMineView || !user?.id) return []
+    return crossDepartmentConfirmTasks
+      .filter(
+        (task) =>
+          task.project_id &&
+          task.confirmation_assignee_id === user.id &&
+          taskStatusValue(task) === "WAITING_CONFIRMATION"
+      )
+      .filter((task) => {
+        const matchesRange =
+          allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
+        const completedToday = isTaskCompletedToday(task)
+        const overdue = isTaskOverdue(task)
+        return matchesRange || completedToday || overdue
+      })
+  }, [
+    allRange,
+    crossDepartmentConfirmTasks,
+    isMineView,
+    isTaskActiveForDate,
+    isTaskCompletedToday,
+    isTaskOverdue,
+    isTaskOverlappingWeek,
+    todayDate,
+    user?.id,
   ])
   React.useEffect(() => {
     let cancelled = false
     const run = async () => {
       const missingIds = new Set<string>()
-      for (const task of todayProjectTasks) {
+      for (const task of [...todayProjectTasks, ...waitingProjectTasksForMeta]) {
         if (!task.project_id) continue
         const projectId = String(task.project_id)
         if (projects.some((p) => p.id === projectId)) continue
@@ -2155,7 +2241,7 @@ export default function DepartmentKanban() {
     return () => {
       cancelled = true
     }
-  }, [apiFetch, projects, projectMetaLookup, todayProjectTasks])
+  }, [apiFetch, projectMetaLookup, projects, todayProjectTasks, waitingProjectTasksForMeta])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
       const matchesRange =
@@ -2164,7 +2250,7 @@ export default function DepartmentKanban() {
       const isOverdue = overdueTaskIds.has(task.id)
       if (!matchesRange && !completedToday && !isOverdue) return false
       if (selectedUserId !== "__all__") {
-        return isTaskAssignedToUser(task, selectedUserId)
+        return isTaskOwnedByViewUser(task, selectedUserId)
       }
       return true
     })
@@ -2174,7 +2260,7 @@ export default function DepartmentKanban() {
     selectedUserId,
     allRange,
     isTaskActiveForDate,
-    isTaskAssignedToUser,
+    isTaskOwnedByViewUser,
     isTaskCompletedToday,
     isTaskOverlappingWeek,
     overdueTaskIds,
@@ -2224,7 +2310,7 @@ export default function DepartmentKanban() {
 
     return visibleNoProjectTasks.filter((task) => {
       if (!task.due_date) return false
-      if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
+      if (targetUserId && !isTaskOwnedByViewUser(task, targetUserId)) {
         return false
       }
 
@@ -2252,7 +2338,7 @@ export default function DepartmentKanban() {
     viewMode,
     selectedUserId,
     user?.id,
-    isTaskAssignedToUser,
+    isTaskOwnedByViewUser,
     isTaskActiveForDate,
   ])
   const dailyReportProjectTasks = React.useMemo(() => {
@@ -2266,7 +2352,7 @@ export default function DepartmentKanban() {
 
     return projectTasks.filter((task) => {
       if (!task.due_date) return false
-      if (targetUserId && !isTaskAssignedToUser(task, targetUserId)) {
+      if (targetUserId && !isTaskOwnedByViewUser(task, targetUserId)) {
         return false
       }
 
@@ -2308,7 +2394,7 @@ export default function DepartmentKanban() {
       const createdKey = dayKey(createdDate)
       return createdKey <= todayKey
     })
-  }, [projectTasks, todayDate, viewMode, selectedUserId, user?.id, isTaskAssignedToUser, isTaskActiveForDate])
+  }, [projectTasks, todayDate, viewMode, selectedUserId, user?.id, isTaskOwnedByViewUser, isTaskActiveForDate])
 
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
@@ -3470,6 +3556,57 @@ export default function DepartmentKanban() {
     () => sortDoneLast(todayNoProjectTasks, (task) => taskStatusValue(task) === "DONE"),
     [sortDoneLast, todayNoProjectTasks]
   )
+  const todayWaitingProjectTasks = React.useMemo(
+    () => todayProjectTasksSorted.filter((task) => taskStatusValue(task) === "WAITING_CONFIRMATION"),
+    [todayProjectTasksSorted]
+  )
+  const todayWaitingNoProjectTasks = React.useMemo(
+    () => todayNoProjectTasksSorted.filter((task) => taskStatusValue(task) === "WAITING_CONFIRMATION"),
+    [todayNoProjectTasksSorted]
+  )
+  const crossDepartmentWaitingTasks = React.useMemo(() => {
+    if (!isMineView || !user?.id) return []
+    return crossDepartmentConfirmTasks
+      .filter(
+        (task) =>
+          task.confirmation_assignee_id === user.id && taskStatusValue(task) === "WAITING_CONFIRMATION"
+      )
+      .filter((task) => {
+        const matchesRange =
+          allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
+        const completedToday = isTaskCompletedToday(task)
+        const overdue = isTaskOverdue(task)
+        return matchesRange || completedToday || overdue
+      })
+  }, [
+    allRange,
+    crossDepartmentConfirmTasks,
+    isMineView,
+    isTaskActiveForDate,
+    isTaskCompletedToday,
+    isTaskOverdue,
+    isTaskOverlappingWeek,
+    todayDate,
+    user?.id,
+  ])
+  const todayWaitingTasks = React.useMemo(
+    () => {
+      const merged = [
+        ...todayWaitingProjectTasks.map((task) => ({ task, type: "Project" as const })),
+        ...todayWaitingNoProjectTasks.map((task) => ({ task, type: "Fast" as const })),
+        ...crossDepartmentWaitingTasks.map((task) => ({
+          task,
+          type: task.project_id ? ("Project" as const) : ("Fast" as const),
+        })),
+      ]
+      const byId = new Map<string, { task: Task; type: "Project" | "Fast" }>()
+      for (const item of merged) {
+        if (!byId.has(item.task.id)) byId.set(item.task.id, item)
+      }
+      return Array.from(byId.values())
+    },
+    [crossDepartmentWaitingTasks, todayWaitingNoProjectTasks, todayWaitingProjectTasks]
+  )
   const todaySystemTasksSorted = React.useMemo(
     () =>
       sortDoneLast(todaySystemTasks, (task) => {
@@ -3759,6 +3896,17 @@ export default function DepartmentKanban() {
 
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "STAFF"
   const isReadOnly = viewMode === "mine"
+  const canEditTasksInCurrentView = viewMode === "mine"
+  const canEditAllTodayTask = React.useCallback(
+    (task?: Task | null) => {
+      if (!task || !user?.id) return false
+      if (viewMode === "mine") return true
+      if (viewMode !== "department") return false
+      if (user.role === "ADMIN" || user.role === "MANAGER") return true
+      return isTaskOwnedByViewUser(task, user.id)
+    },
+    [isTaskOwnedByViewUser, user?.id, user?.role, viewMode]
+  )
   const canManage = canCreate && !isReadOnly
   const canManageDepartmentSystemDateEdit = user?.role === "ADMIN" || user?.role === "MANAGER"
   const showSystemActions = viewMode === "mine"
@@ -4695,13 +4843,20 @@ export default function DepartmentKanban() {
   }
 
   const startAllTodayTaskEdit = (task: Task) => {
+    if (!canEditAllTodayTask(task)) {
+      toast.error("You do not have permission to edit this task")
+      return
+    }
     setAllTodayEditingTaskId(task.id)
+    setAllTodayEditTitle(task.title || "")
+    setAllTodayEditDescription(task.description || "")
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
       ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
         ? statusValue
         : "TODO"
     )
+    setAllTodayEditConfirmationAssigneeId(task.confirmation_assignee_id || "")
     setAllTodayEditStartDate(toDateInputValue(task.start_date))
     setAllTodayEditDueDate(toDateInputValue(task.due_date))
   }
@@ -4709,12 +4864,31 @@ export default function DepartmentKanban() {
   const cancelAllTodayTaskEdit = () => {
     setAllTodayEditingTaskId(null)
     setAllTodayEditStatus("TODO")
+    setAllTodayEditTitle("")
+    setAllTodayEditDescription("")
+    setAllTodayEditConfirmationAssigneeId("")
     setAllTodayEditStartDate("")
     setAllTodayEditDueDate("")
   }
 
   const updateAllTodayTask = async () => {
     if (!allTodayEditingTaskId || !allTodayEditStatus) return
+    const editingTask =
+      departmentTasks.find((task) => task.id === allTodayEditingTaskId) ||
+      noProjectTasks.find((task) => task.id === allTodayEditingTaskId) ||
+      null
+    if (!canEditAllTodayTask(editingTask)) {
+      toast.error("You do not have permission to edit this task")
+      return
+    }
+    const confirmationValidation = validateWaitingConfirmation(
+      allTodayEditStatus,
+      allTodayEditConfirmationAssigneeId
+    )
+    if (confirmationValidation) {
+      toast.error(confirmationValidation)
+      return
+    }
     setAllTodayUpdating(true)
     try {
       const startDateValue = allTodayEditStartDate ? new Date(allTodayEditStartDate).toISOString() : null
@@ -4723,9 +4897,14 @@ export default function DepartmentKanban() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          title: allTodayEditTitle.trim(),
+          description: allTodayEditDescription.trim() || null,
           status: allTodayEditStatus,
           start_date: startDateValue,
           due_date: dueDateValue,
+          ...(isWaitingConfirmation(allTodayEditStatus)
+            ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
+            : {}),
         }),
       })
       if (!res.ok) {
@@ -6592,6 +6771,101 @@ export default function DepartmentKanban() {
               <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
+                    <div className="text-sm font-semibold text-slate-800">Waiting Confirmation</div>
+                    <div className="text-xs text-slate-500 mt-1">Tasks currently waiting for confirmation.</div>
+                  </div>
+                  <div className="text-xs font-semibold text-slate-600">{todayWaitingTasks.length}</div>
+                </div>
+                {todayWaitingTasks.length ? (
+                  <Table
+                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+                    className="min-w-[1100px] text-[11px]"
+                  >
+                    <TableHeader>
+                      <TableRow className="bg-slate-50">
+                        {["NR", "TYPE", "DEPARTMENT", "PROJECT", "ASSIGNED", "TASK TITLE", "CONFIRMER", "STATUS", "START", "DUE", "ACTIONS"].map((label) => (
+                          <TableHead
+                            key={label}
+                            className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                          >
+                            {label}
+                          </TableHead>
+                        ))}
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {todayWaitingTasks.map(({ task, type }, index) => {
+                        const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+                        const meta = task.project_id ? projectMetaLookup.get(task.project_id) || null : null
+                        const projectDepartmentId = project?.department_id || meta?.department_id || null
+                        const taskDepartmentId = task.department_id || projectDepartmentId
+                        const projectTitle = type === "Project" ? (resolveProjectTitle(project) || meta?.title || "-") : "-"
+                        const departmentLabel = taskDepartmentId
+                          ? formatDepartmentName(departmentMap.get(taskDepartmentId)?.name || "")
+                          : "-"
+                        const assignees = taskAssigneeInitials(task)
+                        const confirmer = task.confirmation_assignee_id ? userMap.get(task.confirmation_assignee_id) : null
+                        const confirmerLabel = confirmer?.full_name || confirmer?.username || confirmer?.email || "-"
+                        return (
+                          <TableRow key={`waiting-${type}-${task.id}`} className={TODAY_TASK_ROW_CLASS}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>{index + 1}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{type}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{departmentLabel || "-"}</TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words`}>
+                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{projectTitle}</div>
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
+                              {assignees.length ? (
+                                <div className="flex items-center gap-1">
+                                  {assignees.map((item) => (
+                                    <div
+                                      key={item.id}
+                                      className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
+                                      title={item.label}
+                                    >
+                                      {item.value}
+                                    </div>
+                                  ))}
+                                </div>
+                              ) : (
+                                <span className="text-slate-500">-</span>
+                              )}
+                            </TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{task.title}</div>
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
+                              {reportStatusLabel(taskStatusValue(task))}
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                title="Edit"
+                                aria-label={`Edit ${task.title}`}
+                                onClick={() => startAllTodayTaskEdit(task)}
+                                disabled={!canEditAllTodayTask(task)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
+                            </TableCell>
+                          </TableRow>
+                        )
+                      })}
+                    </TableBody>
+                  </Table>
+                ) : (
+                  <div className="mt-3 text-sm text-slate-500">No waiting confirmation tasks.</div>
+                )}
+              </Card>
+
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
                     <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
                     <div className="text-xs text-slate-500 mt-1">Tasks scheduled for today.</div>
                   </div>
@@ -6673,6 +6947,7 @@ export default function DepartmentKanban() {
                                 title="Edit"
                                 aria-label={`Edit ${task.title}`}
                                 onClick={() => startAllTodayTaskEdit(task)}
+                                disabled={!canEditAllTodayTask(task)}
                               >
                                 <Pencil className="h-3 w-3" />
                               </Button>
@@ -6760,6 +7035,7 @@ export default function DepartmentKanban() {
                                 title="Edit"
                                 aria-label={`Edit ${task.title}`}
                                 onClick={() => startAllTodayTaskEdit(task)}
+                                disabled={!canEditAllTodayTask(task)}
                               >
                                 <Pencil className="h-3 w-3" />
                               </Button>
@@ -6877,6 +7153,18 @@ export default function DepartmentKanban() {
                   </DialogHeader>
                   <div className="space-y-4">
                     <div className="space-y-2">
+                      <Label className="text-slate-700">Title</Label>
+                      <Input
+                        value={allTodayEditTitle}
+                        onChange={(e) => setAllTodayEditTitle(e.target.value)}
+                        className="border-slate-200 focus:border-slate-400 rounded-xl"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-slate-700">Description</Label>
+                      <BoldOnlyEditor value={allTodayEditDescription} onChange={setAllTodayEditDescription} />
+                    </div>
+                    <div className="space-y-2">
                       <Label className="text-slate-700">Status</Label>
                       <Select value={allTodayEditStatus} onValueChange={setAllTodayEditStatus}>
                         <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
@@ -6891,6 +7179,29 @@ export default function DepartmentKanban() {
                         </SelectContent>
                       </Select>
                     </div>
+                    {isWaitingConfirmation(allTodayEditStatus) ? (
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Confirm by (Manager/Admin)</Label>
+                        <Select
+                          value={allTodayEditConfirmationAssigneeId || "__none__"}
+                          onValueChange={(value) =>
+                            setAllTodayEditConfirmationAssigneeId(value === "__none__" ? "" : value)
+                          }
+                        >
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="Select confirmer" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="__none__">Select confirmer</SelectItem>
+                            {confirmerCandidates.map((candidate) => (
+                              <SelectItem key={candidate.id} value={candidate.id}>
+                                {candidate.full_name || candidate.username || "-"}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    ) : null}
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label className="text-slate-700">Start date</Label>
@@ -6916,7 +7227,17 @@ export default function DepartmentKanban() {
                         Cancel
                       </Button>
                       <Button
-                        disabled={!allTodayEditStatus || allTodayUpdating}
+                        disabled={
+                          !allTodayEditTitle.trim() ||
+                          !allTodayEditStatus ||
+                          allTodayUpdating ||
+                          (isWaitingConfirmation(allTodayEditStatus) && !allTodayEditConfirmationAssigneeId) ||
+                          !canEditAllTodayTask(
+                            departmentTasks.find((task) => task.id === allTodayEditingTaskId) ||
+                            noProjectTasks.find((task) => task.id === allTodayEditingTaskId) ||
+                            null
+                          )
+                        }
                         onClick={() => void updateAllTodayTask()}
                         className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                       >
@@ -7319,7 +7640,7 @@ export default function DepartmentKanban() {
                   Use these buckets to track non-project tasks and special cases.
                 </div>
               </div>
-              {!isReadOnly ? (
+              {canEditTasksInCurrentView ? (
                 <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                   <DialogTrigger asChild>
                     <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-4 sm:px-6 w-full sm:w-auto">
@@ -7476,7 +7797,7 @@ export default function DepartmentKanban() {
                   </DialogContent>
                 </Dialog>
               ) : null}
-              {!isReadOnly ? (
+              {canEditTasksInCurrentView ? (
                 <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
                   <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
                     <DialogHeader>

@@ -155,6 +155,7 @@ export interface Task {
   reminder_enabled?: boolean
   next_reminder_at?: string | null
   assigned_to?: string | null
+  confirmation_assignee_id?: string | null
   assignees?: TaskAssignee[] | null
   created_by?: string | null
   ga_note_origin_id?: string | null
