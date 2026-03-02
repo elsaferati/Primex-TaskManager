@@ -226,6 +226,18 @@ const parseFeedbackNote = (note: string | null | undefined) => {
   return { note: cleaned || undefined, everyday }
 }
 
+const parseFilenameFromDisposition = (headerValue: string | null) => {
+  if (!headerValue) return ""
+  const match =
+    /filename\*=(?:UTF-8'')?([^;]+)/i.exec(headerValue) || /filename=\"?([^\";]+)\"?/i.exec(headerValue)
+  if (!match) return ""
+  try {
+    return decodeURIComponent(match[1].trim().replace(/^\"|\"$/g, ""))
+  } catch {
+    return match[1].trim().replace(/^\"|\"$/g, "")
+  }
+}
+
 const initials = (name: string) => {
   const cleaned = name.trim()
   if (!cleaned) return "?"
@@ -540,6 +552,8 @@ export default function CommonViewPage() {
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
+  const weekTablePrintRef = React.useRef<HTMLDivElement | null>(null)
+  const weekTablePrintContentRef = React.useRef<HTMLDivElement | null>(null)
 
   // Modal state
   const [modalOpen, setModalOpen] = React.useState(false)
@@ -2252,13 +2266,107 @@ export default function CommonViewPage() {
     setMultiMode(false)
   }
 
+  const resetWeekTablePrintFit = React.useCallback(() => {
+    const root = weekTablePrintRef.current
+    if (!root) return
+    root.style.removeProperty("--week-table-print-scale")
+    root.style.removeProperty("--week-table-print-width")
+    root.style.removeProperty("--week-table-print-height")
+  }, [])
+
+  const applyWeekTablePrintFit = React.useCallback(() => {
+    if (!allDaysSelected) {
+      resetWeekTablePrintFit()
+      return
+    }
+    const root = weekTablePrintRef.current
+    const content = weekTablePrintContentRef.current
+    if (!root || !content) return
+
+    root.style.setProperty("--week-table-print-scale", "1")
+    root.style.setProperty("--week-table-print-width", "100%")
+
+    const dpi = 96
+    const marginsIn = { left: 0.35, right: 0.35, top: 0.45, bottom: 0.51 }
+    const isPortrait =
+      window.matchMedia("(orientation: portrait)").matches || window.innerHeight > window.innerWidth
+    const letterIn = isPortrait ? { width: 8.5, height: 11 } : { width: 11, height: 8.5 }
+    const a4In = isPortrait ? { width: 8.27, height: 11.69 } : { width: 11.69, height: 8.27 }
+    const printableWidthIn = Math.min(
+      letterIn.width - marginsIn.left - marginsIn.right,
+      a4In.width - marginsIn.left - marginsIn.right
+    )
+    const printableHeightIn = Math.min(
+      letterIn.height - marginsIn.top - marginsIn.bottom,
+      a4In.height - marginsIn.top - marginsIn.bottom
+    )
+    const printableWidthPx = Math.max(1, Math.floor(printableWidthIn * dpi))
+    const printableHeightPx = Math.max(1, Math.floor(printableHeightIn * dpi))
+    const footerReservePx = 28
+    const availableHeightPx = Math.max(1, printableHeightPx - footerReservePx)
+
+    const naturalWidth = content.scrollWidth
+    const naturalHeight = content.scrollHeight
+    if (!naturalWidth || !naturalHeight) {
+      root.style.setProperty("--week-table-print-height", `${printableHeightPx}px`)
+      return
+    }
+
+    const widthFit = printableWidthPx / naturalWidth
+    const heightFit = availableHeightPx / naturalHeight
+    const fitScale = Math.min(1, widthFit, heightFit)
+    const safeScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1
+
+    root.style.setProperty("--week-table-print-scale", safeScale.toString())
+    root.style.setProperty("--week-table-print-width", `${100 / safeScale}%`)
+    root.style.setProperty("--week-table-print-height", `${printableHeightPx}px`)
+  }, [allDaysSelected, resetWeekTablePrintFit])
+
+  React.useEffect(() => {
+    const handleResize = () => {
+      if (!allDaysSelected) return
+      if (!window.matchMedia("print").matches) return
+      applyWeekTablePrintFit()
+    }
+    window.addEventListener("resize", handleResize)
+    return () => {
+      window.removeEventListener("resize", handleResize)
+    }
+  }, [allDaysSelected, applyWeekTablePrintFit])
+
+  React.useEffect(() => {
+    const orientationMedia = window.matchMedia("(orientation: portrait)")
+    const handleOrientationChange = () => {
+      if (!allDaysSelected) return
+      if (!window.matchMedia("print").matches) return
+      applyWeekTablePrintFit()
+    }
+    orientationMedia.addEventListener("change", handleOrientationChange)
+    return () => {
+      orientationMedia.removeEventListener("change", handleOrientationChange)
+    }
+  }, [allDaysSelected, applyWeekTablePrintFit])
+
   const handlePrint = () => {
+    if (allDaysSelected) {
+      setPrintTotalPages(1)
+      applyWeekTablePrintFit()
+    }
     window.print()
   }
 
   // Calculate total pages for print footer
   React.useEffect(() => {
     const handleBeforePrint = () => {
+      if (allDaysSelected) {
+        setPrintTotalPages(1)
+        window.requestAnimationFrame(() => {
+          window.requestAnimationFrame(() => {
+            applyWeekTablePrintFit()
+          })
+        })
+        return
+      }
       const dpi = 96
       const pageHeightPx = 11 * dpi - (0.36 + 0.51) * dpi
       const bodyHeight = Math.max(
@@ -2271,6 +2379,7 @@ export default function CommonViewPage() {
     }
     const handleAfterPrint = () => {
       setPrintTotalPages(1)
+      resetWeekTablePrintFit()
     }
     window.addEventListener("beforeprint", handleBeforePrint)
     window.addEventListener("afterprint", handleAfterPrint)
@@ -2278,19 +2387,215 @@ export default function CommonViewPage() {
       window.removeEventListener("beforeprint", handleBeforePrint)
       window.removeEventListener("afterprint", handleAfterPrint)
     }
-  }, [])
+  }, [allDaysSelected, applyWeekTablePrintFit, resetWeekTablePrintFit])
 
   const today = new Date()
   const todayIso = toISODate(today)
   const thisWeekMonday = getMonday(today)
   const thisWeekMondayIso = toISODate(thisWeekMonday)
 
+  const buildCommonViewExportPayload = () => {
+    const exportISOsBase = allDaysSelected ? weekISOs : weekISOs.filter((iso) => selectedDates.has(iso))
+    const exportISOs = exportISOsBase.length ? exportISOsBase : weekISOs
+
+    const dailyFeedback = filtered.feedback.filter((x) => x.everyday)
+    const dailyProblems = filtered.problems.filter((x) => x.everyday)
+
+    const dataByDay: Record<
+      string,
+      {
+        late: LateItem[]
+        absent: AbsentItem[]
+        leave: LeaveItem[]
+        blocked: BlockedItem[]
+        oneH: OneHItem[]
+        personal: PersonalItem[]
+        external: ExternalItem[]
+        internal: InternalItem[]
+        bz: BzItem[]
+        r1: R1Item[]
+        problems: ProblemItem[]
+        feedback: FeedbackItem[]
+        priority: PriorityItem[]
+      }
+    > = {}
+
+    exportISOs.forEach((iso) => {
+      if (filtered.fullyCoveredDates.has(iso)) {
+        dataByDay[iso] = {
+          late: [],
+          absent: [],
+          leave: [
+            {
+              person: ALL_USERS_INITIALS,
+              startDate: iso,
+              endDate: iso,
+              fullDay: true,
+              isAllUsers: true,
+            },
+          ],
+          blocked: [],
+          oneH: [],
+          personal: [],
+          external: [],
+          internal: [],
+          bz: [],
+          r1: [],
+          problems: dailyProblems,
+          feedback: dailyFeedback,
+          priority: [],
+        }
+        return
+      }
+      dataByDay[iso] = {
+        late: filtered.late.filter((x) => x.date === iso),
+        absent: filtered.absent.filter((x) => x.date === iso),
+        leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
+        blocked: filtered.blocked.filter((x) => x.date === iso),
+        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
+        personal: filtered.personal.filter((x) => x.date === iso),
+        external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso), false),
+        problems: [
+          ...filtered.problems.filter((x) => !x.everyday && x.date === iso),
+          ...dailyProblems,
+        ],
+        feedback: [
+          ...filtered.feedback.filter((x) => !x.everyday && x.date === iso),
+          ...dailyFeedback,
+        ],
+        priority: filtered.priority.filter((x) => x.date === iso),
+      }
+    })
+
+    const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: string }) =>
+      entry.assignees && entry.assignees.length
+        ? entry.assignees
+        : (entry.person || entry.owner)
+          ? String(entry.person || entry.owner)
+              .split(",")
+              .map((v) => v.trim())
+              .filter(Boolean)
+          : []
+
+    const assigneesSuffix = (entry: { assignees?: string[]; person?: string; owner?: string }) => {
+      const initialsList = entryAssignees(entry).map((name: string) => initials(name)).filter(Boolean)
+      return initialsList.length ? ` (${initialsList.join(", ")})` : ""
+    }
+
+    const renderCellLines = (rowId: CommonType, iso: string) => {
+      const dayData = dataByDay[iso]
+      if (!dayData) return []
+      const entries =
+        rowId === "late"
+          ? dayData.late
+          : rowId === "absent"
+            ? dayData.absent
+            : rowId === "leave"
+              ? dayData.leave
+              : rowId === "blocked"
+                ? dayData.blocked
+                : rowId === "oneH"
+                  ? dayData.oneH
+                  : rowId === "r1"
+                    ? dayData.r1
+                    : rowId === "personal"
+                      ? dayData.personal
+                      : rowId === "external"
+                        ? dayData.external
+                        : rowId === "internal"
+                          ? dayData.internal
+                          : rowId === "bz"
+                            ? dayData.bz
+                            : rowId === "priority"
+                              ? dayData.priority
+                              : rowId === "problem"
+                                ? dayData.problems
+                                : rowId === "feedback"
+                                  ? dayData.feedback
+                                  : []
+      if (!entries.length) return []
+
+      if (rowId === "late") {
+        return entries.map((e: LateItem, idx: number) => `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "absent") {
+        return entries.map((e: AbsentItem, idx: number) => `${idx + 1}. ${e.from} - ${e.to}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "leave") {
+        return entries.map((e: LeaveItem, idx: number) => {
+          const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
+          const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
+          const label = isAllUsers ? `${timeLabel} ALL` : timeLabel
+          return `${idx + 1}. ${label}${isAllUsers ? "" : assigneesSuffix(e)}`
+        })
+      }
+      if (rowId === "blocked") {
+        return entries.map((e: BlockedItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "oneH" || rowId === "r1") {
+        return entries.map((e: OneHItem | R1Item, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "personal") {
+        return entries.map((e: PersonalItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "external") {
+        return entries.map((e: ExternalItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "internal") {
+        return entries.map((e: InternalItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "bz") {
+        return entries.map((e: BzItem, idx: number) => {
+          const bzLabel = e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""
+          return `${idx + 1}. ${stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
+        })
+      }
+      if (rowId === "priority") {
+        return entries.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
+      }
+      if (rowId === "problem" || rowId === "feedback") {
+        return entries.map((e: ProblemItem | FeedbackItem, idx: number) => {
+          const dateLabel = e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)
+          const noteLabel = e.note ? ` - ${e.note}` : ""
+          return `${idx + 1}. ${e.title} - ${dateLabel}${noteLabel}${assigneesSuffix(e)}`
+        })
+      }
+      return []
+    }
+
+    const visibleRows = swimlaneRows.filter((row) => showCard(row.id))
+    const columns = ["NR", "LLOJI", ...exportISOs.map((iso) => `${getDayCode(fromISODate(iso))} = ${formatDateHuman(iso)}`)]
+    const rows = visibleRows.map((row, rowIndex) => [
+      String(rowIndex + 1),
+      row.label.toUpperCase(),
+      ...exportISOs.map((iso) => renderCellLines(row.id as CommonType, iso).join("\n")),
+    ])
+    const weekTitleRange =
+      exportISOs.length >= 2
+        ? `${formatDateHuman(exportISOs[0])} - ${formatDateHuman(exportISOs[exportISOs.length - 1])}`
+        : exportISOs.length === 1
+          ? formatDateHuman(exportISOs[0])
+          : ""
+    return {
+      title: `COMMON VIEW - WEEK PLAN${weekTitleRange ? ` (${weekTitleRange})` : ""}`,
+      columns,
+      rows,
+    }
+  }
+
   const handleExportExcel = async () => {
     if (exportingExcel) return
     setExportingExcel(true)
     try {
-      const weekStartIso = toISODate(weekStart)
-      const res = await apiFetch(`/exports/common.xlsx?week_start=${encodeURIComponent(weekStartIso)}`)
+      const payload = buildCommonViewExportPayload()
+      const res = await apiFetch(`/exports/common-view.xlsx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
       if (!res?.ok) {
         const detail = await res.text()
         alert(detail || "Failed to export Excel.")
@@ -2300,11 +2605,16 @@ export default function CommonViewPage() {
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      const dd = String(weekStart.getDate()).padStart(2, "0")
-      const mm = String(weekStart.getMonth() + 1).padStart(2, "0")
-      const yy = String(weekStart.getFullYear()).slice(-2)
-      const initialsValue = (printInitials || "USER").toUpperCase()
-      link.download = `COMMON VIEW ${dd}_${mm}_${yy}_EF (${initialsValue}).xlsx`
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      if (filename) {
+        link.download = filename
+      } else {
+        const dd = String(weekStart.getDate()).padStart(2, "0")
+        const mm = String(weekStart.getMonth() + 1).padStart(2, "0")
+        const yy = String(weekStart.getFullYear()).slice(-2)
+        const initialsValue = (printInitials || "USER").toUpperCase()
+        link.download = `COMMON VIEW ${dd}_${mm}_${yy}_EF (${initialsValue}).xlsx`
+      }
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -4183,7 +4493,7 @@ export default function CommonViewPage() {
         @media print {
           @page {
             margin: 0.45in 0.35in 0.51in 0.35in;
-            size: landscape;
+            size: auto;
           }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
@@ -4225,12 +4535,13 @@ export default function CommonViewPage() {
           .week-table-view { 
             display: block !important; 
             padding-top: 0;
-            padding-bottom: 0.35in; 
+            padding-bottom: 0.35in;
             margin: 0;
             width: 100%;
             max-width: 100%;
             overflow: visible;
             page-break-before: auto;
+            page-break-inside: auto !important;
           }
           .print-header {
             display: grid;
@@ -4244,7 +4555,7 @@ export default function CommonViewPage() {
             page-break-after: avoid;
           }
           .week-table {
-            page-break-inside: avoid;
+            page-break-inside: auto;
             margin-top: 0;
           }
           .print-title {
@@ -4278,6 +4589,28 @@ export default function CommonViewPage() {
           .print-initials {
             grid-column: 3;
             text-align: right;
+          }
+          .week-table-onepage {
+            --week-table-print-scale: 1;
+            --week-table-print-width: 100%;
+            --week-table-print-height: auto;
+            position: relative;
+            min-height: var(--week-table-print-height);
+            padding-bottom: 28px;
+            overflow: hidden;
+          }
+          .week-table-onepage-content {
+            width: var(--week-table-print-width);
+            transform-origin: top left;
+            transform: scale(var(--week-table-print-scale));
+          }
+          .week-table-onepage .print-footer {
+            position: fixed;
+            left: 0;
+            right: 0;
+            bottom: 0.2in;
+            padding-left: 0.1in;
+            padding-right: 0.1in;
           }
           .swimlane-board { gap: 12px; }
           .swimlane-row { break-inside: avoid; page-break-inside: avoid; }
@@ -5201,18 +5534,18 @@ export default function CommonViewPage() {
         @media print {
           .week-table-view {
             display: block !important;
-            page-break-inside: avoid;
+            page-break-inside: auto;
             page-break-after: auto;
           }
           .week-table-view .print-header {
             page-break-after: avoid;
-            margin-bottom: 8px;
+            margin-bottom: 6px;
           }
           .week-table {
-            page-break-inside: avoid;
+            page-break-inside: auto;
             table-layout: fixed;
             width: 100%;
-            font-size: 9px;
+            font-size: 10px;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
             margin-top: 0;
@@ -5220,13 +5553,17 @@ export default function CommonViewPage() {
           .week-table thead {
             display: table-header-group;
           }
+          .week-table tr {
+            break-inside: avoid-page;
+            page-break-inside: avoid;
+          }
           .week-table th,
           .week-table td {
             border: 1px solid #111827 !important;
             position: static !important;
             top: auto !important;
             z-index: auto !important;
-            padding: 4px 5px;
+            padding: 2px 3px;
             white-space: normal;
             overflow-wrap: anywhere;
             word-break: break-word;
@@ -5235,10 +5572,10 @@ export default function CommonViewPage() {
             top: auto !important;
           }
           .week-table-number {
-            width: 36px !important;
+            width: 30px !important;
           }
           .week-table-label {
-            width: 100px !important;
+            width: 88px !important;
           }
           .week-table-cell,
           .week-table-entry span {
@@ -5249,12 +5586,24 @@ export default function CommonViewPage() {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
             page-break-inside: avoid;
-            margin-bottom: 3px;
-            font-size: 9px;
-            padding: 2px 4px;
+            margin-bottom: 1px;
+            font-size: 9.5px;
+            line-height: 1.15;
+            gap: 3px;
+            padding: 1px 3px;
           }
           .week-table-entries {
+            gap: 1px;
+          }
+          .week-table-avatars {
             gap: 2px;
+            margin-top: 0;
+          }
+          .week-table-avatar {
+            width: 12px;
+            height: 12px;
+            font-size: 7px;
+            border-width: 1px;
           }
         }
           align-items: center;
@@ -7546,7 +7895,8 @@ export default function CommonViewPage() {
       <div className="view-container">
         <div className="common-view-title">PERMBLEDHJA - COMMON VIEW</div>
         {allDaysSelected ? (
-          <div className="week-table-view">
+          <div className="week-table-view week-table-onepage" ref={weekTablePrintRef}>
+            <div className="week-table-onepage-content" ref={weekTablePrintContentRef}>
             <div className="print-header">
               <div />
               <div className="print-title">COMMON VIEW - WEEK PLAN</div>
@@ -7912,9 +8262,10 @@ export default function CommonViewPage() {
                   })}
               </tbody>
             </table>
+            </div>
             <div className="print-footer">
               <span />
-              <div className="print-page-count">1/{printTotalPages}</div>
+              <div className="print-page-count">1/1</div>
               <div className="print-initials">PUNOI: {printInitials}</div>
             </div>
           </div>
