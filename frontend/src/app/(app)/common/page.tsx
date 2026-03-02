@@ -564,6 +564,7 @@ export default function CommonViewPage() {
   const [printOrientationHint, setPrintOrientationHint] = React.useState<"portrait" | "landscape">("landscape")
   const weekTablePrintRef = React.useRef<HTMLDivElement | null>(null)
   const weekTablePrintContentRef = React.useRef<HTMLDivElement | null>(null)
+  const [exportingMeetingExcel, setExportingMeetingExcel] = React.useState(false)
 
   // Modal state
   const [modalOpen, setModalOpen] = React.useState(false)
@@ -2756,6 +2757,43 @@ export default function CommonViewPage() {
       alert("Failed to export Excel.")
     } finally {
       setExportingExcel(false)
+    }
+  }
+
+  const handleExportMeetingExcel = async () => {
+    if (exportingMeetingExcel) return
+    if (!activeMeeting?.id) return
+    setExportingMeetingExcel(true)
+    try {
+      const res = await apiFetch(`/exports/meeting-template.xlsx?checklist_id=${encodeURIComponent(activeMeeting.id)}`)
+      if (!res?.ok) {
+        const detail = await res.text()
+        alert(detail || "Failed to export Excel.")
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      if (filename) {
+        link.download = filename
+      } else {
+        const dd = String(weekStart.getDate()).padStart(2, "0")
+        const mm = String(weekStart.getMonth() + 1).padStart(2, "0")
+        const yy = String(weekStart.getFullYear()).slice(-2)
+        const initialsValue = (printInitials || "USER").toUpperCase()
+        link.download = `MEETING ${dd}_${mm}_${yy}_EF (${initialsValue}).xlsx`
+      }
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to export meeting Excel", err)
+      alert("Failed to export Excel.")
+    } finally {
+      setExportingMeetingExcel(false)
     }
   }
 
@@ -6382,8 +6420,8 @@ export default function CommonViewPage() {
                 }
               >
                 {printOrientationHint === "landscape"
-                  ? "Best fit at print scale 100%"
-                  : "Portrait prints as multi-page for readability"}
+                  ? ""
+                  : ""}
               </span>
             ) : null}
             <button
@@ -6656,6 +6694,14 @@ export default function CommonViewPage() {
                   {showMeetingTemplateForm ? "Hide form" : "New checklist"}
                 </button>
               ) : null}
+              <button
+                className="btn-surface"
+                type="button"
+                onClick={handleExportMeetingExcel}
+                disabled={!activeMeeting || exportingMeetingExcel}
+              >
+                {exportingMeetingExcel ? "Exporting..." : "Export Excel"}
+              </button>
               <button className="btn-surface" type="button" onClick={() => setMeetingPanelOpen(false)}>
                 Close
               </button>
@@ -7074,7 +7120,7 @@ export default function CommonViewPage() {
               <div className="meeting-title">External Meetings</div>
               <div className="meeting-subtitle">Show all external meetings and add new ones.</div>
             </div>
-            <button className="btn-outline" type="button" onClick={() => setExternalMeetingsOpen(false)}>
+            <button className="btn-surface" type="button" onClick={() => setExternalMeetingsOpen(false)}>
               Close
             </button>
           </div>
@@ -7757,7 +7803,7 @@ export default function CommonViewPage() {
               <div className="meeting-title">Internal Meetings</div>
               <div className="meeting-subtitle">Show all internal meetings and add new ones.</div>
             </div>
-            <button className="btn-outline" type="button" onClick={() => setInternalMeetingsOpen(false)}>
+            <button className="btn-surface" type="button" onClick={() => setInternalMeetingsOpen(false)}>
               Close
             </button>
           </div>
