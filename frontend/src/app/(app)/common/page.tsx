@@ -5632,34 +5632,43 @@ export default function CommonViewPage() {
             width: 30px !important;
           }
           .week-table-label {
-            width: 88px !important;
+            width: 72px !important;
           }
           .week-table-cell,
           .week-table-entry span {
             white-space: normal;
           }
           .week-table-entry {
-            border: 1px solid #111827 !important;
+            border: 0.1px solid #111827 !important;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
             page-break-inside: avoid;
-            margin-bottom: 1px;
+            margin-bottom: 0px;
             font-size: 9.5px;
             line-height: 1.15;
             gap: 3px;
-            padding: 1px 3px;
+            padding: 0px 3px;
           }
           .week-table-entries {
             gap: 1px;
           }
           .week-table-avatars {
-            gap: 2px;
+            gap: 1px;
             margin-top: 0;
+            line-height: 1;
           }
           .week-table-avatar {
-            width: 10px;
-            height: 10px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            min-width: 0;
+            height: auto;
+            padding: 0 0px;
+            border-radius: 2px;
             font-size: 6px;
+            line-height: 1;
+            font-weight: 700;
+            white-space: nowrap;
             border-width: 0.8px;
           }
         }
@@ -7979,7 +7988,7 @@ export default function CommonViewPage() {
               <thead>
                 <tr>
                   <th rowSpan={2} style={{ width: "40px" }}>NR</th>
-                  <th rowSpan={2} style={{ width: "110px" }}>LLOJI</th>
+                  <th rowSpan={2} style={{ width: "86px" }}>LLOJI</th>
                   {weekISOs.map((iso) => {
                     const d = fromISODate(iso)
                     const dayCode = getDayCode(d)
