@@ -7,7 +7,7 @@ from sqlalchemy import nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.access import ensure_department_access
+from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
@@ -49,6 +49,23 @@ def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
         is_checked=item.is_checked,
         assignees=assignees,
     )
+
+def _serialize_columns(columns: list | None) -> list[dict] | None:
+    if columns is None:
+        return None
+    serialized: list[dict] = []
+    for col in columns:
+        if isinstance(col, dict):
+            serialized.append(col)
+            continue
+        if hasattr(col, "model_dump"):
+            serialized.append(col.model_dump())
+            continue
+        if hasattr(col, "dict"):
+            serialized.append(col.dict())
+            continue
+        serialized.append(dict(col))
+    return serialized
 
 
 @router.get("", response_model=list[ChecklistWithItemsOut])
@@ -129,24 +146,28 @@ async def create_checklist(
     user=Depends(get_current_user),
 ) -> ChecklistOut:
     if payload.group_key:
-        existing = (
-            await db.execute(select(Checklist).where(Checklist.group_key == payload.group_key))
-        ).scalar_one_or_none()
-        if existing is not None:
-            return ChecklistOut(
-                id=existing.id,
-                title=existing.title,
-                task_id=existing.task_id,
-                project_id=existing.project_id,
-                note=existing.note,
-                default_owner=existing.default_owner,
-                default_time=existing.default_time,
-                group_key=existing.group_key,
-                columns=existing.columns,
-                position=existing.position,
-                created_at=existing.created_at,
-            )
+        if payload.group_key in ("board", "staff"):
+            ensure_manager_or_admin(user)
+        else:
+            existing = (
+                await db.execute(select(Checklist).where(Checklist.group_key == payload.group_key))
+            ).scalar_one_or_none()
+            if existing is not None:
+                return ChecklistOut(
+                    id=existing.id,
+                    title=existing.title,
+                    task_id=existing.task_id,
+                    project_id=existing.project_id,
+                    note=existing.note,
+                    default_owner=existing.default_owner,
+                    default_time=existing.default_time,
+                    group_key=existing.group_key,
+                    columns=existing.columns,
+                    position=existing.position,
+                    created_at=existing.created_at,
+                )
 
+    columns_payload = _serialize_columns(payload.columns)
     checklist = Checklist(
         title=payload.title,
         task_id=payload.task_id,
@@ -155,7 +176,7 @@ async def create_checklist(
         default_owner=payload.default_owner,
         default_time=payload.default_time,
         group_key=payload.group_key,
-        columns=payload.columns,
+        columns=columns_payload,
         position=payload.position,
     )
     db.add(checklist)
@@ -188,8 +209,11 @@ async def update_checklist(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
     
     # Only admins can update meeting templates (checklists with group_key)
-    if checklist.group_key and user.role != UserRole.ADMIN:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update meeting templates")
+    if checklist.group_key:
+        if checklist.group_key in ("board", "staff"):
+            ensure_manager_or_admin(user)
+        elif user.role != UserRole.ADMIN:
+            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update meeting templates")
     
     if payload.title is not None:
         checklist.title = payload.title
@@ -200,7 +224,7 @@ async def update_checklist(
     if payload.default_time is not None:
         checklist.default_time = payload.default_time
     if payload.columns is not None:
-        checklist.columns = payload.columns
+        checklist.columns = _serialize_columns(payload.columns)
     if payload.position is not None:
         checklist.position = payload.position
     

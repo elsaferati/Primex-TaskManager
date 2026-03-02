@@ -190,6 +190,7 @@ type MeetingTemplate = {
   rows: MeetingRow[]
   defaultOwner?: string
   defaultTime?: string
+  position?: number
 }
 
 type MeetingChecklist = {
@@ -212,6 +213,13 @@ type MeetingChecklist = {
   }[]
 }
 
+const DEFAULT_MEETING_COLUMNS: MeetingColumn[] = [
+  { key: "nr", label: "NR", width: "52px" },
+  { key: "topic", label: "M1 PIKAT" },
+  { key: "check", label: "", width: "48px" },
+  { key: "owner", label: "WHO", width: "90px" },
+  { key: "time", label: "WHEN", width: "90px" },
+]
 
 const ALL_USERS_VALUE = "__all__"
 const ALL_USERS_LABEL = "All users"
@@ -255,6 +263,7 @@ export default function CommonViewPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const isStaff = user?.role === "STAFF"
+  const canEditMeetingTemplates = Boolean(isAdmin || isManager)
   const canDeleteCommon = Boolean(isAdmin || isManager || isStaff)
   // Common view should show all data for all roles (same as admin)
   const commonDepartmentId = ""
@@ -577,6 +586,14 @@ export default function CommonViewPage() {
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingTemplates, setMeetingTemplates] = React.useState<MeetingTemplate[]>([])
   const [activeMeetingId, setActiveMeetingId] = React.useState("")
+  const [meetingTemplateGroup, setMeetingTemplateGroup] = React.useState<"board" | "staff">("board")
+  const [meetingTemplateTitle, setMeetingTemplateTitle] = React.useState("")
+  const [meetingTemplateNote, setMeetingTemplateNote] = React.useState("")
+  const [meetingTemplateDefaultOwner, setMeetingTemplateDefaultOwner] = React.useState("")
+  const [meetingTemplateDefaultTime, setMeetingTemplateDefaultTime] = React.useState("")
+  const [creatingMeetingTemplate, setCreatingMeetingTemplate] = React.useState(false)
+  const [meetingTemplateError, setMeetingTemplateError] = React.useState("")
+  const [showMeetingTemplateForm, setShowMeetingTemplateForm] = React.useState(false)
   const [externalMeetingsOpen, setExternalMeetingsOpen] = React.useState(false)
   const [externalMeetings, setExternalMeetings] = React.useState<Meeting[]>([])
   const [externalMeetingTitle, setExternalMeetingTitle] = React.useState("")
@@ -810,7 +827,7 @@ export default function CommonViewPage() {
           if (res.status === 404) {
             detail = "Meeting template not found. Please refresh the page."
           } else if (res.status === 403) {
-            detail = "Only admins can update meeting templates."
+            detail = "Only admins and managers can update meeting templates."
           } else {
             detail = `Failed to update meeting title (${res.status})`
           }
@@ -1035,96 +1052,157 @@ export default function CommonViewPage() {
   const canCreateExternalMeeting = Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId)
   const canCreateInternalMeeting = Boolean(internalMeetingTitle.trim()) && Boolean(internalMeetingDepartmentId)
 
-  React.useEffect(() => {
-    let mounted = true
-    async function loadMeetings() {
-      try {
-        // Common view should only show the official meeting templates:
-        // - group_key=board (BORD/GA)
-        // - group_key=staff (STAFF/GA)
-        const [boardRes, staffRes] = await Promise.all([
+  const reloadMeetingTemplates = React.useCallback(async () => {
+    try {
+      // Common view should only show the official meeting templates:
+      // - group_key=board (BORD/GA)
+      // - group_key=staff (STAFF/GA)
+      const [boardRes, staffRes] = await Promise.all([
+        apiFetch("/checklists?group_key=board&include_items=true"),
+        apiFetch("/checklists?group_key=staff&include_items=true"),
+      ])
+      if (!boardRes?.ok && !staffRes?.ok) return [] as MeetingTemplate[]
+      let boardData = boardRes?.ok ? ((await boardRes.json()) as MeetingChecklist[]) : []
+      let staffData = staffRes?.ok ? ((await staffRes.json()) as MeetingChecklist[]) : []
+      let data = [...boardData, ...staffData]
+
+      const checklistIds = data.map((checklist) => checklist.id)
+      if (checklistIds.length) {
+        await Promise.allSettled(
+          checklistIds.map((checklistId) =>
+            apiFetch("/internal-meeting-sessions/ensure", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ checklist_id: checklistId }),
+            })
+          )
+        )
+
+        const [boardResRefresh, staffResRefresh] = await Promise.all([
           apiFetch("/checklists?group_key=board&include_items=true"),
           apiFetch("/checklists?group_key=staff&include_items=true"),
         ])
-        if (!boardRes?.ok && !staffRes?.ok) return
-        let boardData = boardRes?.ok ? ((await boardRes.json()) as MeetingChecklist[]) : []
-        let staffData = staffRes?.ok ? ((await staffRes.json()) as MeetingChecklist[]) : []
-        let data = [...boardData, ...staffData]
-
-        const checklistIds = data.map((checklist) => checklist.id)
-        if (checklistIds.length) {
-          await Promise.allSettled(
-            checklistIds.map((checklistId) =>
-              apiFetch("/internal-meeting-sessions/ensure", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify({ checklist_id: checklistId }),
-              })
-            )
-          )
-
-          const [boardResRefresh, staffResRefresh] = await Promise.all([
-            apiFetch("/checklists?group_key=board&include_items=true"),
-            apiFetch("/checklists?group_key=staff&include_items=true"),
-          ])
-          if (boardResRefresh?.ok || staffResRefresh?.ok) {
-            boardData = boardResRefresh?.ok
-              ? ((await boardResRefresh.json()) as MeetingChecklist[])
-              : boardData
-            staffData = staffResRefresh?.ok
-              ? ((await staffResRefresh.json()) as MeetingChecklist[])
-              : staffData
-            data = [...boardData, ...staffData]
-          }
+        if (boardResRefresh?.ok || staffResRefresh?.ok) {
+          boardData = boardResRefresh?.ok
+            ? ((await boardResRefresh.json()) as MeetingChecklist[])
+            : boardData
+          staffData = staffResRefresh?.ok
+            ? ((await staffResRefresh.json()) as MeetingChecklist[])
+            : staffData
+          data = [...boardData, ...staffData]
         }
-
-        const templates = data
-          .slice()
-          .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-          .map((checklist) => {
-            const rows = (checklist.items || [])
-              .slice()
-              .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-              .map((item) => ({
-                id: item.id,
-                nr: item.position ?? 0,
-                day: item.day || undefined,
-                topic: item.title || "",
-                owner: item.owner || undefined,
-                time: item.time || undefined,
-                isChecked: item.is_checked ?? false,
-              }))
-            return {
-              id: checklist.id,
-              title: checklist.title,
-              note: checklist.note || undefined,
-              groupKey: checklist.group_key || undefined,
-              columns: checklist.columns?.length
-                ? checklist.columns
-                : [
-                    { key: "nr", label: "NR", width: "52px" },
-                    { key: "topic", label: "M1 PIKAT" },
-                    { key: "check", label: "", width: "48px" },
-                    { key: "owner", label: "WHO", width: "90px" },
-                    { key: "time", label: "WHEN", width: "90px" },
-                  ],
-              rows,
-              defaultOwner: checklist.default_owner || undefined,
-              defaultTime: checklist.default_time || undefined,
-            }
-          })
-        if (mounted) {
-          setMeetingTemplates(templates)
-        }
-      } catch (err) {
-        console.error("Failed to load meeting checklists", err)
       }
+
+      const templates = data
+        .slice()
+        .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+        .map((checklist) => {
+          const rows = (checklist.items || [])
+            .slice()
+            .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
+            .map((item) => ({
+              id: item.id,
+              nr: item.position ?? 0,
+              day: item.day || undefined,
+              topic: item.title || "",
+              owner: item.owner || undefined,
+              time: item.time || undefined,
+              isChecked: item.is_checked ?? false,
+            }))
+          return {
+            id: checklist.id,
+            title: checklist.title,
+            note: checklist.note || undefined,
+            groupKey: checklist.group_key || undefined,
+            columns: checklist.columns?.length ? checklist.columns : DEFAULT_MEETING_COLUMNS,
+            rows,
+            defaultOwner: checklist.default_owner || undefined,
+            defaultTime: checklist.default_time || undefined,
+            position: checklist.position ?? undefined,
+          }
+        })
+      return templates
+    } catch (err) {
+      console.error("Failed to load meeting checklists", err)
+      return [] as MeetingTemplate[]
     }
-    void loadMeetings()
+  }, [apiFetch])
+
+  React.useEffect(() => {
+    let mounted = true
+    void reloadMeetingTemplates().then((templates) => {
+      if (mounted) setMeetingTemplates(templates)
+    })
     return () => {
       mounted = false
     }
-  }, [apiFetch])
+  }, [reloadMeetingTemplates])
+
+  const canCreateMeetingTemplate = canEditMeetingTemplates && Boolean(meetingTemplateTitle.trim())
+
+  const createMeetingTemplate = React.useCallback(async () => {
+    if (!canCreateMeetingTemplate) return
+    setCreatingMeetingTemplate(true)
+    setMeetingTemplateError("")
+    try {
+      const baseColumns = (activeMeeting?.columns?.length ? activeMeeting.columns : DEFAULT_MEETING_COLUMNS).map(
+        (col) => ({ ...col })
+      )
+      const maxPosition = meetingTemplates.reduce(
+        (max, template) => Math.max(max, template.position ?? -1),
+        -1
+      )
+      const payload = {
+        title: meetingTemplateTitle.trim(),
+        note: meetingTemplateNote.trim() || null,
+        default_owner: meetingTemplateDefaultOwner.trim() || null,
+        default_time: meetingTemplateDefaultTime.trim() || null,
+        group_key: meetingTemplateGroup,
+        columns: baseColumns,
+        position: maxPosition + 1,
+      }
+      const res = await apiFetch("/checklists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create meeting checklist."
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          detail = `Failed to create meeting checklist (${res.status}).`
+        }
+        setMeetingTemplateError(detail)
+        return
+      }
+      const created = (await res.json()) as { id: string }
+      const templates = await reloadMeetingTemplates()
+      setMeetingTemplates(templates)
+      if (created?.id) setActiveMeetingId(created.id)
+      setMeetingTemplateTitle("")
+      setMeetingTemplateNote("")
+      setMeetingTemplateDefaultOwner("")
+      setMeetingTemplateDefaultTime("")
+    } catch (err) {
+      console.error("Failed to create meeting checklist", err)
+      setMeetingTemplateError("Failed to create meeting checklist. Please try again.")
+    } finally {
+      setCreatingMeetingTemplate(false)
+    }
+  }, [
+    activeMeeting,
+    apiFetch,
+    canCreateMeetingTemplate,
+    meetingTemplateDefaultOwner,
+    meetingTemplateDefaultTime,
+    meetingTemplateGroup,
+    meetingTemplateNote,
+    meetingTemplateTitle,
+    meetingTemplates,
+    reloadMeetingTemplates,
+  ])
 
   React.useEffect(() => {
     if (!meetingTemplates.length) return
@@ -4844,6 +4922,63 @@ export default function CommonViewPage() {
           gap: 12px;
           margin-top: 12px;
         }
+        .meeting-create-card {
+          margin-top: 12px;
+          border: 1px dashed #cbd5e1;
+          border-radius: 12px;
+          padding: 12px;
+          background: #f8fafc;
+        }
+        .meeting-create-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+        }
+        .meeting-create-title {
+          font-size: 13px;
+          font-weight: 700;
+          color: #0f172a;
+        }
+        .meeting-create-subtitle {
+          font-size: 12px;
+          color: #64748b;
+          margin-top: 2px;
+        }
+        .meeting-create-grid {
+          display: grid;
+          grid-template-columns: repeat(4, minmax(0, 1fr));
+          gap: 10px;
+          margin-top: 10px;
+        }
+        .meeting-create-field {
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+        }
+        .meeting-create-field label {
+          font-size: 12px;
+          font-weight: 700;
+          color: #475569;
+        }
+        .meeting-create-field select {
+          border: 1px solid #e2e8f0;
+          border-radius: 10px;
+          padding: 8px 10px;
+          background: #ffffff;
+          color: #0f172a;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .meeting-create-note {
+          grid-column: 1 / -1;
+        }
+        .meeting-create-error {
+          margin-top: 8px;
+          font-size: 12px;
+          color: #b91c1c;
+          font-weight: 600;
+        }
         .meeting-dropdown {
           display: flex;
           flex-direction: column;
@@ -4982,9 +5117,15 @@ export default function CommonViewPage() {
           .external-meetings-grid {
             grid-template-columns: 1fr;
           }
+          .meeting-create-grid {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
         }
         @media (max-width: 720px) {
           .external-meeting-row {
+            grid-template-columns: 1fr;
+          }
+          .meeting-create-grid {
             grid-template-columns: 1fr;
           }
         }
@@ -6502,9 +6643,23 @@ export default function CommonViewPage() {
               <div className="meeting-title">Meetings</div>
               <div className="meeting-subtitle">Select a meeting to view the checklist table.</div>
             </div>
-            <button className="btn-outline" type="button" onClick={() => setMeetingPanelOpen(false)}>
-              Close
-            </button>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              {canEditMeetingTemplates ? (
+                <button
+                  className="btn-surface"
+                  type="button"
+                  onClick={() => {
+                    setMeetingTemplateError("")
+                    setShowMeetingTemplateForm((prev) => !prev)
+                  }}
+                >
+                  {showMeetingTemplateForm ? "Hide form" : "New checklist"}
+                </button>
+              ) : null}
+              <button className="btn-surface" type="button" onClick={() => setMeetingPanelOpen(false)}>
+                Close
+              </button>
+            </div>
           </div>
           <div className="meeting-tabs">
             <div className="meeting-dropdown">
@@ -6542,6 +6697,100 @@ export default function CommonViewPage() {
               </select>
             </div>
           </div>
+          {canEditMeetingTemplates ? (
+            <>
+              {showMeetingTemplateForm ? (
+                <div className="meeting-create-card">
+                  <div className="meeting-create-header">
+                    <div>
+                      <div className="meeting-create-title">Create checklist</div>
+                      <div className="meeting-create-subtitle">Create a new Board/Staff meeting template.</div>
+                    </div>
+                    <div style={{ display: "flex", gap: "8px" }}>
+                      <button
+                        className="btn-outline"
+                        type="button"
+                        onClick={() => {
+                          setShowMeetingTemplateForm(false)
+                          setMeetingTemplateError("")
+                        }}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        className="btn-primary"
+                        type="button"
+                        onClick={() => void createMeetingTemplate()}
+                        disabled={!canCreateMeetingTemplate || creatingMeetingTemplate}
+                      >
+                        {creatingMeetingTemplate ? "Creating..." : "Create checklist"}
+                      </button>
+                    </div>
+                  </div>
+                  <div className="meeting-create-grid">
+                    <div className="meeting-create-field">
+                      <label htmlFor="meeting-create-group">Group</label>
+                      <select
+                        id="meeting-create-group"
+                        value={meetingTemplateGroup}
+                        onChange={(e) => setMeetingTemplateGroup(e.target.value as "board" | "staff")}
+                      >
+                        <option value="board">BORD/GA</option>
+                        <option value="staff">STAFF/GA</option>
+                      </select>
+                    </div>
+                    <div className="meeting-create-field">
+                      <label htmlFor="meeting-create-title">Title</label>
+                      <input
+                        id="meeting-create-title"
+                        className="input"
+                        type="text"
+                        placeholder="Checklist title"
+                        value={meetingTemplateTitle}
+                        onChange={(e) => setMeetingTemplateTitle(e.target.value)}
+                      />
+                    </div>
+                    <div className="meeting-create-field">
+                      <label htmlFor="meeting-create-owner">Default owner</label>
+                      <input
+                        id="meeting-create-owner"
+                        className="input"
+                        type="text"
+                        placeholder="Optional"
+                        value={meetingTemplateDefaultOwner}
+                        onChange={(e) => setMeetingTemplateDefaultOwner(e.target.value)}
+                      />
+                    </div>
+                    <div className="meeting-create-field">
+                      <label htmlFor="meeting-create-time">Default time</label>
+                      <input
+                        id="meeting-create-time"
+                        className="input"
+                        type="text"
+                        placeholder="Optional"
+                        value={meetingTemplateDefaultTime}
+                        onChange={(e) => setMeetingTemplateDefaultTime(e.target.value)}
+                      />
+                    </div>
+                    <div className="meeting-create-field meeting-create-note">
+                      <label htmlFor="meeting-create-note">Note</label>
+                      <input
+                        id="meeting-create-note"
+                        className="input"
+                        type="text"
+                        placeholder="Optional"
+                        value={meetingTemplateNote}
+                        onChange={(e) => setMeetingTemplateNote(e.target.value)}
+                      />
+                    </div>
+                  </div>
+                  {meetingTemplateError ? (
+                    <div className="meeting-create-error">{meetingTemplateError}</div>
+                  ) : null}
+                </div>
+              ) : null}
+            </>
+          ) : null}
           {activeMeeting ? (
             <div className="meeting-table-card">
               <div className="meeting-table-header">
@@ -6577,9 +6826,9 @@ export default function CommonViewPage() {
                 ) : (
                   <div
                     className="meeting-table-title"
-                    style={isAdmin ? { cursor: "pointer", userSelect: "none" } : undefined}
-                    onClick={isAdmin ? startEditMeetingTitle : undefined}
-                    title={isAdmin ? "Click to edit" : undefined}
+                    style={canEditMeetingTemplates ? { cursor: "pointer", userSelect: "none" } : undefined}
+                    onClick={canEditMeetingTemplates ? startEditMeetingTitle : undefined}
+                    title={canEditMeetingTemplates ? "Click to edit" : undefined}
                   >
                     {activeMeeting.title}
                   </div>
@@ -6602,7 +6851,7 @@ export default function CommonViewPage() {
                           {col.label}
                         </th>
                       ))}
-                      {isAdmin ? <th style={{ width: "120px" }}>Actions</th> : null}
+                      {canEditMeetingTemplates ? <th style={{ width: "120px" }}>Actions</th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -6622,7 +6871,7 @@ export default function CommonViewPage() {
                           if (col.key === "time") {
                             value = row.time || (rowIndex === 0 ? activeMeeting.defaultTime || "" : "")
                           }
-                          const isEditing = isAdmin && editingRowId === row.id
+                          const isEditing = canEditMeetingTemplates && editingRowId === row.id
 
                           if (col.key === "owner" && mergeOwnerColumn) {
                             if (rowIndex !== 0) return null
@@ -6726,7 +6975,7 @@ export default function CommonViewPage() {
                             </td>
                           )
                         })}
-                        {isAdmin ? (
+                        {canEditMeetingTemplates ? (
                           <td>
                             {editingRowId === row.id ? (
                               <div style={{ display: "flex", gap: "6px" }}>
@@ -6775,7 +7024,7 @@ export default function CommonViewPage() {
                   </tbody>
                 </table>
               </div>
-              {isAdmin ? (
+              {canEditMeetingTemplates ? (
                 <div style={{ padding: "12px", borderTop: "1px solid #e2e8f0" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr)) auto", gap: "8px" }}>
                     <input
