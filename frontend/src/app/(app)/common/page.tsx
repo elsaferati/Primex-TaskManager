@@ -552,6 +552,7 @@ export default function CommonViewPage() {
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
+  const [printOrientationHint, setPrintOrientationHint] = React.useState<"portrait" | "landscape">("landscape")
   const weekTablePrintRef = React.useRef<HTMLDivElement | null>(null)
   const weekTablePrintContentRef = React.useRef<HTMLDivElement | null>(null)
 
@@ -2272,6 +2273,43 @@ export default function CommonViewPage() {
     root.style.removeProperty("--week-table-print-scale")
   }, [])
 
+  const getPrintOrientation = React.useCallback((): "portrait" | "landscape" => {
+    const isPortrait =
+      window.matchMedia("(orientation: portrait)").matches || window.innerHeight > window.innerWidth
+    return isPortrait ? "portrait" : "landscape"
+  }, [])
+
+  const computePrintMetrics = React.useCallback((orientation: "portrait" | "landscape") => {
+    const dpi = 96
+    const marginsIn = { left: 0.35, right: 0.35, top: 0.45, bottom: 0.51 }
+    const letterIn = orientation === "portrait" ? { width: 8.5, height: 11 } : { width: 11, height: 8.5 }
+    const a4In = orientation === "portrait" ? { width: 8.27, height: 11.69 } : { width: 11.69, height: 8.27 }
+    const printableWidthIn = Math.min(
+      letterIn.width - marginsIn.left - marginsIn.right,
+      a4In.width - marginsIn.left - marginsIn.right
+    )
+    const printableHeightIn = Math.min(
+      letterIn.height - marginsIn.top - marginsIn.bottom,
+      a4In.height - marginsIn.top - marginsIn.bottom
+    )
+    return {
+      printableWidthPx: Math.max(1, Math.floor(printableWidthIn * dpi)),
+      printableHeightPx: Math.max(1, Math.floor(printableHeightIn * dpi)),
+      footerReservePx: 28,
+    }
+  }, [])
+
+  const calculateAllDaysPortraitPages = React.useCallback(() => {
+    const { printableHeightPx, footerReservePx } = computePrintMetrics("portrait")
+    const availableHeightPx = Math.max(1, printableHeightPx - footerReservePx)
+    const contentHeight = Math.max(
+      weekTablePrintContentRef.current?.scrollHeight || 0,
+      weekTablePrintRef.current?.scrollHeight || 0,
+      document.body.scrollHeight
+    )
+    return Math.max(1, Math.ceil(contentHeight / availableHeightPx))
+  }, [computePrintMetrics])
+
   const applyWeekTablePrintFit = React.useCallback(() => {
     if (!allDaysSelected) {
       resetWeekTablePrintFit()
@@ -2281,25 +2319,15 @@ export default function CommonViewPage() {
     const content = weekTablePrintContentRef.current
     if (!root || !content) return
 
+    const orientation = getPrintOrientation()
+    if (orientation === "portrait") {
+      root.style.setProperty("--week-table-print-scale", "1")
+      return
+    }
+
     root.style.setProperty("--week-table-print-scale", "1")
 
-    const dpi = 96
-    const marginsIn = { left: 0.35, right: 0.35, top: 0.45, bottom: 0.51 }
-    const isPortrait =
-      window.matchMedia("(orientation: portrait)").matches || window.innerHeight > window.innerWidth
-    const letterIn = isPortrait ? { width: 8.5, height: 11 } : { width: 11, height: 8.5 }
-    const a4In = isPortrait ? { width: 8.27, height: 11.69 } : { width: 11.69, height: 8.27 }
-    const printableWidthIn = Math.min(
-      letterIn.width - marginsIn.left - marginsIn.right,
-      a4In.width - marginsIn.left - marginsIn.right
-    )
-    const printableHeightIn = Math.min(
-      letterIn.height - marginsIn.top - marginsIn.bottom,
-      a4In.height - marginsIn.top - marginsIn.bottom
-    )
-    const printableWidthPx = Math.max(1, Math.floor(printableWidthIn * dpi))
-    const printableHeightPx = Math.max(1, Math.floor(printableHeightIn * dpi))
-    const footerReservePx = 28
+    const { printableWidthPx, printableHeightPx, footerReservePx } = computePrintMetrics("landscape")
     const availableHeightPx = Math.max(1, printableHeightPx - footerReservePx)
 
     const naturalWidth = content.scrollWidth
@@ -2314,7 +2342,21 @@ export default function CommonViewPage() {
     const safeScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1
 
     root.style.setProperty("--week-table-print-scale", safeScale.toString())
-  }, [allDaysSelected, resetWeekTablePrintFit])
+  }, [allDaysSelected, computePrintMetrics, getPrintOrientation, resetWeekTablePrintFit])
+
+  React.useEffect(() => {
+    const syncPrintHintOrientation = () => {
+      setPrintOrientationHint(getPrintOrientation())
+    }
+    syncPrintHintOrientation()
+    const orientationMedia = window.matchMedia("(orientation: portrait)")
+    window.addEventListener("resize", syncPrintHintOrientation)
+    orientationMedia.addEventListener("change", syncPrintHintOrientation)
+    return () => {
+      window.removeEventListener("resize", syncPrintHintOrientation)
+      orientationMedia.removeEventListener("change", syncPrintHintOrientation)
+    }
+  }, [getPrintOrientation])
 
   React.useEffect(() => {
     const handleResize = () => {
@@ -2343,8 +2385,14 @@ export default function CommonViewPage() {
 
   const handlePrint = () => {
     if (allDaysSelected) {
-      setPrintTotalPages(1)
-      applyWeekTablePrintFit()
+      const orientation = getPrintOrientation()
+      if (orientation === "landscape") {
+        setPrintTotalPages(1)
+        applyWeekTablePrintFit()
+      } else {
+        resetWeekTablePrintFit()
+        setPrintTotalPages(calculateAllDaysPortraitPages())
+      }
     }
     window.print()
   }
@@ -2353,10 +2401,16 @@ export default function CommonViewPage() {
   React.useEffect(() => {
     const handleBeforePrint = () => {
       if (allDaysSelected) {
-        setPrintTotalPages(1)
         window.requestAnimationFrame(() => {
           window.requestAnimationFrame(() => {
-            applyWeekTablePrintFit()
+            const orientation = getPrintOrientation()
+            if (orientation === "landscape") {
+              setPrintTotalPages(1)
+              applyWeekTablePrintFit()
+              return
+            }
+            resetWeekTablePrintFit()
+            setPrintTotalPages(calculateAllDaysPortraitPages())
           })
         })
         return
@@ -2381,7 +2435,13 @@ export default function CommonViewPage() {
       window.removeEventListener("beforeprint", handleBeforePrint)
       window.removeEventListener("afterprint", handleAfterPrint)
     }
-  }, [allDaysSelected, applyWeekTablePrintFit, resetWeekTablePrintFit])
+  }, [
+    allDaysSelected,
+    applyWeekTablePrintFit,
+    calculateAllDaysPortraitPages,
+    getPrintOrientation,
+    resetWeekTablePrintFit,
+  ])
 
   const today = new Date()
   const todayIso = toISODate(today)
@@ -4595,6 +4655,7 @@ export default function CommonViewPage() {
             position: relative;
             padding-bottom: 28px;
             overflow: visible;
+            page-break-inside: auto;
           }
           .week-table-onepage-content {
             width: 100%;
@@ -5596,10 +5657,10 @@ export default function CommonViewPage() {
             margin-top: 0;
           }
           .week-table-avatar {
-            width: 12px;
-            height: 12px;
-            font-size: 7px;
-            border-width: 1px;
+            width: 10px;
+            height: 10px;
+            font-size: 6px;
+            border-width: 0.8px;
           }
         }
           align-items: center;
@@ -6145,8 +6206,17 @@ export default function CommonViewPage() {
               Print
             </button>
             {allDaysSelected ? (
-              <span className="no-print print-scale-hint" title="For best fit, keep browser print scale at 100%">
-                Best fit at print scale 100%
+              <span
+                className="no-print print-scale-hint"
+                title={
+                  printOrientationHint === "landscape"
+                    ? "For best fit, keep browser print scale at 100%"
+                    : "Portrait mode prints as multi-page for readability"
+                }
+              >
+                {printOrientationHint === "landscape"
+                  ? "Best fit at print scale 100%"
+                  : "Portrait prints as multi-page for readability"}
               </span>
             ) : null}
             <button
@@ -8266,7 +8336,7 @@ export default function CommonViewPage() {
             </div>
             <div className="print-footer">
               <span />
-              <div className="print-page-count">1/1</div>
+              <div className="print-page-count">1/{printTotalPages}</div>
               <div className="print-initials">PUNOI: {printInitials}</div>
             </div>
           </div>
