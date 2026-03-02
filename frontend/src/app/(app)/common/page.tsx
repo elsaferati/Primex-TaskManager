@@ -2270,8 +2270,6 @@ export default function CommonViewPage() {
     const root = weekTablePrintRef.current
     if (!root) return
     root.style.removeProperty("--week-table-print-scale")
-    root.style.removeProperty("--week-table-print-width")
-    root.style.removeProperty("--week-table-print-height")
   }, [])
 
   const applyWeekTablePrintFit = React.useCallback(() => {
@@ -2284,7 +2282,6 @@ export default function CommonViewPage() {
     if (!root || !content) return
 
     root.style.setProperty("--week-table-print-scale", "1")
-    root.style.setProperty("--week-table-print-width", "100%")
 
     const dpi = 96
     const marginsIn = { left: 0.35, right: 0.35, top: 0.45, bottom: 0.51 }
@@ -2308,7 +2305,6 @@ export default function CommonViewPage() {
     const naturalWidth = content.scrollWidth
     const naturalHeight = content.scrollHeight
     if (!naturalWidth || !naturalHeight) {
-      root.style.setProperty("--week-table-print-height", `${printableHeightPx}px`)
       return
     }
 
@@ -2318,8 +2314,6 @@ export default function CommonViewPage() {
     const safeScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1
 
     root.style.setProperty("--week-table-print-scale", safeScale.toString())
-    root.style.setProperty("--week-table-print-width", `${100 / safeScale}%`)
-    root.style.setProperty("--week-table-print-height", `${printableHeightPx}px`)
   }, [allDaysSelected, resetWeekTablePrintFit])
 
   React.useEffect(() => {
@@ -4484,6 +4478,12 @@ export default function CommonViewPage() {
         }
 
         .no-print { display: inline-flex; }
+        .print-scale-hint {
+          font-size: 11px;
+          color: #475569;
+          font-weight: 600;
+          white-space: nowrap;
+        }
         .hide-in-print { display: none !important; }
         .hide-when-all-days { display: none !important; }
         .print-header,
@@ -4592,17 +4592,13 @@ export default function CommonViewPage() {
           }
           .week-table-onepage {
             --week-table-print-scale: 1;
-            --week-table-print-width: 100%;
-            --week-table-print-height: auto;
             position: relative;
-            min-height: var(--week-table-print-height);
             padding-bottom: 28px;
-            overflow: hidden;
+            overflow: visible;
           }
           .week-table-onepage-content {
-            width: var(--week-table-print-width);
-            transform-origin: top left;
-            transform: scale(var(--week-table-print-scale));
+            width: 100%;
+            zoom: var(--week-table-print-scale);
           }
           .week-table-onepage .print-footer {
             position: fixed;
@@ -6148,6 +6144,11 @@ export default function CommonViewPage() {
             <button className="btn-primary no-print" type="button" onClick={handlePrint}>
               Print
             </button>
+            {allDaysSelected ? (
+              <span className="no-print print-scale-hint" title="For best fit, keep browser print scale at 100%">
+                Best fit at print scale 100%
+              </span>
+            ) : null}
             <button
               className={`btn-outline no-print ${meetingPanelOpen ? "active" : ""}`}
               type="button"
