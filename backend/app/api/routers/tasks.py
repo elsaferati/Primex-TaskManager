@@ -1288,6 +1288,7 @@ async def update_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     is_assigned_to_task = await _is_user_assigned_to_task(db, task, user.id)
+    is_confirmation_assignee = task.confirmation_assignee_id is not None and task.confirmation_assignee_id == user.id
     
     # Check if user has permission to edit this task:
     # Allow: Admin, Manager, task creator, primary assignee, or any assignee in TaskAssignee table
@@ -1297,6 +1298,8 @@ async def update_task(
     elif task.created_by and task.created_by == user.id:
         can_edit = True
     elif is_assigned_to_task:
+        can_edit = True
+    elif is_confirmation_assignee:
         can_edit = True
     
     if not can_edit:
