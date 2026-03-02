@@ -1176,6 +1176,7 @@ export default function DepartmentKanban() {
   const [allTodayEditStartDate, setAllTodayEditStartDate] = React.useState("")
   const [allTodayEditDueDate, setAllTodayEditDueDate] = React.useState("")
   const [allTodayUpdating, setAllTodayUpdating] = React.useState(false)
+  const [markingWaitingTaskId, setMarkingWaitingTaskId] = React.useState<string | null>(null)
   const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
   const [editingSystemDateTemplateId, setEditingSystemDateTemplateId] = React.useState<string | null>(null)
   const [editingSystemDateSource, setEditingSystemDateSource] = React.useState("")
@@ -1756,6 +1757,29 @@ export default function DepartmentKanban() {
       return Boolean(task.assignees?.some((assignee) => assignee.id === userId))
     },
     []
+  )
+  const waitingConfirmationStatusLabel = React.useCallback(
+    (task: Task) => {
+      const statusValue = (task.status ? String(task.status) : "").toUpperCase()
+      if (statusValue !== "WAITING_CONFIRMATION") return reportStatusLabel(task.status)
+      if (task.confirmation_assignee_id && task.confirmation_assignee_id === user?.id) {
+        return "Waiting to Confirm"
+      }
+      if (isTaskAssignedToUser(task, user?.id)) {
+        return "Waiting for Confirm"
+      }
+      return "Waiting Confirmation"
+    },
+    [isTaskAssignedToUser, user?.id]
+  )
+  const canMarkWaitingConfirmation = React.useCallback(
+    (task?: Task | null) => {
+      if (!task || !user?.id) return false
+      if (user.role === "ADMIN" || user.role === "MANAGER") return true
+      if (task.confirmation_assignee_id === user.id) return true
+      return isTaskAssignedToUser(task, user.id)
+    },
+    [isTaskAssignedToUser, user?.id, user?.role]
   )
   const isTaskOwnedByViewUser = React.useCallback(
     (task: Task, userId?: string | null) => {
@@ -3607,6 +3631,13 @@ export default function DepartmentKanban() {
     },
     [crossDepartmentWaitingTasks, todayWaitingNoProjectTasks, todayWaitingProjectTasks]
   )
+  const allTodayTaskLookup = React.useMemo(() => {
+    const map = new Map<string, Task>()
+    for (const task of departmentTasks) map.set(task.id, task)
+    for (const task of noProjectTasks) map.set(task.id, task)
+    for (const task of crossDepartmentConfirmTasks) map.set(task.id, task)
+    return map
+  }, [crossDepartmentConfirmTasks, departmentTasks, noProjectTasks])
   const todaySystemTasksSorted = React.useMemo(
     () =>
       sortDoneLast(todaySystemTasks, (task) => {
@@ -4873,10 +4904,7 @@ export default function DepartmentKanban() {
 
   const updateAllTodayTask = async () => {
     if (!allTodayEditingTaskId || !allTodayEditStatus) return
-    const editingTask =
-      departmentTasks.find((task) => task.id === allTodayEditingTaskId) ||
-      noProjectTasks.find((task) => task.id === allTodayEditingTaskId) ||
-      null
+    const editingTask = allTodayTaskLookup.get(allTodayEditingTaskId) || null
     if (!canEditAllTodayTask(editingTask)) {
       toast.error("You do not have permission to edit this task")
       return
@@ -4921,10 +4949,59 @@ export default function DepartmentKanban() {
       const updated = (await res.json()) as Task
       setDepartmentTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
       setNoProjectTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
+      setCrossDepartmentConfirmTasks((prev) => {
+        const exists = prev.some((t) => t.id === updated.id)
+        if (!exists) return prev
+        if (taskStatusValue(updated) !== "WAITING_CONFIRMATION") {
+          return prev.filter((t) => t.id !== updated.id)
+        }
+        return prev.map((t) => (t.id === updated.id ? updated : t))
+      })
       cancelAllTodayTaskEdit()
       toast.success("Task updated")
     } finally {
       setAllTodayUpdating(false)
+    }
+  }
+
+  const markWaitingTaskDone = async (task: Task) => {
+    if (!canMarkWaitingConfirmation(task)) {
+      toast.error("You do not have permission to complete this task")
+      return
+    }
+    setMarkingWaitingTaskId(task.id)
+    try {
+      const res = await apiFetch(`/tasks/${task.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ status: "DONE" }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to mark task as done"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Task
+      setDepartmentTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      setNoProjectTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      setCrossDepartmentConfirmTasks((prev) => {
+        const exists = prev.some((t) => t.id === updated.id)
+        if (!exists) return prev
+        if (taskStatusValue(updated) !== "WAITING_CONFIRMATION") {
+          return prev.filter((t) => t.id !== updated.id)
+        }
+        return prev.map((t) => (t.id === updated.id ? updated : t))
+      })
+      void refreshDailyReport()
+      toast.success("Task marked as done")
+    } finally {
+      setMarkingWaitingTaskId(null)
     }
   }
 
@@ -6836,22 +6913,37 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
-                              {reportStatusLabel(taskStatusValue(task))}
+                              {waitingConfirmationStatusLabel(task)}
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                title="Edit"
-                                aria-label={`Edit ${task.title}`}
-                                onClick={() => startAllTodayTaskEdit(task)}
-                                disabled={!canEditAllTodayTask(task)}
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                {canMarkWaitingConfirmation(task) ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-6 w-6 border-emerald-200 text-emerald-600 hover:border-emerald-300 hover:text-emerald-700"
+                                    title="Mark done"
+                                    aria-label={`Mark ${task.title} as done`}
+                                    onClick={() => void markWaitingTaskDone(task)}
+                                    disabled={markingWaitingTaskId === task.id}
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </Button>
+                                ) : null}
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                  title="Edit"
+                                  aria-label={`Edit ${task.title}`}
+                                  onClick={() => startAllTodayTaskEdit(task)}
+                                  disabled={!canEditAllTodayTask(task)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         )
@@ -7233,9 +7325,7 @@ export default function DepartmentKanban() {
                           allTodayUpdating ||
                           (isWaitingConfirmation(allTodayEditStatus) && !allTodayEditConfirmationAssigneeId) ||
                           !canEditAllTodayTask(
-                            departmentTasks.find((task) => task.id === allTodayEditingTaskId) ||
-                            noProjectTasks.find((task) => task.id === allTodayEditingTaskId) ||
-                            null
+                            allTodayTaskLookup.get(allTodayEditingTaskId || "") || null
                           )
                         }
                         onClick={() => void updateAllTodayTask()}
