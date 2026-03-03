@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone, time as dt_time
+from collections import defaultdict
+
+try:
+    from zoneinfo import ZoneInfo
+except ImportError:  # pragma: no cover
+    ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, insert, or_, select, text, cast, Date as SQLDate, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user, require_admin
@@ -321,6 +328,22 @@ def _previous_occurrence_date(template: SystemTaskTemplate, target: date) -> dat
     return previous_occurrence_date(template, target)
 
 
+def _template_zoneinfo(template: SystemTaskTemplate):
+    tz_name = (getattr(template, "timezone", None) or "").strip() or "Europe/Tirane"
+    if ZoneInfo is None:
+        return timezone.utc, "Europe/Tirane"
+    try:
+        return ZoneInfo(tz_name), tz_name
+    except Exception:
+        return ZoneInfo("Europe/Tirane"), "Europe/Tirane"
+
+
+def _local_day_utc_bounds(local_day: date, tzinfo) -> tuple[datetime, datetime]:
+    local_start = datetime.combine(local_day, dt_time.min, tzinfo=tzinfo)
+    local_end = local_start + timedelta(days=1)
+    return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
+
+
 @router.get("", response_model=list[SystemTaskOut])
 async def list_system_tasks(
     department_id: uuid.UUID | None = None,
@@ -330,7 +353,7 @@ async def list_system_tasks(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[SystemTaskOut]:
-    template_stmt = select(SystemTaskTemplate)
+    template_stmt = select(SystemTaskTemplate).order_by(SystemTaskTemplate.created_at.desc())
 
     if department_id is not None:
         # Allow all users to view system tasks from any department (for department kanban views)
@@ -350,22 +373,8 @@ async def list_system_tasks(
     if not templates:
         return []
 
-    for tmpl in templates:
-        try:
-            await _sync_task_for_template(db=db, template=tmpl, creator_id=user.id)
-        except Exception as e:
-            # Log the error but continue with other templates
-            import logging
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error syncing task for template {tmpl.id}: {str(e)}", exc_info=True)
-            # Rollback this template's changes
-            await db.rollback()
-            continue
-    await db.commit()
-
     template_ids = [t.id for t in templates]
     base_date = occurrence_date or date.today()
-    await ensure_task_instances_in_range(db, start=base_date, end=base_date)
     occurrence_date_map: dict[uuid.UUID, date] = {
         tmpl.id: (base_date if matches_template_date(tmpl, base_date) else _previous_occurrence_date(tmpl, base_date))
         for tmpl in templates
@@ -375,53 +384,97 @@ async def list_system_tasks(
         for tmpl in templates
     }
     effective_occurrence_date_map: dict[uuid.UUID, date] = dict(next_occurrence_date_map)
-    # Start from templates and LEFT JOIN tasks to include templates without tasks
-    task_stmt = (
-        select(SystemTaskTemplate, Task)
-        .outerjoin(Task, Task.system_template_origin_id == SystemTaskTemplate.id)
-        .where(SystemTaskTemplate.id.in_(template_ids))
-    )
-    # If filtering by user (My View), only show tasks assigned to that user
-    if assigned_to is not None:
-        task_stmt = task_stmt.where(Task.assigned_to == assigned_to)
-    if only_active:
-        task_stmt = task_stmt.where(
-            or_(
-                Task.is_active.is_(True),
-                Task.id.is_(None)  # Include templates without tasks
+
+    # Generate only the minimum required window for this endpoint request.
+    needed_dates = list(occurrence_date_map.values())
+    min_needed_date = min(needed_dates) if needed_dates else base_date
+    max_needed_date = max(needed_dates) if needed_dates else base_date
+    await ensure_task_instances_in_range(db, start=min_needed_date, end=max_needed_date)
+
+    # Build per-timezone UTC bounds and fetch only the matching day-window tasks.
+    bucket_template_ids: dict[tuple[str, date], list[uuid.UUID]] = defaultdict(list)
+    bucket_utc_bounds: dict[tuple[str, date], tuple[datetime, datetime]] = {}
+    for tmpl in templates:
+        tzinfo, tz_name = _template_zoneinfo(tmpl)
+        occ = occurrence_date_map[tmpl.id]
+        bucket_key = (tz_name, occ)
+        bucket_template_ids[bucket_key].append(tmpl.id)
+        if bucket_key not in bucket_utc_bounds:
+            bucket_utc_bounds[bucket_key] = _local_day_utc_bounds(occ, tzinfo)
+
+    range_clauses = []
+    for bucket_key, tmpl_ids in bucket_template_ids.items():
+        start_utc, end_utc = bucket_utc_bounds[bucket_key]
+        range_clauses.append(
+            and_(
+                Task.system_template_origin_id.in_(tmpl_ids),
+                Task.origin_run_at >= start_utc,
+                Task.origin_run_at < end_utc,
             )
         )
-    task_stmt = task_stmt.order_by(
-        SystemTaskTemplate.created_at.desc(),
-        Task.is_active.desc().nullslast(),
-        Task.created_at.desc().nullslast()
-    )
 
-    rows = (await db.execute(task_stmt)).all()
+    tasks: list[Task] = []
+    if range_clauses:
+        task_stmt = (
+            select(Task)
+            .where(Task.origin_run_at.is_not(None))
+            .where(or_(*range_clauses))
+            .options(selectinload(Task.assignees).joinedload(TaskAssignee.user))
+            .order_by(Task.is_active.desc().nullslast(), Task.created_at.desc().nullslast())
+        )
+        if assigned_to is not None:
+            task_stmt = task_stmt.where(Task.assigned_to == assigned_to)
+        if only_active:
+            task_stmt = task_stmt.where(Task.is_active.is_(True))
+        tasks = (await db.execute(task_stmt)).scalars().all()
+
     template_assignees_map: dict[uuid.UUID, set[uuid.UUID]] = {}
     for tmpl in templates:
         assignee_ids = getattr(tmpl, "assignee_ids", None) or []
         if not assignee_ids and tmpl.default_assignee_id:
             assignee_ids = [tmpl.default_assignee_id]
         template_assignees_map[tmpl.id] = set(assignee_ids)
-    filtered_rows: list[tuple[SystemTaskTemplate, Task | None]] = []
-    for template, task in rows:
-        if task is None:
-            filtered_rows.append((template, task))
+
+    # Keep only task instances that belong to configured template assignees.
+    filtered_tasks: list[Task] = []
+    for task in tasks:
+        if task.system_template_origin_id is None:
             continue
-        allowed_ids = template_assignees_map.get(template.id, set())
+        allowed_ids = template_assignees_map.get(task.system_template_origin_id, set())
         if not allowed_ids:
             continue
         if task.assigned_to and task.assigned_to in allowed_ids:
-            filtered_rows.append((template, task))
-    rows = filtered_rows
+            filtered_tasks.append(task)
+
+    template_by_id = {t.id: t for t in templates}
+    rows: list[tuple[SystemTaskTemplate, Task | None]] = []
+    template_tasks_map_for_rows: dict[uuid.UUID, list[Task]] = defaultdict(list)
+    for task in filtered_tasks:
+        if task.system_template_origin_id in template_by_id:
+            template_tasks_map_for_rows[task.system_template_origin_id].append(task)
+    for tmpl in templates:
+        tmpl_tasks = template_tasks_map_for_rows.get(tmpl.id, [])
+        if tmpl_tasks:
+            for task in tmpl_tasks:
+                rows.append((tmpl, task))
+        else:
+            rows.append((tmpl, None))
+
     # Return all tasks for each template (no de-duplication)
     # Also include templates that don't have tasks yet
     task_ids = [task.id for template, task in rows if task is not None]
-    assignee_map = await _assignees_for_tasks(db, task_ids)
+    assignee_map: dict[uuid.UUID, list[TaskAssigneeOut]] = {}
+    for task in filtered_tasks:
+        task_assignees: list[TaskAssigneeOut] = []
+        for ta in getattr(task, "assignees", []) or []:
+            if ta.user is None:
+                continue
+            task_assignees.append(_user_to_assignee(ta.user))
+        assignee_map[task.id] = task_assignees
+
     fallback_ids = [
         task.assigned_to
-        for template, task in rows
+        for task in filtered_tasks
         if task is not None and task.assigned_to is not None and not assignee_map.get(task.id)
     ]
     if fallback_ids:
@@ -429,9 +482,7 @@ async def list_system_tasks(
             await db.execute(select(User).where(User.id.in_(fallback_ids)))
         ).scalars().all()
         fallback_map = {user.id: user for user in fallback_users}
-        for template, task in rows:
-            if task is None:
-                continue
+        for task in filtered_tasks:
             if assignee_map.get(task.id):
                 continue
             if task.assigned_to in fallback_map:
@@ -459,14 +510,6 @@ async def list_system_tasks(
                 continue  # Skip templates without tasks in My View
             
             task_assignees = assignee_map.get(task.id, [])
-            if not task_assignees and task.assigned_to:
-                # Fallback to assigned_to user
-                assigned_user = (
-                    await db.execute(select(User).where(User.id == task.assigned_to))
-                ).scalar_one_or_none()
-                if assigned_user:
-                    task_assignees = [_user_to_assignee(assigned_user)]
-            
             task_out = _task_row_to_out(
                 task,
                 template,
@@ -535,21 +578,29 @@ async def list_system_tasks(
         result.append(task_out)
     
     # Process templates without tasks
+    template_only_user_ids: set[uuid.UUID] = set()
+    for template in template_only_map.values():
+        if template.assignee_ids:
+            template_only_user_ids.update(template.assignee_ids)
+        elif template.default_assignee_id:
+            template_only_user_ids.add(template.default_assignee_id)
+    template_only_users = (
+        (await db.execute(select(User).where(User.id.in_(template_only_user_ids)))).scalars().all()
+        if template_only_user_ids else []
+    )
+    template_only_user_map = {u.id: u for u in template_only_users}
+
     for template_id, template in template_only_map.items():
         assignees_list = []
         department_ids_set = set()
         
         if template.assignee_ids:
-            assignee_users = (
-                await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
-            ).scalars().all()
+            assignee_users = [template_only_user_map[uid] for uid in template.assignee_ids if uid in template_only_user_map]
             assignees_list = [_user_to_assignee(user) for user in assignee_users]
             # Collect department IDs from assignees
             department_ids_set = {user.department_id for user in assignee_users if user.department_id is not None}
         elif template.default_assignee_id:
-            assignee_user = (
-                await db.execute(select(User).where(User.id == template.default_assignee_id))
-            ).scalar_one_or_none()
+            assignee_user = template_only_user_map.get(template.default_assignee_id)
             if assignee_user:
                 assignees_list = [_user_to_assignee(assignee_user)]
                 if assignee_user.department_id:
