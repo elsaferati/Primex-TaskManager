@@ -7,7 +7,7 @@ from sqlalchemy import nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from app.api.access import ensure_department_access, ensure_manager_or_admin
+from app.api.access import ensure_admin, ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.checklist import Checklist
@@ -243,3 +243,26 @@ async def update_checklist(
         position=checklist.position,
         created_at=checklist.created_at,
     )
+
+
+@router.delete("/{checklist_id}", status_code=status.HTTP_200_OK)
+async def delete_checklist(
+    checklist_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> dict:
+    checklist = (await db.execute(select(Checklist).where(Checklist.id == checklist_id))).scalar_one_or_none()
+    if checklist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
+
+    if checklist.group_key:
+        if checklist.group_key in ("board", "staff"):
+            ensure_manager_or_admin(user)
+        else:
+            ensure_admin(user)
+    else:
+        ensure_manager_or_admin(user)
+
+    await db.delete(checklist)
+    await db.commit()
+    return {"ok": True}
