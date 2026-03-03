@@ -325,6 +325,15 @@ def _safe_filename_spaces(label: str) -> str:
     cleaned = re.sub(r"\s+", " ", cleaned.strip())
     return cleaned.upper() or "EXPORT"
 
+def _safe_sheet_title(label: str | None, fallback: str = "MEETING") -> str:
+    value = (label or "").strip()
+    if not value:
+        return fallback[:31]
+    # Excel sheet name invalid chars: []:*?/\
+    value = re.sub(r"[\[\]\:\*\?\/\\]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return (value or fallback)[:31]
+
 
 def _fast_task_badge(task) -> str:
     if task.is_bllok:
@@ -1960,6 +1969,186 @@ async def export_common_view_xlsx(
 
     initials_value = (_initials_compact(user.full_name or user.username or "") or "USER").upper()
     filename = f"COMMON VIEW {filename_date}_EF ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/meeting-template.xlsx")
+async def export_meeting_template_xlsx(
+    checklist_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+
+    checklist = (
+        await db.execute(select(Checklist).where(Checklist.id == checklist_id))
+    ).scalar_one_or_none()
+    if checklist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
+    if checklist.group_key not in ("board", "staff"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting template not found")
+
+    items = (
+        await db.execute(
+            select(ChecklistItem)
+            .where(ChecklistItem.checklist_id == checklist.id)
+            .order_by(ChecklistItem.position, ChecklistItem.id)
+        )
+    ).scalars().all()
+
+    raw_columns = checklist.columns or []
+    columns: list[dict[str, str]] = []
+    for col in raw_columns:
+        if not isinstance(col, dict):
+            continue
+        key = str(col.get("key") or "").strip()
+        if not key:
+            continue
+        label = str(col.get("label") or "").strip()
+        columns.append({"key": key, "label": label})
+    if not columns:
+        columns = [
+            {"key": "nr", "label": "NR"},
+            {"key": "topic", "label": "M1 PIKAT"},
+            {"key": "check", "label": ""},
+            {"key": "owner", "label": "WHO"},
+            {"key": "time", "label": "WHEN"},
+        ]
+
+    title_base = checklist.title or "MEETING"
+    title = f"MEETING {title_base}".upper()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = _safe_sheet_title(title, fallback="MEETING")
+
+    last_col = len(columns)
+
+    # Row 1: merged title
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    header_row = 4
+    data_row = header_row + 1
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    for col_idx, col in enumerate(columns, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=col.get("label", ""))
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        cell.number_format = "@"
+
+    # Data rows
+    for row_index, item in enumerate(items):
+        for col_idx, col in enumerate(columns, start=1):
+            key = col.get("key")
+            value = ""
+            if key == "nr":
+                value = str(item.position) if item.position is not None else ""
+            elif key == "day":
+                value = item.day or ""
+            elif key == "topic":
+                value = item.title or ""
+            elif key == "check":
+                value = "✓" if item.is_checked else ""
+            elif key == "owner":
+                value = item.owner or (checklist.default_owner or "" if row_index == 0 else "")
+            elif key == "time":
+                value = item.time or (checklist.default_time or "" if row_index == 0 else "")
+            cell = ws.cell(row=data_row, column=col_idx, value=value or "")
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            if key == "nr":
+                cell.font = Font(bold=True)
+        data_row += 1
+
+    last_row = data_row - 1
+
+    # Column widths
+    width_by_key = {
+        "nr": 5,
+        "day": 10,
+        "topic": 52,
+        "check": 8,
+        "owner": 16,
+        "time": 12,
+    }
+    for col_idx, col in enumerate(columns, start=1):
+        key = col.get("key")
+        width = width_by_key.get(key, 24)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    if last_row >= header_row:
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+
+    ws.freeze_panes = "A5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials_compact = _initials_compact(user.full_name or user.username or "") or "____"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials_compact}"
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    if last_row >= header_row:
+        for r_idx in range(header_row, last_row + 1):
+            for c_idx in range(1, last_col + 1):
+                is_header = r_idx == header_row
+                is_first_col = c_idx == 1
+                is_last_col = c_idx == last_col
+                is_last_row = r_idx == last_row
+
+                left = thick if is_first_col else thin
+                right = thick if is_last_col else thin
+                top = thick if is_header else thin
+                bottom = thick if is_last_row else thin
+
+                if is_header:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=thick, right=thick, top=thick, bottom=thick)
+                else:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for r in range(data_row, last_row + 1):
+        max_lines = 1
+        for c in range(1, last_col + 1):
+            value = ws.cell(row=r, column=c).value
+            lines = str(value).count("\n") + 1 if value else 1
+            max_lines = max(max_lines, lines)
+        ws.row_dimensions[r].height = max(18, min(240, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    initials_value = (_initials_compact(user.full_name or user.username or "") or "USER").upper()
+    filename_title = _safe_filename_spaces(title)
+    filename = f"{filename_title} {filename_date}_EF ({initials_value}).xlsx"
 
     return StreamingResponse(
         bio,
