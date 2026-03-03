@@ -29,7 +29,7 @@ System Tasks Refactor With Duration, Weekend Policy, and Absence-Aware Assignmen
       4. `next_occurrence(template, current_dt)` advances according to frequency and `interval` for DAILY/WEEKLY/MONTHLY/YEARLY; THREE/SIX_MONTHS unchanged.
       5. Monthly fallback: if `day_of_month` > last day of month, use last day.
    2. Interval anchoring: use `apply_from` if set; else use template `created_at` (in template TZ) to compute the cycle for DAILY/WEEKLY/MONTHLY/YEARLY.
-
+   
 4. **Generator service (`system_task_instances.py`)**
    1. Implement `generate_system_task_instances(now_utc)`:
       1. Select active slots joined with active templates where `next_run_at <= now_utc + max_lookahead`, with `FOR UPDATE SKIP LOCKED`.
