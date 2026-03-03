@@ -17,7 +17,7 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, cast, func, or_, select, Date as SQLDate
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -33,7 +33,6 @@ from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.department import Department
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
-from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
@@ -51,7 +50,7 @@ from app.api.routers import planners as planners_router
 from app.api.routers.planners import weekly_table_planner
 from app.schemas.planner import WeeklyTableDepartment
 from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
-from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
+from app.services.system_task_instances import ensure_task_instances_in_range
 from app.services.daily_report_logic import (
     DailyReportTyoMode,
     _as_utc_date,
@@ -2563,45 +2562,61 @@ async def _daily_report_rows_for_user(
         for project in projects:
             project_map[project.id] = project.title or project.name or "-"
 
-    await ensure_occurrences_in_range(db=db, start=day - timedelta(days=60), end=day)
+    await ensure_task_instances_in_range(db=db, start=day - timedelta(days=60), end=day)
     await db.commit()
 
-    occ_today_rows = (
+    done_like_statuses = ("DONE", "NOT_DONE", "SKIPPED")
+    local_occurrence_date = cast(
+        func.timezone(func.coalesce(SystemTaskTemplate.timezone, "Europe/Tirane"), Task.origin_run_at),
+        SQLDate,
+    )
+
+    system_today_rows = (
         await db.execute(
-            select(SystemTaskOccurrence, SystemTaskTemplate)
-            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskOccurrence.user_id == user_id)
-            .where(SystemTaskOccurrence.occurrence_date == day)
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .where(Task.assigned_to == user_id)
+            .where(Task.system_template_origin_id.is_not(None))
+            .where(Task.origin_run_at.is_not(None))
+            .where(local_occurrence_date == day)
             .order_by(SystemTaskTemplate.title)
         )
     ).all()
+
     latest_occurrence = (
         select(
-            SystemTaskOccurrence.template_id,
-            func.max(SystemTaskOccurrence.occurrence_date).label("latest_date"),
+            Task.system_template_origin_id.label("template_id"),
+            Task.system_task_slot_id.label("slot_id"),
+            func.max(local_occurrence_date).label("latest_date"),
         )
-        .where(SystemTaskOccurrence.user_id == user_id)
-        .where(SystemTaskOccurrence.occurrence_date <= day)
-        .group_by(SystemTaskOccurrence.template_id)
+        .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+        .where(Task.assigned_to == user_id)
+        .where(Task.system_template_origin_id.is_not(None))
+        .where(Task.origin_run_at.is_not(None))
+        .where(local_occurrence_date <= day)
+        .group_by(Task.system_template_origin_id, Task.system_task_slot_id)
     ).subquery()
 
-    occ_overdue_rows = (
+    system_overdue_rows = (
         await db.execute(
-            select(SystemTaskOccurrence, SystemTaskTemplate)
-            .join(latest_occurrence, SystemTaskOccurrence.template_id == latest_occurrence.c.template_id)
-            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskOccurrence.occurrence_date == latest_occurrence.c.latest_date)
-            .where(SystemTaskOccurrence.occurrence_date < day)
-            .where(SystemTaskOccurrence.status == OPEN)
-            .order_by(SystemTaskOccurrence.occurrence_date.desc(), SystemTaskTemplate.title)
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .join(
+                latest_occurrence,
+                and_(
+                    Task.system_template_origin_id == latest_occurrence.c.template_id,
+                    Task.system_task_slot_id.is_not_distinct_from(latest_occurrence.c.slot_id),
+                    local_occurrence_date == latest_occurrence.c.latest_date,
+                ),
+            )
+            .where(Task.assigned_to == user_id)
+            .where(local_occurrence_date < day)
+            .where(Task.status.not_in(done_like_statuses))
+            .order_by(local_occurrence_date.desc(), SystemTaskTemplate.title)
         )
     ).all()
 
-    overdue_rows: list[tuple[SystemTaskOccurrence, SystemTaskTemplate]] = []
-    for occ, tmpl in occ_overdue_rows:
-        overdue_rows.append((occ, tmpl))
-
-    template_ids = list({tmpl.id for _, tmpl in occ_today_rows} | {tmpl.id for _, tmpl in overdue_rows})
+    template_ids = list({tmpl.id for _, tmpl, _ in system_today_rows} | {tmpl.id for _, tmpl, _ in system_overdue_rows})
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
     alignment_user_ids = {uid for ids in alignment_users_map.values() for uid in ids}
     alignment_user_map: dict[uuid.UUID, str] = {}
@@ -2612,8 +2627,8 @@ async def _daily_report_rows_for_user(
             alignment_user_map[u.id] = _initials(label)
 
     dept_ids = {t.department_id for t in daily_tasks if t.department_id}
-    dept_ids |= {tmpl.department_id for _, tmpl in occ_today_rows if tmpl.department_id}
-    dept_ids |= {tmpl.department_id for _, tmpl in overdue_rows if tmpl.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl, _ in system_today_rows if tmpl.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl, _ in system_overdue_rows if tmpl.department_id}
     department_map: dict[uuid.UUID, Department] = {}
     if dept_ids:
         departments = (
@@ -2737,11 +2752,19 @@ async def _daily_report_rows_for_user(
                 ]
             )
 
-    def add_system_row(container: list[list[str]], occ: SystemTaskOccurrence, tmpl: SystemTaskTemplate) -> None:
-        base_date = occ.occurrence_date
-        acted_date = occ.acted_at.date() if occ.acted_at else None
+    all_system_task_ids = [task.id for task, _, _ in (system_today_rows + system_overdue_rows)]
+    system_comment_map = await _user_comments_for_tasks(db, all_system_task_ids, user_id)
+
+    def _to_occurrence_status(task_status: str | None) -> str:
+        if task_status in done_like_statuses:
+            return task_status or "OPEN"
+        return "OPEN"
+
+    def add_system_row(container: list[list[str]], task: Task, tmpl: SystemTaskTemplate, occurrence_day: date) -> None:
+        base_date = occurrence_day
+        acted_date = task.completed_at.date() if task.completed_at else None
         tyo = _tyo_label(base_date, acted_date, day)
-        period = _resolve_period(tmpl.finish_period, occ.occurrence_date)
+        period = _resolve_period(tmpl.finish_period, occurrence_day)
         bz, koha_bz = alignment_values(tmpl)
         container.append(
             [
@@ -2752,21 +2775,21 @@ async def _daily_report_rows_for_user(
                 department_label(tmpl.department_id, tmpl.scope, False),
                 tmpl.title or "-",
                 tmpl.description or "",
-                _format_system_status(occ.status).upper(),
+                _format_system_status(_to_occurrence_status(task.status)).upper(),
                 bz,
                 koha_bz,
                 tyo,
-                occ.comment or "",
+                system_comment_map.get(task.id) or "",
             ]
         )
 
-    for occ, tmpl in overdue_rows:
-        target = system_pm_rows if _resolve_period(tmpl.finish_period, occ.occurrence_date) == "PM" else system_am_rows
-        add_system_row(target, occ, tmpl)
+    for task, tmpl, occurrence_day in system_overdue_rows:
+        target = system_pm_rows if _resolve_period(tmpl.finish_period, occurrence_day) == "PM" else system_am_rows
+        add_system_row(target, task, tmpl, occurrence_day)
 
-    for occ, tmpl in occ_today_rows:
-        target = system_pm_rows if _resolve_period(tmpl.finish_period, occ.occurrence_date) == "PM" else system_am_rows
-        add_system_row(target, occ, tmpl)
+    for task, tmpl, occurrence_day in system_today_rows:
+        target = system_pm_rows if _resolve_period(tmpl.finish_period, occurrence_day) == "PM" else system_am_rows
+        add_system_row(target, task, tmpl, occurrence_day)
 
     fast_rows.sort(key=lambda item: (item[0], item[1]))
     rows.extend([row for _, __, row in fast_rows])

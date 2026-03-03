@@ -5,8 +5,7 @@ from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
-from sqlalchemy import and_, delete, insert, or_, select, text, cast, tuple_, String as SQLString
-from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy import and_, delete, insert, or_, select, text, cast, Date as SQLDate, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -24,26 +23,27 @@ from app.models.enums import (
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
-from app.models.system_task_occurrence import SystemTaskOccurrence
-from app.models.system_task_occurrence_override import SystemTaskOccurrenceOverride
 from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.user import User
 from app.schemas.system_task import SystemTaskOut
 from app.schemas.task import TaskAssigneeOut
 from app.schemas.system_task_template import (
+    SystemTaskTemplateAssigneeSlotIn,
+    SystemTaskTemplateAssigneeSlotOut,
     SystemTaskTemplateCreate, SystemTaskTemplateOut,
-    SystemTaskTemplateOut,
     SystemTaskTemplateUpdate,
 )
 from app.services.system_task_schedule import (
+    first_run_at,
     matches_template_date,
     next_occurrence_date,
     previous_occurrence_date,
     should_reopen_system_task,
 )
-from app.services.system_task_occurrences import DONE, NOT_DONE, OPEN, SKIPPED, ensure_occurrences_in_range
+from app.services.system_task_instances import ensure_slots_initialized, ensure_task_instances_in_range
 
 
 router = APIRouter()
@@ -82,6 +82,25 @@ async def _validate_alignment_user_ids(db: AsyncSession, user_ids: list[uuid.UUI
     # stable unique
     seen: set[uuid.UUID] = set()
     return [uid for uid in user_ids if not (uid in seen or seen.add(uid))]
+
+
+async def _validate_slot_user_ids(
+    db: AsyncSession,
+    slots: list[SystemTaskTemplateAssigneeSlotIn] | None,
+) -> None:
+    if not slots:
+        return
+    all_user_ids: list[uuid.UUID] = []
+    for slot in slots:
+        all_user_ids.append(slot.primary_user_id)
+        if slot.zv1_user_id:
+            all_user_ids.append(slot.zv1_user_id)
+        if slot.zv2_user_id:
+            all_user_ids.append(slot.zv2_user_id)
+    expected = set(all_user_ids)
+    users = (await db.execute(select(User.id).where(User.id.in_(expected)))).scalars().all()
+    if len(set(users)) != len(expected):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee slot user not found")
 
 
 async def _assignees_for_tasks(
@@ -140,112 +159,100 @@ async def _replace_task_assignees(
         await db.execute(insert(TaskAssignee), values)
 
 
+def _dedupe_assignee_ids(values: list[uuid.UUID] | None) -> list[uuid.UUID]:
+    seen: set[uuid.UUID] = set()
+    return [uid for uid in (values or []) if not (uid in seen or seen.add(uid))]
+
+
+async def _slots_for_template(
+    db: AsyncSession, template_id: uuid.UUID
+) -> list[SystemTaskTemplateAssigneeSlot]:
+    return (
+        await db.execute(
+            select(SystemTaskTemplateAssigneeSlot)
+            .where(SystemTaskTemplateAssigneeSlot.template_id == template_id)
+            .order_by(SystemTaskTemplateAssigneeSlot.created_at.asc())
+        )
+    ).scalars().all()
+
+
+def _slot_to_out(slot: SystemTaskTemplateAssigneeSlot) -> SystemTaskTemplateAssigneeSlotOut:
+    return SystemTaskTemplateAssigneeSlotOut(
+        id=slot.id,
+        primary_user_id=slot.primary_user_id,
+        zv1_user_id=slot.zv1_user_id,
+        zv2_user_id=slot.zv2_user_id,
+        is_active=slot.is_active,
+    )
+
+
+async def _sync_template_slots_from_payload(
+    db: AsyncSession,
+    *,
+    template: SystemTaskTemplate,
+    assignee_slots: list[SystemTaskTemplateAssigneeSlotIn] | None,
+    assignee_ids: list[uuid.UUID] | None,
+) -> list[SystemTaskTemplateAssigneeSlot]:
+    await ensure_slots_initialized(db)
+    if assignee_slots is None:
+        if assignee_ids is None:
+            return await _slots_for_template(db, template.id)
+        assignee_slots = [
+            SystemTaskTemplateAssigneeSlotIn(primary_user_id=uid, zv1_user_id=None, zv2_user_id=None)
+            for uid in assignee_ids
+        ]
+
+    existing = {slot.id: slot for slot in await _slots_for_template(db, template.id)}
+    keep_ids: set[uuid.UUID] = set()
+    now = datetime.now(timezone.utc)
+    for item in assignee_slots:
+        if item.id and item.id in existing:
+            slot = existing[item.id]
+            keep_ids.add(slot.id)
+            slot.primary_user_id = item.primary_user_id
+            slot.zv1_user_id = item.zv1_user_id
+            slot.zv2_user_id = item.zv2_user_id
+            if item.is_active is not None:
+                slot.is_active = item.is_active
+            continue
+        slot = SystemTaskTemplateAssigneeSlot(
+            id=item.id or uuid.uuid4(),
+            template_id=template.id,
+            primary_user_id=item.primary_user_id,
+            zv1_user_id=item.zv1_user_id,
+            zv2_user_id=item.zv2_user_id,
+            next_run_at=first_run_at(template, now),
+            is_active=True if item.is_active is None else item.is_active,
+        )
+        db.add(slot)
+        keep_ids.add(slot.id)
+    for existing_slot in existing.values():
+        if existing_slot.id not in keep_ids:
+            await db.delete(existing_slot)
+    await db.flush()
+    return await _slots_for_template(db, template.id)
+
+
 async def _sync_task_for_template(
     *,
     db: AsyncSession,
     template: SystemTaskTemplate,
     creator_id: uuid.UUID | None,
 ) -> list[Task]:
-    """Sync tasks for all assignees of a template. Returns list of tasks."""
-    now = datetime.now(timezone.utc)
-    active_value = _task_is_active(template)
-    
-    # Get all assignees from the array (safely handle NULL or missing field)
-    assignee_ids = getattr(template, 'assignee_ids', None) or []
-    if not assignee_ids and template.default_assignee_id:
-        assignee_ids = [template.default_assignee_id]
-    
-    if not assignee_ids:
-        return []
-    
-    tasks = []
-    for assignee_id in assignee_ids:
-        # Get user to determine department
-        user = (
-            await db.execute(select(User).where(User.id == assignee_id))
-        ).scalar_one_or_none()
-        
-        if not user:
-            continue
-        
-        # Check if task exists for this user
-        task = (
-            await db.execute(
-                select(Task)
-                .where(
-                    Task.system_template_origin_id == template.id,
-                    Task.assigned_to == assignee_id
-                )
-                .order_by(Task.created_at.desc())
-            )
-        ).scalars().first()
-        
-        if task is None:
-            task = Task(
-                title=template.title,
-                description=template.description,
-                internal_notes=template.internal_notes,
-                department_id=user.department_id or template.department_id,
-                assigned_to=assignee_id,
-                created_by=creator_id,
-                status=_enum_value(TaskStatus.TODO),
-                priority=_enum_value(template.priority or TaskPriority.NORMAL),
-                finish_period=_enum_value(template.finish_period),
-                system_template_origin_id=template.id,
-                start_date=now,
-                is_active=active_value,
-            )
-            db.add(task)
-            try:
-                await db.flush()
-            except Exception as e:
-                # Check if it's a unique constraint violation
-                error_msg = str(e).lower()
-                if 'unique' in error_msg or 'duplicate' in error_msg:
-                    # Task might already exist, try to fetch it again
-                    task = (
-                        await db.execute(
-                            select(Task)
-                            .where(
-                                Task.system_template_origin_id == template.id,
-                                Task.assigned_to == assignee_id
-                            )
-                            .order_by(Task.created_at.desc())
-                        )
-                    ).scalars().first()
-                    if task is None:
-                        raise  # Re-raise if we still can't find it
-                else:
-                    raise  # Re-raise if it's a different error
-            
-            # Add single assignee to TaskAssignee table (only if not already exists)
-            existing_assignee = (
-                await db.execute(
-                    select(TaskAssignee)
-                    .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == assignee_id)
-                )
-            ).scalar_one_or_none()
-            if not existing_assignee:
-                await db.execute(
-                    insert(TaskAssignee),
-                    [{"task_id": task.id, "user_id": assignee_id}],
-                )
-        else:
-            # Update existing task
-            task.title = template.title
-            task.description = template.description
-            task.internal_notes = template.internal_notes
-            task.department_id = user.department_id or template.department_id
-            task.finish_period = _enum_value(template.finish_period)
-            task.is_active = active_value
-            task.priority = _enum_value(template.priority or TaskPriority.NORMAL)
-            if active_value and should_reopen_system_task(task, template, now):
-                task.status = _enum_value(TaskStatus.TODO)
-                task.completed_at = None
-        
-        tasks.append(task)
-    
-    return tasks
+    """Ensure template slots and upcoming generated task instances exist."""
+    del creator_id  # kept for old callers
+    await ensure_slots_initialized(db)
+    start = datetime.now(timezone.utc).date()
+    end = start + timedelta(days=max(int(getattr(template, "lookahead", 14) or 14), 1))
+    await ensure_task_instances_in_range(db, start=start, end=end)
+    return (
+        await db.execute(
+            select(Task)
+            .where(Task.system_template_origin_id == template.id)
+            .where(Task.origin_run_at.is_not(None))
+            .order_by(Task.origin_run_at.desc())
+        )
+    ).scalars().all()
 
 
 def _task_row_to_out(
@@ -358,6 +365,7 @@ async def list_system_tasks(
 
     template_ids = [t.id for t in templates]
     base_date = occurrence_date or date.today()
+    await ensure_task_instances_in_range(db, start=base_date, end=base_date)
     occurrence_date_map: dict[uuid.UUID, date] = {
         tmpl.id: (base_date if matches_template_date(tmpl, base_date) else _previous_occurrence_date(tmpl, base_date))
         for tmpl in templates
@@ -367,33 +375,6 @@ async def list_system_tasks(
         for tmpl in templates
     }
     effective_occurrence_date_map: dict[uuid.UUID, date] = dict(next_occurrence_date_map)
-    if user.id and template_ids:
-        override_rows = (
-            await db.execute(
-                select(
-                    SystemTaskOccurrenceOverride.template_id,
-                    SystemTaskOccurrenceOverride.source_occurrence_date,
-                    SystemTaskOccurrenceOverride.target_occurrence_date,
-                )
-                .where(SystemTaskOccurrenceOverride.user_id == user.id)
-                .where(SystemTaskOccurrenceOverride.template_id.in_(template_ids))
-                .where(
-                    tuple_(
-                        SystemTaskOccurrenceOverride.template_id,
-                        SystemTaskOccurrenceOverride.source_occurrence_date,
-                    ).in_(
-                        [
-                            (template_id, next_date)
-                            for template_id, next_date in next_occurrence_date_map.items()
-                        ]
-                    )
-                )
-            )
-        ).all()
-        for template_id, source_date, target_date in override_rows:
-            expected_source = next_occurrence_date_map.get(template_id)
-            if expected_source and expected_source == source_date:
-                effective_occurrence_date_map[template_id] = target_date
     # Start from templates and LEFT JOIN tasks to include templates without tasks
     task_stmt = (
         select(SystemTaskTemplate, Task)
@@ -468,31 +449,6 @@ async def list_system_tasks(
         ).all()
         user_comment_map = {task_id: comment for task_id, comment in comment_rows}
 
-    # Fetch occurrence statuses for the current user (for My View / per-user status)
-    occurrence_status_map: dict[uuid.UUID, str] = {}
-    if user.id and template_ids:
-        templates_by_date: dict[date, list[uuid.UUID]] = {}
-        for template_id, target_date in effective_occurrence_date_map.items():
-            templates_by_date.setdefault(target_date, []).append(template_id)
-
-        for target_date, date_template_ids in templates_by_date.items():
-            await ensure_occurrences_in_range(
-                db=db,
-                start=target_date,
-                end=target_date,
-                template_ids=date_template_ids,
-            )
-            occ_rows = (
-                await db.execute(
-                    select(SystemTaskOccurrence.template_id, SystemTaskOccurrence.status)
-                    .where(SystemTaskOccurrence.template_id.in_(date_template_ids))
-                    .where(SystemTaskOccurrence.user_id == user.id)
-                    .where(SystemTaskOccurrence.occurrence_date == target_date)
-                )
-            ).all()
-            for template_id, status_value in occ_rows:
-                occurrence_status_map[template_id] = status_value
-
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
 
     # If filtering by user (My View), return individual tasks instead of grouped
@@ -511,15 +467,6 @@ async def list_system_tasks(
                 if assigned_user:
                     task_assignees = [_user_to_assignee(assigned_user)]
             
-            # Get occurrence status for this template and user
-            occ_status = occurrence_status_map.get(template.id)
-            if occ_status is None and user.id:
-                assignee_ids = getattr(template, "assignee_ids", None) or []
-                if not assignee_ids and template.default_assignee_id:
-                    assignee_ids = [template.default_assignee_id]
-                if user.id in assignee_ids:
-                    occ_status = OPEN
-            
             task_out = _task_row_to_out(
                 task,
                 template,
@@ -530,7 +477,6 @@ async def list_system_tasks(
                 occurrence_date=occurrence_date_map.get(template.id),
                 next_occurrence_date_value=next_occurrence_date_map.get(template.id),
                 effective_occurrence_date=effective_occurrence_date_map.get(template.id),
-                occurrence_status=occ_status,
             )
             # For individual tasks, department_ids is just the task's department
             task_out.department_ids = [task.department_id] if task.department_id else None
@@ -573,14 +519,6 @@ async def list_system_tasks(
         
         # Use the first task for the main response, but include all department_ids and all assignees
         first_task, _ = task_list[0]
-        # Get occurrence status for the current user (if viewing their own tasks)
-        occ_status = occurrence_status_map.get(template.id) if user.id else None
-        if occ_status is None and user.id:
-            assignee_ids = getattr(template, "assignee_ids", None) or []
-            if not assignee_ids and template.default_assignee_id:
-                assignee_ids = [template.default_assignee_id]
-            if user.id in assignee_ids:
-                occ_status = OPEN
         task_out = _task_row_to_out(
             first_task,
             template,
@@ -591,7 +529,6 @@ async def list_system_tasks(
             occurrence_date=occurrence_date_map.get(template.id),
             next_occurrence_date_value=next_occurrence_date_map.get(template.id),
             effective_occurrence_date=effective_occurrence_date_map.get(template.id),
-            occurrence_status=occ_status,
         )
         # Add department_ids to the response
         task_out.department_ids = department_ids if department_ids else None
@@ -694,6 +631,14 @@ async def list_system_task_templates(
     for tid, uid in alignment_user_rows:
         alignment_users_map.setdefault(tid, []).append(uid)
 
+    await ensure_slots_initialized(db)
+    slot_rows = (
+        await db.execute(select(SystemTaskTemplateAssigneeSlot).where(SystemTaskTemplateAssigneeSlot.template_id.in_(template_ids)))
+    ).scalars().all() if template_ids else []
+    slots_map: dict[uuid.UUID, list[SystemTaskTemplateAssigneeSlotOut]] = {}
+    for slot in slot_rows:
+        slots_map.setdefault(slot.template_id, []).append(_slot_to_out(slot))
+
     return [
         SystemTaskTemplateOut(
             id=t.id,
@@ -709,12 +654,19 @@ async def list_system_task_templates(
             days_of_week=t.days_of_week,
             day_of_month=t.day_of_month,
             month_of_year=t.month_of_year,
+            timezone=t.timezone or "Europe/Tirane",
+            due_time=t.due_time,
+            lookahead=t.lookahead,
+            interval=t.interval,
+            apply_from=t.apply_from,
+            duration_days=t.duration_days,
             priority=TaskPriority(t.priority) if t.priority else None,
             finish_period=TaskFinishPeriod(t.finish_period) if t.finish_period else None,
             requires_alignment=bool(getattr(t, "requires_alignment", False)),
             alignment_time=getattr(t, "alignment_time", None),
             alignment_roles=roles_map.get(t.id),
             alignment_user_ids=alignment_users_map.get(t.id),
+            assignee_slots=slots_map.get(t.id, []),
             is_active=t.is_active,
             created_at=t.created_at,
         )
@@ -735,7 +687,7 @@ async def set_system_task_occurrence_status(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> dict:
-    allowed = {OPEN, DONE, NOT_DONE, SKIPPED}
+    allowed = {"OPEN", "DONE", "NOT_DONE", "SKIPPED"}
     if payload.status not in allowed:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid status")
 
@@ -771,70 +723,58 @@ async def set_system_task_occurrence_status(
             detail="You are not assigned to this system task"
         )
 
-    # Ensure the occurrence row exists (idempotent).
-    await ensure_occurrences_in_range(db=db, start=payload.occurrence_date, end=payload.occurrence_date, template_ids=[tmpl.id])
-
-    occ = (
-        await db.execute(
-            select(SystemTaskOccurrence)
-            .where(SystemTaskOccurrence.template_id == tmpl.id)
-            .where(SystemTaskOccurrence.user_id == user.id)
-            .where(SystemTaskOccurrence.occurrence_date == payload.occurrence_date)
-        )
-    ).scalar_one_or_none()
-    if occ is None:
-        fallback_date = previous_occurrence_date(tmpl, payload.occurrence_date)
-        await ensure_occurrences_in_range(
-            db=db,
-            start=fallback_date,
-            end=fallback_date,
-            template_ids=[tmpl.id],
-        )
-        occ = (
-            await db.execute(
-                select(SystemTaskOccurrence)
-                .where(SystemTaskOccurrence.template_id == tmpl.id)
-                .where(SystemTaskOccurrence.user_id == user.id)
-                .where(SystemTaskOccurrence.occurrence_date == fallback_date)
-            )
-        ).scalar_one_or_none()
-    if occ is None:
-        # This shouldn't happen if ensure_occurrences_in_range worked, but handle it gracefully
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Occurrence not available for this user. Please refresh and try again.",
-        )
-
-    now = datetime.now(timezone.utc)
-    occ.status = payload.status
-    occ.comment = payload.comment
-    occ.acted_at = None if payload.status == OPEN else now
-
-    # Also update the corresponding Task status if it exists
-    # Find the task for this user and template
+    await ensure_task_instances_in_range(db=db, start=payload.occurrence_date, end=payload.occurrence_date)
+    task_local_date = cast(func.timezone(tmpl.timezone or "Europe/Tirane", Task.origin_run_at), SQLDate)
     task = (
         await db.execute(
             select(Task)
             .where(Task.system_template_origin_id == tmpl.id)
             .where(Task.assigned_to == user.id)
+            .where(task_local_date == payload.occurrence_date)
             .order_by(Task.created_at.desc())
         )
     ).scalars().first()
-    
-    if task:
-        # Map occurrence status to task status
-        if payload.status == DONE:
-            task.status = TaskStatus.DONE
-            task.completed_at = now
-        elif payload.status == NOT_DONE:
-            task.status = TaskStatus.NOT_DONE
-            task.completed_at = now
-        elif payload.status == SKIPPED:
-            task.status = TaskStatus.NOT_DONE  # Map SKIPPED to NOT_DONE for tasks
-            task.completed_at = now
-        elif payload.status == OPEN:
-            task.status = TaskStatus.TODO
-            task.completed_at = None
+    if task is None:
+        fallback_date = previous_occurrence_date(tmpl, payload.occurrence_date)
+        await ensure_task_instances_in_range(db=db, start=fallback_date, end=fallback_date)
+        task = (
+            await db.execute(
+                select(Task)
+                .where(Task.system_template_origin_id == tmpl.id)
+                .where(Task.assigned_to == user.id)
+                .where(task_local_date == fallback_date)
+                .order_by(Task.created_at.desc())
+            )
+        ).scalars().first()
+    if task is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Task instance not available for this user/date. Please refresh and try again.",
+        )
+
+    now = datetime.now(timezone.utc)
+    if payload.status == "DONE":
+        task.status = TaskStatus.DONE
+        task.completed_at = now
+    elif payload.status in ("NOT_DONE", "SKIPPED"):
+        task.status = TaskStatus.NOT_DONE
+        task.completed_at = now
+    else:
+        task.status = TaskStatus.TODO
+        task.completed_at = None
+
+    if payload.comment is not None:
+        user_comment = (
+            await db.execute(
+                select(TaskUserComment)
+                .where(TaskUserComment.task_id == task.id)
+                .where(TaskUserComment.user_id == user.id)
+            )
+        ).scalar_one_or_none()
+        if user_comment is None:
+            db.add(TaskUserComment(task_id=task.id, user_id=user.id, comment=payload.comment))
+        else:
+            user_comment.comment = payload.comment
 
     await db.commit()
     return {"ok": True}
@@ -875,139 +815,45 @@ async def override_system_task_occurrence_date(
     if payload.source_occurrence_date == payload.target_occurrence_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target date must be different from source date")
 
-    await ensure_occurrences_in_range(
+    await ensure_task_instances_in_range(
         db=db,
         start=min(payload.source_occurrence_date, payload.target_occurrence_date),
         end=max(payload.source_occurrence_date, payload.target_occurrence_date),
-        template_ids=[tmpl.id],
     )
 
-    source_occ_guard = (
-        await db.execute(
-            select(SystemTaskOccurrence)
-            .where(SystemTaskOccurrence.template_id == tmpl.id)
-            .where(SystemTaskOccurrence.user_id == user.id)
-            .where(SystemTaskOccurrence.occurrence_date == payload.source_occurrence_date)
-        )
-    ).scalar_one_or_none()
-    if source_occ_guard is not None and source_occ_guard.status == DONE:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Done system tasks cannot be edited")
-
-    upsert_stmt = pg_insert(SystemTaskOccurrenceOverride).values(
-        {
-            "id": uuid.uuid4(),
-            "template_id": tmpl.id,
-            "user_id": user.id,
-            "source_occurrence_date": payload.source_occurrence_date,
-            "target_occurrence_date": payload.target_occurrence_date,
-        }
-    )
-    upsert_stmt = upsert_stmt.on_conflict_do_update(
-        constraint="uq_system_task_occurrence_override",
-        set_={
-            "target_occurrence_date": payload.target_occurrence_date,
-            "updated_at": datetime.now(timezone.utc),
-        },
-    )
-    await db.execute(upsert_stmt)
-
-    source_occ = (
-        await db.execute(
-            select(SystemTaskOccurrence)
-            .where(SystemTaskOccurrence.template_id == tmpl.id)
-            .where(SystemTaskOccurrence.user_id == user.id)
-            .where(SystemTaskOccurrence.occurrence_date == payload.source_occurrence_date)
-        )
-    ).scalar_one_or_none()
-    target_occ = (
-        await db.execute(
-            select(SystemTaskOccurrence)
-            .where(SystemTaskOccurrence.template_id == tmpl.id)
-            .where(SystemTaskOccurrence.user_id == user.id)
-            .where(SystemTaskOccurrence.occurrence_date == payload.target_occurrence_date)
-        )
-    ).scalar_one_or_none()
-    now = datetime.now(timezone.utc)
-    if source_occ is None:
-        source_insert = pg_insert(SystemTaskOccurrence).values(
-            {
-                "id": uuid.uuid4(),
-                "template_id": tmpl.id,
-                "user_id": user.id,
-                "occurrence_date": payload.source_occurrence_date,
-                "status": SKIPPED,
-                "acted_at": now,
-                "created_at": now,
-                "updated_at": now,
-            }
-        )
-        source_insert = source_insert.on_conflict_do_update(
-            constraint="uq_system_task_occurrence",
-            set_={"status": SKIPPED, "acted_at": now, "updated_at": now},
-        )
-        await db.execute(source_insert)
-    if target_occ is None:
-        target_insert = pg_insert(SystemTaskOccurrence).values(
-            {
-                "id": uuid.uuid4(),
-                "template_id": tmpl.id,
-                "user_id": user.id,
-                "occurrence_date": payload.target_occurrence_date,
-                "status": OPEN,
-                "acted_at": None,
-                "created_at": now,
-                "updated_at": now,
-            }
-        )
-        target_insert = target_insert.on_conflict_do_update(
-            constraint="uq_system_task_occurrence",
-            set_={"status": OPEN, "acted_at": None, "updated_at": now},
-        )
-        await db.execute(target_insert)
-
-    source_occ = (
-        await db.execute(
-            select(SystemTaskOccurrence)
-            .where(SystemTaskOccurrence.template_id == tmpl.id)
-            .where(SystemTaskOccurrence.user_id == user.id)
-            .where(SystemTaskOccurrence.occurrence_date == payload.source_occurrence_date)
-        )
-    ).scalar_one_or_none()
-    target_occ = (
-        await db.execute(
-            select(SystemTaskOccurrence)
-            .where(SystemTaskOccurrence.template_id == tmpl.id)
-            .where(SystemTaskOccurrence.user_id == user.id)
-            .where(SystemTaskOccurrence.occurrence_date == payload.target_occurrence_date)
-        )
-    ).scalar_one_or_none()
-
-    if source_occ is not None:
-        source_occ.status = SKIPPED
-        source_occ.acted_at = now
-    if target_occ is not None:
-        target_occ.status = OPEN
-        target_occ.acted_at = None
-
+    task_local_date = cast(func.timezone(tmpl.timezone or "Europe/Tirane", Task.origin_run_at), SQLDate)
     task = (
         await db.execute(
             select(Task)
-            .where(Task.system_template_origin_id == tmpl.id, Task.assigned_to == user.id)
+            .where(Task.system_template_origin_id == tmpl.id)
+            .where(Task.assigned_to == user.id)
+            .where(task_local_date == payload.source_occurrence_date)
             .order_by(Task.created_at.desc())
         )
     ).scalars().first()
-    if task is None:
+    if task is None and user.role in (UserRole.ADMIN, UserRole.MANAGER):
         task = (
             await db.execute(
                 select(Task)
                 .where(Task.system_template_origin_id == tmpl.id)
+                .where(task_local_date == payload.source_occurrence_date)
                 .order_by(Task.created_at.desc())
             )
         ).scalars().first()
 
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found for template")
+    if task.status == TaskStatus.DONE:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Done system tasks cannot be edited")
 
+    old_due_date = task.due_date or task.origin_run_at or task.start_date
+    if old_due_date is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task does not have a date to move")
+    day_shift = (payload.target_occurrence_date - payload.source_occurrence_date).days
+    new_due_date = old_due_date + timedelta(days=day_shift)
+    if task.due_date is not None and new_due_date != task.due_date and task.original_due_date is None:
+        task.original_due_date = task.due_date
+    task.due_date = new_due_date
     task.status = TaskStatus.TODO
     task.completed_at = None
 
@@ -1031,7 +877,6 @@ async def override_system_task_occurrence_date(
         occurrence_date=payload.source_occurrence_date,
         next_occurrence_date_value=payload.source_occurrence_date,
         effective_occurrence_date=payload.target_occurrence_date,
-        occurrence_status=OPEN,
     )
 
 
@@ -1066,10 +911,13 @@ async def create_system_task_template(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid weekday")
         days_of_week = cleaned_days
 
+    assignee_slots = payload.assignee_slots
+    await _validate_slot_user_ids(db, assignee_slots)
     assignee_ids = None
-    if payload.assignee_ids is not None:
-        seen: set[uuid.UUID] = set()
-        assignee_ids = [uid for uid in payload.assignee_ids if not (uid in seen or seen.add(uid))]
+    if assignee_slots is not None:
+        assignee_ids = _dedupe_assignee_ids([slot.primary_user_id for slot in assignee_slots])
+    elif payload.assignee_ids is not None:
+        assignee_ids = _dedupe_assignee_ids(payload.assignee_ids)
     elif payload.default_assignee_id is not None:
         assignee_ids = [payload.default_assignee_id]
 
@@ -1151,6 +999,12 @@ async def create_system_task_template(
         days_of_week=days_of_week,
         day_of_month=payload.day_of_month,
         month_of_year=payload.month_of_year,
+        timezone=payload.timezone or "Europe/Tirane",
+        due_time=payload.due_time or datetime.strptime("09:00", "%H:%M").time(),
+        lookahead=payload.lookahead or 14,
+        interval=payload.interval or 1,
+        apply_from=payload.apply_from,
+        duration_days=payload.duration_days or 1,
         priority=_enum_value(priority_value),
         finish_period=_enum_value(payload.finish_period),
         requires_alignment=payload.requires_alignment if payload.requires_alignment is not None else False,
@@ -1160,6 +1014,12 @@ async def create_system_task_template(
 
     db.add(template)
     await db.flush()
+    await _sync_template_slots_from_payload(
+        db,
+        template=template,
+        assignee_slots=assignee_slots,
+        assignee_ids=assignee_ids,
+    )
 
     # Alignment roles/users. Stored on the template (applies to future occurrences).
     if payload.requires_alignment:
@@ -1306,7 +1166,7 @@ async def update_system_task_template(
     fields_set = payload.__fields_set__
     scope_set = "scope" in fields_set
     department_set = "department_id" in fields_set
-    assignee_set = "default_assignee_id" in fields_set or "assignee_ids" in fields_set
+    assignee_set = "default_assignee_id" in fields_set or "assignee_ids" in fields_set or "assignee_slots" in fields_set
     days_set = "days_of_week" in fields_set or "day_of_week" in fields_set
     schedule_fields_set = (
         "frequency" in fields_set
@@ -1345,10 +1205,13 @@ async def update_system_task_template(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid weekday")
         days_of_week = cleaned_days
 
+    assignee_slots = payload.assignee_slots if "assignee_slots" in fields_set else None
+    await _validate_slot_user_ids(db, assignee_slots)
     assignee_ids = None
-    if "assignee_ids" in fields_set:
-        seen: set[uuid.UUID] = set()
-        assignee_ids = [uid for uid in (payload.assignee_ids or []) if not (uid in seen or seen.add(uid))]
+    if assignee_slots is not None:
+        assignee_ids = _dedupe_assignee_ids([slot.primary_user_id for slot in assignee_slots])
+    elif "assignee_ids" in fields_set:
+        assignee_ids = _dedupe_assignee_ids(payload.assignee_ids or [])
     elif "default_assignee_id" in fields_set and payload.default_assignee_id is not None:
         assignee_ids = [payload.default_assignee_id]
     elif assignee_set:
@@ -1457,6 +1320,18 @@ async def update_system_task_template(
         template.day_of_month = payload.day_of_month
     if payload.month_of_year is not None:
         template.month_of_year = payload.month_of_year
+    if "timezone" in fields_set and payload.timezone is not None:
+        template.timezone = payload.timezone
+    if "due_time" in fields_set and payload.due_time is not None:
+        template.due_time = payload.due_time
+    if "lookahead" in fields_set and payload.lookahead is not None:
+        template.lookahead = payload.lookahead
+    if "interval" in fields_set and payload.interval is not None:
+        template.interval = payload.interval
+    if "apply_from" in fields_set:
+        template.apply_from = payload.apply_from
+    if "duration_days" in fields_set and payload.duration_days is not None:
+        template.duration_days = payload.duration_days
     if payload.priority is not None:
         template.priority = _enum_value(payload.priority)
     if "finish_period" in fields_set:
@@ -1493,6 +1368,13 @@ async def update_system_task_template(
                 )
 
     await db.flush()
+    if assignee_set:
+        await _sync_template_slots_from_payload(
+            db,
+            template=template,
+            assignee_slots=assignee_slots,
+            assignee_ids=assignee_ids,
+        )
     tasks = await _sync_task_for_template(db=db, template=template, creator_id=user.id)
     await db.commit()
     await db.refresh(template)
