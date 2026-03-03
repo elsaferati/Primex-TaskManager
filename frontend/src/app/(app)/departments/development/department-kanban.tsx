@@ -2118,15 +2118,7 @@ export default function DepartmentKanban() {
           // Skip if already in today's tasks
           if (todayTaskIds.has(templateId)) return false
           // Only include if it's in overdue list
-          if (!overdueSystemTemplateIds.has(templateId)) return false
-
-          // Check if next occurrence date has passed
-          const nextOccurrence = getNextOccurrenceDate(t, todayDate)
-          const nextOccurrenceKey = dayKey(nextOccurrence)
-          const todayKey = dayKey(todayDate)
-
-          // Only show if next occurrence is in the past (overdue)
-          return nextOccurrenceKey < todayKey
+          return overdueSystemTemplateIds.has(templateId)
         })
 
         return [...todayTasks, ...overdueTasks]
@@ -7206,6 +7198,7 @@ export default function DepartmentKanban() {
                         const statusValue = templateId ? (systemOccurrenceStatusByTemplate.get(templateId) ?? task.status ?? null) : (task.status ?? null)
                         const statusLabel = formatSystemOccurrenceStatus(statusValue)
                         const isDoneStatus = String(statusValue || "").toUpperCase() === "DONE"
+                        const isOverdue = templateId ? overdueSystemTemplateIds.has(templateId) : false
                         const assignees = systemAssigneeInitials(task)
                         const priorityValue = normalizePriority(task.priority)
                         const canEditSystemDate = canEditSystemDateRow(task, statusValue)
@@ -7237,6 +7230,11 @@ export default function DepartmentKanban() {
                                 <span>{task.title || "-"}</span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
+                                ) : null}
+                                {isOverdue ? (
+                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-rose-100 text-rose-700 border-rose-200">
+                                    Late
+                                  </Badge>
                                 ) : null}
                               </div>
                             </TableCell>
