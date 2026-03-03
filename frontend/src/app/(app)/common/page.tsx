@@ -585,8 +585,10 @@ export default function CommonViewPage() {
   const [openInfoId, setOpenInfoId] = React.useState<CommonType | null>(null)
   const infoPopoverRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
+  const [meetingAutoSelectEnabled, setMeetingAutoSelectEnabled] = React.useState(true)
   const [meetingTemplates, setMeetingTemplates] = React.useState<MeetingTemplate[]>([])
   const [activeMeetingId, setActiveMeetingId] = React.useState("")
+  const [deletingMeetingTemplate, setDeletingMeetingTemplate] = React.useState(false)
   const [meetingTemplateGroup, setMeetingTemplateGroup] = React.useState<"board" | "staff">("board")
   const [meetingTemplateTitle, setMeetingTemplateTitle] = React.useState("")
   const [meetingTemplateNote, setMeetingTemplateNote] = React.useState("")
@@ -1205,12 +1207,60 @@ export default function CommonViewPage() {
     reloadMeetingTemplates,
   ])
 
+  const deleteMeetingTemplate = React.useCallback(async () => {
+    if (!activeMeeting) return
+    const confirmed = window.confirm("Delete this checklist? This action cannot be undone.")
+    if (!confirmed) return
+    setDeletingMeetingTemplate(true)
+    try {
+      const res = await apiFetch(`/checklists/${activeMeeting.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete meeting checklist."
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          if (res.status === 404) {
+            detail = "Meeting checklist not found. Please refresh the page."
+          } else if (res.status === 403) {
+            detail = "Only admins and managers can delete meeting checklists."
+          } else {
+            detail = `Failed to delete meeting checklist (${res.status}).`
+          }
+        }
+        alert(detail)
+        return
+      }
+
+      const sameGroup = meetingTemplates.filter((meeting) => meeting.groupKey === activeMeeting.groupKey)
+      const currentIndex = sameGroup.findIndex((meeting) => meeting.id === activeMeeting.id)
+      const fallbackNext =
+        sameGroup.length > 1 ? sameGroup[currentIndex + 1] || sameGroup[currentIndex - 1] : null
+      const nextMeetingId = fallbackNext?.id || ""
+
+      setMeetingTemplates((prev) => prev.filter((meeting) => meeting.id !== activeMeeting.id))
+      if (nextMeetingId) {
+        setActiveMeetingId(nextMeetingId)
+        setMeetingAutoSelectEnabled(true)
+      } else {
+        setActiveMeetingId("")
+        setMeetingAutoSelectEnabled(false)
+      }
+    } catch (err) {
+      console.error("Failed to delete meeting checklist", err)
+      alert("Failed to delete meeting checklist. Please try again.")
+    } finally {
+      setDeletingMeetingTemplate(false)
+    }
+  }, [activeMeeting, apiFetch, meetingTemplates])
+
   React.useEffect(() => {
+    if (!meetingAutoSelectEnabled) return
     if (!meetingTemplates.length) return
     if (!activeMeetingId || !meetingTemplates.some((meeting) => meeting.id === activeMeetingId)) {
       setActiveMeetingId(meetingTemplates[0].id)
     }
-  }, [activeMeetingId, meetingTemplates])
+  }, [activeMeetingId, meetingAutoSelectEnabled, meetingTemplates])
 
   React.useEffect(() => {
     setEditingRowId(null)
@@ -4624,6 +4674,16 @@ export default function CommonViewPage() {
           opacity: 0.6;
           cursor: not-allowed;
         }
+        .btn-surface.danger {
+          background: #fff1f2;
+          color: #b91c1c;
+          border-color: #fecaca;
+        }
+        .btn-surface.danger:hover:not(:disabled) {
+          background: #ffe4e6;
+          color: #991b1b;
+          border-color: #fca5a5;
+        }
 
         .external-checklist-media {
           border: 1px solid #e2e8f0;
@@ -6694,6 +6754,16 @@ export default function CommonViewPage() {
                   {showMeetingTemplateForm ? "Hide form" : "New checklist"}
                 </button>
               ) : null}
+              {canEditMeetingTemplates ? (
+                <button
+                  className="btn-surface danger"
+                  type="button"
+                  onClick={() => void deleteMeetingTemplate()}
+                  disabled={!activeMeeting || deletingMeetingTemplate}
+                >
+                  {deletingMeetingTemplate ? "Deleting..." : "Delete checklist"}
+                </button>
+              ) : null}
               <button
                 className="btn-surface"
                 type="button"
@@ -6713,7 +6783,10 @@ export default function CommonViewPage() {
               <select
                 id="meeting-board-ga"
                 value={boardMeetingIds.includes(activeMeetingId) ? activeMeetingId : ""}
-                onChange={(e) => setActiveMeetingId(e.target.value)}
+                onChange={(e) => {
+                  setMeetingAutoSelectEnabled(true)
+                  setActiveMeetingId(e.target.value)
+                }}
               >
                 <option value="" disabled>
                   Select meeting
@@ -6730,7 +6803,10 @@ export default function CommonViewPage() {
               <select
                 id="meeting-staff-ga"
                 value={staffMeetingIds.includes(activeMeetingId) ? activeMeetingId : ""}
-                onChange={(e) => setActiveMeetingId(e.target.value)}
+                onChange={(e) => {
+                  setMeetingAutoSelectEnabled(true)
+                  setActiveMeetingId(e.target.value)
+                }}
               >
                 <option value="" disabled>
                   Select meeting

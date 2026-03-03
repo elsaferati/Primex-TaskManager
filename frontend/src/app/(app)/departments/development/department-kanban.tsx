@@ -2077,6 +2077,12 @@ export default function DepartmentKanban() {
       (viewMode === "mine" || (viewMode === "department" && selectedUserId !== "__all__")),
     [activeTab, allRange, selectedUserId, viewMode]
   )
+  const shouldIncludeOverdueSystemInAllToday = React.useMemo(
+    () =>
+      activeTab === "all" &&
+      (viewMode === "mine" || (viewMode === "department" && selectedUserId !== "__all__" && allRange === "today")),
+    [activeTab, allRange, selectedUserId, viewMode]
+  )
   const overdueTaskIds = React.useMemo(() => {
     const ids = new Set<string>()
     if (!shouldIncludeOverdueInAllToday) return ids
@@ -2087,18 +2093,24 @@ export default function DepartmentKanban() {
   }, [dailyReport?.tasks_overdue, shouldIncludeOverdueInAllToday])
   const overdueSystemTemplateIds = React.useMemo(() => {
     const ids = new Set<string>()
-    if (!shouldIncludeOverdueInAllToday) return ids
+    if (viewMode === "mine") {
+      for (const occ of dailyReport?.system_overdue || []) {
+        if (occ?.template_id) ids.add(occ.template_id)
+      }
+      return ids
+    }
+    if (!shouldIncludeOverdueSystemInAllToday) return ids
     for (const occ of dailyReport?.system_overdue || []) {
       if (occ?.template_id) ids.add(occ.template_id)
     }
     return ids
-  }, [dailyReport?.system_overdue, shouldIncludeOverdueInAllToday])
+  }, [dailyReport?.system_overdue, shouldIncludeOverdueSystemInAllToday, viewMode])
   const todaySystemTasks = React.useMemo(
     () => {
       const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
 
       // Include overdue system tasks in All -> Today for my view and selected-user department view.
-      if (shouldIncludeOverdueInAllToday && overdueSystemTemplateIds.size > 0) {
+      if (shouldIncludeOverdueSystemInAllToday && overdueSystemTemplateIds.size > 0) {
         const todayTaskIds = new Set(todayTasks.map((t) => t.template_id || t.id))
 
         const overdueTasks = visibleSystemTemplates.filter((t) => {
@@ -2122,7 +2134,7 @@ export default function DepartmentKanban() {
 
       return todayTasks
     },
-    [overdueSystemTemplateIds, shouldIncludeOverdueInAllToday, todayDate, visibleSystemTemplates]
+    [overdueSystemTemplateIds, shouldIncludeOverdueSystemInAllToday, todayDate, visibleSystemTemplates]
   )
   const systemOccurrenceStatusByTemplate = React.useMemo(() => {
     const map = new Map<string, string>()
@@ -3654,7 +3666,9 @@ export default function DepartmentKanban() {
   React.useEffect(() => {
     let cancelled = false
     const run = async () => {
-      if (activeTab !== "all") {
+      const shouldFetchDailyReport =
+        activeTab === "all" || (activeTab === "system" && viewMode === "mine")
+      if (!shouldFetchDailyReport) {
         setDailyReport(null)
         return
       }
@@ -3700,7 +3714,9 @@ export default function DepartmentKanban() {
   }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
 
   const refreshDailyReport = React.useCallback(async () => {
-    if (activeTab !== "all") return
+    const shouldFetchDailyReport =
+      activeTab === "all" || (activeTab === "system" && viewMode === "mine")
+    if (!shouldFetchDailyReport) return
     if (viewMode === "department" && selectedUserId === "__all__") return
     const targetUserId =
       viewMode === "department"
@@ -3957,8 +3973,25 @@ export default function DepartmentKanban() {
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
-    return visibleSystemTemplates.filter((t) => shouldShowTemplate(t, systemDate))
-  }, [showAllSystem, systemDate, visibleSystemTemplates])
+    if (viewMode !== "mine") {
+      return visibleSystemTemplates.filter((t) => shouldShowTemplate(t, systemDate))
+    }
+    const allowed = new Set<string>()
+    for (const t of visibleSystemTemplates) {
+      const templateId = t.template_id || t.id
+      if (
+        shouldShowTemplate(t, systemDate) ||
+        shouldShowTemplate(t, todayDate) ||
+        (templateId && overdueSystemTemplateIds.has(templateId))
+      ) {
+        allowed.add(templateId)
+      }
+    }
+    return visibleSystemTemplates.filter((t) => {
+      const templateId = t.template_id || t.id
+      return allowed.has(templateId)
+    })
+  }, [overdueSystemTemplateIds, showAllSystem, systemDate, todayDate, viewMode, visibleSystemTemplates])
 
   const noProjectBuckets = React.useMemo(() => {
     const normal: Task[] = []
