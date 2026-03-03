@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, insert, or_, select, text, cast, Date as SQLDate, func
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import joinedload, selectinload
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user, require_admin
@@ -419,7 +418,6 @@ async def list_system_tasks(
             select(Task)
             .where(Task.origin_run_at.is_not(None))
             .where(or_(*range_clauses))
-            .options(selectinload(Task.assignees).joinedload(TaskAssignee.user))
             .order_by(Task.is_active.desc().nullslast(), Task.created_at.desc().nullslast())
         )
         if assigned_to is not None:
@@ -463,14 +461,7 @@ async def list_system_tasks(
     # Return all tasks for each template (no de-duplication)
     # Also include templates that don't have tasks yet
     task_ids = [task.id for template, task in rows if task is not None]
-    assignee_map: dict[uuid.UUID, list[TaskAssigneeOut]] = {}
-    for task in filtered_tasks:
-        task_assignees: list[TaskAssigneeOut] = []
-        for ta in getattr(task, "assignees", []) or []:
-            if ta.user is None:
-                continue
-            task_assignees.append(_user_to_assignee(ta.user))
-        assignee_map[task.id] = task_assignees
+    assignee_map = await _assignees_for_tasks(db, task_ids)
 
     fallback_ids = [
         task.assigned_to
