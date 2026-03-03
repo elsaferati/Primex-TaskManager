@@ -36,6 +36,12 @@ class SystemTaskTemplate(Base):
     days_of_week: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)
     day_of_month: Mapped[int | None] = mapped_column(Integer)
     month_of_year: Mapped[int | None] = mapped_column(Integer)
+    timezone: Mapped[str] = mapped_column(String(64), nullable=False, server_default="Europe/Tirane")
+    due_time: Mapped[time] = mapped_column(Time, nullable=False, server_default="09:00:00")
+    lookahead: Mapped[int] = mapped_column(Integer, nullable=False, server_default="14")
+    interval: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    apply_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    duration_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
 
     priority: Mapped[str | None] = mapped_column(
         String(50), nullable=True, server_default="NORMAL"

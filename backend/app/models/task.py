@@ -40,6 +40,13 @@ class Task(Base):
     system_template_origin_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("system_task_templates.id")
     )
+    origin_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    system_task_slot_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("system_task_template_assignee_slots.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
     # Groups per-user copies of a single "logical" standalone task.
     # Used for multi-assignee standalone tasks (e.g. fast tasks and GA/KA note tasks without a project).
     fast_task_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)

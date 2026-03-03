@@ -29,6 +29,8 @@ class TaskOut(BaseModel):
     created_by: uuid.UUID | None = None
     ga_note_origin_id: uuid.UUID | None = None
     system_template_origin_id: uuid.UUID | None = None
+    origin_run_at: datetime | None = None
+    system_task_slot_id: uuid.UUID | None = None
     status: TaskStatus
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None

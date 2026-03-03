@@ -25,6 +25,7 @@ from app.models.project_prompt import ProjectPrompt
 from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.refresh_token import RefreshToken
 from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_occurrence_override import SystemTaskOccurrenceOverride
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
@@ -72,6 +73,7 @@ __all__ = [
     "VsWorkflowItem",
     "RefreshToken",
     "SystemTaskTemplate",
+    "SystemTaskTemplateAssigneeSlot",
     "SystemTaskOccurrence",
     "SystemTaskOccurrenceOverride",
     "SystemTaskTemplateAlignmentRole",

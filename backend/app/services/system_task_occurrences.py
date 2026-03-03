@@ -13,6 +13,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.services.system_task_schedule import matches_template_date
+from app.services.system_task_instances import ensure_task_instances_in_range
 
 
 OPEN = "OPEN"
@@ -69,10 +70,10 @@ async def ensure_occurrences_in_range(
     template_ids: list[uuid.UUID] | None = None,
 ) -> None:
     """
-    Ensure rows exist for all scheduled occurrences between [start, end] inclusive.
-
-    This is idempotent and uses INSERT..ON CONFLICT DO NOTHING.
+    Back-compat wrapper.
+    Also ensures task-backed system instances exist for the same range.
     """
+    await ensure_task_instances_in_range(db=db, start=start, end=end)
     if end < start:
         return
 
