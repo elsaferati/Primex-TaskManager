@@ -3904,6 +3904,23 @@ export default function DepartmentKanban() {
       }),
     [sortDoneLast, todaySystemTasks, systemOccurrenceStatusByTemplate]
   )
+  const overdueOccurrenceByTemplateId = React.useMemo(() => {
+    const map = new Map<string, DailyReportResponse["system_overdue"][number]>()
+    if (!dailyReport?.system_overdue?.length) return map
+    for (const occ of dailyReport.system_overdue) {
+      const existing = map.get(occ.template_id)
+      if (!existing) {
+        map.set(occ.template_id, occ)
+        continue
+      }
+      const existingDate = toDate(existing.occurrence_date)
+      const nextDate = toDate(occ.occurrence_date)
+      if (!existingDate || (nextDate && dayKey(nextDate) > dayKey(existingDate))) {
+        map.set(occ.template_id, occ)
+      }
+    }
+    return map
+  }, [dailyReport?.system_overdue])
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
   const gaTableDirty = gaTableInput !== (gaTableEntry?.content ?? "")
 
@@ -6971,6 +6988,8 @@ export default function DepartmentKanban() {
                         const statusLabel = formatSystemOccurrenceStatus(statusValue)
                         const isDoneStatus = String(statusValue || "").toUpperCase() === "DONE"
                         const isOverdue = templateId ? overdueSystemTemplateIds.has(templateId) : false
+                        const overdueOccurrence = templateId ? overdueOccurrenceByTemplateId.get(templateId) : undefined
+                        const displayDate = isOverdue && overdueOccurrence ? overdueOccurrence.occurrence_date : systemTaskDisplayDate(task)
                         const assignees = systemAssigneeInitials(task)
                         const priorityValue = normalizePriority(task.priority)
                         const canEditSystemDate = canEditSystemDateRow(task, statusValue)
@@ -7010,7 +7029,7 @@ export default function DepartmentKanban() {
                                 ) : null}
                               </div>
                             </TableCell>
-                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(systemTaskDisplayDate(task))}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(displayDate)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{task.finish_period || "-"}</TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${isDoneStatus ? "bg-emerald-100 text-emerald-800 font-medium" : ""}`}>{statusLabel}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{PRIORITY_LABELS[priorityValue]}</TableCell>
