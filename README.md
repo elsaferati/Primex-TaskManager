@@ -27,6 +27,7 @@ copy .env.example .env
 Edit `backend/.env`:
 - `DATABASE_URL` must be `postgresql+asyncpg://...`
 - Set `JWT_SECRET`
+- Set `APP_TIMEZONE` (default `Europe/Budapest`)
 - Optional for cloud dictation: `OPENAI_API_KEY`, `SPEECH_MAX_FILE_MB` (default 20)
 
 Install deps:
@@ -58,6 +59,11 @@ celery -A app.celery_app.celery_app worker -l info
 celery -A app.celery_app.celery_app beat -l info
 ```
 
+System task scheduling notes:
+- `generate-system-tasks`: every 15 minutes
+- `pregenerate-system-tasks-by-7am`: daily 06:50 local (`APP_TIMEZONE`)
+- `reconcile-system-task-slots`: daily 06:30 local (30-day backfill/rewind)
+
 ### 2) Frontend
 
 ```powershell
@@ -73,5 +79,12 @@ Open `http://localhost:3000`.
 
 - Frontend: `cd frontend; npm run build; npm start`
 - Backend: run `uvicorn app.main:app` behind a reverse proxy (TLS), and run Celery worker + beat as services.
+- Keep `REDIS_ENABLED=true` in environments where Celery background generation is expected.
 - WebSocket notifications: frontend connects to `ws(s)://<API_HOST>/ws/notifications?token=<access_token>`.
+
+Useful ops checks:
+```powershell
+celery -A app.celery_app.celery_app inspect ping
+celery -A app.celery_app.celery_app inspect stats
+```
 

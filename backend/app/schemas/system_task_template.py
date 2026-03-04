@@ -23,7 +23,7 @@ class SystemTaskTemplateOut(BaseModel):
     days_of_week: list[int] | None = None
     day_of_month: int | None = None
     month_of_year: int | None = None
-    timezone: str = "Europe/Tirane"
+    timezone: str = "Europe/Budapest"
     due_time: time = time(9, 0)
     lookahead: int = 14
     interval: int = 1

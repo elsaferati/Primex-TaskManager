@@ -15,6 +15,7 @@ from sqlalchemy import and_, delete, insert, or_, select, text, cast, Date as SQ
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
+from app.config import settings
 from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.models.department import Department
@@ -328,13 +329,17 @@ def _previous_occurrence_date(template: SystemTaskTemplate, target: date) -> dat
 
 
 def _template_zoneinfo(template: SystemTaskTemplate):
-    tz_name = (getattr(template, "timezone", None) or "").strip() or "Europe/Tirane"
+    fallback_tz = settings.APP_TIMEZONE
+    tz_name = (getattr(template, "timezone", None) or "").strip() or fallback_tz
     if ZoneInfo is None:
-        return timezone.utc, "Europe/Tirane"
+        return timezone.utc, fallback_tz
     try:
         return ZoneInfo(tz_name), tz_name
     except Exception:
-        return ZoneInfo("Europe/Tirane"), "Europe/Tirane"
+        try:
+            return ZoneInfo(fallback_tz), fallback_tz
+        except Exception:
+            return timezone.utc, fallback_tz
 
 
 def _local_day_utc_bounds(local_day: date, tzinfo) -> tuple[datetime, datetime]:
@@ -696,7 +701,7 @@ async def list_system_task_templates(
             days_of_week=t.days_of_week,
             day_of_month=t.day_of_month,
             month_of_year=t.month_of_year,
-            timezone=t.timezone or "Europe/Tirane",
+            timezone=t.timezone or settings.APP_TIMEZONE,
             due_time=t.due_time,
             lookahead=t.lookahead,
             interval=t.interval,
@@ -766,7 +771,7 @@ async def set_system_task_occurrence_status(
         )
 
     await ensure_task_instances_in_range(db=db, start=payload.occurrence_date, end=payload.occurrence_date)
-    task_local_date = cast(func.timezone(tmpl.timezone or "Europe/Tirane", Task.origin_run_at), SQLDate)
+    task_local_date = cast(func.timezone(tmpl.timezone or settings.APP_TIMEZONE, Task.origin_run_at), SQLDate)
     task = (
         await db.execute(
             select(Task)
@@ -863,7 +868,7 @@ async def override_system_task_occurrence_date(
         end=max(payload.source_occurrence_date, payload.target_occurrence_date),
     )
 
-    task_local_date = cast(func.timezone(tmpl.timezone or "Europe/Tirane", Task.origin_run_at), SQLDate)
+    task_local_date = cast(func.timezone(tmpl.timezone or settings.APP_TIMEZONE, Task.origin_run_at), SQLDate)
     task = (
         await db.execute(
             select(Task)
@@ -1041,7 +1046,7 @@ async def create_system_task_template(
         days_of_week=days_of_week,
         day_of_month=payload.day_of_month,
         month_of_year=payload.month_of_year,
-        timezone=payload.timezone or "Europe/Tirane",
+        timezone=payload.timezone or settings.APP_TIMEZONE,
         due_time=payload.due_time or datetime.strptime("09:00", "%H:%M").time(),
         lookahead=payload.lookahead or 14,
         interval=payload.interval or 1,

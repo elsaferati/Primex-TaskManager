@@ -22,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.common_entry import CommonEntry
 from app.models.enums import CommonCategory, ProjectPhaseStatus, ProjectType, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
@@ -250,21 +251,21 @@ def _as_utc_date(value: datetime | date | None) -> date | None:
 def _as_local_date(value: datetime | date | None) -> date | None:
     """
     Extract the date component from a datetime, preserving the local date meaning.
-    For planning purposes, we want the date in Europe/Pristina timezone (UTC+1/+2), not UTC.
+    For planning purposes, we want the date in APP_TIMEZONE, not UTC.
     
-    When PostgreSQL stores a date like "2026-02-05 00:00:00+01" (midnight in Europe/Pristina),
+    When PostgreSQL stores a date like "2026-02-05 00:00:00+01" (midnight in local timezone),
     it stores the UTC equivalent "2026-02-04 23:00:00 UTC". SQLAlchemy retrieves it as UTC.
-    We need to convert back to Europe/Pristina timezone before extracting the date.
+    We need to convert back to APP_TIMEZONE before extracting the date.
     
     Example:
     - Input: 2026-02-04 23:00:00+00:00 (UTC representation of 2026-02-05 00:00:00+01)
-    - Output: 2026-02-05 (the intended local date in Europe/Pristina)
+    - Output: 2026-02-05 (the intended local date in APP_TIMEZONE)
     """
     if value is None:
         return None
     if isinstance(value, datetime):
         if value.tzinfo:
-            local_dt = value.astimezone(_pristina_tz())
+            local_dt = value.astimezone(_app_tz())
             # Extract date from local timezone datetime
             return local_dt.date()
         else:
@@ -274,39 +275,40 @@ def _as_local_date(value: datetime | date | None) -> date | None:
     return value
 
 
-def _pristina_tz():
+def _app_tz():
     """
-    Resolve Europe/Pristina timezone with fallbacks.
+    Resolve APP_TIMEZONE with fallbacks.
 
     Note: This file supports both zoneinfo and pytz fallbacks for older environments.
     """
+    tz_name = settings.APP_TIMEZONE
     tz = None
 
     if ZoneInfo is not None:
         try:
-            tz = ZoneInfo("Europe/Pristina")
+            tz = ZoneInfo(tz_name)
         except Exception:
-            try:
-                tz = ZoneInfo("Europe/Belgrade")
-            except Exception:
-                tz = None
+            tz = None
 
     if tz is None:
         try:
             import pytz
 
             try:
-                tz = pytz.timezone("Europe/Pristina")
+                tz = pytz.timezone(tz_name)
             except Exception:
-                tz = pytz.timezone("Europe/Belgrade")
+                tz = None
         except ImportError:
-            tz = timezone(timedelta(hours=1))
+            tz = None
+
+    if tz is None:
+        tz = timezone.utc
 
     return tz
 
 
-def _today_pristina_date() -> date:
-    return datetime.now(timezone.utc).astimezone(_pristina_tz()).date()
+def _today_app_date() -> date:
+    return datetime.now(timezone.utc).astimezone(_app_tz()).date()
 
 
 def _user_to_assignee(user: User) -> TaskAssigneeOut:
@@ -2543,7 +2545,7 @@ async def weekly_table_planner(
                     # Query generated system task rows for this user on this day.
                     task_local_day = cast(
                         func.timezone(
-                            func.coalesce(SystemTaskTemplate.timezone, "Europe/Tirane"),
+                            func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE),
                             func.coalesce(Task.due_date, Task.origin_run_at),
                         ),
                         Date,
@@ -3060,7 +3062,7 @@ async def save_weekly_snapshot(
     if dept is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
-    today = _today_pristina_date()
+    today = _today_app_date()
     target_week_start = _snapshot_week_start_for_mode(payload.mode, today)
     snapshot_type = _snapshot_type_for_mode(payload.mode)
     return await _create_and_store_weekly_snapshot(
@@ -3080,7 +3082,7 @@ async def weekly_snapshot_overview(
 ) -> WeeklySnapshotOverviewOut:
     ensure_department_access(user, department_id)
 
-    today = _today_pristina_date()
+    today = _today_app_date()
     this_week_start = _week_start(today)
     week_starts = [
         this_week_start - timedelta(days=14),
@@ -3243,7 +3245,7 @@ async def weekly_plan_vs_actual_compare(
         for task in current_task_items
     }
 
-    today_local = _today_pristina_date()
+    today_local = _today_app_date()
     as_of_date = min(today_local, week_end)
 
     buckets = _classify_weekly_plan_performance(

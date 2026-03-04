@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.department import Department
 from app.models.enums import GaNoteStatus, UserRole, TaskStatus
@@ -43,11 +44,14 @@ from app.services.daily_report_logic import (
 
 
 router = APIRouter()
-TIRANA_TZ = ZoneInfo("Europe/Tirane")
+try:
+    APP_TZ = ZoneInfo(settings.APP_TIMEZONE)
+except Exception:
+    APP_TZ = timezone.utc
 
 
 def _tirana_day_utc_bounds(day: date) -> tuple[datetime, datetime]:
-    day_start_local = datetime.combine(day, time.min, tzinfo=TIRANA_TZ)
+    day_start_local = datetime.combine(day, time.min, tzinfo=APP_TZ)
     day_end_local = day_start_local + timedelta(days=1)
     return day_start_local.astimezone(timezone.utc), day_end_local.astimezone(timezone.utc)
 
@@ -387,7 +391,7 @@ async def daily_report(
 
     done_like_statuses = ("DONE", "NOT_DONE", "SKIPPED")
     local_occurrence_date = cast(
-        func.timezone(func.coalesce(SystemTaskTemplate.timezone, "Europe/Tirane"), Task.origin_run_at),
+        func.timezone(func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE), Task.origin_run_at),
         SQLDate,
     )
 
