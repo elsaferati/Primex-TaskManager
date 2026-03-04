@@ -4,6 +4,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from app.config import settings
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -48,7 +49,11 @@ def _template_start_date(template: SystemTaskTemplate) -> date | None:
         return None
     if isinstance(created_at, datetime):
         if created_at.tzinfo is not None:
-            return created_at.astimezone(ZoneInfo("Europe/Tirane")).date()
+            try:
+                local_tz = ZoneInfo(settings.APP_TIMEZONE)
+            except Exception:
+                local_tz = timezone.utc
+            return created_at.astimezone(local_tz).date()
         return created_at.date()
     if isinstance(created_at, date):
         return created_at

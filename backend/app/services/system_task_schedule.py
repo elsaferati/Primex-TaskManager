@@ -4,6 +4,7 @@ import calendar
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from app.config import settings
 from app.models.enums import FrequencyType, TaskStatus
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
@@ -72,11 +73,14 @@ def matches_template_date(template: SystemTaskTemplate, target: date) -> bool:
 
 
 def template_tz(template: SystemTaskTemplate) -> ZoneInfo:
-    tz_name = getattr(template, "timezone", None) or "Europe/Tirane"
+    tz_name = getattr(template, "timezone", None) or settings.APP_TIMEZONE
     try:
         return ZoneInfo(tz_name)
     except Exception:
-        return ZoneInfo("Europe/Tirane")
+        try:
+            return ZoneInfo(settings.APP_TIMEZONE)
+        except Exception:
+            return ZoneInfo("UTC")
 
 
 def template_due_time(template: SystemTaskTemplate) -> time:

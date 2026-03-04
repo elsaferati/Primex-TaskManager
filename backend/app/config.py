@@ -21,6 +21,7 @@ class Settings(BaseSettings):
     DATABASE_URL: str
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
+    APP_TIMEZONE: str = "Europe/Budapest"
 
      # Add these three lines:
     ADMIN_EMAIL: str | None = None

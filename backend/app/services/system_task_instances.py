@@ -283,3 +283,74 @@ async def ensure_slots_initialized(db: AsyncSession) -> None:
             for assignee_id in assignee_ids
         ]
         await db.execute(insert(SystemTaskTemplateAssigneeSlot), values)
+
+
+async def reconcile_system_task_slots(
+    db: AsyncSession,
+    *,
+    now_utc: datetime | None = None,
+    lookback_days: int = 30,
+) -> dict[str, int]:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    lookback_days = max(int(lookback_days or 0), 0)
+
+    slot_rows = (
+        await db.execute(
+            select(SystemTaskTemplateAssigneeSlot, SystemTaskTemplate)
+            .join(SystemTaskTemplate, SystemTaskTemplateAssigneeSlot.template_id == SystemTaskTemplate.id)
+            .where(SystemTaskTemplateAssigneeSlot.is_active.is_(True))
+            .where(SystemTaskTemplate.is_active.is_(True))
+            .with_for_update(skip_locked=True)
+        )
+    ).all()
+    if not slot_rows:
+        return {"rewound_slots": 0, "created_tasks": 0}
+
+    rewound_slots = 0
+    for slot, template in slot_rows:
+        tz = template_tz(template)
+        today_local = now_utc.astimezone(tz).date()
+        start_local = today_local - timedelta(days=lookback_days)
+
+        if start_local > today_local:
+            continue
+
+        start_utc = datetime.combine(start_local, time.min, tzinfo=tz).astimezone(timezone.utc)
+        end_utc = datetime.combine(today_local + timedelta(days=1), time.min, tzinfo=tz).astimezone(timezone.utc)
+
+        existing_run_rows = (
+            await db.execute(
+                select(Task.origin_run_at)
+                .where(Task.system_template_origin_id == template.id)
+                .where(Task.system_task_slot_id == slot.id)
+                .where(Task.origin_run_at.is_not(None))
+                .where(Task.origin_run_at >= start_utc)
+                .where(Task.origin_run_at < end_utc)
+            )
+        ).scalars().all()
+        existing_dates = {run_at.astimezone(tz).date() for run_at in existing_run_rows if run_at is not None}
+
+        cursor = first_run_at(template, start_utc)
+        earliest_missing_run: datetime | None = None
+        for _ in range((lookback_days + 2) * 8):
+            cursor_local_date = cursor.astimezone(tz).date()
+            if cursor_local_date > today_local:
+                break
+            if cursor_local_date not in existing_dates:
+                earliest_missing_run = cursor
+                break
+            cursor = next_occurrence(template, cursor)
+
+        if earliest_missing_run is not None and slot.next_run_at > earliest_missing_run:
+            slot.next_run_at = earliest_missing_run
+            rewound_slots += 1
+
+    created_tasks = 0
+    if rewound_slots > 0:
+        created_tasks = await generate_system_task_instances(
+            db=db,
+            now_utc=now_utc,
+            lookahead_days_override=lookback_days + 1,
+        )
+
+    return {"rewound_slots": rewound_slots, "created_tasks": created_tasks}

@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.common_entry import CommonEntry
 from app.models.department import Department
@@ -142,31 +143,25 @@ def _daily_feedback_filter():
     )
 
 def _tirane_tz():
+    tz_name = settings.APP_TIMEZONE
     tz = None
     if ZoneInfo is not None:
         try:
-            tz = ZoneInfo("Europe/Tirane")
+            tz = ZoneInfo(tz_name)
         except Exception:
-            try:
-                tz = ZoneInfo("Europe/Pristina")
-            except Exception:
-                try:
-                    tz = ZoneInfo("Europe/Belgrade")
-                except Exception:
-                    tz = None
+            tz = None
     if tz is None:
         try:
             import pytz
 
             try:
-                tz = pytz.timezone("Europe/Tirane")
+                tz = pytz.timezone(tz_name)
             except Exception:
-                try:
-                    tz = pytz.timezone("Europe/Pristina")
-                except Exception:
-                    tz = pytz.timezone("Europe/Belgrade")
+                tz = None
         except ImportError:
-            tz = timezone(timedelta(hours=1))
+            tz = None
+    if tz is None:
+        tz = timezone.utc
     return tz
 
 def _as_tirane_dt(value: datetime | None) -> datetime | None:

@@ -38,6 +38,7 @@ import type {
   SystemTaskFrequency,
   SystemTaskScope,
   SystemTaskTemplate,
+  SystemTaskTemplateAssigneeSlot,
   TaskFinishPeriod,
   TaskPriority,
   User,
@@ -503,115 +504,74 @@ export function SystemTasksView({
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
-      const templateMetaPromise = isManagerOrAdmin 
-        ? apiFetch("/system-tasks/templates")
-        : Promise.resolve({ ok: false } as Response)
       // For My View (allowMarkAsDone), filter by current user unless forced to load all.
       const systemTasksUrl = allowMarkAsDone && user?.id && !forceLoadAll
         ? `/system-tasks?assigned_to=${user.id}`
         : "/system-tasks"
-      const [templatesRes, departmentsRes, templateMetaRes] = await Promise.all([
-        apiFetch(systemTasksUrl),
+      const tasksEndpoint = showSystemActions ? "/system-tasks/templates" : systemTasksUrl
+      const [templatesRes, departmentsRes] = await Promise.all([
+        apiFetch(tasksEndpoint),
         apiFetch("/departments"),
-        templateMetaPromise,
       ])
       if (templatesRes.ok) {
         const rows = (await templatesRes.json()) as SystemTaskTemplate[]
-        let metaById = new Map<
-          string,
-          {
-            requires_alignment?: boolean | null
-            alignment_time?: string | null
-            alignment_roles?: string[] | null
-            alignment_user_ids?: string[] | null
-          }
-        >()
-        // Only process template metadata if we got a response (user is manager/admin)
-        if (templateMetaRes && templateMetaRes.ok) {
-          const metas = (await templateMetaRes.json()) as Array<{
-            id: string
-            requires_alignment?: boolean | null
-            alignment_time?: string | null
-            alignment_roles?: string[] | null
-            alignment_user_ids?: string[] | null
-          }>
-          metaById = new Map(
-            metas.map((m) => [
-              m.id,
-              {
-                requires_alignment: m.requires_alignment ?? false,
-                alignment_time: m.alignment_time ?? null,
-                alignment_roles: m.alignment_roles ?? null,
-                alignment_user_ids: m.alignment_user_ids ?? null,
-              },
-            ])
-          )
-        }
-        // Group tasks by template_id and merge assignees and departments
-        const groupedByTemplate = new Map<string, typeof rows[0] & { assignees: typeof rows[0]['assignees'], department_ids?: string[] }>()
-        
-        for (const row of rows) {
-          const templateId = row.template_id ?? row.id
-          const meta = metaById.get(templateId)
-          const merged = meta ? { ...row, ...meta } : row
-          if (merged.requires_alignment != null && row.requires_alignment != null) merged.requires_alignment = row.requires_alignment
-          if (merged.alignment_time != null && row.alignment_time != null) merged.alignment_time = row.alignment_time
-          if (row.alignment_roles && row.alignment_roles.length) {
-            merged.alignment_roles = row.alignment_roles
-          }
-          if (row.alignment_user_ids && row.alignment_user_ids.length) {
-            merged.alignment_user_ids = row.alignment_user_ids
-          }
-          
-          // Group by template_id
-          const key = String(templateId)
-          if (groupedByTemplate.has(key)) {
-            // Merge assignees from this task into the existing group
-            const existing = groupedByTemplate.get(key)!
-            const existingAssigneeIds = new Set(existing.assignees?.map(a => a.id) || [])
-            const newAssignees = (merged.assignees || []).filter(a => !existingAssigneeIds.has(a.id))
-            if (newAssignees.length > 0) {
-              existing.assignees = [...(existing.assignees || []), ...newAssignees]
-            }
-            // Collect department IDs from all tasks in the group
-            const existingDeptIds = new Set(existing.department_ids || [])
-            if (merged.department_id && !existingDeptIds.has(merged.department_id)) {
-              existing.department_ids = [...(existing.department_ids || []), merged.department_id]
-            }
-            // Also use department_ids from backend if available
-            if ((merged as any).department_ids) {
-              for (const deptId of (merged as any).department_ids) {
-                if (!existingDeptIds.has(deptId)) {
-                  existing.department_ids = [...(existing.department_ids || []), deptId]
+        if (showSystemActions) {
+          // Management view uses one row per template directly from templates endpoint.
+          setTemplates(rows)
+        } else {
+          // Non-management views still load occurrence rows and collapse by template.
+          const groupedByTemplate = new Map<
+            string,
+            typeof rows[0] & { assignees: typeof rows[0]["assignees"]; department_ids?: string[] }
+          >()
+          for (const row of rows) {
+            const templateId = row.template_id ?? row.id
+            const key = String(templateId)
+            if (groupedByTemplate.has(key)) {
+              const existing = groupedByTemplate.get(key)!
+              const existingAssigneeIds = new Set(existing.assignees?.map((a) => a.id) || [])
+              const newAssignees = (row.assignees || []).filter((a) => !existingAssigneeIds.has(a.id))
+              if (newAssignees.length > 0) {
+                existing.assignees = [...(existing.assignees || []), ...newAssignees]
+              }
+              const existingDeptIds = new Set(existing.department_ids || [])
+              if (row.department_id && !existingDeptIds.has(row.department_id)) {
+                existing.department_ids = [...(existing.department_ids || []), row.department_id]
+              }
+              if ((row as { department_ids?: string[] }).department_ids) {
+                for (const deptId of (row as { department_ids?: string[] }).department_ids || []) {
+                  if (!existingDeptIds.has(deptId)) {
+                    existing.department_ids = [...(existing.department_ids || []), deptId]
+                  }
                 }
               }
-            }
-            // Use the first task's status (or prefer DONE if any is done)
-            if (merged.status === "DONE" && existing.status !== "DONE") {
-              existing.status = merged.status
-            }
-            // Keep the first task's id for reference
-            if (!existing.id) {
-              existing.id = merged.id
-            }
-          } else {
-            // First task for this template
-            const deptIds: string[] = []
-            if (merged.department_id) {
-              deptIds.push(merged.department_id)
-            }
-            if ((merged as any).department_ids) {
-              for (const deptId of (merged as any).department_ids) {
-                if (!deptIds.includes(deptId)) {
-                  deptIds.push(deptId)
+              if (row.status === "DONE" && existing.status !== "DONE") {
+                existing.status = row.status
+              }
+              if (!existing.id) {
+                existing.id = row.id
+              }
+            } else {
+              const deptIds: string[] = []
+              if (row.department_id) {
+                deptIds.push(row.department_id)
+              }
+              if ((row as { department_ids?: string[] }).department_ids) {
+                for (const deptId of (row as { department_ids?: string[] }).department_ids || []) {
+                  if (!deptIds.includes(deptId)) {
+                    deptIds.push(deptId)
+                  }
                 }
               }
+              groupedByTemplate.set(key, {
+                ...row,
+                assignees: row.assignees || [],
+                department_ids: deptIds.length > 0 ? deptIds : undefined,
+              })
             }
-            groupedByTemplate.set(key, { ...merged, assignees: merged.assignees || [], department_ids: deptIds.length > 0 ? deptIds : undefined })
           }
+          setTemplates(Array.from(groupedByTemplate.values()))
         }
-        
-        setTemplates(Array.from(groupedByTemplate.values()))
       } else {
         console.error("Failed to load system tasks", templatesRes.status)
       }
@@ -629,7 +589,7 @@ export function SystemTasksView({
     } finally {
       setLoading(false)
     }
-  }, [apiFetch, isManagerOrAdmin, allowMarkAsDone, user?.id])
+  }, [apiFetch, isManagerOrAdmin, showSystemActions, allowMarkAsDone, user?.id, forceLoadAll])
 
   React.useEffect(() => {
     void load()
@@ -1437,7 +1397,7 @@ export function SystemTasksView({
   const weekendShiftHint =
     "If the selected day falls on Saturday/Sunday, the task runs on Friday."
 
-  const assigneeSummary = (list?: SystemTaskTemplate["assignees"]) => {
+  const assigneeSummary = React.useCallback((list?: SystemTaskTemplate["assignees"]) => {
     if (!list || list.length === 0) return "-"
     if (list.length <= 2) {
       return list
@@ -1445,7 +1405,59 @@ export function SystemTasksView({
         .join(", ")
     }
     return `${list.length} people`
-  }
+  }, [])
+
+  const resolveAssigneeNameById = React.useCallback(
+    (userId?: string | null) => {
+      if (!userId) return "-"
+      const person = userMap.get(userId)
+      const email = person && "email" in person ? person.email || "" : ""
+      return person?.full_name || person?.username || email || userId
+    },
+    [userMap]
+  )
+
+  const renderManagementAssignees = React.useCallback(
+    (template: SystemTaskTemplate) => {
+      const slots = [...(template.assignee_slots ?? [])]
+      if (slots.length > 0) {
+        slots.sort((a: SystemTaskTemplateAssigneeSlot, b: SystemTaskTemplateAssigneeSlot) => {
+          if (a.is_active === b.is_active) return 0
+          return a.is_active ? -1 : 1
+        })
+        return (
+          <div className="space-y-1">
+            {slots.map((slot) => {
+              const primaryLabel = resolveAssigneeNameById(slot.primary_user_id)
+              const zv1Label = slot.zv1_user_id ? resolveAssigneeNameById(slot.zv1_user_id) : "Not assigned"
+              const zv2Label = slot.zv2_user_id ? resolveAssigneeNameById(slot.zv2_user_id) : "Not assigned"
+              return (
+                <div
+                  key={slot.id}
+                  className={cn(
+                    "rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] leading-tight",
+                    !slot.is_active && "opacity-55"
+                  )}
+                >
+                  <div className="font-medium text-slate-800">{primaryLabel}</div>
+                  <div className="text-slate-500">ZV1: {zv1Label}</div>
+                  <div className="text-slate-500">ZV2: {zv2Label}</div>
+                </div>
+              )
+            })}
+          </div>
+        )
+      }
+
+      const legacySummary = assigneeSummary(template.assignees)
+      if (legacySummary !== "-") return <span>{legacySummary}</span>
+      if (template.default_assignee_id) {
+        return <span>{resolveAssigneeNameById(template.default_assignee_id)}</span>
+      }
+      return <span className="text-slate-400">-</span>
+    },
+    [assigneeSummary, resolveAssigneeNameById]
+  )
 
   const setInternalNoteValue = (
     key: string,
@@ -3305,7 +3317,7 @@ export function SystemTasksView({
                     <div>No.</div>
                     <div>Task Title</div>
                     <div>Department</div>
-                    <div>Owner</div>
+                    <div>{showSystemActions ? "Assignees" : "Owner"}</div>
                     {showBzTimeColumn ? <div>BZ Time</div> : null}
                     <div className="hidden sm:block">Frequency</div>
                     <div className="hidden md:block">Finish by</div>
@@ -3402,8 +3414,18 @@ export function SystemTasksView({
                                 {departmentLabel}
                               </div>
 
-                              <div className="truncate text-xs sm:text-sm text-slate-700 font-normal" title={ownerLabel !== "-" ? ownerLabel : ""}>
-                                {ownerLabel === "-" && isUnassignedAll ? <span className="text-slate-400">-</span> : ownerLabel}
+                              <div
+                                className={cn(
+                                  "text-xs sm:text-sm text-slate-700 font-normal",
+                                  showSystemActions ? "space-y-1" : "truncate"
+                                )}
+                                title={!showSystemActions && ownerLabel !== "-" ? ownerLabel : ""}
+                              >
+                                {showSystemActions
+                                  ? renderManagementAssignees(template)
+                                  : ownerLabel === "-" && isUnassignedAll
+                                    ? <span className="text-slate-400">-</span>
+                                    : ownerLabel}
                               </div>
 
                               {showBzTimeColumn ? (
