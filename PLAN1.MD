@@ -10,6 +10,7 @@ Fix the missing/late system task creation by:
 This keeps database datetime safety (`timestamptz` + UTC) while ensuring users and SQL sessions see local time consistently.
 
 ### Decisions Locked
+
 - Timezone policy: **Local display, UTC storage**.
 - Generation target: **today’s occurrences must exist by 07:00 local**.
 - Backfill: **last 30 days** for missing system tasks.
