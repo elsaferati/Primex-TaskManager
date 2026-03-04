@@ -34,15 +34,9 @@ jobs:
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
           
-          REM 1. Restart the main API Server
           pm2 restart backend || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-          
-          REM 2. Restart Celery Worker (Background task runner)
           pm2 restart celery_worker || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name celery_worker -- -m celery -A app.celery_app worker -l info --pool=solo
-          
-          REM 3. Restart Celery Beat (The scheduler/alarm clock)
           pm2 restart celery_beat || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name celery_beat -- -m celery -A app.celery_app beat -l info
           
           pm2 save
