@@ -108,6 +108,7 @@ No breaking API contract required.
 
 ---
 
+
 ## Data / Migration Plan
 - Data migration (safe):
   - Update `system_task_templates.timezone` from legacy defaults to `APP_TIMEZONE` **only when value is null or legacy default** (do not override explicit custom timezones).
