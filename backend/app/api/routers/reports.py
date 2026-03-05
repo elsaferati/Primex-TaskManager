@@ -33,7 +33,6 @@ from app.schemas.daily_report import (
     DailyReportGaTableResponse,
 )
 from app.schemas.task import TaskAssigneeOut, TaskOut
-from app.services.system_task_instances import ensure_task_instances_in_range
 from app.services.project_display_title import build_project_display_title_map
 from app.services.daily_report_logic import (
     completed_on_day,
@@ -386,9 +385,6 @@ async def daily_report(
             )
 
     # --- System recurring tasks from `tasks` (origin_run_at) ---
-    await ensure_task_instances_in_range(db=db, start=day - timedelta(days=60), end=day)
-    await db.commit()
-
     done_like_statuses = ("DONE", "NOT_DONE", "SKIPPED")
     local_occurrence_date = cast(
         func.timezone(func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE), Task.origin_run_at),

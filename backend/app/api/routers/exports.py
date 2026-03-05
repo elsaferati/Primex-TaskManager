@@ -50,7 +50,6 @@ from app.api.routers import planners as planners_router
 from app.api.routers.planners import weekly_table_planner
 from app.schemas.planner import WeeklyTableDepartment
 from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
-from app.services.system_task_instances import ensure_task_instances_in_range
 from app.services.daily_report_logic import (
     DailyReportTyoMode,
     _as_utc_date,
@@ -2561,9 +2560,6 @@ async def _daily_report_rows_for_user(
         ).scalars().all()
         for project in projects:
             project_map[project.id] = project.title or project.name or "-"
-
-    await ensure_task_instances_in_range(db=db, start=day - timedelta(days=60), end=day)
-    await db.commit()
 
     done_like_statuses = ("DONE", "NOT_DONE", "SKIPPED")
     local_occurrence_date = cast(

@@ -41,7 +41,6 @@ from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.department import Department
 from app.services.task_classification import is_fast_task as is_fast_task_model
 from app.services.system_task_schedule import matches_template_date
-from app.services.system_task_instances import ensure_task_instances_in_range
 from app.services.project_display_title import build_project_display_title_map
 from app.schemas.planner import (
     MonthlyPlannerResponse,
@@ -2401,7 +2400,7 @@ async def weekly_table_planner(
         # Organize tasks by day and user
         days_data: list[WeeklyTableDay] = []
         
-        # Ensure system task occurrences exist for GA department and GANE ARIFAJ user
+        # Keep weekly planner read-only: do not generate system tasks during page loads.
         is_ga_dept = dept.name == "GA"
         gane_arifaj_user = None
         if is_ga_dept:
@@ -2409,15 +2408,6 @@ async def weekly_table_planner(
                 if u.username and u.username.lower() == "gane.arifaj":
                     gane_arifaj_user = u
                     break
-        
-        if is_ga_dept and gane_arifaj_user:
-            # Ensure system task instances exist for the week (only once per department).
-            await ensure_task_instances_in_range(
-                db=db,
-                start=working_days[0],
-                end=working_days[-1],
-            )
-            await db.commit()
         
         for day_date in working_days:
             users_day_data: list[WeeklyTableUserDay] = []
