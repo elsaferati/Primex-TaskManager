@@ -35,9 +35,12 @@ jobs:
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
           
+          REM 1. Restart the main API Server to clear locked DB connections
           call pm2 restart backend || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-          call pm2 restart celery_worker || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name celery_worker -- -m celery -A app.celery_app worker -l info --pool=solo
-          call pm2 restart celery_beat || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name celery_beat -- -m celery -A app.celery_app beat -l info
+          
+          REM 2. EMERGENCY KILL SWITCH: Stop the Celery workers hammering the database
+          call pm2 stop celery_worker
+          call pm2 stop celery_beat
           
           call pm2 save
       - name: Update Frontend (PowerShell Fix)
