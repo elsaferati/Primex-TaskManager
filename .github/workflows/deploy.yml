@@ -34,14 +34,23 @@ jobs:
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
-          
-          REM 1. Restart the main API Server to clear locked DB connections
-          call pm2 restart backend || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-          
-          REM 2. EMERGENCY KILL SWITCH: Stop the Celery workers hammering the database
+
+          REM 1. Run database migrations
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
+
+          REM 2. Stop Celery before restarting API to avoid stale connections
           call pm2 stop celery_worker
           call pm2 stop celery_beat
-          
+
+          REM 3. Restart the main API server
+          call pm2 restart backend || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+
+          REM 4. Restart Celery worker
+          call pm2 restart celery_worker || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name celery_worker -- -m celery -A app.celery_app worker --loglevel=info
+
+          REM 5. Restart Celery beat scheduler (runs the 07:00 system task generation)
+          call pm2 restart celery_beat || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name celery_beat -- -m celery -A app.celery_app beat --loglevel=info
+
           call pm2 save
       - name: Update Frontend (PowerShell Fix)
         shell: powershell

@@ -22,15 +22,7 @@ celery_app.conf.accept_content = ["json"]
 celery_app.conf.beat_schedule = {
     "generate-system-tasks": {
         "task": "app.celery_tasks.generate_system_tasks",
-        "schedule": crontab(minute="*/15"),
-    },
-    "pregenerate-system-tasks-by-7am": {
-        "task": "app.celery_tasks.pregenerate_system_tasks_by_7am",
-        "schedule": crontab(minute=50, hour=6),
-    },
-    "reconcile-system-task-slots": {
-        "task": "app.celery_tasks.reconcile_system_task_slots",
-        "schedule": crontab(minute=30, hour=6),
+        "schedule": crontab(hour=7, minute=0),
     },
     "process-reminders": {
         "task": "app.celery_tasks.process_reminders",
