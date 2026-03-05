@@ -389,12 +389,6 @@ async def list_system_tasks(
     }
     effective_occurrence_date_map: dict[uuid.UUID, date] = dict(next_occurrence_date_map)
 
-    # Generate only the minimum required window for this endpoint request.
-    needed_dates = list(occurrence_date_map.values())
-    min_needed_date = min(needed_dates) if needed_dates else base_date
-    max_needed_date = max(needed_dates) if needed_dates else base_date
-    await ensure_task_instances_in_range(db, start=min_needed_date, end=max_needed_date)
-
     # Build per-timezone UTC bounds and fetch only the matching day-window tasks.
     bucket_template_ids: dict[tuple[str, date], list[uuid.UUID]] = defaultdict(list)
     bucket_utc_bounds: dict[tuple[str, date], tuple[datetime, datetime]] = {}
@@ -770,7 +764,6 @@ async def set_system_task_occurrence_status(
             detail="You are not assigned to this system task"
         )
 
-    await ensure_task_instances_in_range(db=db, start=payload.occurrence_date, end=payload.occurrence_date)
     task_local_date = cast(func.timezone(tmpl.timezone or settings.APP_TIMEZONE, Task.origin_run_at), SQLDate)
     task = (
         await db.execute(
@@ -783,7 +776,6 @@ async def set_system_task_occurrence_status(
     ).scalars().first()
     if task is None:
         fallback_date = previous_occurrence_date(tmpl, payload.occurrence_date)
-        await ensure_task_instances_in_range(db=db, start=fallback_date, end=fallback_date)
         task = (
             await db.execute(
                 select(Task)
@@ -861,12 +853,6 @@ async def override_system_task_occurrence_date(
 
     if payload.source_occurrence_date == payload.target_occurrence_date:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Target date must be different from source date")
-
-    await ensure_task_instances_in_range(
-        db=db,
-        start=min(payload.source_occurrence_date, payload.target_occurrence_date),
-        end=max(payload.source_occurrence_date, payload.target_occurrence_date),
-    )
 
     task_local_date = cast(func.timezone(tmpl.timezone or settings.APP_TIMEZONE, Task.origin_run_at), SQLDate)
     task = (
