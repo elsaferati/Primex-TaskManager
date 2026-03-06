@@ -113,7 +113,7 @@ jobs:
               if ($async.AsyncWaitHandle.WaitOne(2000, $false) -and $client.Connected) {
                 $client.EndConnect($async) | Out-Null
                 $ok = $true
-                Write-Host "Redis reachability check: OK ($hostName:$port)"
+                Write-Host "Redis reachability check: OK (${hostName}:$port)"
                 break
               }
             } catch {
@@ -125,7 +125,7 @@ jobs:
             Start-Sleep -Seconds 2
           }
           if (-not $ok) {
-            Write-Error "Redis is not reachable at $hostName:$port. Failing deploy before backend/celery restart."
+            Write-Error "Redis is not reachable at ${hostName}:$port. Failing deploy before backend/celery restart."
             exit 1
           }
 
