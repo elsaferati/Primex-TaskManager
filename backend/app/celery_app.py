@@ -13,15 +13,24 @@ celery_app = Celery(
     include=["app.celery_tasks"],
 )
 
-celery_app.conf.timezone = "UTC"
+celery_app.conf.enable_utc = True
+celery_app.conf.timezone = settings.APP_TIMEZONE
 celery_app.conf.task_serializer = "json"
 celery_app.conf.result_serializer = "json"
 celery_app.conf.accept_content = ["json"]
 
 celery_app.conf.beat_schedule = {
+    "reconcile-system-task-slots": {
+        "task": "app.celery_tasks.reconcile_system_task_slots_daily",
+        "schedule": crontab(hour=6, minute=30),
+    },
+    "pregenerate-system-tasks-by-7am": {
+        "task": "app.celery_tasks.pregenerate_system_tasks_today",
+        "schedule": crontab(hour=6, minute=50),
+    },
     "generate-system-tasks": {
         "task": "app.celery_tasks.generate_system_tasks",
-        "schedule": crontab(minute="*/15"),
+        "schedule": crontab(hour=7, minute=0),
     },
     "process-reminders": {
         "task": "app.celery_tasks.process_reminders",

@@ -17,7 +17,7 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-from sqlalchemy import and_, case, func, or_, select
+from sqlalchemy import and_, case, cast, func, or_, select, Date as SQLDate
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -33,7 +33,6 @@ from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.department import Department
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
-from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
@@ -51,7 +50,6 @@ from app.api.routers import planners as planners_router
 from app.api.routers.planners import weekly_table_planner
 from app.schemas.planner import WeeklyTableDepartment
 from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
-from app.services.system_task_occurrences import OPEN, ensure_occurrences_in_range
 from app.services.daily_report_logic import (
     DailyReportTyoMode,
     _as_utc_date,
@@ -324,6 +322,15 @@ def _safe_filename_spaces(label: str) -> str:
     cleaned = re.sub(r"[^\w\s\-]", "", label)
     cleaned = re.sub(r"\s+", " ", cleaned.strip())
     return cleaned.upper() or "EXPORT"
+
+def _safe_sheet_title(label: str | None, fallback: str = "MEETING") -> str:
+    value = (label or "").strip()
+    if not value:
+        return fallback[:31]
+    # Excel sheet name invalid chars: []:*?/\
+    value = re.sub(r"[\[\]\:\*\?\/\\]", " ", value)
+    value = re.sub(r"\s+", " ", value).strip()
+    return (value or fallback)[:31]
 
 
 def _fast_task_badge(task) -> str:
@@ -1968,6 +1975,186 @@ async def export_common_view_xlsx(
     )
 
 
+@router.get("/meeting-template.xlsx")
+async def export_meeting_template_xlsx(
+    checklist_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+
+    checklist = (
+        await db.execute(select(Checklist).where(Checklist.id == checklist_id))
+    ).scalar_one_or_none()
+    if checklist is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
+    if checklist.group_key not in ("board", "staff"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting template not found")
+
+    items = (
+        await db.execute(
+            select(ChecklistItem)
+            .where(ChecklistItem.checklist_id == checklist.id)
+            .order_by(ChecklistItem.position, ChecklistItem.id)
+        )
+    ).scalars().all()
+
+    raw_columns = checklist.columns or []
+    columns: list[dict[str, str]] = []
+    for col in raw_columns:
+        if not isinstance(col, dict):
+            continue
+        key = str(col.get("key") or "").strip()
+        if not key:
+            continue
+        label = str(col.get("label") or "").strip()
+        columns.append({"key": key, "label": label})
+    if not columns:
+        columns = [
+            {"key": "nr", "label": "NR"},
+            {"key": "topic", "label": "M1 PIKAT"},
+            {"key": "check", "label": ""},
+            {"key": "owner", "label": "WHO"},
+            {"key": "time", "label": "WHEN"},
+        ]
+
+    title_base = checklist.title or "MEETING"
+    title = f"MEETING {title_base}".upper()
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = _safe_sheet_title(title, fallback="MEETING")
+
+    last_col = len(columns)
+
+    # Row 1: merged title
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    header_row = 4
+    data_row = header_row + 1
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    for col_idx, col in enumerate(columns, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=col.get("label", ""))
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        cell.number_format = "@"
+
+    # Data rows
+    for row_index, item in enumerate(items):
+        for col_idx, col in enumerate(columns, start=1):
+            key = col.get("key")
+            value = ""
+            if key == "nr":
+                value = str(item.position) if item.position is not None else ""
+            elif key == "day":
+                value = item.day or ""
+            elif key == "topic":
+                value = item.title or ""
+            elif key == "check":
+                value = "✓" if item.is_checked else ""
+            elif key == "owner":
+                value = item.owner or (checklist.default_owner or "" if row_index == 0 else "")
+            elif key == "time":
+                value = item.time or (checklist.default_time or "" if row_index == 0 else "")
+            cell = ws.cell(row=data_row, column=col_idx, value=value or "")
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            if key == "nr":
+                cell.font = Font(bold=True)
+        data_row += 1
+
+    last_row = data_row - 1
+
+    # Column widths
+    width_by_key = {
+        "nr": 5,
+        "day": 10,
+        "topic": 52,
+        "check": 8,
+        "owner": 16,
+        "time": 12,
+    }
+    for col_idx, col in enumerate(columns, start=1):
+        key = col.get("key")
+        width = width_by_key.get(key, 24)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    if last_row >= header_row:
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+
+    ws.freeze_panes = "A5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials_compact = _initials_compact(user.full_name or user.username or "") or "____"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials_compact}"
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    if last_row >= header_row:
+        for r_idx in range(header_row, last_row + 1):
+            for c_idx in range(1, last_col + 1):
+                is_header = r_idx == header_row
+                is_first_col = c_idx == 1
+                is_last_col = c_idx == last_col
+                is_last_row = r_idx == last_row
+
+                left = thick if is_first_col else thin
+                right = thick if is_last_col else thin
+                top = thick if is_header else thin
+                bottom = thick if is_last_row else thin
+
+                if is_header:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=thick, right=thick, top=thick, bottom=thick)
+                else:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for r in range(data_row, last_row + 1):
+        max_lines = 1
+        for c in range(1, last_col + 1):
+            value = ws.cell(row=r, column=c).value
+            lines = str(value).count("\n") + 1 if value else 1
+            max_lines = max(max_lines, lines)
+        ws.row_dimensions[r].height = max(18, min(240, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    initials_value = (_initials_compact(user.full_name or user.username or "") or "USER").upper()
+    filename_title = _safe_filename_spaces(title)
+    filename = f"{filename_title} {filename_date}_EF ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
 @router.get("/tasks.pdf")
 async def export_tasks_pdf(
     department_id: uuid.UUID | None = None,
@@ -2374,45 +2561,58 @@ async def _daily_report_rows_for_user(
         for project in projects:
             project_map[project.id] = project.title or project.name or "-"
 
-    await ensure_occurrences_in_range(db=db, start=day - timedelta(days=60), end=day)
-    await db.commit()
+    done_like_statuses = ("DONE", "NOT_DONE", "SKIPPED")
+    local_occurrence_date = cast(
+        func.timezone(func.coalesce(SystemTaskTemplate.timezone, "Europe/Tirane"), Task.origin_run_at),
+        SQLDate,
+    )
 
-    occ_today_rows = (
+    system_today_rows = (
         await db.execute(
-            select(SystemTaskOccurrence, SystemTaskTemplate)
-            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskOccurrence.user_id == user_id)
-            .where(SystemTaskOccurrence.occurrence_date == day)
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .where(Task.assigned_to == user_id)
+            .where(Task.system_template_origin_id.is_not(None))
+            .where(Task.origin_run_at.is_not(None))
+            .where(local_occurrence_date == day)
             .order_by(SystemTaskTemplate.title)
         )
     ).all()
+
     latest_occurrence = (
         select(
-            SystemTaskOccurrence.template_id,
-            func.max(SystemTaskOccurrence.occurrence_date).label("latest_date"),
+            Task.system_template_origin_id.label("template_id"),
+            Task.system_task_slot_id.label("slot_id"),
+            func.max(local_occurrence_date).label("latest_date"),
         )
-        .where(SystemTaskOccurrence.user_id == user_id)
-        .where(SystemTaskOccurrence.occurrence_date <= day)
-        .group_by(SystemTaskOccurrence.template_id)
+        .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+        .where(Task.assigned_to == user_id)
+        .where(Task.system_template_origin_id.is_not(None))
+        .where(Task.origin_run_at.is_not(None))
+        .where(local_occurrence_date <= day)
+        .group_by(Task.system_template_origin_id, Task.system_task_slot_id)
     ).subquery()
 
-    occ_overdue_rows = (
+    system_overdue_rows = (
         await db.execute(
-            select(SystemTaskOccurrence, SystemTaskTemplate)
-            .join(latest_occurrence, SystemTaskOccurrence.template_id == latest_occurrence.c.template_id)
-            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskOccurrence.occurrence_date == latest_occurrence.c.latest_date)
-            .where(SystemTaskOccurrence.occurrence_date < day)
-            .where(SystemTaskOccurrence.status == OPEN)
-            .order_by(SystemTaskOccurrence.occurrence_date.desc(), SystemTaskTemplate.title)
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .join(
+                latest_occurrence,
+                and_(
+                    Task.system_template_origin_id == latest_occurrence.c.template_id,
+                    Task.system_task_slot_id.is_not_distinct_from(latest_occurrence.c.slot_id),
+                    local_occurrence_date == latest_occurrence.c.latest_date,
+                ),
+            )
+            .where(Task.assigned_to == user_id)
+            .where(local_occurrence_date < day)
+            .where(Task.status.not_in(done_like_statuses))
+            .order_by(local_occurrence_date.desc(), SystemTaskTemplate.title)
         )
     ).all()
 
-    overdue_rows: list[tuple[SystemTaskOccurrence, SystemTaskTemplate]] = []
-    for occ, tmpl in occ_overdue_rows:
-        overdue_rows.append((occ, tmpl))
-
-    template_ids = list({tmpl.id for _, tmpl in occ_today_rows} | {tmpl.id for _, tmpl in overdue_rows})
+    template_ids = list({tmpl.id for _, tmpl, _ in system_today_rows} | {tmpl.id for _, tmpl, _ in system_overdue_rows})
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
     alignment_user_ids = {uid for ids in alignment_users_map.values() for uid in ids}
     alignment_user_map: dict[uuid.UUID, str] = {}
@@ -2423,8 +2623,8 @@ async def _daily_report_rows_for_user(
             alignment_user_map[u.id] = _initials(label)
 
     dept_ids = {t.department_id for t in daily_tasks if t.department_id}
-    dept_ids |= {tmpl.department_id for _, tmpl in occ_today_rows if tmpl.department_id}
-    dept_ids |= {tmpl.department_id for _, tmpl in overdue_rows if tmpl.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl, _ in system_today_rows if tmpl.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl, _ in system_overdue_rows if tmpl.department_id}
     department_map: dict[uuid.UUID, Department] = {}
     if dept_ids:
         departments = (
@@ -2548,11 +2748,19 @@ async def _daily_report_rows_for_user(
                 ]
             )
 
-    def add_system_row(container: list[list[str]], occ: SystemTaskOccurrence, tmpl: SystemTaskTemplate) -> None:
-        base_date = occ.occurrence_date
-        acted_date = occ.acted_at.date() if occ.acted_at else None
+    all_system_task_ids = [task.id for task, _, _ in (system_today_rows + system_overdue_rows)]
+    system_comment_map = await _user_comments_for_tasks(db, all_system_task_ids, user_id)
+
+    def _to_occurrence_status(task_status: str | None) -> str:
+        if task_status in done_like_statuses:
+            return task_status or "OPEN"
+        return "OPEN"
+
+    def add_system_row(container: list[list[str]], task: Task, tmpl: SystemTaskTemplate, occurrence_day: date) -> None:
+        base_date = occurrence_day
+        acted_date = task.completed_at.date() if task.completed_at else None
         tyo = _tyo_label(base_date, acted_date, day)
-        period = _resolve_period(tmpl.finish_period, occ.occurrence_date)
+        period = _resolve_period(tmpl.finish_period, occurrence_day)
         bz, koha_bz = alignment_values(tmpl)
         container.append(
             [
@@ -2563,21 +2771,21 @@ async def _daily_report_rows_for_user(
                 department_label(tmpl.department_id, tmpl.scope, False),
                 tmpl.title or "-",
                 tmpl.description or "",
-                _format_system_status(occ.status).upper(),
+                _format_system_status(_to_occurrence_status(task.status)).upper(),
                 bz,
                 koha_bz,
                 tyo,
-                occ.comment or "",
+                system_comment_map.get(task.id) or "",
             ]
         )
 
-    for occ, tmpl in overdue_rows:
-        target = system_pm_rows if _resolve_period(tmpl.finish_period, occ.occurrence_date) == "PM" else system_am_rows
-        add_system_row(target, occ, tmpl)
+    for task, tmpl, occurrence_day in system_overdue_rows:
+        target = system_pm_rows if _resolve_period(tmpl.finish_period, occurrence_day) == "PM" else system_am_rows
+        add_system_row(target, task, tmpl, occurrence_day)
 
-    for occ, tmpl in occ_today_rows:
-        target = system_pm_rows if _resolve_period(tmpl.finish_period, occ.occurrence_date) == "PM" else system_am_rows
-        add_system_row(target, occ, tmpl)
+    for task, tmpl, occurrence_day in system_today_rows:
+        target = system_pm_rows if _resolve_period(tmpl.finish_period, occurrence_day) == "PM" else system_am_rows
+        add_system_row(target, task, tmpl, occurrence_day)
 
     fast_rows.sort(key=lambda item: (item[0], item[1]))
     rows.extend([row for _, __, row in fast_rows])

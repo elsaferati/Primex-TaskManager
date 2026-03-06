@@ -61,9 +61,11 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
 const MAX_ATTACHMENT_FILES = 20
 const MAX_ATTACHMENT_MB = 25
 const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024
+const EMAIL_MARKER_RE = /(^|\s)em:/i
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
+type ContentFilter = "all" | "emails"
 
 function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   if (!value) return "UNKNOWN"
@@ -182,6 +184,7 @@ export default function GaKaNotesPage() {
   const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("week")
   const [noteTypeFilter, setNoteTypeFilter] = React.useState<"all" | "GA" | "KA">("all")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
+  const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [showLegend, setShowLegend] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
@@ -1100,6 +1103,10 @@ export default function GaKaNotesPage() {
       if (aggregatedStatus === "UNKNOWN") return false
       return aggregatedStatus === taskStatusFilter
     }
+    const matchesContentFilter = (note: GaNote) => {
+      if (contentFilter === "all") return true
+      return EMAIL_MARKER_RE.test(note.content || "")
+    }
     const taskDoneBucket = (note: GaNote) => {
       const taskInfo = noteTaskInfo.get(note.id)
       if (!taskInfo) return 0
@@ -1113,6 +1120,7 @@ export default function GaKaNotesPage() {
       .filter(withinRange)
       .filter(matchesNoteType)
       .filter(matchesTaskStatusFilter)
+      .filter(matchesContentFilter)
       .sort((a, b) => {
         // First, sort by status: open notes first, closed notes last
         const aIsClosed = a.status === "CLOSED"
@@ -1132,7 +1140,7 @@ export default function GaKaNotesPage() {
         return bCreated - aCreated
       })
     return sorted
-  }, [notes, rangeFilter, noteTypeFilter, taskStatusFilter, noteTaskInfo])
+  }, [notes, rangeFilter, noteTypeFilter, taskStatusFilter, contentFilter, noteTaskInfo])
 
   const attachmentDialogItems = React.useMemo(() => {
     if (!attachmentsDialogNoteId) return []
@@ -1469,6 +1477,20 @@ export default function GaKaNotesPage() {
                   >
                     Done
                   </SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Select
+                value={contentFilter}
+                onValueChange={(v) => setContentFilter(v as ContentFilter)}
+              >
+                <SelectTrigger className="h-9 w-[140px]">
+                  <SelectValue placeholder="Content" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="emails">Emails</SelectItem>
                 </SelectContent>
               </Select>
             </div>

@@ -27,6 +27,7 @@ copy .env.example .env
 Edit `backend/.env`:
 - `DATABASE_URL` must be `postgresql+asyncpg://...`
 - Set `JWT_SECRET`
+- Set `APP_TIMEZONE` (default `Europe/Budapest`)
 - Optional for cloud dictation: `OPENAI_API_KEY`, `SPEECH_MAX_FILE_MB` (default 20)
 
 Install deps:
@@ -58,6 +59,11 @@ celery -A app.celery_app.celery_app worker -l info
 celery -A app.celery_app.celery_app beat -l info
 ```
 
+System task scheduling notes:
+- `reconcile-system-task-slots`: daily at `06:30` local (`APP_TIMEZONE`, 7-day backfill/rewind)
+- `pregenerate-system-tasks-by-7am`: daily 06:50 local (`APP_TIMEZONE`)
+- `generate-system-tasks`: daily 07:00 local (`APP_TIMEZONE`)
+
 ### 2) Frontend
 
 ```powershell
@@ -72,6 +78,23 @@ Open `http://localhost:3000`.
 ## Production notes
 
 - Frontend: `cd frontend; npm run build; npm start`
-- Backend: run `uvicorn app.main:app` behind a reverse proxy (TLS), and run Celery worker + beat as services.
+- Backend: run all backend processes with PM2 from `backend/ecosystem.config.cjs`.
+- Keep `REDIS_ENABLED=true` in environments where Celery background generation is expected.
 - WebSocket notifications: frontend connects to `ws(s)://<API_HOST>/ws/notifications?token=<access_token>`.
+- Ensure `REDIS_URL` points to a reachable Redis instance and `APP_TIMEZONE=Europe/Budapest` (or your business timezone).
+
+PM2 commands:
+```powershell
+cd backend
+pm2 start ecosystem.config.cjs
+pm2 status
+pm2 logs backend-celery-beat --lines 200
+pm2 save
+```
+
+Useful ops checks:
+```powershell
+celery -A app.celery_app.celery_app inspect ping
+celery -A app.celery_app.celery_app inspect stats
+```
 

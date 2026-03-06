@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
 import { VsWorkflow } from "@/components/projects/vs-workflow"
 
@@ -453,7 +454,8 @@ const MEETING_TABS = [
 
 type TabId = (typeof TABS)[number]["id"] | (typeof MEETING_TABS)[number]["id"]
 
-const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
+const PCM_SELECTABLE_STATUSES: Task["status"][] = ["TODO", "IN_PROGRESS", "DONE"]
+const LEGACY_WAITING_STATUS: Task["status"] = "WAITING_CONFIRMATION"
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 
 const MEETING_POINTS = [
@@ -845,7 +847,10 @@ export default function PcmProjectPage() {
   const [createOpen, setCreateOpen] = React.useState(false)
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
-  const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
+  const [newStatus, setNewStatus] = React.useState<Task["status"]>("TODO")
+  const [pendingStatusTaskId, setPendingStatusTaskId] = React.useState<string | null>(null)
+  const [pendingStatusValue, setPendingStatusValue] = React.useState<Task["status"]>("TODO")
+  const [pendingConfirmationAssigneeId, setPendingConfirmationAssigneeId] = React.useState("")
   const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
@@ -1977,7 +1982,7 @@ export default function PcmProjectPage() {
       toast.error("Due date is required")
       return
     }
-    if ((newStatus === "DONE" || newStatus === "WAITING_CONFIRMATION") && hasIncompleteChecklist) {
+    if (newStatus === "DONE" && hasIncompleteChecklist) {
       toast.error("Complete all checklist items before marking this task as done.")
       return
     }
@@ -3191,6 +3196,14 @@ export default function PcmProjectPage() {
     [activePhase, project?.current_phase, tasks]
   )
   const assignableUsers = React.useMemo(() => allUsers, [allUsers])
+  const confirmationUserPool = React.useMemo(
+    () => [...allUsers, ...members, ...(user ? [user] : [])],
+    [allUsers, members, user]
+  )
+  const confirmerCandidates = React.useMemo(
+    () => getConfirmerCandidates(confirmationUserPool),
+    [confirmationUserPool]
+  )
 
   if (!project) return <div className="text-sm text-muted-foreground">Loading...</div>
 
@@ -3291,7 +3304,7 @@ export default function PcmProjectPage() {
   const phase = project.current_phase || "MEETINGS"
   const phaseIndex = PHASES.indexOf(phase as (typeof PHASES)[number])
   const canClosePhase = phase !== "CLOSED"
-  const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
+  const userMap = new Map(confirmationUserPool.map((m) => [m.id, m]))
 
   const renderGaNotes = () => (
     <div className="space-y-4">
@@ -3437,18 +3450,61 @@ export default function PcmProjectPage() {
       : "grid-cols-[40px_1fr_1fr_60px_70px_1fr_80px]"
 
     const patchTask = async (taskId: string, payload: Record<string, unknown>, errorMessage: string) => {
+      const nextStatus = typeof payload.status === "string" ? payload.status : null
+      const currentTask = tasks.find((t) => t.id === taskId)
+      if (
+        isWaitingConfirmation(nextStatus) &&
+        !currentTask?.confirmation_assignee_id &&
+        !payload.confirmation_assignee_id
+      ) {
+        setPendingStatusTaskId(taskId)
+        setPendingStatusValue((nextStatus || "TODO") as Task["status"])
+        setPendingConfirmationAssigneeId("")
+        return null
+      }
       const res = await apiFetch(`/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
       if (!res.ok) {
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string" && data.detail.trim()) {
+            toast.error(data.detail)
+            return null
+          }
+        } catch {
+          // ignore
+        }
         toast.error(errorMessage)
         return null
       }
       const updated = (await res.json()) as Task
       setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
       return updated
+    }
+
+    const submitPendingStatusUpdate = async () => {
+      if (!pendingStatusTaskId) return
+      const validation = validateWaitingConfirmation(pendingStatusValue, pendingConfirmationAssigneeId)
+      if (validation) {
+        toast.error(validation)
+        return
+      }
+      const updated = await patchTask(
+        pendingStatusTaskId,
+        {
+          status: pendingStatusValue,
+          confirmation_assignee_id: pendingConfirmationAssigneeId,
+        },
+        "Failed to update status"
+      )
+      if (updated) {
+        setPendingStatusTaskId(null)
+        setPendingStatusValue("TODO")
+        setPendingConfirmationAssigneeId("")
+      }
     }
 
     const queueDescriptionSave = (taskId: string, description: string) => {
@@ -4836,7 +4892,7 @@ export default function PcmProjectPage() {
                           <SelectValue />
                         </SelectTrigger>
                         <SelectContent>
-                          {TASK_STATUSES.map((status) => (
+                          {PCM_SELECTABLE_STATUSES.map((status) => (
                             <SelectItem key={status} value={status}>
                               {statusLabel(status)}
                             </SelectItem>
@@ -4850,7 +4906,7 @@ export default function PcmProjectPage() {
                         onClick={async () => {
                           if (!project || !vsVlTaskTitle.trim()) return
                           if (
-                            (vsVlTaskStatus === "DONE" || vsVlTaskStatus === "WAITING_CONFIRMATION") &&
+                            vsVlTaskStatus === "DONE" &&
                             hasIncompleteChecklist
                           ) {
                             toast.error("Complete all checklist items before marking this task as done.")
@@ -5064,7 +5120,7 @@ export default function PcmProjectPage() {
                               onValueChange={(value) => {
                                 if (isLocked || !isEditing) return
                                 if (
-                                  (value === "DONE" || value === "WAITING_CONFIRMATION") &&
+                                  value === "DONE" &&
                                   hasIncompleteChecklist
                                 ) {
                                   toast.error("Complete all checklist items before marking this task as done.")
@@ -5087,7 +5143,12 @@ export default function PcmProjectPage() {
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {TASK_STATUSES.map((status) => (
+                                {task.status === LEGACY_WAITING_STATUS ? (
+                                  <SelectItem value={LEGACY_WAITING_STATUS} disabled>
+                                    {statusLabel(LEGACY_WAITING_STATUS)}
+                                  </SelectItem>
+                                ) : null}
+                                {PCM_SELECTABLE_STATUSES.map((status) => (
                                   <SelectItem key={status} value={status}>
                                     {statusLabel(status)}
                                   </SelectItem>
@@ -8434,6 +8495,61 @@ export default function PcmProjectPage() {
       ) : null}
 
       {/* Keep the rest of rendering logic similar to the source component; tabs will include Financials placeholder when active */}
+      <Dialog
+        open={Boolean(pendingStatusTaskId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingStatusTaskId(null)
+            setPendingStatusValue("TODO")
+            setPendingConfirmationAssigneeId("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Confirmer</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Select manager/admin confirmer before setting task to Waiting Confirmation.
+            </div>
+            <div className="space-y-2">
+              <Label>Confirm by (Manager/Admin)</Label>
+              <Select
+                value={pendingConfirmationAssigneeId || "__none__"}
+                onValueChange={(value) => setPendingConfirmationAssigneeId(value === "__none__" ? "" : value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select confirmer" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Select confirmer</SelectItem>
+                  {confirmerCandidates.map((candidate) => (
+                    <SelectItem key={candidate.id} value={candidate.id}>
+                      {candidate.full_name || candidate.username || "-"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setPendingStatusTaskId(null)
+                  setPendingStatusValue("TODO")
+                  setPendingConfirmationAssigneeId("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button disabled={!pendingConfirmationAssigneeId} onClick={() => void submitPendingStatusUpdate()}>
+                Confirm
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       {renderEditDueDateDialog()}
     </div>
   )

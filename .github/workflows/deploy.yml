@@ -11,7 +11,7 @@ jobs:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
-          clean: false 
+          clean: false
           fetch-depth: 0
 
       - name: Force Sync with GitHub
@@ -20,46 +20,143 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
+      - name: Detect Changed Files
+        id: changes
+        shell: powershell
+        run: |
+          $before = "${{ github.event.before }}"
+          $after = "${{ github.sha }}"
+          if ([string]::IsNullOrWhiteSpace($before) -or $before -eq "0000000000000000000000000000000000000000") {
+            try {
+              $before = (git rev-parse "$after^").Trim()
+            } catch {
+              $before = $after
+            }
+          }
+
+          $changedFiles = @(git diff --name-only $before $after | Where-Object { $_ -and $_.Trim() -ne "" })
+          Write-Host "Comparing commits: $before -> $after"
+          Write-Host "Changed files:"
+          if ($changedFiles.Count -eq 0) {
+            Write-Host " - <none>"
+          } else {
+            $changedFiles | ForEach-Object { Write-Host " - $_" }
+          }
+
+          $backendChanged = $false
+          $frontendChanged = $false
+          $migrationChanged = $false
+
+          foreach ($file in $changedFiles) {
+            if ($file -like "backend/*") {
+              $backendChanged = $true
+            }
+            if ($file -like "frontend/*") {
+              $frontendChanged = $true
+            }
+            if ($file -like "backend/alembic/versions/*") {
+              $migrationChanged = $true
+            }
+          }
+
+          "backend_changed=$($backendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "migration_changed=$($migrationChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+
       - name: Create Env Files
         shell: cmd
         run: |
           echo NEXT_PUBLIC_API_URL=https://api-flow.primexeu.com > frontend/.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend/.env
+          echo DB_POOL_SIZE=20 >> backend/.env
+          echo DB_MAX_OVERFLOW=20 >> backend/.env
+          echo DB_POOL_TIMEOUT=30 >> backend/.env
+          echo DB_POOL_RECYCLE=1800 >> backend/.env
           echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend/.env
-          echo REDIS_URL=redis://localhost:6379/0 >> backend/.env
+          echo REDIS_ENABLED=false >> backend/.env
+          echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend/.env
+          echo APP_TIMEZONE=Europe/Budapest >> backend/.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
 
+      - name: Database Migration Notice
+        if: ${{ steps.changes.outputs.migration_changed == 'true' }}
+        shell: powershell
+        run: |
+          Write-Warning "Alembic auto-migration is disabled in deploy. Apply DB SQL manually in pgAdmin before or after this deploy as needed."
+
       - name: Update Backend
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
-          pm2 restart backend || pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
 
-      - name: Update Frontend (PowerShell Fix)
+          REM Database migrations are manual in pgAdmin (no alembic auto-run in deploy).
+
+          REM Restart or start backend API process from ecosystem config
+          call pm2 restart backend-api || call pm2 start ecosystem.config.cjs --only backend-api
+          call pm2 describe backend-api | findstr /I "status"
+          echo PM2 backend-api restart/start completed.
+
+      - name: Wait for Backend Readiness
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          $ok = $false
+          $uri = "http://127.0.0.1:8000/health"
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+              Write-Host "Backend health check attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
+              if ($resp.StatusCode -eq 200) {
+                $ok = $true
+                break
+              }
+            } catch {
+              Write-Host "Backend health check attempt $($i + 1)/20: no response yet"
+              Start-Sleep -Seconds 2
+            }
+          }
+          if (-not $ok) {
+            Write-Error "Backend /health did not become ready after restart."
+            exit 1
+          }
+          Write-Host "Backend health check: OK ($uri)"
+
+      - name: Update Frontend
+        if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
         run: |
           Set-Location frontend
-          
-          Write-Host "1. Stopping Frontend (Safe Mode)..."
-          # We use cmd /c here to safely swallow the error if the process doesn't exist
-          cmd /c "pm2 delete frontend 2>NUL || ver > NUL"
-          
-          Write-Host "2. Installing Dependencies..."
+
+          Write-Host "1. Installing Dependencies..."
           npm install
           if ($LASTEXITCODE -ne 0) { Write-Error "NPM Install Failed"; exit 1 }
 
-          Write-Host "3. Cleaning Old Build..."
+          Write-Host "2. Cleaning Old Build..."
           if (Test-Path .next) { Remove-Item .next -Recurse -Force }
 
-          Write-Host "4. Building New Version (This takes time)..."
+          Write-Host "3. Building New Version (This takes time)..."
           npm run build
           if ($LASTEXITCODE -ne 0) { Write-Error "Build Failed"; exit 1 }
 
-          Write-Host "5. Starting Frontend..."
+          Write-Host "4. Restarting Frontend..."
           $CurrentPath = (Get-Location).Path
-          # We restart via cmd to ensure the path is set correctly
-          cmd /c "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
-          
+          cmd /c "pm2 restart frontend || pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
+
+      - name: Stop Celery Processes
+        shell: cmd
+        run: |
+          call pm2 stop backend-celery-worker || ver > NUL
+          call pm2 stop backend-celery-beat || ver > NUL
+
+      - name: Save PM2 Process List
+        shell: cmd
+        run: |
           pm2 save
+
+      - name: Deploy Observability
+        shell: cmd
+        run: |
+          call pm2 status
+          call pm2 logs backend-api --lines 50 --nostream || ver > NUL

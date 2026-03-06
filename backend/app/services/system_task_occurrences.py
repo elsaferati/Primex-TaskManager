@@ -4,6 +4,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from app.config import settings
 from sqlalchemy import and_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,6 +14,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.services.system_task_schedule import matches_template_date
+from app.services.system_task_instances import ensure_task_instances_in_range
 
 
 OPEN = "OPEN"
@@ -47,7 +49,11 @@ def _template_start_date(template: SystemTaskTemplate) -> date | None:
         return None
     if isinstance(created_at, datetime):
         if created_at.tzinfo is not None:
-            return created_at.astimezone(ZoneInfo("Europe/Tirane")).date()
+            try:
+                local_tz = ZoneInfo(settings.APP_TIMEZONE)
+            except Exception:
+                local_tz = timezone.utc
+            return created_at.astimezone(local_tz).date()
         return created_at.date()
     if isinstance(created_at, date):
         return created_at
@@ -69,10 +75,10 @@ async def ensure_occurrences_in_range(
     template_ids: list[uuid.UUID] | None = None,
 ) -> None:
     """
-    Ensure rows exist for all scheduled occurrences between [start, end] inclusive.
-
-    This is idempotent and uses INSERT..ON CONFLICT DO NOTHING.
+    Back-compat wrapper.
+    Also ensures task-backed system instances exist for the same range.
     """
+    await ensure_task_instances_in_range(db=db, start=start, end=end)
     if end < start:
         return
 

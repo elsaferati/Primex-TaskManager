@@ -22,8 +22,6 @@ from app.models.ga_note import GaNote
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
-from app.models.system_task_occurrence import SystemTaskOccurrence
-from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
@@ -37,8 +35,7 @@ from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
-from app.services.system_task_occurrences import ensure_occurrences_in_range
-from app.services.system_task_schedule import previous_occurrence_date
+from app.services.system_task_instances import ensure_task_instances_in_range
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 
 
@@ -238,10 +235,13 @@ def _task_to_out(
         dependency_task_id=task.dependency_task_id,
         department_id=task.department_id,
         assigned_to=task.assigned_to,
+        confirmation_assignee_id=task.confirmation_assignee_id,
         assignees=assignees,
         created_by=task.created_by,
         ga_note_origin_id=task.ga_note_origin_id,
         system_template_origin_id=task.system_template_origin_id,
+        origin_run_at=task.origin_run_at,
+        system_task_slot_id=task.system_task_slot_id,
         status=status_override or task.status,
         priority=task.priority,
         finish_period=task.finish_period,
@@ -309,6 +309,32 @@ def _extract_mentions(text: str | None) -> set[str]:
     if not text:
         return set()
     return set(MENTION_RE.findall(text))
+
+
+async def _is_user_assigned_to_task(db: AsyncSession, task: Task, user_id: uuid.UUID) -> bool:
+    if task.assigned_to == user_id:
+        return True
+    assignee_record = (
+        await db.execute(
+            select(TaskAssignee)
+            .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == user_id)
+        )
+    ).scalar_one_or_none()
+    return assignee_record is not None
+
+
+def _can_complete_waiting_confirmation(
+    *,
+    user_role: UserRole,
+    actor_user_id: uuid.UUID,
+    confirmation_assignee_id: uuid.UUID | None,
+    actor_is_assignee: bool,
+) -> bool:
+    if user_role in (UserRole.ADMIN, UserRole.MANAGER):
+        return True
+    if confirmation_assignee_id is not None and confirmation_assignee_id == actor_user_id:
+        return True
+    return actor_is_assignee
 
 
 @router.get("", response_model=list[TaskOut])
@@ -601,6 +627,18 @@ async def create_task(
     status_value = payload.status or TaskStatus.TODO
     if payload.ga_note_origin_id is not None:
         status_value = _normalize_ga_note_task_status(status_value)
+    confirmation_assignee_id = payload.confirmation_assignee_id
+    if confirmation_assignee_id is not None:
+        confirmation_user = (
+            await db.execute(select(User).where(User.id == confirmation_assignee_id))
+        ).scalar_one_or_none()
+        if confirmation_user is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
+    if status_value == TaskStatus.WAITING_CONFIRMATION and confirmation_assignee_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation assignee is required when status is WAITING_CONFIRMATION",
+        )
     priority_value = payload.priority or TaskPriority.NORMAL
     phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.MEETINGS)
 
@@ -655,6 +693,7 @@ async def create_task(
                     dependency_task_id=dependency_task_id,
                     department_id=task_department_id,
                     assigned_to=assignee_id,
+                    confirmation_assignee_id=confirmation_assignee_id,
                     created_by=user.id,
                     ga_note_origin_id=payload.ga_note_origin_id,
                     fast_task_group_id=None,
@@ -790,6 +829,7 @@ async def create_task(
                             dependency_task_id=dependency_task_id,
                             department_id=task_department_id,
                             assigned_to=assignee_id,
+                            confirmation_assignee_id=confirmation_assignee_id,
                             created_by=user.id,
                             ga_note_origin_id=payload.ga_note_origin_id,
                             fast_task_group_id=None,
@@ -905,6 +945,7 @@ async def create_task(
                 dependency_task_id=dependency_task_id,
                 department_id=task_department_id,
                 assigned_to=assignee_id,
+                confirmation_assignee_id=confirmation_assignee_id,
                 created_by=user.id,
                 ga_note_origin_id=payload.ga_note_origin_id,
                 fast_task_group_id=None,
@@ -999,6 +1040,7 @@ async def create_task(
                 dependency_task_id=dependency_task_id,
                 department_id=task_department_id,
                 assigned_to=assignee_id,
+                confirmation_assignee_id=confirmation_assignee_id,
                 created_by=user.id,
                 ga_note_origin_id=payload.ga_note_origin_id,
                 fast_task_group_id=fast_task_group_id,
@@ -1086,6 +1128,7 @@ async def create_task(
         dependency_task_id=dependency_task_id,
         department_id=task_department_id,
         assigned_to=assigned_to_value,
+        confirmation_assignee_id=confirmation_assignee_id,
         created_by=user.id,
         ga_note_origin_id=payload.ga_note_origin_id,
         fast_task_group_id=fast_task_group_id,
@@ -1243,6 +1286,8 @@ async def update_task(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    is_assigned_to_task = await _is_user_assigned_to_task(db, task, user.id)
+    is_confirmation_assignee = task.confirmation_assignee_id is not None and task.confirmation_assignee_id == user.id
     
     # Check if user has permission to edit this task:
     # Allow: Admin, Manager, task creator, primary assignee, or any assignee in TaskAssignee table
@@ -1251,18 +1296,10 @@ async def update_task(
         can_edit = True
     elif task.created_by and task.created_by == user.id:
         can_edit = True
-    elif task.assigned_to and task.assigned_to == user.id:
+    elif is_assigned_to_task:
         can_edit = True
-    else:
-        # Check if user is in the TaskAssignee table for this task
-        assignee_record = (
-            await db.execute(
-                select(TaskAssignee)
-                .where(TaskAssignee.task_id == task.id, TaskAssignee.user_id == user.id)
-            )
-        ).scalar_one_or_none()
-        if assignee_record is not None:
-            can_edit = True
+    elif is_confirmation_assignee:
+        can_edit = True
     
     if not can_edit:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
@@ -1283,7 +1320,7 @@ async def update_task(
     # that user is admin, manager, creator, or assignee
 
     if payload.status is not None and task.system_template_origin_id is not None:
-        if task.assigned_to == user.id:
+        if is_assigned_to_task:
             pass
         elif user.role in (UserRole.ADMIN, UserRole.MANAGER):
             # Allow admins and managers to update system task status
@@ -1310,6 +1347,7 @@ async def update_task(
         "finish_period": _enum_value(task.finish_period),
         "phase": _enum_value(task.phase),
         "assigned_to": str(task.assigned_to) if task.assigned_to else None,
+        "confirmation_assignee_id": str(task.confirmation_assignee_id) if task.confirmation_assignee_id else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
     }
@@ -1319,7 +1357,6 @@ async def update_task(
 
     # Track if status was explicitly set in payload to prevent auto-status from overriding it
     status_was_explicitly_set = payload.status is not None
-    status_changed = False
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
@@ -1371,6 +1408,20 @@ async def update_task(
         ensure_manager_or_admin(user)
         ensure_department_access(user, payload.department_id)
         task.department_id = payload.department_id
+
+    confirmation_set = False
+    if hasattr(payload, "model_fields_set"):
+        confirmation_set = "confirmation_assignee_id" in payload.model_fields_set  # type: ignore[attr-defined]
+    elif hasattr(payload, "__fields_set__"):
+        confirmation_set = "confirmation_assignee_id" in payload.__fields_set__  # type: ignore[attr-defined]
+    if confirmation_set:
+        if payload.confirmation_assignee_id is not None:
+            confirmation_user = (
+                await db.execute(select(User).where(User.id == payload.confirmation_assignee_id))
+            ).scalar_one_or_none()
+            if confirmation_user is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
+        task.confirmation_assignee_id = payload.confirmation_assignee_id
 
     if payload.assignees is not None:
         # Fast task group: assignees represent group membership; don't mutate task.assigned_to.
@@ -1445,9 +1496,31 @@ async def update_task(
             )
         )
 
+    current_status_raw = _enum_value(task.status)
+    target_status_raw = payload.status.value if payload.status is not None else current_status_raw
+    actor_is_assignee_for_completion = await _is_user_assigned_to_task(db, task, user.id)
+    if target_status_raw == TaskStatus.WAITING_CONFIRMATION.value and task.confirmation_assignee_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation assignee is required when status is WAITING_CONFIRMATION",
+        )
+    if (
+        payload.status == TaskStatus.DONE
+        and current_status_raw == TaskStatus.WAITING_CONFIRMATION.value
+        and not _can_complete_waiting_confirmation(
+            user_role=user.role,
+            actor_user_id=user.id,
+            confirmation_assignee_id=task.confirmation_assignee_id,
+            actor_is_assignee=actor_is_assignee_for_completion,
+        )
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only confirmation assignee, task assignees, or managers/admins can complete this task",
+        )
+
     if payload.status is not None and payload.status != task.status:
         task.status = payload.status
-        status_changed = True
         if task.status == TaskStatus.DONE:
             task.completed_at = task.completed_at or datetime.now(timezone.utc)
         else:
@@ -1665,6 +1738,8 @@ async def update_task(
             shared_values["internal_notes"] = task.internal_notes
         if payload.department_id is not None:
             shared_values["department_id"] = task.department_id
+        if confirmation_set:
+            shared_values["confirmation_assignee_id"] = task.confirmation_assignee_id
         if payload.due_date is not None:
             shared_values["due_date"] = task.due_date
         if payload.start_date is not None:
@@ -1746,6 +1821,7 @@ async def update_task(
                         dependency_task_id=task.dependency_task_id,
                         department_id=task.department_id,
                         assigned_to=au.id,
+                        confirmation_assignee_id=task.confirmation_assignee_id,
                         created_by=task.created_by,
                         ga_note_origin_id=task.ga_note_origin_id,
                         system_template_origin_id=task.system_template_origin_id,
@@ -1790,38 +1866,6 @@ async def update_task(
 
     await ensure_ko_user_is_task_assignee(db, task=task)
 
-    if status_changed and task.system_template_origin_id and task.assigned_to is not None:
-        tmpl = (
-            await db.execute(
-                select(SystemTaskTemplate).where(SystemTaskTemplate.id == task.system_template_origin_id)
-            )
-        ).scalar_one_or_none()
-        if tmpl is not None:
-            base_dt = task.start_date or task.created_at
-            if base_dt is None:
-                base_day = datetime.now(timezone.utc).date()
-            else:
-                base_day = base_dt.astimezone(timezone.utc).date() if base_dt.tzinfo else base_dt.date()
-            occurrence_date = previous_occurrence_date(tmpl, base_day)
-            await ensure_occurrences_in_range(
-                db=db,
-                start=occurrence_date,
-                end=occurrence_date,
-                template_ids=[tmpl.id],
-            )
-            occ = (
-                await db.execute(
-                    select(SystemTaskOccurrence)
-                    .where(SystemTaskOccurrence.template_id == tmpl.id)
-                    .where(SystemTaskOccurrence.user_id == task.assigned_to)
-                    .where(SystemTaskOccurrence.occurrence_date == occurrence_date)
-                )
-            ).scalar_one_or_none()
-            if occ is not None:
-                occ_status = "DONE" if task.status == TaskStatus.DONE else "OPEN"
-                occ.status = occ_status
-                occ.acted_at = None if occ_status == "OPEN" else datetime.now(timezone.utc)
-
     after = {
         "title": task.title,
         "description": task.description,
@@ -1832,6 +1876,7 @@ async def update_task(
         "finish_period": _enum_value(task.finish_period),
         "phase": _enum_value(task.phase),
         "assigned_to": str(task.assigned_to) if task.assigned_to else None,
+        "confirmation_assignee_id": str(task.confirmation_assignee_id) if task.confirmation_assignee_id else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
     }

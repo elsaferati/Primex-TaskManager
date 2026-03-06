@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
 
 const TASK_STATUS_OPTIONS = [
@@ -122,6 +123,7 @@ export default function TaskDetailsPage() {
   const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
   const [assignedTo, setAssignedTo] = React.useState(UNASSIGNED_VALUE)
+  const [confirmationAssigneeId, setConfirmationAssigneeId] = React.useState("")
   const [assignees, setAssignees] = React.useState<string[]>([])
   const [selectAssigneesOpen, setSelectAssigneesOpen] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
@@ -160,6 +162,7 @@ export default function TaskDetailsPage() {
     setStartDate(toDateInputValue(task.start_date))
     setDueDate(toDateInputValue(task.due_date))
     setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
+    setConfirmationAssigneeId(task.confirmation_assignee_id || "")
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
     const assigneeIds = task.assignees && task.assignees.length > 0
       ? task.assignees.map(a => a.id).filter((id): id is string => Boolean(id))
@@ -281,6 +284,14 @@ export default function TaskDetailsPage() {
         reminder_enabled: reminder,
       }
       if (statusValue) payload.status = statusValue
+      const confirmationValidation = validateWaitingConfirmation(statusValue || null, confirmationAssigneeId)
+      if (confirmationValidation) {
+        toast.error(confirmationValidation)
+        return
+      }
+      if (isWaitingConfirmation(statusValue || null)) {
+        payload.confirmation_assignee_id = confirmationAssigneeId
+      }
       if (canAssign) {
         payload.start_date = startDate || null
         payload.due_date = dueDate || null
@@ -376,6 +387,8 @@ export default function TaskDetailsPage() {
     }
     return `${assignees.length} selected`
   }, [users, assignees])
+  const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
+  const requiresConfirmer = isWaitingConfirmation(statusValue || null)
 
   if (loadError) {
     return (
@@ -461,6 +474,26 @@ export default function TaskDetailsPage() {
                   </SelectContent>
                 </Select>
               </div>
+              {requiresConfirmer ? (
+                <div className="space-y-2">
+                  <Label>Confirm by (Manager/Admin)</Label>
+                  <Select value={confirmationAssigneeId || UNASSIGNED_VALUE} onValueChange={(value) => {
+                    setConfirmationAssigneeId(value === UNASSIGNED_VALUE ? "" : value)
+                  }}>
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select confirmer" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={UNASSIGNED_VALUE}>Select confirmer</SelectItem>
+                      {confirmerCandidates.map((candidate) => (
+                        <SelectItem key={candidate.id} value={candidate.id}>
+                          {candidate.full_name || candidate.username || "-"}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
 
               <div className="space-y-2">
                 <Label>Description</Label>
@@ -612,7 +645,10 @@ export default function TaskDetailsPage() {
               </div>
 
               <div className="flex justify-end">
-                <Button disabled={saving} onClick={() => void save()}>
+                <Button
+                  disabled={saving || (requiresConfirmer && !confirmationAssigneeId)}
+                  onClick={() => void save()}
+                >
                   {saving ? "Saving..." : "Save"}
                 </Button>
               </div>

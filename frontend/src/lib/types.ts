@@ -19,6 +19,14 @@ export interface TaskAssignee {
   department_id?: string | null
 }
 
+export interface SystemTaskTemplateAssigneeSlot {
+  id: string
+  primary_user_id: string
+  zv1_user_id?: string | null
+  zv2_user_id?: string | null
+  is_active: boolean
+}
+
 export interface SystemTaskTemplate {
   id: string
   template_id?: string | null
@@ -30,6 +38,7 @@ export interface SystemTaskTemplate {
   default_assignee_id?: string | null
   created_by?: string | null
   assignees?: TaskAssignee[] | null
+  assignee_slots?: SystemTaskTemplateAssigneeSlot[] | null
   scope: SystemTaskScope
   frequency: SystemTaskFrequency
   day_of_week?: number | null
@@ -155,6 +164,7 @@ export interface Task {
   reminder_enabled?: boolean
   next_reminder_at?: string | null
   assigned_to?: string | null
+  confirmation_assignee_id?: string | null
   assignees?: TaskAssignee[] | null
   created_by?: string | null
   ga_note_origin_id?: string | null

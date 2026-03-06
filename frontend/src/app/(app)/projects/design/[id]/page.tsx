@@ -19,6 +19,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
 
 function toDateInput(value?: string | null) {
@@ -496,6 +497,9 @@ export default function DesignProjectPage() {
   const [controlChecklistEditingText, setControlChecklistEditingText] = React.useState("")
   const [controlChecklistSaving, setControlChecklistSaving] = React.useState(false)
   const [taskStatusSaving, setTaskStatusSaving] = React.useState<Record<string, boolean>>({})
+  const [pendingStatusTaskId, setPendingStatusTaskId] = React.useState<string | null>(null)
+  const [pendingStatusValue, setPendingStatusValue] = React.useState<Task["status"]>("TODO")
+  const [pendingConfirmationAssigneeId, setPendingConfirmationAssigneeId] = React.useState("")
 
   // Inline task form state for Produkte Sa Jane Kryer
   const [newProductTaskTitle, setNewProductTaskTitle] = React.useState("")
@@ -2126,13 +2130,23 @@ export default function DesignProjectPage() {
       toast.error("Only admins can change tasks from DONE to another status")
       return
     }
+    if (isWaitingConfirmation(status) && !task?.confirmation_assignee_id) {
+      setPendingStatusTaskId(taskId)
+      setPendingStatusValue(status)
+      setPendingConfirmationAssigneeId("")
+      return
+    }
     
     setTaskStatusSaving((prev) => ({ ...prev, [taskId]: true }))
     try {
+      const payload: Record<string, unknown> = { status }
+      if (isWaitingConfirmation(status) && task?.confirmation_assignee_id) {
+        payload.confirmation_assignee_id = task.confirmation_assignee_id
+      }
       const res = await apiFetch(`/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ status }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         toast.error("Failed to update task status")
@@ -2143,6 +2157,45 @@ export default function DesignProjectPage() {
       toast.success("Task updated")
     } finally {
       setTaskStatusSaving((prev) => ({ ...prev, [taskId]: false }))
+    }
+  }
+
+  const submitPendingStatusUpdate = async () => {
+    if (!pendingStatusTaskId) return
+    const validation = validateWaitingConfirmation(pendingStatusValue, pendingConfirmationAssigneeId)
+    if (validation) {
+      toast.error(validation)
+      return
+    }
+    setTaskStatusSaving((prev) => ({ ...prev, [pendingStatusTaskId]: true }))
+    try {
+      const res = await apiFetch(`/tasks/${pendingStatusTaskId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          status: pendingStatusValue,
+          confirmation_assignee_id: pendingConfirmationAssigneeId,
+        }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update task status"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string" && data.detail.trim()) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as Task
+      setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
+      toast.success("Task updated")
+      setPendingStatusTaskId(null)
+      setPendingStatusValue("TODO")
+      setPendingConfirmationAssigneeId("")
+    } finally {
+      setTaskStatusSaving((prev) => ({ ...prev, [pendingStatusTaskId]: false }))
     }
   }
 
@@ -2384,6 +2437,10 @@ export default function DesignProjectPage() {
   const showMstPlanningSections = isMstProject && activePhase === "PLANNING"
 
   const userMap = new Map([...allUsers, ...members, ...(user ? [user] : [])].map((m) => [m.id, m]))
+  const confirmerCandidates = React.useMemo(
+    () => getConfirmerCandidates([...allUsers, ...members, ...(user ? [user] : [])]),
+    [allUsers, members, user]
+  )
   const assignableUsers = React.useMemo(() => allUsers, [allUsers])
   const memberLabel = (id?: string | null) => {
     if (!id) return "-"
@@ -5488,6 +5545,61 @@ export default function DesignProjectPage() {
                 }}
               >
                 {savingProjectDueDate ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(pendingStatusTaskId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingStatusTaskId(null)
+            setPendingStatusValue("TODO")
+            setPendingConfirmationAssigneeId("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Select Confirmer</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="text-sm text-muted-foreground">
+              Select manager/admin confirmer before setting task to Waiting Confirmation.
+            </div>
+            <div className="space-y-2">
+              <Label>Confirm by (Manager/Admin)</Label>
+              <Select
+                value={pendingConfirmationAssigneeId || "__none__"}
+                onValueChange={(value) => setPendingConfirmationAssigneeId(value === "__none__" ? "" : value)}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select confirmer" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">Select confirmer</SelectItem>
+                  {confirmerCandidates.map((candidate) => (
+                    <SelectItem key={candidate.id} value={candidate.id}>
+                      {candidate.full_name || candidate.username || "-"}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setPendingStatusTaskId(null)
+                  setPendingStatusValue("TODO")
+                  setPendingConfirmationAssigneeId("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button disabled={!pendingConfirmationAssigneeId} onClick={() => void submitPendingStatusUpdate()}>
+                Confirm
               </Button>
             </div>
           </div>

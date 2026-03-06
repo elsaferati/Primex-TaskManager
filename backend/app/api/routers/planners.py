@@ -17,11 +17,12 @@ except ImportError:
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import func, select, or_
+from sqlalchemy import func, select, or_, cast, Date
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.common_entry import CommonEntry
 from app.models.enums import CommonCategory, ProjectPhaseStatus, ProjectType, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
@@ -29,7 +30,6 @@ from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_member import ProjectMember
 from app.models.system_task_template import SystemTaskTemplate
-from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_planner_exclusion import TaskPlannerExclusion
@@ -41,7 +41,6 @@ from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
 from app.models.department import Department
 from app.services.task_classification import is_fast_task as is_fast_task_model
 from app.services.system_task_schedule import matches_template_date
-from app.services.system_task_occurrences import ensure_occurrences_in_range
 from app.services.project_display_title import build_project_display_title_map
 from app.schemas.planner import (
     MonthlyPlannerResponse,
@@ -251,21 +250,21 @@ def _as_utc_date(value: datetime | date | None) -> date | None:
 def _as_local_date(value: datetime | date | None) -> date | None:
     """
     Extract the date component from a datetime, preserving the local date meaning.
-    For planning purposes, we want the date in Europe/Pristina timezone (UTC+1/+2), not UTC.
+    For planning purposes, we want the date in APP_TIMEZONE, not UTC.
     
-    When PostgreSQL stores a date like "2026-02-05 00:00:00+01" (midnight in Europe/Pristina),
+    When PostgreSQL stores a date like "2026-02-05 00:00:00+01" (midnight in local timezone),
     it stores the UTC equivalent "2026-02-04 23:00:00 UTC". SQLAlchemy retrieves it as UTC.
-    We need to convert back to Europe/Pristina timezone before extracting the date.
+    We need to convert back to APP_TIMEZONE before extracting the date.
     
     Example:
     - Input: 2026-02-04 23:00:00+00:00 (UTC representation of 2026-02-05 00:00:00+01)
-    - Output: 2026-02-05 (the intended local date in Europe/Pristina)
+    - Output: 2026-02-05 (the intended local date in APP_TIMEZONE)
     """
     if value is None:
         return None
     if isinstance(value, datetime):
         if value.tzinfo:
-            local_dt = value.astimezone(_pristina_tz())
+            local_dt = value.astimezone(_app_tz())
             # Extract date from local timezone datetime
             return local_dt.date()
         else:
@@ -275,39 +274,40 @@ def _as_local_date(value: datetime | date | None) -> date | None:
     return value
 
 
-def _pristina_tz():
+def _app_tz():
     """
-    Resolve Europe/Pristina timezone with fallbacks.
+    Resolve APP_TIMEZONE with fallbacks.
 
     Note: This file supports both zoneinfo and pytz fallbacks for older environments.
     """
+    tz_name = settings.APP_TIMEZONE
     tz = None
 
     if ZoneInfo is not None:
         try:
-            tz = ZoneInfo("Europe/Pristina")
+            tz = ZoneInfo(tz_name)
         except Exception:
-            try:
-                tz = ZoneInfo("Europe/Belgrade")
-            except Exception:
-                tz = None
+            tz = None
 
     if tz is None:
         try:
             import pytz
 
             try:
-                tz = pytz.timezone("Europe/Pristina")
+                tz = pytz.timezone(tz_name)
             except Exception:
-                tz = pytz.timezone("Europe/Belgrade")
+                tz = None
         except ImportError:
-            tz = timezone(timedelta(hours=1))
+            tz = None
+
+    if tz is None:
+        tz = timezone.utc
 
     return tz
 
 
-def _today_pristina_date() -> date:
-    return datetime.now(timezone.utc).astimezone(_pristina_tz()).date()
+def _today_app_date() -> date:
+    return datetime.now(timezone.utc).astimezone(_app_tz()).date()
 
 
 def _user_to_assignee(user: User) -> TaskAssigneeOut:
@@ -2400,7 +2400,7 @@ async def weekly_table_planner(
         # Organize tasks by day and user
         days_data: list[WeeklyTableDay] = []
         
-        # Ensure system task occurrences exist for GA department and GANE ARIFAJ user
+        # Keep weekly planner read-only: do not generate system tasks during page loads.
         is_ga_dept = dept.name == "GA"
         gane_arifaj_user = None
         if is_ga_dept:
@@ -2408,16 +2408,6 @@ async def weekly_table_planner(
                 if u.username and u.username.lower() == "gane.arifaj":
                     gane_arifaj_user = u
                     break
-        
-        if is_ga_dept and gane_arifaj_user:
-            # Ensure system task occurrences exist for the week (only once per department)
-            await ensure_occurrences_in_range(
-                db=db,
-                start=working_days[0],
-                end=working_days[-1],
-                template_ids=None,  # All templates
-            )
-            await db.commit()
         
         for day_date in working_days:
             users_day_data: list[WeeklyTableUserDay] = []
@@ -2542,42 +2532,43 @@ async def weekly_table_planner(
                 is_gane_arifaj = dept_user.username and dept_user.username.lower() == "gane.arifaj"
                 
                 if is_ga_dept and is_gane_arifaj:
-                    # Query system task occurrences for this user on this day
-                    # System tasks are assigned via assignee_ids or default_assignee_id in the template
-                    # The occurrence already exists for this user, so we just need to fetch it
-                    occ_rows = (
+                    # Query generated system task rows for this user on this day.
+                    task_local_day = cast(
+                        func.timezone(
+                            func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE),
+                            func.coalesce(Task.due_date, Task.origin_run_at),
+                        ),
+                        Date,
+                    )
+                    system_rows = (
                         await db.execute(
-                            select(SystemTaskOccurrence, SystemTaskTemplate)
-                            .join(SystemTaskTemplate, SystemTaskOccurrence.template_id == SystemTaskTemplate.id)
-                            .where(SystemTaskOccurrence.user_id == dept_user.id)
-                            .where(SystemTaskOccurrence.occurrence_date == day_date)
+                            select(Task, SystemTaskTemplate)
+                            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+                            .where(Task.assigned_to == dept_user.id)
+                            .where(Task.system_template_origin_id.is_not(None))
+                            .where(Task.is_active.is_(True))
+                            .where(task_local_day == day_date)
                             .where(SystemTaskTemplate.is_active.is_(True))
-                            .order_by(SystemTaskTemplate.title)
+                            .order_by(SystemTaskTemplate.title, Task.created_at.desc())
                         )
                     ).all()
                     
                     # Debug logging
-                    if occ_rows:
-                        logger.debug(f"[SYSTEM TASKS] Found {len(occ_rows)} system task occurrences for GANE ARIFAJ on {day_date}")
+                    if system_rows:
+                        logger.debug(f"[SYSTEM TASKS] Found {len(system_rows)} system tasks for GANE ARIFAJ on {day_date}")
                     else:
-                        logger.debug(f"[SYSTEM TASKS] No system task occurrences found for GANE ARIFAJ on {day_date}")
+                        logger.debug(f"[SYSTEM TASKS] No system tasks found for GANE ARIFAJ on {day_date}")
                     
-                    # Convert occurrences to WeeklyTableTaskEntry
-                    for occ, tmpl in occ_rows:
-                        # Map SystemTaskOccurrence status to TaskStatus
-                        # OPEN -> TODO, DONE -> DONE, NOT_DONE/SKIPPED -> TODO
-                        if occ.status == "DONE":
+                    # Convert task rows to WeeklyTableTaskEntry.
+                    for system_task, tmpl in system_rows:
+                        if system_task.status == TaskStatus.DONE:
                             task_status = TaskStatus.DONE
-                        elif occ.status in ("NOT_DONE", "SKIPPED"):
+                            completed_at = system_task.completed_at
+                        else:
                             task_status = TaskStatus.TODO
-                        else:  # OPEN or unknown
-                            task_status = TaskStatus.TODO
-                        
-                        # Determine completed_at from acted_at if status is DONE
-                        completed_at = occ.acted_at if occ.status == "DONE" else None
-                        
-                        # Get finish_period from template
-                        finish_period_value = tmpl.finish_period
+                            completed_at = None
+
+                        finish_period_value = system_task.finish_period or tmpl.finish_period
                         finish_period_upper = None
                         if finish_period_value:
                             finish_period_str = str(finish_period_value).strip()
@@ -2589,17 +2580,16 @@ async def weekly_table_planner(
                         is_am = finish_period_upper == "AM"
                         is_both = not finish_period_upper or finish_period_upper not in ("AM", "PM")
                         
-                        # Create the entry
                         entry = WeeklyTableTaskEntry(
-                            task_id=None,  # System tasks don't have task IDs in weekly planner context
+                            task_id=system_task.id,
                             title=tmpl.title,
                             status=task_status,
-                            daily_status=None,  # System tasks use occurrence status
-                            created_at=tmpl.created_at,
+                            daily_status=None,
+                            created_at=system_task.created_at,
                             completed_at=completed_at,
                             daily_products=None,
-                            finish_period=tmpl.finish_period,
-                            fast_task_type=None,  # Not applicable for system tasks
+                            finish_period=finish_period_value,
+                            fast_task_type=None,
                             is_bllok=False,
                             is_1h_report=False,
                             is_r1=False,
@@ -2607,16 +2597,12 @@ async def weekly_table_planner(
                             ga_note_origin_id=None,
                         )
                         
-                        # Add to appropriate time slots
-                        # Note: System tasks don't have exclusions in the same way, but we check for consistency
                         if is_both:
-                            # Add to both AM and PM
                             am_system_tasks.append(entry)
                             pm_system_tasks.append(entry)
                         elif is_pm:
                             pm_system_tasks.append(entry)
                         else:
-                            # Default to AM if not PM and not both
                             am_system_tasks.append(entry)
 
                 for task in user_tasks:
@@ -3070,7 +3056,7 @@ async def save_weekly_snapshot(
     if dept is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
 
-    today = _today_pristina_date()
+    today = _today_app_date()
     target_week_start = _snapshot_week_start_for_mode(payload.mode, today)
     snapshot_type = _snapshot_type_for_mode(payload.mode)
     is_this_week = payload.mode == WeeklySnapshotSaveMode.THIS_WEEK_FINAL
@@ -3092,7 +3078,7 @@ async def weekly_snapshot_overview(
 ) -> WeeklySnapshotOverviewOut:
     ensure_department_access(user, department_id)
 
-    today = _today_pristina_date()
+    today = _today_app_date()
     this_week_start = _week_start(today)
     week_starts = [
         this_week_start - timedelta(days=14),
@@ -3255,7 +3241,7 @@ async def weekly_plan_vs_actual_compare(
         for task in current_task_items
     }
 
-    today_local = _today_pristina_date()
+    today_local = _today_app_date()
     as_of_date = min(today_local, week_end)
 
     buckets = _classify_weekly_plan_performance(
