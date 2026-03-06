@@ -45,8 +45,6 @@ jobs:
 
           $backendChanged = $false
           $frontendChanged = $false
-          $workerChanged = $false
-          $beatChanged = $false
           $migrationChanged = $false
 
           foreach ($file in $changedFiles) {
@@ -59,29 +57,10 @@ jobs:
             if ($file -like "backend/alembic/versions/*") {
               $migrationChanged = $true
             }
-            if (
-              $file -eq "backend/app/celery_app.py" -or
-              $file -eq "backend/app/celery_tasks.py" -or
-              $file -like "backend/app/jobs/*" -or
-              $file -eq "backend/app/services/system_task_instances.py" -or
-              $file -eq "backend/app/services/system_task_schedule.py" -or
-              $file -eq "backend/requirements.txt"
-            ) {
-              $workerChanged = $true
-            }
-            if (
-              $file -eq "backend/app/celery_app.py" -or
-              $file -eq "backend/app/celery_tasks.py" -or
-              $file -like "backend/app/jobs/*"
-            ) {
-              $beatChanged = $true
-            }
           }
 
           "backend_changed=$($backendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "worker_related_changed=$($workerChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "beat_related_changed=$($beatChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "migration_changed=$($migrationChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
 
       - name: Create Env Files
@@ -100,7 +79,7 @@ jobs:
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
 
       - name: Redis Readiness Gate
-        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.worker_related_changed == 'true' || steps.changes.outputs.beat_related_changed == 'true' }}
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
         run: |
           $hostName = "127.0.0.1"
@@ -125,7 +104,7 @@ jobs:
             Start-Sleep -Seconds 2
           }
           if (-not $ok) {
-            Write-Error "Redis is not reachable at ${hostName}:$port. Failing deploy before backend/celery restart."
+            Write-Error "Redis is not reachable at ${hostName}:$port. Failing deploy before backend restart."
             exit 1
           }
 
@@ -174,24 +153,6 @@ jobs:
           }
           Write-Host "Backend health check: OK ($uri)"
 
-      - name: Update Celery Worker
-        if: ${{ steps.changes.outputs.worker_related_changed == 'true' }}
-        shell: cmd
-        run: |
-          cd backend
-          call pm2 restart backend-celery-worker || call pm2 start ecosystem.config.cjs --only backend-celery-worker
-          call pm2 describe backend-celery-worker | findstr /I "status"
-          echo PM2 backend-celery-worker restart/start completed.
-
-      - name: Update Celery Beat
-        if: ${{ steps.changes.outputs.beat_related_changed == 'true' }}
-        shell: cmd
-        run: |
-          cd backend
-          call pm2 restart backend-celery-beat || call pm2 start ecosystem.config.cjs --only backend-celery-beat
-          call pm2 describe backend-celery-beat | findstr /I "status"
-          echo PM2 backend-celery-beat restart/start completed.
-
       - name: Update Frontend
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
@@ -214,7 +175,7 @@ jobs:
           cmd /c "pm2 restart frontend || pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
 
       - name: Save PM2 Process List
-        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' || steps.changes.outputs.worker_related_changed == 'true' || steps.changes.outputs.beat_related_changed == 'true' }}
+        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}
         shell: cmd
         run: |
           pm2 save
@@ -224,5 +185,3 @@ jobs:
         run: |
           call pm2 status
           call pm2 logs backend-api --lines 50 --nostream || ver > NUL
-          call pm2 logs backend-celery-worker --lines 50 --nostream || ver > NUL
-          call pm2 logs backend-celery-beat --lines 50 --nostream || ver > NUL
