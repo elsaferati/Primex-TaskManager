@@ -73,40 +73,10 @@ jobs:
           echo DB_POOL_TIMEOUT=30 >> backend/.env
           echo DB_POOL_RECYCLE=1800 >> backend/.env
           echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend/.env
-          echo REDIS_ENABLED=true >> backend/.env
+          echo REDIS_ENABLED=false >> backend/.env
           echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend/.env
           echo APP_TIMEZONE=Europe/Budapest >> backend/.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
-
-      - name: Redis Readiness Gate
-        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
-        shell: powershell
-        run: |
-          $hostName = "127.0.0.1"
-          $port = 6379
-          $ok = $false
-          for ($i = 0; $i -lt 20; $i++) {
-            $client = New-Object System.Net.Sockets.TcpClient
-            try {
-              $async = $client.BeginConnect($hostName, $port, $null, $null)
-              if ($async.AsyncWaitHandle.WaitOne(2000, $false) -and $client.Connected) {
-                $client.EndConnect($async) | Out-Null
-                $ok = $true
-                Write-Host "Redis reachability check: OK (${hostName}:$port)"
-                break
-              }
-            } catch {
-              # continue retry loop
-            } finally {
-              $client.Close()
-            }
-            Write-Host "Redis reachability check: waiting ($($i + 1)/20)"
-            Start-Sleep -Seconds 2
-          }
-          if (-not $ok) {
-            Write-Error "Redis is not reachable at ${hostName}:$port. Failing deploy before backend restart."
-            exit 1
-          }
 
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}
@@ -173,6 +143,13 @@ jobs:
           Write-Host "4. Restarting Frontend..."
           $CurrentPath = (Get-Location).Path
           cmd /c "pm2 restart frontend || pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
+
+      - name: Stop Celery Processes
+        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}
+        shell: cmd
+        run: |
+          call pm2 stop backend-celery-worker || ver > NUL
+          call pm2 stop backend-celery-beat || ver > NUL
 
       - name: Save PM2 Process List
         if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}
