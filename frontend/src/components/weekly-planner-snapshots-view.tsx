@@ -71,6 +71,7 @@ type SnapshotTaskEntry = {
   phase?: string | null
   status?: string | null
   daily_status?: string | null
+  created_at?: string | null
   completed_at?: string | null
   daily_products: number | null
   total_products?: number | null
@@ -223,27 +224,38 @@ const getStatusCardClassesForDay = (
   dailyStatus?: string | null
 ) => {
   const normalized = (status || "TODO").toUpperCase()
-  
-  // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
-  if (dailyStatus) {
-    return getStatusCardClasses(dailyStatus)
-  }
-  
-  // For non-MST/TT tasks, use timeline logic based on completion date
-  if (normalized === "DONE" && completedAt && dayDate) {
-    const completedDate = completedAt.slice(0, 10) // Extract YYYY-MM-DD
-    const currentDate = dayDate.slice(0, 10) // Extract YYYY-MM-DD
-    
-    // If the displayed day is before the completion date, show TODO/IN_PROGRESS
-    // (task wasn't done yet on that day)
-    if (currentDate < completedDate) {
-      return getStatusCardClasses("IN_PROGRESS")
-    }
-    // If the displayed day is on or after the completion date, show DONE
+
+  const normalizedDaily = dailyStatus ? dailyStatus.toUpperCase() : null
+
+  if (normalizedDaily === "DONE") {
     return getStatusCardClasses("DONE")
   }
-  
-  // For non-DONE tasks or when dates aren't available, use the main status
+  if (normalizedDaily === "WAITING_CONFIRMATION") {
+    return getStatusCardClasses("WAITING_CONFIRMATION")
+  }
+
+  if (completedAt && dayDate) {
+    const completedDate = completedAt.slice(0, 10)
+    const currentDate = dayDate.slice(0, 10)
+    if (currentDate >= completedDate) {
+      return getStatusCardClasses("DONE")
+    }
+    if (normalized === "DONE") {
+      return getStatusCardClasses("IN_PROGRESS")
+    }
+  }
+
+  if (normalized === "DONE") {
+    return getStatusCardClasses("DONE")
+  }
+
+  if (normalizedDaily === "IN_PROGRESS") {
+    return getStatusCardClasses("IN_PROGRESS")
+  }
+  if (normalizedDaily) {
+    return getStatusCardClasses("TODO")
+  }
+
   if (normalized === "WAITING_CONFIRMATION") {
     return getStatusCardClasses("TODO")
   }
@@ -257,33 +269,75 @@ const getStatusValueForDay = (
   dailyStatus?: string | null
 ) => {
   const normalized = (status || "TODO").toUpperCase()
-  
-  // For MST/TT tasks, dailyStatus provides per-day status history - use it if available
-  if (dailyStatus) {
-    const normalizedDaily = dailyStatus.toUpperCase()
-    if (normalizedDaily === "DONE") return "DONE"
-    if (normalizedDaily === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
-    if (normalizedDaily === "IN_PROGRESS") return "IN_PROGRESS"
-    return "TODO"
-  }
-  
-  // For non-MST/TT tasks, use timeline logic based on completion date
-  if (normalized === "DONE" && completedAt && dayDate) {
-    const completedDate = completedAt.slice(0, 10) // Extract YYYY-MM-DD
-    const currentDate = dayDate.slice(0, 10) // Extract YYYY-MM-DD
-    
-    // If the displayed day is before the completion date, show IN_PROGRESS
-    // (task wasn't done yet on that day)
-    if (currentDate < completedDate) {
-      return "IN_PROGRESS"
-    }
-    // If the displayed day is on or after the completion date, show DONE
+
+  const normalizedDaily = dailyStatus ? dailyStatus.toUpperCase() : null
+
+  if (normalizedDaily === "DONE") {
     return "DONE"
   }
-  
-  // For non-DONE tasks or when dates aren't available, use the main status
-  if (normalized === "WAITING_CONFIRMATION") return "TODO"
+  if (normalizedDaily === "WAITING_CONFIRMATION") {
+    return "WAITING_CONFIRMATION"
+  }
+
+  if (completedAt && dayDate) {
+    const completedDate = completedAt.slice(0, 10)
+    const currentDate = dayDate.slice(0, 10)
+    if (currentDate >= completedDate) {
+      return "DONE"
+    }
+    if (normalized === "DONE") {
+      return "IN_PROGRESS"
+    }
+  }
+
+  if (normalized === "DONE") {
+    return "DONE"
+  }
+
+  if (normalizedDaily === "IN_PROGRESS") {
+    return "IN_PROGRESS"
+  }
+  if (normalizedDaily) {
+    return "TODO"
+  }
+
+  if (normalized === "WAITING_CONFIRMATION") {
+    return "TODO"
+  }
   return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
+}
+
+const isTaskNewForWeek = (createdAt?: string | null, weekStart?: string | null) => {
+  if (!createdAt || !weekStart) return false
+  const createdAtMs = Date.parse(createdAt)
+  const weekStartMs = Date.parse(`${weekStart}T00:00:00`)
+  if (!Number.isFinite(createdAtMs) || !Number.isFinite(weekStartMs)) return false
+  return createdAtMs >= weekStartMs
+}
+
+const getTaskCardClassesForDay = (
+  status?: string | null,
+  completedAt?: string | null,
+  dayDate?: string | null,
+  dailyStatus?: string | null,
+  createdAt?: string | null,
+  weekStart?: string | null
+) => {
+  const statusValue = getStatusValueForDay(status, completedAt, dayDate, dailyStatus)
+  const isNew = isTaskNewForWeek(createdAt, weekStart)
+  if (isNew) {
+    if (statusValue === "DONE") {
+      return "border-[#059669] bg-[#02e6c7] text-[#064e3b]"
+    }
+    if (statusValue === "WAITING_CONFIRMATION") {
+      return getStatusCardClasses("WAITING_CONFIRMATION")
+    }
+    if (statusValue === "IN_PROGRESS") {
+      return getStatusCardClasses("IN_PROGRESS")
+    }
+    return "border-[#1d4ed8] bg-[#dbeafe] text-[#0f172a]"
+  }
+  return getStatusCardClassesForDay(status, completedAt, dayDate, dailyStatus)
 }
 
 const getTaskStatusBadge = (task: SnapshotTaskEntry): { label: string; className: string } | null => {
@@ -522,16 +576,19 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                       <div className="mt-1 space-y-0.5">
                         {project.tasks.map((task, taskIndex) => {
                           const statusBadge = getTaskStatusBadge(task)
+                          const isNew = isTaskNewForWeek(task.created_at, snapshot.payload.week_start)
                           return (
                             <div
                               key={`${project.project_id}-${task.task_id || taskIndex}`}
                               className={[
                                 "flex items-center justify-between gap-1 rounded border px-1.5 py-0.5 text-[11px]",
-                                getStatusCardClassesForDay(
+                                getTaskCardClassesForDay(
                                   task.status,
                                   task.completed_at,
                                   dayDate,
-                                  task.daily_status
+                                  task.daily_status,
+                                  task.created_at,
+                                  snapshot.payload.week_start
                                 ),
                               ].join(" ")}
                             >
@@ -539,6 +596,11 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                                 {projectIndex + 1}.{taskIndex + 1}. {task.task_title || task.title || "-"}
                               </span>
                               <div className="flex items-center gap-1">
+                                {isNew ? (
+                                  <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
+                                    NEW
+                                  </span>
+                                ) : null}
                                 {statusBadge ? (
                                   <span
                                     className={[
@@ -568,32 +630,42 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                     <div className="mb-1 text-[11px] font-semibold text-slate-900">System Tasks</div>
                     {systemTasksList.map((task, idx) => {
                       const statusBadge = getTaskStatusBadge(task)
+                      const isNew = isTaskNewForWeek(task.created_at, snapshot.payload.week_start)
                       return (
                         <div
                           key={`${task.task_id || task.title || "system"}-${idx}`}
                           className={[
                             "flex items-center justify-between rounded border p-1 text-[11px]",
-                            getStatusCardClassesForDay(
+                            getTaskCardClassesForDay(
                               task.status,
                               task.completed_at,
                               dayDate,
-                              task.daily_status
+                              task.daily_status,
+                              task.created_at,
+                              snapshot.payload.week_start
                             ),
                           ].join(" ")}
                         >
                           <span className="truncate whitespace-nowrap font-semibold text-slate-900">
                             {idx + 1}. {task.title || task.task_title || "-"}
                           </span>
-                          {statusBadge ? (
-                            <span
-                              className={[
-                                "inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full border px-1 text-[10px] font-semibold",
-                                statusBadge.className,
-                              ].join(" ")}
-                            >
-                              {statusBadge.label}
-                            </span>
-                          ) : null}
+                          <div className="flex items-center gap-1">
+                            {isNew ? (
+                              <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
+                                NEW
+                              </span>
+                            ) : null}
+                            {statusBadge ? (
+                              <span
+                                className={[
+                                  "inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full border px-1 text-[10px] font-semibold",
+                                  statusBadge.className,
+                                ].join(" ")}
+                              >
+                                {statusBadge.label}
+                              </span>
+                            ) : null}
+                          </div>
                         </div>
                       )
                     })}
@@ -604,30 +676,40 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                   <div className="space-y-1">
                     {fastTasksList.map((task, idx) => {
                       const statusBadge = getFastTaskBadge(task)
+                      const isNew = isTaskNewForWeek(task.created_at, snapshot.payload.week_start)
                       return (
                         <div
                           key={`${task.task_id || task.title || "fast"}-${idx}`}
                           className={[
                             "flex items-center justify-between rounded border p-1 text-[11px]",
-                            getStatusCardClassesForDay(
+                            getTaskCardClassesForDay(
                               task.status,
                               task.completed_at,
                               dayDate,
-                              task.daily_status
+                              task.daily_status,
+                              task.created_at,
+                              snapshot.payload.week_start
                             ),
                           ].join(" ")}
                         >
                           <span className="truncate whitespace-nowrap font-semibold text-slate-900">
                             {idx + 1}. {task.title || task.task_title || "-"}
                           </span>
-                          <span
-                            className={[
-                              "inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full border px-1 text-[10px] font-semibold",
-                              statusBadge.className,
-                            ].join(" ")}
-                          >
-                            {statusBadge.label}
-                          </span>
+                          <div className="flex items-center gap-1">
+                            {isNew ? (
+                              <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
+                                NEW
+                              </span>
+                            ) : null}
+                            <span
+                              className={[
+                                "inline-flex h-5 min-w-[1.5rem] items-center justify-center rounded-full border px-1 text-[10px] font-semibold",
+                                statusBadge.className,
+                              ].join(" ")}
+                            >
+                              {statusBadge.label}
+                            </span>
+                          </div>
                         </div>
                       )
                     })}
@@ -639,7 +721,7 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
         </div>
       )
     },
-    [blocks]
+    [blocks, snapshot.payload.week_start]
   )
 
   if (!department) {
@@ -1161,6 +1243,27 @@ export function WeeklyPlannerSnapshotsView({
     }
 
     const getTaskDisplayTitle = (task: SnapshotTaskEntry) => task.task_title || task.title || "-"
+    const getPrintTaskStatusClass = (
+      task: Pick<SnapshotTaskEntry, "status" | "completed_at" | "daily_status" | "created_at">,
+      dayIso: string
+    ) => {
+      const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
+      const isNew = isTaskNewForWeek(task.created_at, activeSnapshot.payload.week_start)
+      if (isNew) {
+        if (statusValue === "DONE") return "task-status-new-done"
+        if (statusValue === "WAITING_CONFIRMATION") return "task-status-waiting"
+        if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
+        return "task-status-new-open"
+      }
+      if (statusValue === "DONE") return "task-status-done"
+      if (statusValue === "WAITING_CONFIRMATION") return "task-status-waiting"
+      if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
+      return "task-status-todo"
+    }
+    const buildPrintNewBadge = (createdAt?: string | null) => {
+      if (!isTaskNewForWeek(createdAt, activeSnapshot.payload.week_start)) return ""
+      return ` <span class="badge badge-new">NEW</span>`
+    }
 
     const renderDayGroupHtml = (day: SnapshotDay, dayIndex: number, usersChunk: { user_id: string; user_name: string }[]) => {
       const dayName = DAY_NAMES[dayIndex] || ""
@@ -1191,15 +1294,7 @@ export function WeeklyPlannerSnapshotsView({
               <div class="project-title">${projectIndex + 1}. ${getProjectDisplayTitle(project)}</div>`
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
-                const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
-                const statusClass =
-                  statusValue === "DONE"
-                    ? "task-status-done"
-                    : statusValue === "WAITING_CONFIRMATION"
-                      ? "task-status-waiting"
-                      : statusValue === "IN_PROGRESS"
-                        ? "task-status-in-progress"
-                        : "task-status-todo"
+                const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${getTaskDisplayTitle(task)}`
                 if (task.daily_products) {
@@ -1209,6 +1304,7 @@ export function WeeklyPlannerSnapshotsView({
                 if (badge) {
                   html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
                 }
+                html += buildPrintNewBadge(task.created_at)
                 html += `</div>`
               })
             }
@@ -1217,7 +1313,14 @@ export function WeeklyPlannerSnapshotsView({
           if (systemTasks.length > 0) {
             html += `<div style="margin-top: 1px; font-size: 4pt; color: #1e40af;"><strong>System Tasks:</strong>`
             systemTasks.forEach((task, taskIndex) => {
-              html += `<div class="task-item">${taskIndex + 1}. ${getTaskDisplayTitle(task)}</div>`
+              const statusClass = getPrintTaskStatusClass(task, dayIso)
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
+              const badge = getTaskStatusBadge(task)
+              if (badge) {
+                html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
+              }
+              html += buildPrintNewBadge(task.created_at)
+              html += `</div>`
             })
             html += `</div>`
           }
@@ -1238,20 +1341,13 @@ export function WeeklyPlannerSnapshotsView({
         if (fastTasks.length > 0) {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
-            const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
-            const statusClass =
-              statusValue === "DONE"
-                ? "task-status-done"
-                : statusValue === "WAITING_CONFIRMATION"
-                  ? "task-status-waiting"
-                  : statusValue === "IN_PROGRESS"
-                    ? "task-status-in-progress"
-                    : "task-status-todo"
+            const statusClass = getPrintTaskStatusClass(task, dayIso)
             html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
             const badge = getFastTaskBadge(task)
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
             }
+            html += buildPrintNewBadge(task.created_at)
             html += `</div>`
           })
           html += `</div>`
@@ -1277,15 +1373,7 @@ export function WeeklyPlannerSnapshotsView({
               <div class="project-title">${projectIndex + 1}. ${getProjectDisplayTitle(project)}</div>`
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
-                const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
-                const statusClass =
-                  statusValue === "DONE"
-                    ? "task-status-done"
-                    : statusValue === "WAITING_CONFIRMATION"
-                      ? "task-status-waiting"
-                      : statusValue === "IN_PROGRESS"
-                        ? "task-status-in-progress"
-                        : "task-status-todo"
+                const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                 html += `<div class="task-item ${statusClass}">${taskNumber}. ${getTaskDisplayTitle(task)}`
                 if (task.daily_products) {
@@ -1295,6 +1383,7 @@ export function WeeklyPlannerSnapshotsView({
                 if (badge) {
                   html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
                 }
+                html += buildPrintNewBadge(task.created_at)
                 html += `</div>`
               })
             }
@@ -1303,7 +1392,14 @@ export function WeeklyPlannerSnapshotsView({
           if (systemTasks.length > 0) {
             html += `<div style="margin-top: 1px; font-size: 4pt; color: #1e40af;"><strong>System Tasks:</strong>`
             systemTasks.forEach((task, taskIndex) => {
-              html += `<div class="task-item">${taskIndex + 1}. ${getTaskDisplayTitle(task)}</div>`
+              const statusClass = getPrintTaskStatusClass(task, dayIso)
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
+              const badge = getTaskStatusBadge(task)
+              if (badge) {
+                html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
+              }
+              html += buildPrintNewBadge(task.created_at)
+              html += `</div>`
             })
             html += `</div>`
           }
@@ -1324,20 +1420,13 @@ export function WeeklyPlannerSnapshotsView({
         if (fastTasks.length > 0) {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
-            const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
-            const statusClass =
-              statusValue === "DONE"
-                ? "task-status-done"
-                : statusValue === "WAITING_CONFIRMATION"
-                  ? "task-status-waiting"
-                  : statusValue === "IN_PROGRESS"
-                    ? "task-status-in-progress"
-                    : "task-status-todo"
+            const statusClass = getPrintTaskStatusClass(task, dayIso)
             html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${getTaskDisplayTitle(task)}`
             const badge = getFastTaskBadge(task)
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
             }
+            html += buildPrintNewBadge(task.created_at)
             html += `</div>`
           })
           html += `</div>`
@@ -1625,6 +1714,8 @@ export function WeeklyPlannerSnapshotsView({
             .task-status-in-progress { background-color: #FFFF00; }
             .task-status-waiting { background-color: #FFEDD5; border-color: #C2410C; color: #9A3412; }
             .task-status-done { background-color: #C4FDC4; }
+            .task-status-new-open { background-color: #dbeafe; border-color: #1d4ed8; }
+            .task-status-new-done { background-color: #6ee7b7; border-color: #059669; }
             .badge {
               display: inline-block;
               padding: 0.5px 2px;
@@ -1640,6 +1731,10 @@ export function WeeklyPlannerSnapshotsView({
             .badge-ga { background-color: #dbeafe; color: #1e40af; }
             .badge-p { background-color: #d1fae5; color: #065f46; }
             .badge-n { background-color: #f1f5f9; color: #475569; }
+            .badge-new {
+              background-color: #dbeafe;
+              color: #1e40af;
+            }
             .products {
               color: #2563eb;
               font-weight: bold;

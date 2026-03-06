@@ -2916,11 +2916,12 @@ async def _build_weekly_snapshot_payload(
     user: User,
     department_id: uuid.UUID,
     week_start_date: date,
+    is_this_week: bool = False,
 ) -> tuple[date, date, dict]:
     weekly_table = await weekly_table_planner(
         week_start=week_start_date,
         department_id=department_id,
-        is_this_week=False,
+        is_this_week=is_this_week,
         db=db,
         user=user,
     )
@@ -2977,12 +2978,14 @@ async def _create_and_store_weekly_snapshot(
     department_id: uuid.UUID,
     week_start_date: date,
     snapshot_type: WeeklySnapshotType,
+    is_this_week: bool = False,
 ) -> WeeklySnapshotSaveResponse:
     week_start, week_end, snapshot_payload = await _build_weekly_snapshot_payload(
         db=db,
         user=user,
         department_id=department_id,
         week_start_date=week_start_date,
+        is_this_week=is_this_week,
     )
     snapshot = WeeklyPlannerSnapshot(
         department_id=department_id,
@@ -3036,6 +3039,7 @@ async def create_weekly_snapshot_for_week(
         department_id=payload.department_id,
         week_start_date=target_week_start,
         snapshot_type=payload.snapshot_type,
+        is_this_week=False,
     )
 
 
@@ -3055,12 +3059,14 @@ async def save_weekly_snapshot(
     today = _today_app_date()
     target_week_start = _snapshot_week_start_for_mode(payload.mode, today)
     snapshot_type = _snapshot_type_for_mode(payload.mode)
+    is_this_week = payload.mode == WeeklySnapshotSaveMode.THIS_WEEK_FINAL
     return await _create_and_store_weekly_snapshot(
         db=db,
         user=user,
         department_id=payload.department_id,
         week_start_date=target_week_start,
         snapshot_type=snapshot_type,
+        is_this_week=is_this_week,
     )
 
 
