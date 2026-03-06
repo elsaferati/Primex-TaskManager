@@ -60,9 +60,9 @@ celery -A app.celery_app.celery_app beat -l info
 ```
 
 System task scheduling notes:
-- `generate-system-tasks`: every 15 minutes
+- `reconcile-system-task-slots`: daily at `06:30` local (`APP_TIMEZONE`, 7-day backfill/rewind)
 - `pregenerate-system-tasks-by-7am`: daily 06:50 local (`APP_TIMEZONE`)
-- `reconcile-system-task-slots`: daily 06:30 local (30-day backfill/rewind)
+- `generate-system-tasks`: daily 07:00 local (`APP_TIMEZONE`)
 
 ### 2) Frontend
 
@@ -78,9 +78,19 @@ Open `http://localhost:3000`.
 ## Production notes
 
 - Frontend: `cd frontend; npm run build; npm start`
-- Backend: run `uvicorn app.main:app` behind a reverse proxy (TLS), and run Celery worker + beat as services.
+- Backend: run all backend processes with PM2 from `backend/ecosystem.config.cjs`.
 - Keep `REDIS_ENABLED=true` in environments where Celery background generation is expected.
 - WebSocket notifications: frontend connects to `ws(s)://<API_HOST>/ws/notifications?token=<access_token>`.
+- Ensure `REDIS_URL` points to a reachable Redis instance and `APP_TIMEZONE=Europe/Budapest` (or your business timezone).
+
+PM2 commands:
+```powershell
+cd backend
+pm2 start ecosystem.config.cjs
+pm2 status
+pm2 logs backend-celery-beat --lines 200
+pm2 save
+```
 
 Useful ops checks:
 ```powershell

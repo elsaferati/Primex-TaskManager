@@ -11,12 +11,26 @@ from app.jobs.internal_meeting_sessions import (
 )
 from app.jobs.overdue import process_overdue as _process_overdue
 from app.jobs.reminders import process_reminders as _process_reminders
-from app.jobs.system_tasks import generate_system_tasks as _generate_system_tasks
+from app.jobs.system_tasks import (
+    generate_system_tasks as _generate_system_tasks,
+    pregenerate_system_tasks_today as _pregenerate_system_tasks_today,
+    reconcile_system_task_slots_daily as _reconcile_system_task_slots_daily,
+)
 
 
 @celery_app.task(name="app.celery_tasks.generate_system_tasks")
 def generate_system_tasks() -> int:
     return asyncio.run(_generate_system_tasks())
+
+
+@celery_app.task(name="app.celery_tasks.pregenerate_system_tasks_today")
+def pregenerate_system_tasks_today() -> int:
+    return asyncio.run(_pregenerate_system_tasks_today())
+
+
+@celery_app.task(name="app.celery_tasks.reconcile_system_task_slots_daily")
+def reconcile_system_task_slots_daily() -> dict[str, int]:
+    return asyncio.run(_reconcile_system_task_slots_daily())
 
 
 @celery_app.task(name="app.celery_tasks.process_reminders")

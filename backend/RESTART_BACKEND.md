@@ -1,55 +1,48 @@
-# Restart Backend After Database Changes
+# Backend Restart and PM2 Runbook
 
-After running the SQL fixes, you **MUST restart the backend server** for the changes to take effect.
+This project uses three PM2 apps from `backend/ecosystem.config.cjs`:
+- `backend-api`
+- `backend-celery-worker`
+- `backend-celery-beat`
 
-## Why Restart is Needed
-
-The backend application caches database schema information. Even though the constraint was dropped in the database, the running application may still have the old schema cached in memory.
-
-## Steps to Restart
-
-### On the Live Server (via SSH or Remote Desktop):
+## Start / Restart
 
 ```powershell
-# Stop the backend
-pm2 stop backend
-
-# Wait a few seconds
-Start-Sleep -Seconds 3
-
-# Start the backend again
-pm2 start backend
-
-# Or use restart (does both stop and start)
-pm2 restart backend
-
-# Verify it's running
+cd backend
+pm2 start ecosystem.config.cjs
+pm2 restart backend-api
+pm2 restart backend-celery-worker
+pm2 restart backend-celery-beat
+pm2 save
 pm2 status
 ```
 
-### Alternative: Full Restart
+## Required Runtime Environment
 
-If `pm2 restart` doesn't work, try:
+- `REDIS_ENABLED=true`
+- `REDIS_URL=redis://<host>:6379/0`
+- `APP_TIMEZONE=Europe/Budapest`
+
+These are read from the environment and defaulted in `ecosystem.config.cjs`.
+
+## Verify Daily System Task Jobs
 
 ```powershell
-# Delete and recreate
-pm2 delete backend
-pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
-pm2 save
+pm2 logs backend-celery-beat --lines 200
 ```
 
-## Verify the Fix
+Beat must show these schedules:
+- `reconcile-system-task-slots` at `06:30`
+- `pregenerate-system-tasks-by-7am` at `06:50`
+- `generate-system-tasks` at `07:00`
 
-After restarting, test the endpoint:
+## One-Time Recovery After Deployment
 
-1. Open the System Tasks page in the frontend
-2. Check if tasks are loading (should see tasks, not "No scheduled tasks found")
-3. Check PM2 logs: `pm2 logs backend --lines 50` - should NOT see the unique constraint error anymore
+Run once to recover recent missing tasks:
 
-## If Still Not Working
+```powershell
+cd backend
+python scripts/reconcile_system_task_slots.py --days 7
+```
 
-If the error persists after restart:
-
-1. **Verify constraint was dropped**: Run `verify_constraint_dropped.sql` in pgAdmin
-2. **Check for other constraints**: There might be another constraint with a similar name
-3. **Clear database connection pool**: The restart should handle this, but if not, you may need to wait a few minutes for connections to expire
+Then verify system tasks are present for the current local day.
