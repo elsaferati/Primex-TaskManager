@@ -145,14 +145,12 @@ jobs:
           cmd /c "pm2 restart frontend || pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
 
       - name: Stop Celery Processes
-        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}
         shell: cmd
         run: |
           call pm2 stop backend-celery-worker || ver > NUL
           call pm2 stop backend-celery-beat || ver > NUL
 
       - name: Save PM2 Process List
-        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}
         shell: cmd
         run: |
           pm2 save
