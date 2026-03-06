@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", env_ignore_empty=True,  extra="ignore")
 
     DATABASE_URL: str
+    DB_POOL_SIZE: int = 20
+    DB_MAX_OVERFLOW: int = 20
+    DB_POOL_TIMEOUT: int = 30
+    DB_POOL_RECYCLE: int = 1800
     REDIS_ENABLED: bool = True
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"

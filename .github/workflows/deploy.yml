@@ -89,11 +89,45 @@ jobs:
         run: |
           echo NEXT_PUBLIC_API_URL=https://api-flow.primexeu.com > frontend/.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend/.env
+          echo DB_POOL_SIZE=20 >> backend/.env
+          echo DB_MAX_OVERFLOW=20 >> backend/.env
+          echo DB_POOL_TIMEOUT=30 >> backend/.env
+          echo DB_POOL_RECYCLE=1800 >> backend/.env
           echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend/.env
           echo REDIS_ENABLED=true >> backend/.env
-          echo REDIS_URL=redis://localhost:6379/0 >> backend/.env
+          echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend/.env
           echo APP_TIMEZONE=Europe/Budapest >> backend/.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
+
+      - name: Redis Readiness Gate
+        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.worker_related_changed == 'true' || steps.changes.outputs.beat_related_changed == 'true' }}
+        shell: powershell
+        run: |
+          $hostName = "127.0.0.1"
+          $port = 6379
+          $ok = $false
+          for ($i = 0; $i -lt 20; $i++) {
+            $client = New-Object System.Net.Sockets.TcpClient
+            try {
+              $async = $client.BeginConnect($hostName, $port, $null, $null)
+              if ($async.AsyncWaitHandle.WaitOne(2000, $false) -and $client.Connected) {
+                $client.EndConnect($async) | Out-Null
+                $ok = $true
+                Write-Host "Redis reachability check: OK ($hostName:$port)"
+                break
+              }
+            } catch {
+              # continue retry loop
+            } finally {
+              $client.Close()
+            }
+            Write-Host "Redis reachability check: waiting ($($i + 1)/20)"
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) {
+            Write-Error "Redis is not reachable at $hostName:$port. Failing deploy before backend/celery restart."
+            exit 1
+          }
 
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}
@@ -110,43 +144,53 @@ jobs:
 
           REM Database migrations are manual in pgAdmin (no alembic auto-run in deploy).
 
-          REM Restart or start backend API process
-          call pm2 restart backend || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name backend -- -m uvicorn app.main:app --host 0.0.0.0 --port 8000
+          REM Restart or start backend API process from ecosystem config
+          call pm2 restart backend-api || call pm2 start ecosystem.config.cjs --only backend-api
+          call pm2 describe backend-api | findstr /I "status"
+          echo PM2 backend-api restart/start completed.
 
       - name: Wait for Backend Readiness
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
         run: |
           $ok = $false
+          $uri = "http://127.0.0.1:8000/health"
           for ($i = 0; $i -lt 20; $i++) {
             try {
-              $resp = Invoke-WebRequest -Uri "http://127.0.0.1:8000/docs" -UseBasicParsing -TimeoutSec 3
-              if ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 500) {
+              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+              Write-Host "Backend health check attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
+              if ($resp.StatusCode -eq 200) {
                 $ok = $true
                 break
               }
             } catch {
+              Write-Host "Backend health check attempt $($i + 1)/20: no response yet"
               Start-Sleep -Seconds 2
             }
           }
           if (-not $ok) {
-            Write-Error "Backend did not become ready after restart."
+            Write-Error "Backend /health did not become ready after restart."
             exit 1
           }
+          Write-Host "Backend health check: OK ($uri)"
 
       - name: Update Celery Worker
         if: ${{ steps.changes.outputs.worker_related_changed == 'true' }}
         shell: cmd
         run: |
           cd backend
-          call pm2 restart celery_worker || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name celery_worker -- -m celery -A app.celery_app.celery_app worker --loglevel=info
+          call pm2 restart backend-celery-worker || call pm2 start ecosystem.config.cjs --only backend-celery-worker
+          call pm2 describe backend-celery-worker | findstr /I "status"
+          echo PM2 backend-celery-worker restart/start completed.
 
       - name: Update Celery Beat
         if: ${{ steps.changes.outputs.beat_related_changed == 'true' }}
         shell: cmd
         run: |
           cd backend
-          call pm2 restart celery_beat || call pm2 start "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" --name celery_beat -- -m celery -A app.celery_app.celery_app beat --loglevel=info
+          call pm2 restart backend-celery-beat || call pm2 start ecosystem.config.cjs --only backend-celery-beat
+          call pm2 describe backend-celery-beat | findstr /I "status"
+          echo PM2 backend-celery-beat restart/start completed.
 
       - name: Update Frontend
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
@@ -179,6 +223,6 @@ jobs:
         shell: cmd
         run: |
           call pm2 status
-          call pm2 logs backend --lines 50 --nostream || ver > NUL
-          call pm2 logs celery_worker --lines 50 --nostream || ver > NUL
-          call pm2 logs celery_beat --lines 50 --nostream || ver > NUL
+          call pm2 logs backend-api --lines 50 --nostream || ver > NUL
+          call pm2 logs backend-celery-worker --lines 50 --nostream || ver > NUL
+          call pm2 logs backend-celery-beat --lines 50 --nostream || ver > NUL
