@@ -50,7 +50,11 @@ from app.services.system_task_schedule import (
     previous_occurrence_date,
     should_reopen_system_task,
 )
-from app.services.system_task_instances import ensure_slots_initialized, ensure_task_instances_in_range
+from app.services.system_task_instances import (
+    ensure_due_today_instances_best_effort,
+    ensure_slots_initialized,
+    ensure_task_instances_in_range,
+)
 
 
 router = APIRouter()
@@ -348,6 +352,28 @@ def _local_day_utc_bounds(local_day: date, tzinfo) -> tuple[datetime, datetime]:
     return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
 
 
+def _app_local_today() -> date:
+    try:
+        return datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date()
+    except Exception:
+        return datetime.now(timezone.utc).date()
+
+
+async def _run_today_generation_fallback(
+    db: AsyncSession,
+    *,
+    occurrence_date: date | None,
+) -> int:
+    local_today = _app_local_today()
+    if occurrence_date is not None and occurrence_date != local_today:
+        return 0
+    try:
+        return await ensure_due_today_instances_best_effort(db=db)
+    except Exception:
+        await db.rollback()
+        return 0
+
+
 @router.get("", response_model=list[SystemTaskOut])
 async def list_system_tasks(
     department_id: uuid.UUID | None = None,
@@ -357,6 +383,9 @@ async def list_system_tasks(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[SystemTaskOut]:
+    local_today = _app_local_today()
+    if occurrence_date is None or occurrence_date == local_today:
+        await _run_today_generation_fallback(db, occurrence_date=occurrence_date)
     template_stmt = select(SystemTaskTemplate).order_by(SystemTaskTemplate.created_at.desc())
 
     if department_id is not None:

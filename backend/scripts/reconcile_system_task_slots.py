@@ -17,7 +17,7 @@ async def _run(days: int) -> dict[str, int]:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Reconcile and backfill missing system task slots.")
-    parser.add_argument("--days", type=int, default=30, help="Lookback days for missing occurrences.")
+    parser.add_argument("--days", type=int, default=7, help="Lookback days for missing occurrences.")
     args = parser.parse_args()
     result = asyncio.run(_run(max(args.days, 0)))
     print(

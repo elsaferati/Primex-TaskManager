@@ -3,13 +3,14 @@ from __future__ import annotations
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
-from zoneinfo import ZoneInfo
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import and_, insert, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.common_entry import CommonEntry
 from app.models.enums import CommonApprovalStatus, CommonCategory, TaskPriority, TaskStatus
 from app.models.system_task_template import SystemTaskTemplate
@@ -158,6 +159,8 @@ async def generate_system_task_instances(
         tz = template_tz(template)
         due_time = template_due_time(template)
         template_lookahead = int(getattr(template, "lookahead", 14) or 14)
+        if lookahead_days_override is not None:
+            template_lookahead = int(lookahead_days_override)
         lookahead_end_utc = now_utc + timedelta(days=max(1, template_lookahead))
         next_run = slot.next_run_at
 
@@ -249,6 +252,39 @@ async def ensure_task_instances_in_range(
     days = (end - start).days + 1
     now_utc = datetime.now(timezone.utc)
     return await generate_system_task_instances(db=db, now_utc=now_utc, lookahead_days_override=days + 1)
+
+
+def _app_zoneinfo() -> ZoneInfo:
+    try:
+        return ZoneInfo(settings.APP_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        return ZoneInfo("UTC")
+
+
+async def ensure_due_today_instances_best_effort(
+    db: AsyncSession,
+    *,
+    now_utc: datetime | None = None,
+) -> int:
+    now_utc = now_utc or datetime.now(timezone.utc)
+    due_slot_id = (
+        await db.execute(
+            select(SystemTaskTemplateAssigneeSlot.id)
+            .join(SystemTaskTemplate, SystemTaskTemplateAssigneeSlot.template_id == SystemTaskTemplate.id)
+            .where(SystemTaskTemplateAssigneeSlot.is_active.is_(True))
+            .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplateAssigneeSlot.next_run_at <= now_utc)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if due_slot_id is None:
+        return 0
+
+    await ensure_slots_initialized(db)
+    today_local = now_utc.astimezone(_app_zoneinfo()).date()
+    created = await ensure_task_instances_in_range(db=db, start=today_local, end=today_local)
+    await db.commit()
+    return created
 
 
 async def ensure_slots_initialized(db: AsyncSession) -> None:
