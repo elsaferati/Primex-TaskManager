@@ -316,20 +316,32 @@ async def build_project_display_title_map(
 ) -> dict[uuid.UUID, str]:
     if not projects:
         return {}
-    project_total_by_id = {p.id: p.total_products for p in projects}
-    progress_map = await compute_project_control_week_metrics(
-        db,
-        [p.id for p in projects],
-        week_start=week_start,
-        week_end=week_end,
-        project_total_by_id=project_total_by_id,
-    )
+
     out: dict[uuid.UUID, str] = {}
+    metric_projects: list[Project] = []
+
     for project in projects:
-        out[project.id] = build_display_title(
-            title=project.title,
-            project_type=project.project_type,
-            total_products=project.total_products,
-            progress=progress_map.get(project.id),
+        raw_title = (project.title or "").strip() or "Untitled project"
+        if is_tt_or_mst(raw_title, project.project_type):
+            metric_projects.append(project)
+            continue
+        out[project.id] = raw_title
+
+    if metric_projects:
+        project_total_by_id = {p.id: p.total_products for p in metric_projects}
+        progress_map = await compute_project_control_week_metrics(
+            db,
+            [p.id for p in metric_projects],
+            week_start=week_start,
+            week_end=week_end,
+            project_total_by_id=project_total_by_id,
         )
+        for project in metric_projects:
+            out[project.id] = build_display_title(
+                title=project.title,
+                project_type=project.project_type,
+                total_products=project.total_products,
+                progress=progress_map.get(project.id),
+            )
+
     return out
