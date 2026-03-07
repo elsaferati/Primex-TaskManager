@@ -66,7 +66,7 @@ export default function MonthlyPlannerPage() {
     const map = new Map<string, Task[]>()
     if (!data) return map
     for (const t of data.tasks) {
-      const d = (t.planned_for || "").slice(0, 10)
+      const d = (t.due_date || t.start_date || t.planned_for || "").slice(0, 10)
       if (!d) continue
       map.set(d, [...(map.get(d) || []), t])
     }
