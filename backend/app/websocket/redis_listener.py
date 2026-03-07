@@ -5,6 +5,7 @@ import json
 import logging
 import uuid
 
+from app.config import settings
 from app.integrations.redis import create_redis_async
 from app.websocket.manager import manager
 
@@ -14,6 +15,10 @@ logger = logging.getLogger(__name__)
 
 
 async def start_notification_listener() -> None:
+    if not settings.REDIS_ENABLED:
+        logger.info("Redis notification listener disabled by configuration")
+        return
+
     while True:
         pubsub = None
         client = None

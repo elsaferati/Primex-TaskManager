@@ -115,6 +115,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = React.useState<User | null>(null)
   const [loading, setLoading] = React.useState(true)
   const logoutInProgressRef = React.useRef(false)
+  const tokenRef = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    tokenRef.current = token
+  }, [token])
 
   React.useEffect(() => {
     const boot = async () => {
@@ -208,7 +213,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       // ignore
     }
     return () => ws.close()
-  }, [token, user])
+  }, [token])
 
   const logout = React.useCallback(async () => {
     try {
@@ -250,8 +255,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       const makeUrl = (base: string) =>
         path.startsWith("http") ? path : `${base}${path.startsWith("/") ? "" : "/"}${path}`
       const url = makeUrl(API_HTTP_URL)
+      const currentToken = tokenRef.current
       const headers = new Headers(init.headers)
-      if (token) headers.set("Authorization", `Bearer ${token}`)
+      if (currentToken) headers.set("Authorization", `Bearer ${currentToken}`)
 
       const doFetch = (overrideToken?: string | null, overrideUrl?: string) => {
         const h = new Headers(headers)
@@ -306,7 +312,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       return doFetch(refreshed)
     },
-    [token]
+    []
   )
 
   const login = React.useCallback(async (email: string, password: string) => {

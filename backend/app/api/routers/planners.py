@@ -1472,17 +1472,36 @@ async def monthly_planner(
         department_id = user.department_id
 
     month_start, month_end = _month_range(year, month)
+    planned_date = func.coalesce(cast(Task.due_date, Date), cast(Task.start_date, Date))
+    assignee_task_ids = None
 
-    stmt = select(Task).where(Task.planned_for.is_not(None), Task.planned_for >= month_start, Task.planned_for <= month_end)
+    if user_id is not None:
+        assignee_task_ids = set(
+            (
+                await db.execute(
+                    select(TaskAssignee.task_id).where(TaskAssignee.user_id == user_id)
+                )
+            ).scalars().all()
+        )
+
+    stmt = select(Task).where(
+        planned_date.is_not(None),
+        planned_date >= month_start,
+        planned_date <= month_end,
+    )
     if department_id is not None:
         stmt = stmt.where(Task.department_id == department_id)
-    if user_id is not None:
-        stmt = stmt.where(Task.assigned_to_user_id == user_id)
 
-    tasks = (await db.execute(stmt.order_by(Task.planned_for, Task.created_at))).scalars().all()
+    tasks = (await db.execute(stmt.order_by(Task.due_date.nullsfirst(), Task.start_date.nullsfirst(), Task.created_at))).scalars().all()
+    if assignee_task_ids is not None:
+        tasks = [
+            task
+            for task in tasks
+            if task.assigned_to == user_id or task.id in assignee_task_ids
+        ]
     task_out = [_task_to_out(t) for t in tasks]
 
-    recurring = [t for t in task_out if t.task_type.value == "system"]
+    recurring = [t for t in task_out if t.system_template_origin_id is not None]
 
     prev_month = month - 1
     prev_year = year
@@ -1491,32 +1510,32 @@ async def monthly_planner(
         prev_year -= 1
     prev_start, prev_end = _month_range(prev_year, prev_month)
 
-    base_filters = [Task.planned_for.is_not(None)]
+    base_filters = [planned_date.is_not(None)]
     if department_id is not None:
         base_filters.append(Task.department_id == department_id)
-    if user_id is not None:
-        base_filters.append(Task.assigned_to_user_id == user_id)
 
-    month_completed = (
-        await db.execute(
-            select(func.count(Task.id)).where(
-                *base_filters,
-                Task.planned_for >= month_start,
-                Task.planned_for <= month_end,
-                Task.completed_at.is_not(None),
-            )
+    month_completed_query = select(func.count(Task.id)).where(
+        *base_filters,
+        planned_date >= month_start,
+        planned_date <= month_end,
+        Task.completed_at.is_not(None),
+    )
+    prev_completed_query = select(func.count(Task.id)).where(
+        *base_filters,
+        planned_date >= prev_start,
+        planned_date <= prev_end,
+        Task.completed_at.is_not(None),
+    )
+    if user_id is not None:
+        month_completed_query = month_completed_query.where(
+            or_(Task.assigned_to == user_id, Task.id.in_(assignee_task_ids or {uuid.UUID(int=0)}))
         )
-    ).scalar_one()
-    prev_completed = (
-        await db.execute(
-            select(func.count(Task.id)).where(
-                *base_filters,
-                Task.planned_for >= prev_start,
-                Task.planned_for <= prev_end,
-                Task.completed_at.is_not(None),
-            )
+        prev_completed_query = prev_completed_query.where(
+            or_(Task.assigned_to == user_id, Task.id.in_(assignee_task_ids or {uuid.UUID(int=0)}))
         )
-    ).scalar_one()
+
+    month_completed = (await db.execute(month_completed_query)).scalar_one()
+    prev_completed = (await db.execute(prev_completed_query)).scalar_one()
 
     return MonthlyPlannerResponse(
         month_start=month_start,
