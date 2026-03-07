@@ -701,7 +701,6 @@ async def list_system_task_templates(
     for tid, uid in alignment_user_rows:
         alignment_users_map.setdefault(tid, []).append(uid)
 
-    await ensure_slots_initialized(db)
     slot_rows = (
         await db.execute(select(SystemTaskTemplateAssigneeSlot).where(SystemTaskTemplateAssigneeSlot.template_id.in_(template_ids)))
     ).scalars().all() if template_ids else []

@@ -288,15 +288,27 @@ async def ensure_due_today_instances_best_effort(
 
 
 async def ensure_slots_initialized(db: AsyncSession) -> None:
-    templates = (await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True)))).scalars().all()
-    now_utc = datetime.now(timezone.utc)
-    for template in templates:
-        template_slots = (
+    templates = (
+        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True)))
+    ).scalars().all()
+    if not templates:
+        return
+
+    template_ids = [template.id for template in templates]
+    existing_slot_template_ids = set(
+        (
             await db.execute(
-                select(SystemTaskTemplateAssigneeSlot.id).where(SystemTaskTemplateAssigneeSlot.template_id == template.id)
+                select(SystemTaskTemplateAssigneeSlot.template_id).where(
+                    SystemTaskTemplateAssigneeSlot.template_id.in_(template_ids)
+                )
             )
         ).scalars().all()
-        if template_slots:
+    )
+    now_utc = datetime.now(timezone.utc)
+    pending_values: list[dict] = []
+
+    for template in templates:
+        if template.id in existing_slot_template_ids:
             continue
         assignee_ids = list(getattr(template, "assignee_ids", None) or [])
         if not assignee_ids and template.default_assignee_id:
@@ -304,21 +316,25 @@ async def ensure_slots_initialized(db: AsyncSession) -> None:
         if not assignee_ids:
             continue
         next_run = first_run_at(template, now_utc)
-        values = [
-            {
-                "id": uuid.uuid4(),
-                "template_id": template.id,
-                "primary_user_id": assignee_id,
-                "zv1_user_id": None,
-                "zv2_user_id": None,
-                "next_run_at": next_run,
-                "is_active": True,
-                "created_at": now_utc,
-                "updated_at": now_utc,
-            }
-            for assignee_id in assignee_ids
-        ]
-        await db.execute(insert(SystemTaskTemplateAssigneeSlot), values)
+        pending_values.extend(
+            [
+                {
+                    "id": uuid.uuid4(),
+                    "template_id": template.id,
+                    "primary_user_id": assignee_id,
+                    "zv1_user_id": None,
+                    "zv2_user_id": None,
+                    "next_run_at": next_run,
+                    "is_active": True,
+                    "created_at": now_utc,
+                    "updated_at": now_utc,
+                }
+                for assignee_id in assignee_ids
+            ]
+        )
+
+    if pending_values:
+        await db.execute(insert(SystemTaskTemplateAssigneeSlot), pending_values)
 
 
 async def reconcile_system_task_slots(
