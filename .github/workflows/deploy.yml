@@ -66,7 +66,7 @@ jobs:
       - name: Create Env Files
         shell: cmd
         run: |
-          echo NEXT_PUBLIC_API_URL=https://api-flow.primexeu.com > frontend/.env.local
+          echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend/.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend/.env
           echo DB_POOL_SIZE=20 >> backend/.env
           echo DB_MAX_OVERFLOW=20 >> backend/.env
@@ -93,10 +93,17 @@ jobs:
 
           REM Database migrations are manual in pgAdmin (no alembic auto-run in deploy).
 
-          REM Restart or start backend API process from ecosystem config
-          call pm2 restart backend-api || call pm2 start ecosystem.config.cjs --only backend-api
-          call pm2 describe backend-api | findstr /I "status"
-          echo PM2 backend-api restart/start completed.
+          REM Redis is disabled in this environment, so keep Celery processes stopped.
+          call pm2 stop celery_worker
+          call pm2 stop celery_beat
+
+          REM Restart or start backend API process using the real PM2 app name.
+          set REDIS_ENABLED=false
+          set REDIS_URL=redis://127.0.0.1:6379/0
+          set APP_TIMEZONE=Europe/Budapest
+          call pm2 restart backend --update-env || call pm2 start ecosystem.config.cjs --only backend --update-env
+          call pm2 describe backend | findstr /I "status"
+          echo PM2 backend restart/start completed.
 
       - name: Wait for Backend Readiness
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
@@ -142,13 +149,7 @@ jobs:
 
           Write-Host "4. Restarting Frontend..."
           $CurrentPath = (Get-Location).Path
-          cmd /c "pm2 restart frontend || pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
-
-      - name: Stop Celery Processes
-        shell: cmd
-        run: |
-          call pm2 stop backend-celery-worker || ver > NUL
-          call pm2 stop backend-celery-beat || ver > NUL
+          cmd /c "pm2 restart frontend --update-env || pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
 
       - name: Save PM2 Process List
         shell: cmd
@@ -159,4 +160,4 @@ jobs:
         shell: cmd
         run: |
           call pm2 status
-          call pm2 logs backend-api --lines 50 --nostream || ver > NUL
+          call pm2 logs backend --lines 50 --nostream || ver > NUL
