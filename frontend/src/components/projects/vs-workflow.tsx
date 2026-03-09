@@ -46,7 +46,7 @@ export function VsWorkflow({ projectId, apiFetch, phase }: VsWorkflowProps) {
         void loadItems()
         const interval = setInterval(() => {
             void loadItems()
-        }, 30000) // Poll every 30 seconds for new items
+        }, 120000) // Poll every 2 minutes for new items
         return () => clearInterval(interval)
     }, [loadItems])
 

@@ -469,7 +469,14 @@ async def get_common_view(
         )
         non_annual_entries = (await db.execute(non_annual_stmt)).scalars().all()
 
-        annual_stmt = select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave)
+        two_years_ago = datetime.now().date() - timedelta(days=730)
+        annual_stmt = select(CommonEntry).where(
+            CommonEntry.category == CommonCategory.annual_leave,
+            or_(
+                CommonEntry.entry_date.is_(None),
+                CommonEntry.entry_date >= two_years_ago,
+            ),
+        )
         annual_entries = (await db.execute(annual_stmt)).scalars().all()
         annual_overlapping: list[CommonEntry] = []
         for entry in annual_entries:
@@ -872,7 +879,9 @@ async def get_common_view(
 
     if "system_tasks" in requested:
         ts = _time_start()
-        templates = (await db.execute(select(SystemTaskTemplate))).scalars().all()
+        templates = (
+            await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active == True))
+        ).scalars().all()
         template_ids = [t.id for t in templates]
         alignment_user_rows = (
             await db.execute(

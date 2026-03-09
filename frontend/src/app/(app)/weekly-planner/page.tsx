@@ -18,6 +18,7 @@ import { toast } from "sonner"
 import { ChevronDown, Plus, X, Printer, GripVertical, Download } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY } from "@/lib/dates"
+import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import {
@@ -639,10 +640,9 @@ export default function WeeklyPlannerPage() {
         const projs = (await projRes.json()) as Project[]
         setProjects(projs)
       }
-      const usersRes = await apiFetch("/users/lookup")
-      if (usersRes.ok) {
-        const list = (await usersRes.json()) as UserLookup[]
-        setUsers(list.filter((u) => u.is_active))
+      const usersList = await fetchUsersLookupCached(apiFetch)
+      if (usersList) {
+        setUsers((usersList as UserLookup[]).filter((u) => u.is_active))
       }
     }
     void boot()

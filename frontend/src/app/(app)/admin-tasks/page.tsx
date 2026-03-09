@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, toDateInputValue } from "@/lib/dates"
+import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { Pencil } from "lucide-react"
@@ -1056,9 +1057,12 @@ export default function AdminTasksPage() {
       if (systemTasksRes.ok) {
         setSystemTasks((await systemTasksRes.json()) as SystemTaskOut[])
       }
-      const usersRes = await apiFetch(user?.role === "STAFF" ? "/users/lookup" : "/users")
-      if (usersRes.ok) {
-        setUsers((await usersRes.json()) as AssigneeUser[])
+      if (user?.role === "STAFF") {
+        const usersList = await fetchUsersLookupCached(apiFetch)
+        if (usersList) setUsers(usersList as AssigneeUser[])
+      } else {
+        const usersRes = await apiFetch("/users")
+        if (usersRes.ok) setUsers((await usersRes.json()) as AssigneeUser[])
       }
     } finally {
       setLoadingTasks(false)
