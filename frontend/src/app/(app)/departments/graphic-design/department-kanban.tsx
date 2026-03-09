@@ -22,7 +22,6 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
-import { filterGeneratedSystemTaskRows } from "@/lib/system-task-rows"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -1174,9 +1173,7 @@ export default function DepartmentKanban() {
         const templateProjects = allProjects.filter((p) => p.is_template)
         const templateProjectIds = new Set(templateProjects.map((p) => p.id))
         const projects = allProjects.filter((p) => !p.is_template)
-        const systemTasks = sysRes.ok
-          ? filterGeneratedSystemTaskRows((await sysRes.json()) as SystemTaskTemplate[])
-          : []
+        const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
         const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
         const nonSystemTasks = taskRows.filter((t) => {
           if (t.system_template_origin_id) return false
@@ -1256,9 +1253,7 @@ export default function DepartmentKanban() {
         `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}`
       )
       if (res.ok) {
-        setSystemTasks(
-          filterGeneratedSystemTaskRows((await res.json()) as SystemTaskTemplate[])
-        )
+        setSystemTasks((await res.json()) as SystemTaskTemplate[])
       }
     }
     void loadSystemTasks()
@@ -4048,9 +4043,7 @@ export default function DepartmentKanban() {
         `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
       )
       if (sysRes.ok) {
-        setSystemTasks(
-          filterGeneratedSystemTaskRows((await sysRes.json()) as SystemTaskTemplate[])
-        )
+        setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
       }
 
       void refreshDailyReport()
@@ -4175,9 +4168,7 @@ export default function DepartmentKanban() {
         `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
       )
       if (sysRes.ok) {
-        setSystemTasks(
-          filterGeneratedSystemTaskRows((await sysRes.json()) as SystemTaskTemplate[])
-        )
+        setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
       }
 
       void refreshDailyReport()
