@@ -1436,8 +1436,6 @@ export function SystemTasksView({
           <div className="space-y-1">
             {slots.map((slot) => {
               const primaryLabel = resolveAssigneeNameById(slot.primary_user_id)
-              const zv1Label = slot.zv1_user_id ? resolveAssigneeNameById(slot.zv1_user_id) : "Not assigned"
-              const zv2Label = slot.zv2_user_id ? resolveAssigneeNameById(slot.zv2_user_id) : "Not assigned"
               return (
                 <div
                   key={slot.id}
@@ -1447,8 +1445,7 @@ export function SystemTasksView({
                   )}
                 >
                   <div className="font-medium text-slate-800">{primaryLabel}</div>
-                  <div className="text-slate-500">ZV1: {zv1Label}</div>
-                  <div className="text-slate-500">ZV2: {zv2Label}</div>
+                  <div className="text-slate-500">{slot.is_active ? "Active assignee" : "Inactive assignee"}</div>
                 </div>
               )
             })}

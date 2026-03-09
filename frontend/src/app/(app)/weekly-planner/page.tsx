@@ -155,6 +155,8 @@ type TaskChecklist = {
   items: ChecklistItem[]
 }
 
+type SelectedWeek = "last" | "this" | "next"
+
 const ALL_DEPARTMENTS_VALUE = "__all__"
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
 
@@ -181,6 +183,12 @@ function mondayISO(today = new Date()) {
   const day = (d.getDay() + 6) % 7
   d.setDate(d.getDate() - day)
   return d.toISOString().slice(0, 10)
+}
+
+const shiftIsoDateByDays = (iso: string, days: number) => {
+  const shifted = fromISODate(iso)
+  shifted.setDate(shifted.getDate() + days)
+  return toISODate(shifted)
 }
 
 const pad2 = (n: number) => String(n).padStart(2, "0")
@@ -261,7 +269,7 @@ export default function WeeklyPlannerPage() {
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [departmentId, setDepartmentId] = React.useState<string>(ALL_DEPARTMENTS_VALUE)
   const [viewMode, setViewMode] = React.useState<"current" | "snapshots">("current")
-  const [isThisWeek, setIsThisWeek] = React.useState(true)
+  const [selectedWeek, setSelectedWeek] = React.useState<SelectedWeek>("this")
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
   const [pvFestBlocks, setPvFestBlocks] = React.useState<WeeklyPlannerBlock[]>([])
   const [orderedUsersByDept, setOrderedUsersByDept] = React.useState<Record<string, WeeklyPrintUser[]>>({})
@@ -301,6 +309,9 @@ export default function WeeklyPlannerPage() {
   const canSaveSnapshots = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canReorderUsers = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canEditUserOrder = canReorderUsers && departmentId !== ALL_DEPARTMENTS_VALUE
+  const canSaveThisWeekFinal = selectedWeek === "this"
+  const canSaveNextWeekPlanned = selectedWeek === "next"
+  const canCompareLastFridayPlan = selectedWeek === "this"
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -415,6 +426,24 @@ export default function WeeklyPlannerPage() {
   const [fastTaskDescription, setFastTaskDescription] = React.useState<string | null>(null)
   const [fastTaskDescriptionLoading, setFastTaskDescriptionLoading] = React.useState<boolean>(false)
 
+  const buildCurrentWeekParams = React.useCallback((deptId?: string) => {
+    const qs = new URLSearchParams()
+    const effectiveDepartmentId = deptId ?? departmentId
+    if (effectiveDepartmentId && effectiveDepartmentId !== ALL_DEPARTMENTS_VALUE) {
+      qs.set("department_id", effectiveDepartmentId)
+    }
+
+    if (selectedWeek === "this") {
+      qs.set("is_this_week", "true")
+      return qs
+    }
+
+    const currentMonday = mondayISO()
+    const offsetDays = selectedWeek === "last" ? -7 : 7
+    qs.set("week_start", shiftIsoDateByDays(currentMonday, offsetDays))
+    return qs
+  }, [departmentId, selectedWeek])
+
   const deleteTask = React.useCallback(async (
     taskId: string,
     taskTitle?: string,
@@ -456,11 +485,7 @@ export default function WeeklyPlannerPage() {
         return
       }
       toast.success("Task removed from this slot")
-      const refreshParams = new URLSearchParams()
-      if (departmentId !== ALL_DEPARTMENTS_VALUE) {
-        refreshParams.set("department_id", departmentId)
-      }
-      refreshParams.set("is_this_week", isThisWeek.toString())
+      const refreshParams = buildCurrentWeekParams()
       const tableRes = await apiFetch(`/planners/weekly-table?${refreshParams.toString()}`)
       if (tableRes.ok) {
         setData(await tableRes.json())
@@ -470,7 +495,7 @@ export default function WeeklyPlannerPage() {
     } finally {
       setDeletingTaskId(null)
     }
-  }, [apiFetch, departmentId, isThisWeek])
+  }, [apiFetch, buildCurrentWeekParams, departmentId])
 
   const deleteProject = React.useCallback(async (
     projectId: string,
@@ -512,12 +537,8 @@ export default function WeeklyPlannerPage() {
         return
       }
       toast.success("Project removed from this slot")
-      const params = new URLSearchParams()
-      if (departmentId !== ALL_DEPARTMENTS_VALUE) {
-        params.set("department_id", departmentId)
-      }
-      params.set("is_this_week", isThisWeek.toString())
-      const tableRes = await apiFetch(`/planners/weekly-table?${params.toString()}`)
+      const refreshParams = buildCurrentWeekParams()
+      const tableRes = await apiFetch(`/planners/weekly-table?${refreshParams.toString()}`)
       if (tableRes.ok) {
         setData(await tableRes.json())
       }
@@ -526,7 +547,7 @@ export default function WeeklyPlannerPage() {
     } finally {
       setDeletingProjectId(null)
     }
-  }, [apiFetch, departmentId, isThisWeek])
+  }, [apiFetch, buildCurrentWeekParams])
 
   const getOrderedUsersForDept = React.useCallback((dept: WeeklyTableDepartment) => {
     return orderedUsersByDept[dept.department_id] || buildDepartmentUsers(dept)
@@ -652,11 +673,7 @@ export default function WeeklyPlannerPage() {
     setIsLoading(true)
     setError(null)
     try {
-      const qs = new URLSearchParams()
-      qs.set("is_this_week", isThisWeek.toString())
-      if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
-        qs.set("department_id", departmentId)
-      }
+      const qs = buildCurrentWeekParams()
       const res = await apiFetch(`/planners/weekly-table?${qs.toString()}`)
       if (!res.ok) {
         const errorText = await res.text()
@@ -696,7 +713,7 @@ export default function WeeklyPlannerPage() {
     } finally {
       setIsLoading(false)
     }
-  }, [apiFetch, departmentId, isThisWeek])
+  }, [apiFetch, buildCurrentWeekParams])
 
   const saveUserOrder = React.useCallback(async () => {
     if (!canEditUserOrder) return
@@ -2594,9 +2611,7 @@ export default function WeeklyPlannerPage() {
           : [departmentId]
 
       for (const deptId of targets) {
-        const qs = new URLSearchParams()
-        qs.set("department_id", deptId)
-        qs.set("is_this_week", isThisWeek.toString())
+        const qs = buildCurrentWeekParams(deptId)
         const res = await apiFetch(`/exports/weekly-planner.xlsx?${qs.toString()}`)
         if (!res.ok) {
           toast.error("Failed to export weekly planner")
@@ -2627,6 +2642,8 @@ export default function WeeklyPlannerPage() {
       toast.error("Select a specific department before saving snapshots.")
       return
     }
+    if (mode === "THIS_WEEK_FINAL" && !canSaveThisWeekFinal) return
+    if (mode === "NEXT_WEEK_PLANNED" && !canSaveNextWeekPlanned) return
     if (savingSnapshotMode) return
 
     setSavingSnapshotMode(mode)
@@ -2666,7 +2683,7 @@ export default function WeeklyPlannerPage() {
 
   const openPlanVsActualCompare = async () => {
     if (!data) return
-    if (!isThisWeek) {
+    if (!canCompareLastFridayPlan) {
       toast.error('Switch Week to "This Week" to compare against last Friday plan.')
       return
     }
@@ -3091,15 +3108,23 @@ export default function WeeklyPlannerPage() {
                     <DropdownMenuLabel>Snapshots</DropdownMenuLabel>
                     <DropdownMenuItem
                       onSelect={() => void saveWeeklySnapshot("THIS_WEEK_FINAL")}
-                      disabled={savingSnapshotMode !== null}
+                      disabled={savingSnapshotMode !== null || !canSaveThisWeekFinal}
                     >
-                      {savingSnapshotMode === "THIS_WEEK_FINAL" ? "Saving..." : "Save This Week (Final)"}
+                      {savingSnapshotMode === "THIS_WEEK_FINAL"
+                        ? "Saving..."
+                        : canSaveThisWeekFinal
+                          ? "Save This Week (Final)"
+                          : 'Save This Week (Final) [Switch to This Week]'}
                     </DropdownMenuItem>
                     <DropdownMenuItem
                       onSelect={() => void saveWeeklySnapshot("NEXT_WEEK_PLANNED")}
-                      disabled={savingSnapshotMode !== null}
+                      disabled={savingSnapshotMode !== null || !canSaveNextWeekPlanned}
                     >
-                      {savingSnapshotMode === "NEXT_WEEK_PLANNED" ? "Saving..." : "Save Next Week (Planned)"}
+                      {savingSnapshotMode === "NEXT_WEEK_PLANNED"
+                        ? "Saving..."
+                        : canSaveNextWeekPlanned
+                          ? "Save Next Week (Planned)"
+                          : 'Save Next Week (Planned) [Switch to Next Week]'}
                     </DropdownMenuItem>
                     <DropdownMenuSeparator />
                   </>
@@ -3109,7 +3134,7 @@ export default function WeeklyPlannerPage() {
                   <DropdownMenuItem onSelect={openSnapshotCompare}>
                     Compare Snapshots...
                   </DropdownMenuItem>
-                  {isThisWeek ? (
+                  {canCompareLastFridayPlan ? (
                     <DropdownMenuItem
                       onSelect={() => void openPlanVsActualCompare()}
                       disabled={isLoadingPlanVsActual}
@@ -3163,11 +3188,12 @@ export default function WeeklyPlannerPage() {
         {viewMode === "current" ? (
         <div className="space-y-2">
           <Label>Week</Label>
-          <Select value={isThisWeek ? "this" : "next"} onValueChange={(v) => setIsThisWeek(v === "this")}>
+          <Select value={selectedWeek} onValueChange={(value) => setSelectedWeek(value as SelectedWeek)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="last">Last Week</SelectItem>
               <SelectItem value="this">This Week</SelectItem>
               <SelectItem value="next">Next Week</SelectItem>
             </SelectContent>

@@ -100,15 +100,11 @@ class SystemTaskTemplateUpdate(BaseModel):
 class SystemTaskTemplateAssigneeSlotIn(BaseModel):
     id: uuid.UUID | None = None
     primary_user_id: uuid.UUID
-    zv1_user_id: uuid.UUID | None = None
-    zv2_user_id: uuid.UUID | None = None
     is_active: bool | None = None
 
 
 class SystemTaskTemplateAssigneeSlotOut(BaseModel):
     id: uuid.UUID
     primary_user_id: uuid.UUID
-    zv1_user_id: uuid.UUID | None = None
-    zv2_user_id: uuid.UUID | None = None
     is_active: bool
 

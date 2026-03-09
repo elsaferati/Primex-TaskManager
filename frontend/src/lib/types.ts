@@ -22,8 +22,6 @@ export interface TaskAssignee {
 export interface SystemTaskTemplateAssigneeSlot {
   id: string
   primary_user_id: string
-  zv1_user_id?: string | null
-  zv2_user_id?: string | null
   is_active: boolean
 }
 

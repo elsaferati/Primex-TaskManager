@@ -51,9 +51,7 @@ from app.services.system_task_schedule import (
     should_reopen_system_task,
 )
 from app.services.system_task_instances import (
-    ensure_due_today_instances_best_effort,
     ensure_slots_initialized,
-    ensure_task_instances_in_range,
 )
 
 
@@ -101,14 +99,7 @@ async def _validate_slot_user_ids(
 ) -> None:
     if not slots:
         return
-    all_user_ids: list[uuid.UUID] = []
-    for slot in slots:
-        all_user_ids.append(slot.primary_user_id)
-        if slot.zv1_user_id:
-            all_user_ids.append(slot.zv1_user_id)
-        if slot.zv2_user_id:
-            all_user_ids.append(slot.zv2_user_id)
-    expected = set(all_user_ids)
+    expected = {slot.primary_user_id for slot in slots}
     users = (await db.execute(select(User.id).where(User.id.in_(expected)))).scalars().all()
     if len(set(users)) != len(expected):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Assignee slot user not found")
@@ -191,8 +182,6 @@ def _slot_to_out(slot: SystemTaskTemplateAssigneeSlot) -> SystemTaskTemplateAssi
     return SystemTaskTemplateAssigneeSlotOut(
         id=slot.id,
         primary_user_id=slot.primary_user_id,
-        zv1_user_id=slot.zv1_user_id,
-        zv2_user_id=slot.zv2_user_id,
         is_active=slot.is_active,
     )
 
@@ -208,10 +197,7 @@ async def _sync_template_slots_from_payload(
     if assignee_slots is None:
         if assignee_ids is None:
             return await _slots_for_template(db, template.id)
-        assignee_slots = [
-            SystemTaskTemplateAssigneeSlotIn(primary_user_id=uid, zv1_user_id=None, zv2_user_id=None)
-            for uid in assignee_ids
-        ]
+        assignee_slots = [SystemTaskTemplateAssigneeSlotIn(primary_user_id=uid) for uid in assignee_ids]
 
     existing = {slot.id: slot for slot in await _slots_for_template(db, template.id)}
     keep_ids: set[uuid.UUID] = set()
@@ -221,8 +207,7 @@ async def _sync_template_slots_from_payload(
             slot = existing[item.id]
             keep_ids.add(slot.id)
             slot.primary_user_id = item.primary_user_id
-            slot.zv1_user_id = item.zv1_user_id
-            slot.zv2_user_id = item.zv2_user_id
+            slot.next_run_at = first_run_at(template, now)
             if item.is_active is not None:
                 slot.is_active = item.is_active
             continue
@@ -230,8 +215,6 @@ async def _sync_template_slots_from_payload(
             id=item.id or uuid.uuid4(),
             template_id=template.id,
             primary_user_id=item.primary_user_id,
-            zv1_user_id=item.zv1_user_id,
-            zv2_user_id=item.zv2_user_id,
             next_run_at=first_run_at(template, now),
             is_active=True if item.is_active is None else item.is_active,
         )
@@ -242,28 +225,6 @@ async def _sync_template_slots_from_payload(
             await db.delete(existing_slot)
     await db.flush()
     return await _slots_for_template(db, template.id)
-
-
-async def _sync_task_for_template(
-    *,
-    db: AsyncSession,
-    template: SystemTaskTemplate,
-    creator_id: uuid.UUID | None,
-) -> list[Task]:
-    """Ensure template slots and upcoming generated task instances exist."""
-    del creator_id  # kept for old callers
-    await ensure_slots_initialized(db)
-    start = datetime.now(timezone.utc).date()
-    end = start + timedelta(days=max(int(getattr(template, "lookahead", 14) or 14), 1))
-    await ensure_task_instances_in_range(db, start=start, end=end)
-    return (
-        await db.execute(
-            select(Task)
-            .where(Task.system_template_origin_id == template.id)
-            .where(Task.origin_run_at.is_not(None))
-            .order_by(Task.origin_run_at.desc())
-        )
-    ).scalars().all()
 
 
 def _task_row_to_out(
@@ -328,6 +289,66 @@ def _task_row_to_out(
     )
 
 
+async def _template_to_out(
+    db: AsyncSession,
+    *,
+    template: SystemTaskTemplate,
+    user_id: uuid.UUID | None,
+) -> SystemTaskOut:
+    roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
+
+    assignees_list: list[TaskAssigneeOut] = []
+    department_ids_set: set[uuid.UUID] = set()
+    if template.assignee_ids:
+        assignee_users = (
+            await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
+        ).scalars().all()
+        assignees_list = [_user_to_assignee(user) for user in assignee_users]
+        department_ids_set = {user.department_id for user in assignee_users if user.department_id is not None}
+    elif template.default_assignee_id:
+        assignee_user = (
+            await db.execute(select(User).where(User.id == template.default_assignee_id))
+        ).scalar_one_or_none()
+        if assignee_user:
+            assignees_list = [_user_to_assignee(assignee_user)]
+            if assignee_user.department_id:
+                department_ids_set.add(assignee_user.department_id)
+
+    if template.department_id and template.department_id not in department_ids_set:
+        department_ids_set.add(template.department_id)
+    department_ids = sorted(list(department_ids_set)) if department_ids_set else None
+
+    task_out = SystemTaskOut(
+        id=template.id,
+        template_id=template.id,
+        title=template.title,
+        description=template.description,
+        internal_notes=template.internal_notes,
+        department_id=template.department_id,
+        default_assignee_id=template.default_assignee_id,
+        assignees=assignees_list,
+        scope=SystemTaskScope(template.scope),
+        frequency=FrequencyType(template.frequency),
+        day_of_week=template.day_of_week,
+        days_of_week=template.days_of_week,
+        day_of_month=template.day_of_month,
+        month_of_year=template.month_of_year,
+        priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
+        finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
+        status=TaskStatus.TODO,
+        is_active=template.is_active,
+        user_comment=None,
+        requires_alignment=getattr(template, "requires_alignment", False),
+        alignment_time=getattr(template, "alignment_time", None),
+        alignment_roles=roles_map.get(template.id),
+        alignment_user_ids=alignment_users_map.get(template.id),
+        created_by=user_id,
+        created_at=template.created_at,
+    )
+    task_out.department_ids = department_ids
+    return task_out
+
+
 def _previous_occurrence_date(template: SystemTaskTemplate, target: date) -> date:
     return previous_occurrence_date(template, target)
 
@@ -359,21 +380,6 @@ def _app_local_today() -> date:
         return datetime.now(timezone.utc).date()
 
 
-async def _run_today_generation_fallback(
-    db: AsyncSession,
-    *,
-    occurrence_date: date | None,
-) -> int:
-    local_today = _app_local_today()
-    if occurrence_date is not None and occurrence_date != local_today:
-        return 0
-    try:
-        return await ensure_due_today_instances_best_effort(db=db)
-    except Exception:
-        await db.rollback()
-        return 0
-
-
 @router.get("", response_model=list[SystemTaskOut])
 async def list_system_tasks(
     department_id: uuid.UUID | None = None,
@@ -384,8 +390,6 @@ async def list_system_tasks(
     user=Depends(get_current_user),
 ) -> list[SystemTaskOut]:
     local_today = _app_local_today()
-    if occurrence_date is None or occurrence_date == local_today:
-        await _run_today_generation_fallback(db, occurrence_date=occurrence_date)
     template_stmt = select(SystemTaskTemplate).order_by(SystemTaskTemplate.created_at.desc())
 
     if department_id is not None:
@@ -947,11 +951,21 @@ async def create_system_task_template(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> SystemTaskOut:
+    if payload.frequency == FrequencyType.WEEKLY and payload.day_of_week is None and not payload.days_of_week:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Weekday is required for weekly tasks",
+        )
+    if payload.frequency == FrequencyType.MONTHLY and payload.day_of_month is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Day of month is required for monthly tasks",
+        )
     if payload.frequency == FrequencyType.YEARLY:
-        if payload.month_of_year is None:
+        if payload.day_of_month is None or payload.month_of_year is None:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Start month is required for yearly tasks",
+                detail="Day of month and month are required for yearly tasks",
             )
         if payload.month_of_year < 1 or payload.month_of_year > 12:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
@@ -1098,89 +1112,9 @@ async def create_system_task_template(
                 insert(SystemTaskTemplateAlignmentUser),
                 [{"template_id": template.id, "user_id": uid} for uid in alignment_user_ids],
             )
-    tasks = await _sync_task_for_template(db=db, template=template, creator_id=user.id)
     await db.commit()
     await db.refresh(template)
-    if tasks:
-        # Refresh all tasks
-        for task in tasks:
-            await db.refresh(task)
-        # Use the first task for the response
-        task = tasks[0]
-        assignee_map = await _assignees_for_tasks(db, [task.id])
-        if not assignee_map.get(task.id) and task.assigned_to is not None:
-            assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
-            if assigned_user is not None:
-                assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-        roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        # Collect all department IDs from all tasks
-        department_ids_set = {t.department_id for t in tasks if t.department_id is not None}
-        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
-        task_out = _task_row_to_out(
-            task,
-            template,
-            assignee_map.get(task.id, []),
-            None,
-            roles_map.get(template.id),
-            alignment_users_map.get(template.id),
-        )
-        task_out.department_ids = department_ids
-        return task_out
-    else:
-        # No tasks created, return a response using template data directly
-        roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        
-        # Get all assignees from the template's assignee_ids
-        assignees_list = []
-        department_ids_set = set()
-        if template.assignee_ids:
-            assignee_users = (
-                await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
-            ).scalars().all()
-            assignees_list = [_user_to_assignee(user) for user in assignee_users]
-            department_ids_set = {user.department_id for user in assignee_users if user.department_id is not None}
-        elif template.default_assignee_id:
-            assignee_user = (
-                await db.execute(select(User).where(User.id == template.default_assignee_id))
-            ).scalar_one_or_none()
-            if assignee_user:
-                assignees_list = [_user_to_assignee(assignee_user)]
-                if assignee_user.department_id:
-                    department_ids_set.add(assignee_user.department_id)
-        
-        if template.department_id and template.department_id not in department_ids_set:
-            department_ids_set.add(template.department_id)
-        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
-        
-        # Return using template data directly (no task needed)
-        return SystemTaskOut(
-            id=template.id,  # Use template ID as the task ID for display
-            template_id=template.id,
-            title=template.title,
-            description=template.description,
-            internal_notes=template.internal_notes,
-            department_id=template.department_id,
-            department_ids=department_ids,
-            default_assignee_id=template.default_assignee_id,
-            assignees=assignees_list,
-            scope=SystemTaskScope(template.scope),
-            frequency=FrequencyType(template.frequency),
-            day_of_week=template.day_of_week,
-            days_of_week=template.days_of_week,
-            day_of_month=template.day_of_month,
-            month_of_year=template.month_of_year,
-            priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
-            finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
-            status=TaskStatus.TODO,  # Default status
-            is_active=template.is_active,
-            user_comment=None,
-            requires_alignment=getattr(template, "requires_alignment", False),
-            alignment_time=getattr(template, "alignment_time", None),
-            alignment_roles=roles_map.get(template.id),
-            alignment_user_ids=alignment_users_map.get(template.id),
-            created_by=user.id,
-            created_at=template.created_at,
-        )
+    return await _template_to_out(db, template=template, user_id=user.id)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
@@ -1231,29 +1165,11 @@ async def update_system_task_template(
     days_set = "days_of_week" in fields_set or "day_of_week" in fields_set
     schedule_fields_set = (
         "frequency" in fields_set
+        or "day_of_week" in fields_set
+        or "days_of_week" in fields_set
         or "day_of_month" in fields_set
         or "month_of_year" in fields_set
     )
-    effective_frequency = payload.frequency if "frequency" in fields_set else template.frequency
-    if schedule_fields_set and effective_frequency == FrequencyType.YEARLY:
-        effective_month = payload.month_of_year if "month_of_year" in fields_set else template.month_of_year
-        if effective_month is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Start month is required for yearly tasks",
-            )
-        if effective_month < 1 or effective_month > 12:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
-    if schedule_fields_set and effective_frequency in (FrequencyType.THREE_MONTHS, FrequencyType.SIX_MONTHS):
-        effective_day = payload.day_of_month if "day_of_month" in fields_set else template.day_of_month
-        effective_month = payload.month_of_year if "month_of_year" in fields_set else template.month_of_year
-        if effective_day is None or effective_month is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Day of month and start month are required for 3/6-month tasks",
-            )
-        if effective_month < 1 or effective_month > 12:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
     days_of_week = payload.days_of_week
     if days_of_week is None and "day_of_week" in fields_set:
         if payload.day_of_week is not None:
@@ -1265,6 +1181,40 @@ async def update_system_task_template(
         if any(day < 0 or day > 6 for day in cleaned_days):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid weekday")
         days_of_week = cleaned_days
+
+    effective_frequency = payload.frequency if "frequency" in fields_set else template.frequency
+    effective_day = payload.day_of_month if "day_of_month" in fields_set else template.day_of_month
+    effective_month = payload.month_of_year if "month_of_year" in fields_set else template.month_of_year
+    effective_days_of_week = days_of_week if days_of_week is not None else template.days_of_week
+    effective_day_of_week = payload.day_of_week if "day_of_week" in fields_set else template.day_of_week
+    if schedule_fields_set and effective_frequency == FrequencyType.WEEKLY:
+        has_weekday = bool(effective_days_of_week) or effective_day_of_week is not None
+        if not has_weekday:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Weekday is required for weekly tasks",
+            )
+    if schedule_fields_set and effective_frequency == FrequencyType.MONTHLY and effective_day is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Day of month is required for monthly tasks",
+        )
+    if schedule_fields_set and effective_frequency == FrequencyType.YEARLY:
+        if effective_day is None or effective_month is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Day of month and month are required for yearly tasks",
+            )
+        if effective_month < 1 or effective_month > 12:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
+    if schedule_fields_set and effective_frequency in (FrequencyType.THREE_MONTHS, FrequencyType.SIX_MONTHS):
+        if effective_day is None or effective_month is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Day of month and start month are required for 3/6-month tasks",
+            )
+        if effective_month < 1 or effective_month > 12:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid start month")
 
     assignee_slots = payload.assignee_slots if "assignee_slots" in fields_set else None
     await _validate_slot_user_ids(db, assignee_slots)
@@ -1353,20 +1303,8 @@ async def update_system_task_template(
     if scope_set:
         template.scope = _enum_value(scope_value)
     if scope_value == SystemTaskScope.DEPARTMENT:
-        if department_set:
-            template.department_id = payload.department_id
-        # If assignees are GA-only and department is missing, set GA department
-        elif assignee_set and assignee_users and template.department_id is None:
-            assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
-            is_gane_assignee = any(
-                u.username and u.username.lower() == "gane.arifaj" for u in assignee_users
-            )
-            if is_gane_assignee:
-                ga_department = (
-                    await db.execute(select(Department).where(Department.code == "GA"))
-                ).scalar_one_or_none()
-                if ga_department and assignee_departments == {ga_department.id}:
-                    template.department_id = ga_department.id
+        if department_set or assignee_set:
+            template.department_id = target_department
     else:
         template.department_id = None
     if assignee_set and assignee_ids is not None:
@@ -1436,86 +1374,6 @@ async def update_system_task_template(
             assignee_slots=assignee_slots,
             assignee_ids=assignee_ids,
         )
-    tasks = await _sync_task_for_template(db=db, template=template, creator_id=user.id)
     await db.commit()
     await db.refresh(template)
-    if tasks:
-        # Refresh all tasks
-        for task in tasks:
-            await db.refresh(task)
-        # Use the first task for the response
-        task = tasks[0]
-        assignee_map = await _assignees_for_tasks(db, [task.id])
-        if not assignee_map.get(task.id) and task.assigned_to is not None:
-            assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
-            if assigned_user is not None:
-                assignee_map[task.id] = [_user_to_assignee(assigned_user)]
-        roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        # Collect all department IDs from all tasks
-        department_ids_set = {t.department_id for t in tasks if t.department_id is not None}
-        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
-        task_out = _task_row_to_out(
-            task,
-            template,
-            assignee_map.get(task.id, []),
-            None,
-            roles_map.get(template.id),
-            alignment_users_map.get(template.id),
-        )
-        task_out.department_ids = department_ids
-        return task_out
-    else:
-        # No tasks created, return a response using template data directly
-        roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-        
-        # Get all assignees from the template's assignee_ids
-        assignees_list = []
-        department_ids_set = set()
-        if template.assignee_ids:
-            assignee_users = (
-                await db.execute(select(User).where(User.id.in_(template.assignee_ids)))
-            ).scalars().all()
-            assignees_list = [_user_to_assignee(user) for user in assignee_users]
-            department_ids_set = {user.department_id for user in assignee_users if user.department_id is not None}
-        elif template.default_assignee_id:
-            assignee_user = (
-                await db.execute(select(User).where(User.id == template.default_assignee_id))
-            ).scalar_one_or_none()
-            if assignee_user:
-                assignees_list = [_user_to_assignee(assignee_user)]
-                if assignee_user.department_id:
-                    department_ids_set.add(assignee_user.department_id)
-        
-        if template.department_id and template.department_id not in department_ids_set:
-            department_ids_set.add(template.department_id)
-        department_ids = sorted(list(department_ids_set)) if department_ids_set else None
-        
-        # Return using template data directly (no task needed)
-        return SystemTaskOut(
-            id=template.id,  # Use template ID as the task ID for display
-            template_id=template.id,
-            title=template.title,
-            description=template.description,
-            internal_notes=template.internal_notes,
-            department_id=template.department_id,
-            department_ids=department_ids,
-            default_assignee_id=template.default_assignee_id,
-            assignees=assignees_list,
-            scope=SystemTaskScope(template.scope),
-            frequency=FrequencyType(template.frequency),
-            day_of_week=template.day_of_week,
-            days_of_week=template.days_of_week,
-            day_of_month=template.day_of_month,
-            month_of_year=template.month_of_year,
-            priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
-            finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
-            status=TaskStatus.TODO,  # Default status
-            is_active=template.is_active,
-            user_comment=None,
-            requires_alignment=getattr(template, "requires_alignment", False),
-            alignment_time=getattr(template, "alignment_time", None),
-            alignment_roles=roles_map.get(template.id),
-            alignment_user_ids=alignment_users_map.get(template.id),
-            created_by=user.id,
-            created_at=template.created_at,
-        )
+    return await _template_to_out(db, template=template, user_id=user.id)
