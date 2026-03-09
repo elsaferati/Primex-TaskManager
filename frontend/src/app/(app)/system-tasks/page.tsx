@@ -509,70 +509,63 @@ export function SystemTasksView({
       const systemTasksUrl = allowMarkAsDone && user?.id && !forceLoadAll
         ? `/system-tasks?assigned_to=${user.id}`
         : "/system-tasks"
-      const tasksEndpoint = showSystemActions ? "/system-tasks/templates" : systemTasksUrl
       const [templatesRes, departmentsRes] = await Promise.all([
-        apiFetch(tasksEndpoint),
+        apiFetch(systemTasksUrl),
         apiFetch("/departments"),
       ])
       if (templatesRes.ok) {
         const rows = (await templatesRes.json()) as SystemTaskTemplate[]
-        if (showSystemActions) {
-          // Management view uses one row per template directly from templates endpoint.
-          setTemplates(rows)
-        } else {
-          // Non-management views still load occurrence rows and collapse by template.
-          const groupedByTemplate = new Map<
-            string,
-            typeof rows[0] & { assignees: typeof rows[0]["assignees"]; department_ids?: string[] }
-          >()
-          for (const row of rows) {
-            const templateId = row.template_id ?? row.id
-            const key = String(templateId)
-            if (groupedByTemplate.has(key)) {
-              const existing = groupedByTemplate.get(key)!
-              const existingAssigneeIds = new Set(existing.assignees?.map((a) => a.id) || [])
-              const newAssignees = (row.assignees || []).filter((a) => !existingAssigneeIds.has(a.id))
-              if (newAssignees.length > 0) {
-                existing.assignees = [...(existing.assignees || []), ...newAssignees]
-              }
-              const existingDeptIds = new Set(existing.department_ids || [])
-              if (row.department_id && !existingDeptIds.has(row.department_id)) {
-                existing.department_ids = [...(existing.department_ids || []), row.department_id]
-              }
-              if ((row as { department_ids?: string[] }).department_ids) {
-                for (const deptId of (row as { department_ids?: string[] }).department_ids || []) {
-                  if (!existingDeptIds.has(deptId)) {
-                    existing.department_ids = [...(existing.department_ids || []), deptId]
-                  }
-                }
-              }
-              if (row.status === "DONE" && existing.status !== "DONE") {
-                existing.status = row.status
-              }
-              if (!existing.id) {
-                existing.id = row.id
-              }
-            } else {
-              const deptIds: string[] = []
-              if (row.department_id) {
-                deptIds.push(row.department_id)
-              }
-              if ((row as { department_ids?: string[] }).department_ids) {
-                for (const deptId of (row as { department_ids?: string[] }).department_ids || []) {
-                  if (!deptIds.includes(deptId)) {
-                    deptIds.push(deptId)
-                  }
-                }
-              }
-              groupedByTemplate.set(key, {
-                ...row,
-                assignees: row.assignees || [],
-                department_ids: deptIds.length > 0 ? deptIds : undefined,
-              })
+        const groupedByTemplate = new Map<
+          string,
+          typeof rows[0] & { assignees: typeof rows[0]["assignees"]; department_ids?: string[] }
+        >()
+        for (const row of rows) {
+          const templateId = row.template_id ?? row.id
+          const key = String(templateId)
+          if (groupedByTemplate.has(key)) {
+            const existing = groupedByTemplate.get(key)!
+            const existingAssigneeIds = new Set(existing.assignees?.map((a) => a.id) || [])
+            const newAssignees = (row.assignees || []).filter((a) => !existingAssigneeIds.has(a.id))
+            if (newAssignees.length > 0) {
+              existing.assignees = [...(existing.assignees || []), ...newAssignees]
             }
+            const existingDeptIds = new Set(existing.department_ids || [])
+            if (row.department_id && !existingDeptIds.has(row.department_id)) {
+              existing.department_ids = [...(existing.department_ids || []), row.department_id]
+            }
+            if ((row as { department_ids?: string[] }).department_ids) {
+              for (const deptId of (row as { department_ids?: string[] }).department_ids || []) {
+                if (!existingDeptIds.has(deptId)) {
+                  existing.department_ids = [...(existing.department_ids || []), deptId]
+                }
+              }
+            }
+            if (row.status === "DONE" && existing.status !== "DONE") {
+              existing.status = row.status
+            }
+            if (!existing.id) {
+              existing.id = row.id
+            }
+          } else {
+            const deptIds: string[] = []
+            if (row.department_id) {
+              deptIds.push(row.department_id)
+            }
+            if ((row as { department_ids?: string[] }).department_ids) {
+              for (const deptId of (row as { department_ids?: string[] }).department_ids || []) {
+                if (!deptIds.includes(deptId)) {
+                  deptIds.push(deptId)
+                }
+              }
+            }
+            groupedByTemplate.set(key, {
+              ...row,
+              assignees: row.assignees || [],
+              department_ids: deptIds.length > 0 ? deptIds : undefined,
+            })
           }
-          setTemplates(Array.from(groupedByTemplate.values()))
         }
+        setTemplates(Array.from(groupedByTemplate.values()))
       } else {
         console.error("Failed to load system tasks", templatesRes.status)
       }
