@@ -26,6 +26,7 @@ import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmat
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
+import { filterGeneratedSystemTaskRows } from "@/lib/system-task-rows"
 import type {
   ChecklistItem,
   DailyReportGaEntry,
@@ -1308,7 +1309,9 @@ export default function DepartmentKanban() {
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
         ])
         const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
-        const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
+        const systemTasks = sysRes.ok
+          ? filterGeneratedSystemTaskRows((await sysRes.json()) as SystemTaskTemplate[])
+          : []
         const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
         const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
         setDepartments(deps)
@@ -1385,7 +1388,9 @@ export default function DepartmentKanban() {
         `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}`
       )
       if (res.ok) {
-        setSystemTasks((await res.json()) as SystemTaskTemplate[])
+        setSystemTasks(
+          filterGeneratedSystemTaskRows((await res.json()) as SystemTaskTemplate[])
+        )
       }
     }
     void loadSystemTasks()
@@ -4315,7 +4320,9 @@ export default function DepartmentKanban() {
         `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
       )
       if (sysRes.ok) {
-        setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
+        setSystemTasks(
+          filterGeneratedSystemTaskRows((await sysRes.json()) as SystemTaskTemplate[])
+        )
       }
 
       void refreshDailyReport()
@@ -4440,7 +4447,9 @@ export default function DepartmentKanban() {
         `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
       )
       if (sysRes.ok) {
-        setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
+        setSystemTasks(
+          filterGeneratedSystemTaskRows((await sysRes.json()) as SystemTaskTemplate[])
+        )
       }
 
       void refreshDailyReport()
