@@ -74,6 +74,10 @@ async def _is_user_absent(
                 CommonEntry.assigned_to_user_id == user_id,
                 and_(CommonEntry.assigned_to_user_id.is_(None), CommonEntry.created_by_user_id == user_id),
             ),
+            or_(
+                CommonEntry.entry_date.is_(None),
+                CommonEntry.entry_date >= start_local_date - timedelta(days=365),
+            ),
         )
     )
     entries = (await db.execute(stmt)).scalars().all()

@@ -418,6 +418,16 @@ async def list_tasks(
                 stmt = stmt.where(effective_date <= window_to_date)
     if not include_done:
         stmt = stmt.where(cast(Task.status, SQLString) != TaskStatus.DONE.value)
+    else:
+        # Only include DONE tasks completed within the last 45 days.
+        # Historical completed tasks are never shown in kanban views anyway.
+        done_cutoff = datetime.now(timezone.utc) - timedelta(days=45)
+        stmt = stmt.where(
+            or_(
+                cast(Task.status, SQLString) != TaskStatus.DONE.value,
+                Task.completed_at >= done_cutoff,
+            )
+        )
 
     tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]

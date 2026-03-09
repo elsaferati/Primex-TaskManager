@@ -1274,9 +1274,29 @@ async def weekly_planner(
     task_stmt = select(Task).where(Task.is_active == True)
     if department_id is not None:
         task_stmt = task_stmt.where(Task.department_id == department_id)
+
+    # SQL-level date filter: only load tasks relevant to this week ±60 days.
+    # Tasks far outside the window would never appear in the UI anyway.
+    _lookahead = timedelta(days=60)
+    _done_cutoff = week_start_date - timedelta(days=30)
+    task_stmt = task_stmt.where(
+        or_(
+            Task.due_date.is_(None),
+            Task.due_date.between(
+                week_start_date - _lookahead,
+                week_end + _lookahead,
+            ),
+        )
+    ).where(
+        or_(
+            Task.status != TaskStatus.DONE.value,
+            Task.completed_at >= _done_cutoff,
+        )
+    )
+
     # Note: We don't filter by user_id at SQL level to allow KO field checking in Python
     # Filtering by user will be done after fetching tasks
-    
+
     all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
     
     # Filter by user_id if provided (check assigned_to, assignees, and KO field for MST/TT Control phase)
