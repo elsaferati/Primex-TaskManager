@@ -32,6 +32,7 @@ import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
+import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { toast } from "sonner"
 import type {
   Department,
@@ -580,11 +581,17 @@ export function SystemTasksView({
       } else {
         console.error("Failed to load departments", departmentsRes.status)
       }
-      const usersRes = await apiFetch(isManagerOrAdmin ? "/users" : "/users/lookup")
-      if (usersRes.ok) {
-        setUsers((await usersRes.json()) as AssigneeUser[])
+      if (isManagerOrAdmin) {
+        const usersRes = await apiFetch("/users")
+        if (usersRes.ok) {
+          setUsers((await usersRes.json()) as AssigneeUser[])
+        } else {
+          console.error("Failed to load users", usersRes.status)
+        }
       } else {
-        console.error("Failed to load users", usersRes.status)
+        const usersList = await fetchUsersLookupCached(apiFetch)
+        if (usersList) setUsers(usersList as AssigneeUser[])
+        else console.error("Failed to load users")
       }
     } finally {
       setLoading(false)

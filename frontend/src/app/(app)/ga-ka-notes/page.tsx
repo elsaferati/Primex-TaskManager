@@ -19,6 +19,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
+import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
 import type { Department, GaNote, GaNoteAttachment, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
@@ -296,9 +297,12 @@ export default function GaKaNotesPage() {
   }, [apiFetch])
 
   const loadUsers = React.useCallback(async () => {
-    const res = await apiFetch(user?.role === "STAFF" ? "/users/lookup" : "/users")
-    if (res?.ok) {
-      setUsers((await res.json()) as UserLookup[])
+    if (user?.role === "STAFF") {
+      const usersList = await fetchUsersLookupCached(apiFetch)
+      if (usersList) setUsers(usersList as UserLookup[])
+    } else {
+      const res = await apiFetch("/users")
+      if (res?.ok) setUsers((await res.json()) as UserLookup[])
     }
   }, [apiFetch, user?.role])
 

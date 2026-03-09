@@ -34,7 +34,7 @@ celery_app.conf.beat_schedule = {
     },
     "process-reminders": {
         "task": "app.celery_tasks.process_reminders",
-        "schedule": crontab(minute="*/1"),
+        "schedule": crontab(minute="*/5"),
     },
     "process-overdue": {
         "task": "app.celery_tasks.process_overdue",

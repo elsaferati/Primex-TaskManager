@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import time
 import uuid
 from datetime import date, datetime, timedelta
 from typing import Any
@@ -308,15 +309,19 @@ def build_display_title(
     return f"{base} ({resolved_total}/{done_total}/{realized_week})"
 
 
-async def build_project_display_title_map(
+# --- Simple in-memory TTL cache for display title maps ---
+# Key: str(department_id) or "" for no department.
+# Value: (monotonic timestamp, result dict).
+_display_title_cache: dict[str, tuple[float, dict[uuid.UUID, str]]] = {}
+_CACHE_TTL = 30.0  # seconds
+
+
+async def _build_project_display_title_map_uncached(
     db: AsyncSession,
     projects: list[Project],
     week_start: date | None = None,
     week_end: date | None = None,
 ) -> dict[uuid.UUID, str]:
-    if not projects:
-        return {}
-
     out: dict[uuid.UUID, str] = {}
     metric_projects: list[Project] = []
 
@@ -345,3 +350,29 @@ async def build_project_display_title_map(
             )
 
     return out
+
+
+async def build_project_display_title_map(
+    db: AsyncSession,
+    projects: list[Project],
+    week_start: date | None = None,
+    week_end: date | None = None,
+    department_id: uuid.UUID | None = None,
+) -> dict[uuid.UUID, str]:
+    if not projects:
+        return {}
+
+    cache_key = str(department_id)
+    now = time.monotonic()
+    if cache_key in _display_title_cache:
+        ts, cached = _display_title_cache[cache_key]
+        if now - ts < _CACHE_TTL:
+            # Return cached titles for known projects, fall back to raw title for unknowns
+            result = {}
+            for p in projects:
+                result[p.id] = cached.get(p.id) or (p.title or "").strip() or "Untitled project"
+            return result
+
+    result = await _build_project_display_title_map_uncached(db, projects, week_start, week_end)
+    _display_title_cache[cache_key] = (now, result)
+    return result

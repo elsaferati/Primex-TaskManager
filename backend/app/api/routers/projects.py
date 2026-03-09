@@ -387,7 +387,9 @@ async def list_projects(
     projects_for_display_title = [project for project in projects if not project.is_template]
     display_title_by_id: dict[uuid.UUID, str] = {}
     if projects_for_display_title:
-        display_title_by_id = await build_project_display_title_map(db, projects_for_display_title)
+        display_title_by_id = await build_project_display_title_map(
+            db, projects_for_display_title, department_id=department_id
+        )
     return [_project_to_out(p, display_title_by_id.get(p.id) or p.title) for p in projects]
 
 
