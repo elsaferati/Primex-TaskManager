@@ -4140,8 +4140,13 @@ async def export_weekly_planner_xlsx(
     week_start_date = data.week_start
     week_end_date = data.week_end
 
-    # Add "THIS WEEK PLAN" or "NEXT WEEK PLAN" label
-    week_label = "THIS WEEK PLAN" if is_this_week else "NEXT WEEK PLAN"
+    current_week_start = planners_router._week_start(planners_router._today_app_date())
+    if week_start_date < current_week_start:
+        week_label = "LAST WEEK PLAN"
+    elif week_start_date > current_week_start:
+        week_label = "NEXT WEEK PLAN"
+    else:
+        week_label = "THIS WEEK PLAN"
     title_label = f"{dept_label} {week_start_date.day:02d}-{week_start_date.month:02d}-{week_start_date.year} - {week_end_date.day:02d}-{week_end_date.month:02d}-{week_end_date.year} - {week_label}"
     title_upper = title_label.upper()
 
