@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Response, status
 from pydantic import BaseModel
 from sqlalchemy import and_, delete, insert, or_, select, text, cast, Date as SQLDate, func
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import noload
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.config import settings
@@ -448,6 +449,9 @@ async def list_system_tasks(
     if range_clauses:
         task_stmt = (
             select(Task)
+            # Assignees are loaded explicitly below; disabling implicit relationship loading
+            # avoids async lazy-loads that can raise MissingGreenlet in production.
+            .options(noload(Task.assignees))
             .where(Task.origin_run_at.is_not(None))
             .where(or_(*range_clauses))
             .order_by(Task.is_active.desc().nullslast(), Task.created_at.desc().nullslast())
