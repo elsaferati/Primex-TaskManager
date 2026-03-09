@@ -18,14 +18,34 @@ def _first_working_day_of_month(year: int, month: int) -> int:
     return 1
 
 
+def _previous_working_day(value: date) -> date:
+    while value.weekday() > 4:
+        value = value - timedelta(days=1)
+    return value
+
+
+def _last_working_day_of_month(year: int, month: int) -> date:
+    last_day = calendar.monthrange(year, month)[1]
+    return _previous_working_day(date(year, month, last_day))
+
+
 def _resolved_day_of_month(template_day: int | None, target: date) -> int | None:
     if template_day is None:
         return None
     if template_day == 0:
-        return calendar.monthrange(target.year, target.month)[1]
+        return _last_working_day_of_month(target.year, target.month).day
     if template_day == -1:
         return _first_working_day_of_month(target.year, target.month)
     return template_day
+
+
+def resolved_occurrence_date(template: SystemTaskTemplate, target: date) -> date | None:
+    template_day = _resolved_day_of_month(template.day_of_month, target)
+    if template_day is None:
+        return None
+    month_last_day = calendar.monthrange(target.year, target.month)[1]
+    candidate = date(target.year, target.month, min(template_day, month_last_day))
+    return _previous_working_day(candidate)
 
 
 def _matches_template_day_of_week(template: SystemTaskTemplate, target: date) -> bool:
@@ -56,18 +76,17 @@ def matches_template_date(template: SystemTaskTemplate, target: date) -> bool:
     if frequency == FrequencyType.WEEKLY:
         return _matches_template_day_of_week(template, target)
 
-    resolved_day = _resolved_day_of_month(template.day_of_month, target)
-    day_matches = resolved_day is None or resolved_day == target.day
-
     if frequency in (FrequencyType.MONTHLY, FrequencyType.THREE_MONTHS, FrequencyType.SIX_MONTHS):
-        if not day_matches:
+        resolved = resolved_occurrence_date(template, target)
+        if resolved is None or resolved != target:
             return False
         return _matches_month_cycle(frequency, target.month, template.month_of_year)
 
     if frequency == FrequencyType.YEARLY:
         if template.month_of_year is not None and template.month_of_year != target.month:
             return False
-        return day_matches
+        resolved = resolved_occurrence_date(template, target)
+        return resolved is None or resolved == target
 
     return True
 
@@ -140,21 +159,16 @@ def _matches_interval(template: SystemTaskTemplate, target: date) -> bool:
 def _matches_template_datetime(template: SystemTaskTemplate, target_local_date: date) -> bool:
     frequency = getattr(template, "frequency", None)
     if frequency == FrequencyType.MONTHLY:
-        if template.day_of_month is None:
-            return False
-        month_last_day = calendar.monthrange(target_local_date.year, target_local_date.month)[1]
-        expected_day = min(template.day_of_month, month_last_day)
-        if target_local_date.day != expected_day:
+        resolved = resolved_occurrence_date(template, target_local_date)
+        if resolved is None or resolved != target_local_date:
             return False
         return _matches_interval(template, target_local_date)
     if frequency == FrequencyType.YEARLY:
         if template.month_of_year and target_local_date.month != template.month_of_year:
             return False
-        if template.day_of_month is not None:
-            month_last_day = calendar.monthrange(target_local_date.year, target_local_date.month)[1]
-            expected_day = min(template.day_of_month, month_last_day)
-            if target_local_date.day != expected_day:
-                return False
+        resolved = resolved_occurrence_date(template, target_local_date)
+        if resolved is not None and resolved != target_local_date:
+            return False
         return _matches_interval(template, target_local_date)
     return matches_template_date(template, target_local_date) and _matches_interval(template, target_local_date)
 

@@ -6,10 +6,10 @@ from app.api.routers.system_tasks import _local_day_utc_bounds, _template_zonein
 
 
 class TestSystemTasksListTimezoneBounds(unittest.TestCase):
-    def test_invalid_timezone_falls_back_to_tirana(self) -> None:
+    def test_invalid_timezone_falls_back_to_app_timezone(self) -> None:
         template = SimpleNamespace(timezone="Invalid/Zone")
         tzinfo, tz_name = _template_zoneinfo(template)
-        self.assertEqual(tz_name, "Europe/Tirane")
+        self.assertEqual(tz_name, "Europe/Budapest")
         start_utc, end_utc = _local_day_utc_bounds(date(2026, 2, 24), tzinfo)
         self.assertEqual(start_utc, datetime(2026, 2, 23, 23, 0, tzinfo=timezone.utc))
         self.assertEqual(end_utc, datetime(2026, 2, 24, 23, 0, tzinfo=timezone.utc))

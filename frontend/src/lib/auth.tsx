@@ -299,7 +299,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (res.status !== 401) return res
 
       const refreshed = await refreshAccessToken()
-      if (!refreshed) return res
+      if (!refreshed) {
+        setStoredToken(null)
+        setStoredLogoutAt(null)
+        setToken(null)
+        setUser(null)
+        return res
+      }
 
       setStoredToken(refreshed)
       setToken(refreshed)
@@ -307,10 +313,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const me = await fetchMe(refreshed)
         setUser(me)
       } catch {
-        // ignore
+        setStoredToken(null)
+        setStoredLogoutAt(null)
+        setToken(null)
+        setUser(null)
+        return res
       }
 
-      return doFetch(refreshed)
+      const retryRes = await doFetch(refreshed)
+      if (retryRes.status === 401) {
+        setStoredToken(null)
+        setStoredLogoutAt(null)
+        setToken(null)
+        setUser(null)
+      }
+      return retryRes
     },
     []
   )

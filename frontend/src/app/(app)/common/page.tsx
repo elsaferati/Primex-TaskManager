@@ -259,7 +259,7 @@ const stripInitialsPrefix = (value: string) => {
 }
 
 export default function CommonViewPage() {
-  const { apiFetch, user } = useAuth()
+  const { apiFetch, user, loading: authLoading } = useAuth()
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const isStaff = user?.role === "STAFF"
@@ -1389,6 +1389,11 @@ export default function CommonViewPage() {
     let mounted = true
     async function load() {
       try {
+        if (authLoading) return
+        if (!user) {
+          if (mounted) setDataLoaded(true)
+          return
+        }
         if (mounted) setDataLoaded(false)
         if (commonViewAggregateEnabled) {
           const weekStartIso = toISODate(weekStart)
@@ -1424,7 +1429,9 @@ export default function CommonViewPage() {
             }
             return
           } catch (err) {
-            console.error("Failed to load aggregate common view data", err)
+            if (!(err instanceof Error && err.message === "common_view_failed_401")) {
+              console.error("Failed to load aggregate common view data", err)
+            }
           }
         }
         const weekStartIso = toISODate(weekStart)
@@ -2159,7 +2166,7 @@ export default function CommonViewPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
+  }, [apiFetch, authLoading, user, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
 
   React.useEffect(() => {
     if (!externalMeetingsOpen) return

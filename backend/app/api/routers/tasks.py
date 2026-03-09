@@ -35,7 +35,6 @@ from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
-from app.services.system_task_instances import ensure_task_instances_in_range
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 
 

@@ -10,8 +10,8 @@ from app.services.system_task_occurrences import (
 
 
 class TestSystemTaskOccurrenceCreationBoundary(unittest.TestCase):
-    def test_template_start_date_uses_tirana_day(self) -> None:
-        # 23:30 UTC is next day in Tirana (UTC+1 in February).
+    def test_template_start_date_uses_app_timezone_day(self) -> None:
+        # 23:30 UTC is next day in Budapest (UTC+1 in February).
         tmpl = SimpleNamespace(created_at=datetime(2026, 2, 24, 23, 30, tzinfo=timezone.utc))
         self.assertEqual(_template_start_date(tmpl), date(2026, 2, 25))
 
@@ -38,8 +38,9 @@ class TestSystemTaskOccurrenceCreationBoundary(unittest.TestCase):
         )
         # Would match monthly schedule, but must be blocked because it is before creation day.
         self.assertFalse(_is_occurrence_eligible_for_template(tmpl, date(2026, 2, 15)))
-        # Next month scheduled day remains valid.
-        self.assertTrue(_is_occurrence_eligible_for_template(tmpl, date(2026, 3, 15)))
+        # March 15, 2026 is Sunday, so the task shifts to Friday March 13.
+        self.assertTrue(_is_occurrence_eligible_for_template(tmpl, date(2026, 3, 13)))
+        self.assertFalse(_is_occurrence_eligible_for_template(tmpl, date(2026, 3, 15)))
 
     def test_existing_old_template_keeps_overdue_behavior(self) -> None:
         tmpl = SimpleNamespace(
@@ -50,7 +51,8 @@ class TestSystemTaskOccurrenceCreationBoundary(unittest.TestCase):
             month_of_year=None,
             created_at=datetime(2025, 1, 1, 0, 0, tzinfo=timezone.utc),
         )
-        self.assertTrue(_is_occurrence_eligible_for_template(tmpl, date(2026, 2, 15)))
+        # February 15, 2026 is Sunday, so the recurring occurrence is created on Friday February 13.
+        self.assertTrue(_is_occurrence_eligible_for_template(tmpl, date(2026, 2, 13)))
 
 
 if __name__ == "__main__":

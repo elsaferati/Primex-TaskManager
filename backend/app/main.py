@@ -10,6 +10,7 @@ from fastapi.responses import ORJSONResponse
 from app.auth.security import ACCESS_TOKEN_TYPE, decode_token, require_token_type
 from app.api.routers import api_router
 from app.config import settings
+from app.services.system_task_scheduler import run_system_task_scheduler_forever
 from app.websocket.redis_listener import start_notification_listener
 from app.websocket.manager import manager
 
@@ -28,6 +29,7 @@ app.add_middleware(
 app.include_router(api_router, prefix="/api")
 
 listener_task: asyncio.Task | None = None
+scheduler_task: asyncio.Task | None = None
 
 @app.get("/health")
 async def health() -> dict:
@@ -36,14 +38,16 @@ async def health() -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    global listener_task
+    global listener_task, scheduler_task
     if settings.REDIS_ENABLED:
         listener_task = asyncio.create_task(start_notification_listener())
+    if settings.SYSTEM_TASK_SCHEDULER_ENABLED:
+        scheduler_task = asyncio.create_task(run_system_task_scheduler_forever())
 
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    global listener_task
+    global listener_task, scheduler_task
     if listener_task is not None:
         listener_task.cancel()
         try:
@@ -51,6 +55,13 @@ async def _shutdown() -> None:
         except asyncio.CancelledError:
             pass
         listener_task = None
+    if scheduler_task is not None:
+        scheduler_task.cancel()
+        try:
+            await scheduler_task
+        except asyncio.CancelledError:
+            pass
+        scheduler_task = None
 
 
 @app.websocket("/ws/notifications")
