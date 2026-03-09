@@ -33,6 +33,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY } from "@/lib/dates"
 import { formatDepartmentName } from "@/lib/department-name"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
+import { filterGeneratedSystemTaskRows } from "@/lib/system-task-rows"
 import { toast } from "sonner"
 import type {
   Department,
@@ -514,7 +515,9 @@ export function SystemTasksView({
         apiFetch("/departments"),
       ])
       if (templatesRes.ok) {
-        const rows = (await templatesRes.json()) as SystemTaskTemplate[]
+        const rows = filterGeneratedSystemTaskRows(
+          (await templatesRes.json()) as SystemTaskTemplate[]
+        )
         const groupedByTemplate = new Map<
           string,
           typeof rows[0] & { assignees: typeof rows[0]["assignees"]; department_ids?: string[] }
