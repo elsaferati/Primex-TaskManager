@@ -262,7 +262,7 @@ function formatDateOnly(value?: string | null) {
 }
 
 function systemTaskDisplayDate(task: SystemTaskTemplate): string | null {
-  return task.effective_occurrence_date || task.next_occurrence_date || task.occurrence_date || null
+  return task.occurrence_date || task.effective_occurrence_date || task.next_occurrence_date || null
 }
 
 function todayInputValue() {
