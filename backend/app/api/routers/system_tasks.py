@@ -311,9 +311,12 @@ async def _template_to_out(
     *,
     template: SystemTaskTemplate,
     user_id: uuid.UUID | None,
+    occurrence_date: date | None = None,
+    next_occurrence_date_value: date | None = None,
+    effective_occurrence_date: date | None = None,
+    alignment_roles: list[str] | None = None,
+    alignment_user_ids: list[uuid.UUID] | None = None,
 ) -> SystemTaskOut:
-    roles_map, alignment_users_map = await _alignment_maps_for_templates(db, [template.id])
-
     assignees_list: list[TaskAssigneeOut] = []
     department_ids_set: set[uuid.UUID] = set()
     if template.assignee_ids:
@@ -350,6 +353,9 @@ async def _template_to_out(
         days_of_week=template.days_of_week,
         day_of_month=template.day_of_month,
         month_of_year=template.month_of_year,
+        occurrence_date=occurrence_date,
+        next_occurrence_date=next_occurrence_date_value,
+        effective_occurrence_date=effective_occurrence_date,
         priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
         finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
         status=TaskStatus.TODO,
@@ -357,8 +363,8 @@ async def _template_to_out(
         user_comment=None,
         requires_alignment=getattr(template, "requires_alignment", False),
         alignment_time=getattr(template, "alignment_time", None),
-        alignment_roles=roles_map.get(template.id),
-        alignment_user_ids=alignment_users_map.get(template.id),
+        alignment_roles=alignment_roles,
+        alignment_user_ids=alignment_user_ids,
         created_by=user_id,
         created_at=template.created_at,
     )
@@ -517,7 +523,7 @@ async def list_system_tasks(
             for task in tmpl_tasks:
                 rows.append((tmpl, task))
 
-    if not rows:
+    if not rows and assigned_to is not None:
         return []
 
     # Return all tasks for each template (no de-duplication)
@@ -620,6 +626,23 @@ async def list_system_tasks(
         # Add department_ids to the response
         task_out.department_ids = department_ids if department_ids else None
         result.append(task_out)
+
+    rendered_template_ids = {item.template_id for item in result if item.template_id is not None}
+    missing_templates = [tmpl for tmpl in templates if tmpl.id not in rendered_template_ids]
+    for template in missing_templates:
+        task_out = await _template_to_out(
+            db,
+            template=template,
+            user_id=user.id,
+            occurrence_date=occurrence_date_map.get(template.id),
+            next_occurrence_date_value=next_occurrence_date_map.get(template.id),
+            effective_occurrence_date=effective_occurrence_date_map.get(template.id),
+            alignment_roles=roles_map.get(template.id),
+            alignment_user_ids=alignment_users_map.get(template.id),
+        )
+        result.append(task_out)
+
+    result.sort(key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
 
     return result
 

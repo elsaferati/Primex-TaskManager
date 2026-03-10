@@ -60,9 +60,8 @@ celery -A app.celery_app.celery_app beat -l info
 ```
 
 System task scheduling notes:
-- `reconcile-system-task-slots`: daily at `06:30` local (`APP_TIMEZONE`, 7-day backfill/rewind)
-- `pregenerate-system-tasks-by-7am`: daily 06:50 local (`APP_TIMEZONE`)
-- `generate-system-tasks`: daily 07:00 local (`APP_TIMEZONE`)
+- `generate-system-tasks`: weekly on Friday at `06:00` local (`APP_TIMEZONE`)
+- By default, generation creates scheduled system task instances through the next `7` days
 
 ### 2) Frontend
 

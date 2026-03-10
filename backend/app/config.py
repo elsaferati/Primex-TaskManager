@@ -29,6 +29,8 @@ class Settings(BaseSettings):
     SYSTEM_TASK_SCHEDULER_ENABLED: bool = True
     SYSTEM_TASK_SCHEDULER_HOUR: int = 6
     SYSTEM_TASK_SCHEDULER_MINUTE: int = 0
+    SYSTEM_TASK_SCHEDULER_DAY_OF_WEEK: str = "fri"
+    SYSTEM_TASK_GENERATE_AHEAD_DAYS: int = 7
 
      # Add these three lines:
     ADMIN_EMAIL: str | None = None

@@ -17,6 +17,11 @@ class _ScalarsResult:
     def all(self):
         return self._values
 
+    def scalar_one_or_none(self):
+        if not self._values:
+            return None
+        return self._values[0]
+
 
 class _FakeAsyncSession:
     def __init__(self, execute_results):
@@ -29,7 +34,7 @@ class _FakeAsyncSession:
 
 
 class TestSystemTasksListGeneratedOnly(unittest.IsolatedAsyncioTestCase):
-    async def test_list_system_tasks_excludes_templates_without_generated_rows(self) -> None:
+    async def test_list_system_tasks_includes_templates_without_generated_rows(self) -> None:
         template = SimpleNamespace(
             id=uuid.uuid4(),
             title="TASK MUJORE RINESA LAURENTI",
@@ -56,6 +61,9 @@ class TestSystemTasksListGeneratedOnly(unittest.IsolatedAsyncioTestCase):
         db = _FakeAsyncSession([
             _ScalarsResult([template]),
             _ScalarsResult([]),
+            _ScalarsResult([]),
+            _ScalarsResult([]),
+            _ScalarsResult([]),
         ])
         user = SimpleNamespace(id=uuid.uuid4())
 
@@ -65,8 +73,10 @@ class TestSystemTasksListGeneratedOnly(unittest.IsolatedAsyncioTestCase):
             user=user,
         )
 
-        self.assertEqual(result, [])
-        self.assertEqual(len(db.executed), 2)
+        self.assertEqual(len(result), 1)
+        self.assertEqual(str(result[0].template_id), str(template.id))
+        self.assertEqual(getattr(result[0].status, "value", result[0].status), "TODO")
+        self.assertEqual(len(db.executed), 5)
 
     async def test_list_system_tasks_with_occurrence_date_excludes_previous_occurrence_templates(self) -> None:
         matching_template = SimpleNamespace(

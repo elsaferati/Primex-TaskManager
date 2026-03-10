@@ -137,7 +137,12 @@ async def generate_system_task_instances(
     for slot, template in slot_rows:
         tz = template_tz(template)
         due_time = template_due_time(template)
-        range_end = end if end is not None else now_utc.astimezone(tz).date()
+        range_end = (
+            end
+            if end is not None
+            else now_utc.astimezone(tz).date()
+            + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0))
+        )
         range_start = start
         next_run = slot.next_run_at or first_run_at(template, now_utc)
 

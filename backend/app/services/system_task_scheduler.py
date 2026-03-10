@@ -12,6 +12,16 @@ from app.services.system_task_instances import generate_system_task_instances
 
 logger = logging.getLogger(__name__)
 
+_WEEKDAY_MAP = {
+    "mon": 0,
+    "tue": 1,
+    "wed": 2,
+    "thu": 3,
+    "fri": 4,
+    "sat": 5,
+    "sun": 6,
+}
+
 
 def scheduler_timezone() -> ZoneInfo:
     try:
@@ -27,13 +37,21 @@ def scheduler_run_time() -> time:
     )
 
 
+def scheduler_weekday() -> int:
+    value = (settings.SYSTEM_TASK_SCHEDULER_DAY_OF_WEEK or "fri").strip().lower()[:3]
+    return _WEEKDAY_MAP.get(value, _WEEKDAY_MAP["fri"])
+
+
 def next_scheduler_run_after(now_utc: datetime) -> datetime:
     tz = scheduler_timezone()
     local_now = now_utc.astimezone(tz)
-    scheduled_today = datetime.combine(local_now.date(), scheduler_run_time(), tzinfo=tz)
-    if local_now < scheduled_today:
-        return scheduled_today.astimezone(timezone.utc)
-    return (scheduled_today + timedelta(days=1)).astimezone(timezone.utc)
+    scheduled_weekday = scheduler_weekday()
+    days_until_run = (scheduled_weekday - local_now.weekday()) % 7
+    scheduled_date = local_now.date() + timedelta(days=days_until_run)
+    scheduled_dt = datetime.combine(scheduled_date, scheduler_run_time(), tzinfo=tz)
+    if local_now < scheduled_dt:
+        return scheduled_dt.astimezone(timezone.utc)
+    return (scheduled_dt + timedelta(days=7)).astimezone(timezone.utc)
 
 
 async def run_system_task_scheduler_once(now_utc: datetime | None = None) -> int:
@@ -52,7 +70,11 @@ async def run_system_task_scheduler_forever() -> None:
 
     tz = scheduler_timezone()
     now_utc = datetime.now(timezone.utc)
-    if now_utc.astimezone(tz).time() >= scheduler_run_time():
+    local_now = now_utc.astimezone(tz)
+    if (
+        local_now.weekday() == scheduler_weekday()
+        and local_now.time() >= scheduler_run_time()
+    ):
         await run_system_task_scheduler_once(now_utc=now_utc)
 
     while True:

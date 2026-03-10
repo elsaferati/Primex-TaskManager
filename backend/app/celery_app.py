@@ -23,6 +23,7 @@ celery_app.conf.beat_schedule = {
     "generate-system-tasks-daily": {
         "task": "app.celery_tasks.generate_system_tasks",
         "schedule": crontab(
+            day_of_week=settings.SYSTEM_TASK_SCHEDULER_DAY_OF_WEEK,
             hour=settings.SYSTEM_TASK_SCHEDULER_HOUR,
             minute=settings.SYSTEM_TASK_SCHEDULER_MINUTE,
         ),
