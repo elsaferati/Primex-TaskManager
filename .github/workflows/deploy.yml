@@ -147,9 +147,40 @@ jobs:
           npm run build
           if ($LASTEXITCODE -ne 0) { Write-Error "Build Failed"; exit 1 }
 
-          Write-Host "4. Restarting Frontend..."
+          Write-Host "4. Replacing Frontend Process..."
           $CurrentPath = (Get-Location).Path
-          cmd /c "pm2 restart frontend --update-env || pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" -- start"
+          $pm2Delete = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 delete frontend" -NoNewWindow -Wait -PassThru
+          if ($pm2Delete.ExitCode -ne 0) {
+            Write-Host "PM2 frontend process did not exist yet. Continuing with clean start."
+          }
+
+          $pm2Start = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000" -NoNewWindow -Wait -PassThru
+          if ($pm2Start.ExitCode -ne 0) { Write-Error "PM2 frontend start failed"; exit 1 }
+
+      - name: Wait for Frontend Readiness
+        if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
+        shell: powershell
+        run: |
+          $ok = $false
+          $uri = "http://127.0.0.1:3000/dashboard"
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+              Write-Host "Frontend readiness attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
+              if ($resp.StatusCode -eq 200) {
+                $ok = $true
+                break
+              }
+            } catch {
+              Write-Host "Frontend readiness attempt $($i + 1)/20: no response yet"
+              Start-Sleep -Seconds 2
+            }
+          }
+          if (-not $ok) {
+            Write-Error "Frontend did not become ready on port 3000."
+            exit 1
+          }
+          Write-Host "Frontend readiness check: OK ($uri)"
 
       - name: Save PM2 Process List
         shell: cmd
