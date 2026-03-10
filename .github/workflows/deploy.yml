@@ -140,20 +140,27 @@ jobs:
           npm install
           if ($LASTEXITCODE -ne 0) { Write-Error "NPM Install Failed"; exit 1 }
 
-          Write-Host "2. Cleaning Old Build..."
-          if (Test-Path .next) { Remove-Item .next -Recurse -Force }
-
-          Write-Host "3. Building New Version (This takes time)..."
-          npm run build
-          if ($LASTEXITCODE -ne 0) { Write-Error "Build Failed"; exit 1 }
-
-          Write-Host "4. Replacing Frontend Process..."
-          $CurrentPath = (Get-Location).Path
+          Write-Host "2. Stopping Existing Frontend Process..."
           $pm2Delete = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 delete frontend" -NoNewWindow -Wait -PassThru
           if ($pm2Delete.ExitCode -ne 0) {
             Write-Host "PM2 frontend process did not exist yet. Continuing with clean start."
           }
 
+          Write-Host "3. Cleaning Old Build..."
+          if (Test-Path .next) {
+            Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path .next) {
+              Start-Sleep -Seconds 2
+              Remove-Item .next -Recurse -Force
+            }
+          }
+
+          Write-Host "4. Building New Version (This takes time)..."
+          npm run build
+          if ($LASTEXITCODE -ne 0) { Write-Error "Build Failed"; exit 1 }
+
+          Write-Host "5. Starting Frontend Process..."
+          $CurrentPath = (Get-Location).Path
           $pm2Start = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000" -NoNewWindow -Wait -PassThru
           if ($pm2Start.ExitCode -ne 0) { Write-Error "PM2 frontend start failed"; exit 1 }
 

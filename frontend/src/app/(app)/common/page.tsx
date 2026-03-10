@@ -6463,7 +6463,7 @@ export default function CommonViewPage() {
         <header className="top-header">
           <div className="page-title">
             <h1>Common View</h1>
-            <p>Daily/weekly view for key statuses and team prioritiesss.</p>
+            <p>Daily/weekly view for key statuses and team prioritiessssssssss.</p>
           </div>
           <div className="flex items-center gap-2">
             <button
