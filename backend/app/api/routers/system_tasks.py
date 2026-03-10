@@ -427,10 +427,19 @@ async def list_system_tasks(
     if not templates:
         return []
 
-    template_ids = [t.id for t in templates]
     base_date = occurrence_date or date.today()
+    if occurrence_date is not None:
+        templates = [tmpl for tmpl in templates if matches_template_date(tmpl, base_date)]
+        if not templates:
+            return []
+
+    template_ids = [t.id for t in templates]
     occurrence_date_map: dict[uuid.UUID, date] = {
-        tmpl.id: (base_date if matches_template_date(tmpl, base_date) else _previous_occurrence_date(tmpl, base_date))
+        tmpl.id: (
+            base_date
+            if occurrence_date is not None
+            else (base_date if matches_template_date(tmpl, base_date) else _previous_occurrence_date(tmpl, base_date))
+        )
         for tmpl in templates
     }
     next_occurrence_date_map: dict[uuid.UUID, date] = {
