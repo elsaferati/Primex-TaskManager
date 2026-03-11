@@ -6,6 +6,7 @@ from datetime import datetime, time
 from pydantic import BaseModel, Field
 
 from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority
+from app.schemas.task import TaskAssigneeOut
 
 
 class SystemTaskTemplateOut(BaseModel):
@@ -14,8 +15,10 @@ class SystemTaskTemplateOut(BaseModel):
     description: str | None = None
     internal_notes: str | None = None
     department_id: uuid.UUID | None = None
+    department_ids: list[uuid.UUID] | None = None
     default_assignee_id: uuid.UUID | None = None
     assignee_ids: list[uuid.UUID] | None = None
+    assignees: list[TaskAssigneeOut] = Field(default_factory=list)
     assignee_slots: list["SystemTaskTemplateAssigneeSlotOut"] = Field(default_factory=list)
     scope: SystemTaskScope
     frequency: FrequencyType

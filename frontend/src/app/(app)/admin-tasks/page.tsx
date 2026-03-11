@@ -1503,6 +1503,14 @@ export default function AdminTasksPage() {
     return map
   }, [tasks])
 
+  const systemTaskByTemplateId = React.useMemo(() => {
+    const map = new Map<string, SystemTaskOut>()
+    for (const task of systemTasks) {
+      map.set(task.template_id, task)
+    }
+    return map
+  }, [systemTasks])
+
   const allTasksTableRows = React.useMemo(() => {
     const rows: Array<{
       id: string
@@ -1517,28 +1525,14 @@ export default function AdminTasksPage() {
       status: string
       priority: TaskPriority
       comment?: string | null
-      taskId?: string
-      systemTemplateId?: string
-      systemOccurrenceDate?: string
+      taskId: string
       isFastTask?: boolean
+      isTemplateAlignedSystem?: boolean
     }> = []
 
     if (!ganeUserId) return rows
 
-    const frequencyShort = (value?: string | null) => {
-      if (!value) return "SYS"
-      if (value === "DAILY") return "D"
-      if (value === "WEEKLY") return "W"
-      if (value === "MONTHLY") return "M"
-      if (value === "YEARLY") return "Y"
-      if (value === "3_MONTHS") return "3M"
-      if (value === "6_MONTHS") return "6M"
-      return "SYS"
-    }
-
     for (const task of tasks) {
-      const isSystem = Boolean(task.system_template_origin_id || task.task_type === "system")
-      if (isSystem) continue
       if (task.is_active === false) continue
 
       const isAssigned =
@@ -1549,54 +1543,28 @@ export default function AdminTasksPage() {
 
       const dateIso = getTaskDateIso(task)
       const statusValue = task.status || (task.completed_at ? "DONE" : "TODO")
+      const isSystemTask = Boolean(task.system_template_origin_id || task.task_type === "system")
+      const systemTemplate = task.system_template_origin_id
+        ? systemTaskByTemplateId.get(task.system_template_origin_id)
+        : undefined
+      const hasTemplateAlignment =
+        Boolean(isSystemTask && ganeUserId && systemTemplate?.alignment_user_ids?.includes(ganeUserId))
       rows.push({
         id: `task:${task.id}`,
-        ll: "FT",
-        nll: task.project_id ? "-" : fastReportSubtypeShort(task),
+        ll: isSystemTask ? "SYS" : "FT",
+        nll: isSystemTask ? "SYS" : task.project_id ? "-" : fastReportSubtypeShort(task),
         assigned: taskAssigneeBadges(task),
         dateIso,
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
-        bz: "-",
-        kohaBz: "-",
+        bz: hasTemplateAlignment ? "BZ (TPL)" : "-",
+        kohaBz: hasTemplateAlignment ? formatTimeLabel(systemTemplate?.alignment_time || "") || "TPL" : "-",
         status: statusValue,
         priority: getDisplayPriority(task),
         comment: taskCommentMap.get(task.id) ?? null,
         taskId: task.id,
         isFastTask: !task.project_id,
-      })
-    }
-
-    for (const systemTask of systemTasks) {
-      if (systemTask.is_active === false) continue
-
-      const isAssignedToGane =
-        systemTask.default_assignee_id === ganeUserId ||
-        systemTask.assignees?.some((assignee) => assignee.id === ganeUserId)
-      const isGaScope =
-        systemTask.scope === "GA" ||
-        (adminDepartmentId && systemTask.department_id === adminDepartmentId)
-      if (!isAssignedToGane && !isGaScope) continue
-
-      const dateIso = getSystemDateIso(systemTask)
-      const templateId = systemTask.template_id || systemTask.id
-      const statusKey = `${templateId}:${dateIso}`
-      const statusValue = systemStatusOverrides[statusKey] || systemTask.status || "OPEN"
-      rows.push({
-        id: `system:${templateId}:${dateIso}`,
-        ll: "SYS",
-        nll: frequencyShort(systemTask.frequency),
-        assigned: systemAssigneeBadges(systemTask),
-        dateIso,
-        period: systemTask.finish_period || "AM",
-        title: systemTask.title || "-",
-        bz: "-",
-        kohaBz: "-",
-        status: statusValue,
-        priority: (systemTask.priority || "NORMAL") as TaskPriority,
-        comment: systemTask.user_comment ?? null,
-        systemTemplateId: templateId,
-        systemOccurrenceDate: dateIso,
+        isTemplateAlignedSystem: hasTemplateAlignment,
       })
     }
 
@@ -1611,19 +1579,26 @@ export default function AdminTasksPage() {
     return rows
   }, [
     tasks,
-    systemTasks,
     ganeUserId,
-    adminDepartmentId,
+    systemTaskByTemplateId,
     taskAssigneeBadges,
-    systemAssigneeBadges,
     taskCommentMap,
-    systemStatusOverrides,
   ])
 
   const filteredAllTasksRows = React.useMemo(() => {
     if (!allTasksDateFilter) return allTasksTableRows
     return allTasksTableRows.filter((row) => row.dateIso === allTasksDateFilter)
   }, [allTasksDateFilter, allTasksTableRows])
+
+  const highlightedAllTasksRows = React.useMemo(
+    () => filteredAllTasksRows.filter((row) => row.isTemplateAlignedSystem),
+    [filteredAllTasksRows]
+  )
+
+  const regularAllTasksRows = React.useMemo(
+    () => filteredAllTasksRows.filter((row) => !row.isTemplateAlignedSystem),
+    [filteredAllTasksRows]
+  )
 
   const dailyUserReportRows = React.useMemo(() => {
     const rows: Array<{
@@ -2808,6 +2783,64 @@ export default function AdminTasksPage() {
     }
   }, [commonData, commonUsers, commonWeekISOs])
 
+  const bzTasksByDay = React.useMemo(() => {
+    const byDay: Record<string, BzItem[]> = {}
+    for (const iso of commonWeekISOs) {
+      byDay[iso] = []
+    }
+    if (!ganeUserId) return byDay
+
+    const assigneeLabelsForTask = (task: Task) => {
+      const ids = new Set<string>()
+      if (task.assigned_to) ids.add(task.assigned_to)
+      if (task.assignees) {
+        for (const assignee of task.assignees) {
+          if (assignee.id) ids.add(assignee.id)
+        }
+      }
+      return Array.from(ids)
+        .map((userId) => {
+          const userFromMap = userMap.get(userId)
+          if (userFromMap) return userFromMap.full_name || userFromMap.username || ""
+          const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
+          return assigneeFromArray?.full_name || assigneeFromArray?.username || ""
+        })
+        .filter(Boolean)
+    }
+
+    for (const task of tasks) {
+      if (task.is_active === false) continue
+      if (!task.alignment_user_ids?.includes(ganeUserId)) continue
+
+      const startDate = toDate(task.start_date || task.due_date || task.created_at)
+      const endDate = toDate(task.due_date || task.start_date || task.created_at)
+      if (!startDate || !endDate) continue
+
+      const timeSource = toDate(task.due_date || task.start_date || task.created_at)
+      const timeLabel = timeSource ? formatTime(timeSource) : ""
+      const startIso = toISODate(startDate)
+      const endIso = toISODate(endDate)
+      const assigneeLabels = assigneeLabelsForTask(task)
+
+      for (const iso of commonWeekISOs) {
+        if (iso < startIso || iso > endIso) continue
+        byDay[iso].push({
+          title: task.title || "-",
+          date: iso,
+          time: timeLabel,
+          assignees: assigneeLabels,
+          bzWithLabel: "GA",
+        })
+      }
+    }
+
+    for (const iso of commonWeekISOs) {
+      byDay[iso] = sortByTime(byDay[iso], (item) => item.time, (item) => item.title)
+    }
+
+    return byDay
+  }, [commonWeekISOs, ganeUserId, sortByTime, tasks, userMap])
+
   const tableDataByDay = React.useMemo(() => {
     const dataByDay: Record<
       string,
@@ -2866,7 +2899,7 @@ export default function AdminTasksPage() {
         personal: commonFiltered.personal.filter((x) => x.date === iso),
         external: sortByTime(commonFiltered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(commonFiltered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
-        bz: sortByTime(commonFiltered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
+        bz: bzTasksByDay[iso] || [],
         r1: sortTasksByOrder(commonFiltered.r1.filter((x) => x.date === iso)),
         problems: [
           ...commonFiltered.problems.filter((x) => !x.everyday && x.date === iso),
@@ -2881,7 +2914,7 @@ export default function AdminTasksPage() {
     })
 
     return dataByDay
-  }, [commonFiltered, commonWeekISOs, sortByTime, sortTasksByOrder])
+  }, [bzTasksByDay, commonFiltered, commonWeekISOs, sortByTime, sortTasksByOrder])
 
   const weekTableRows = React.useMemo(
     () => [
@@ -2926,6 +2959,41 @@ export default function AdminTasksPage() {
     }
     return byDay
   }, [commonWeekISOs, ganeUserId, tasks])
+
+  const bzAlignedSystemOccurrencesByDay = React.useMemo(() => {
+    const byDay: Record<string, DailyReportSystemOccurrence[]> = {}
+    commonWeekISOs.forEach((iso) => {
+      byDay[iso] = []
+    })
+    if (!ganeUserId) return byDay
+
+    const normalizeTitle = (value?: string | null) =>
+      (value || "").trim().replace(/\s+/g, " ").toLowerCase()
+
+    const alignedTemplateIds = new Set(
+      systemTasks
+        .filter((task) => task.is_active !== false && task.alignment_user_ids?.includes(ganeUserId))
+        .map((task) => task.template_id)
+        .filter(Boolean)
+    )
+    const alignedTitles = new Set(
+      systemTasks
+        .filter((task) => task.is_active !== false && task.alignment_user_ids?.includes(ganeUserId))
+        .map((task) => normalizeTitle(task.title))
+        .filter(Boolean)
+    )
+
+    for (const iso of commonWeekISOs) {
+      const occurrences = gaSystemByDay[iso] || []
+      byDay[iso] = occurrences.filter(
+        (occurrence) =>
+          alignedTemplateIds.has(occurrence.template_id) ||
+          alignedTitles.has(normalizeTitle(occurrence.title))
+      )
+    }
+
+    return byDay
+  }, [commonWeekISOs, gaSystemByDay, ganeUserId, systemTasks])
 
   const canEditGaTimeSlots =
     isAdmin || (user?.username ? user.username.toLowerCase() === "gane.arifaj" : false)
@@ -3046,6 +3114,26 @@ export default function AdminTasksPage() {
         return initialsList.length ? ` (${initialsList.join(", ")})` : ""
       }
 
+      const renderBzLines = (iso: string) => {
+        const bzEntries = tableDataByDay?.[iso]?.bz || []
+        const alignedSystemEntries = bzAlignedSystemOccurrencesByDay[iso] || []
+        const lines: string[] = []
+
+        bzEntries.forEach((e: BzItem, idx: number) => {
+          const bzLabel = e.bzWithLabel ? ` - ${e.bzWithLabel}` : ""
+          lines.push(
+            `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${bzLabel}${assigneesSuffix(e)}`
+          )
+        })
+
+        alignedSystemEntries.forEach((task, idx) => {
+          const lineIndex = lines.length + 1
+          lines.push(`${lineIndex}. ${stripInitialsPrefix(task.title || "-")}`)
+        })
+
+        return lines
+      }
+
       const renderCellLines = (rowId: CommonType, iso: string) => {
         const dayData = tableDataByDay?.[iso]
         if (!dayData) return []
@@ -3089,6 +3177,9 @@ export default function AdminTasksPage() {
                                     ? dayData.feedback
                                     : []
 
+        if (rowId === "bz") {
+          return renderBzLines(iso)
+        }
         if (!entries.length) return []
 
         if (rowId === "late") {
@@ -3139,12 +3230,6 @@ export default function AdminTasksPage() {
             `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
           )
         }
-        if (rowId === "bz") {
-          return entries.map((e: BzItem, idx: number) => {
-            const bzLabel = e.bzWithLabel ? ` - ${e.bzWithLabel}` : ""
-            return `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${bzLabel}${assigneesSuffix(e)}`
-          })
-        }
         if (rowId === "priority") {
           return entries.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
         }
@@ -3161,7 +3246,7 @@ export default function AdminTasksPage() {
         columns,
         rows,
       }
-    }, [commonWeekISOs, gaSystemByDay, gaTasksByDay, tableDataByDay, weekTableRows, weekTitleRange])
+    }, [bzAlignedSystemOccurrencesByDay, commonWeekISOs, gaSystemByDay, gaTasksByDay, tableDataByDay, weekTableRows, weekTitleRange])
     const renderCellContent = (rowId: CommonType, iso: string) => {
       const dayData = tableDataByDay?.[iso]
       if (!dayData) return null
@@ -3188,6 +3273,46 @@ export default function AdminTasksPage() {
                 .map((v) => v.trim())
                 .filter(Boolean)
             : []
+      const renderBzContent = () => {
+        const bzEntries = dayData.bz || []
+        const alignedSystemEntries = bzAlignedSystemOccurrencesByDay[iso] || []
+        if (!bzEntries.length && !alignedSystemEntries.length) return null
+
+        const content: React.ReactNode[] = []
+
+        bzEntries.forEach((e: BzItem, idx: number) => {
+          content.push(
+            <div key={`bz-${idx}`} className="week-table-entry">
+              <span>
+                {idx + 1}. {stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
+                {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
+              </span>
+              {e.assignees && e.assignees.length ? (
+                <div className="week-table-avatars">
+                  {e.assignees.map((name: string) => (
+                    <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                      {commonViewInitials(name)}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+          )
+        })
+
+        alignedSystemEntries.forEach((task, idx) => {
+          const displayIndex = content.length + 1
+          content.push(
+            <div key={`bz-system-${task.template_id}-${idx}`} className="week-table-entry">
+              <span>
+                {displayIndex}. {stripInitialsPrefix(task.title || "-")}
+              </span>
+            </div>
+          )
+        })
+
+        return content
+      }
       const entries =
         rowId === "late"
           ? dayData.late
@@ -3217,6 +3342,9 @@ export default function AdminTasksPage() {
                                   ? dayData.feedback
                                   : []
 
+      if (rowId === "bz") {
+        return renderBzContent()
+      }
       if (!entries.length) return null
 
       if (rowId === "late") {
@@ -3357,25 +3485,6 @@ export default function AdminTasksPage() {
           </div>
         ))
       }
-      if (rowId === "bz") {
-        return entries.map((e: BzItem, idx: number) => (
-          <div key={idx} className="week-table-entry">
-            <span>
-              {idx + 1}. {stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
-              {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
-            </span>
-            {e.assignees && e.assignees.length ? (
-              <div className="week-table-avatars">
-                {e.assignees.map((name: string) => (
-                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
-                    {commonViewInitials(name)}
-                  </span>
-                ))}
-              </div>
-            ) : null}
-          </div>
-        ))
-      }
       if (rowId === "priority") {
         const groupMap = new Map<string, PriorityItem[]>()
         for (const item of entries as PriorityItem[]) {
@@ -3438,6 +3547,136 @@ export default function AdminTasksPage() {
         </div>
       )
     }
+
+    const renderAllTasksTable = (
+      rows: typeof filteredAllTasksRows,
+      options?: { accent?: boolean; emptyLabel?: string }
+    ) => (
+      <Table
+        containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+        className="min-w-[1200px] text-[11px]"
+      >
+        <TableHeader>
+          <TableRow className="bg-slate-50">
+            {[
+              "NR",
+              "LL",
+              "NLL",
+              "ASSIGNED",
+              "DATE",
+              "AM/PM",
+              "TITLE",
+              "BZ",
+              "KOHA BZ",
+              "STATUS",
+              "PRIORITY",
+              "KOMENT",
+              "ACTIONS",
+            ].map((label) => (
+              <TableHead
+                key={label}
+                className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+              >
+                {label}
+              </TableHead>
+            ))}
+          </TableRow>
+        </TableHeader>
+        <TableBody>
+          {rows.length ? (
+            rows.map((row, index) => {
+              const statusValue = TASK_STATUS_OPTIONS.includes(row.status as (typeof TASK_STATUS_OPTIONS)[number])
+                ? row.status
+                : "TODO"
+              const statusLabel = reportStatusLabel(statusValue)
+              const statusClass = weeklyPlanStatusBgClass(statusValue)
+              const actionKey = `task:${row.taskId || "na"}`
+              const isUpdating = Boolean(taskStatusUpdating[actionKey])
+              const commentKey = `all-task:${row.taskId}`
+              const previousValue = row.comment ?? ""
+              const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
+              const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
+              const canMarkDone = statusValue !== "DONE"
+              const rowTask = tasks.find((task) => task.id === row.taskId) || null
+              return (
+                <TableRow key={row.id} className="h-12">
+                  <TableCell className="h-12 align-middle font-semibold text-slate-700">{index + 1}</TableCell>
+                  <TableCell className="h-12 align-middle font-semibold">{row.ll}</TableCell>
+                  <TableCell className="h-12 align-middle">{row.nll}</TableCell>
+                  <TableCell className="h-12 align-middle">{renderAssignedBadges(row.assigned)}</TableCell>
+                  <TableCell className="h-12 align-middle">{row.dateIso ? formatDateDMY(row.dateIso) : "-"}</TableCell>
+                  <TableCell className="h-12 align-middle">{row.period || "-"}</TableCell>
+                  <TableCell className="h-12 align-middle whitespace-normal break-words font-medium text-slate-800">
+                    {row.title}
+                  </TableCell>
+                  <TableCell className="h-12 align-middle">{row.bz}</TableCell>
+                  <TableCell className="h-12 align-middle">{row.kohaBz}</TableCell>
+                  <TableCell className={`h-12 align-middle uppercase ${statusClass}`}>
+                    {statusLabel}
+                  </TableCell>
+                  <TableCell className="h-12 align-middle uppercase">{row.priority}</TableCell>
+                  <TableCell className="h-12 align-middle">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="text"
+                        aria-label="Koment"
+                        className="h-4 w-full border-b border-slate-300 bg-transparent"
+                        value={commentValue}
+                        onChange={(e) => {
+                          if (!commentKey) return
+                          setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: e.target.value }))
+                        }}
+                        onBlur={(e) => {
+                          const nextValue = e.target.value
+                          void saveAllTasksReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
+                        }}
+                        disabled={!commentKey}
+                      />
+                      <span className="text-[10px] text-slate-400">{isSaving ? "Saving" : ""}</span>
+                    </div>
+                  </TableCell>
+                  <TableCell className="h-12 align-middle">
+                    <div className="flex items-center gap-2">
+                      {canMarkDone ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          disabled={isUpdating}
+                          onClick={() => void updateTaskStatus(row.taskId, "DONE")}
+                        >
+                          {isUpdating ? "Updating..." : "Done"}
+                        </Button>
+                      ) : (
+                        <span className="text-xs text-emerald-700">Done</span>
+                      )}
+                      {rowTask ? (
+                        <Button
+                          variant="outline"
+                          size="icon"
+                          className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                          title="Edit due date"
+                          aria-label={`Edit ${row.title}`}
+                          onClick={() => startEditTask(rowTask)}
+                        >
+                          <Pencil className="h-3 w-3" />
+                        </Button>
+                      ) : null}
+                    </div>
+                  </TableCell>
+                </TableRow>
+              )
+            })
+          ) : (
+            <TableRow>
+              <TableCell colSpan={13} className="py-8 text-center text-sm text-muted-foreground">
+                {options?.emptyLabel || "No tasks available."}
+              </TableCell>
+            </TableRow>
+          )}
+        </TableBody>
+      </Table>
+    )
 
     return (
       <div className="admin-week-table">
@@ -3861,171 +4100,24 @@ export default function AdminTasksPage() {
               />
             </div>
           </div>
-          <Table
-            containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-            className="min-w-[1200px] text-[11px]"
-          >
-            <TableHeader>
-              <TableRow className="bg-slate-50">
-                {[
-                  "NR",
-                  "LL",
-                  "NLL",
-                  "ASSIGNED",
-                  "DATE",
-                  "AM/PM",
-                  "TITLE",
-                  "BZ",
-                  "KOHA BZ",
-                  "STATUS",
-                  "PRIORITY",
-                  "KOMENT",
-                  "ACTIONS",
-                ].map((label) => (
-                  <TableHead
-                    key={label}
-                    className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
-                  >
-                    {label}
-                  </TableHead>
-                ))}
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredAllTasksRows.length ? (
-                filteredAllTasksRows.map((row, index) => {
-                  const isSystem = row.ll === "SYS"
-                  const statusValue = isSystem
-                    ? (SYSTEM_STATUS_OPTIONS.includes(row.status as (typeof SYSTEM_STATUS_OPTIONS)[number])
-                        ? row.status
-                        : "OPEN")
-                    : (TASK_STATUS_OPTIONS.includes(row.status as (typeof TASK_STATUS_OPTIONS)[number])
-                        ? row.status
-                        : "TODO")
-                  const statusLabel = isSystem ? formatSystemOccurrenceStatus(statusValue) : reportStatusLabel(statusValue)
-                  const statusClass = isSystem
-                    ? statusValue === "DONE"
-                      ? "bg-emerald-100 text-emerald-800 font-medium"
-                      : ""
-                    : weeklyPlanStatusBgClass(statusValue)
-                  const occurrenceDate = row.systemOccurrenceDate || row.dateIso || todayIso
-                  const actionKey = isSystem
-                    ? `system:${row.systemTemplateId || "na"}:${occurrenceDate}`
-                    : `task:${row.taskId || "na"}`
-                  const isUpdating = Boolean(taskStatusUpdating[actionKey])
-                  const commentKey = row.taskId
-                    ? `all-task:${row.taskId}`
-                    : row.systemTemplateId && occurrenceDate
-                      ? `all-system:${row.systemTemplateId}:${occurrenceDate}`
-                      : row.systemTemplateId
-                        ? `all-system:${row.systemTemplateId}`
-                        : ""
-                  const previousValue = row.comment ?? ""
-                  const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
-                  const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
-                  return (
-                    <TableRow key={row.id} className="h-12">
-                      <TableCell className="h-12 align-middle font-semibold text-slate-700">{index + 1}</TableCell>
-                      <TableCell className="h-12 align-middle font-semibold">{row.ll}</TableCell>
-                      <TableCell className="h-12 align-middle">{row.nll}</TableCell>
-                      <TableCell className="h-12 align-middle">{renderAssignedBadges(row.assigned)}</TableCell>
-                      <TableCell className="h-12 align-middle">{row.dateIso ? formatDateDMY(row.dateIso) : "-"}</TableCell>
-                      <TableCell className="h-12 align-middle">{row.period || "-"}</TableCell>
-                      <TableCell className="h-12 align-middle whitespace-normal break-words font-medium text-slate-800">
-                        {row.title}
-                      </TableCell>
-                      <TableCell className="h-12 align-middle">{row.bz}</TableCell>
-                      <TableCell className="h-12 align-middle">{row.kohaBz}</TableCell>
-                      <TableCell className={`h-12 align-middle uppercase ${statusClass}`}>
-                        {statusLabel}
-                      </TableCell>
-                      <TableCell className="h-12 align-middle uppercase">{row.priority}</TableCell>
-                      <TableCell className="h-12 align-middle">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="text"
-                            aria-label="Koment"
-                            className="h-4 w-full border-b border-slate-300 bg-transparent"
-                            value={commentValue}
-                            onChange={(e) => {
-                              if (!commentKey) return
-                              setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: e.target.value }))
-                            }}
-                            onBlur={(e) => {
-                              if (!commentKey) return
-                              const nextValue = e.target.value
-                              if (row.taskId) {
-                                void saveAllTasksReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
-                                return
-                              }
-                              if (row.systemTemplateId) {
-                                void saveAllTasksReportSystemComment(
-                                  row.systemTemplateId,
-                                  occurrenceDate,
-                                  row.status || "OPEN",
-                                  nextValue,
-                                  previousValue,
-                                  commentKey
-                                )
-                              }
-                            }}
-                            disabled={!commentKey}
-                          />
-                          <span className="text-[10px] text-slate-400">{isSaving ? "Saving" : ""}</span>
-                        </div>
-                      </TableCell>
-                      <TableCell className="h-12 align-middle">
-                        <div className="flex items-center gap-2">
-                          <Select
-                            value={statusValue}
-                            onValueChange={(value) => {
-                              if (isSystem && row.systemTemplateId) {
-                                void updateSystemOccurrenceStatus(row.systemTemplateId, occurrenceDate, value, row.comment)
-                                return
-                              }
-                              if (!isSystem && row.taskId) {
-                                void updateTaskStatus(row.taskId, value)
-                              }
-                            }}
-                            disabled={isUpdating}
-                          >
-                            <SelectTrigger className="h-7 text-xs">
-                              <SelectValue />
-                            </SelectTrigger>
-                            <SelectContent>
-                              {(isSystem ? SYSTEM_STATUS_OPTIONS : TASK_STATUS_OPTIONS).map((value) => (
-                                <SelectItem key={value} value={value}>
-                                  {isSystem ? formatSystemOccurrenceStatus(value) : reportStatusLabel(value)}
-                                </SelectItem>
-                            ))}
-                          </SelectContent>
-                          </Select>
-                          {!isSystem && row.isFastTask && row.taskId ? (
-                            <Button
-                              variant="outline"
-                              size="icon"
-                              className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                              title="Edit"
-                              aria-label={`Edit ${row.title}`}
-                              onClick={() => startFastTaskEdit(row.taskId as string)}
-                            >
-                              <Pencil className="h-3 w-3" />
-                            </Button>
-                          ) : null}
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  )
-                })
-              ) : (
-                <TableRow>
-                  <TableCell colSpan={13} className="py-8 text-center text-sm text-muted-foreground">
-                    No tasks available.
-                  </TableCell>
-                </TableRow>
-              )}
-            </TableBody>
-          </Table>
+          {highlightedAllTasksRows.length ? (
+            <div className="mt-4">
+              <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
+                BZ From System Template Alignment
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                These are system-task occurrences visible because the template has BZ alignment to Gane.
+              </div>
+              {renderAllTasksTable(highlightedAllTasksRows, {
+                emptyLabel: "No aligned system tasks.",
+              })}
+            </div>
+          ) : null}
+          <div className={highlightedAllTasksRows.length ? "mt-5" : ""}>
+            {renderAllTasksTable(regularAllTasksRows, {
+              emptyLabel: highlightedAllTasksRows.length ? "No other tasks available." : "No tasks available.",
+            })}
+          </div>
           </AdminTasksSection>
         </div>
       </div>

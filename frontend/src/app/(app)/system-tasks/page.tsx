@@ -505,12 +505,8 @@ export function SystemTasksView({
   const load = React.useCallback(async () => {
     setLoading(true)
     try {
-      // For My View (allowMarkAsDone), filter by current user unless forced to load all.
-      const systemTasksUrl = allowMarkAsDone && user?.id && !forceLoadAll
-        ? `/system-tasks?assigned_to=${user.id}`
-        : "/system-tasks"
       const [templatesRes, departmentsRes] = await Promise.all([
-        apiFetch(systemTasksUrl),
+        apiFetch("/system-tasks/templates"),
         apiFetch("/departments"),
       ])
       if (templatesRes.ok) {
@@ -589,17 +585,13 @@ export function SystemTasksView({
     } finally {
       setLoading(false)
     }
-  }, [apiFetch, isManagerOrAdmin, showSystemActions, allowMarkAsDone, user?.id, forceLoadAll])
+  }, [apiFetch, isManagerOrAdmin])
 
   React.useEffect(() => {
     void load()
   }, [load])
 
-  // In My View (allowMarkAsDone=true), all users can mark their own tasks as done
-  // In Department View, only ADMIN or gane.arifaj can mark tasks as done
-  const canMarkDone = allowMarkAsDone || (
-    user?.role === "ADMIN" || user?.username?.toLowerCase() === "gane.arifaj"
-  )
+  const canMarkDone = false
   const gridClass = React.useMemo(
     () => (showBzTimeColumn ? GRID_WITH_BZ_TIME_CLASS : BASE_GRID_CLASS),
     [showBzTimeColumn]
@@ -1662,7 +1654,7 @@ export function SystemTasksView({
 
     const rows = sections[0]?.templates ?? []
     if (rows.length === 0) {
-      toast("No system tasks to print for the current filters.")
+      toast("No system task templates to print for the current filters.")
       return
     }
 
@@ -3496,7 +3488,7 @@ export function SystemTasksView({
                       })
                     ) : (
                       <div className="py-12 text-center text-sm text-muted-foreground">
-                        No scheduled tasks found.
+                        No system task templates found.
                       </div>
                     )}
                   </React.Fragment>
@@ -3508,7 +3500,7 @@ export function SystemTasksView({
         </div>
       ) : (
         <div className="rounded-lg border border-dashed border-slate-300 p-8 text-center text-sm text-muted-foreground bg-slate-50">
-          No system tasks match the current filters.
+          No system task templates match the current filters.
         </div>
       )}
     </div>

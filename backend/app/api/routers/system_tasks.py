@@ -294,6 +294,8 @@ def _task_row_to_out(
         effective_occurrence_date=effective_occurrence_date,
         priority=priority_value,
         finish_period=task.finish_period,
+        start_date=task.start_date,
+        due_date=task.due_date,
         status=final_status,
         is_active=task.is_active,
         user_comment=user_comment,
@@ -358,6 +360,8 @@ async def _template_to_out(
         effective_occurrence_date=effective_occurrence_date,
         priority=TaskPriority(template.priority) if template.priority else TaskPriority.NORMAL,
         finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
+        start_date=None,
+        due_date=None,
         status=TaskStatus.TODO,
         is_active=template.is_active,
         user_comment=None,
@@ -560,12 +564,12 @@ async def list_system_tasks(
 
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
 
-    # If filtering by user (My View), return individual tasks instead of grouped
-    if assigned_to is not None:
+    # Department-scoped lists and My View should return real task rows only.
+    if assigned_to is not None or department_id is not None:
         result = []
         for template, task in rows:
             if task is None:
-                continue  # Skip templates without tasks in My View
+                continue
             
             task_assignees = assignee_map.get(task.id, [])
             task_out = _task_row_to_out(
@@ -579,9 +583,9 @@ async def list_system_tasks(
                 next_occurrence_date_value=next_occurrence_date_map.get(template.id),
                 effective_occurrence_date=effective_occurrence_date_map.get(template.id),
             )
-            # For individual tasks, department_ids is just the task's department
             task_out.department_ids = [task.department_id] if task.department_id else None
             result.append(task_out)
+        result.sort(key=lambda item: item.created_at or datetime.min.replace(tzinfo=timezone.utc), reverse=True)
         return result
 
     # Group tasks by template_id to collect all departments (for Department View)
@@ -690,6 +694,20 @@ async def list_system_task_templates(
     for slot in slot_rows:
         slots_map.setdefault(slot.template_id, []).append(_slot_to_out(slot))
 
+    assignee_user_ids: set[uuid.UUID] = set()
+    for template in templates:
+        if template.assignee_ids:
+            assignee_user_ids.update(template.assignee_ids)
+        elif template.default_assignee_id:
+            assignee_user_ids.add(template.default_assignee_id)
+
+    assignee_users = (
+        (await db.execute(select(User).where(User.id.in_(assignee_user_ids)))).scalars().all()
+        if assignee_user_ids
+        else []
+    )
+    assignee_user_map = {row.id: row for row in assignee_users}
+
     return [
         SystemTaskTemplateOut(
             id=t.id,
@@ -697,8 +715,22 @@ async def list_system_task_templates(
             description=t.description,
             internal_notes=t.internal_notes,
             department_id=t.department_id,
+            department_ids=sorted(
+                {
+                    user.department_id
+                    for user_id in (t.assignee_ids or ([t.default_assignee_id] if t.default_assignee_id else []))
+                    for user in [assignee_user_map.get(user_id)]
+                    if user is not None and user.department_id is not None
+                }
+            )
+            or None,
             default_assignee_id=t.default_assignee_id,
             assignee_ids=t.assignee_ids,
+            assignees=[
+                _user_to_assignee(assignee_user_map[user_id])
+                for user_id in (t.assignee_ids or ([t.default_assignee_id] if t.default_assignee_id else []))
+                if user_id in assignee_user_map
+            ],
             scope=SystemTaskScope(t.scope),
             frequency=FrequencyType(t.frequency),
             day_of_week=t.day_of_week,

@@ -151,7 +151,7 @@ const TODAY_TASK_CELL_CLASS = "h-12 align-middle"
 const TODAY_TASK_TEXT_CLAMP_CLASS = "max-h-10 overflow-hidden leading-4"
 
 // Grid layout for system tasks table - matches system-tasks page
-const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_96px_56px_80px_88px] xl:grid-cols-[36px_1fr_150px_150px_120px_120px_64px_100px_100px] gap-2 xl:gap-4 items-center px-4"
+const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_90px_96px_96px_56px_80px_88px] xl:grid-cols-[36px_1fr_150px_150px_120px_120px_120px_64px_100px_100px] gap-2 xl:gap-4 items-center px-4"
 
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
@@ -442,8 +442,12 @@ function formatDateOnly(value?: string | null) {
   return formatDateDMY(value)
 }
 
+function systemTaskStartDate(task: SystemTaskTemplate): string | null {
+  return task.start_date || task.occurrence_date || null
+}
+
 function systemTaskDisplayDate(task: SystemTaskTemplate): string | null {
-  return task.effective_occurrence_date || task.next_occurrence_date || task.occurrence_date || null
+  return task.due_date || task.effective_occurrence_date || task.next_occurrence_date || task.occurrence_date || null
 }
 
 function todayInputValue() {
@@ -1303,10 +1307,9 @@ export default function DepartmentKanban() {
   const [allTodayUpdating, setAllTodayUpdating] = React.useState(false)
   const [markingWaitingTaskId, setMarkingWaitingTaskId] = React.useState<string | null>(null)
   const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
-  const [editingSystemDateTemplateId, setEditingSystemDateTemplateId] = React.useState<string | null>(null)
+  const [editingSystemTaskId, setEditingSystemTaskId] = React.useState<string | null>(null)
   const [editingSystemDateSource, setEditingSystemDateSource] = React.useState("")
   const [editingSystemDateTarget, setEditingSystemDateTarget] = React.useState("")
-  const [editingSystemDateStatus, setEditingSystemDateStatus] = React.useState<"TODO" | "DONE">("TODO")
   const [editingSystemDateTitle, setEditingSystemDateTitle] = React.useState("")
   const [savingSystemDateOverride, setSavingSystemDateOverride] = React.useState(false)
   const [projectTemplateId, setProjectTemplateId] = React.useState<ProjectTemplateId>("__custom__")
@@ -4558,68 +4561,38 @@ export default function DepartmentKanban() {
         toast.error("Done system tasks cannot be edited")
         return
       }
-      const templateId = task.template_id || task.id
-      const source = normalizeDueDateInput(systemTaskDisplayDate(task) || todayInputValue())
-      setEditingSystemDateTemplateId(templateId)
+      const source = toDateInputValue(task.due_date || systemTaskDisplayDate(task)) || todayInputValue()
+      setEditingSystemTaskId(task.id)
       setEditingSystemDateSource(source)
       setEditingSystemDateTarget(source)
-      setEditingSystemDateStatus("TODO")
       setEditingSystemDateTitle(task.title || "System task")
     },
     []
   )
 
   const closeSystemDateEditor = React.useCallback(() => {
-    setEditingSystemDateTemplateId(null)
+    setEditingSystemTaskId(null)
     setEditingSystemDateSource("")
     setEditingSystemDateTarget("")
-    setEditingSystemDateStatus("TODO")
     setEditingSystemDateTitle("")
     setSavingSystemDateOverride(false)
   }, [])
 
   const saveSystemDateOverride = React.useCallback(async () => {
-    if (!editingSystemDateTemplateId || !editingSystemDateSource || !editingSystemDateTarget) return
+    if (!editingSystemTaskId || !editingSystemDateSource || !editingSystemDateTarget) return
     setSavingSystemDateOverride(true)
     try {
-      const targetOccurrenceDate = editingSystemDateTarget
-      const dateChanged = editingSystemDateSource !== editingSystemDateTarget
-      if (dateChanged) {
-        const res = await apiFetch("/system-tasks/occurrence-date", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            template_id: editingSystemDateTemplateId,
-            source_occurrence_date: editingSystemDateSource,
-            target_occurrence_date: editingSystemDateTarget,
-          }),
-        })
-        if (!res.ok) {
-          let detail = "Failed to update system task date"
-          try {
-            const payload = (await res.json()) as { detail?: string }
-            if (payload?.detail) detail = payload.detail
-          } catch {
-            // ignore parse failures
-          }
-          toast.error(detail)
-          return
-        }
-      }
-
-      const statusRes = await apiFetch("/system-tasks/occurrences", {
-        method: "POST",
+      const res = await apiFetch(`/tasks/${editingSystemTaskId}`, {
+        method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          template_id: editingSystemDateTemplateId,
-          occurrence_date: targetOccurrenceDate,
-          status: editingSystemDateStatus === "DONE" ? "DONE" : "OPEN",
+          due_date: new Date(`${editingSystemDateTarget}T12:00:00`).toISOString(),
         }),
       })
-      if (!statusRes.ok) {
-        let detail = "Failed to update system task status"
+      if (!res.ok) {
+        let detail = "Failed to update system task due date"
         try {
-          const payload = (await statusRes.json()) as { detail?: string }
+          const payload = (await res.json()) as { detail?: string }
           if (payload?.detail) detail = payload.detail
         } catch {
           // ignore parse failures
@@ -4630,13 +4603,10 @@ export default function DepartmentKanban() {
 
       setSystemTasks((prev) =>
         prev.map((task) => {
-          const rowTemplateId = task.template_id || task.id
-          if (rowTemplateId !== editingSystemDateTemplateId) return task
+          if (task.id !== editingSystemTaskId) return task
           return {
             ...task,
-            next_occurrence_date: editingSystemDateSource,
-            effective_occurrence_date: editingSystemDateTarget,
-            status: editingSystemDateStatus,
+            due_date: new Date(`${editingSystemDateTarget}T12:00:00`).toISOString(),
           }
         })
       )
@@ -4650,9 +4620,9 @@ export default function DepartmentKanban() {
 
       void refreshDailyReport()
       closeSystemDateEditor()
-      toast.success("System task updated")
+      toast.success("System task due date updated")
     } catch {
-      toast.error("Failed to update system task date")
+      toast.error("Failed to update system task due date")
     } finally {
       setSavingSystemDateOverride(false)
     }
@@ -4661,9 +4631,8 @@ export default function DepartmentKanban() {
     closeSystemDateEditor,
     department?.id,
     editingSystemDateSource,
-    editingSystemDateStatus,
     editingSystemDateTarget,
-    editingSystemDateTemplateId,
+    editingSystemTaskId,
     refreshDailyReport,
     systemDate,
   ])
@@ -7160,54 +7129,6 @@ export default function DepartmentKanban() {
                 </DialogContent>
               </Dialog>
 
-              <Dialog open={Boolean(editingSystemDateTemplateId)} onOpenChange={(open) => { if (!open) closeSystemDateEditor() }}>
-                <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
-                  <DialogHeader>
-                    <DialogTitle className="text-slate-800">Edit System Task Date</DialogTitle>
-                  </DialogHeader>
-                  <div className="space-y-4">
-                    <div className="text-sm text-slate-600">{editingSystemDateTitle}</div>
-                    <div className="space-y-2">
-                      <Label className="text-slate-700">Status</Label>
-                      <Select value={editingSystemDateStatus} onValueChange={(v) => setEditingSystemDateStatus(v as "TODO" | "DONE")}>
-                        <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="TODO">TO DO</SelectItem>
-                          <SelectItem value="DONE">Done</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-slate-700">Current date</Label>
-                      <Input type="date" value={editingSystemDateSource} disabled className="border-slate-200 rounded-xl w-full bg-slate-50" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-slate-700">New date</Label>
-                      <Input
-                        type="date"
-                        value={editingSystemDateTarget}
-                        onChange={(e) => setEditingSystemDateTarget(normalizeDueDateInput(e.target.value))}
-                        className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
-                      />
-                    </div>
-                    <div className="flex justify-end gap-2">
-                      <Button variant="outline" onClick={closeSystemDateEditor} className="rounded-xl border-slate-200">
-                        Cancel
-                      </Button>
-                      <Button
-                        disabled={!editingSystemDateTarget || savingSystemDateOverride}
-                        onClick={() => void saveSystemDateOverride()}
-                        className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
-                      >
-                        {savingSystemDateOverride ? "Saving..." : "Save"}
-                      </Button>
-                    </div>
-                  </div>
-                </DialogContent>
-              </Dialog>
-
             </div>
           </div>
         ) : null}
@@ -7380,7 +7301,8 @@ export default function DepartmentKanban() {
                         <div>Department</div>
                         <div>Owner</div>
                         <div>Frequency</div>
-                        <div>Date</div>
+                        <div>Start Date</div>
+                        <div>Due Date</div>
                         <div>Finish by</div>
                         <div>Priority</div>
                         <div className="text-right">Actions</div>
@@ -7442,6 +7364,9 @@ export default function DepartmentKanban() {
                                 <span className="text-sm text-slate-700 font-normal">
                                   {frequencyLabel}
                                 </span>
+                              </div>
+                              <div className="text-sm text-slate-700 font-normal">
+                                {formatDateOnly(systemTaskStartDate(template))}
                               </div>
                               <div className="text-sm text-slate-700 font-normal">
                                 {formatDateOnly(systemTaskDisplayDate(template))}
@@ -7524,6 +7449,42 @@ export default function DepartmentKanban() {
                 </Button>
                 <Button onClick={() => void confirmCloseTask()} disabled={closingTask}>
                   {closingTask ? "Updating..." : "Close Task"}
+                </Button>
+              </div>
+            </div>
+          </DialogContent>
+        </Dialog>
+
+        <Dialog open={Boolean(editingSystemTaskId)} onOpenChange={(open) => { if (!open) closeSystemDateEditor() }}>
+          <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl">
+            <DialogHeader>
+              <DialogTitle className="text-slate-800">Edit System Task Date</DialogTitle>
+            </DialogHeader>
+            <div className="space-y-4">
+              <div className="text-sm text-slate-600">{editingSystemDateTitle}</div>
+              <div className="space-y-2">
+                <Label className="text-slate-700">Current due date</Label>
+                <Input type="date" value={editingSystemDateSource} disabled className="border-slate-200 rounded-xl w-full bg-slate-50" />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-slate-700">New due date</Label>
+                <Input
+                  type="date"
+                  value={editingSystemDateTarget}
+                  onChange={(e) => setEditingSystemDateTarget(normalizeDueDateInput(e.target.value))}
+                  className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                />
+              </div>
+              <div className="flex justify-end gap-2">
+                <Button variant="outline" onClick={closeSystemDateEditor} className="rounded-xl border-slate-200">
+                  Cancel
+                </Button>
+                <Button
+                  disabled={!editingSystemDateTarget || savingSystemDateOverride}
+                  onClick={() => void saveSystemDateOverride()}
+                  className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                >
+                  {savingSystemDateOverride ? "Saving..." : "Save"}
                 </Button>
               </div>
             </div>

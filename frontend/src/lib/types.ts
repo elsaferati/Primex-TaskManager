@@ -48,6 +48,8 @@ export interface SystemTaskTemplate {
   effective_occurrence_date?: string | null
   priority?: TaskPriority | null
   finish_period?: TaskFinishPeriod | null
+  start_date?: string | null
+  due_date?: string | null
   requires_alignment?: boolean | null
   alignment_time?: string | null
   alignment_roles?: string[] | null

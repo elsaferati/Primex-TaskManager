@@ -30,6 +30,8 @@ class SystemTaskOut(BaseModel):
     effective_occurrence_date: date | None = None
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None
+    start_date: datetime | None = None
+    due_date: datetime | None = None
     status: TaskStatus
     is_active: bool
     user_comment: str | None = None
