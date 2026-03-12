@@ -620,6 +620,36 @@ const commonViewInitials = (name: string) => {
 }
 
 const stripInitialsPrefix = (value: string) => value
+const normalizeAssigneeList = (value?: string) =>
+  value
+    ? value
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean)
+    : []
+const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: string }) =>
+  entry.assignees && entry.assignees.length
+    ? entry.assignees
+    : normalizeAssigneeList(entry.person || entry.owner || "")
+const mergeTaskEntriesByVisibleTitle = <
+  T extends { title: string; assignees?: string[]; person?: string; owner?: string }
+>(
+  entries: T[]
+) => {
+  const merged = new Map<string, T>()
+  entries.forEach((entry) => {
+    const visibleTitle = stripInitialsPrefix(entry.title).trim()
+    const key = visibleTitle.toLowerCase()
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, { ...entry, assignees: [...entryAssignees(entry)] })
+      return
+    }
+    const combinedAssignees = Array.from(new Set([...entryAssignees(existing), ...entryAssignees(entry)]))
+    merged.set(key, { ...existing, assignees: combinedAssignees })
+  })
+  return Array.from(merged.values())
+}
 
 const fromISODate = (s: string) => {
   const [y, m, d] = s.split("-").map(Number)
@@ -1528,6 +1558,7 @@ export default function AdminTasksPage() {
       taskId: string
       isFastTask?: boolean
       isTemplateAlignedSystem?: boolean
+      needsGaneConfirmation?: boolean
     }> = []
 
     if (!ganeUserId) return rows
@@ -1539,7 +1570,9 @@ export default function AdminTasksPage() {
         task.assigned_to === ganeUserId ||
         task.assignees?.some((assignee) => assignee.id === ganeUserId) ||
         task.alignment_user_ids?.includes(ganeUserId)
-      if (!isAssigned) continue
+      const needsGaneConfirmation =
+        task.status === "WAITING_CONFIRMATION" && task.confirmation_assignee_id === ganeUserId
+      if (!isAssigned && !needsGaneConfirmation) continue
 
       const dateIso = getTaskDateIso(task)
       const statusValue = task.status || (task.completed_at ? "DONE" : "TODO")
@@ -1565,6 +1598,7 @@ export default function AdminTasksPage() {
         taskId: task.id,
         isFastTask: !task.project_id,
         isTemplateAlignedSystem: hasTemplateAlignment,
+        needsGaneConfirmation,
       })
     }
 
@@ -1598,6 +1632,14 @@ export default function AdminTasksPage() {
   const regularAllTasksRows = React.useMemo(
     () => filteredAllTasksRows.filter((row) => !row.isTemplateAlignedSystem),
     [filteredAllTasksRows]
+  )
+  const waitingConfirmationRows = React.useMemo(
+    () => allTasksTableRows.filter((row) => row.needsGaneConfirmation && !row.isTemplateAlignedSystem),
+    [allTasksTableRows]
+  )
+  const regularNonConfirmationRows = React.useMemo(
+    () => regularAllTasksRows.filter((row) => !row.needsGaneConfirmation),
+    [regularAllTasksRows]
   )
 
   const dailyUserReportRows = React.useMemo(() => {
@@ -2783,6 +2825,22 @@ export default function AdminTasksPage() {
     }
   }, [commonData, commonUsers, commonWeekISOs])
 
+  const allUsersLeaveByDate = React.useMemo(() => {
+    const byDate = new Map<string, LeaveItem>()
+    for (const iso of commonWeekISOs) {
+      const matching = commonData.leave.find((x) => x.isAllUsers && iso >= x.startDate && iso <= x.endDate)
+      if (!matching) continue
+      byDate.set(iso, {
+        ...matching,
+        person: ALL_USERS_INITIALS,
+        entryId: undefined,
+        startDate: iso,
+        endDate: iso,
+      })
+    }
+    return byDate
+  }, [commonData.leave, commonWeekISOs])
+
   const bzTasksByDay = React.useMemo(() => {
     const byDay: Record<string, BzItem[]> = {}
     for (const iso of commonWeekISOs) {
@@ -2865,11 +2923,12 @@ export default function AdminTasksPage() {
 
     commonWeekISOs.forEach((iso) => {
       if (commonFiltered.fullyCoveredDates.has(iso)) {
+        const allUsersLeave = allUsersLeaveByDate.get(iso)
         dataByDay[iso] = {
           late: [],
           absent: [],
           leave: [
-            {
+            allUsersLeave || {
               person: ALL_USERS_INITIALS,
               startDate: iso,
               endDate: iso,
@@ -3099,16 +3158,6 @@ export default function AdminTasksPage() {
     const exportPayload = React.useMemo(() => {
       const columns = ["NR", "LLOJI", ...commonWeekISOs.map((iso) => `${getDayCode(fromISODate(iso))} = ${formatDateHuman(iso)}`)]
 
-      const entryAssignees = (entry: any) =>
-        entry.assignees && entry.assignees.length
-          ? entry.assignees
-          : (entry.person || entry.owner)
-            ? String(entry.person || entry.owner)
-                .split(",")
-                .map((v) => v.trim())
-                .filter(Boolean)
-            : []
-
       const assigneesSuffix = (entry: any) => {
         const initialsList = entryAssignees(entry).map((name: string) => commonViewInitials(name)).filter(Boolean)
         return initialsList.length ? ` (${initialsList.join(", ")})` : ""
@@ -3195,7 +3244,8 @@ export default function AdminTasksPage() {
             const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
             const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
             const label = isAllUsers ? `${timeLabel} ALL` : timeLabel
-            return `${idx + 1}. ${label}${isAllUsers ? "" : assigneesSuffix(e)}`
+            const noteLabel = e.note ? ` - ${e.note}` : ""
+            return `${idx + 1}. ${label}${noteLabel}${isAllUsers ? "" : assigneesSuffix(e)}`
           })
         }
         if (rowId === "blocked") {
@@ -3211,7 +3261,7 @@ export default function AdminTasksPage() {
           })
         }
         if (rowId === "oneH" || rowId === "r1") {
-          return entries.map((e: any, idx: number) =>
+          return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) =>
             `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
           )
         }
@@ -3264,15 +3314,6 @@ export default function AdminTasksPage() {
           </div>
         ))
       }
-      const entryAssignees = (entry: any) =>
-        entry.assignees && entry.assignees.length
-          ? entry.assignees
-          : (entry.person || entry.owner)
-            ? String(entry.person || entry.owner)
-                .split(",")
-                .map((v) => v.trim())
-                .filter(Boolean)
-            : []
       const renderBzContent = () => {
         const bzEntries = dayData.bz || []
         const alignedSystemEntries = bzAlignedSystemOccurrencesByDay[iso] || []
@@ -3379,10 +3420,12 @@ export default function AdminTasksPage() {
         return entries.map((e: LeaveItem, idx: number) => {
           const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
           const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
+          const noteLabel = e.note ? ` - ${e.note}` : ""
           return (
             <div key={idx} className="week-table-entry">
               <span>
                 {idx + 1}. {isAllUsers ? `${timeLabel} ALL` : timeLabel}
+                {noteLabel}
               </span>
               {!isAllUsers ? (
                 <div className="week-table-avatars">
@@ -3430,7 +3473,7 @@ export default function AdminTasksPage() {
         ))
       }
       if (rowId === "oneH" || rowId === "r1") {
-        return entries.map((e: any, idx: number) => (
+        return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) => (
           <div key={idx} className="week-table-entry">
             <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
             <div className="week-table-avatars">
@@ -3550,29 +3593,31 @@ export default function AdminTasksPage() {
 
     const renderAllTasksTable = (
       rows: typeof filteredAllTasksRows,
-      options?: { accent?: boolean; emptyLabel?: string }
-    ) => (
+      options?: { accent?: boolean; emptyLabel?: string; showBzColumns?: boolean }
+    ) => {
+      const showBzColumns = options?.showBzColumns ?? true
+      const headers = [
+        "NR",
+        "LL",
+        "NLL",
+        "ASSIGNED",
+        "DATE",
+        "AM/PM",
+        "TITLE",
+        ...(showBzColumns ? ["BZ", "KOHA BZ"] : []),
+        "STATUS",
+        "PRIORITY",
+        "KOMENT",
+        "ACTIONS",
+      ]
+      return (
       <Table
         containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
         className="min-w-[1200px] text-[11px]"
       >
         <TableHeader>
           <TableRow className="bg-slate-50">
-            {[
-              "NR",
-              "LL",
-              "NLL",
-              "ASSIGNED",
-              "DATE",
-              "AM/PM",
-              "TITLE",
-              "BZ",
-              "KOHA BZ",
-              "STATUS",
-              "PRIORITY",
-              "KOMENT",
-              "ACTIONS",
-            ].map((label) => (
+            {headers.map((label) => (
               <TableHead
                 key={label}
                 className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -3597,6 +3642,8 @@ export default function AdminTasksPage() {
               const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
               const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
               const canMarkDone = statusValue !== "DONE"
+              const actionLabel =
+                row.needsGaneConfirmation && statusValue === "WAITING_CONFIRMATION" ? "Confirm" : "Done"
               const rowTask = tasks.find((task) => task.id === row.taskId) || null
               return (
                 <TableRow key={row.id} className="h-12">
@@ -3609,8 +3656,8 @@ export default function AdminTasksPage() {
                   <TableCell className="h-12 align-middle whitespace-normal break-words font-medium text-slate-800">
                     {row.title}
                   </TableCell>
-                  <TableCell className="h-12 align-middle">{row.bz}</TableCell>
-                  <TableCell className="h-12 align-middle">{row.kohaBz}</TableCell>
+                  {showBzColumns ? <TableCell className="h-12 align-middle">{row.bz}</TableCell> : null}
+                  {showBzColumns ? <TableCell className="h-12 align-middle">{row.kohaBz}</TableCell> : null}
                   <TableCell className={`h-12 align-middle uppercase ${statusClass}`}>
                     {statusLabel}
                   </TableCell>
@@ -3645,7 +3692,7 @@ export default function AdminTasksPage() {
                           disabled={isUpdating}
                           onClick={() => void updateTaskStatus(row.taskId, "DONE")}
                         >
-                          {isUpdating ? "Updating..." : "Done"}
+                          {isUpdating ? "Updating..." : actionLabel}
                         </Button>
                       ) : (
                         <span className="text-xs text-emerald-700">Done</span>
@@ -3669,14 +3716,15 @@ export default function AdminTasksPage() {
             })
           ) : (
             <TableRow>
-              <TableCell colSpan={13} className="py-8 text-center text-sm text-muted-foreground">
+              <TableCell colSpan={headers.length} className="py-8 text-center text-sm text-muted-foreground">
                 {options?.emptyLabel || "No tasks available."}
               </TableCell>
             </TableRow>
           )}
         </TableBody>
       </Table>
-    )
+      )
+    }
 
     return (
       <div className="admin-week-table">
@@ -4103,19 +4151,36 @@ export default function AdminTasksPage() {
           {highlightedAllTasksRows.length ? (
             <div className="mt-4">
               <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
-                BZ From System Template Alignment
+                System Tasks with BZ Gane
               </div>
               <div className="mt-1 text-xs text-slate-500">
-                These are system-task occurrences visible because the template has BZ alignment to Gane.
+                
               </div>
               {renderAllTasksTable(highlightedAllTasksRows, {
                 emptyLabel: "No aligned system tasks.",
               })}
             </div>
           ) : null}
-          <div className={highlightedAllTasksRows.length ? "mt-5" : ""}>
-            {renderAllTasksTable(regularAllTasksRows, {
-              emptyLabel: highlightedAllTasksRows.length ? "No other tasks available." : "No tasks available.",
+          {waitingConfirmationRows.length ? (
+            <div className={highlightedAllTasksRows.length ? "mt-5" : "mt-4"}>
+              <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
+                Waiting Confirmation For Gane
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                
+              </div>
+              {renderAllTasksTable(waitingConfirmationRows, {
+                emptyLabel: "No waiting confirmation tasks.",
+                showBzColumns: false,
+              })}
+            </div>
+          ) : null}
+          <div className={highlightedAllTasksRows.length || waitingConfirmationRows.length ? "mt-5" : ""}>
+            {renderAllTasksTable(regularNonConfirmationRows, {
+              emptyLabel:
+                highlightedAllTasksRows.length || waitingConfirmationRows.length
+                  ? "No other tasks available."
+                  : "No tasks available.",
             })}
           </div>
           </AdminTasksSection>

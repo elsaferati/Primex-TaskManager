@@ -257,6 +257,36 @@ const initials = (name: string) => {
 const stripInitialsPrefix = (value: string) => {
   return value
 }
+const normalizeAssigneeList = (value?: string) =>
+  value
+    ? value
+        .split(",")
+        .map((v) => v.trim())
+        .filter(Boolean)
+    : []
+const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: string }) =>
+  entry.assignees && entry.assignees.length
+    ? entry.assignees
+    : normalizeAssigneeList(entry.person || entry.owner || "")
+const mergeTaskEntriesByVisibleTitle = <
+  T extends { title: string; assignees?: string[]; person?: string; owner?: string }
+>(
+  entries: T[]
+) => {
+  const merged = new Map<string, T>()
+  entries.forEach((entry) => {
+    const visibleTitle = stripInitialsPrefix(entry.title).trim()
+    const key = visibleTitle.toLowerCase()
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, { ...entry, assignees: [...entryAssignees(entry)] })
+      return
+    }
+    const combinedAssignees = Array.from(new Set([...entryAssignees(existing), ...entryAssignees(entry)]))
+    merged.set(key, { ...existing, assignees: combinedAssignees })
+  })
+  return Array.from(merged.values())
+}
 
 export default function CommonViewPage() {
   const { apiFetch, user, loading: authLoading } = useAuth()
@@ -2276,6 +2306,23 @@ export default function CommonViewPage() {
     }
   }, [commonData, selectedDates, users, weekISOs])
 
+  const allUsersLeaveByDate = React.useMemo(() => {
+    const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
+    const byDate = new Map<string, LeaveItem>()
+    for (const iso of datesToUse) {
+      const matching = commonData.leave.find((x) => x.isAllUsers && leaveCovers(x, iso))
+      if (!matching) continue
+      byDate.set(iso, {
+        ...matching,
+        person: ALL_USERS_INITIALS,
+        entryId: undefined,
+        startDate: iso,
+        endDate: iso,
+      })
+    }
+    return byDate
+  }, [commonData.leave, selectedDates, weekISOs])
+
   // Common people for priority (from users)
   const commonPeople = React.useMemo(() => {
     return users
@@ -2612,11 +2659,12 @@ export default function CommonViewPage() {
 
     exportISOs.forEach((iso) => {
       if (filtered.fullyCoveredDates.has(iso)) {
+        const allUsersLeave = allUsersLeaveByDate.get(iso)
         dataByDay[iso] = {
           late: [],
           absent: [],
           leave: [
-            {
+            allUsersLeave || {
               person: ALL_USERS_INITIALS,
               startDate: iso,
               endDate: iso,
@@ -2659,16 +2707,6 @@ export default function CommonViewPage() {
         priority: filtered.priority.filter((x) => x.date === iso),
       }
     })
-
-    const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: string }) =>
-      entry.assignees && entry.assignees.length
-        ? entry.assignees
-        : (entry.person || entry.owner)
-          ? String(entry.person || entry.owner)
-              .split(",")
-              .map((v) => v.trim())
-              .filter(Boolean)
-          : []
 
     const assigneesSuffix = (entry: { assignees?: string[]; person?: string; owner?: string }) => {
       const initialsList = entryAssignees(entry).map((name: string) => initials(name)).filter(Boolean)
@@ -2726,7 +2764,9 @@ export default function CommonViewPage() {
         return entries.map((e: BlockedItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
       }
       if (rowId === "oneH" || rowId === "r1") {
-        return entries.map((e: OneHItem | R1Item, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
+        return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map(
+          (e: OneHItem | R1Item, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+        )
       }
       if (rowId === "personal") {
         return entries.map((e: PersonalItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
@@ -3898,13 +3938,15 @@ export default function CommonViewPage() {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
     const syntheticAllUsers = datesToUse
       .filter((d) => filtered.fullyCoveredDates.has(d))
-      .map((d) => ({
-        person: ALL_USERS_INITIALS,
-        startDate: d,
-        endDate: d,
-        fullDay: true,
-        isAllUsers: true,
-      }))
+      .map((d) =>
+        allUsersLeaveByDate.get(d) || {
+          person: ALL_USERS_INITIALS,
+          startDate: d,
+          endDate: d,
+          fullDay: true,
+          isAllUsers: true,
+        }
+      )
     const syntheticKeys = new Set<string>(
       leaveSource.map((x) =>
         [x.startDate, x.endDate, x.fullDay ? "1" : "0", x.from || "", x.to || "", x.note || "", x.person].join("|")
@@ -4190,11 +4232,12 @@ export default function CommonViewPage() {
     
     weekISOs.forEach((iso) => {
       if (filtered.fullyCoveredDates.has(iso)) {
+        const allUsersLeave = allUsersLeaveByDate.get(iso)
         dataByDay[iso] = {
           late: [],
           absent: [],
           leave: [
-            {
+            allUsersLeave || {
               person: ALL_USERS_INITIALS,
               startDate: iso,
               endDate: iso,
@@ -8448,17 +8491,6 @@ export default function CommonViewPage() {
                     const getCellContent = (iso: string) => {
                       const entries = dayEntries[iso] || []
                       if (entries.length === 0) return null
-                      const normalizeAssignees = (value?: string) =>
-                        value
-                          ? value
-                              .split(",")
-                              .map((v) => v.trim())
-                              .filter(Boolean)
-                          : []
-                      const entryAssignees = (entry: any) =>
-                        entry.assignees && entry.assignees.length
-                          ? entry.assignees
-                          : normalizeAssignees(entry.person || entry.owner || "")
                       
                       if (row.id === "late") {
         return entries.map((e: LateItem, idx: number) => (
@@ -8513,11 +8545,13 @@ export default function CommonViewPage() {
                           const range = "" // hide date in table view
                           const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
                           const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
+                          const noteLabel = e.note ? ` - ${e.note}` : ""
                           return (
                             <div key={idx} className="week-table-entry">
                               <span>
                                 {idx + 1}. {isAllUsers ? `${timeLabel} ALL` : timeLabel}
                                 {range ? ` ${range}` : ""}
+                                {noteLabel}
                               </span>
                               {!isAllUsers ? (
                                 <div className="week-table-avatars">
@@ -8595,7 +8629,7 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "oneH" || row.id === "r1") {
-                        return entries.map((e: any, idx: number) => (
+                        return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) => (
                           <div key={idx} className="week-table-entry">
                             <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
                             <div className="week-table-avatars">
