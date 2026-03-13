@@ -40,6 +40,9 @@ class Settings(BaseSettings):
     JWT_SECRET: str
     JWT_ACCESS_TOKEN_EXPIRE_MINUTES: int = 15
     JWT_REFRESH_TOKEN_EXPIRE_DAYS: int = 30
+    AUTH_COOKIE_SECURE: bool | None = None
+    AUTH_COOKIE_SAMESITE: str | None = None
+    AUTH_COOKIE_DOMAIN: str | None = None
 
     CORS_ORIGINS: str = DEFAULT_CORS_ORIGINS_CSV
 
@@ -71,6 +74,23 @@ class Settings(BaseSettings):
             seen.add(origin)
             merged.append(origin)
         return merged
+
+    @property
+    def auth_cookie_secure(self) -> bool:
+        if self.AUTH_COOKIE_SECURE is not None:
+            return self.AUTH_COOKIE_SECURE
+        return self.FRONTEND_URL.startswith("https://") or any(
+            origin.startswith("https://") for origin in self.cors_origin_list
+        )
+
+    @property
+    def auth_cookie_samesite(self) -> str:
+        value = (self.AUTH_COOKIE_SAMESITE or "").strip().lower()
+        if value not in {"lax", "strict", "none"}:
+            return "none" if self.auth_cookie_secure else "lax"
+        if value == "none" and not self.auth_cookie_secure:
+            return "lax"
+        return value
 
 
 settings = Settings()

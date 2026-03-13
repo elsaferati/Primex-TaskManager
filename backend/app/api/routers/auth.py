@@ -17,6 +17,7 @@ from app.auth.security import (
     verify_password,
 )
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.refresh_token import RefreshToken
 from app.models.user import User
@@ -27,6 +28,20 @@ from app.schemas.user import UserOut
 router = APIRouter()
 
 REFRESH_COOKIE_NAME = "primex_refresh"
+
+
+def _refresh_cookie_options(*, max_age: int | None = None) -> dict[str, object]:
+    options: dict[str, object] = {
+        "httponly": True,
+        "secure": settings.auth_cookie_secure,
+        "samesite": settings.auth_cookie_samesite,
+        "path": "/api/auth",
+    }
+    if settings.AUTH_COOKIE_DOMAIN:
+        options["domain"] = settings.AUTH_COOKIE_DOMAIN
+    if max_age is not None:
+        options["max_age"] = max_age
+    return options
 
 
 @router.post("/login", response_model=TokenResponse)
@@ -49,11 +64,7 @@ async def login(payload: LoginRequest, response: Response, db: AsyncSession = De
     response.set_cookie(
         REFRESH_COOKIE_NAME,
         refresh_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=int((expires_at - now).total_seconds()),
-        path="/api/auth",
+        **_refresh_cookie_options(max_age=int((expires_at - now).total_seconds())),
     )
 
     return TokenResponse(access_token=access_token)
@@ -101,11 +112,7 @@ async def refresh(
     response.set_cookie(
         REFRESH_COOKIE_NAME,
         new_refresh_token,
-        httponly=True,
-        secure=False,
-        samesite="lax",
-        max_age=int((new_expires_at - now).total_seconds()),
-        path="/api/auth",
+        **_refresh_cookie_options(max_age=int((new_expires_at - now).total_seconds())),
     )
 
     access_token = create_access_token(user_id=user.id, role=user.role.value, department_id=user.department_id)
@@ -134,7 +141,13 @@ async def logout(
         except Exception:
             pass
 
-    response.delete_cookie(REFRESH_COOKIE_NAME, path="/api/auth")
+    response.delete_cookie(
+        REFRESH_COOKIE_NAME,
+        path="/api/auth",
+        domain=settings.AUTH_COOKIE_DOMAIN,
+        secure=settings.auth_cookie_secure,
+        samesite=settings.auth_cookie_samesite,
+    )
     return {"status": "ok"}
 
 

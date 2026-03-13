@@ -22,6 +22,7 @@ const LOGOUT_AT_KEY = "primex_logout_at"
 const FETCH_TIMEOUT_MS = 8000
 // Refresh token when it has less than 3 minutes remaining (15 min total - 3 min buffer = 12 min)
 const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
+let refreshPromise: Promise<string | null> | null = null
 
 function getStoredToken(): string | null {
   if (typeof window === "undefined") return null
@@ -110,6 +111,18 @@ async function refreshAccessToken(): Promise<string | null> {
   return data.access_token
 }
 
+async function refreshAccessTokenShared(): Promise<string | null> {
+  if (refreshPromise) {
+    return refreshPromise
+  }
+
+  refreshPromise = refreshAccessToken().finally(() => {
+    refreshPromise = null
+  })
+
+  return refreshPromise
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = React.useState<string | null>(null)
   const [user, setUser] = React.useState<User | null>(null)
@@ -137,7 +150,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
         }
       } catch {
-        const refreshed = await refreshAccessToken()
+        const refreshed = await refreshAccessTokenShared()
         if (refreshed) {
           try {
             const me = await fetchMe(refreshed)
@@ -170,7 +183,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
     const checkAndRefresh = async () => {
       if (isTokenExpiringSoon(token)) {
-        const refreshed = await refreshAccessToken()
+        const refreshed = await refreshAccessTokenShared()
         if (refreshed) {
           try {
             const me = await fetchMe(refreshed)
@@ -298,7 +311,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
       if (res.status !== 401) return res
 
-      const refreshed = await refreshAccessToken()
+      const refreshed = await refreshAccessTokenShared()
       if (!refreshed) {
         setStoredToken(null)
         setStoredLogoutAt(null)
