@@ -200,18 +200,21 @@ async def _sync_template_slots_from_payload(
             return await _slots_for_template(db, template.id)
         assignee_slots = [SystemTaskTemplateAssigneeSlotIn(primary_user_id=uid) for uid in assignee_ids]
 
-    existing = {slot.id: slot for slot in await _slots_for_template(db, template.id)}
-    keep_ids: set[uuid.UUID] = set()
-    now = datetime.now(timezone.utc)
+    normalized_slots: list[SystemTaskTemplateAssigneeSlotIn] = []
+    seen_primary_ids: set[uuid.UUID] = set()
     for item in assignee_slots:
-        if item.id and item.id in existing:
-            slot = existing[item.id]
-            keep_ids.add(slot.id)
-            slot.primary_user_id = item.primary_user_id
-            slot.next_run_at = first_run_at(template, now)
-            if item.is_active is not None:
-                slot.is_active = item.is_active
+        if item.primary_user_id in seen_primary_ids:
             continue
+        seen_primary_ids.add(item.primary_user_id)
+        normalized_slots.append(item)
+
+    existing_slots = await _slots_for_template(db, template.id)
+    for slot in existing_slots:
+        await db.delete(slot)
+    await db.flush()
+
+    now = datetime.now(timezone.utc)
+    for item in normalized_slots:
         slot = SystemTaskTemplateAssigneeSlot(
             id=item.id or uuid.uuid4(),
             template_id=template.id,
@@ -220,10 +223,6 @@ async def _sync_template_slots_from_payload(
             is_active=True if item.is_active is None else item.is_active,
         )
         db.add(slot)
-        keep_ids.add(slot.id)
-    for existing_slot in existing.values():
-        if existing_slot.id not in keep_ids:
-            await db.delete(existing_slot)
     await db.flush()
     return await _slots_for_template(db, template.id)
 

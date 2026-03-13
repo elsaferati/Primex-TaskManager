@@ -1848,10 +1848,10 @@ export default function AdminTasksPage() {
     setEditingTaskId(task.id)
     setEditTitle(task.title || "")
     setEditDescription(task.description || "")
-    const taskStartDate = task.start_date ? new Date(task.start_date).toISOString().split("T")[0] : ""
+    const taskStartDate = toDateInputValue(task.start_date)
     setEditStartDate(taskStartDate)
     setEditStartDateDisplay(taskStartDate ? toDDMMYYYY(taskStartDate) : "")
-    const taskDueDate = task.due_date ? new Date(task.due_date).toISOString().split("T")[0] : ""
+    const taskDueDate = toDateInputValue(task.due_date || task.start_date)
     setEditDueDate(taskDueDate)
     setEditDueDateDisplay(taskDueDate ? toDDMMYYYY(taskDueDate) : "")
     setEditPriority((task.is_bllok ? "BLLOK" : (task.priority || "NORMAL")) as TaskPriority)
@@ -4196,6 +4196,54 @@ export default function AdminTasksPage() {
           <AdminCommonWeekTable />
         </div>
       </div>
+      <Dialog
+        open={editOpen}
+        onOpenChange={(open) => {
+          setEditOpen(open)
+          if (!open) setEditingTaskId(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Edit Task Due Date</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label>Task</Label>
+              <Input value={editTitle} readOnly className="bg-slate-50 text-slate-600" />
+            </div>
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Current due date</Label>
+                <Input value={editDueDateDisplay} readOnly className="bg-slate-50 text-slate-600" />
+              </div>
+              <div className="space-y-2">
+                <Label>New due date</Label>
+                <Input
+                  type="date"
+                  value={editDueDate}
+                  onChange={(event) => {
+                    const value = event.target.value
+                    setEditDueDate(value)
+                    setEditDueDateDisplay(value ? toDDMMYYYY(value) : "")
+                  }}
+                />
+              </div>
+            </div>
+            <div className="text-xs text-slate-500">
+              This updates only this generated task row. The system task template stays unchanged.
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button disabled={savingEdit || !editingTaskId || !editDueDate} onClick={() => void saveEditTask()}>
+                {savingEdit ? "Saving..." : "Save"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={fastTaskOpen}
         onOpenChange={(open) => {
