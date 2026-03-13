@@ -592,16 +592,24 @@ type CommonViewPayload = {
 const ALL_USERS_INITIALS = "ALL"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 
-const GA_TIME_SLOTS = Array.from({ length: 9 }, (_, idx) => {
-  const startHour = 8 + idx
-  const endHour = startHour + 1
-  const pad = (value: number) => String(value).padStart(2, "0")
-  return {
-    start: `${pad(startHour)}:00`,
-    end: `${pad(endHour)}:00`,
-    label: `${pad(startHour)}:00 - ${pad(endHour)}:00`,
-  }
-})
+const GA_TIME_SLOTS = [
+  { start: "08:00", end: "09:00", label: "08:00 - 09:00" },
+  { start: "09:00", end: "10:00", label: "09:00 - 10:00" },
+  { start: "10:00", end: "11:00", label: "10:00 - 11:00" },
+  { start: "11:00", end: "12:00", label: "11:00 - 12:00" },
+  { start: "12:00", end: "13:00", label: "12:00 - 13:00" },
+  { start: "13:00", end: "13:30", label: "13:00 - 13:30" },
+  { start: "13:30", end: "14:00", label: "13:30 - 14:00" },
+  { start: "14:00", end: "15:00", label: "14:00 - 15:00" },
+  { start: "15:00", end: "16:00", label: "15:00 - 16:00" },
+  { start: "16:00", end: "16:30", label: "16:00 - 16:30" },
+  { start: "16:30", end: "17:00", label: "16:30 - 17:00" },
+  { start: "17:00", end: "18:00", label: "17:00 - 18:00" },
+  { start: "18:00", end: "19:00", label: "18:00 - 19:00" },
+  { start: "19:00", end: "20:00", label: "19:00 - 20:00" },
+  { start: "20:00", end: "21:00", label: "20:00 - 21:00" },
+  { start: "21:00", end: "22:00", label: "21:00 - 22:00" },
+] as const
 
 const parseFeedbackNote = (note: string | null | undefined) => {
   const raw = note || ""
@@ -845,8 +853,10 @@ export default function AdminTasksPage() {
   const dailyReportDragRef = React.useRef({ isDragging: false, startX: 0, startScrollLeft: 0 })
   const [isDraggingDailyReport, setIsDraggingDailyReport] = React.useState(false)
 
-  const [commonWeekStart] = React.useState<Date>(() => getMonday(new Date()))
+  const [commonWeekStart, setCommonWeekStart] = React.useState<Date>(() => getMonday(new Date()))
   const commonWeekISOs = React.useMemo(() => getWeekdays(commonWeekStart).map(toISODate), [commonWeekStart])
+  const thisCommonWeekIso = React.useMemo(() => toISODate(getMonday(new Date())), [])
+  const nextCommonWeekIso = React.useMemo(() => toISODate(addDays(getMonday(new Date()), 7)), [])
   const [commonUsers, setCommonUsers] = React.useState<User[]>([])
   const [commonDepartments, setCommonDepartments] = React.useState<Department[]>([])
   const [commonData, setCommonData] = React.useState({
@@ -2986,6 +2996,7 @@ export default function AdminTasksPage() {
       { id: "oneH", label: "1H" },
       { id: "r1", label: "R1=1H" },
       { id: "personal", label: "P:" },
+      { id: "priority", label: "PRJK" },
     ],
     []
   )
@@ -3796,7 +3807,21 @@ export default function AdminTasksPage() {
               title={`COMMON VIEW - GANE TASKS${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
               description=""
               actions={
-                <div className="flex items-center gap-2 print:hidden">
+                <div className="flex flex-wrap items-center gap-2 print:hidden">
+                  <Button
+                    variant={toISODate(commonWeekStart) === thisCommonWeekIso ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCommonWeekStart(getMonday(new Date()))}
+                  >
+                    This Week
+                  </Button>
+                  <Button
+                    variant={toISODate(commonWeekStart) === nextCommonWeekIso ? "default" : "outline"}
+                    size="sm"
+                    onClick={() => setCommonWeekStart(addDays(getMonday(new Date()), 7))}
+                  >
+                    Next Week
+                  </Button>
                   <Button variant="outline" size="sm" onClick={() => handleSectionPrint("common")}>
                     Print
                   </Button>
@@ -3897,7 +3922,16 @@ export default function AdminTasksPage() {
                   </thead>
                   <tbody>
                     {GA_TIME_SLOTS.map((slot, index) => (
-                      <tr key={`ga-print-${slot.start}`}>
+                      <tr
+                        key={`ga-print-${slot.start}`}
+                        className={
+                          slot.start === "08:00"
+                            ? "ga-time-row ga-time-row-secondary"
+                            : slot.start < "14:00"
+                              ? "ga-time-row ga-time-row-primary"
+                              : "ga-time-row ga-time-row-secondary"
+                        }
+                      >
                         <td className="ga-time-slot-label ga-time-nr">{index + 1}</td>
                         <td className="ga-time-slot-label">{slot.label}</td>
                         {commonWeekISOs.map((iso) => {
@@ -4626,6 +4660,7 @@ export default function AdminTasksPage() {
           border: 2px solid #111827;
           font-size: 11px;
           direction: ltr;
+          table-layout: fixed;
         }
         .admin-week-table .week-table th {
           border: 1px solid #111827;
@@ -4671,11 +4706,13 @@ export default function AdminTasksPage() {
           text-align: left;
         }
         .admin-week-table .week-table-number {
+          width: 40px;
           text-align: center;
           font-weight: 700;
           background: #f8f9fa;
         }
         .admin-week-table .week-table-label {
+          width: 110px;
           font-weight: 700;
           background: #f8f9fa;
         }
@@ -4787,7 +4824,7 @@ export default function AdminTasksPage() {
           z-index: 2;
         }
         .admin-week-table .ga-time-nr {
-          width: 40px;
+          width: 30px;
           text-align: center;
         }
         .admin-week-table .ga-time-slot-label {
@@ -4795,9 +4832,11 @@ export default function AdminTasksPage() {
           background: #f1f5f9;
           font-weight: 700;
           font-size: 10px;
-          text-align: center;
+          text-align: left;
           padding: 6px;
           white-space: nowrap;
+          direction: ltr;
+          vertical-align: bottom;
         }
         .admin-week-table .ga-time-cell {
           border: 1px solid #e2e8f0;
@@ -4890,7 +4929,7 @@ export default function AdminTasksPage() {
             display: none !important;
           }
           @page {
-            margin: 0;
+            margin: 0.3in 0.2in 0.2in 0.2in;
             size: landscape;
           }
           .print-only {
@@ -4898,14 +4937,26 @@ export default function AdminTasksPage() {
           }
           .print-page {
             position: relative;
-            padding: 0;
-            padding-left: 0;
-            padding-right: 0;
+            padding: 0.3in 0.22in 0.2in 0.22in;
             margin: 0;
             width: 100%;
             max-width: 100%;
             overflow: visible;
             page-break-before: auto;
+          }
+          .print-section[data-print-section="ga-time"] .print-page {
+            display: flex;
+            flex-direction: column;
+            height: 7.15in;
+            max-height: 7.15in;
+            overflow: hidden;
+            padding: 0.08in 0 0.06in 0;
+            width: calc(100% + 0.4in);
+            max-width: calc(100% + 0.4in);
+            margin-left: -0.2in;
+          }
+          .print-section[data-print-section="ga-time"] .print-header {
+            margin-bottom: 4px;
           }
           .print-header {
             display: grid;
@@ -4991,10 +5042,26 @@ export default function AdminTasksPage() {
           .admin-week-table .ga-time-table-table {
             table-layout: fixed;
             width: 100%;
+            height: 100%;
             font-size: 9px;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
             border: 1px solid #111827 !important;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-table {
+            flex: 1;
+            display: flex;
+            min-height: 0;
+            overflow: hidden;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-primary {
+            height: 13.8%;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-secondary {
+            height: 6.2%;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-secondary > td {
+            height: 6.2%;
           }
           .admin-week-table .ga-time-table-table th,
           .admin-week-table .ga-time-table-table td {
@@ -5011,8 +5078,26 @@ export default function AdminTasksPage() {
             background: #e5e7eb !important;
             color: #111827 !important;
           }
+          .admin-week-table .ga-time-nr {
+            width: 26px !important;
+          }
+          .admin-week-table .ga-time-header:nth-child(2),
+          .admin-week-table .ga-time-slot-label:nth-child(2) {
+            width: 78px !important;
+          }
           .admin-week-table .ga-time-slot-label {
             background: #f3f4f6 !important;
+            text-align: left !important;
+            direction: ltr;
+            vertical-align: bottom !important;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-slot-label,
+          .print-section[data-print-section="ga-time"] .ga-time-cell {
+            height: inherit;
+            vertical-align: top;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-cell-content {
+            min-height: 100%;
           }
           .admin-week-table .ga-time-entry {
             border: 1px solid #111827 !important;
@@ -5020,8 +5105,8 @@ export default function AdminTasksPage() {
             print-color-adjust: exact;
             page-break-inside: avoid;
             margin-bottom: 3px;
-            font-size: 9px;
-            padding: 2px 4px;
+            font-size: 11px;
+            padding: 3px 5px;
           }
           .print-title {
             font-size: 16px;
@@ -5037,15 +5122,20 @@ export default function AdminTasksPage() {
           }
           .print-footer {
             position: fixed;
-            bottom: 0.2in;
-            left: 0;
-            right: 0;
+            bottom: 0.18in;
+            left: 0.22in;
+            right: 0.22in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
-            padding-left: 0.1in;
-            padding-right: 0.1in;
+            padding-left: 0;
+            padding-right: 0;
             font-size: 10px;
             color: #334155;
+          }
+          .print-section[data-print-section="ga-time"] .print-footer {
+            bottom: 0.06in;
+            left: -0.2in;
+            right: -0.2in;
           }
           .print-page-count {
             grid-column: 2;

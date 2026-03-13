@@ -535,6 +535,35 @@ def _scope_label(template: SystemTaskTemplate) -> str:
     return "DEPARTMENT" if template.department_id else "ALL"
 
 
+def _system_task_template_department_label(
+    template: SystemTaskTemplate,
+    template_assignee_ids: list[uuid.UUID],
+    user_department_map: dict[uuid.UUID, uuid.UUID | None],
+    department_code_map: dict[uuid.UUID, str],
+) -> str:
+    assignee_dept_codes: list[str] = []
+    seen_codes: set[str] = set()
+    for assignee_id in template_assignee_ids:
+        department_id = user_department_map.get(assignee_id)
+        if not department_id:
+            continue
+        department_code = (department_code_map.get(department_id) or "").strip().upper()
+        if not department_code or department_code in seen_codes:
+            continue
+        seen_codes.add(department_code)
+        assignee_dept_codes.append(department_code)
+
+    if assignee_dept_codes:
+        return " / ".join(assignee_dept_codes)
+
+    scope_value = _scope_label(template).upper()
+    if scope_value == SystemTaskScope.GA.value:
+        return "GA"
+    if scope_value == SystemTaskScope.ALL.value:
+        return "ALL"
+    return "-"
+
+
 def _parse_internal_notes(notes: str | None) -> dict[str, str]:
     if not notes:
         return {}
@@ -3093,6 +3122,238 @@ async def export_daily_report_xlsx(
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
+@router.get("/system-task-templates.xlsx")
+async def export_system_task_templates_xlsx(
+    mode: str = "all",
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_manager_or_admin(user)
+
+    normalized_mode = (mode or "all").strip().lower()
+    if normalized_mode not in {"all", "active", "inactive"}:
+        raise HTTPException(status_code=400, detail="Invalid mode. Expected all, active, or inactive.")
+
+    template_stmt = select(SystemTaskTemplate)
+    if normalized_mode == "active":
+        template_stmt = template_stmt.where(SystemTaskTemplate.is_active.is_(True))
+    elif normalized_mode == "inactive":
+        template_stmt = template_stmt.where(SystemTaskTemplate.is_active.is_(False))
+
+    templates = (await db.execute(template_stmt.order_by(SystemTaskTemplate.title))).scalars().all()
+
+    template_assignee_ids_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    template_assignee_user_ids: set[uuid.UUID] = set()
+    for tmpl in templates:
+        raw_ids = list(getattr(tmpl, "assignee_ids", None) or [])
+        if tmpl.default_assignee_id and tmpl.default_assignee_id not in raw_ids:
+            raw_ids.append(tmpl.default_assignee_id)
+        if raw_ids:
+            seen: set[uuid.UUID] = set()
+            deduped: list[uuid.UUID] = []
+            for uid in raw_ids:
+                if uid in seen:
+                    continue
+                seen.add(uid)
+                deduped.append(uid)
+            template_assignee_ids_map[tmpl.id] = deduped
+            template_assignee_user_ids.update(deduped)
+
+    template_assignee_initials_map: dict[uuid.UUID, str] = {}
+    template_assignee_department_map: dict[uuid.UUID, uuid.UUID | None] = {}
+    if template_assignee_user_ids:
+        template_assignee_users = (
+            await db.execute(select(User).where(User.id.in_(template_assignee_user_ids)))
+        ).scalars().all()
+        template_assignee_initials_map = {
+            u.id: _initials(u.full_name or u.username or "") for u in template_assignee_users
+        }
+        template_assignee_department_map = {u.id: u.department_id for u in template_assignee_users}
+
+    template_ids = [t.id for t in templates]
+    template_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if template_ids:
+        template_alignment_rows = (
+            await db.execute(
+                select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id)
+                .where(SystemTaskTemplateAlignmentUser.template_id.in_(template_ids))
+            )
+        ).all()
+        for template_id, alignment_user_id in template_alignment_rows:
+            template_alignment_map.setdefault(template_id, []).append(alignment_user_id)
+
+    department_ids = {template.department_id for template in templates if template.department_id}
+    department_ids.update(dept_id for dept_id in template_assignee_department_map.values() if dept_id is not None)
+    department_map: dict[uuid.UUID, str] = {}
+    if department_ids:
+        departments = (
+            await db.execute(select(Department).where(Department.id.in_(department_ids)))
+        ).scalars().all()
+        department_map = {d.id: (d.code or d.name or "") for d in departments}
+
+    alignment_user_ids: set[uuid.UUID] = set()
+    for template in templates:
+        for alignment_user_id in template_alignment_map.get(template.id, []):
+            alignment_user_ids.add(alignment_user_id)
+    alignment_user_map: dict[uuid.UUID, str] = {}
+    if alignment_user_ids:
+        alignment_users = (
+            await db.execute(select(User).where(User.id.in_(alignment_user_ids)))
+        ).scalars().all()
+        alignment_user_map = {
+            u.id: _initials(u.full_name or u.username or "") for u in alignment_users
+        }
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "System Task Templates"
+
+    headers = [
+        "NR",
+        "PRIO",
+        "LL",
+        "DITA",
+        "DEP",
+        "AM/\nPM",
+        "TITULLI",
+        "PERSHKRIMI",
+        "USER",
+        "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
+        "BZ ME",
+        "KOHA BZ",
+    ]
+    last_col = len(headers)
+
+    title_row = 3
+    header_row = 5
+    data_row = header_row + 1
+
+    ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=last_col)
+    title_cell = ws.cell(row=title_row, column=1, value="SYSTEM TASK TEMPLATES")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+
+    col_widths = [len(header) for header in headers]
+
+    for idx, template in enumerate(templates, start=1):
+        template_assignee_ids = template_assignee_ids_map.get(template.id, [])
+        assignee_initials = [
+            template_assignee_initials_map.get(uid, "") for uid in template_assignee_ids
+        ]
+        assignee_label = ", ".join([initials for initials in assignee_initials if initials])
+        row_idx = data_row + idx - 1
+        department_label = _system_task_template_department_label(
+            template,
+            template_assignee_ids,
+            template_assignee_department_map,
+            department_map,
+        )
+        note_values = _parse_internal_notes(template.internal_notes)
+        regj_value = note_values.get("REGJ", "") or "-"
+        path_value = note_values.get("PATH", "") or "-"
+        check_value = note_values.get("CHECKLISTA", "") or note_values.get("CHECK", "") or "-"
+        training_value = note_values.get("TRAINING", "") or "-"
+        bz_group_value = note_values.get("BZ GROUP", "") or "-"
+        if all(value == "-" for value in [regj_value, path_value, check_value, training_value, bz_group_value]):
+            details_value = ""
+        else:
+            details_value = "\n".join(
+                [
+                    f"1.REGJ: {regj_value}",
+                    f"2.PATH: {path_value}",
+                    f"3.CHECKLISTA: {check_value}",
+                    f"4.TRAINING: {training_value}",
+                    f"5.BZ GROUP: {bz_group_value}",
+                ]
+            )
+        alignment_ids = template_alignment_map.get(template.id) or []
+        bz_me_labels = [alignment_user_map.get(alignment_user_id, "") for alignment_user_id in alignment_ids]
+        bz_me_value = ", ".join([label for label in bz_me_labels if label])
+        alignment_time = getattr(template, "alignment_time", None)
+        bz_time_value = ""
+        if alignment_time:
+            alignment_time_str = str(alignment_time)
+            bz_time_value = alignment_time_str[:5]
+        schedule_value = _system_task_schedule_label(template)
+        values = [
+            idx,
+            _priority_label(template.priority),
+            _frequency_label(template.frequency),
+            schedule_value,
+            department_label,
+            template.finish_period or "",
+            template.title,
+            _strip_html_keep_breaks(template.description),
+            assignee_label,
+            details_value,
+            bz_me_value,
+            bz_time_value,
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=row_idx, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True)
+            col_widths[col_idx - 1] = max(col_widths[col_idx - 1], len(str(value)))
+
+    for col_idx, width in enumerate(col_widths, start=1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = min(width + 2, 80)
+
+    for row_idx in range(data_row, ws.max_row + 1):
+        cell = ws.cell(row=row_idx, column=1)
+        cell.font = Font(bold=True)
+        cell.number_format = "#,##0"
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    last_row = ws.max_row
+    for r in range(header_row, last_row + 1):
+        for c in range(1, last_col + 1):
+            left = thick if c == 1 else thin
+            right = thick if c == last_col else thin
+            top = thick if r == header_row else thin
+            if r == header_row or r == last_row:
+                bottom = thick
+            else:
+                bottom = thin
+            ws.cell(row=r, column=c).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    ws.freeze_panes = "B6"
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.sheet_properties.pageSetUpPr.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 1
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    user_initials = _initials(user.full_name or user.username or "")
+    ws.oddFooter.right.text = f"PUNOI: {user_initials or '____'}"
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+    today = datetime.now().date()
+    filename = (
+        f"SYSTEM_TASK_TEMPLATES_{normalized_mode.upper()}_"
+        f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}_{user_initials or 'USER'}.xlsx"
+    )
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
 @router.get("/system-tasks.xlsx")
 async def export_system_tasks_xlsx(
     active_only: bool = True,
@@ -3164,6 +3425,7 @@ async def export_system_tasks_xlsx(
             template_assignee_user_ids.update(deduped)
 
     template_assignee_initials_map: dict[uuid.UUID, str] = {}
+    template_assignee_department_map: dict[uuid.UUID, uuid.UUID | None] = {}
     if template_assignee_user_ids:
         template_assignee_users = (
             await db.execute(select(User).where(User.id.in_(template_assignee_user_ids)))
@@ -3171,6 +3433,7 @@ async def export_system_tasks_xlsx(
         template_assignee_initials_map = {
             u.id: _initials(u.full_name or u.username or "") for u in template_assignee_users
         }
+        template_assignee_department_map = {u.id: u.department_id for u in template_assignee_users}
 
     template_ids = [t.id for t in templates]
     task_stmt = (
@@ -3249,12 +3512,13 @@ async def export_system_tasks_xlsx(
             template_alignment_map.setdefault(template_id, []).append(user_id)
 
     department_ids = {template.department_id for _, template in task_rows if template.department_id}
+    department_ids.update(dept_id for dept_id in template_assignee_department_map.values() if dept_id is not None)
     department_map: dict[uuid.UUID, str] = {}
     if department_ids:
         departments = (
             await db.execute(select(Department).where(Department.id.in_(department_ids)))
         ).scalars().all()
-        department_map = {d.id: d.name for d in departments}
+        department_map = {d.id: (d.code or d.name or "") for d in departments}
 
     alignment_user_ids: set[uuid.UUID] = set()
     for task, template in task_rows:
@@ -3323,12 +3587,12 @@ async def export_system_tasks_xlsx(
             fallback_initials = [(_initials(name) if name else "") for name in assignees]
             assignee_label = ", ".join([initials for initials in fallback_initials if initials])
         row_idx = data_row + idx - 1
-        if template.department_id and template.department_id in department_map:
-            department_label = _department_short(department_map[template.department_id])
-        elif template.scope == "GA":
-            department_label = "GA"
-        else:
-            department_label = "ALL"
+        department_label = _system_task_template_department_label(
+            template,
+            template_assignee_ids,
+            template_assignee_department_map,
+            department_map,
+        )
         note_values = _parse_internal_notes(template.internal_notes)
         regj_value = note_values.get("REGJ", "") or "-"
         path_value = note_values.get("PATH", "") or "-"
@@ -3514,6 +3778,7 @@ async def preview_system_tasks(
             template_assignee_user_ids.update(deduped)
 
     template_assignee_initials_map: dict[uuid.UUID, str] = {}
+    template_assignee_department_map: dict[uuid.UUID, uuid.UUID | None] = {}
     if template_assignee_user_ids:
         template_assignee_users = (
             await db.execute(select(User).where(User.id.in_(template_assignee_user_ids)))
@@ -3521,6 +3786,7 @@ async def preview_system_tasks(
         template_assignee_initials_map = {
             u.id: _initials(u.full_name or u.username or "") for u in template_assignee_users
         }
+        template_assignee_department_map = {u.id: u.department_id for u in template_assignee_users}
 
     template_ids = [t.id for t in templates]
     task_stmt = (
@@ -3599,12 +3865,13 @@ async def preview_system_tasks(
             template_alignment_map.setdefault(template_id, []).append(alignment_user_id)
 
     department_ids = {template.department_id for _, template in task_rows if template.department_id}
+    department_ids.update(dept_id for dept_id in template_assignee_department_map.values() if dept_id is not None)
     department_map: dict[uuid.UUID, str] = {}
     if department_ids:
         departments = (
             await db.execute(select(Department).where(Department.id.in_(department_ids)))
         ).scalars().all()
-        department_map = {d.id: d.name for d in departments}
+        department_map = {d.id: (d.code or d.name or "") for d in departments}
 
     alignment_user_ids: set[uuid.UUID] = set()
     for task, template in task_rows:
@@ -3649,12 +3916,12 @@ async def preview_system_tasks(
                 assignees = [fallback_map[task.assigned_to]]
             fallback_initials = [(_initials(name) if name else "") for name in assignees]
             assignee_label = ", ".join([initials for initials in fallback_initials if initials])
-        if template.department_id and template.department_id in department_map:
-            department_label = _department_short(department_map[template.department_id])
-        elif template.scope == "GA":
-            department_label = "GA"
-        else:
-            department_label = "ALL"
+        department_label = _system_task_template_department_label(
+            template,
+            template_assignee_ids,
+            template_assignee_department_map,
+            department_map,
+        )
         note_values = _parse_internal_notes(template.internal_notes)
         regj_value = note_values.get("REGJ", "") or "-"
         path_value = note_values.get("PATH", "") or "-"

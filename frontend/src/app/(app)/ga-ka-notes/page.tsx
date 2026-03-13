@@ -1746,13 +1746,13 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1450px]">
-                <table className="w-full caption-bottom text-sm min-w-[1450px]">
+              <div className="w-full min-w-[1180px] sm:min-w-[1370px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1180px] sm:min-w-[1370px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
-                      <th className="w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
-                      <th className="min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
+                      <th className="min-w-[340px] w-[340px] max-w-[340px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                      <th className="hidden sm:table-cell min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
@@ -1849,10 +1849,10 @@ export default function GaKaNotesPage() {
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
                         <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
-                        <td className={`whitespace-pre-wrap break-words w-[320px] border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
+                        <td className={`min-w-[340px] w-[340px] max-w-[340px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] whitespace-pre-wrap break-words border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
                             <div className="flex items-start justify-between gap-2">
-                              <div className="flex flex-wrap items-center gap-1">
+                              <div className="min-w-0 flex flex-wrap items-center gap-1">
                                 {showMobileDeptBadge || assignees.length > 0 ? (
                                   <span className="sm:hidden inline-flex items-center gap-1 mr-1">
                                     {showMobileDeptBadge ? (
@@ -1879,7 +1879,7 @@ export default function GaKaNotesPage() {
                                     ) : null}
                                   </span>
                                 ) : null}
-                                <span className="text-sm">{note.content}</span>
+                                <span className="min-w-0 text-sm break-words">{note.content}</span>
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
                                 {attachments.length > 0 ? (
@@ -1963,7 +1963,7 @@ export default function GaKaNotesPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[320px] w-[320px] max-w-[320px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="hidden sm:table-cell border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[320px] w-[320px] max-w-[320px]" style={{ verticalAlign: 'bottom' }}>
                           {taskInfo?.description || attachments.length > 0 ? (
                             <div className="space-y-2">
                               {taskInfo?.description ? (

@@ -1553,7 +1553,7 @@ export function SystemTasksView({
     if (exportingExcel) return
     setExportingExcel(true)
     try {
-      const res = await apiFetch("/exports/system-tasks.xlsx?active_only=true")
+      const res = await apiFetch("/exports/system-task-templates.xlsx?mode=all")
       if (!res?.ok) {
         const detail = await res.text()
         alert(detail || "Failed to export Excel.")
@@ -1563,7 +1563,7 @@ export function SystemTasksView({
       const url = window.URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      link.download = "system_tasks_active.xlsx"
+      link.download = "system_task_templates_all.xlsx"
       document.body.appendChild(link)
       link.click()
       link.remove()
