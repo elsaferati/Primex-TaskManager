@@ -375,6 +375,68 @@ async def _template_to_out(
     return task_out
 
 
+async def _template_definition_to_out(
+    db: AsyncSession,
+    *,
+    template: SystemTaskTemplate,
+) -> SystemTaskTemplateOut:
+    role_map, alignment_user_map = await _alignment_maps_for_templates(db, [template.id])
+    slots = await _slots_for_template(db, template.id)
+    assignee_ids = template.assignee_ids or ([template.default_assignee_id] if template.default_assignee_id else [])
+    assignee_users = (
+        (await db.execute(select(User).where(User.id.in_(assignee_ids)))).scalars().all()
+        if assignee_ids
+        else []
+    )
+    assignee_user_map = {user.id: user for user in assignee_users}
+
+    department_ids = sorted(
+        {
+            user.department_id
+            for user_id in assignee_ids
+            for user in [assignee_user_map.get(user_id)]
+            if user is not None and user.department_id is not None
+        }
+    ) or None
+
+    return SystemTaskTemplateOut(
+        id=template.id,
+        title=template.title,
+        description=template.description,
+        internal_notes=template.internal_notes,
+        department_id=template.department_id,
+        department_ids=department_ids,
+        default_assignee_id=template.default_assignee_id,
+        assignee_ids=template.assignee_ids,
+        assignees=[
+            _user_to_assignee(assignee_user_map[user_id])
+            for user_id in assignee_ids
+            if user_id in assignee_user_map
+        ],
+        assignee_slots=[_slot_to_out(slot) for slot in slots],
+        scope=SystemTaskScope(template.scope),
+        frequency=FrequencyType(template.frequency),
+        day_of_week=template.day_of_week,
+        days_of_week=template.days_of_week,
+        day_of_month=template.day_of_month,
+        month_of_year=template.month_of_year,
+        timezone=template.timezone or settings.APP_TIMEZONE,
+        due_time=template.due_time,
+        lookahead=template.lookahead,
+        interval=template.interval,
+        apply_from=template.apply_from,
+        duration_days=template.duration_days,
+        priority=TaskPriority(template.priority) if template.priority else None,
+        finish_period=TaskFinishPeriod(template.finish_period) if template.finish_period else None,
+        requires_alignment=bool(getattr(template, "requires_alignment", False)),
+        alignment_time=getattr(template, "alignment_time", None),
+        alignment_roles=role_map.get(template.id),
+        alignment_user_ids=alignment_user_map.get(template.id),
+        is_active=template.is_active,
+        created_at=template.created_at,
+    )
+
+
 def _previous_occurrence_date(template: SystemTaskTemplate, target: date) -> date:
     return previous_occurrence_date(template, target)
 
@@ -412,6 +474,7 @@ async def list_system_tasks(
     only_active: bool = False,
     assigned_to: uuid.UUID | None = None,  # Filter by user for "My View"
     occurrence_date: date | None = None,
+    include_overdue: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[SystemTaskOut]:
@@ -432,30 +495,32 @@ async def list_system_tasks(
     # When no department_id is provided (main system tasks view), show all system tasks to all users
     # No filtering needed - everyone can see all system tasks
 
-    templates = (await db.execute(template_stmt)).scalars().all()
-    if not templates:
+    all_templates = (await db.execute(template_stmt)).scalars().all()
+    if not all_templates:
         return []
 
     base_date = occurrence_date or date.today()
+    templates = all_templates
     if occurrence_date is not None:
         templates = [tmpl for tmpl in templates if matches_template_date(tmpl, base_date)]
-        if not templates:
+        if not templates and not include_overdue:
             return []
 
     template_ids = [t.id for t in templates]
+    all_template_ids = [t.id for t in all_templates]
     occurrence_date_map: dict[uuid.UUID, date] = {
         tmpl.id: (
             base_date
             if occurrence_date is not None
             else (base_date if matches_template_date(tmpl, base_date) else _previous_occurrence_date(tmpl, base_date))
         )
-        for tmpl in templates
+        for tmpl in all_templates
     }
     next_occurrence_date_map: dict[uuid.UUID, date] = {
         tmpl.id: next_occurrence_date(tmpl, base_date)
-        for tmpl in templates
+        for tmpl in all_templates
     }
-    effective_occurrence_date_map: dict[uuid.UUID, date] = dict(next_occurrence_date_map)
+    effective_occurrence_date_map: dict[uuid.UUID, date] = dict(occurrence_date_map)
 
     # Build per-timezone UTC bounds and fetch only the matching day-window tasks.
     bucket_template_ids: dict[tuple[str, date], list[uuid.UUID]] = defaultdict(list)
@@ -497,7 +562,7 @@ async def list_system_tasks(
         tasks = (await db.execute(task_stmt)).scalars().all()
 
     template_assignees_map: dict[uuid.UUID, set[uuid.UUID]] = {}
-    for tmpl in templates:
+    for tmpl in all_templates:
         assignee_ids = getattr(tmpl, "assignee_ids", None) or []
         if not assignee_ids and tmpl.default_assignee_id:
             assignee_ids = [tmpl.default_assignee_id]
@@ -515,7 +580,7 @@ async def list_system_tasks(
             filtered_tasks.append(task)
 
     template_by_id = {t.id: t for t in templates}
-    rows: list[tuple[SystemTaskTemplate, Task | None]] = []
+    rows: list[tuple[SystemTaskTemplate, Task | None, date | None]] = []
     template_tasks_map_for_rows: dict[uuid.UUID, list[Task]] = defaultdict(list)
     for task in filtered_tasks:
         if task.system_template_origin_id in template_by_id:
@@ -524,13 +589,46 @@ async def list_system_tasks(
         tmpl_tasks = template_tasks_map_for_rows.get(tmpl.id, [])
         if tmpl_tasks:
             for task in tmpl_tasks:
-                rows.append((tmpl, task))
+                rows.append((tmpl, task, occurrence_date_map.get(tmpl.id)))
+
+    if include_overdue and occurrence_date is not None and all_template_ids:
+        overdue_local_date = cast(
+            func.timezone(func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE), Task.origin_run_at),
+            SQLDate,
+        )
+        overdue_stmt = (
+            select(Task, SystemTaskTemplate, overdue_local_date.label("task_date"))
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .options(noload(Task.assignees))
+            .where(Task.system_template_origin_id.in_(all_template_ids))
+            .where(Task.origin_run_at.is_not(None))
+            .where(overdue_local_date < base_date)
+            .where(Task.status != TaskStatus.DONE)
+            .order_by(overdue_local_date.desc(), Task.created_at.desc().nullslast())
+        )
+        if assigned_to is not None:
+            overdue_stmt = overdue_stmt.where(Task.assigned_to == assigned_to)
+        if only_active:
+            overdue_stmt = overdue_stmt.where(Task.is_active.is_(True))
+        overdue_rows = (await db.execute(overdue_stmt)).all()
+        existing_task_ids = {task.id for _, task, _ in rows if task is not None}
+        for task, template, task_date in overdue_rows:
+            if task.id in existing_task_ids or task.system_template_origin_id is None:
+                continue
+            allowed_ids = template_assignees_map.get(task.system_template_origin_id, set())
+            if not allowed_ids:
+                continue
+            if not task.assigned_to or task.assigned_to not in allowed_ids:
+                continue
+            filtered_tasks.append(task)
+            rows.append((template, task, task_date))
+            existing_task_ids.add(task.id)
 
     if not rows and assigned_to is not None:
         return []
 
     # Return all tasks for each template (no de-duplication)
-    task_ids = [task.id for template, task in rows if task is not None]
+    task_ids = [task.id for template, task, _ in rows if task is not None]
     assignee_map = await _assignees_for_tasks(db, task_ids)
 
     fallback_ids = [
@@ -561,12 +659,12 @@ async def list_system_tasks(
         ).all()
         user_comment_map = {task_id: comment for task_id, comment in comment_rows}
 
-    roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
+    roles_map, alignment_users_map = await _alignment_maps_for_templates(db, all_template_ids)
 
     # Department-scoped lists and My View should return real task rows only.
     if assigned_to is not None or department_id is not None:
         result = []
-        for template, task in rows:
+        for template, task, row_date in rows:
             if task is None:
                 continue
             
@@ -578,9 +676,9 @@ async def list_system_tasks(
                 user_comment_map.get(task.id),
                 roles_map.get(template.id),
                 alignment_users_map.get(template.id),
-                occurrence_date=occurrence_date_map.get(template.id),
+                occurrence_date=row_date or occurrence_date_map.get(template.id),
                 next_occurrence_date_value=next_occurrence_date_map.get(template.id),
-                effective_occurrence_date=effective_occurrence_date_map.get(template.id),
+                effective_occurrence_date=row_date or effective_occurrence_date_map.get(template.id),
             )
             task_out.department_ids = [task.department_id] if task.department_id else None
             result.append(task_out)
@@ -590,7 +688,7 @@ async def list_system_tasks(
     # Group tasks by template_id to collect all departments (for Department View)
     template_tasks_map: dict[uuid.UUID, list[tuple[Task, SystemTaskTemplate]]] = {}
 
-    for template, task in rows:
+    for template, task, _ in rows:
         if template.id not in template_tasks_map:
             template_tasks_map[template.id] = []
         template_tasks_map[template.id].append((task, template))
@@ -953,12 +1051,12 @@ async def override_system_task_occurrence_date(
     )
 
 
-@router.post("", response_model=SystemTaskOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=SystemTaskTemplateOut, status_code=status.HTTP_201_CREATED)
 async def create_system_task_template(
     payload: SystemTaskTemplateCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
-) -> SystemTaskOut:
+) -> SystemTaskTemplateOut:
     if payload.frequency == FrequencyType.WEEKLY and payload.day_of_week is None and not payload.days_of_week:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1122,7 +1220,7 @@ async def create_system_task_template(
             )
     await db.commit()
     await db.refresh(template)
-    return await _template_to_out(db, template=template, user_id=user.id)
+    return await _template_definition_to_out(db, template=template)
 
 
 @router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
@@ -1151,13 +1249,13 @@ async def delete_system_task_template(
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
-@router.patch("/{template_id}", response_model=SystemTaskOut)
+@router.patch("/{template_id}", response_model=SystemTaskTemplateOut)
 async def update_system_task_template(
     template_id: uuid.UUID,
     payload: SystemTaskTemplateUpdate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
-) -> SystemTaskOut:
+) -> SystemTaskTemplateOut:
     template = (
         await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))
     ).scalar_one_or_none()
@@ -1389,4 +1487,4 @@ async def update_system_task_template(
         await _reset_template_slots_next_run_at(db, template=template)
     await db.commit()
     await db.refresh(template)
-    return await _template_to_out(db, template=template, user_id=user.id)
+    return await _template_definition_to_out(db, template=template)

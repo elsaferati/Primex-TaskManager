@@ -36,7 +36,15 @@ type LeaveItem = {
   isAllUsers?: boolean
   userId?: string
 }
-type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type BlockedItem = {
+  title: string
+  person: string
+  date: string
+  note?: string
+  assignees?: string[]
+  status?: string
+  isDone?: boolean
+}
 type OneHItem = {
   title: string
   person: string
@@ -44,9 +52,18 @@ type OneHItem = {
   note?: string
   assignees?: string[]
   departmentId?: string
+  status?: string
   isDone?: boolean
 }
-type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type PersonalItem = {
+  title: string
+  person: string
+  date: string
+  note?: string
+  assignees?: string[]
+  status?: string
+  isDone?: boolean
+}
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type InternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type R1Item = {
@@ -56,6 +73,7 @@ type R1Item = {
   note?: string
   assignees?: string[]
   departmentId?: string
+  status?: string
   isDone?: boolean
 }
 type ProblemItem = {
@@ -146,6 +164,41 @@ const COMMON_VIEW_CACHE = new Map<
   { etag: string | null; payload: CommonViewPayload; cachedAt: number }
 >()
 
+const normalizeCommonTaskStatus = (status?: string | null, isDone?: boolean) => {
+  const normalized = (status || "")
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, "_")
+
+  if (normalized === "TO_DO") return "TODO"
+  if (normalized === "INPROGRESS") return "IN_PROGRESS"
+  if (normalized) return normalized
+  return isDone ? "DONE" : "TODO"
+}
+
+const isCommonTaskDone = (status?: string | null, isDone?: boolean) =>
+  normalizeCommonTaskStatus(status, isDone) === "DONE"
+
+const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
+  if (status == null && typeof isDone !== "boolean") return ""
+
+  const normalized = normalizeCommonTaskStatus(status, isDone)
+
+  if (normalized === "DONE") return "task-state-done"
+  if (normalized === "IN_PROGRESS") return "task-state-in-progress"
+  if (normalized === "WAITING_CONFIRMATION") return "task-state-waiting"
+  if (normalized === "TODO") return "task-state-todo"
+  return ""
+}
+
+const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
+  const normalized = normalizeCommonTaskStatus(status, isDone)
+
+  if (normalized === "DONE") return 2
+  if (normalized === "WAITING_CONFIRMATION") return 1
+  return 0
+}
+
 type SwimlaneCell = {
   title: string
   subtitle?: string
@@ -157,6 +210,7 @@ type SwimlaneCell = {
   entryId?: string
   number?: number
   entryDate?: string
+  status?: string
   isDone?: boolean
 }
 type SwimlaneRow = {
@@ -439,15 +493,15 @@ export default function CommonViewPage() {
     const pad2 = (n: number) => String(n).padStart(2, "0")
     return `${pad2(date.getHours())}:${pad2(date.getMinutes())}`
   }
-  const formatTimeLabel = (value?: string) => {
+  const formatTimeLabel = (value?: string): string => {
     if (!value) return ""
     const normalized = value.trim()
     if (!normalized || normalized.toLowerCase() === "tbd") return normalized
     if (/am|pm/i.test(normalized)) return normalized
     if (normalized.includes("-")) {
       const [startRaw, endRaw] = normalized.split("-").map((part) => part.trim())
-      const startLabel = formatTimeLabel(startRaw)
-      const endLabel = formatTimeLabel(endRaw)
+      const startLabel: string = formatTimeLabel(startRaw)
+      const endLabel: string = formatTimeLabel(endRaw)
       if (startLabel && endLabel) return `${startLabel} - ${endLabel}`
       return normalized
     }
@@ -586,7 +640,7 @@ export default function CommonViewPage() {
   } | null>(null)
 
   const [weekStart, setWeekStart] = React.useState<Date>(() => getMonday(new Date()))
-  const [selectedDates, setSelectedDates] = React.useState<Set<string>>(new Set())
+  const [selectedDates, setSelectedDates] = React.useState<Set<string>>(() => new Set([toISODate(new Date())]))
   const [multiMode, setMultiMode] = React.useState(false)
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
@@ -702,12 +756,28 @@ export default function CommonViewPage() {
   )
   const compareTaskOrder = React.useCallback(
     (
-      a: { isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] },
-      b: { isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] }
+      a: {
+        status?: string
+        isDone?: boolean
+        departmentId?: string
+        title?: string
+        person?: string
+        owner?: string
+        assignees?: string[]
+      },
+      b: {
+        status?: string
+        isDone?: boolean
+        departmentId?: string
+        title?: string
+        person?: string
+        owner?: string
+        assignees?: string[]
+      }
     ) => {
-      const doneA = a.isDone ? 1 : 0
-      const doneB = b.isDone ? 1 : 0
-      if (doneA !== doneB) return doneA - doneB
+      const statusRankA = commonTaskSortRank(a.status, a.isDone)
+      const statusRankB = commonTaskSortRank(b.status, b.isDone)
+      if (statusRankA !== statusRankB) return statusRankA - statusRankB
       const metaA = getDepartmentMeta(a.departmentId)
       const metaB = getDepartmentMeta(b.departmentId)
       if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank
@@ -723,7 +793,16 @@ export default function CommonViewPage() {
     [getDepartmentMeta, getPersonSortKey]
   )
   const sortTasksByOrder = React.useCallback(
-    <T extends { date: string; isDone?: boolean; departmentId?: string; title?: string; person?: string; owner?: string; assignees?: string[] }>(
+    <T extends {
+      date: string
+      status?: string
+      isDone?: boolean
+      departmentId?: string
+      title?: string
+      person?: string
+      owner?: string
+      assignees?: string[]
+    }>(
       items: T[],
       multiDate: boolean
     ) => {
@@ -1339,15 +1418,33 @@ export default function CommonViewPage() {
           date: parsed.everyday ? weekStartIso : item.date,
         }
       })
+      const normalizedBlocked = payload.items.blocked.map((item: any) => {
+        const status = normalizeCommonTaskStatus(item.status, item.isDone)
+        return {
+          ...item,
+          status,
+          isDone: isCommonTaskDone(status, item.isDone),
+        }
+      })
       const normalizedOneH = payload.items.oneH.map((item: any) => ({
         ...item,
         departmentId: item.departmentId || item.department_id || undefined,
-        isDone: Boolean(item.isDone),
+        status: normalizeCommonTaskStatus(item.status, item.isDone),
+        isDone: isCommonTaskDone(item.status, item.isDone),
       }))
+      const normalizedPersonal = payload.items.personal.map((item: any) => {
+        const status = normalizeCommonTaskStatus(item.status, item.isDone)
+        return {
+          ...item,
+          status,
+          isDone: isCommonTaskDone(status, item.isDone),
+        }
+      })
       const normalizedR1 = payload.items.r1.map((item: any) => ({
         ...item,
         departmentId: item.departmentId || item.department_id || undefined,
-        isDone: Boolean(item.isDone),
+        status: normalizeCommonTaskStatus(item.status, item.isDone),
+        isDone: isCommonTaskDone(item.status, item.isDone),
       }))
       const normalizedProblems = payload.items.problems.map((item) => {
         const parsed = parseFeedbackNote(item.note)
@@ -1365,8 +1462,12 @@ export default function CommonViewPage() {
           for (const bucket of buckets) {
             if (bucket === "feedback") {
               next = { ...next, feedback: normalizedFeedback }
+            } else if (bucket === "blocked") {
+              next = { ...next, blocked: normalizedBlocked }
             } else if (bucket === "oneH") {
               next = { ...next, oneH: normalizedOneH }
+            } else if (bucket === "personal") {
+              next = { ...next, personal: normalizedPersonal }
             } else if (bucket === "r1") {
               next = { ...next, r1: normalizedR1 }
             } else if (bucket === "problems") {
@@ -1820,9 +1921,7 @@ export default function CommonViewPage() {
           for (const t of tasks) {
             const statusValue = (t.status || "").toLowerCase()
             const isDone = Boolean(t.completed_at) || statusValue === "done" || statusValue === "completed"
-            if (isDone && !t.is_1h_report && !t.is_r1) {
-              continue
-            }
+            const normalizedTaskStatus = normalizeCommonTaskStatus(t.status, isDone)
 
             const assigneeId = t.assigned_to || t.assignees?.[0]?.id || t.assigned_to_user_id || null
             const assignee = t.assignees?.[0] || (assigneeId ? loadedUsers.find((u) => u.id === assigneeId) : null)
@@ -1899,6 +1998,8 @@ export default function CommonViewPage() {
                   assignees: assigneeNames,
                   date: taskDate,
                   note: t.description || undefined,
+                  status: normalizedTaskStatus,
+                  isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                 })
               }
               if (t.is_1h_report) {
@@ -1909,7 +2010,8 @@ export default function CommonViewPage() {
                   date: taskDate,
                   note: t.description || undefined,
                   departmentId,
-                  isDone,
+                  status: normalizedTaskStatus,
+                  isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                 })
               }
               if (t.is_personal) {
@@ -1919,6 +2021,8 @@ export default function CommonViewPage() {
                   assignees: assigneeNames,
                   date: taskDate,
                   note: t.description || undefined,
+                  status: normalizedTaskStatus,
+                  isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                 })
               }
               if (t.is_r1) {
@@ -1929,7 +2033,8 @@ export default function CommonViewPage() {
                   assignees: assigneeNames,
                   note: t.description || undefined,
                   departmentId,
-                  isDone,
+                  status: normalizedTaskStatus,
+                  isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                 })
               }
             }
@@ -2707,9 +2812,9 @@ export default function CommonViewPage() {
         late: filtered.late.filter((x) => x.date === iso),
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
-        blocked: filtered.blocked.filter((x) => x.date === iso),
+        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso), false),
         oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
-        personal: filtered.personal.filter((x) => x.date === iso),
+        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
@@ -2765,13 +2870,13 @@ export default function CommonViewPage() {
       if (!entries.length) return []
 
       if (rowId === "late") {
-        return entries.map((e: LateItem, idx: number) => `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`)
+        return (entries as LateItem[]).map((e, idx: number) => `${idx + 1}. ${e.start || "08:00"}-${e.until}${assigneesSuffix(e)}`)
       }
       if (rowId === "absent") {
-        return entries.map((e: AbsentItem, idx: number) => `${idx + 1}. ${e.from} - ${e.to}${assigneesSuffix(e)}`)
+        return (entries as AbsentItem[]).map((e, idx: number) => `${idx + 1}. ${e.from} - ${e.to}${assigneesSuffix(e)}`)
       }
       if (rowId === "leave") {
-        return entries.map((e: LeaveItem, idx: number) => {
+        return (entries as LeaveItem[]).map((e, idx: number) => {
           const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
           const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
           const label = isAllUsers ? `${timeLabel} ALL` : timeLabel
@@ -2779,7 +2884,7 @@ export default function CommonViewPage() {
         })
       }
       if (rowId === "blocked") {
-        return entries.map((e: BlockedItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
+        return (entries as BlockedItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
       }
       if (rowId === "oneH" || rowId === "r1") {
         return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map(
@@ -2787,25 +2892,25 @@ export default function CommonViewPage() {
         )
       }
       if (rowId === "personal") {
-        return entries.map((e: PersonalItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
+        return (entries as PersonalItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
       }
       if (rowId === "external") {
-        return entries.map((e: ExternalItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
+        return (entries as ExternalItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
       }
       if (rowId === "internal") {
-        return entries.map((e: InternalItem, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
+        return (entries as InternalItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
       }
       if (rowId === "bz") {
-        return entries.map((e: BzItem, idx: number) => {
+        return (entries as BzItem[]).map((e, idx: number) => {
           const bzLabel = e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""
           return `${idx + 1}. ${stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
         })
       }
       if (rowId === "priority") {
-        return entries.map((e: PriorityItem, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
+        return (entries as PriorityItem[]).map((e, idx: number) => `${idx + 1}. ${e.project}${assigneesSuffix(e)}`)
       }
       if (rowId === "problem" || rowId === "feedback") {
-        return entries.map((e: ProblemItem | FeedbackItem, idx: number) => {
+        return (entries as (ProblemItem | FeedbackItem)[]).map((e, idx: number) => {
           const dateLabel = e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)
           const noteLabel = e.note ? ` - ${e.note}` : ""
           return `${idx + 1}. ${e.title} - ${dateLabel}${noteLabel}${assigneesSuffix(e)}`
@@ -3994,15 +4099,15 @@ export default function CommonViewPage() {
       }
     })
 
-    const blockedSource = isMultiDate
-      ? sortByDate(filtered.blocked, (x) => x.date, (x) => x.title)
-      : filtered.blocked
+    const blockedSource = sortTasksByOrder(filtered.blocked, isMultiDate)
     const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent blocked",
+      status: x.status,
+      isDone: x.isDone,
     }))
 
     const oneHSource = includeOneH ? sortTasksByOrder(filtered.oneH, isMultiDate) : []
@@ -4012,18 +4117,19 @@ export default function CommonViewPage() {
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent oneh",
+      status: x.status,
       isDone: x.isDone,
     }))
 
-    const personalSource = isMultiDate
-      ? sortByDate(filtered.personal, (x) => x.date, (x) => x.title)
-      : filtered.personal
+    const personalSource = sortTasksByOrder(filtered.personal, isMultiDate)
     const personalItems: SwimlaneCell[] = personalSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent personal",
+      status: x.status,
+      isDone: x.isDone,
     }))
 
     const externalSource = isMultiDate
@@ -4063,6 +4169,7 @@ export default function CommonViewPage() {
       subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
       dateLabel: formatDateHuman(x.date),
       accentClass: "swimlane-accent r1",
+      status: x.status,
       isDone: x.isDone,
     }))
 
@@ -5631,6 +5738,18 @@ export default function CommonViewPage() {
           background: #d4ffe1;
           border-left-color: #ffffff;
         }
+        .swimlane-cell.task-state-waiting {
+          background: #ffedd5;
+          border-left-color: #ffffff;
+        }
+        .swimlane-cell.task-state-in-progress {
+          background:rgb(255, 253, 195);
+          border-left-color: #ffffff;
+        }
+        .swimlane-cell.task-state-todo {
+          background:rgb(255, 222, 241);
+          border-left-color: #ffffff;
+        }
         .swimlane-title-row {
           display: flex;
           flex-direction: column;
@@ -5640,12 +5759,27 @@ export default function CommonViewPage() {
           padding-right: 0;
           flex: 1 1 auto;
         }
+        .swimlane-title-main {
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+          width: 100%;
+        }
+        .swimlane-title-main.priority {
+          flex-direction: column;
+          align-items: flex-start;
+          flex-wrap: nowrap;
+        }
+        .swimlane-title-main.priority .swimlane-assignees,
+        .swimlane-title-main.priority .swimlane-title {
+          width: 100%;
+        }
         .swimlane-title {
           flex: 1 1 auto;
           min-width: 0;
           font-weight: 700;
           font-size: 14px;
-          width: 100%;
         }
         .swimlane-date {
           font-size: 12px;
@@ -5842,11 +5976,39 @@ export default function CommonViewPage() {
           background: #ffffff;
           margin-bottom: 2px;
         }
+        .week-table-entry.task-state-done {
+          background: #d4ffe1;
+        }
+        .week-table-entry.task-state-in-progress {
+          background: #fef3c7;
+        }
+        .week-table-entry.task-state-waiting {
+          background: #ffedd5;
+        }
+        .week-table-entry.task-state-todo {
+          background: #fbcfe8;
+        }
+        .week-table-view.neutral-all-days .week-table-entry,
+        .week-table-view.neutral-all-days .week-table-entry.task-state-done,
+        .week-table-view.neutral-all-days .week-table-entry.task-state-in-progress,
+        .week-table-view.neutral-all-days .week-table-entry.task-state-waiting,
+        .week-table-view.neutral-all-days .week-table-entry.task-state-todo {
+          background: #ffffff;
+        }
+        .week-table-entry-main {
+          flex: 1;
+          display: flex;
+          flex-wrap: wrap;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+        }
         .week-table-prjk-divider {
           border-top: 1px solid #64748b;
           margin: 1px 0;
         }
-        .week-table-entry span {
+        .week-table-entry > span,
+        .week-table-entry-main > span:first-child {
           flex: 1;
         }
         .week-table-delete {
@@ -8431,7 +8593,7 @@ export default function CommonViewPage() {
       <div className="view-container">
         <div className="common-view-title">PERMBLEDHJA - COMMON VIEW</div>
         {allDaysSelected ? (
-          <div className="week-table-view week-table-onepage" ref={weekTablePrintRef}>
+          <div className="week-table-view week-table-onepage neutral-all-days" ref={weekTablePrintRef}>
             <div className="week-table-onepage-content" ref={weekTablePrintContentRef}>
             <div className="print-header">
               <div />
@@ -8467,25 +8629,24 @@ export default function CommonViewPage() {
                 {swimlaneRows
                   .filter((row) => showCard(row.id))
                   .map((row, rowIndex) => {
-                    const rowData = tableDataByDay?.[weekISOs[0]] || {}
                     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
                     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
                     let dayEntries: Record<string, any[]> = {}
                     weekISOs.forEach((iso) => {
-                      const dayData = tableDataByDay?.[iso] || {}
-                      if (row.id === "late") dayEntries[iso] = dayData.late || []
-                      else if (row.id === "absent") dayEntries[iso] = dayData.absent || []
-                      else if (row.id === "leave") dayEntries[iso] = dayData.leave || []
-                      else if (row.id === "blocked") dayEntries[iso] = dayData.blocked || []
-                      else if (row.id === "oneH") dayEntries[iso] = includeOneH ? dayData.oneH || [] : []
-                      else if (row.id === "r1") dayEntries[iso] = includeR1 ? dayData.r1 || [] : []
-                      else if (row.id === "personal") dayEntries[iso] = dayData.personal || []
-                      else if (row.id === "external") dayEntries[iso] = dayData.external || []
-                      else if (row.id === "internal") dayEntries[iso] = dayData.internal || []
-                      else if (row.id === "bz") dayEntries[iso] = dayData.bz || []
-                      else if (row.id === "problem") dayEntries[iso] = dayData.problems || []
-                      else if (row.id === "feedback") dayEntries[iso] = dayData.feedback || []
-                      else if (row.id === "priority") dayEntries[iso] = dayData.priority || []
+                      const dayData = tableDataByDay?.[iso]
+                      if (row.id === "late") dayEntries[iso] = dayData?.late || []
+                      else if (row.id === "absent") dayEntries[iso] = dayData?.absent || []
+                      else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
+                      else if (row.id === "blocked") dayEntries[iso] = dayData?.blocked || []
+                      else if (row.id === "oneH") dayEntries[iso] = includeOneH ? dayData?.oneH || [] : []
+                      else if (row.id === "r1") dayEntries[iso] = includeR1 ? dayData?.r1 || [] : []
+                      else if (row.id === "personal") dayEntries[iso] = dayData?.personal || []
+                      else if (row.id === "external") dayEntries[iso] = dayData?.external || []
+                      else if (row.id === "internal") dayEntries[iso] = dayData?.internal || []
+                      else if (row.id === "bz") dayEntries[iso] = dayData?.bz || []
+                      else if (row.id === "problem") dayEntries[iso] = dayData?.problems || []
+                      else if (row.id === "feedback") dayEntries[iso] = dayData?.feedback || []
+                      else if (row.id === "priority") dayEntries[iso] = dayData?.priority || []
                     })
 
                     const getWeekRowClass = (rowId: string) => {
@@ -8525,7 +8686,7 @@ export default function CommonViewPage() {
               <button
                 type="button"
                 className="week-table-delete week-table-delete-red"
-                onClick={() => deleteCommonEntry(e.entryId)}
+                onClick={() => deleteCommonEntry(e.entryId!)}
                 aria-label="Delete entry"
                 title="Delete"
               >
@@ -8549,7 +8710,7 @@ export default function CommonViewPage() {
                               <button
                                 type="button"
                                 className="week-table-delete week-table-delete-red"
-                                onClick={() => deleteCommonEntry(e.entryId)}
+                                onClick={() => deleteCommonEntry(e.entryId!)}
                                 aria-label="Delete entry"
                                 title="Delete"
                               >
@@ -8584,7 +8745,7 @@ export default function CommonViewPage() {
                                 <button
                                   type="button"
                                   className="week-table-delete week-table-delete-red"
-                                  onClick={() => deleteCommonEntry(e.entryId)}
+                                  onClick={() => deleteCommonEntry(e.entryId!)}
                                   aria-label="Delete entry"
                                   title="Delete"
                                 >
@@ -8607,8 +8768,13 @@ export default function CommonViewPage() {
                         })
                       } else if (row.id === "blocked") {
                         return entries.map((e: BlockedItem, idx: number) => (
-                          <div key={idx} className="week-table-entry">
-                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                          <div
+                            key={idx}
+                            className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
+                          >
+                            <div className="week-table-entry-main">
+                              <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                            </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -8637,7 +8803,7 @@ export default function CommonViewPage() {
                               <button
                                 type="button"
                                 className="week-table-delete week-table-delete-red"
-                                onClick={() => deleteCommonEntry(e.entryId)}
+                                onClick={() => deleteCommonEntry(e.entryId!)}
                                 aria-label="Delete entry"
                                 title="Delete"
                               >
@@ -8648,8 +8814,13 @@ export default function CommonViewPage() {
                         ))
                       } else if (row.id === "oneH" || row.id === "r1") {
                         return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) => (
-                          <div key={idx} className="week-table-entry">
-                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                          <div
+                            key={idx}
+                            className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
+                          >
+                            <div className="week-table-entry-main">
+                              <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                            </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -8661,8 +8832,13 @@ export default function CommonViewPage() {
                         ))
                       } else if (row.id === "personal") {
                         return entries.map((e: PersonalItem, idx: number) => (
-                          <div key={idx} className="week-table-entry">
-                            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                          <div
+                            key={idx}
+                            className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
+                          >
+                            <div className="week-table-entry-main">
+                              <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                            </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -8898,6 +9074,7 @@ export default function CommonViewPage() {
                                   cell.accentClass || "",
                                   cell.placeholder ? "placeholder" : "",
                                   cell.isDone ? "done" : "",
+                                  commonTaskStateClassName(cell.status, cell.isDone),
                                 ]
                                   .filter(Boolean)
                                   .join(" ")}
@@ -8906,7 +9083,7 @@ export default function CommonViewPage() {
                                   <button
                                     type="button"
                                     className="swimlane-delete"
-                                    onClick={() => deleteCommonEntry(cell.entryId)}
+                                    onClick={() => deleteCommonEntry(cell.entryId!)}
                                     aria-label="Delete entry"
                                     title="Delete"
                                   >
@@ -8921,7 +9098,7 @@ export default function CommonViewPage() {
                                   <button
                                     type="button"
                                     className="swimlane-delete"
-                                    onClick={() => deleteAllUsersLeaveForDay(cell.entryDate)}
+                                    onClick={() => deleteAllUsersLeaveForDay(cell.entryDate!)}
                                     aria-label="Delete all-users entries"
                                     title="Delete all users"
                                   >
@@ -8929,25 +9106,27 @@ export default function CommonViewPage() {
                                   </button>
                                 ) : null}
                                 <div className="swimlane-title-row">
-                                  {!cell.placeholder && cell.assignees?.length ? (
-                                    <div className="swimlane-assignees">
-                                      {cell.assignees.map((name) => (
-                                        <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
-                                          {initials(name)}
-                                        </span>
-                                      ))}
+                                  <div className={`swimlane-title-main ${row.id === "priority" ? "priority" : ""}`}>
+                                    {!cell.placeholder && cell.assignees?.length ? (
+                                      <div className="swimlane-assignees">
+                                        {cell.assignees.map((name) => (
+                                          <span key={`${cell.title}-${name}`} className="swimlane-avatar" title={name}>
+                                            {initials(name)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : !cell.placeholder && cell.assigneeLabels?.length ? (
+                                      <div className="swimlane-assignees">
+                                        {cell.assigneeLabels.map((label) => (
+                                          <span key={`${cell.title}-${label}`} className="swimlane-avatar" title={label}>
+                                            {label}
+                                          </span>
+                                        ))}
+                                      </div>
+                                    ) : null}
+                                    <div className="swimlane-title">
+                                      {stripInitialsPrefix(cell.title)}
                                     </div>
-                                  ) : !cell.placeholder && cell.assigneeLabels?.length ? (
-                                    <div className="swimlane-assignees">
-                                      {cell.assigneeLabels.map((label) => (
-                                        <span key={`${cell.title}-${label}`} className="swimlane-avatar" title={label}>
-                                          {label}
-                                        </span>
-                                      ))}
-                                    </div>
-                                  ) : null}
-                                  <div className="swimlane-title">
-                                    {stripInitialsPrefix(cell.title)}
                                   </div>
                                   {(() => {
                                     const showSubtitle =

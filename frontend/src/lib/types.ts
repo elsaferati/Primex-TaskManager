@@ -25,6 +25,39 @@ export interface SystemTaskTemplateAssigneeSlot {
   is_active: boolean
 }
 
+export interface SystemTaskTemplateDefinition {
+  id: string
+  title: string
+  description?: string | null
+  internal_notes?: string | null
+  department_id?: string | null
+  department_ids?: string[] | null
+  default_assignee_id?: string | null
+  assignee_ids?: string[] | null
+  assignees?: TaskAssignee[] | null
+  assignee_slots?: SystemTaskTemplateAssigneeSlot[] | null
+  scope: SystemTaskScope
+  frequency: SystemTaskFrequency
+  day_of_week?: number | null
+  days_of_week?: number[] | null
+  day_of_month?: number | null
+  month_of_year?: number | null
+  timezone?: string | null
+  due_time?: string | null
+  lookahead?: number | null
+  interval?: number | null
+  apply_from?: string | null
+  duration_days?: number | null
+  priority?: TaskPriority | null
+  finish_period?: TaskFinishPeriod | null
+  requires_alignment?: boolean | null
+  alignment_time?: string | null
+  alignment_roles?: string[] | null
+  alignment_user_ids?: string[] | null
+  is_active: boolean
+  created_at: string
+}
+
 export interface SystemTaskTemplate {
   id: string
   template_id?: string | null
@@ -169,6 +202,8 @@ export interface Task {
   created_by?: string | null
   ga_note_origin_id?: string | null
   system_template_origin_id?: string | null
+  origin_run_at?: string | null
+  system_task_slot_id?: string | null
   status?: string
   priority?: string
   finish_period?: TaskFinishPeriod | null
@@ -201,6 +236,7 @@ export interface DailyReportTaskItem {
 }
 
 export interface DailyReportSystemOccurrence {
+  task: Task
   template_id: string
   title: string
   frequency?: string | null

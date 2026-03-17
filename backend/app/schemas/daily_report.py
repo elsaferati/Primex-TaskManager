@@ -20,6 +20,7 @@ class DailyReportTaskItem(BaseModel):
 
 
 class DailyReportSystemOccurrence(BaseModel):
+    task: TaskOut
     template_id: uuid.UUID
     title: str
     frequency: str | None = None

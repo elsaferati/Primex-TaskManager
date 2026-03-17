@@ -424,6 +424,22 @@ function formatDateInput(date: Date) {
   return date.toISOString().slice(0, 10)
 }
 
+function dateInputToDate(value?: string | null) {
+  if (!value) return null
+  const [year, month, day] = value.split("-").map(Number)
+  if (!year || !month || !day) return null
+  const date = new Date(year, month - 1, day)
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return null
+  }
+  return date
+}
+
 function formatDate(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
@@ -899,6 +915,7 @@ function normalizeDailyReportStatusKey(status?: string | null) {
     .toUpperCase()
     .replace(/[\s-]+/g, "_")
   if (!normalized) return ""
+  if (normalized === "OPEN") return "TODO"
   if (normalized === "TODO" || normalized === "TO_DO") return "TODO"
   if (normalized === "IN_PROGRESS" || normalized === "INPROGRESS") return "IN_PROGRESS"
   if (normalized === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
@@ -963,7 +980,7 @@ function formatSystemOccurrenceStatus(status?: string | null) {
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "NOT_DONE") return "Not Done"
   if (status === "DONE") return "Done"
-  if (status === "OPEN") return "Open"
+  if (status === "OPEN") return "TO DO"
   if (status === "SKIPPED") return "Skipped"
   return status
 }
@@ -1209,6 +1226,8 @@ export default function DepartmentKanban() {
   )
   const [allRange, setAllRange] = React.useState<"today" | "week">("today")
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
+  const [fastTaskDateInput, setFastTaskDateInput] = React.useState(() => todayInputValue())
+  const [showAllFastTasks, setShowAllFastTasks] = React.useState(false)
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
@@ -1275,15 +1294,8 @@ export default function DepartmentKanban() {
   const [printPageMarkers, setPrintPageMarkers] = React.useState<Array<{ page: number; total: number; top: number }>>([])
   const [printPageMinHeight, setPrintPageMinHeight] = React.useState<number | null>(null)
   const [pendingPrint, setPendingPrint] = React.useState(false)
-  const [createSystemOpen, setCreateSystemOpen] = React.useState(false)
-  const [creatingSystem, setCreatingSystem] = React.useState(false)
-  const [systemTitle, setSystemTitle] = React.useState("")
-  const [systemDescription, setSystemDescription] = React.useState("")
-  const [systemOwnerId, setSystemOwnerId] = React.useState("__unassigned__")
   const [systemDepartmentId, setSystemDepartmentId] = React.useState("")
-  const [systemDateInput, setSystemDateInput] = React.useState(() => formatDateInput(new Date()))
   const [systemFrequency, setSystemFrequency] = React.useState<SystemTaskTemplate["frequency"]>("DAILY")
-  const [systemStatus, setSystemStatus] = React.useState<(typeof STATUS_OPTIONS)[number]>("OPEN")
   const [createProjectOpen, setCreateProjectOpen] = React.useState(false)
   const [creatingProject, setCreatingProject] = React.useState(false)
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
@@ -1420,7 +1432,7 @@ export default function DepartmentKanban() {
 
         const [projRes, sysRes, tasksRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}${showTemplates ? "&include_templates=true" : ""}`),
-          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}`),
+          apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}&include_overdue=true`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
         ])
         const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
@@ -1496,7 +1508,7 @@ export default function DepartmentKanban() {
     if (bootstrapSystemTasksKeyRef.current === systemTasksKey) return
     const loadSystemTasks = async () => {
       const res = await apiFetch(
-        `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}`
+        `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}&include_overdue=true`
       )
       if (res.ok) {
         setSystemTasks((await res.json()) as SystemTaskTemplate[])
@@ -1861,6 +1873,10 @@ export default function DepartmentKanban() {
   }, [users, editTaskAssignees])
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
+  const selectedFastTaskDate = React.useMemo(
+    () => dateInputToDate(fastTaskDateInput) ?? todayDate,
+    [fastTaskDateInput, todayDate]
+  )
   const printedAt = React.useMemo(() => new Date(), [])
   const weekStart = React.useMemo(() => startOfWeekMonday(todayDate), [todayDate])
   const weekEnd = React.useMemo(
@@ -1936,21 +1952,26 @@ export default function DepartmentKanban() {
     },
     [weekEnd, weekStart]
   )
+  const isTaskCompletedOnDate = React.useCallback((task: Task, targetDate: Date) => {
+    const completedDate = task.completed_at ? toDate(task.completed_at) : null
+    return completedDate ? isSameDay(completedDate, targetDate) : false
+  }, [])
   const isTaskCompletedToday = React.useCallback(
-    (task: Task) => {
-      const completedDate = task.completed_at ? toDate(task.completed_at) : null
-      return completedDate ? isSameDay(completedDate, todayDate) : false
-    },
-    [todayDate]
+    (task: Task) => isTaskCompletedOnDate(task, todayDate),
+    [isTaskCompletedOnDate, todayDate]
   )
-  const isTaskOverdue = React.useCallback(
-    (task: Task) => {
+  const isTaskOverdueForDate = React.useCallback(
+    (task: Task, targetDate: Date) => {
       if (taskStatusValue(task) === "DONE") return false
       const dueDate = task.due_date ? toDate(task.due_date) : null
       if (!dueDate) return false
-      return dayKey(dueDate) < dayKey(todayDate)
+      return dayKey(dueDate) < dayKey(targetDate)
     },
-    [todayDate]
+    [taskStatusValue]
+  )
+  const isTaskOverdue = React.useCallback(
+    (task: Task) => isTaskOverdueForDate(task, todayDate),
+    [isTaskOverdueForDate, todayDate]
   )
   const sortDoneLast = React.useCallback(<T,>(items: T[], isDone: (item: T) => boolean) => {
     const withIndex = items.map((item, index) => ({ item, index }))
@@ -2207,14 +2228,24 @@ export default function DepartmentKanban() {
     () =>
       activeTab === "all" &&
       allRange === "today" &&
-      (viewMode === "mine" || (viewMode === "department" && selectedUserId !== "__all__")),
-    [activeTab, allRange, selectedUserId, viewMode]
+      viewMode === "mine",
+    [activeTab, allRange, viewMode]
   )
   const shouldIncludeOverdueSystemInAllToday = React.useMemo(
     () =>
       activeTab === "all" &&
-      (viewMode === "mine" || (viewMode === "department" && selectedUserId !== "__all__" && allRange === "today")),
-    [activeTab, allRange, selectedUserId, viewMode]
+      viewMode === "mine",
+    [activeTab, viewMode]
+  )
+  const isSystemTaskOverdueForDate = React.useCallback(
+    (task: SystemTaskTemplate, targetDate: Date) => {
+      const status = String(task.status || "").toUpperCase()
+      if (status === "DONE") return false
+      const taskDate = toDate(task.due_date || task.start_date || task.occurrence_date || task.effective_occurrence_date || null)
+      if (!taskDate) return false
+      return dayKey(taskDate) < dayKey(targetDate)
+    },
+    []
   )
   const overdueTaskIds = React.useMemo(() => {
     const ids = new Set<string>()
@@ -2224,34 +2255,16 @@ export default function DepartmentKanban() {
     }
     return ids
   }, [dailyReport?.tasks_overdue, shouldIncludeOverdueInAllToday])
-  const overdueSystemTemplateIds = React.useMemo(() => {
-    const ids = new Set<string>()
-    if (viewMode === "mine") {
-      for (const occ of dailyReport?.system_overdue || []) {
-        if (occ?.template_id) ids.add(occ.template_id)
-      }
-      return ids
-    }
-    if (!shouldIncludeOverdueSystemInAllToday) return ids
-    for (const occ of dailyReport?.system_overdue || []) {
-      if (occ?.template_id) ids.add(occ.template_id)
-    }
-    return ids
-  }, [dailyReport?.system_overdue, shouldIncludeOverdueSystemInAllToday, viewMode])
   const todaySystemTasks = React.useMemo(
     () => {
       const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
 
-      // Include overdue system tasks in All -> Today for my view and selected-user department view.
-      if (shouldIncludeOverdueSystemInAllToday && overdueSystemTemplateIds.size > 0) {
-        const todayTaskIds = new Set(todayTasks.map((t) => t.template_id || t.id))
+      if (shouldIncludeOverdueSystemInAllToday) {
+        const todayTaskIds = new Set(todayTasks.map((t) => t.id))
 
         const overdueTasks = visibleSystemTemplates.filter((t) => {
-          const templateId = t.template_id || t.id
-          // Skip if already in today's tasks
-          if (todayTaskIds.has(templateId)) return false
-          // Only include if it's in overdue list
-          return overdueSystemTemplateIds.has(templateId)
+          if (todayTaskIds.has(t.id)) return false
+          return isSystemTaskOverdueForDate(t, todayDate)
         })
 
         return [...todayTasks, ...overdueTasks]
@@ -2259,61 +2272,8 @@ export default function DepartmentKanban() {
 
       return todayTasks
     },
-    [overdueSystemTemplateIds, shouldIncludeOverdueSystemInAllToday, todayDate, visibleSystemTemplates]
+    [isSystemTaskOverdueForDate, shouldIncludeOverdueSystemInAllToday, todayDate, visibleSystemTemplates]
   )
-  const systemOccurrenceStatusByTemplate = React.useMemo(() => {
-    const map = new Map<string, string>()
-    const addIfMissing = (templateId: string | null | undefined, status?: string | null) => {
-      if (!templateId || !status) return
-      if (!map.has(templateId)) map.set(templateId, status)
-    }
-
-    if (viewMode === "mine" || selectedUserId !== "__all__") {
-      if (dailyReport?.system_today) {
-        for (const occ of dailyReport.system_today) {
-          addIfMissing(occ.template_id, occ.status)
-        }
-      }
-      if (dailyReport?.system_overdue) {
-        for (const occ of dailyReport.system_overdue) {
-          addIfMissing(occ.template_id, occ.status)
-        }
-      }
-      return map
-    }
-
-    const statusByTemplate = new Map<string, string[]>()
-    const pushStatus = (templateId: string | null | undefined, status?: string | null) => {
-      if (!templateId || !status) return
-      const existing = statusByTemplate.get(templateId) || []
-      existing.push(status)
-      statusByTemplate.set(templateId, existing)
-    }
-
-    for (const report of allUsersDailyReports.values()) {
-      for (const occ of report.system_today || []) {
-        pushStatus(occ.template_id, occ.status)
-      }
-      for (const occ of report.system_overdue || []) {
-        pushStatus(occ.template_id, occ.status)
-      }
-    }
-
-    const aggregate = (statuses: string[]) => {
-      if (!statuses.length) return null
-      if (statuses.some((status) => status === "OPEN")) return "OPEN"
-      if (statuses.some((status) => status === "NOT_DONE")) return "NOT_DONE"
-      if (statuses.some((status) => status === "SKIPPED")) return "SKIPPED"
-      if (statuses.every((status) => status === "DONE")) return "DONE"
-      return statuses[0]
-    }
-
-    for (const [templateId, statuses] of statusByTemplate) {
-      const result = aggregate(statuses)
-      if (result) map.set(templateId, result)
-    }
-    return map
-  }, [allUsersDailyReports, dailyReport?.system_overdue, dailyReport?.system_today, selectedUserId, viewMode])
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
     return projectTasks.filter((task) => {
@@ -2425,6 +2385,33 @@ export default function DepartmentKanban() {
     isTaskCompletedToday,
     isTaskOverlappingWeek,
     overdueTaskIds,
+  ])
+  const selectedDateNoProjectTasks = React.useMemo(() => {
+    if (showAllFastTasks) {
+      return visibleNoProjectTasks.filter((task) => {
+        if (selectedUserId !== "__all__") {
+          return isTaskOwnedByViewUser(task, selectedUserId)
+        }
+        return true
+      })
+    }
+    return visibleNoProjectTasks.filter((task) => {
+      const matchesSelectedDate = isTaskActiveForDate(task, selectedFastTaskDate)
+      const completedOnSelectedDate = isTaskCompletedOnDate(task, selectedFastTaskDate)
+      if (!matchesSelectedDate && !completedOnSelectedDate) return false
+      if (selectedUserId !== "__all__") {
+        return isTaskOwnedByViewUser(task, selectedUserId)
+      }
+      return true
+    })
+  }, [
+    visibleNoProjectTasks,
+    isTaskActiveForDate,
+    selectedFastTaskDate,
+    isTaskCompletedOnDate,
+    selectedUserId,
+    showAllFastTasks,
+    isTaskOwnedByViewUser,
   ])
   const todayOpenNotes = React.useMemo(() => {
     return openNotes.filter((note) => {
@@ -2619,14 +2606,8 @@ export default function DepartmentKanban() {
       if (task.completed_at) return "DONE"
       return "TODO"
     }
-    const normalizeSystemStatusKey = (status?: string | null): StatusKey => {
-      const raw = status?.toUpperCase() || ""
-      if (raw === "DONE" || raw === "SKIPPED") return "DONE"
-      return "TODO"
-    }
     const isRowDone = (row: (typeof rows)[number]) => {
-      if (row.systemStatus === "DONE") return true
-      return row.status?.toUpperCase() === "DONE"
+      return row.statusKey === "DONE" || row.status?.toUpperCase() === "DONE"
     }
     const doneLast = (items: Array<(typeof rows)[number]>) => {
       const open: Array<(typeof rows)[number]> = []
@@ -2666,36 +2647,43 @@ export default function DepartmentKanban() {
     }
 
     const todayTemplateIds = new Set(
-      todaySystemTasks.map((tmpl) => tmpl.template_id || tmpl.id)
+      (dailyReport?.system_today || [])
+        .map((item) => item.task?.system_template_origin_id)
+        .filter((value): value is string => Boolean(value))
     )
     const systemTodayByTemplate = new Map<string, DailyReportResponse["system_today"][number]>()
     if (dailyReport?.system_today?.length) {
-      for (const occ of dailyReport.system_today) {
-        systemTodayByTemplate.set(occ.template_id, occ)
+      for (const item of dailyReport.system_today) {
+        const templateId = item.task?.system_template_origin_id
+        if (templateId) systemTodayByTemplate.set(templateId, item)
       }
     }
     const overdueByTemplate = new Map<string, DailyReportResponse["system_overdue"][number]>()
     if (dailyReport?.system_overdue?.length) {
-      for (const occ of dailyReport.system_overdue) {
-        if (todayTemplateIds.has(occ.template_id)) {
+      for (const item of dailyReport.system_overdue) {
+        const templateId = item.task?.system_template_origin_id
+        if (!templateId || todayTemplateIds.has(templateId)) {
           continue
         }
-        const existing = overdueByTemplate.get(occ.template_id)
+        const existing = overdueByTemplate.get(templateId)
         if (!existing) {
-          overdueByTemplate.set(occ.template_id, occ)
+          overdueByTemplate.set(templateId, item)
           continue
         }
-        const existingDate = toDate(existing.occurrence_date)
-        const nextDate = toDate(occ.occurrence_date)
+        const existingDate = toDate(existing.task?.start_date || existing.task?.origin_run_at || existing.task?.due_date || existing.task?.created_at)
+        const nextDate = toDate(item.task?.start_date || item.task?.origin_run_at || item.task?.due_date || item.task?.created_at)
         if (!existingDate || (nextDate && dayKey(nextDate) > dayKey(existingDate))) {
-          overdueByTemplate.set(occ.template_id, occ)
+          overdueByTemplate.set(templateId, item)
         }
       }
     }
 
-    for (const occ of overdueByTemplate.values()) {
-      const tmpl = systemTemplateById.get(occ.template_id) || null
-      const baseDate = toDate(occ.occurrence_date)
+    for (const item of overdueByTemplate.values()) {
+      const task = item.task
+      if (!task) continue
+      const templateId = task.system_template_origin_id
+      const tmpl = templateId ? (systemTemplateById.get(templateId) || null) : null
+      const baseDate = toDate(task.start_date || task.origin_run_at || task.due_date || task.created_at)
       const alignmentEnabled = Boolean(
         tmpl?.requires_alignment ||
         tmpl?.alignment_time ||
@@ -2706,11 +2694,11 @@ export default function DepartmentKanban() {
       pushSystemRow({
         typeLabel: "SYS",
         subtype: tmpl ? systemFrequencyShortLabel(tmpl.frequency) : "SYS",
-        period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
-        title: occ.title || "-",
-        description: tmpl?.description || "-",
-        status: formatSystemOccurrenceStatus(occ.status),
-        statusKey: normalizeSystemStatusKey(occ.status),
+        period: resolvePeriod(task.finish_period ?? tmpl?.finish_period ?? null, task.due_date || task.start_date || task.created_at),
+        title: task.title || "-",
+        description: task.description || tmpl?.description || "-",
+        status: taskStatusLabel(task),
+        statusKey: normalizeTaskStatusKey(task),
         bz: alignmentEnabled
           ? bzUsers !== "-"
             ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
@@ -2719,45 +2707,43 @@ export default function DepartmentKanban() {
               : "-"
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
-        tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
-        comment: occ.comment ?? null,
-        systemTemplateId: occ.template_id,
-        systemOccurrenceDate: occ.occurrence_date,
-        systemStatus: occ.status,
+        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        comment: task.user_comment ?? null,
+        taskId: task.id,
       })
     }
 
-    for (const tmpl of todaySystemTasks) {
-      const templateId = tmpl.template_id || tmpl.id
-      const occ = systemTodayByTemplate.get(templateId) || null
+    for (const item of systemTodayByTemplate.values()) {
+      const task = item.task
+      if (!task) continue
+      const templateId = task.system_template_origin_id
+      const tmpl = templateId ? (systemTemplateById.get(templateId) || null) : null
       const alignmentEnabled = Boolean(
-        tmpl.requires_alignment ||
-        tmpl.alignment_time ||
-        (tmpl.alignment_user_ids && tmpl.alignment_user_ids.length) ||
-        (tmpl.alignment_roles && tmpl.alignment_roles.length)
+        tmpl?.requires_alignment ||
+        tmpl?.alignment_time ||
+        (tmpl?.alignment_user_ids && tmpl.alignment_user_ids.length) ||
+        (tmpl?.alignment_roles && tmpl.alignment_roles.length)
       )
-      const bzUsers = formatAlignmentUsers(tmpl.alignment_user_ids, userMap)
+      const bzUsers = formatAlignmentUsers(tmpl?.alignment_user_ids, userMap)
       pushSystemRow({
         typeLabel: "SYS",
-        subtype: systemFrequencyShortLabel(tmpl.frequency),
-        period: resolvePeriod(tmpl.finish_period, occ?.occurrence_date || todayIso),
-        title: occ?.title || tmpl.title || "-",
-        description: tmpl.description || "-",
-        status: formatSystemOccurrenceStatus(occ?.status || tmpl.status),
-        statusKey: normalizeSystemStatusKey(occ?.status || tmpl.status),
+        subtype: tmpl ? systemFrequencyShortLabel(tmpl.frequency) : "SYS",
+        period: resolvePeriod(task.finish_period ?? tmpl?.finish_period ?? null, task.due_date || task.start_date || task.created_at),
+        title: task.title || "-",
+        description: task.description || tmpl?.description || "-",
+        status: taskStatusLabel(task),
+        statusKey: normalizeTaskStatusKey(task),
         bz: alignmentEnabled
           ? bzUsers !== "-"
-            ? formatAlignmentInitials(tmpl.alignment_user_ids, userMap)
-            : tmpl.alignment_roles?.length
+            ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
+            : tmpl?.alignment_roles?.length
               ? tmpl.alignment_roles.join(", ")
               : "-"
           : "-",
-        kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl.alignment_time) : "-",
+        kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
         tyo: "T",
-        comment: occ?.comment ?? null,
-        systemTemplateId: templateId,
-        systemOccurrenceDate: occ?.occurrence_date || todayIso,
-        systemStatus: occ?.status || "OPEN",
+        comment: task.user_comment ?? null,
+        taskId: task.id,
       })
     }
 
@@ -2991,14 +2977,8 @@ export default function DepartmentKanban() {
         if (task.completed_at) return "DONE"
         return "TODO"
       }
-      const normalizeSystemStatusKey = (status?: string | null): StatusKey => {
-        const raw = status?.toUpperCase() || ""
-        if (raw === "DONE" || raw === "SKIPPED") return "DONE"
-        return "TODO"
-      }
       const isRowDone = (row: (typeof rows)[number]) => {
-        if (row.systemStatus === "DONE") return true
-        return row.status?.toUpperCase() === "DONE"
+        return row.statusKey === "DONE" || row.status?.toUpperCase() === "DONE"
       }
       const doneLast = (items: Array<(typeof rows)[number]>) => {
         const open: Array<(typeof rows)[number]> = []
@@ -3032,18 +3012,23 @@ export default function DepartmentKanban() {
       }
 
       // Process system tasks
-      const allSystemOccurrences = [
+      const allSystemTaskItems = [
         ...(report.system_today || []),
         ...(report.system_overdue || []),
       ]
       const systemTodayByTemplate = new Map<string, DailyReportResponse["system_today"][number]>()
-      for (const occ of report.system_today || []) {
-        systemTodayByTemplate.set(occ.template_id, occ)
+      for (const item of report.system_today || []) {
+        const templateId = item.task?.system_template_origin_id
+        if (templateId) systemTodayByTemplate.set(templateId, item)
       }
 
-      for (const occ of allSystemOccurrences) {
-        const tmpl = systemTemplateById.get(occ.template_id) || null
-        const baseDate = toDate(occ.occurrence_date)
+      for (const item of allSystemTaskItems) {
+        const task = item.task
+        if (!task) continue
+        const templateId = task.system_template_origin_id
+        if (!templateId) continue
+        const tmpl = systemTemplateById.get(templateId) || null
+        const baseDate = toDate(task.start_date || task.origin_run_at || task.due_date || task.created_at)
         if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
           continue
         }
@@ -3057,11 +3042,11 @@ export default function DepartmentKanban() {
         pushSystemRow({
           typeLabel: "SYS",
           subtype: tmpl ? systemFrequencyShortLabel(tmpl.frequency) : "SYS",
-          period: resolvePeriod(tmpl?.finish_period ?? null, occ.occurrence_date),
-          title: occ.title || "-",
-          description: tmpl?.description || "-",
-          status: formatSystemOccurrenceStatus(occ.status),
-          statusKey: normalizeSystemStatusKey(occ.status),
+          period: resolvePeriod(task.finish_period ?? tmpl?.finish_period ?? null, task.due_date || task.start_date || task.created_at),
+          title: task.title || "-",
+          description: task.description || tmpl?.description || "-",
+          status: taskStatusLabel(task),
+          statusKey: normalizeTaskStatusKey(task),
           bz: alignmentEnabled
             ? bzUsers !== "-"
               ? formatAlignmentInitials(tmpl?.alignment_user_ids, userMap)
@@ -3070,11 +3055,9 @@ export default function DepartmentKanban() {
                 : "-"
             : "-",
           kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
-          tyo: getTyoLabel(baseDate, occ.acted_at, todayDate),
-          comment: occ.comment ?? null,
-          systemTemplateId: occ.template_id,
-          systemOccurrenceDate: occ.occurrence_date,
-          systemStatus: occ.status,
+          tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+          comment: task.user_comment ?? null,
+          taskId: task.id,
         })
       }
 
@@ -3450,60 +3433,6 @@ export default function DepartmentKanban() {
       setDailyReport((prev) => {
         if (!prev) return prev
         return prev
-      })
-      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
-    } catch (error) {
-      console.error("Failed to save comment", error)
-      toast.error("Failed to save comment")
-      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
-    } finally {
-      setDailyReportCommentSaving(commentKey, false)
-    }
-  }
-
-  const saveDailyReportSystemComment = async (
-    templateId: string,
-    occurrenceDate: string,
-    status: string,
-    nextValue: string,
-    previousValue: string,
-    commentKey: string
-  ) => {
-    const trimmed = nextValue.trim()
-    const previousTrimmed = previousValue.trim()
-    if (trimmed === previousTrimmed) return
-
-    const payloadComment = trimmed.length ? trimmed : null
-    setDailyReportCommentSaving(commentKey, true)
-    try {
-      const res = await apiFetch("/system-tasks/occurrences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          template_id: templateId,
-          occurrence_date: occurrenceDate,
-          status: status || "OPEN",
-          comment: payloadComment,
-        }),
-      })
-      if (!res.ok) {
-        const data = await res.json()
-        toast.error(data.detail || "Failed to save comment")
-        setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
-        return
-      }
-
-      setDailyReport((prev) => {
-        if (!prev) return prev
-        const updateOccurrence = (occ: DailyReportResponse["system_today"][number]) =>
-          occ.template_id === templateId && occ.occurrence_date === occurrenceDate
-            ? { ...occ, comment: payloadComment }
-            : occ
-        return {
-          ...prev,
-          system_today: prev.system_today.map(updateOccurrence),
-          system_overdue: prev.system_overdue.map(updateOccurrence),
-        }
       })
       setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
     } catch (error) {
@@ -3899,57 +3828,27 @@ export default function DepartmentKanban() {
     return map
   }, [crossDepartmentConfirmTasks, departmentTasks, noProjectTasks])
   const todaySystemTasksSorted = React.useMemo(
-    () =>
-      sortDoneLast(todaySystemTasks, (task) => {
-        const templateId = task.template_id || task.id
-        const statusValue = templateId ? (systemOccurrenceStatusByTemplate.get(templateId) ?? task.status ?? null) : (task.status ?? null)
-        return statusValue === "DONE"
-      }),
-    [sortDoneLast, todaySystemTasks, systemOccurrenceStatusByTemplate]
+    () => sortDoneLast(todaySystemTasks, (task) => String(task.status || "").toUpperCase() === "DONE"),
+    [sortDoneLast, todaySystemTasks]
   )
-  const overdueOccurrenceByTemplateId = React.useMemo(() => {
-    const map = new Map<string, DailyReportResponse["system_overdue"][number]>()
-    if (!dailyReport?.system_overdue?.length) return map
-    for (const occ of dailyReport.system_overdue) {
-      const existing = map.get(occ.template_id)
-      if (!existing) {
-        map.set(occ.template_id, occ)
-        continue
-      }
-      const existingDate = toDate(existing.occurrence_date)
-      const nextDate = toDate(occ.occurrence_date)
-      if (!existingDate || (nextDate && dayKey(nextDate) > dayKey(existingDate))) {
-        map.set(occ.template_id, occ)
-      }
-    }
-    return map
-  }, [dailyReport?.system_overdue])
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
   const gaTableDirty = gaTableInput !== (gaTableEntry?.content ?? "")
 
-  // Daily Report (overdue) for All Today (department view) and My View (current user).
+  // Daily Report is only available in My View.
   React.useEffect(() => {
     let cancelled = false
     const run = async () => {
       const shouldFetchDailyReport =
-        activeTab === "all" || (activeTab === "system" && viewMode === "mine")
+        viewMode === "mine" && (activeTab === "all" || activeTab === "system")
       if (!shouldFetchDailyReport) {
-        setDailyReport(null)
-        return
-      }
-      if (viewMode === "department" && selectedUserId === "__all__") {
         setDailyReport(null)
         setLoadingDailyReport(false)
         return
       }
-      const targetUserId =
-        viewMode === "department"
-          ? selectedUserId !== "__all__"
-            ? selectedUserId
-            : user?.id
-          : user?.id
+      const targetUserId = user?.id
       if (!department?.id || !targetUserId) {
         setDailyReport(null)
+        setLoadingDailyReport(false)
         return
       }
       setLoadingDailyReport(true)
@@ -3976,19 +3875,13 @@ export default function DepartmentKanban() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
+  }, [activeTab, apiFetch, department?.id, todayIso, user?.id, viewMode])
 
   const refreshDailyReport = React.useCallback(async () => {
     const shouldFetchDailyReport =
-      activeTab === "all" || (activeTab === "system" && viewMode === "mine")
+      viewMode === "mine" && (activeTab === "all" || activeTab === "system")
     if (!shouldFetchDailyReport) return
-    if (viewMode === "department" && selectedUserId === "__all__") return
-    const targetUserId =
-      viewMode === "department"
-        ? selectedUserId !== "__all__"
-          ? selectedUserId
-          : user?.id
-        : user?.id
+    const targetUserId = user?.id
     if (!department?.id || !targetUserId) return
     try {
       const qs = new URLSearchParams({
@@ -4003,7 +3896,7 @@ export default function DepartmentKanban() {
     } catch {
       // ignore refresh failures
     }
-  }, [activeTab, apiFetch, department?.id, selectedUserId, todayIso, user?.id, viewMode])
+  }, [activeTab, apiFetch, department?.id, todayIso, user?.id, viewMode])
 
   React.useEffect(() => {
     let cancelled = false
@@ -4169,6 +4062,7 @@ export default function DepartmentKanban() {
   const canCreate = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "STAFF"
   const isReadOnly = viewMode === "mine"
   const canEditTasksInCurrentView = viewMode === "mine"
+  const canCreateNoProjectTask = canCreate
   const canEditAllTodayTask = React.useCallback(
     (task?: Task | null) => {
       if (!task || !user?.id) return false
@@ -4188,25 +4082,10 @@ export default function DepartmentKanban() {
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
-    if (viewMode !== "mine") {
-      return visibleSystemTemplates.filter((t) => shouldShowTemplate(t, systemDate))
-    }
-    const allowed = new Set<string>()
-    for (const t of visibleSystemTemplates) {
-      const templateId = t.template_id || t.id
-      if (
-        shouldShowTemplate(t, systemDate) ||
-        shouldShowTemplate(t, todayDate) ||
-        (templateId && overdueSystemTemplateIds.has(templateId))
-      ) {
-        allowed.add(templateId)
-      }
-    }
     return visibleSystemTemplates.filter((t) => {
-      const templateId = t.template_id || t.id
-      return allowed.has(templateId)
+      return shouldShowTemplate(t, systemDate) || isSystemTaskOverdueForDate(t, systemDate)
     })
-  }, [overdueSystemTemplateIds, showAllSystem, systemDate, todayDate, viewMode, visibleSystemTemplates])
+  }, [isSystemTaskOverdueForDate, showAllSystem, systemDate, visibleSystemTemplates])
 
   const toggleSystemDescription = React.useCallback((id: string) => {
     setExpandedSystemDescriptions((prev) => ({ ...prev, [id]: !prev[id] }))
@@ -4218,7 +4097,7 @@ export default function DepartmentKanban() {
     const blocked: Task[] = []
     const oneHour: Task[] = []
     const r1: Task[] = []
-    for (const t of visibleNoProjectTasks) {
+    for (const t of selectedDateNoProjectTasks) {
       if (t.is_bllok) {
         blocked.push(t)
       } else if (t.is_r1) {
@@ -4240,7 +4119,7 @@ export default function DepartmentKanban() {
       oneHour: sortDoneLast(oneHour, (task) => taskStatusValue(task) === "DONE"),
       r1: sortDoneLast(r1, (task) => taskStatusValue(task) === "DONE"),
     }
-  }, [visibleNoProjectTasks, sortDoneLast, taskStatusValue])
+  }, [selectedDateNoProjectTasks, sortDoneLast, taskStatusValue])
 
   const statusRows = [
     {
@@ -4417,65 +4296,8 @@ export default function DepartmentKanban() {
     })
   }, [visibleSystemTasks])
 
-  const submitSystemTask = async () => {
-    if (!systemTitle.trim() || !systemDepartmentId) return
-    setCreatingSystem(true)
-    try {
-      const date = new Date(systemDateInput)
-      const dayIdx = date.getDay() === 0 ? 6 : date.getDay() - 1
-      const dayOfMonth = date.getDate()
-      const monthOfYear = date.getMonth() + 1
-
-      const payload = {
-        title: systemTitle.trim(),
-        description: systemDescription.trim() || null,
-        department_id: systemDepartmentId,
-        default_assignee_id: systemOwnerId === "__unassigned__" ? null : systemOwnerId,
-        frequency: systemFrequency,
-        day_of_week: systemFrequency === "WEEKLY" ? dayIdx : null,
-        days_of_week: systemFrequency === "WEEKLY" ? [dayIdx] : null,
-        day_of_month: systemFrequency !== "WEEKLY" && systemFrequency !== "DAILY" ? dayOfMonth : null,
-        month_of_year:
-          systemFrequency === "YEARLY" || systemFrequency === "3_MONTHS" || systemFrequency === "6_MONTHS"
-            ? monthOfYear
-            : null,
-        is_active: systemStatus === "OPEN",
-      }
-
-      const res = await apiFetch("/system-tasks", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(payload),
-      })
-      if (!res.ok) {
-        let detail = "Failed to create system task"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
-      const created = (await res.json()) as SystemTaskTemplate
-      setSystemTasks((prev) => [created, ...prev])
-      setCreateSystemOpen(false)
-      setSystemTitle("")
-      setSystemDescription("")
-      setSystemOwnerId("__unassigned__")
-      setSystemDateInput(formatDateInput(new Date()))
-      setSystemFrequency("DAILY")
-      setSystemStatus("OPEN")
-      toast.success("System task created")
-    } finally {
-      setCreatingSystem(false)
-    }
-  }
-
   const handleCloseTaskClick = (task: SystemTaskTemplate) => {
-    const templateId = task.template_id ?? task.id
-    setTaskToCloseId(templateId)
+    setTaskToCloseId(task.id)
     setTaskToCloseTemplate(task)
     setCloseTaskComment("")
     setCloseTaskDialogOpen(true)
@@ -4489,38 +4311,63 @@ export default function DepartmentKanban() {
     }
 
     setClosingTask(true)
-    const occurrenceBaseDate = taskToCloseTemplate
-      ? findPreviousOccurrenceDate(taskToCloseTemplate, systemDate)
-      : systemDate
-    const occurrenceDate = formatDateInput(occurrenceBaseDate)
+    const closeComment = closeTaskComment.trim()
+    const templateId = taskToCloseTemplate?.template_id ?? taskToCloseTemplate?.id ?? taskToCloseId
+    const hasRealTaskRow = Boolean(taskToCloseTemplate?.template_id && taskToCloseTemplate.id !== taskToCloseTemplate.template_id)
 
     try {
-      const res = await apiFetch("/system-tasks/occurrences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          template_id: taskToCloseId,
-          occurrence_date: occurrenceDate,
-          status: "DONE",
-          comment: closeTaskComment.trim(),
-        }),
-      })
-      if (!res.ok) {
-        toast.error("Failed to close system task")
-        return
+      if (hasRealTaskRow) {
+        const updateRes = await apiFetch(`/tasks/${taskToCloseId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "DONE" }),
+        })
+        if (!updateRes.ok) {
+          toast.error("Failed to close system task")
+          return
+        }
+
+        const commentRes = await apiFetch(`/tasks/${taskToCloseId}/comment`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comment: closeComment }),
+        })
+        if (!commentRes.ok) {
+          toast.error("Task was closed, but saving the comment failed")
+        }
+      } else {
+        const occurrenceBaseDate = taskToCloseTemplate
+          ? findPreviousOccurrenceDate(taskToCloseTemplate, systemDate)
+          : systemDate
+        const occurrenceDate = formatDateInput(occurrenceBaseDate)
+        const res = await apiFetch("/system-tasks/occurrences", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            template_id: templateId,
+            occurrence_date: occurrenceDate,
+            status: "DONE",
+            comment: closeComment,
+          }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to close system task")
+          return
+        }
       }
 
       setSystemTasks((prev) =>
         prev.map((task) => {
-          const templateId = task.template_id ?? task.id
-          return templateId === taskToCloseId
-            ? { ...task, status: "DONE", user_comment: closeTaskComment.trim() }
+          const matchesTask = task.id === taskToCloseId
+          const matchesTemplate = !hasRealTaskRow && (task.template_id ?? task.id) === templateId
+          return matchesTask || matchesTemplate
+            ? { ...task, status: "DONE", user_comment: closeComment }
             : task
         })
       )
 
       const sysRes = await apiFetch(
-        `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
+        `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}&include_overdue=true`
       )
       if (sysRes.ok) {
         setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
@@ -4612,7 +4459,7 @@ export default function DepartmentKanban() {
       )
 
       const sysRes = await apiFetch(
-        `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}`
+        `/system-tasks?department_id=${department?.id || ""}&occurrence_date=${formatDateInput(systemDate)}&include_overdue=true`
       )
       if (sysRes.ok) {
         setSystemTasks((await sysRes.json()) as SystemTaskTemplate[])
@@ -6339,11 +6186,7 @@ export default function DepartmentKanban() {
                     <tbody>
                       {dailyUserReportFilteredEntries.length ? (
                         dailyUserReportFilteredEntries.map(({ id: rowId, row }, index) => {
-                          const commentKey = row.taskId
-                            ? `task:${row.taskId}`
-                            : row.systemTemplateId && row.systemOccurrenceDate
-                              ? `system:${row.systemTemplateId}:${row.systemOccurrenceDate}`
-                              : ""
+                          const commentKey = row.taskId ? `task:${row.taskId}` : ""
                           const previousValue = row.comment ?? ""
                           const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
                           const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
@@ -6424,17 +6267,6 @@ export default function DepartmentKanban() {
                                       const nextValue = e.target.value
                                       if (row.taskId) {
                                         void saveDailyReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
-                                        return
-                                      }
-                                      if (row.systemTemplateId && row.systemOccurrenceDate) {
-                                        void saveDailyReportSystemComment(
-                                          row.systemTemplateId,
-                                          row.systemOccurrenceDate,
-                                          row.systemStatus || "OPEN",
-                                          nextValue,
-                                          previousValue,
-                                          commentKey
-                                        )
                                       }
                                     }}
                                     disabled={!commentKey}
@@ -6447,17 +6279,6 @@ export default function DepartmentKanban() {
                                       if (!commentKey) return
                                       if (row.taskId) {
                                         void saveDailyReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
-                                        return
-                                      }
-                                      if (row.systemTemplateId && row.systemOccurrenceDate) {
-                                        void saveDailyReportSystemComment(
-                                          row.systemTemplateId,
-                                          row.systemOccurrenceDate,
-                                          row.systemStatus || "OPEN",
-                                          commentValue,
-                                          previousValue,
-                                          commentKey
-                                        )
                                       }
                                     }}
                                   >
@@ -6520,70 +6341,6 @@ export default function DepartmentKanban() {
               </Card>
             ) : null}
 
-            {viewMode === "department" ? (
-              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4 max-w-5xl">
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <div className="text-sm font-semibold text-slate-800">Daily Report (Overdue)</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      Shows overdue items for the selected user (not for “All users”).
-                    </div>
-                  </div>
-                  {loadingDailyReport ? <div className="text-xs text-slate-500">Loading…</div> : null}
-                </div>
-                {selectedUserId === "__all__" ? (
-                  <div className="mt-3 text-sm text-slate-600">Select a user to view their overdue report.</div>
-                ) : dailyReport ? (
-                  <div className="mt-4 grid gap-3 md:grid-cols-2">
-                    <div className="rounded-xl border border-slate-200 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue tasks</div>
-                      {dailyReport.tasks_overdue.length ? (
-                        <div className="mt-2 space-y-2">
-                          {dailyReport.tasks_overdue.slice(0, 8).map((item) => (
-                            <div key={item.task.id} className="flex items-start justify-between gap-2">
-                              <div className="text-sm text-slate-800">{item.task.title}</div>
-                              <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
-                                late {item.late_days ?? 0}d
-                              </div>
-                            </div>
-                          ))}
-                          {dailyReport.tasks_overdue.length > 8 ? (
-                            <div className="text-xs text-slate-500">+{dailyReport.tasks_overdue.length - 8} more</div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-sm text-slate-500">No overdue tasks.</div>
-                      )}
-                    </div>
-                    <div className="rounded-xl border border-slate-200 p-3">
-                      <div className="text-xs font-semibold uppercase tracking-wide text-slate-500">Overdue system tasks</div>
-                      {dailyReport.system_overdue.length ? (
-                        <div className="mt-2 space-y-2">
-                          {dailyReport.system_overdue.slice(0, 8).map((occ) => (
-                            <div key={`${occ.template_id}-${occ.occurrence_date}`} className="flex items-start justify-between gap-2">
-                              <div className="text-sm text-slate-800">
-                                {occ.title}{" "}
-                                <span className="text-xs text-slate-500">(planned {occ.occurrence_date})</span>
-                              </div>
-                              <div className="shrink-0 rounded-full bg-rose-100 text-rose-700 px-2 py-0.5 text-[11px] font-semibold">
-                                late {occ.late_days ?? 0}d
-                              </div>
-                            </div>
-                          ))}
-                          {dailyReport.system_overdue.length > 8 ? (
-                            <div className="text-xs text-slate-500">+{dailyReport.system_overdue.length - 8} more</div>
-                          ) : null}
-                        </div>
-                      ) : (
-                        <div className="mt-2 text-sm text-slate-500">No overdue system tasks.</div>
-                      )}
-                    </div>
-                  </div>
-                ) : (
-                  <div className="mt-3 text-sm text-slate-500">No report available.</div>
-                )}
-              </Card>
-            ) : null}
             <div className="space-y-4">
               <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between gap-3">
@@ -6929,7 +6686,7 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">System Tasks</div>
-                    <div className="text-xs text-slate-500 mt-1">Scheduled system tasks for today.</div>
+                    <div className="text-xs text-slate-500 mt-1">Scheduled and overdue system tasks for today.</div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">{todaySystemTasks.length}</div>
                 </div>
@@ -6952,16 +6709,15 @@ export default function DepartmentKanban() {
                     </TableHeader>
                     <TableBody>
                       {todaySystemTasksSorted.map((task, index) => {
-                        const templateId = task.template_id || task.id
-                        const statusValue = templateId ? (systemOccurrenceStatusByTemplate.get(templateId) ?? task.status ?? null) : (task.status ?? null)
+                        const statusValue = task.status ?? null
                         const statusLabel = formatSystemOccurrenceStatus(statusValue)
                         const isDoneStatus = String(statusValue || "").toUpperCase() === "DONE"
-                        const isOverdue = templateId ? overdueSystemTemplateIds.has(templateId) : false
-                        const overdueOccurrence = templateId ? overdueOccurrenceByTemplateId.get(templateId) : undefined
-                        const displayDate = isOverdue && overdueOccurrence ? overdueOccurrence.occurrence_date : systemTaskDisplayDate(task)
+                        const isOverdue = isSystemTaskOverdueForDate(task, todayDate)
+                        const displayDate = systemTaskDisplayDate(task)
                         const assignees = systemAssigneeInitials(task)
                         const priorityValue = normalizePriority(task.priority)
                         const canEditSystemDate = canEditSystemDateRow(task, statusValue)
+                        const canMarkDone = canEditSystemDate && !isDoneStatus
                         return (
                           <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
@@ -7003,18 +6759,35 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${isDoneStatus ? "bg-emerald-100 text-emerald-800 font-medium" : ""}`}>{statusLabel}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{PRIORITY_LABELS[priorityValue]}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>
-                              {canEditSystemDate ? (
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                  title="Edit date"
-                                  aria-label={`Edit date ${task.title || "system task"}`}
-                                  disabled={savingSystemDateOverride}
-                                  onClick={() => openSystemDateEditor(task, statusValue)}
-                                >
-                                  <Pencil className="h-3 w-3" />
-                                </Button>
+                              {canMarkDone || canEditSystemDate ? (
+                                <div className="flex items-center gap-2">
+                                  {canMarkDone ? (
+                                    <Button
+                                      variant="outline"
+                                      size="sm"
+                                      className="h-7 border-emerald-200 px-2 text-xs text-emerald-600 hover:border-emerald-300 hover:text-emerald-700"
+                                      title="Mark done"
+                                      aria-label={`Mark ${task.title || "system task"} as done`}
+                                      onClick={() => handleCloseTaskClick(task)}
+                                      disabled={closingTask}
+                                    >
+                                      {closingTask ? "Updating..." : "Mark done"}
+                                    </Button>
+                                  ) : null}
+                                  {canEditSystemDate ? (
+                                    <Button
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                      title="Edit date"
+                                      aria-label={`Edit date ${task.title || "system task"}`}
+                                      disabled={savingSystemDateOverride}
+                                      onClick={() => openSystemDateEditor(task, statusValue)}
+                                    >
+                                      <Pencil className="h-3 w-3" />
+                                    </Button>
+                                  ) : null}
+                                </div>
                               ) : (
                                 <span className="text-slate-400">-</span>
                               )}
@@ -7025,7 +6798,7 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <div className="mt-3 text-sm text-slate-500">No system tasks today.</div>
+                  <div className="mt-3 text-sm text-slate-500">No system tasks for today.</div>
                 )}
               </Card>
 
@@ -7142,107 +6915,6 @@ export default function DepartmentKanban() {
                   Department tasks organized by frequency and date.
                 </div>
               </div>
-              {canManage ? (
-                <Dialog open={createSystemOpen} onOpenChange={setCreateSystemOpen}>
-                  <DialogTrigger asChild>
-                    <Button variant="outline">+ Add Task</Button>
-                  </DialogTrigger>
-                  <DialogContent className="sm:max-w-2xl z-[110]">
-                    <DialogHeader>
-                      <DialogTitle>Add System Task</DialogTitle>
-                    </DialogHeader>
-                    <div className="grid gap-4 md:grid-cols-2">
-                      <div className="space-y-2 md:col-span-2">
-                        <Label>Title</Label>
-                        <Input value={systemTitle} onChange={(e) => setSystemTitle(e.target.value)} />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Owner</Label>
-                        <Select value={systemOwnerId} onValueChange={setSystemOwnerId}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Select owner" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__unassigned__">Unassigned</SelectItem>
-                            {departmentUsers.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || "-"}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Set by</Label>
-                        <Input value={user?.full_name || user?.username || user?.email || ""} disabled />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Date</Label>
-                        <Input
-                          type="date"
-                          value={systemDateInput}
-                          onChange={(e) => setSystemDateInput(e.target.value)}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Frequency</Label>
-                        <Select value={systemFrequency} onValueChange={(v) => setSystemFrequency(v as SystemTaskTemplate["frequency"])}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Frequency" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="DAILY">Daily</SelectItem>
-                            <SelectItem value="WEEKLY">Weekly</SelectItem>
-                            <SelectItem value="MONTHLY">Monthly</SelectItem>
-                            <SelectItem value="3_MONTHS">3 months</SelectItem>
-                            <SelectItem value="6_MONTHS">6 months</SelectItem>
-                            <SelectItem value="YEARLY">Yearly</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Department</Label>
-                        <Select value={systemDepartmentId} onValueChange={setSystemDepartmentId}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Department" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={department.id}>{formatDepartmentName(department.name)}</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Status</Label>
-                        <Select value={systemStatus} onValueChange={(v) => setSystemStatus(v as typeof systemStatus)}>
-                          <SelectTrigger>
-                            <SelectValue placeholder="Status" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="OPEN">Open</SelectItem>
-                            <SelectItem value="INACTIVE">Inactive</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-2 md:col-span-2">
-                        <Label>Description</Label>
-                        <Textarea
-                          value={systemDescription}
-                          onChange={(e) => setSystemDescription(e.target.value)}
-                          placeholder="Enter task details..."
-                        />
-                      </div>
-                      <div className="flex justify-end gap-2 md:col-span-2">
-                        <Button variant="outline" onClick={() => setCreateSystemOpen(false)}>
-                          Cancel
-                        </Button>
-                        <Button disabled={!systemTitle.trim() || creatingSystem} onClick={() => void submitSystemTask()}>
-                          {creatingSystem ? "Saving..." : "Save"}
-                        </Button>
-                      </div>
-                    </div>
-                  </DialogContent>
-                </Dialog>
-              ) : null}
             </div>
 
             <div className="flex flex-wrap items-center gap-3">
@@ -7277,21 +6949,24 @@ export default function DepartmentKanban() {
                 <Checkbox checked={multiSelect} onCheckedChange={(v) => setMultiSelect(Boolean(v))} />
                 <span>Multi-select</span>
               </div>
-              <Input
-                type="date"
-                className="w-40"
-                value={formatDateInput(systemDate)}
-                onChange={(e) => setSystemDate(new Date(e.target.value))}
-              />
-              <Button variant="outline" onClick={() => setShowAllSystem((prev) => !prev)}>
-                {showAllSystem ? "Only date" : "Show all"}
-              </Button>
+              <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-1.5">
+                <Input
+                  type="date"
+                  className="h-9 w-40 border-0 bg-transparent p-0 shadow-none focus-visible:ring-0"
+                  value={formatDateInput(systemDate)}
+                  onChange={(e) => setSystemDate(new Date(e.target.value))}
+                />
+                <div className="h-5 w-px bg-border" />
+                <Button variant="outline" size="sm" onClick={() => setShowAllSystem((prev) => !prev)}>
+                  {showAllSystem ? "Only date" : "Show all"}
+                </Button>
+              </div>
             </div>
 
             <div
               className="relative w-full rounded-lg border bg-white shadow-sm"
             >
-              <div className="max-h-[calc(100vh-var(--system-tasks-sticky-offset)-1.5rem)] overflow-auto overscroll-contain">
+              <div className="overflow-x-auto">
                 <div className="min-w-[1000px] xl:min-w-0">
                   <div className="sticky top-0 z-30">
                     <div className="border-b bg-slate-50/95 backdrop-blur py-3 px-4">
@@ -7324,6 +6999,7 @@ export default function DepartmentKanban() {
                           const frequencyLabel = FREQUENCY_LABELS[template.frequency] || template.frequency
                           const statusValue = template.status || "TODO"
                           const isClosed = statusValue === "DONE"
+                          const isOverdue = isSystemTaskOverdueForDate(template, systemDate)
                           const isAssigned =
                             Boolean(user?.id) &&
                             (template.default_assignee_id === user?.id ||
@@ -7349,6 +7025,11 @@ export default function DepartmentKanban() {
                                   <div className="text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
                                     {template.title}
                                   </div>
+                                  {isOverdue ? (
+                                    <Badge variant="outline" className="h-5 text-[10px] uppercase bg-rose-100 text-rose-700 border-rose-200">
+                                      Late
+                                    </Badge>
+                                  ) : null}
                                   <Badge variant="secondary" className="h-5 text-[10px] uppercase">
                                     {statusValue}
                                   </Badge>
@@ -7500,7 +7181,44 @@ export default function DepartmentKanban() {
                   Use these buckets to track non-project tasks and special cases.
                 </div>
               </div>
-            {canEditTasksInCurrentView ? (
+            <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end">
+              <div className="w-full sm:w-[180px]">
+                <Label htmlFor="fast-task-date" className="mb-2 block text-xs font-medium uppercase tracking-wide text-slate-500">
+                  Date
+                </Label>
+                <Input
+                  id="fast-task-date"
+                  type="date"
+                  value={fastTaskDateInput}
+                  onChange={(e) => {
+                    setShowAllFastTasks(false)
+                    setFastTaskDateInput(e.target.value || todayInputValue())
+                  }}
+                  className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                />
+              </div>
+              <div className="flex gap-2 sm:pb-0.5">
+                <Button
+                  type="button"
+                  variant={showAllFastTasks ? "outline" : "default"}
+                  onClick={() => {
+                    setShowAllFastTasks(false)
+                    setFastTaskDateInput(todayInputValue())
+                  }}
+                  className="rounded-xl"
+                >
+                  Today
+                </Button>
+                <Button
+                  type="button"
+                  variant={showAllFastTasks ? "default" : "outline"}
+                  onClick={() => setShowAllFastTasks(true)}
+                  className="rounded-xl"
+                >
+                  All
+                </Button>
+              </div>
+            {canCreateNoProjectTask ? (
               <Dialog open={noProjectOpen} onOpenChange={setNoProjectOpen}>
                   <DialogTrigger asChild>
                     <Button className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl px-6">
@@ -7657,6 +7375,7 @@ export default function DepartmentKanban() {
                   </DialogContent>
                 </Dialog>
               ) : null}
+            </div>
             </div>
             {canEditTasksInCurrentView ? (
               <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>

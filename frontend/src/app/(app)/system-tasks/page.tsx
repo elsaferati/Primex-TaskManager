@@ -1,4 +1,4 @@
-﻿
+
 "use client"
 
 import * as React from "react"
@@ -38,7 +38,7 @@ import type {
   Department,
   SystemTaskFrequency,
   SystemTaskScope,
-  SystemTaskTemplate,
+  SystemTaskTemplateDefinition,
   SystemTaskTemplateAssigneeSlot,
   TaskFinishPeriod,
   TaskPriority,
@@ -190,7 +190,7 @@ type Section = {
   id: string
   label: string
   date: Date
-  templates: SystemTaskTemplate[]
+  templates: SystemTaskTemplateDefinition[]
 }
 
 // --- Helpers ---
@@ -294,7 +294,7 @@ function getFirstWorkingDayOfMonth(year: number, monthIndex: number) {
   return 1
 }
 
-function matchesTemplateDayOfWeek(template: SystemTaskTemplate, targetDay: number) {
+function matchesTemplateDayOfWeek(template: SystemTaskTemplateDefinition, targetDay: number) {
   if (template.days_of_week && template.days_of_week.length) {
     return template.days_of_week.includes(targetDay)
   }
@@ -302,7 +302,7 @@ function matchesTemplateDayOfWeek(template: SystemTaskTemplate, targetDay: numbe
   return false
 }
 
-function matchesTemplateDate(template: SystemTaskTemplate, date: Date) {
+function matchesTemplateDate(template: SystemTaskTemplateDefinition, date: Date) {
   const dayOfWeek = getMondayBasedDay(date)
   const dayOfMonth = date.getDate()
   const monthIndex = date.getMonth()
@@ -386,7 +386,7 @@ function parseInternalNotes(value?: string | null): Record<string, string> {
   return result
 }
 
-function resolveTemplateScope(template: SystemTaskTemplate): SystemTaskScope {
+function resolveTemplateScope(template: SystemTaskTemplateDefinition): SystemTaskScope {
   if (template.scope) return template.scope
   return template.department_id ? "DEPARTMENT" : "ALL"
 }
@@ -422,11 +422,10 @@ export function SystemTasksView({
 }: SystemTasksViewProps) {
   const { apiFetch, user } = useAuth()
   type AssigneeUser = User | UserLookup
-  const [templates, setTemplates] = React.useState<SystemTaskTemplate[]>([])
+  const [templates, setTemplates] = React.useState<SystemTaskTemplateDefinition[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<AssigneeUser[]>([])
   const [loading, setLoading] = React.useState(true)
-  const [updatingTaskIds, setUpdatingTaskIds] = React.useState<Set<string>>(new Set())
   const [createOpen, setCreateOpen] = React.useState(false)
   const [editOpen, setEditOpen] = React.useState(false)
   const [saving, setSaving] = React.useState(false)
@@ -464,7 +463,7 @@ export function SystemTasksView({
   const [alignmentTime, setAlignmentTime] = React.useState("")
   const [alignmentManagerIds, setAlignmentManagerIds] = React.useState<string[]>([])
   const [showWeekendDays, setShowWeekendDays] = React.useState(false)
-  const [editTemplate, setEditTemplate] = React.useState<SystemTaskTemplate | null>(null)
+  const [editTemplate, setEditTemplate] = React.useState<SystemTaskTemplateDefinition | null>(null)
   const [editTitle, setEditTitle] = React.useState("")
   const [editDescription, setEditDescription] = React.useState("")
   const [editDepartmentId, setEditDepartmentId] = React.useState("")
@@ -510,14 +509,13 @@ export function SystemTasksView({
         apiFetch("/departments"),
       ])
       if (templatesRes.ok) {
-        const rows = (await templatesRes.json()) as SystemTaskTemplate[]
+        const rows = (await templatesRes.json()) as SystemTaskTemplateDefinition[]
         const groupedByTemplate = new Map<
           string,
           typeof rows[0] & { assignees: typeof rows[0]["assignees"]; department_ids?: string[] }
         >()
         for (const row of rows) {
-          const templateId = row.template_id ?? row.id
-          const key = String(templateId)
+          const key = String(row.id)
           if (groupedByTemplate.has(key)) {
             const existing = groupedByTemplate.get(key)!
             const existingAssigneeIds = new Set(existing.assignees?.map((a) => a.id) || [])
@@ -591,62 +589,10 @@ export function SystemTasksView({
     void load()
   }, [load])
 
-  const canMarkDone = false
   const gridClass = React.useMemo(
     () => (showBzTimeColumn ? GRID_WITH_BZ_TIME_CLASS : BASE_GRID_CLASS),
     [showBzTimeColumn]
   )
-
-  const toggleTaskStatus = React.useCallback(async (template: SystemTaskTemplate) => {
-    const templateId = template.template_id ?? template.id
-    if (!templateId) return
-    if (!canMarkDone) return
-    const currentStatus = template.status || "OPEN"
-    if (currentStatus === "DONE") return
-    const newStatus = "DONE"
-    const today = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
-    const occurrenceDate = template.occurrence_date || today
-    
-    setUpdatingTaskIds((prev) => new Set(prev).add(String(templateId)))
-    try {
-      const res = await apiFetch("/system-tasks/occurrences", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          template_id: templateId,
-          occurrence_date: occurrenceDate,
-          status: newStatus,
-        }),
-      })
-      if (!res.ok) {
-        let detail = "Failed to update task status"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(detail)
-        return
-      }
-      // Update the template status in local state (match by template_id)
-      setTemplates((prev) =>
-        prev.map((t) => {
-          const tId = t.template_id ?? t.id
-          return tId === templateId ? { ...t, status: newStatus } : t
-        })
-      )
-      toast.success("Task marked as done")
-    } catch (error) {
-      toast.error("Failed to update task status")
-    } finally {
-      setUpdatingTaskIds((prev) => {
-        const next = new Set(prev)
-        next.delete(String(templateId))
-        return next
-      })
-    }
-  }, [apiFetch, canMarkDone])
 
   React.useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -738,7 +684,7 @@ export function SystemTasksView({
   )
 
   const departmentNamesForAssignees = React.useCallback(
-    (assignees?: SystemTaskTemplate["assignees"]) => {
+    (assignees?: SystemTaskTemplateDefinition["assignees"]) => {
       if (!assignees || assignees.length === 0) return []
       return departmentNamesForOwnerIds(assignees.map((assignee) => assignee.id))
     },
@@ -746,7 +692,7 @@ export function SystemTasksView({
   )
 
   const templateDepartmentLabel = React.useCallback(
-    (template: SystemTaskTemplate) => {
+    (template: SystemTaskTemplateDefinition) => {
       const scope = resolveTemplateScope(template)
       const assigneeDeptCodes = template.assignees
         ? Array.from(
@@ -879,13 +825,13 @@ export function SystemTasksView({
 
     // GA view: show any template where Gane is an assignee OR the template is scoped to GA department.
     if (scopeFilter === "GA") {
-      const isAssignedToGane = (template: SystemTaskTemplate) =>
+      const isAssignedToGane = (template: SystemTaskTemplateDefinition) =>
         (ganeUserId &&
           (template.default_assignee_id === ganeUserId ||
             template.assignees?.some((assignee) => assignee.id === ganeUserId))) ||
         template.assignees?.some((assignee) => assignee.username?.toLowerCase() === "gane.arifaj")
 
-      const isGaDepartment = (template: SystemTaskTemplate) =>
+      const isGaDepartment = (template: SystemTaskTemplateDefinition) =>
         template.scope === "GA" || (gaDepartmentId ? template.department_id === gaDepartmentId : false)
 
       return templates.filter((template) => isAssignedToGane(template) || isGaDepartment(template))
@@ -1156,11 +1102,10 @@ export function SystemTasksView({
   }
 
   const canEditTemplate = React.useCallback(
-    (template?: SystemTaskTemplate | null) => {
+    (template?: SystemTaskTemplateDefinition | null) => {
       if (!template) return false
       if (!showSystemActions || !user) return false
       if (isManagerOrAdmin) return true
-      const creatorId = template.created_by
       const assigneeIds = new Set<string>()
       if (template.default_assignee_id) assigneeIds.add(template.default_assignee_id)
       if (template.assignees && template.assignees.length) {
@@ -1168,13 +1113,12 @@ export function SystemTasksView({
           assigneeIds.add(person.id)
         }
       }
-      if (creatorId && creatorId === user.id) return true
       return assigneeIds.has(user.id)
     },
     [isManagerOrAdmin, showSystemActions, user]
   )
 
-  const startEdit = (template: SystemTaskTemplate) => {
+  const startEdit = (template: SystemTaskTemplateDefinition) => {
     if (!canEditTemplate(template)) return
     setEditTemplate(template)
     setEditOpen(true)
@@ -1245,7 +1189,7 @@ export function SystemTasksView({
           resolvedEditMonthOfYear,
         is_active: editIsActive,
       }
-      const templateId = editTemplate.template_id ?? editTemplate.id
+      const templateId = editTemplate.id
       const res = await apiFetch(`/system-tasks/${templateId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -1262,15 +1206,9 @@ export function SystemTasksView({
         toast.error(typeof detail === "string" ? detail : "An error occurred")
         return
       }
-      const updated = (await res.json()) as SystemTaskTemplate
-      // Match by template_id first, then fall back to id (task id)
-      const matchId = updated.template_id ?? updated.id
-      // Update templates list with the server response
+      const updated = (await res.json()) as SystemTaskTemplateDefinition
       setTemplates((prev) =>
-        prev.map((item) => {
-          const itemTemplateId = item.template_id ?? item.id
-          return itemTemplateId === matchId ? updated : item
-        })
+        prev.map((item) => (item.id === updated.id ? updated : item))
       )
       setEditOpen(false)
       setEditTemplate(null)
@@ -1282,8 +1220,8 @@ export function SystemTasksView({
     }
   }
 
-  const deleteTemplate = async (template: SystemTaskTemplate) => {
-    const templateId = template.template_id ?? template.id
+  const deleteTemplate = async (template: SystemTaskTemplateDefinition) => {
+    const templateId = template.id
     const templateTitle = template.title || "this system task"
     
     const confirmed = window.confirm(
@@ -1309,10 +1247,7 @@ export function SystemTasksView({
         return
       }
       // Remove from templates list
-      setTemplates((prev) => prev.filter((item) => {
-        const itemTemplateId = item.template_id ?? item.id
-        return itemTemplateId !== templateId
-      }))
+      setTemplates((prev) => prev.filter((item) => item.id !== templateId))
       toast.success("System task deleted")
       await load()
     } catch {
@@ -1389,7 +1324,7 @@ export function SystemTasksView({
   const weekendShiftHint =
     "If the selected day falls on Saturday/Sunday, the task runs on Friday."
 
-  const assigneeSummary = React.useCallback((list?: SystemTaskTemplate["assignees"]) => {
+  const assigneeSummary = React.useCallback((list?: SystemTaskTemplateDefinition["assignees"]) => {
     if (!list || list.length === 0) return "-"
     if (list.length <= 2) {
       return list
@@ -1410,7 +1345,7 @@ export function SystemTasksView({
   )
 
   const renderManagementAssignees = React.useCallback(
-    (template: SystemTaskTemplate) => {
+    (template: SystemTaskTemplateDefinition) => {
       const slots = [...(template.assignee_slots ?? [])]
       if (slots.length > 0) {
         slots.sort((a: SystemTaskTemplateAssigneeSlot, b: SystemTaskTemplateAssigneeSlot) => {
@@ -1511,7 +1446,7 @@ export function SystemTasksView({
       if (value === -1) return "first_working_day"
       return String(value)
     }
-    const dayOfWeekLabel = (template: SystemTaskTemplate) => {
+    const dayOfWeekLabel = (template: SystemTaskTemplateDefinition) => {
       const days =
         template.days_of_week && template.days_of_week.length
           ? template.days_of_week
@@ -1586,7 +1521,7 @@ export function SystemTasksView({
         .replace(/'/g, "&#39;")
     }
     const stripHtml = (value: string | null | undefined) => String(value ?? "").replace(/<[^>]+>/g, "").trim()
-    const buildDetails = (template: SystemTaskTemplate) => {
+    const buildDetails = (template: SystemTaskTemplateDefinition) => {
       const notes = parseInternalNotes(template.internal_notes)
       const parts: string[] = []
       const reg = notes.REGJ ? `REGJ: ${notes.REGJ}` : ""
@@ -1599,11 +1534,11 @@ export function SystemTasksView({
       if (training) parts.push(training)
       return parts.join(" | ")
     }
-    const buildBzGroup = (template: SystemTaskTemplate) => {
+    const buildBzGroup = (template: SystemTaskTemplateDefinition) => {
       const notes = parseInternalNotes(template.internal_notes)
       return notes["BZ GROUP"] || ""
     }
-    const buildBzMe = (template: SystemTaskTemplate) => {
+    const buildBzMe = (template: SystemTaskTemplateDefinition) => {
       const managerIds = template.alignment_user_ids ?? []
       if (managerIds.length === 0) return ""
       const labels = managerIds
@@ -1617,11 +1552,11 @@ export function SystemTasksView({
         .filter(Boolean)
       return labels.join(", ")
     }
-    const buildBzKur = (template: SystemTaskTemplate) => {
+    const buildBzKur = (template: SystemTaskTemplateDefinition) => {
       if (!template.requires_alignment) return ""
       return timeInputValue(template.alignment_time)
     }
-    const buildDetailsWithBzGroup = (template: SystemTaskTemplate) => {
+    const buildDetailsWithBzGroup = (template: SystemTaskTemplateDefinition) => {
       const notes = parseInternalNotes(template.internal_notes)
       const normalize = (value?: string | null) => {
         const trimmed = String(value ?? "").trim()
@@ -1643,7 +1578,7 @@ export function SystemTasksView({
       ]
       return parts.join("\n")
     }
-    const assigneeInitials = (list?: SystemTaskTemplate["assignees"]) => {
+    const assigneeInitials = (list?: SystemTaskTemplateDefinition["assignees"]) => {
       if (!list || list.length === 0) return "-"
       return list
         .map((person) => userDisplayLabel(person))
@@ -1672,9 +1607,9 @@ export function SystemTasksView({
     const filterLine = activeFilters.length ? activeFilters.join(" | ") : "All"
 
     const frequencyOrder: SystemTaskFrequency[] = ["DAILY", "WEEKLY", "MONTHLY", "3_MONTHS", "6_MONTHS", "YEARLY"]
-    const grouped = new Map<SystemTaskFrequency, SystemTaskTemplate[]>()
+    const grouped = new Map<SystemTaskFrequency, SystemTaskTemplateDefinition[]>()
     for (const f of frequencyOrder) grouped.set(f, [])
-    const inactive: SystemTaskTemplate[] = []
+    const inactive: SystemTaskTemplateDefinition[] = []
     for (const template of rows) {
       if (template.is_active === false) {
         inactive.push(template)
@@ -1702,11 +1637,11 @@ export function SystemTasksView({
       }
     }
 
-    const departmentShortLabel = (template: SystemTaskTemplate) => {
+    const departmentShortLabel = (template: SystemTaskTemplateDefinition) => {
       return templateDepartmentLabel(template)
     }
 
-    const renderTemplateRow = (template: SystemTaskTemplate, rowNumber: number) => {
+    const renderTemplateRow = (template: SystemTaskTemplateDefinition, rowNumber: number) => {
       const priorityValue = normalizePriority(template.priority)
                         const departmentLabel = templateDepartmentLabel(template)
       const ownerLabel = assigneeInitials(template.assignees)
@@ -1728,7 +1663,7 @@ export function SystemTasksView({
           <td class="details-bz">${buildDetailsWithBzGroup(template)}</td>
           <td class="bz-me">${escapeHtml(buildBzMe(template) || "-")}</td>
           <td class="bz-kur">${escapeHtml(buildBzKur(template) || "-")}</td>
-          <td class="comment">${escapeHtml(template.user_comment || "-")}</td>
+          <td class="comment">-</td>
         </tr>
       `
     }
@@ -3355,7 +3290,7 @@ export function SystemTasksView({
                           prevPriority !== priorityValue &&
                           priorityValue === "HIGH"
 
-                        const templateKey = template.template_id ?? template.id
+                        const templateKey = template.id
                         return (
                           <React.Fragment key={templateKey}>
                             {/* Dividers */}
@@ -3389,13 +3324,8 @@ export function SystemTasksView({
                               </div>
                               {/* Title Only (Description removed from list view) */}
                               <div className="min-w-0 pr-2 sm:pr-4">
-                                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
-                                  <div className="text-[13px] sm:text-[14px] md:text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
-                                    {template.title}
-                                  </div>
-                                  <Badge variant="secondary" className="h-5 text-[10px] uppercase">
-                                    {template.status || "TODO"}
-                                  </Badge>
+                                <div className="text-[13px] sm:text-[14px] md:text-[15px] font-semibold leading-tight text-slate-900 break-words" title={template.title}>
+                                  {template.title}
                                 </div>
                               </div>
 
@@ -3444,21 +3374,6 @@ export function SystemTasksView({
 
                               <div className="text-right">
                                 <div className="flex flex-col items-end gap-2">
-                                  {canMarkDone && (
-                                    template.status === "DONE" ? (
-                                      <span className="text-xs text-emerald-700">Done</span>
-                                    ) : (
-                                      <Button
-                                        variant="outline"
-                                        size="sm"
-                                        disabled={updatingTaskIds.has(String(templateKey))}
-                                        onClick={() => void toggleTaskStatus(template)}
-                                        className="h-7 text-xs"
-                                      >
-                                        {updatingTaskIds.has(String(templateKey)) ? "Updating..." : "Mark done"}
-                                      </Button>
-                                    )
-                                  )}
                                   {canEditTemplate(template) && (
                                     <Button
                                       variant="ghost"
@@ -3473,11 +3388,11 @@ export function SystemTasksView({
                                     <Button
                                       variant="ghost"
                                       size="sm"
-                                      disabled={deletingTemplateId === (template.template_id ?? template.id)}
+                                      disabled={deletingTemplateId === template.id}
                                       className="h-7 w-full border border-transparent text-xs text-red-600 hover:border-red-200 hover:bg-red-50 hover:text-red-700"
                                       onClick={() => void deleteTemplate(template)}
                                     >
-                                      {deletingTemplateId === (template.template_id ?? template.id) ? "Deleting..." : "Delete"}
+                                      {deletingTemplateId === template.id ? "Deleting..." : "Delete"}
                                     </Button>
                                   )}
                                 </div>

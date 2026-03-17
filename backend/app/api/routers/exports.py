@@ -202,16 +202,25 @@ def _frequency_label(value: str | None) -> str:
 _WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
-GA_TIME_SLOTS: list[tuple[str, str]] = [
-    ("08:00", "09:00"),
-    ("09:00", "10:00"),
-    ("10:00", "11:00"),
-    ("11:00", "12:00"),
-    ("12:00", "13:00"),
-    ("13:00", "14:00"),
-    ("14:00", "15:00"),
-    ("15:00", "16:00"),
-    ("16:00", "17:00"),
+GA_TIME_ROWS: list[tuple[str, str, str, str]] = [
+    ("", "", "00:00", "00:01"),
+    ("", "", "00:01", "00:02"),
+    ("1", "08:00 - 09:00", "08:00", "09:00"),
+    ("2", "09:00 - 10:00", "09:00", "10:00"),
+    ("3", "10:00 - 11:00", "10:00", "11:00"),
+    ("4", "11:00 - 12:00", "11:00", "12:00"),
+    ("5", "12:00 - 13:00", "12:00", "13:00"),
+    ("6", "13:00 - 13:30", "13:00", "13:30"),
+    ("7", "13:30 - 14:00", "13:30", "14:00"),
+    ("8", "14:00 - 15:00", "14:00", "15:00"),
+    ("9", "15:00 - 16:00", "15:00", "16:00"),
+    ("10", "16:00 - 16:30", "16:00", "16:30"),
+    ("11", "16:30 - 17:00", "16:30", "17:00"),
+    ("12", "17:00 - 18:00", "17:00", "18:00"),
+    ("13", "18:00 - 19:00", "18:00", "19:00"),
+    ("14", "19:00 - 20:00", "19:00", "20:00"),
+    ("15", "20:00 - 21:00", "20:00", "21:00"),
+    ("16", "21:00 - 22:00", "21:00", "22:00"),
 ]
 
 
@@ -1234,11 +1243,11 @@ async def export_ga_time_xlsx(
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
 
     row_idx = data_start_row
-    for slot_index, (start_label, end_label) in enumerate(GA_TIME_SLOTS, start=1):
-        nr_cell = ws.cell(row=row_idx, column=1, value=slot_index)
+    for nr_label, time_label, start_label, _end_label in GA_TIME_ROWS:
+        nr_cell = ws.cell(row=row_idx, column=1, value=nr_label or None)
         nr_cell.font = Font(bold=True)
         nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
-        time_cell = ws.cell(row=row_idx, column=2, value=f"{start_label} - {end_label}")
+        time_cell = ws.cell(row=row_idx, column=2, value=time_label or None)
         time_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         for day_offset, _iso in enumerate(week_isos):
             day_value = day_offset
@@ -2780,16 +2789,19 @@ async def _daily_report_rows_for_user(
     all_system_task_ids = [task.id for task, _, _ in (system_today_rows + system_overdue_rows)]
     system_comment_map = await _user_comments_for_tasks(db, all_system_task_ids, user_id)
 
-    def _to_occurrence_status(task_status: str | None) -> str:
-        if task_status in done_like_statuses:
-            return task_status or "OPEN"
-        return "OPEN"
+    def _system_task_status(task: Task) -> str:
+        raw_status = (str(task.status or "")).upper()
+        if task.completed_at or raw_status == "DONE":
+            return "DONE"
+        if raw_status in {"TODO", "IN_PROGRESS", "WAITING_CONFIRMATION"}:
+            return raw_status
+        return "TODO"
 
     def add_system_row(container: list[list[str]], task: Task, tmpl: SystemTaskTemplate, occurrence_day: date) -> None:
-        base_date = occurrence_day
+        base_date = _as_utc_date(task.start_date) or _as_utc_date(task.origin_run_at) or occurrence_day
         acted_date = task.completed_at.date() if task.completed_at else None
         tyo = _tyo_label(base_date, acted_date, day)
-        period = _resolve_period(tmpl.finish_period, occurrence_day)
+        period = _resolve_period(task.finish_period or tmpl.finish_period, _as_utc_date(task.due_date) or occurrence_day)
         bz, koha_bz = alignment_values(tmpl)
         container.append(
             [
@@ -2798,9 +2810,9 @@ async def _daily_report_rows_for_user(
                 _system_frequency_short_label(tmpl.frequency),
                 period,
                 department_label(tmpl.department_id, tmpl.scope, False),
-                tmpl.title or "-",
-                tmpl.description or "",
-                _format_system_status(_to_occurrence_status(task.status)).upper(),
+                task.title or tmpl.title or "-",
+                _strip_html_keep_breaks(task.description or tmpl.description),
+                _format_system_status(_system_task_status(task)).upper(),
                 bz,
                 koha_bz,
                 tyo,

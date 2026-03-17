@@ -454,6 +454,7 @@ async def daily_report(
     ).all()
 
     all_system_task_ids = [task.id for task, _, _ in (system_today_rows + system_acted_today_rows + system_overdue_rows)]
+    system_assignee_out_map = await _assignees_for_tasks(db, all_system_task_ids)
     system_comment_map = await _user_comments_for_tasks(db, all_system_task_ids, user_id)
 
     def _to_occurrence_status(task_status: str | None) -> str:
@@ -471,6 +472,11 @@ async def daily_report(
         late_days = business_days_between(occurrence_day, day) if is_from_overdue else None
         system_today.append(
             DailyReportSystemOccurrence(
+                task=_task_to_out(
+                    task,
+                    system_assignee_out_map.get(task.id, []),
+                    user_comment=system_comment_map.get(task.id),
+                ),
                 template_id=tmpl.id,
                 title=tmpl.title,
                 frequency=tmpl.frequency,
@@ -490,6 +496,11 @@ async def daily_report(
         late_days = business_days_between(occurrence_day, day)
         system_overdue.append(
             DailyReportSystemOccurrence(
+                task=_task_to_out(
+                    task,
+                    system_assignee_out_map.get(task.id, []),
+                    user_comment=system_comment_map.get(task.id),
+                ),
                 template_id=tmpl.id,
                 title=tmpl.title,
                 frequency=tmpl.frequency,

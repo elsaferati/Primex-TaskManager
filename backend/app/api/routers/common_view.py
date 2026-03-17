@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import hashlib
 import os
@@ -58,6 +58,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
+COMMON_VIEW_CACHE_VERSION = "2"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -253,7 +254,12 @@ def _should_include_task(task: Task) -> bool:
     status_value = (task.status or "").lower()
     is_done = bool(task.completed_at) or status_value in {"done", "completed"}
     if is_done:
-        return bool(getattr(task, "is_1h_report", False) or getattr(task, "is_r1", False))
+        return bool(
+            getattr(task, "is_1h_report", False)
+            or getattr(task, "is_r1", False)
+            or getattr(task, "is_personal", False)
+            or getattr(task, "is_bllok", False)
+        )
     return True
 
 
@@ -323,6 +329,7 @@ async def _compute_etag(
     include_all_departments: bool,
 ) -> str:
     parts: list[str] = [
+        COMMON_VIEW_CACHE_VERSION,
         week_start.isoformat(),
         week_end.isoformat(),
         ",".join(sorted(requested)),
@@ -406,7 +413,10 @@ async def get_common_view(
     if if_match and if_match.strip('"') == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
 
-    cache_key = f"{week_start_date}|{week_end}|{','.join(sorted(requested))}|{department_id}|{include_all_departments}|{user.role}"
+    cache_key = (
+        f"{COMMON_VIEW_CACHE_VERSION}|{week_start_date}|{week_end}|{','.join(sorted(requested))}|"
+        f"{department_id}|{include_all_departments}|{user.role}"
+    )
     if SERVER_CACHE_TTL_SECONDS > 0:
         cached = _cache.get(cache_key)
         if cached:
@@ -675,6 +685,7 @@ async def get_common_view(
             owner_label = ", ".join([n for n in assignee_names if n]) or "Unknown"
             status_value = (t.status or "").lower()
             is_done = bool(t.completed_at) or status_value in {"done", "completed"}
+            task_status = (t.status or ("DONE" if is_done else "TODO")).strip() or ("DONE" if is_done else "TODO")
             dept_id = None
             if assignees:
                 dept_id = assignees[0].department_id
@@ -698,6 +709,8 @@ async def get_common_view(
                             "assignees": assignee_names or None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
+                            "status": task_status,
+                            "isDone": is_done,
                         }
                     )
                 if t.is_1h_report:
@@ -710,6 +723,7 @@ async def get_common_view(
                             "date": task_date.isoformat(),
                             "note": t.description or None,
                             "department_id": str(dept_id) if dept_id else None,
+                            "status": task_status,
                             "isDone": is_done,
                         }
                     )
@@ -722,6 +736,8 @@ async def get_common_view(
                             "assignees": assignee_names or None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
+                            "status": task_status,
+                            "isDone": is_done,
                         }
                     )
                 if t.is_r1:
@@ -734,6 +750,7 @@ async def get_common_view(
                             "assignees": assignee_names or None,
                             "note": t.description or None,
                             "department_id": str(dept_id) if dept_id else None,
+                            "status": task_status,
                             "isDone": is_done,
                         }
                     )
@@ -948,7 +965,7 @@ async def get_common_view(
     missing = [name for name in requested if name not in included]
 
     payload = CommonViewResponse(
-        schema_version=1,
+        schema_version=2,
         generated_at=datetime.utcnow(),
         week_start=week_start_date,
         week_end=week_end,

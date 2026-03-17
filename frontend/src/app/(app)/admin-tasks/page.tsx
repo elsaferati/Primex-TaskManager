@@ -330,7 +330,30 @@ function isIsoWithinInclusiveRange(targetIso: string, startIso?: string | null, 
   const normalizedStart = startIso || endIso || ""
   const normalizedEnd = endIso || startIso || ""
   if (!normalizedStart || !normalizedEnd) return false
-  return targetIso >= normalizedStart && targetIso <= normalizedEnd
+  if (normalizedStart <= normalizedEnd) {
+    return targetIso >= normalizedStart && targetIso <= normalizedEnd
+  }
+  return targetIso >= normalizedEnd && targetIso <= normalizedStart
+}
+
+function doesIsoRangeOverlapInclusive(
+  filterStartIso?: string | null,
+  filterEndIso?: string | null,
+  valueStartIso?: string | null,
+  valueEndIso?: string | null
+) {
+  const normalizedFilterStart = filterStartIso || filterEndIso || ""
+  const normalizedFilterEnd = filterEndIso || filterStartIso || ""
+  const normalizedValueStart = valueStartIso || valueEndIso || ""
+  const normalizedValueEnd = valueEndIso || valueStartIso || ""
+  if (!normalizedFilterStart || !normalizedFilterEnd || !normalizedValueStart || !normalizedValueEnd) {
+    return false
+  }
+  const filterMin = normalizedFilterStart <= normalizedFilterEnd ? normalizedFilterStart : normalizedFilterEnd
+  const filterMax = normalizedFilterStart <= normalizedFilterEnd ? normalizedFilterEnd : normalizedFilterStart
+  const valueMin = normalizedValueStart <= normalizedValueEnd ? normalizedValueStart : normalizedValueEnd
+  const valueMax = normalizedValueStart <= normalizedValueEnd ? normalizedValueEnd : normalizedValueStart
+  return valueMin <= filterMax && valueMax >= filterMin
 }
 
 function getSystemDateIso(task: SystemTaskOut): string {
@@ -573,6 +596,14 @@ type GaTimeSlotEntry = {
   updated_at: string
 }
 
+type GaTimeRow = {
+  start: string
+  end: string
+  label: string
+  nrLabel: string
+  isSpecial?: boolean
+}
+
 type CommonBucket =
   | "late"
   | "absent"
@@ -626,23 +657,25 @@ type CommonViewPayload = {
 const ALL_USERS_INITIALS = "ALL"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 
-const GA_TIME_SLOTS = [
-  { start: "08:00", end: "09:00", label: "08:00 - 09:00" },
-  { start: "09:00", end: "10:00", label: "09:00 - 10:00" },
-  { start: "10:00", end: "11:00", label: "10:00 - 11:00" },
-  { start: "11:00", end: "12:00", label: "11:00 - 12:00" },
-  { start: "12:00", end: "13:00", label: "12:00 - 13:00" },
-  { start: "13:00", end: "13:30", label: "13:00 - 13:30" },
-  { start: "13:30", end: "14:00", label: "13:30 - 14:00" },
-  { start: "14:00", end: "15:00", label: "14:00 - 15:00" },
-  { start: "15:00", end: "16:00", label: "15:00 - 16:00" },
-  { start: "16:00", end: "16:30", label: "16:00 - 16:30" },
-  { start: "16:30", end: "17:00", label: "16:30 - 17:00" },
-  { start: "17:00", end: "18:00", label: "17:00 - 18:00" },
-  { start: "18:00", end: "19:00", label: "18:00 - 19:00" },
-  { start: "19:00", end: "20:00", label: "19:00 - 20:00" },
-  { start: "20:00", end: "21:00", label: "20:00 - 21:00" },
-  { start: "21:00", end: "22:00", label: "21:00 - 22:00" },
+const GA_TIME_ROWS: readonly GaTimeRow[] = [
+  { start: "00:00", end: "00:01", label: "", nrLabel: "", isSpecial: true },
+  { start: "00:01", end: "00:02", label: "", nrLabel: "", isSpecial: true },
+  { start: "08:00", end: "09:00", label: "08:00 - 09:00", nrLabel: "1" },
+  { start: "09:00", end: "10:00", label: "09:00 - 10:00", nrLabel: "2" },
+  { start: "10:00", end: "11:00", label: "10:00 - 11:00", nrLabel: "3" },
+  { start: "11:00", end: "12:00", label: "11:00 - 12:00", nrLabel: "4" },
+  { start: "12:00", end: "13:00", label: "12:00 - 13:00", nrLabel: "5" },
+  { start: "13:00", end: "13:30", label: "13:00 - 13:30", nrLabel: "6" },
+  { start: "13:30", end: "14:00", label: "13:30 - 14:00", nrLabel: "7" },
+  { start: "14:00", end: "15:00", label: "14:00 - 15:00", nrLabel: "8" },
+  { start: "15:00", end: "16:00", label: "15:00 - 16:00", nrLabel: "9" },
+  { start: "16:00", end: "16:30", label: "16:00 - 16:30", nrLabel: "10" },
+  { start: "16:30", end: "17:00", label: "16:30 - 17:00", nrLabel: "11" },
+  { start: "17:00", end: "18:00", label: "17:00 - 18:00", nrLabel: "12" },
+  { start: "18:00", end: "19:00", label: "18:00 - 19:00", nrLabel: "13" },
+  { start: "19:00", end: "20:00", label: "19:00 - 20:00", nrLabel: "14" },
+  { start: "20:00", end: "21:00", label: "20:00 - 21:00", nrLabel: "15" },
+  { start: "21:00", end: "22:00", label: "21:00 - 22:00", nrLabel: "16" },
 ] as const
 
 const parseFeedbackNote = (note: string | null | undefined) => {
@@ -891,7 +924,8 @@ export default function AdminTasksPage() {
   const printInitials = initials(user?.full_name || user?.username || "")
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
-  const [allTasksDateFilter, setAllTasksDateFilter] = React.useState(() => todayIso)
+  const [allTasksDateFrom, setAllTasksDateFrom] = React.useState(() => todayIso)
+  const [allTasksDateTo, setAllTasksDateTo] = React.useState(() => todayIso)
   const [taskStatusUpdating, setTaskStatusUpdating] = React.useState<Record<string, boolean>>({})
   const [systemStatusOverrides, setSystemStatusOverrides] = React.useState<Record<string, string>>({})
   const [fastEditOpen, setFastEditOpen] = React.useState(false)
@@ -1724,14 +1758,14 @@ export default function AdminTasksPage() {
   ])
 
   const filteredAllTasksRows = React.useMemo(() => {
-    if (!allTasksDateFilter) return allTasksTableRows
+    if (!allTasksDateFrom && !allTasksDateTo) return allTasksTableRows
     return allTasksTableRows.filter((row) => {
       if (row.isFastTask) {
-        return isIsoWithinInclusiveRange(allTasksDateFilter, row.startDateIso, row.dateIso)
+        return doesIsoRangeOverlapInclusive(allTasksDateFrom, allTasksDateTo, row.startDateIso, row.dateIso)
       }
-      return row.dateIso === allTasksDateFilter
+      return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
     })
-  }, [allTasksDateFilter, allTasksTableRows])
+  }, [allTasksDateFrom, allTasksDateTo, allTasksTableRows])
 
   const highlightedAllTasksRows = React.useMemo(
     () => filteredAllTasksRows.filter((row) => row.isTemplateAlignedSystem),
@@ -1743,8 +1777,8 @@ export default function AdminTasksPage() {
     [filteredAllTasksRows]
   )
   const waitingConfirmationRows = React.useMemo(
-    () => allTasksTableRows.filter((row) => row.needsGaneConfirmation && !row.isTemplateAlignedSystem),
-    [allTasksTableRows]
+    () => filteredAllTasksRows.filter((row) => row.needsGaneConfirmation && !row.isTemplateAlignedSystem),
+    [filteredAllTasksRows]
   )
   const regularNonConfirmationRows = React.useMemo(
     () => regularAllTasksRows.filter((row) => !row.needsGaneConfirmation),
@@ -2459,6 +2493,8 @@ export default function AdminTasksPage() {
       comment?: string | null
       userInitials?: string
       taskId?: string
+      startDateIso?: string
+      isFastTask?: boolean
       createdDate?: string
       systemTemplateId?: string
       systemOccurrenceDate?: string
@@ -2495,7 +2531,7 @@ export default function AdminTasksPage() {
       const isProject = Boolean(task.project_id)
       const baseDate = toDate(task.due_date || task.start_date || task.created_at)
       const createdDate = task.created_at ? new Date(task.created_at).toISOString().slice(0, 10) : undefined
-
+      const startDateIso = toDateOnlyIso(task.start_date || task.due_date || null)
       const dateIso = getTaskDateIso(task)
       const assigneeDepartments = taskAssigneeDepartments(task)
       rows.push({
@@ -2522,6 +2558,8 @@ export default function AdminTasksPage() {
         comment: taskCommentMap.get(task.id) ?? null,
         userInitials: taskAssigneeInitials(task),
         taskId: task.id,
+        startDateIso,
+        isFastTask: !isProject,
         createdDate,
       })
     }
@@ -2583,6 +2621,7 @@ export default function AdminTasksPage() {
         comment: systemTask.user_comment ?? null,
         userInitials: systemAssigneeInitials(systemTask),
         systemTemplateId: systemTask.template_id,
+        isFastTask: false,
         createdDate,
       })
     }
@@ -2611,6 +2650,16 @@ export default function AdminTasksPage() {
     userMap,
   ])
 
+  const filteredAllTasksReportRows = React.useMemo(() => {
+    if (!allTasksDateFrom && !allTasksDateTo) return allTasksReportRows
+    return allTasksReportRows.filter((row) => {
+      if (row.isFastTask) {
+        return doesIsoRangeOverlapInclusive(allTasksDateFrom, allTasksDateTo, row.startDateIso, row.dateIso)
+      }
+      return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
+    })
+  }, [allTasksDateFrom, allTasksDateTo, allTasksReportRows])
+
   const exportAllTasks = async () => {
     if (!user?.id) return
     if (!ganeUserId) {
@@ -2619,7 +2668,7 @@ export default function AdminTasksPage() {
     }
     setExportingAllTasks(true)
     try {
-      const rowsPayload = allTasksReportRows.map((row) => {
+      const rowsPayload = filteredAllTasksReportRows.map((row) => {
         return {
           typeLabel: row.typeLabel,
           subtype: row.subtype,
@@ -4063,19 +4112,21 @@ export default function AdminTasksPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {GA_TIME_SLOTS.map((slot, index) => (
+                    {GA_TIME_ROWS.map((slot) => (
                       <tr
                         key={`ga-print-${slot.start}`}
                         className={
-                          slot.start === "08:00"
+                          slot.isSpecial
+                            ? "ga-time-row ga-time-row-custom"
+                            : slot.start === "08:00"
                             ? "ga-time-row ga-time-row-secondary"
                             : slot.start < "14:00"
                               ? "ga-time-row ga-time-row-primary"
                               : "ga-time-row ga-time-row-secondary"
                         }
                       >
-                        <td className="ga-time-slot-label ga-time-nr">{index + 1}</td>
-                        <td className="ga-time-slot-label">{slot.label}</td>
+                        <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
+                        <td className="ga-time-slot-label">{slot.label || "\u00A0"}</td>
                         {commonWeekISOs.map((iso) => {
                           const dayOfWeek = toDayOfWeek(iso)
                           const cellKey = `${dayOfWeek}|${slot.start}`
@@ -4089,7 +4140,7 @@ export default function AdminTasksPage() {
                                       <span>{entry.content}</span>
                                     </div>
                                   ))
-                                ) : (
+                                ) : slot.isSpecial ? null : (
                                   <span className="week-table-empty">-</span>
                                 )}
                               </div>
@@ -4150,10 +4201,10 @@ export default function AdminTasksPage() {
                 </tr>
               </thead>
               <tbody>
-                {GA_TIME_SLOTS.map((slot, index) => (
-                  <tr key={slot.start}>
-                    <td className="ga-time-slot-label ga-time-nr">{index + 1}</td>
-                    <td className="ga-time-slot-label">{slot.label}</td>
+                {GA_TIME_ROWS.map((slot) => (
+                  <tr key={slot.start} className={slot.isSpecial ? "ga-time-row-custom" : undefined}>
+                    <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
+                    <td className="ga-time-slot-label">{slot.label || "\u00A0"}</td>
                     {commonWeekISOs.map((iso) => {
                       const dayOfWeek = toDayOfWeek(iso)
                       const cellKey = `${dayOfWeek}|${slot.start}`
@@ -4224,7 +4275,7 @@ export default function AdminTasksPage() {
                                 </div>
                               )
                             })}
-                            {canEditGaTimeSlots ? (
+                            {canEditGaTimeSlots && (!slot.isSpecial || entries.length === 0) ? (
                               gaTimeAddingCell === cellKey ? (
                                 <input
                                   className="ga-time-input"
@@ -4264,7 +4315,7 @@ export default function AdminTasksPage() {
                                     setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
                                   }}
                                 >
-                                  + 
+                                  {slot.isSpecial ? "Add" : "+"}
                                 </button>
                               )
                             ) : null}
@@ -4311,16 +4362,27 @@ export default function AdminTasksPage() {
                 type="button"
                 variant="outline"
                 size="sm"
-                className={allTasksDateFilter ? "" : "border-blue-500 bg-blue-50 text-blue-700"}
-                onClick={() => setAllTasksDateFilter("")}
+                className={allTasksDateFrom || allTasksDateTo ? "" : "border-blue-500 bg-blue-50 text-blue-700"}
+                onClick={() => {
+                  setAllTasksDateFrom("")
+                  setAllTasksDateTo("")
+                }}
               >
                 All
               </Button>
+              <span>From</span>
               <Input
                 type="date"
                 className="h-8 w-[160px] text-xs"
-                value={allTasksDateFilter || ""}
-                onChange={(event) => setAllTasksDateFilter(event.target.value)}
+                value={allTasksDateFrom || ""}
+                onChange={(event) => setAllTasksDateFrom(event.target.value)}
+              />
+              <span>To</span>
+              <Input
+                type="date"
+                className="h-8 w-[160px] text-xs"
+                value={allTasksDateTo || ""}
+                onChange={(event) => setAllTasksDateTo(event.target.value)}
               />
             </div>
           </div>
@@ -5024,6 +5086,9 @@ export default function AdminTasksPage() {
           white-space: nowrap;
           direction: ltr;
           vertical-align: bottom;
+        }
+        .admin-week-table .ga-time-row-custom .ga-time-slot-label {
+          background: #f8fafc;
         }
         .admin-week-table .ga-time-cell {
           border: 1px solid #e2e8f0;
