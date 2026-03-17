@@ -63,6 +63,13 @@ def _note_out(note: GaNote) -> GaNoteOut:
     )
 
 
+def _ga_note_upload_base_dir() -> Path:
+    upload_base = Path(settings.GA_NOTES_UPLOAD_DIR)
+    if not upload_base.is_absolute():
+        upload_base = Path(__file__).resolve().parents[3] / upload_base
+    return upload_base
+
+
 async def _ensure_note_access(note: GaNote, user, db: AsyncSession) -> None:
     if note.project_id is not None:
         project = (await db.execute(select(Project).where(Project.id == note.project_id))).scalar_one_or_none()
@@ -96,9 +103,7 @@ async def _save_ga_note_attachments(
         )
 
     max_bytes = settings.GA_NOTES_MAX_FILE_MB * 1024 * 1024
-    upload_base = Path(settings.GA_NOTES_UPLOAD_DIR)
-    if not upload_base.is_absolute():
-        upload_base = Path(__file__).resolve().parents[3] / upload_base
+    upload_base = _ga_note_upload_base_dir()
     note_dir = upload_base / str(note.id)
     note_dir.mkdir(parents=True, exist_ok=True)
 
@@ -351,9 +356,7 @@ async def download_ga_note_attachment(
 
     await _ensure_note_access(attachment.note, user, db)
 
-    upload_base = Path(settings.GA_NOTES_UPLOAD_DIR)
-    if not upload_base.is_absolute():
-        upload_base = Path(__file__).resolve().parents[3] / upload_base
+    upload_base = _ga_note_upload_base_dir()
     stored_path = upload_base / str(attachment.note_id) / attachment.stored_filename
     if not stored_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
@@ -365,3 +368,37 @@ async def download_ga_note_attachment(
         media_type=attachment.content_type or "application/octet-stream",
         filename=attachment.original_filename,
     )
+
+
+@router.delete("/attachments/{attachment_id}", status_code=status.HTTP_204_NO_CONTENT, response_model=None)
+async def delete_ga_note_attachment(
+    attachment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    attachment = (
+        await db.execute(
+            select(GaNoteAttachment)
+            .options(selectinload(GaNoteAttachment.note))
+            .where(GaNoteAttachment.id == attachment_id)
+        )
+    ).scalar_one_or_none()
+    if attachment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    await _ensure_note_access(attachment.note, user, db)
+
+    upload_base = _ga_note_upload_base_dir()
+    note_dir = upload_base / str(attachment.note_id)
+    stored_path = note_dir / attachment.stored_filename
+
+    await db.delete(attachment)
+    await db.commit()
+
+    try:
+        if stored_path.exists():
+            stored_path.unlink()
+        if note_dir.exists() and not any(note_dir.iterdir()):
+            note_dir.rmdir()
+    except OSError:
+        pass

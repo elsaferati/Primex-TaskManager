@@ -313,6 +313,26 @@ function getTaskDateIso(task: Task): string {
   return toDateOnlyIso(task.due_date || task.start_date || null)
 }
 
+function formatTaskDateRangeDisplay(task: Pick<Task, "start_date" | "due_date">): string {
+  const startIso = toDateOnlyIso(task.start_date || null)
+  const dueIso = toDateOnlyIso(task.due_date || null)
+  if (startIso && dueIso) {
+    if (startIso === dueIso) return toDDMMYYYY(startIso)
+    return `${toDDMMYYYY(startIso)} - ${toDDMMYYYY(dueIso)}`
+  }
+  if (dueIso) return toDDMMYYYY(dueIso)
+  if (startIso) return toDDMMYYYY(startIso)
+  return "-"
+}
+
+function isIsoWithinInclusiveRange(targetIso: string, startIso?: string | null, endIso?: string | null) {
+  if (!targetIso) return false
+  const normalizedStart = startIso || endIso || ""
+  const normalizedEnd = endIso || startIso || ""
+  if (!normalizedStart || !normalizedEnd) return false
+  return targetIso >= normalizedStart && targetIso <= normalizedEnd
+}
+
 function getSystemDateIso(task: SystemTaskOut): string {
   return toDateOnlyIso(systemTaskDisplayDate(task) || null)
 }
@@ -526,6 +546,20 @@ type BzItem = {
   time: string
   assignees?: string[]
   bzWithLabel?: string
+  taskId?: string
+  templateId?: string | null
+  matchTitle?: string
+}
+
+type CommonGaTableEntry = {
+  kind: "task" | "system"
+  title: string
+  assignees?: string[]
+  time?: string
+  bzWithLabel?: string
+  taskId?: string
+  templateId?: string | null
+  matchTitle?: string
 }
 
 type GaTimeSlotEntry = {
@@ -628,6 +662,11 @@ const commonViewInitials = (name: string) => {
 }
 
 const stripInitialsPrefix = (value: string) => value
+const normalizeCommonGaTitle = (value?: string | null) =>
+  stripInitialsPrefix(value || "")
+    .trim()
+    .replace(/\s+/g, " ")
+    .toLowerCase()
 const normalizeAssigneeList = (value?: string) =>
   value
     ? value
@@ -658,6 +697,24 @@ const mergeTaskEntriesByVisibleTitle = <
   })
   return Array.from(merged.values())
 }
+const getCommonGaEntryMatchKeys = (entry: {
+  templateId?: string | null
+  matchTitle?: string | null
+  title?: string | null
+}) => {
+  const keys: string[] = []
+  if (entry.templateId) keys.push(`template:${entry.templateId}`)
+  const titleKey = normalizeCommonGaTitle(entry.matchTitle || entry.title || "")
+  if (titleKey) keys.push(`title:${titleKey}`)
+  return keys
+}
+const mergeLabelList = (left?: string, right?: string) => {
+  const labels = [...(left ? left.split(",") : []), ...(right ? right.split(",") : [])]
+    .map((value) => value.trim())
+    .filter(Boolean)
+  return Array.from(new Set(labels)).join(", ")
+}
+const formatBzTimeDisplay = (value?: string | null) => formatTimeLabel(value || "").trim() || "-"
 
 const fromISODate = (s: string) => {
   const [y, m, d] = s.split("-").map(Number)
@@ -714,9 +771,17 @@ const parseTimeToMinutes = (value?: string | null) => {
           : normalized.includes("â€”")
             ? "â€”"
             : "-"
-    normalized = normalized.split(separator)[0].trim()
+    const [firstPartRaw, secondPartRaw] = normalized.split(separator).map((part) => part.trim())
+    const secondPart = secondPartRaw || ""
+    const firstPart = firstPartRaw || ""
+    const trailingMeridianMatch = /\b(am|pm)\b/i.exec(secondPart)
+    const firstHasMeridian = /\b(am|pm)\b/i.test(firstPart)
+    normalized =
+      trailingMeridianMatch && firstPart && !firstHasMeridian
+        ? `${firstPart} ${trailingMeridianMatch[1]}`
+        : firstPart
   }
-  const amPmMatch = /^(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b/i.exec(normalized)
+  const amPmMatch = /^(\d{1,2})(?::(\d{2}))?(?::\d{2})?\s*(am|pm)\b/i.exec(normalized)
   if (amPmMatch) {
     let hours = Number(amPmMatch[1])
     const minutes = Number(amPmMatch[2] ?? "0")
@@ -727,7 +792,7 @@ const parseTimeToMinutes = (value?: string | null) => {
     if (isPm) hours += 12
     return hours * 60 + minutes
   }
-  const timeMatch = /^(\d{1,2}):(\d{2})$/.exec(normalized)
+  const timeMatch = /^(\d{1,2}):(\d{2})(?::\d{2})?$/.exec(normalized)
   if (!timeMatch) return null
   const hours = Number(timeMatch[1])
   const minutes = Number(timeMatch[2])
@@ -739,6 +804,14 @@ const formatTimeLabel = (value?: string) => {
   if (!value) return ""
   const normalized = value.trim()
   if (!normalized || normalized.toLowerCase() === "tbd") return normalized
+  const amPmMatch = /^(\d{1,2}:\d{2})(?::\d{2})?\s*(am|pm)\b/i.exec(normalized)
+  if (amPmMatch) {
+    return `${amPmMatch[1]} ${amPmMatch[2].toUpperCase()}`
+  }
+  const secondsMatch = /^(\d{1,2}:\d{2}):\d{2}$/.exec(normalized)
+  if (secondsMatch) {
+    return secondsMatch[1]
+  }
   if (/am|pm/i.test(normalized)) return normalized
   if (normalized.includes("-")) {
     const [startRaw, endRaw] = normalized.split("-").map((part) => part.trim())
@@ -805,6 +878,7 @@ export default function AdminTasksPage() {
   const [editStartDateDisplay, setEditStartDateDisplay] = React.useState("")
   const [editDueDate, setEditDueDate] = React.useState("")
   const [editDueDateDisplay, setEditDueDateDisplay] = React.useState("")
+  const [editingTaskIsFast, setEditingTaskIsFast] = React.useState(false)
   const [editPriority, setEditPriority] = React.useState<TaskPriority>("NORMAL")
   const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
@@ -1234,14 +1308,26 @@ export default function AdminTasksPage() {
 
   React.useEffect(() => {
     const handleBeforePrint = () => {
+      if (printTarget === "ga-time" || printTarget === "common") {
+        setPrintTotalPages(1)
+        return
+      }
+
+      const printRoot = document.querySelector(`[data-print-target="${printTarget || ""}"]`) as HTMLElement | null
+      const activeSection = printRoot?.querySelector(
+        `.print-section[data-print-section="${printTarget}"]`
+      ) as HTMLElement | null
+
       const dpi = 96
       const pageHeightPx = 11 * dpi - (0.36 + 0.51) * dpi
+      const sectionHeight = activeSection?.scrollHeight || activeSection?.offsetHeight || 0
       const bodyHeight = Math.max(
         document.body.scrollHeight,
         document.documentElement.scrollHeight,
         document.body.offsetHeight
       )
-      const totalPages = Math.max(1, Math.ceil(bodyHeight / pageHeightPx))
+      const measuredHeight = sectionHeight || bodyHeight
+      const totalPages = Math.max(1, Math.ceil(measuredHeight / pageHeightPx))
       setPrintTotalPages(totalPages)
     }
     const handleAfterPrint = () => setPrintTarget(null)
@@ -1251,7 +1337,7 @@ export default function AdminTasksPage() {
       window.removeEventListener("beforeprint", handleBeforePrint)
       window.removeEventListener("afterprint", handleAfterPrint)
     }
-  }, [])
+  }, [printTarget])
 
 
   const submitTask = async () => {
@@ -1557,7 +1643,10 @@ export default function AdminTasksPage() {
       ll: "SYS" | "FT"
       nll: string
       assigned: { id: string; value: string; label: string }[]
+      startDateIso: string
+      startDateLabel: string
       dateIso: string
+      dateLabel: string
       period: string
       title: string
       bz: string
@@ -1584,7 +1673,9 @@ export default function AdminTasksPage() {
         task.status === "WAITING_CONFIRMATION" && task.confirmation_assignee_id === ganeUserId
       if (!isAssigned && !needsGaneConfirmation) continue
 
-      const dateIso = getTaskDateIso(task)
+      const startDateIso = toDateOnlyIso(task.start_date || task.due_date || null)
+      const dueDateIso = getTaskDateIso(task)
+      const dateIso = dueDateIso || startDateIso
       const statusValue = task.status || (task.completed_at ? "DONE" : "TODO")
       const isSystemTask = Boolean(task.system_template_origin_id || task.task_type === "system")
       const systemTemplate = task.system_template_origin_id
@@ -1597,7 +1688,10 @@ export default function AdminTasksPage() {
         ll: isSystemTask ? "SYS" : "FT",
         nll: isSystemTask ? "SYS" : task.project_id ? "-" : fastReportSubtypeShort(task),
         assigned: taskAssigneeBadges(task),
+        startDateIso,
+        startDateLabel: startDateIso ? formatDateDMY(startDateIso) : "-",
         dateIso,
+        dateLabel: dateIso ? formatDateDMY(dateIso) : "-",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
         bz: hasTemplateAlignment ? "BZ (TPL)" : "-",
@@ -1631,7 +1725,12 @@ export default function AdminTasksPage() {
 
   const filteredAllTasksRows = React.useMemo(() => {
     if (!allTasksDateFilter) return allTasksTableRows
-    return allTasksTableRows.filter((row) => row.dateIso === allTasksDateFilter)
+    return allTasksTableRows.filter((row) => {
+      if (row.isFastTask) {
+        return isIsoWithinInclusiveRange(allTasksDateFilter, row.startDateIso, row.dateIso)
+      }
+      return row.dateIso === allTasksDateFilter
+    })
   }, [allTasksDateFilter, allTasksTableRows])
 
   const highlightedAllTasksRows = React.useMemo(
@@ -1855,7 +1954,9 @@ export default function AdminTasksPage() {
   }, [dailyReport, departments, ganeUser, ganeUserId, taskAssigneeInitials, taskCommentMap, tasks, todayDate])
 
   const startEditTask = (task: Task) => {
+    const isFastTask = !task.project_id && !task.system_template_origin_id && task.task_type !== "system"
     setEditingTaskId(task.id)
+    setEditingTaskIsFast(isFastTask)
     setEditTitle(task.title || "")
     setEditDescription(task.description || "")
     const taskStartDate = toDateInputValue(task.start_date)
@@ -1874,8 +1975,13 @@ export default function AdminTasksPage() {
     if (!editingTaskId || !editTitle.trim()) return
     setSavingEdit(true)
     try {
-      const startDateValue = editStartDate ? new Date(editStartDate).toISOString() : null
-      const dueDateValue = editDueDate ? new Date(editDueDate).toISOString() : null
+      let normalizedStartDate = editStartDate || ""
+      let normalizedDueDate = editDueDate || ""
+      if (editingTaskIsFast && normalizedStartDate && normalizedDueDate && normalizedStartDate > normalizedDueDate) {
+        ;[normalizedStartDate, normalizedDueDate] = [normalizedDueDate, normalizedStartDate]
+      }
+      const startDateValue = normalizedStartDate ? new Date(normalizedStartDate).toISOString() : null
+      const dueDateValue = normalizedDueDate ? new Date(normalizedDueDate).toISOString() : null
       const isBllok = editPriority === "BLLOK"
       const actualPriority: "NORMAL" | "HIGH" = isBllok ? "NORMAL" : (editPriority === "HIGH" ? "HIGH" : "NORMAL")
       const payload: Record<string, unknown> = {
@@ -1907,9 +2013,14 @@ export default function AdminTasksPage() {
         return
       }
       const updated = (await res.json()) as Task
-      setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      if (editingTaskIsFast) {
+        await load()
+      } else {
+        setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      }
       setEditOpen(false)
       setEditingTaskId(null)
+      setEditingTaskIsFast(false)
       toast.success("Task updated")
     } finally {
       setSavingEdit(false)
@@ -2851,7 +2962,7 @@ export default function AdminTasksPage() {
     return byDate
   }, [commonData.leave, commonWeekISOs])
 
-  const bzTasksByDay = React.useMemo(() => {
+  const bzSystemTasksByDay = React.useMemo(() => {
     const byDay: Record<string, BzItem[]> = {}
     for (const iso of commonWeekISOs) {
       byDay[iso] = []
@@ -2878,28 +2989,26 @@ export default function AdminTasksPage() {
 
     for (const task of tasks) {
       if (task.is_active === false) continue
-      if (!task.alignment_user_ids?.includes(ganeUserId)) continue
+      if (!task.system_template_origin_id) continue
+      const template = systemTaskByTemplateId.get(task.system_template_origin_id)
+      if (!template?.alignment_user_ids?.includes(ganeUserId)) continue
 
-      const startDate = toDate(task.start_date || task.due_date || task.created_at)
-      const endDate = toDate(task.due_date || task.start_date || task.created_at)
-      if (!startDate || !endDate) continue
+      const occurrenceDate = toDate(task.start_date || task.due_date || task.created_at)
+      if (!occurrenceDate) continue
+      const occurrenceIso = toISODate(occurrenceDate)
+      if (!commonWeekISOs.includes(occurrenceIso)) continue
 
-      const timeSource = toDate(task.due_date || task.start_date || task.created_at)
-      const timeLabel = timeSource ? formatTime(timeSource) : ""
-      const startIso = toISODate(startDate)
-      const endIso = toISODate(endDate)
       const assigneeLabels = assigneeLabelsForTask(task)
-
-      for (const iso of commonWeekISOs) {
-        if (iso < startIso || iso > endIso) continue
-        byDay[iso].push({
-          title: task.title || "-",
-          date: iso,
-          time: timeLabel,
-          assignees: assigneeLabels,
-          bzWithLabel: "GA",
-        })
-      }
+      byDay[occurrenceIso].push({
+        title: task.title || "-",
+        date: occurrenceIso,
+        time: template.alignment_time || "",
+        assignees: assigneeLabels,
+        bzWithLabel: "GA",
+        taskId: task.id,
+        templateId: task.system_template_origin_id,
+        matchTitle: task.title || "-",
+      })
     }
 
     for (const iso of commonWeekISOs) {
@@ -2907,7 +3016,7 @@ export default function AdminTasksPage() {
     }
 
     return byDay
-  }, [commonWeekISOs, ganeUserId, sortByTime, tasks, userMap])
+  }, [commonWeekISOs, ganeUserId, sortByTime, systemTaskByTemplateId, tasks, userMap])
 
   const tableDataByDay = React.useMemo(() => {
     const dataByDay: Record<
@@ -2968,7 +3077,7 @@ export default function AdminTasksPage() {
         personal: commonFiltered.personal.filter((x) => x.date === iso),
         external: sortByTime(commonFiltered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(commonFiltered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
-        bz: bzTasksByDay[iso] || [],
+        bz: bzSystemTasksByDay[iso] || [],
         r1: sortTasksByOrder(commonFiltered.r1.filter((x) => x.date === iso)),
         problems: [
           ...commonFiltered.problems.filter((x) => !x.everyday && x.date === iso),
@@ -2983,7 +3092,7 @@ export default function AdminTasksPage() {
     })
 
     return dataByDay
-  }, [bzTasksByDay, commonFiltered, commonWeekISOs, sortByTime, sortTasksByOrder])
+  }, [bzSystemTasksByDay, commonFiltered, commonWeekISOs, sortByTime, sortTasksByOrder])
 
   const weekTableRows = React.useMemo(
     () => [
@@ -3030,40 +3139,106 @@ export default function AdminTasksPage() {
     return byDay
   }, [commonWeekISOs, ganeUserId, tasks])
 
-  const bzAlignedSystemOccurrencesByDay = React.useMemo(() => {
-    const byDay: Record<string, DailyReportSystemOccurrence[]> = {}
-    commonWeekISOs.forEach((iso) => {
-      byDay[iso] = []
-    })
-    if (!ganeUserId) return byDay
+  const commonGaRowsByDay = React.useMemo(() => {
+    const byDay: Record<string, { bz: BzItem[]; detGa: CommonGaTableEntry[] }> = {}
 
-    const normalizeTitle = (value?: string | null) =>
-      (value || "").trim().replace(/\s+/g, " ").toLowerCase()
+    const appendBzEntry = (entries: BzItem[], candidate: BzItem) => {
+      const candidateKeys = getCommonGaEntryMatchKeys(candidate)
+      const existingIndex = entries.findIndex((entry) => {
+        const existingKeys = getCommonGaEntryMatchKeys(entry)
+        return candidateKeys.some((key) => existingKeys.includes(key))
+      })
+      if (existingIndex === -1) {
+        entries.push({
+          ...candidate,
+          assignees: Array.from(new Set(candidate.assignees || [])),
+          matchTitle: candidate.matchTitle || candidate.title,
+        })
+        return
+      }
 
-    const alignedTemplateIds = new Set(
-      systemTasks
-        .filter((task) => task.is_active !== false && task.alignment_user_ids?.includes(ganeUserId))
-        .map((task) => task.template_id)
-        .filter(Boolean)
-    )
-    const alignedTitles = new Set(
-      systemTasks
-        .filter((task) => task.is_active !== false && task.alignment_user_ids?.includes(ganeUserId))
-        .map((task) => normalizeTitle(task.title))
-        .filter(Boolean)
-    )
+      const existing = entries[existingIndex]
+      entries[existingIndex] = {
+        ...existing,
+        assignees: Array.from(new Set([...(existing.assignees || []), ...(candidate.assignees || [])])),
+        time: existing.time || candidate.time || "",
+        bzWithLabel: mergeLabelList(existing.bzWithLabel, candidate.bzWithLabel) || undefined,
+        taskId: existing.taskId || candidate.taskId,
+        templateId: existing.templateId || candidate.templateId,
+        matchTitle: existing.matchTitle || candidate.matchTitle || existing.title,
+      }
+    }
+    const appendDetGaEntry = (entries: CommonGaTableEntry[], candidate: CommonGaTableEntry) => {
+      const candidateKeys = getCommonGaEntryMatchKeys(candidate)
+      const existingIndex = entries.findIndex((entry) => {
+        const existingKeys = getCommonGaEntryMatchKeys(entry)
+        return candidateKeys.some((key) => existingKeys.includes(key))
+      })
+      if (existingIndex === -1) {
+        entries.push(candidate)
+        return
+      }
+
+      const existing = entries[existingIndex]
+      entries[existingIndex] = {
+        ...existing,
+        assignees: Array.from(new Set([...(existing.assignees || []), ...(candidate.assignees || [])])),
+        taskId: existing.taskId || candidate.taskId,
+        templateId: existing.templateId || candidate.templateId,
+        matchTitle: existing.matchTitle || candidate.matchTitle || existing.title,
+      }
+    }
 
     for (const iso of commonWeekISOs) {
-      const occurrences = gaSystemByDay[iso] || []
-      byDay[iso] = occurrences.filter(
-        (occurrence) =>
-          alignedTemplateIds.has(occurrence.template_id) ||
-          alignedTitles.has(normalizeTitle(occurrence.title))
-      )
+      const bzEntries: BzItem[] = []
+
+      for (const taskEntry of bzSystemTasksByDay[iso] || []) {
+        appendBzEntry(bzEntries, taskEntry)
+      }
+
+      const bzMatchKeys = new Set(bzEntries.flatMap((entry) => getCommonGaEntryMatchKeys(entry)))
+      const detGaEntries: CommonGaTableEntry[] = []
+
+      for (const occurrence of gaSystemByDay[iso] || []) {
+        const entry: CommonGaTableEntry = {
+          kind: "system",
+          title: occurrence.title || "-",
+          templateId: occurrence.template_id,
+          matchTitle: occurrence.title || "-",
+        }
+        const shouldHide = getCommonGaEntryMatchKeys(entry).some((key) => bzMatchKeys.has(key))
+        if (!shouldHide) {
+          appendDetGaEntry(detGaEntries, entry)
+        }
+      }
+
+      for (const task of gaTasksByDay[iso] || []) {
+        const entry: CommonGaTableEntry = {
+          kind: "task",
+          title: task.title || "-",
+          taskId: task.id,
+          matchTitle: task.title || "-",
+        }
+        const shouldHide = getCommonGaEntryMatchKeys(entry).some((key) => bzMatchKeys.has(key))
+        if (!shouldHide) {
+          appendDetGaEntry(detGaEntries, entry)
+        }
+      }
+
+      byDay[iso] = {
+        bz: sortByTime(bzEntries, (entry) => entry.time || "", (entry) => entry.title),
+        detGa: detGaEntries,
+      }
     }
 
     return byDay
-  }, [commonWeekISOs, gaSystemByDay, ganeUserId, systemTasks])
+  }, [
+    bzSystemTasksByDay,
+    commonWeekISOs,
+    gaSystemByDay,
+    gaTasksByDay,
+    sortByTime,
+  ])
 
   const canEditGaTimeSlots =
     isAdmin || (user?.username ? user.username.toLowerCase() === "gane.arifaj" : false)
@@ -3175,35 +3350,18 @@ export default function AdminTasksPage() {
       }
 
       const renderBzLines = (iso: string) => {
-        const bzEntries = tableDataByDay?.[iso]?.bz || []
-        const alignedSystemEntries = bzAlignedSystemOccurrencesByDay[iso] || []
-        const lines: string[] = []
-
-        bzEntries.forEach((e: BzItem, idx: number) => {
+        const bzEntries = commonGaRowsByDay[iso]?.bz || []
+        return bzEntries.map((e: BzItem, idx: number) => {
           const bzLabel = e.bzWithLabel ? ` - ${e.bzWithLabel}` : ""
-          lines.push(
-            `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${bzLabel}${assigneesSuffix(e)}`
-          )
+          return `${idx + 1}. ${stripInitialsPrefix(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
         })
-
-        alignedSystemEntries.forEach((task, idx) => {
-          const lineIndex = lines.length + 1
-          lines.push(`${lineIndex}. ${stripInitialsPrefix(task.title || "-")}`)
-        })
-
-        return lines
       }
 
       const renderCellLines = (rowId: CommonType, iso: string) => {
         const dayData = tableDataByDay?.[iso]
         if (!dayData) return []
         if (rowId === "det_ga") {
-          const systemEntries = gaSystemByDay[iso] || []
-          const taskEntries = gaTasksByDay[iso] || []
-          const combined = [
-            ...systemEntries.map((entry) => ({ kind: "system" as const, title: entry.title })),
-            ...taskEntries.map((entry) => ({ kind: "task" as const, title: entry.title || "-" })),
-          ]
+          const combined = commonGaRowsByDay[iso]?.detGa || []
           if (!combined.length) return []
           return combined.map((entry, idx) => `${idx + 1}. ${entry.title}`)
         }
@@ -3307,63 +3465,40 @@ export default function AdminTasksPage() {
         columns,
         rows,
       }
-    }, [bzAlignedSystemOccurrencesByDay, commonWeekISOs, gaSystemByDay, gaTasksByDay, tableDataByDay, weekTableRows, weekTitleRange])
+    }, [commonGaRowsByDay, commonWeekISOs, tableDataByDay, weekTableRows, weekTitleRange])
     const renderCellContent = (rowId: CommonType, iso: string) => {
       const dayData = tableDataByDay?.[iso]
       if (!dayData) return null
       if (rowId === "det_ga") {
-        const systemEntries = gaSystemByDay[iso] || []
-        const taskEntries = gaTasksByDay[iso] || []
-        const combined = [
-          ...systemEntries.map((entry) => ({ kind: "system" as const, title: entry.title })),
-          ...taskEntries.map((entry) => ({ kind: "task" as const, title: entry.title || "-" })),
-        ]
+        const combined = commonGaRowsByDay[iso]?.detGa || []
         if (!combined.length) return null
         return combined.map((entry, idx) => (
-          <div key={`${entry.kind}-${idx}`} className="week-table-entry">
+          <div key={`${entry.kind}-${entry.templateId || entry.taskId || idx}`} className="week-table-entry">
             <span>{idx + 1}. {entry.title}</span>
           </div>
         ))
       }
       const renderBzContent = () => {
-        const bzEntries = dayData.bz || []
-        const alignedSystemEntries = bzAlignedSystemOccurrencesByDay[iso] || []
-        if (!bzEntries.length && !alignedSystemEntries.length) return null
+        const bzEntries = commonGaRowsByDay[iso]?.bz || []
+        if (!bzEntries.length) return null
 
-        const content: React.ReactNode[] = []
-
-        bzEntries.forEach((e: BzItem, idx: number) => {
-          content.push(
-            <div key={`bz-${idx}`} className="week-table-entry">
-              <span>
-                {idx + 1}. {stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
-                {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
-              </span>
-              {e.assignees && e.assignees.length ? (
-                <div className="week-table-avatars">
-                  {e.assignees.map((name: string) => (
-                    <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
-                      {commonViewInitials(name)}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
-            </div>
-          )
-        })
-
-        alignedSystemEntries.forEach((task, idx) => {
-          const displayIndex = content.length + 1
-          content.push(
-            <div key={`bz-system-${task.template_id}-${idx}`} className="week-table-entry">
-              <span>
-                {displayIndex}. {stripInitialsPrefix(task.title || "-")}
-              </span>
-            </div>
-          )
-        })
-
-        return content
+        return bzEntries.map((e: BzItem, idx: number) => (
+          <div key={`bz-${e.templateId || e.taskId || idx}`} className="week-table-entry">
+            <span>
+              {idx + 1}. {stripInitialsPrefix(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}
+              {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
+            </span>
+            {e.assignees && e.assignees.length ? (
+              <div className="week-table-avatars">
+                {e.assignees.map((name: string) => (
+                  <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
+                    {commonViewInitials(name)}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        ))
       }
       const entries =
         rowId === "late"
@@ -3612,6 +3747,7 @@ export default function AdminTasksPage() {
         "LL",
         "NLL",
         "ASSIGNED",
+        "START DATE",
         "DATE",
         "AM/PM",
         "TITLE",
@@ -3631,7 +3767,9 @@ export default function AdminTasksPage() {
             {headers.map((label) => (
               <TableHead
                 key={label}
-                className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
+                className={`text-[10px] font-semibold uppercase tracking-wide text-slate-500 ${
+                  label === "TITLE" ? "min-w-[360px]" : ""
+                }`}
               >
                 {label}
               </TableHead>
@@ -3657,23 +3795,27 @@ export default function AdminTasksPage() {
                 row.needsGaneConfirmation && statusValue === "WAITING_CONFIRMATION" ? "Confirm" : "Done"
               const rowTask = tasks.find((task) => task.id === row.taskId) || null
               return (
-                <TableRow key={row.id} className="h-12">
-                  <TableCell className="h-12 align-middle font-semibold text-slate-700">{index + 1}</TableCell>
-                  <TableCell className="h-12 align-middle font-semibold">{row.ll}</TableCell>
-                  <TableCell className="h-12 align-middle">{row.nll}</TableCell>
-                  <TableCell className="h-12 align-middle">{renderAssignedBadges(row.assigned)}</TableCell>
-                  <TableCell className="h-12 align-middle">{row.dateIso ? formatDateDMY(row.dateIso) : "-"}</TableCell>
-                  <TableCell className="h-12 align-middle">{row.period || "-"}</TableCell>
-                  <TableCell className="h-12 align-middle whitespace-normal break-words font-medium text-slate-800">
+                <TableRow key={row.id}>
+                  <TableCell className="align-middle font-semibold text-slate-700">{index + 1}</TableCell>
+                  <TableCell className="align-middle font-semibold">{row.ll}</TableCell>
+                  <TableCell className="align-middle">{row.nll}</TableCell>
+                  <TableCell className="align-middle">{renderAssignedBadges(row.assigned)}</TableCell>
+                  <TableCell className="align-middle">{row.startDateLabel}</TableCell>
+                  <TableCell className="align-middle">{row.dateLabel}</TableCell>
+                  <TableCell className="align-middle">{row.period || "-"}</TableCell>
+                  <TableCell
+                    className="min-w-[360px] align-middle whitespace-normal break-words font-medium text-slate-800"
+                    title={row.title}
+                  >
                     {row.title}
                   </TableCell>
-                  {showBzColumns ? <TableCell className="h-12 align-middle">{row.bz}</TableCell> : null}
-                  {showBzColumns ? <TableCell className="h-12 align-middle">{row.kohaBz}</TableCell> : null}
-                  <TableCell className={`h-12 align-middle uppercase ${statusClass}`}>
+                  {showBzColumns ? <TableCell className="align-middle">{row.bz}</TableCell> : null}
+                  {showBzColumns ? <TableCell className="align-middle">{row.kohaBz}</TableCell> : null}
+                  <TableCell className={`align-middle uppercase ${statusClass}`}>
                     {statusLabel}
                   </TableCell>
-                  <TableCell className="h-12 align-middle uppercase">{row.priority}</TableCell>
-                  <TableCell className="h-12 align-middle">
+                  <TableCell className="align-middle uppercase">{row.priority}</TableCell>
+                  <TableCell className="align-middle">
                     <div className="flex items-center gap-2">
                       <input
                         type="text"
@@ -3693,7 +3835,7 @@ export default function AdminTasksPage() {
                       <span className="text-[10px] text-slate-400">{isSaving ? "Saving" : ""}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="h-12 align-middle">
+                  <TableCell className="align-middle">
                     <div className="flex items-center gap-2">
                       {canMarkDone ? (
                         <Button
@@ -3713,7 +3855,7 @@ export default function AdminTasksPage() {
                           variant="outline"
                           size="icon"
                           className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                          title="Edit due date"
+                          title={row.isFastTask ? "Edit task dates" : "Edit due date"}
                           aria-label={`Edit ${row.title}`}
                           onClick={() => startEditTask(rowTask)}
                         >
@@ -4209,7 +4351,13 @@ export default function AdminTasksPage() {
               })}
             </div>
           ) : null}
-          <div className={highlightedAllTasksRows.length || waitingConfirmationRows.length ? "mt-5" : ""}>
+          <div className={highlightedAllTasksRows.length || waitingConfirmationRows.length ? "mt-5" : "mt-4"}>
+            <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
+              Fast Tasks
+            </div>
+            <div className="mt-1 text-xs text-slate-500">
+              
+            </div>
             {renderAllTasksTable(regularNonConfirmationRows, {
               emptyLabel:
                 highlightedAllTasksRows.length || waitingConfirmationRows.length
@@ -4234,12 +4382,15 @@ export default function AdminTasksPage() {
         open={editOpen}
         onOpenChange={(open) => {
           setEditOpen(open)
-          if (!open) setEditingTaskId(null)
+          if (!open) {
+            setEditingTaskId(null)
+            setEditingTaskIsFast(false)
+          }
         }}
       >
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
-            <DialogTitle>Edit Task Due Date</DialogTitle>
+            <DialogTitle>{editingTaskIsFast ? "Edit Fast Task Dates" : "Edit Task Due Date"}</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
             <div className="space-y-2">
@@ -4247,31 +4398,67 @@ export default function AdminTasksPage() {
               <Input value={editTitle} readOnly className="bg-slate-50 text-slate-600" />
             </div>
             <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-2">
-                <Label>Current due date</Label>
-                <Input value={editDueDateDisplay} readOnly className="bg-slate-50 text-slate-600" />
-              </div>
-              <div className="space-y-2">
-                <Label>New due date</Label>
-                <Input
-                  type="date"
-                  value={editDueDate}
-                  onChange={(event) => {
-                    const value = event.target.value
-                    setEditDueDate(value)
-                    setEditDueDateDisplay(value ? toDDMMYYYY(value) : "")
-                  }}
-                />
-              </div>
+              {editingTaskIsFast ? (
+                <>
+                  <div className="space-y-2">
+                    <Label>Start date</Label>
+                    <Input
+                      type="date"
+                      value={editStartDate}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setEditStartDate(value)
+                        setEditStartDateDisplay(value ? toDDMMYYYY(value) : "")
+                      }}
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Due date</Label>
+                    <Input
+                      type="date"
+                      value={editDueDate}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setEditDueDate(value)
+                        setEditDueDateDisplay(value ? toDDMMYYYY(value) : "")
+                      }}
+                    />
+                  </div>
+                </>
+              ) : (
+                <>
+                  <div className="space-y-2">
+                    <Label>Current due date</Label>
+                    <Input value={editDueDateDisplay} readOnly className="bg-slate-50 text-slate-600" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>New due date</Label>
+                    <Input
+                      type="date"
+                      value={editDueDate}
+                      onChange={(event) => {
+                        const value = event.target.value
+                        setEditDueDate(value)
+                        setEditDueDateDisplay(value ? toDDMMYYYY(value) : "")
+                      }}
+                    />
+                  </div>
+                </>
+              )}
             </div>
             <div className="text-xs text-slate-500">
-              This updates only this generated task row. The system task template stays unchanged.
+              {editingTaskIsFast
+                ? "This updates the fast task date range for the active generated task copies."
+                : "This updates only this generated task row. The system task template stays unchanged."}
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setEditOpen(false)}>
                 Cancel
               </Button>
-              <Button disabled={savingEdit || !editingTaskId || !editDueDate} onClick={() => void saveEditTask()}>
+              <Button
+                disabled={savingEdit || !editingTaskId || (editingTaskIsFast ? !editStartDate || !editDueDate : !editDueDate)}
+                onClick={() => void saveEditTask()}
+              >
                 {savingEdit ? "Saving..." : "Save"}
               </Button>
             </div>
@@ -4841,13 +5028,15 @@ export default function AdminTasksPage() {
         .admin-week-table .ga-time-cell {
           border: 1px solid #e2e8f0;
           padding: 6px;
-          vertical-align: top;
+          vertical-align: bottom;
           min-width: 140px;
         }
         .admin-week-table .ga-time-cell-content {
           display: flex;
           flex-direction: column;
+          justify-content: flex-end;
           gap: 6px;
+          min-height: 100%;
         }
         .admin-week-table .ga-time-entry {
           display: flex;
@@ -4929,15 +5118,15 @@ export default function AdminTasksPage() {
             display: none !important;
           }
           @page {
-            margin: 0.3in 0.2in 0.2in 0.2in;
-            size: landscape;
+            margin: 4mm;
+            size: A4 landscape;
           }
           .print-only {
             display: block !important;
           }
           .print-page {
             position: relative;
-            padding: 0.3in 0.22in 0.2in 0.22in;
+            padding: 0.12in 0.12in 0.14in 0.12in;
             margin: 0;
             width: 100%;
             max-width: 100%;
@@ -4947,13 +5136,11 @@ export default function AdminTasksPage() {
           .print-section[data-print-section="ga-time"] .print-page {
             display: flex;
             flex-direction: column;
-            height: 7.15in;
-            max-height: 7.15in;
+            height: 184mm;
+            min-height: 184mm;
+            max-height: 184mm;
             overflow: hidden;
-            padding: 0.08in 0 0.06in 0;
-            width: calc(100% + 0.4in);
-            max-width: calc(100% + 0.4in);
-            margin-left: -0.2in;
+            padding: 0.04in 0.02in 0.08in 0.02in;
           }
           .print-section[data-print-section="ga-time"] .print-header {
             margin-bottom: 4px;
@@ -5094,10 +5281,14 @@ export default function AdminTasksPage() {
           .print-section[data-print-section="ga-time"] .ga-time-slot-label,
           .print-section[data-print-section="ga-time"] .ga-time-cell {
             height: inherit;
-            vertical-align: top;
+            vertical-align: bottom;
           }
           .print-section[data-print-section="ga-time"] .ga-time-cell-content {
             min-height: 100%;
+            justify-content: flex-end;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-table-table tbody {
+            height: 100%;
           }
           .admin-week-table .ga-time-entry {
             border: 1px solid #111827 !important;
@@ -5122,9 +5313,9 @@ export default function AdminTasksPage() {
           }
           .print-footer {
             position: fixed;
-            bottom: 0.18in;
-            left: 0.22in;
-            right: 0.22in;
+            bottom: 0.08in;
+            left: 0.12in;
+            right: 0.12in;
             display: grid;
             grid-template-columns: 1fr auto 1fr;
             padding-left: 0;
@@ -5133,9 +5324,9 @@ export default function AdminTasksPage() {
             color: #334155;
           }
           .print-section[data-print-section="ga-time"] .print-footer {
-            bottom: 0.06in;
-            left: -0.2in;
-            right: -0.2in;
+            bottom: 0.04in;
+            left: 0.04in;
+            right: 0.04in;
           }
           .print-page-count {
             grid-column: 2;

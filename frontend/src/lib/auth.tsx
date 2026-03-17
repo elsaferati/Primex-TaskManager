@@ -123,6 +123,14 @@ async function refreshAccessTokenShared(): Promise<string | null> {
   return refreshPromise
 }
 
+async function restoreSessionFromRefreshCookie() {
+  const refreshed = await refreshAccessTokenShared()
+  if (!refreshed) return null
+
+  const me = await fetchMe(refreshed)
+  return { token: refreshed, user: me }
+}
+
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [token, setToken] = React.useState<string | null>(null)
   const [user, setUser] = React.useState<User | null>(null)
@@ -137,39 +145,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   React.useEffect(() => {
     const boot = async () => {
       const existing = getStoredToken()
-      if (!existing) {
-        setLoading(false)
-        return
-      }
 
       try {
-        const me = await fetchMe(existing)
-        setToken(existing)
-        setUser(me)
-        if (getStoredLogoutAt() == null) {
-          setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
-        }
-      } catch {
-        const refreshed = await refreshAccessTokenShared()
-        if (refreshed) {
+        if (existing) {
           try {
-            const me = await fetchMe(refreshed)
-            setStoredToken(refreshed)
-            setToken(refreshed)
+            const me = await fetchMe(existing)
+            setToken(existing)
             setUser(me)
             if (getStoredLogoutAt() == null) {
               setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
             }
+            return
           } catch {
-            setStoredToken(null)
-            setToken(null)
-            setUser(null)
+            const restored = await restoreSessionFromRefreshCookie()
+            if (!restored) {
+              setStoredToken(null)
+              setStoredLogoutAt(null)
+              setToken(null)
+              setUser(null)
+              return
+            }
+
+            setStoredToken(restored.token)
+            setToken(restored.token)
+            setUser(restored.user)
+            if (getStoredLogoutAt() == null) {
+              setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
+            }
+            return
           }
-        } else {
+        }
+
+        const restored = await restoreSessionFromRefreshCookie()
+        if (!restored) {
           setStoredToken(null)
+          setStoredLogoutAt(null)
           setToken(null)
           setUser(null)
+          return
         }
+
+        setStoredToken(restored.token)
+        setToken(restored.token)
+        setUser(restored.user)
+        if (getStoredLogoutAt() == null) {
+          setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
+        }
+      } catch {
+        setStoredToken(null)
+        setStoredLogoutAt(null)
+        setToken(null)
+        setUser(null)
       } finally {
         setLoading(false)
       }
@@ -379,6 +405,4 @@ export function useAuth() {
   if (!ctx) throw new Error("useAuth must be used within AuthProvider")
   return ctx
 }
-
-
 

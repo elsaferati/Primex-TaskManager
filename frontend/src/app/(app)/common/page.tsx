@@ -1760,6 +1760,7 @@ export default function CommonViewPage() {
         // Load tasks for blocked, 1H, R1, external, and priority
         // For priority items (PRJK), we want everyone to see the same projects,
         // so try to fetch all tasks first, fallback to user's tasks if 403
+        let loadedTasks: Task[] = []
         let tasksRes = initialTasksRes
         if (!tasksRes?.ok && tasksRes?.status === 403 && !commonDepartmentId) {
           tasksRes = await apiFetch(`/tasks?include_done=true&window_from=${encodeURIComponent(weekStartIso)}&window_to=${encodeURIComponent(weekEndIso)}`)
@@ -1767,6 +1768,7 @@ export default function CommonViewPage() {
 
         if (tasksRes?.ok) {
           const tasks = (await tasksRes.json()) as Task[]
+          loadedTasks = tasks
 
           const chunk = <T,>(items: T[], size: number): T[][] => {
             if (size <= 0) return [items]
@@ -2129,48 +2131,64 @@ export default function CommonViewPage() {
         const userMap = new Map(loadedUsers.map((u) => [u.id, u]))
         const ganeUserId =
           loadedUsers.find((u) => u.username?.toLowerCase() === "gane.arifaj")?.id || null
-        const bzItems: BzItem[] = []
-        for (let i = 0; i < systemTasksResponses.length; i += 1) {
-          const res = systemTasksResponses[i]
-          const dateStr = weekDates[i]
-          if (!res?.ok || !dateStr) continue
+        const templateById = new Map<string, SystemTaskTemplate>()
+        for (const res of systemTasksResponses) {
+          if (!res?.ok) continue
           const templates = (await res.json()) as SystemTaskTemplate[]
           for (const tmpl of templates) {
-            if (tmpl.occurrence_date && tmpl.occurrence_date !== dateStr) continue
-            const alignmentEnabled = Boolean(
-              tmpl.requires_alignment ||
-              tmpl.alignment_time ||
-              (tmpl.alignment_user_ids && tmpl.alignment_user_ids.length) ||
-              (tmpl.alignment_roles && tmpl.alignment_roles.length)
-            )
-            if (!alignmentEnabled) continue
-            const alignmentUserIds = tmpl.alignment_user_ids ?? []
-            if (!ganeUserId || !alignmentUserIds.includes(ganeUserId)) continue
-            const bzWithNames = alignmentUserIds
-              .map((id) => {
-                const person = userMap.get(id)
-                return person?.full_name || person?.username || ""
-              })
-              .filter(Boolean)
-            const bzWithInitials = bzWithNames.map(initials).filter(Boolean)
-            const bzWithLabel =
-              bzWithInitials.length > 0
-                ? bzWithInitials.join(", ")
-                : tmpl.alignment_roles?.length
-                  ? tmpl.alignment_roles.join(", ")
-                  : ""
-            const taskAssignees =
-              tmpl.assignees?.map((a) => a.full_name || a.username || a.email || "Unknown").filter(Boolean) || []
-            bzItems.push({
-              title: tmpl.title || "-",
+            const key = tmpl.template_id || tmpl.id
+            if (key) templateById.set(key, tmpl)
+          }
+        }
+        const bzMap = new Map<string, BzItem>()
+        for (const task of loadedTasks) {
+          const maybeActive = (task as Task & { is_active?: boolean }).is_active
+          if (maybeActive === false) continue
+          if (!task.system_template_origin_id) continue
+          const template = templateById.get(task.system_template_origin_id)
+          if (!template || !ganeUserId || !template.alignment_user_ids?.includes(ganeUserId)) continue
+
+          const taskDate = parseDateOnly(task.start_date || task.due_date || task.created_at)
+          if (!taskDate) continue
+          const dateStr = toISODate(taskDate)
+          if (dateStr < weekStartIso || dateStr > weekEndIso) continue
+
+          const taskAssignees =
+            task.assignees?.length
+              ? task.assignees.map((a) => a.full_name || a.username || a.email || "Unknown").filter(Boolean)
+              : task.assigned_to
+                ? [userMap.get(task.assigned_to)?.full_name || userMap.get(task.assigned_to)?.username || "Unknown"].filter(Boolean)
+                : []
+          const bzWithNames = (template.alignment_user_ids || [])
+            .map((id) => {
+              const person = userMap.get(id)
+              return person?.full_name || person?.username || ""
+            })
+            .filter(Boolean)
+          const bzWithInitials = bzWithNames.map(initials).filter(Boolean)
+          const bzWithLabel =
+            bzWithInitials.length > 0
+              ? bzWithInitials.join(", ")
+              : template.alignment_roles?.length
+                ? template.alignment_roles.join(", ")
+                : ""
+          const mapKey = `${dateStr}:${task.system_template_origin_id}:${(task.title || "-").trim().toLowerCase()}`
+          const existing = bzMap.get(mapKey)
+          if (!existing) {
+            bzMap.set(mapKey, {
+              title: task.title || "-",
               date: dateStr,
-              time: formatAlignmentTime(tmpl.alignment_time),
+              time: formatAlignmentTime(template.alignment_time),
               assignees: taskAssignees,
               bzWithLabel,
             })
+            continue
           }
+          existing.assignees = Array.from(new Set([...(existing.assignees || []), ...taskAssignees]))
+          if (!existing.time) existing.time = formatAlignmentTime(template.alignment_time)
+          if (!existing.bzWithLabel && bzWithLabel) existing.bzWithLabel = bzWithLabel
         }
-        allData.bz = bzItems
+        allData.bz = Array.from(bzMap.values())
 
         // Single state update with all data
         if (mounted) {

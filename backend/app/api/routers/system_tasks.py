@@ -15,7 +15,7 @@ from sqlalchemy import and_, delete, insert, or_, select, text, cast, Date as SQ
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import noload
 
-from app.api.access import ensure_department_access, ensure_manager_or_admin
+from app.api.access import ensure_department_access
 from app.config import settings
 from app.api.deps import get_current_user, require_admin
 from app.db import get_db
@@ -655,7 +655,6 @@ async def list_system_task_templates(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[SystemTaskTemplateOut]:
-    ensure_manager_or_admin(user)
     templates = (await db.execute(select(SystemTaskTemplate).order_by(SystemTaskTemplate.created_at.desc()))).scalars().all()
     if not templates:
         return []

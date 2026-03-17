@@ -20,6 +20,7 @@ import {
   StickyNote,
   Briefcase,
   DollarSign,
+  Clock3,
   X,
   type LucideIcon
 } from "lucide-react"
@@ -27,6 +28,7 @@ import {
 import { cn } from "@/lib/utils"
 import type { UserRole } from "@/lib/types"
 import { useSidebar } from "./sidebar-context"
+import { useWaitingConfirmationGa } from "./waiting-confirmation-ga-context"
 
 // 1. Add an 'icon' property to your type definition
 type NavItem = { 
@@ -53,6 +55,11 @@ const items: NavItem[] = [
     href: "/ga-ka-notes",
     label: "GA/KA Notes",
     icon: StickyNote,
+  },
+  {
+    href: "/waiting-confirmation-ga",
+    label: "Waiting Conf GA",
+    icon: Clock3,
   },
   {
     href: "/admin-tasks",
@@ -126,6 +133,7 @@ const items: NavItem[] = [
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const { isOpen, setIsOpen } = useSidebar()
+  const { count } = useWaitingConfirmationGa()
   const projectRoute =
     pathname.startsWith("/projects/pcm") ? "pcm" : pathname.startsWith("/projects/design") ? "design" : pathname.startsWith("/projects/dev") ? "dev" : pathname.startsWith("/projects/") ? "dev" : null
 
@@ -178,6 +186,8 @@ export function Sidebar({ role }: { role: UserRole }) {
               (item.label === "Development" && projectRoute === "dev") ||
               (item.label === "Product Content" && projectRoute === "pcm") ||
               (item.label === "Graphic Design" && projectRoute === "design")
+            const displayLabel =
+              item.href === "/waiting-confirmation-ga" ? `${item.label} (${count})` : item.label
             return (
               <Link
                 key={item.href}
@@ -195,7 +205,7 @@ export function Sidebar({ role }: { role: UserRole }) {
                   "h-4 w-4 shrink-0 transition-colors",
                   active ? "text-primary" : "text-muted-foreground group-hover:text-foreground"
                 )} />
-                {item.label}
+                {displayLabel}
               </Link>
             )
           })}
