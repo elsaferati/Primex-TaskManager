@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -69,6 +69,34 @@ async def mark_all_read(db: AsyncSession = Depends(get_db), user=Depends(get_cur
         .where(Notification.user_id == user.id, Notification.read_at.is_(None))
         .values(read_at=now)
     )
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/delete-all")
+async def delete_all_notifications_post(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> dict:
+    await db.execute(delete(Notification).where(Notification.user_id == user.id))
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/{notification_id}/delete")
+async def delete_notification_post(
+    notification_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> dict:
+    result = await db.execute(
+        delete(Notification)
+        .where(Notification.id == notification_id, Notification.user_id == user.id)
+        .returning(Notification.id)
+    )
+    deleted_id = result.scalar_one_or_none()
+    if deleted_id is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Notification not found")
     await db.commit()
     return {"status": "ok"}
 

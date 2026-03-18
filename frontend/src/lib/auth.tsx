@@ -243,6 +243,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         const msg = JSON.parse(event.data) as { type?: string; title?: string; body?: string }
         if (msg.type === "notification") {
           toast(msg.title || "Notification", { description: msg.body || undefined })
+          window.dispatchEvent(new CustomEvent("primex:notification"))
         }
       } catch {
         // ignore

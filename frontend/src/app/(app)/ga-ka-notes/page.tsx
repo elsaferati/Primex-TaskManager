@@ -1366,7 +1366,7 @@ export default function GaKaNotesPage() {
               value={content}
               onChange={(e) => setContent(e.target.value)}
               rows={6}
-              className="min-h-[220px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
+              className="md:min-h-[220px] min-h-[170px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
             />
             {isVoiceListening ? (

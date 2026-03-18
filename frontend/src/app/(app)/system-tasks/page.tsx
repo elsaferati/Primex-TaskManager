@@ -1344,6 +1344,24 @@ export function SystemTasksView({
     [userMap]
   )
 
+  const renderAssigneeSummaryText = React.useCallback(
+    (labels: string[], inactive = false) => {
+      const cleaned = labels.map((label) => label.trim()).filter(Boolean)
+      if (cleaned.length === 0) return <span className="text-slate-400">-</span>
+      const visible = cleaned.slice(0, 3).join(", ")
+      const summary = cleaned.length > 3 ? `${visible}, ...` : visible
+      return (
+        <span
+          title={cleaned.join(", ")}
+          className={cn("block truncate text-xs sm:text-sm text-slate-700 font-normal", inactive && "opacity-55")}
+        >
+          {summary}
+        </span>
+      )
+    },
+    []
+  )
+
   const renderManagementAssignees = React.useCallback(
     (template: SystemTaskTemplateDefinition) => {
       const slots = [...(template.assignee_slots ?? [])]
@@ -1352,35 +1370,25 @@ export function SystemTasksView({
           if (a.is_active === b.is_active) return 0
           return a.is_active ? -1 : 1
         })
-        return (
-          <div className="space-y-1">
-            {slots.map((slot) => {
-              const primaryLabel = resolveAssigneeNameById(slot.primary_user_id)
-              return (
-                <div
-                  key={slot.id}
-                  className={cn(
-                    "rounded border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] leading-tight",
-                    !slot.is_active && "opacity-55"
-                  )}
-                >
-                  <div className="font-medium text-slate-800">{primaryLabel}</div>
-                  <div className="text-slate-500">{slot.is_active ? "Active assignee" : "Inactive assignee"}</div>
-                </div>
-              )
-            })}
-          </div>
+        return renderAssigneeSummaryText(
+          slots.map((slot) => resolveAssigneeNameById(slot.primary_user_id)),
+          slots.every((slot) => !slot.is_active)
         )
       }
 
-      const legacySummary = assigneeSummary(template.assignees)
-      if (legacySummary !== "-") return <span>{legacySummary}</span>
+      if (template.assignees?.length) {
+        return renderAssigneeSummaryText(
+          template.assignees
+            .map((person) => person.full_name || person.username || person.email || "")
+            .filter(Boolean)
+        )
+      }
       if (template.default_assignee_id) {
-        return <span>{resolveAssigneeNameById(template.default_assignee_id)}</span>
+        return renderAssigneeSummaryText([resolveAssigneeNameById(template.default_assignee_id)])
       }
       return <span className="text-slate-400">-</span>
     },
-    [assigneeSummary, resolveAssigneeNameById]
+    [renderAssigneeSummaryText, resolveAssigneeNameById]
   )
 
   const setInternalNoteValue = (
