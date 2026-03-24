@@ -18,8 +18,13 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
     setIsOpen((prev) => !prev)
   }, [])
 
+  const value = React.useMemo(
+    () => ({ isOpen, setIsOpen, toggle }),
+    [isOpen, toggle]
+  )
+
   return (
-    <SidebarContext.Provider value={{ isOpen, setIsOpen, toggle }}>
+    <SidebarContext.Provider value={value}>
       {children}
     </SidebarContext.Provider>
   )

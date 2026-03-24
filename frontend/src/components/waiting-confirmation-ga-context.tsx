@@ -73,7 +73,30 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
   }, [apiFetch])
 
   React.useEffect(() => {
-    void refresh()
+    let cancelled = false
+    let timeoutId: ReturnType<typeof window.setTimeout> | null = null
+    let idleId: number | null = null
+
+    const runRefresh = () => {
+      if (cancelled) return
+      void refresh()
+    }
+
+    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+      idleId = window.requestIdleCallback(runRefresh, { timeout: 1200 })
+    } else {
+      timeoutId = window.setTimeout(runRefresh, 150)
+    }
+
+    return () => {
+      cancelled = true
+      if (idleId !== null && typeof window !== "undefined" && "cancelIdleCallback" in window) {
+        window.cancelIdleCallback(idleId)
+      }
+      if (timeoutId !== null) {
+        window.clearTimeout(timeoutId)
+      }
+    }
   }, [refresh])
 
   const applyTaskResult = React.useCallback(

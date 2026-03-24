@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
@@ -161,6 +162,7 @@ function isDevelopmentDepartment(dept?: Department | null) {
 
 export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
+  const confirm = useConfirm()
   const searchParams = useSearchParams()
   const canMarkDone = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [notes, setNotes] = React.useState<GaNote[]>([])
@@ -619,7 +621,12 @@ export default function GaKaNotesPage() {
   }
 
   const deleteAttachmentFromDialog = async (noteId: string, attachment: GaNoteAttachment) => {
-    const confirmed = window.confirm(`Delete "${attachment.original_filename}"?`)
+    const confirmed = await confirm({
+      title: "Delete attachment",
+      description: `Delete "${attachment.original_filename}"?`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
     if (!confirmed) return
 
     setDeletingAttachmentIds((prev) => (prev.includes(attachment.id) ? prev : [...prev, attachment.id]))

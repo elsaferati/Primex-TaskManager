@@ -97,6 +97,9 @@ class CommonViewExportIn(BaseModel):
     title: str
     columns: list[str]
     rows: list[list[str]]
+    filename_prefix: str | None = None
+    freeze_panes: str | None = None
+    column_widths: list[float] | None = None
 
 
 DATE_LABEL_RE = re.compile(r"Date:\s*(\d{4}-\d{2}-\d{2})", re.IGNORECASE)
@@ -1902,6 +1905,7 @@ async def export_common_view_xlsx(
     ws.title = (payload.title or "Common View")[:31]
 
     last_col = len(payload.columns)
+    custom_widths = payload.column_widths or []
 
     # Row 1: merged title
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
@@ -1935,15 +1939,19 @@ async def export_common_view_xlsx(
 
     last_row = data_row - 1
 
-    ws.column_dimensions["A"].width = 5
-    ws.column_dimensions["B"].width = 14
-    for col_idx in range(3, last_col + 1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = 44
+    if len(custom_widths) == last_col:
+        for col_idx, width in enumerate(custom_widths, start=1):
+            ws.column_dimensions[get_column_letter(col_idx)].width = max(float(width or 0), 1.0)
+    else:
+        ws.column_dimensions["A"].width = 5
+        ws.column_dimensions["B"].width = 14
+        for col_idx in range(3, last_col + 1):
+            ws.column_dimensions[get_column_letter(col_idx)].width = 44
 
     if last_row >= header_row:
         ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
 
-    ws.freeze_panes = "C5"
+    ws.freeze_panes = payload.freeze_panes or "C5"
     ws.print_title_rows = f"{header_row}:{header_row}"
 
     ws.page_setup.orientation = "landscape"
@@ -2004,7 +2012,12 @@ async def export_common_view_xlsx(
         filename_date = f"{dd}_{mm}_{yyyy[-2:]}"
 
     initials_value = (_initials_compact(user.full_name or user.username or "") or "USER").upper()
-    filename = f"COMMON VIEW {filename_date}_EF ({initials_value}).xlsx"
+    if payload.filename_prefix:
+        safe_prefix = "".join(ch if ch.isalnum() or ch in ("-", "_", " ") else "_" for ch in payload.filename_prefix)
+        safe_prefix = re.sub(r"\s+", "_", safe_prefix).strip("_") or "COMMON_VIEW"
+        filename = f"{safe_prefix}_{filename_date}_{initials_value}.xlsx"
+    else:
+        filename = f"COMMON VIEW {filename_date}_EF ({initials_value}).xlsx"
 
     return StreamingResponse(
         bio,

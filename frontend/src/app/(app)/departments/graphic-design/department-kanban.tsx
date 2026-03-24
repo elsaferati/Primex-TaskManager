@@ -14,6 +14,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
@@ -920,6 +921,7 @@ export default function DepartmentKanban() {
   const departmentName = "Graphic Design"
   const departmentSlug = "graphic-design"
   const { apiFetch, user } = useAuth()
+  const confirm = useConfirm()
   const pathname = usePathname()
   const searchParams = useSearchParams()
   const tabParam = searchParams.get("tab")
@@ -1253,7 +1255,6 @@ export default function DepartmentKanban() {
     if (cached) {
       applyBootstrap(cached)
       setLoading(false)
-      void loadBootstrapData({ silent: true })
       return
     }
     void loadBootstrapData({ silent: false })
@@ -1406,6 +1407,7 @@ export default function DepartmentKanban() {
   }, [])
 
   React.useEffect(() => {
+    if (activeTab !== "all" && activeTab !== "projects") return
     if (!projects.length) return
     let cancelled = false
     const loadMembers = async () => {
@@ -1432,7 +1434,7 @@ export default function DepartmentKanban() {
     return () => {
       cancelled = true
     }
-  }, [projects, apiFetch])
+  }, [activeTab, projects, apiFetch])
 
   React.useEffect(() => {
     if (isTabId) {
@@ -3610,8 +3612,7 @@ export default function DepartmentKanban() {
   const canCreate =
     user?.role === "ADMIN" || user?.role === "MANAGER" || user?.role === "STAFF" // All roles may create/manage
   const isReadOnly = viewMode === "mine"
-  const canEditTasksInCurrentView = viewMode === "mine"
-const canCreateNoProjectTask = canCreate
+  const canCreateNoProjectTask = canCreate
   const canEditAllTodayTask = React.useCallback(
     (task?: Task | null) => {
       if (!task || !user?.id) return false
@@ -3626,6 +3627,24 @@ const canCreateNoProjectTask = canCreate
   const canManageDepartmentSystemDateEdit = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
   const canDeleteProjects = (user?.role === "ADMIN" || user?.role === "MANAGER") && !isReadOnly
+  const canEditNoProjectTask = React.useCallback(
+    (task?: Task | null) => {
+      if (!task || !user?.id) return false
+      if (user.role === "ADMIN" || user.role === "MANAGER") return true
+      return isTaskAssignedToUser(task, user.id)
+    },
+    [isTaskAssignedToUser, user?.id, user?.role]
+  )
+  const editingNoProjectTask = React.useMemo(
+    () =>
+      editingTaskId
+        ? noProjectTasks.find((task) => task.id === editingTaskId) ??
+          departmentTasks.find((task) => task.id === editingTaskId) ??
+          null
+        : null,
+    [departmentTasks, editingTaskId, noProjectTasks]
+  )
+  const canOpenNoProjectEditDialog = !editingTaskId || canEditNoProjectTask(editingNoProjectTask)
 
   const visibleSystemTasks = React.useMemo(() => {
     if (showAllSystem) return visibleSystemTemplates
@@ -4153,7 +4172,13 @@ const canCreateNoProjectTask = canCreate
   const deleteProject = async (projectId: string) => {
     const project = projects.find((p) => p.id === projectId)
     const projectLabel = resolveProjectTitle(project) || "this project"
-    if (!window.confirm(`Delete "${projectLabel}"? This cannot be undone.`)) return
+    const confirmed = await confirm({
+      title: "Delete project",
+      description: `Delete "${projectLabel}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
+    if (!confirmed) return
 
     setDeletingProjectId(projectId)
     try {
@@ -4256,7 +4281,13 @@ const canCreateNoProjectTask = canCreate
   const deleteNoProjectTask = async (taskId: string) => {
     const task = noProjectTasks.find((t) => t.id === taskId)
     const taskLabel = task?.title || "this task"
-    if (!window.confirm(`Delete "${taskLabel}"? This cannot be undone.`)) return
+    const confirmed = await confirm({
+      title: "Delete task",
+      description: `Delete "${taskLabel}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
+    if (!confirmed) return
 
     setDeletingNoProjectTaskId(taskId)
     try {
@@ -4281,6 +4312,10 @@ const canCreateNoProjectTask = canCreate
   }
 
   const startEditTask = (task: Task) => {
+    if (!canEditNoProjectTask(task)) {
+      toast.error("You do not have permission to edit this task")
+      return
+    }
     setEditingTaskId(task.id)
     setEditTaskTitle(task.title || "")
     setEditTaskDescription(task.description || "")
@@ -4723,7 +4758,13 @@ const canCreateNoProjectTask = canCreate
   const deleteInternalNote = async (noteIds: string[] | string) => {
     const ids = Array.isArray(noteIds) ? noteIds : [noteIds]
     if (!ids.length) return
-    if (!window.confirm("Are you sure you want to delete this internal note?")) return
+    const confirmed = await confirm({
+      title: "Delete internal note",
+      description: "Are you sure you want to delete this internal note?",
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
+    if (!confirmed) return
     let failed = false
     for (const noteId of ids) {
       const res = await apiFetch(`/internal-notes/${noteId}`, { method: "DELETE" })
@@ -6193,7 +6234,7 @@ const canCreateNoProjectTask = canCreate
             {activeTab === "system" && (
               <div className="space-y-6">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">System Routine</h2>
+                  <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">System Tasks</h2>
                 </div>
                 <div className="flex flex-wrap items-center gap-4 rounded-2xl bg-white p-3 shadow-sm ring-1 ring-slate-100 dark:bg-slate-900 dark:ring-slate-800">
                   <div className="flex gap-1 rounded-xl bg-slate-100 p-1 dark:bg-slate-800">
@@ -6428,10 +6469,7 @@ const canCreateNoProjectTask = canCreate
               <div className="space-y-4">
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   <div>
-                    <div className="text-xl font-semibold text-slate-900">Tasks (No Project)</div>
-                    <div className="text-sm text-slate-600">
-                      Use these buckets to track non-project tasks and special cases.
-                    </div>
+                    <div className="text-xl font-semibold text-slate-900 pt-4">Fast Tasks</div>
                   </div>
                 <div className="flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-end">
                   <div className="w-full sm:w-[180px]">
@@ -6629,7 +6667,7 @@ const canCreateNoProjectTask = canCreate
                   ) : null}
                 </div>
                 </div>
-                {canEditTasksInCurrentView ? (
+                {canOpenNoProjectEditDialog ? (
                   <Dialog open={Boolean(editingTaskId)} onOpenChange={(open) => { if (!open) cancelEditTask() }}>
                     <DialogContent className="sm:max-w-lg bg-white border-slate-200 rounded-2xl z-[110]">
                       <DialogHeader>
@@ -6891,38 +6929,38 @@ const canCreateNoProjectTask = canCreate
                                       {formatDateOnly(t.due_date)}
                                     </div>
                                     <div className="sm:px-3 flex items-start justify-end gap-2">
+                                      {canEditNoProjectTask(t) ? (
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          className="h-5 w-5 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                          title="Edit"
+                                          aria-label={`Edit ${t.title}`}
+                                          onClick={(event) => {
+                                            event.preventDefault()
+                                            event.stopPropagation()
+                                            startEditTask(t)
+                                          }}
+                                        >
+                                          <Pencil className="h-3 w-3" />
+                                        </Button>
+                                      ) : null}
                                       {canDeleteNoProject ? (
-                                        <>
-                                          <Button
-                                            variant="outline"
-                                            size="icon"
-                                            className="h-5 w-5 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                            title="Edit"
-                                            aria-label={`Edit ${t.title}`}
-                                            onClick={(event) => {
-                                              event.preventDefault()
-                                              event.stopPropagation()
-                                              startEditTask(t)
-                                            }}
-                                          >
-                                            <Pencil className="h-3 w-3" />
-                                          </Button>
-                                          <Button
-                                            variant="outline"
-                                            size="icon"
-                                            disabled={deletingNoProjectTaskId === t.id}
-                                            className="h-5 w-5 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
-                                            title="Delete"
-                                            aria-label={`Delete ${t.title}`}
-                                            onClick={(event) => {
-                                              event.preventDefault()
-                                              event.stopPropagation()
-                                              void deleteNoProjectTask(t.id)
-                                            }}
-                                          >
-                                            <Trash2 className="h-3 w-3" />
-                                          </Button>
-                                        </>
+                                        <Button
+                                          variant="outline"
+                                          size="icon"
+                                          disabled={deletingNoProjectTaskId === t.id}
+                                          className="h-5 w-5 border-slate-200 text-slate-500 hover:border-red-200 hover:text-red-600"
+                                          title="Delete"
+                                          aria-label={`Delete ${t.title}`}
+                                          onClick={(event) => {
+                                            event.preventDefault()
+                                            event.stopPropagation()
+                                            void deleteNoProjectTask(t.id)
+                                          }}
+                                        >
+                                          <Trash2 className="h-3 w-3" />
+                                        </Button>
                                       ) : null}
                                     </div>
                                   </div>

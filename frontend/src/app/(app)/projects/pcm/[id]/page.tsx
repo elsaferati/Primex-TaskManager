@@ -13,6 +13,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
@@ -826,6 +827,17 @@ export default function PcmProjectPage() {
   const router = useRouter()
   const projectId = String(params.id)
   const { apiFetch, user } = useAuth()
+  const confirm = useConfirm()
+  const confirmDeleteTask = React.useCallback(
+    () =>
+      confirm({
+        title: "Delete task",
+        description: "Are you sure you want to delete this task?",
+        confirmLabel: "Delete",
+        variant: "destructive",
+      }),
+    [confirm]
+  )
 
   const [project, setProject] = React.useState<Project | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
@@ -5212,7 +5224,7 @@ export default function PcmProjectPage() {
                               size="icon"
                               className="h-6 w-6 text-red-600 hover:bg-red-50 flex-shrink-0"
                               onClick={async () => {
-                                if (!confirm("Are you sure you want to delete this task?")) return
+                                if (!(await confirmDeleteTask())) return
                                 const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
                                 if (!res?.ok) {
                                   if (res?.status == 405) {
@@ -6970,7 +6982,7 @@ export default function PcmProjectPage() {
                                     size="sm"
                                     className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
                                     onClick={async () => {
-                                      if (!confirm("Are you sure you want to delete this task?")) return
+                                      if (!(await confirmDeleteTask())) return
                                       const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
                                       if (!res?.ok) {
                                         if (res?.status == 405) {
@@ -8032,7 +8044,7 @@ export default function PcmProjectPage() {
                                     size="sm"
                                     className="h-8 w-8 p-0 text-slate-400 hover:text-red-500 hover:bg-red-50"
                                     onClick={async () => {
-                                      if (!confirm("Are you sure you want to delete this task?")) return
+                                      if (!(await confirmDeleteTask())) return
                                       const res = await apiFetch(`/tasks/${task.id}`, { method: "DELETE" })
                                       if (!res?.ok) {
                                         if (res?.status == 405) {

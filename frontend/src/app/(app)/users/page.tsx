@@ -1,7 +1,9 @@
 "use client"
 
 import * as React from "react"
+import { toast } from "sonner"
 
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -14,6 +16,7 @@ import type { Department, User } from "@/lib/types"
 
 export default function UsersPage() {
   const { user, apiFetch } = useAuth()
+  const confirm = useConfirm()
   const [users, setUsers] = React.useState<User[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [showInactive, setShowInactive] = React.useState(false)
@@ -41,7 +44,13 @@ export default function UsersPage() {
   const departmentById = new Map(departments.map((d) => [d.id, d.name]))
 
   const deactivate = async (target: User) => {
-    if (!window.confirm(`Deactivate ${target.email}?`)) return
+    const confirmed = await confirm({
+      title: "Deactivate user",
+      description: `Deactivate ${target.email}?`,
+      confirmLabel: "Deactivate",
+      variant: "destructive",
+    })
+    if (!confirmed) return
     const res = await apiFetch(`/users/${target.id}`, { method: "DELETE" })
     if (!res.ok) {
       let detail = "Failed to deactivate user"
@@ -51,7 +60,7 @@ export default function UsersPage() {
       } catch {
         // ignore response parse errors
       }
-      window.alert(detail)
+      toast.error(detail)
       return
     }
     await load()

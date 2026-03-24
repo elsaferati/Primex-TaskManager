@@ -71,6 +71,11 @@ const items: NavItem[] = [
     label: "System Tasks",
     icon: Layers,
   },
+  {
+    href: "/system-task-instances",
+    label: "System Tasks Report",
+    icon: Layers,
+  },
   { 
     href: "/departments/development", 
     label: "Development", 

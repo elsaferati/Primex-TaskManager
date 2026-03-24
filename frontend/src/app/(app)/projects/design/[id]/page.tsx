@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
@@ -337,6 +338,7 @@ export default function DesignProjectPage() {
   const router = useRouter()
   const projectId = String(params.id)
   const { apiFetch, user } = useAuth()
+  const confirm = useConfirm()
   const stickyHeaderRef = React.useRef<HTMLDivElement | null>(null)
   const [stickyOffsetPx, setStickyOffsetPx] = React.useState(0)
 
@@ -1223,7 +1225,7 @@ export default function DesignProjectPage() {
   }
 
   const deleteMstSofaNewRow = async (itemId: string) => {
-    if (!window.confirm("Delete this checklist item?")) return
+    if (!(await confirm({ title: "Delete checklist item", description: "Delete this checklist item?", confirmLabel: "Delete", variant: "destructive" }))) return
     const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
     if (!res.ok) {
       toast.error("Failed to delete checklist item")
@@ -1296,7 +1298,7 @@ export default function DesignProjectPage() {
   }
 
   const deleteMstVitrineNewRow = async (itemId: string) => {
-    if (!window.confirm("Delete this checklist item?")) return
+    if (!(await confirm({ title: "Delete checklist item", description: "Delete this checklist item?", confirmLabel: "Delete", variant: "destructive" }))) return
     const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
     if (!res.ok) {
       toast.error("Failed to delete checklist item")
@@ -1369,7 +1371,7 @@ export default function DesignProjectPage() {
   }
 
   const deleteMstSideboardNewRow = async (itemId: string) => {
-    if (!window.confirm("Delete this checklist item?")) return
+    if (!(await confirm({ title: "Delete checklist item", description: "Delete this checklist item?", confirmLabel: "Delete", variant: "destructive" }))) return
     const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
     if (!res.ok) {
       toast.error("Failed to delete checklist item")
@@ -1442,7 +1444,7 @@ export default function DesignProjectPage() {
   }
 
   const deleteMstLowboardRow = async (itemId: string) => {
-    if (!window.confirm("Delete this checklist item?")) return
+    if (!(await confirm({ title: "Delete checklist item", description: "Delete this checklist item?", confirmLabel: "Delete", variant: "destructive" }))) return
     const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
     if (!res.ok) {
       toast.error("Failed to delete checklist item")
@@ -1514,7 +1516,7 @@ export default function DesignProjectPage() {
   }
 
   const deleteMstGjeneraleRow = async (itemId: string) => {
-    if (!window.confirm("Delete this checklist item?")) return
+    if (!(await confirm({ title: "Delete checklist item", description: "Delete this checklist item?", confirmLabel: "Delete", variant: "destructive" }))) return
     const res = await apiFetch(`/checklist-items/${itemId}`, { method: "DELETE" })
     if (!res.ok) {
       toast.error("Failed to delete checklist item")

@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { toast } from "sonner"
 import { ChevronDown, Plus, X, Printer, GripVertical, Download } from "lucide-react"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY } from "@/lib/dates"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
@@ -264,6 +265,7 @@ const SortableUserHeader = ({ user, isOrdering }: SortableUserHeaderProps) => {
 
 export default function WeeklyPlannerPage() {
   const { apiFetch, user } = useAuth()
+  const confirm = useConfirm()
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
@@ -458,11 +460,14 @@ export default function WeeklyPlannerPage() {
     }
 
     const slotLabel = timeSlot ? timeSlot.toUpperCase() : "this slot"
-    const confirmed = window.confirm(
-      taskTitle
+    const confirmed = await confirm({
+      title: "Remove task from planner",
+      description: taskTitle
         ? `Remove task "${taskTitle}" from ${slotLabel} on ${dayDate} for this user?`
-        : `Remove this task from ${slotLabel} on ${dayDate} for this user?`
-    )
+        : `Remove this task from ${slotLabel} on ${dayDate} for this user?`,
+      confirmLabel: "Remove",
+      variant: "destructive",
+    })
 
     if (!confirmed) return
 
@@ -495,7 +500,7 @@ export default function WeeklyPlannerPage() {
     } finally {
       setDeletingTaskId(null)
     }
-  }, [apiFetch, buildCurrentWeekParams, departmentId])
+  }, [apiFetch, buildCurrentWeekParams, confirm, departmentId])
 
   const deleteProject = React.useCallback(async (
     projectId: string,
@@ -511,11 +516,14 @@ export default function WeeklyPlannerPage() {
     }
 
     const slotLabel = timeSlot ? timeSlot.toUpperCase() : "this slot"
-    const confirmed = window.confirm(
-      projectTitle
+    const confirmed = await confirm({
+      title: "Remove project from planner",
+      description: projectTitle
         ? `Remove project "${projectTitle}" from ${slotLabel} on ${dayDate} for this user?`
-        : `Remove this project from ${slotLabel} on ${dayDate} for this user?`
-    )
+        : `Remove this project from ${slotLabel} on ${dayDate} for this user?`,
+      confirmLabel: "Remove",
+      variant: "destructive",
+    })
     if (!confirmed) return
 
     setDeletingProjectId(projectId)
@@ -547,7 +555,7 @@ export default function WeeklyPlannerPage() {
     } finally {
       setDeletingProjectId(null)
     }
-  }, [apiFetch, buildCurrentWeekParams])
+  }, [apiFetch, buildCurrentWeekParams, confirm])
 
   const getOrderedUsersForDept = React.useCallback((dept: WeeklyTableDepartment) => {
     return orderedUsersByDept[dept.department_id] || buildDepartmentUsers(dept)

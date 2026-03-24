@@ -27,6 +27,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Textarea } from "@/components/ui/textarea"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/lib/auth"
@@ -140,6 +141,8 @@ function userInitials(label: string) {
   const last = tokens[tokens.length - 1]?.[0] ?? ""
   return `${first}${last}`.toUpperCase()
 }
+
+const MAX_ASSIGNEE_INITIALS = 10
 
 const INTERNAL_NOTE_FIELDS = [
   { key: "REGJ", label: "REGJ", placeholder: "0" },
@@ -421,6 +424,7 @@ export function SystemTasksView({
   showBzTimeColumn = false,
 }: SystemTasksViewProps) {
   const { apiFetch, user } = useAuth()
+  const confirm = useConfirm()
   type AssigneeUser = User | UserLookup
   const [templates, setTemplates] = React.useState<SystemTaskTemplateDefinition[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
@@ -1223,11 +1227,14 @@ export function SystemTasksView({
   const deleteTemplate = async (template: SystemTaskTemplateDefinition) => {
     const templateId = template.id
     const templateTitle = template.title || "this system task"
-    
-    const confirmed = window.confirm(
-      `Are you sure you want to delete the system task "${templateTitle}"?\n\nThis action cannot be undone and will also delete all associated tasks.`
-    )
-    
+
+    const confirmed = await confirm({
+      title: "Delete system task",
+      description: `Are you sure you want to delete the system task "${templateTitle}"? This action cannot be undone and will also delete all associated tasks.`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
+
     if (!confirmed) return
 
     setDeletingTemplateId(templateId)
@@ -1325,13 +1332,19 @@ export function SystemTasksView({
     "If the selected day falls on Saturday/Sunday, the task runs on Friday."
 
   const assigneeSummary = React.useCallback((list?: SystemTaskTemplateDefinition["assignees"]) => {
-    if (!list || list.length === 0) return "-"
-    if (list.length <= 2) {
-      return list
-        .map((person) => person.full_name || person.username || person.email)
-        .join(", ")
-    }
-    return `${list.length} people`
+    const labels = (list ?? [])
+      .map((person) => person.full_name || person.username || person.email || "")
+      .filter(Boolean)
+    if (!labels.length) return "-"
+    if (labels.length > MAX_ASSIGNEE_INITIALS) return "All"
+    return labels.map((label) => userInitials(label)).join(", ")
+  }, [])
+
+  const assigneeSummaryTitle = React.useCallback((list?: SystemTaskTemplateDefinition["assignees"]) => {
+    return (list ?? [])
+      .map((person) => person.full_name || person.username || person.email || "")
+      .filter(Boolean)
+      .join(", ")
   }, [])
 
   const resolveAssigneeNameById = React.useCallback(
@@ -1348,15 +1361,28 @@ export function SystemTasksView({
     (labels: string[], inactive = false) => {
       const cleaned = labels.map((label) => label.trim()).filter(Boolean)
       if (cleaned.length === 0) return <span className="text-slate-400">-</span>
-      const visible = cleaned.slice(0, 3).join(", ")
-      const summary = cleaned.length > 3 ? `${visible}, ...` : visible
+      if (cleaned.length > MAX_ASSIGNEE_INITIALS) {
+        return (
+          <span
+            title={cleaned.join(", ")}
+            className={cn("block text-xs sm:text-sm text-slate-700 font-normal", inactive && "opacity-55")}
+          >
+            All
+          </span>
+        )
+      }
       return (
-        <span
-          title={cleaned.join(", ")}
-          className={cn("block truncate text-xs sm:text-sm text-slate-700 font-normal", inactive && "opacity-55")}
-        >
-          {summary}
-        </span>
+        <div className={cn("flex flex-wrap gap-1.5", inactive && "opacity-55")} title={cleaned.join(", ")}>
+          {cleaned.map((label) => (
+            <span
+              key={label}
+              className="inline-flex items-center rounded-full border border-slate-200 bg-slate-50 px-2 py-1 text-[11px] text-slate-700"
+              title={label}
+            >
+              {userInitials(label)}
+            </span>
+          ))}
+        </div>
       )
     },
     []
@@ -1499,7 +1525,7 @@ export function SystemTasksView({
       const res = await apiFetch("/exports/system-task-templates.xlsx?mode=all")
       if (!res?.ok) {
         const detail = await res.text()
-        alert(detail || "Failed to export Excel.")
+        toast.error(detail || "Failed to export Excel.")
         return
       }
       const blob = await res.blob()
@@ -1513,7 +1539,7 @@ export function SystemTasksView({
       window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error("Failed to export system tasks Excel", err)
-      alert("Failed to export Excel.")
+      toast.error("Failed to export Excel.")
     } finally {
       setExportingExcel(false)
     }
@@ -3272,6 +3298,7 @@ export function SystemTasksView({
                         const priorityValue = normalizePriority(template.priority)
                         const departmentLabel = templateDepartmentLabel(template)
                         const ownerLabel = assigneeSummary(template.assignees)
+                        const ownerTitle = assigneeSummaryTitle(template.assignees)
                         const isUnassignedAll = !template.department_id && !template.default_assignee_id
                         const frequencyLabel =
                           FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ??
@@ -3346,7 +3373,7 @@ export function SystemTasksView({
                                   "text-xs sm:text-sm text-slate-700 font-normal",
                                   showSystemActions ? "space-y-1" : "truncate"
                                 )}
-                                title={!showSystemActions && ownerLabel !== "-" ? ownerLabel : ""}
+                                title={!showSystemActions && ownerLabel !== "-" ? ownerTitle : ""}
                               >
                                 {showSystemActions
                                   ? renderManagementAssignees(template)

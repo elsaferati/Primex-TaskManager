@@ -39,6 +39,10 @@ class TaskOut(BaseModel):
     daily_products: int | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
+    original_due_date: datetime | None = None
+    planned_date: datetime | None = None
+    late_days: int | None = None
+    moved_days: int | None = None
     completed_at: datetime | None = None
     is_bllok: bool
     is_1h_report: bool

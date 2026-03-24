@@ -36,6 +36,7 @@ from app.services.notifications import add_notification, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
+from app.services.daily_report_logic import business_days_between
 
 
 router = APIRouter()
@@ -79,6 +80,41 @@ def _is_mst_or_tt_project(project: Project) -> bool:
     return project.project_type == ProjectType.MST.value or ("MST" in title) or is_tt
 
 
+def _signed_business_days_between(start_day: date, end_day: date) -> int:
+    if end_day >= start_day:
+        return business_days_between(start_day, end_day)
+    return -business_days_between(end_day, start_day)
+
+
+def _task_late_days(task: Task, *, today: date) -> int | None:
+    due_day = _as_local_date(task.due_date)
+    if due_day is None:
+        return None
+
+    if task.status == TaskStatus.DONE.value:
+        completed_day = _as_local_date(task.completed_at)
+        if completed_day and completed_day > due_day:
+            return business_days_between(due_day, completed_day)
+        return None
+
+    if today > due_day:
+        late_days = business_days_between(due_day, today)
+        return late_days or None
+    return None
+
+
+def _task_moved_days(task: Task) -> int | None:
+    original_due_day = _as_local_date(task.original_due_date)
+    due_day = _as_local_date(task.due_date)
+    if original_due_day is None or due_day is None or original_due_day == due_day:
+        return None
+    return _signed_business_days_between(original_due_day, due_day)
+
+
+def _task_planned_date(task: Task) -> datetime | None:
+    return task.original_due_date or task.due_date
+
+
 def _extract_total_and_completed(daily_products: int | None, internal_notes: str | None) -> tuple[int | None, int]:
     total: int | None = daily_products
     completed = 0
@@ -116,6 +152,19 @@ def _compute_status_from_completed(total: int | None, completed: int) -> TaskSta
     if completed < total:
         return TaskStatus.IN_PROGRESS
     return TaskStatus.DONE
+
+
+def _should_auto_status_from_product_counts(
+    project: Project | None,
+    phase: str | ProjectPhaseStatus | None,
+) -> bool:
+    if project is None:
+        return False
+    phase_value = phase.value if isinstance(phase, ProjectPhaseStatus) else phase
+    return phase_value in (
+        ProjectPhaseStatus.PRODUCT.value,
+        ProjectPhaseStatus.CONTROL.value,
+    )
 
 
 _GA_NOTE_VALID_STATUSES = {
@@ -224,6 +273,8 @@ def _task_to_out(
     assignees: list[TaskAssigneeOut],
     user_comment: str | None = None,
     status_override: TaskStatus | None = None,
+    late_days: int | None = None,
+    moved_days: int | None = None,
 ) -> TaskOut:
     return TaskOut(
         id=task.id,
@@ -249,6 +300,10 @@ def _task_to_out(
         daily_products=task.daily_products,
         start_date=task.start_date,
         due_date=task.due_date,
+        original_due_date=task.original_due_date,
+        planned_date=_task_planned_date(task),
+        late_days=late_days,
+        moved_days=moved_days,
         completed_at=task.completed_at,
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
@@ -349,7 +404,9 @@ async def list_tasks(
     window_from: datetime | None = None,
     window_to: datetime | None = None,
     include_done: bool = True,
+    include_all_done: bool = False,
     include_inactive: bool = False,
+    system_only: bool = False,
     include_all_departments: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
@@ -368,6 +425,8 @@ async def list_tasks(
 
     if not include_inactive:
         stmt = stmt.where(Task.is_active.is_(True))
+    if system_only:
+        stmt = stmt.where(Task.system_template_origin_id.is_not(None))
 
     if department_id:
         # Include tasks that belong to projects in the department (legacy tasks may have null/mismatched Task.department_id).
@@ -417,7 +476,7 @@ async def list_tasks(
                 stmt = stmt.where(effective_date <= window_to_date)
     if not include_done:
         stmt = stmt.where(cast(Task.status, SQLString) != TaskStatus.DONE.value)
-    else:
+    elif not include_all_done:
         # Only include DONE tasks completed within the last 45 days.
         # Historical completed tasks are never shown in kanban views anyway.
         done_cutoff = datetime.now(timezone.utc) - timedelta(days=45)
@@ -461,6 +520,7 @@ async def list_tasks(
             alignment_map.setdefault(tid, []).append(uid)
 
     out = []
+    today = _as_local_date(datetime.now(timezone.utc)) or datetime.now(timezone.utc).date()
     for t in tasks:
         status_override: TaskStatus | None = None
         if is_mst_tt_project and t.phase in (ProjectPhaseStatus.PRODUCT.value, ProjectPhaseStatus.CONTROL.value):
@@ -476,6 +536,8 @@ async def list_tasks(
             dto_assignees or [],
             user_comment=comment_map.get(t.id),
             status_override=status_override,
+            late_days=_task_late_days(t, today=today),
+            moved_days=_task_moved_days(t),
         )
         dto.alignment_user_ids = alignment_map.get(t.id)
         out.append(dto)
@@ -651,10 +713,7 @@ async def create_task(
     priority_value = payload.priority or TaskPriority.NORMAL
     phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.MEETINGS)
 
-    if project is not None and _is_mst_or_tt_project(project) and phase_value in (
-        ProjectPhaseStatus.PRODUCT,
-        ProjectPhaseStatus.CONTROL,
-    ):
+    if _should_auto_status_from_product_counts(project, phase_value):
         total, completed = _extract_total_and_completed(payload.daily_products, payload.internal_notes)
         auto_status = _compute_status_from_completed(total, completed)
         if auto_status is not None:
@@ -1158,12 +1217,9 @@ async def create_task(
     db.add(task)
     await db.flush()
 
-    # Record per-day progress event for MST/TT Product Content tasks based on completed/total.
+    # Record per-day progress event for product-count driven project tasks.
     # This is per-day history; it does not retroactively change other days.
-    if project is not None and _is_mst_or_tt_project(project) and phase_value in (
-        ProjectPhaseStatus.PRODUCT,
-        ProjectPhaseStatus.CONTROL,
-    ):
+    if _should_auto_status_from_product_counts(project, phase_value):
         total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
         if total is not None and total > 0 and completed > 0:
             today = datetime.now(timezone.utc).date()
@@ -1634,76 +1690,76 @@ async def update_task(
                 detail="Fast task can only have one type: BLL, R1, 1H, or Personal"
             )
 
-    # Auto-status for MST/TT Product Content tasks: compute status from completed/total products.
-    # Only auto-compute status if status wasn't explicitly set by user
-    if task.project_id is not None and task.phase in (
-        ProjectPhaseStatus.PRODUCT.value,
-        ProjectPhaseStatus.CONTROL.value,
-    ):
-        project = (await db.execute(select(Project).where(Project.id == task.project_id))).scalar_one_or_none()
-        if project is not None and _is_mst_or_tt_project(project):
-            total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
-            
-            # Only auto-compute status if status wasn't explicitly set in payload
-            # This preserves user's explicit status changes
-            if not status_was_explicitly_set:
-                auto_status = _compute_status_from_completed(total, completed)
-                if auto_status is not None:
-                    task.status = auto_status
-                    if task.status == TaskStatus.DONE:
-                        task.completed_at = task.completed_at or datetime.now(timezone.utc)
+    project_for_product_status: Project | None = None
+    if task.project_id is not None:
+        project_for_product_status = (
+            await db.execute(select(Project).where(Project.id == task.project_id))
+        ).scalar_one_or_none()
+
+    # Auto-status for project tasks that are driven by completed/total product counts.
+    # Only auto-compute status if status wasn't explicitly set by user.
+    if _should_auto_status_from_product_counts(project_for_product_status, task.phase):
+        total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
+
+        # Only auto-compute status if status wasn't explicitly set in payload.
+        # This preserves user's explicit status changes.
+        if not status_was_explicitly_set:
+            auto_status = _compute_status_from_completed(total, completed)
+            if auto_status is not None:
+                task.status = auto_status
+                if task.status == TaskStatus.DONE:
+                    task.completed_at = task.completed_at or datetime.now(timezone.utc)
+                else:
+                    task.completed_at = None
+
+        # Per-day progress logging: touches the record for the task's due_date (today/past only).
+        # If due_date is in the future, skip logging; if due_date is None, fall back to today.
+        if total is not None and total > 0:
+            made_progress = completed > old_completed
+            became_done_today = completed >= total and old_completed < total
+            is_already_done = completed >= total
+            values_changed = completed != old_completed or total != old_total
+            # Update if there's progress, just became done, is already done, or values changed (to keep status accurate).
+            if made_progress or became_done_today or is_already_done or values_changed:
+                today = datetime.now(timezone.utc).date()
+                progress_day: date | None = today
+                if task.due_date is not None:
+                    due_dt = task.due_date
+                    due_day = due_dt.astimezone(timezone.utc).date() if due_dt.tzinfo else due_dt.date()
+                    if due_day > today:
+                        progress_day = None
                     else:
-                        task.completed_at = None
+                        progress_day = due_day
 
-            # Per-day progress logging: touches the record for the task's due_date (today/past only).
-            # If due_date is in the future, skip logging; if due_date is None, fall back to today.
-            if total is not None and total > 0:
-                made_progress = completed > old_completed
-                became_done_today = completed >= total and old_completed < total
-                is_already_done = completed >= total
-                values_changed = completed != old_completed or total != old_total
-                # Update if there's progress, just became done, is already done, or values changed (to keep status accurate).
-                if made_progress or became_done_today or is_already_done or values_changed:
-                    today = datetime.now(timezone.utc).date()
-                    progress_day: date | None = today
-                    if task.due_date is not None:
-                        due_dt = task.due_date
-                        due_day = due_dt.astimezone(timezone.utc).date() if due_dt.tzinfo else due_dt.date()
-                        if due_day > today:
-                            progress_day = None
-                        else:
-                            progress_day = due_day
-
-                    if progress_day is not None:
-                        # Check if there's an existing TaskDailyProgress for today with explicit status
-                        # If status was explicitly set today, preserve it
-                        explicit_status_for_today: TaskStatus | None = None
-                        if status_was_explicitly_set and progress_day == today:
-                            # Check if we just set a status for today in the status change block above
-                            existing_today_progress = (
-                                await db.execute(
-                                    select(TaskDailyProgress).where(
-                                        TaskDailyProgress.task_id == task.id,
-                                        TaskDailyProgress.day_date == today,
-                                    )
+                if progress_day is not None:
+                    # Check if there's an existing TaskDailyProgress for today with explicit status.
+                    # If status was explicitly set today, preserve it.
+                    explicit_status_for_today: TaskStatus | None = None
+                    if status_was_explicitly_set and progress_day == today:
+                        # Check if we just set a status for today in the status change block above.
+                        existing_today_progress = (
+                            await db.execute(
+                                select(TaskDailyProgress).where(
+                                    TaskDailyProgress.task_id == task.id,
+                                    TaskDailyProgress.day_date == today,
                                 )
-                            ).scalar_one_or_none()
-                            if existing_today_progress and existing_today_progress.daily_status:
-                                # Preserve the explicit status that was set today
-                                try:
-                                    explicit_status_for_today = TaskStatus(existing_today_progress.daily_status)
-                                except Exception:
-                                    explicit_status_for_today = None
-                        
-                        await upsert_task_daily_progress(
-                            db,
-                            task_id=task.id,
-                            day_date=progress_day,
-                            old_completed=old_completed,
-                            new_completed=completed,
-                            total=total,
-                            explicit_status=explicit_status_for_today,
-                        )
+                            )
+                        ).scalar_one_or_none()
+                        if existing_today_progress and existing_today_progress.daily_status:
+                            try:
+                                explicit_status_for_today = TaskStatus(existing_today_progress.daily_status)
+                            except Exception:
+                                explicit_status_for_today = None
+
+                    await upsert_task_daily_progress(
+                        db,
+                        task_id=task.id,
+                        day_date=progress_day,
+                        old_completed=old_completed,
+                        new_completed=completed,
+                        total=total,
+                        explicit_status=explicit_status_for_today,
+                    )
 
     if payload.status is not None and task.assigned_to is not None and task.status == payload.status:
         created_notifications.append(

@@ -13,6 +13,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from 
 import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
@@ -188,6 +189,7 @@ export default function DevelopmentProjectPage() {
   const router = useRouter()
   const projectId = String(params.id)
   const { apiFetch, user } = useAuth()
+  const confirm = useConfirm()
 
   const [project, setProject] = React.useState<Project | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
@@ -439,7 +441,12 @@ export default function DevelopmentProjectPage() {
   }
 
   const deleteDevelopmentChecklistItem = async (itemId: string) => {
-    const confirmed = window.confirm("Delete this checklist item?")
+    const confirmed = await confirm({
+      title: "Delete checklist item",
+      description: "Delete this checklist item?",
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
     if (!confirmed) return
     setDevelopmentChecklistDeletingId(itemId)
     try {
@@ -743,11 +750,14 @@ export default function DevelopmentProjectPage() {
   const deleteTask = async (taskId: string, taskTitle?: string) => {
     if (!taskId) return
 
-    const confirmed = window.confirm(
-      taskTitle
-        ? `Are you sure you want to delete the task "${taskTitle}"?\n\nThis action cannot be undone.`
-        : "Are you sure you want to delete this task?\n\nThis action cannot be undone."
-    )
+    const confirmed = await confirm({
+      title: "Delete task",
+      description: taskTitle
+        ? `Are you sure you want to delete the task "${taskTitle}"? This action cannot be undone.`
+        : "Are you sure you want to delete this task? This action cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
 
     if (!confirmed) return
 

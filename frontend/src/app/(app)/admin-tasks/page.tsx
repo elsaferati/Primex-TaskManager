@@ -3,6 +3,7 @@
 import * as React from "react"
 import { toast } from "sonner"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -12,6 +13,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { formatDateDMY, formatDateTimeDMY, toDateInputValue } from "@/lib/dates"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
@@ -358,6 +360,14 @@ function doesIsoRangeOverlapInclusive(
 
 function getSystemDateIso(task: SystemTaskOut): string {
   return toDateOnlyIso(systemTaskDisplayDate(task) || null)
+}
+
+function dayDiffInclusive(fromIso: string, toIso: string) {
+  if (!fromIso || !toIso) return 0
+  const fromDate = fromISODate(fromIso)
+  const toDate = fromISODate(toIso)
+  const msPerDay = 24 * 60 * 60 * 1000
+  return Math.max(0, Math.round((toDate.getTime() - fromDate.getTime()) / msPerDay))
 }
 
 function parseInternalNotes(notes?: string | null) {
@@ -866,6 +876,7 @@ const getDayCode = (d: Date) => {
 
 export default function AdminTasksPage() {
   const { apiFetch, user } = useAuth()
+  const confirm = useConfirm()
   type AssigneeUser = User | UserLookup
   const [tasks, setTasks] = React.useState<Task[]>([])
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskOut[]>([])
@@ -1692,6 +1703,9 @@ export default function AdminTasksPage() {
       isFastTask?: boolean
       isTemplateAlignedSystem?: boolean
       needsGaneConfirmation?: boolean
+      showInSystemTasksSection?: boolean
+      isLateSystemTask?: boolean
+      lateDays?: number
     }> = []
 
     if (!ganeUserId) return rows
@@ -1717,6 +1731,11 @@ export default function AdminTasksPage() {
         : undefined
       const hasTemplateAlignment =
         Boolean(isSystemTask && ganeUserId && systemTemplate?.alignment_user_ids?.includes(ganeUserId))
+      const computedLateDays =
+        statusValue !== "DONE" && dueDateIso && dueDateIso < todayIso
+          ? Math.max(task.late_days ?? 0, dayDiffInclusive(dueDateIso, todayIso))
+          : 0
+      const isLateSystemTask = Boolean(isSystemTask && isAssigned && computedLateDays > 0)
       rows.push({
         id: `task:${task.id}`,
         ll: isSystemTask ? "SYS" : "FT",
@@ -1737,6 +1756,9 @@ export default function AdminTasksPage() {
         isFastTask: !task.project_id,
         isTemplateAlignedSystem: hasTemplateAlignment,
         needsGaneConfirmation,
+        showInSystemTasksSection: hasTemplateAlignment || isLateSystemTask,
+        isLateSystemTask,
+        lateDays: computedLateDays,
       })
     }
 
@@ -1755,29 +1777,33 @@ export default function AdminTasksPage() {
     systemTaskByTemplateId,
     taskAssigneeBadges,
     taskCommentMap,
+    todayIso,
   ])
 
   const filteredAllTasksRows = React.useMemo(() => {
     if (!allTasksDateFrom && !allTasksDateTo) return allTasksTableRows
     return allTasksTableRows.filter((row) => {
+      if (row.isLateSystemTask && isIsoWithinInclusiveRange(todayIso, allTasksDateFrom, allTasksDateTo)) {
+        return true
+      }
       if (row.isFastTask) {
         return doesIsoRangeOverlapInclusive(allTasksDateFrom, allTasksDateTo, row.startDateIso, row.dateIso)
       }
       return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
     })
-  }, [allTasksDateFrom, allTasksDateTo, allTasksTableRows])
+  }, [allTasksDateFrom, allTasksDateTo, allTasksTableRows, todayIso])
 
   const highlightedAllTasksRows = React.useMemo(
-    () => filteredAllTasksRows.filter((row) => row.isTemplateAlignedSystem),
+    () => filteredAllTasksRows.filter((row) => row.showInSystemTasksSection),
     [filteredAllTasksRows]
   )
 
   const regularAllTasksRows = React.useMemo(
-    () => filteredAllTasksRows.filter((row) => !row.isTemplateAlignedSystem),
+    () => filteredAllTasksRows.filter((row) => !row.showInSystemTasksSection),
     [filteredAllTasksRows]
   )
   const waitingConfirmationRows = React.useMemo(
-    () => filteredAllTasksRows.filter((row) => row.needsGaneConfirmation && !row.isTemplateAlignedSystem),
+    () => filteredAllTasksRows.filter((row) => row.needsGaneConfirmation && !row.showInSystemTasksSection),
     [filteredAllTasksRows]
   )
   const regularNonConfirmationRows = React.useMemo(
@@ -2062,7 +2088,13 @@ export default function AdminTasksPage() {
   }
 
   const deleteTask = async (taskId: string) => {
-    if (!confirm("Are you sure you want to delete this task?")) return
+    const confirmed = await confirm({
+      title: "Delete task",
+      description: "Are you sure you want to delete this task?",
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
+    if (!confirmed) return
     setDeletingTaskId(taskId)
     try {
       const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
@@ -3850,7 +3882,16 @@ export default function AdminTasksPage() {
                   <TableCell className="align-middle">{row.nll}</TableCell>
                   <TableCell className="align-middle">{renderAssignedBadges(row.assigned)}</TableCell>
                   <TableCell className="align-middle">{row.startDateLabel}</TableCell>
-                  <TableCell className="align-middle">{row.dateLabel}</TableCell>
+                  <TableCell className="align-middle">
+                    <div className="flex flex-col gap-1">
+                      <span>{row.dateLabel}</span>
+                      {row.isLateSystemTask ? (
+                        <Badge variant="destructive" className="rounded-sm px-1.5 py-0 text-[10px] uppercase">
+                          {row.lateDays ? `Late ${row.lateDays}` : "Late"}
+                        </Badge>
+                      ) : null}
+                    </div>
+                  </TableCell>
                   <TableCell className="align-middle">{row.period || "-"}</TableCell>
                   <TableCell
                     className="min-w-[360px] align-middle whitespace-normal break-words font-medium text-slate-800"

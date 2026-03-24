@@ -93,6 +93,40 @@ export interface SystemTaskTemplate {
   created_at: string
 }
 
+export interface SystemTaskOut {
+  id: string
+  template_id: string
+  title: string
+  description?: string | null
+  internal_notes?: string | null
+  department_id?: string | null
+  department_ids?: string[] | null
+  default_assignee_id?: string | null
+  assignees?: TaskAssignee[] | null
+  scope: SystemTaskScope
+  frequency: SystemTaskFrequency
+  day_of_week?: number | null
+  days_of_week?: number[] | null
+  day_of_month?: number | null
+  month_of_year?: number | null
+  occurrence_date?: string | null
+  next_occurrence_date?: string | null
+  effective_occurrence_date?: string | null
+  priority?: TaskPriority | null
+  finish_period?: TaskFinishPeriod | null
+  start_date?: string | null
+  due_date?: string | null
+  status?: string | null
+  is_active: boolean
+  user_comment?: string | null
+  requires_alignment?: boolean | null
+  alignment_time?: string | null
+  alignment_roles?: string[] | null
+  alignment_user_ids?: string[] | null
+  created_by?: string | null
+  created_at: string
+}
+
 export type CommonCategory =
   | "Delays"
   | "Absences"
@@ -212,6 +246,10 @@ export interface Task {
   daily_products?: number | null
   start_date?: string | null
   due_date?: string | null
+  original_due_date?: string | null
+  planned_date?: string | null
+  late_days?: number | null
+  moved_days?: number | null
   completed_at?: string | null
   is_bllok?: boolean
   is_1h_report?: boolean

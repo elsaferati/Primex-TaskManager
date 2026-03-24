@@ -118,6 +118,7 @@ export default function TaskDetailsPage() {
   }, [load])
 
   const [saving, setSaving] = React.useState(false)
+  const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<Task["status"] | "">("")
   const [startDate, setStartDate] = React.useState("")
@@ -157,6 +158,7 @@ export default function TaskDetailsPage() {
 
   React.useEffect(() => {
     if (!task) return
+    setTitle(task.title || "")
     setDescription(task.description || "")
     setStatusValue(task.status || "")
     setStartDate(toDateInputValue(task.start_date))
@@ -279,7 +281,14 @@ export default function TaskDetailsPage() {
     if (!task) return
     setSaving(true)
     try {
+      const trimmedTitle = title.trim()
+      if (trimmedTitle.length < 2) {
+        toast.error("Title must be at least 2 characters")
+        return
+      }
+
       const payload: Record<string, unknown> = {
+        title: trimmedTitle,
         description,
         reminder_enabled: reminder,
       }
@@ -431,7 +440,7 @@ export default function TaskDetailsPage() {
                 >
                   Back
                 </Button>
-                <div className="text-2xl font-semibold text-slate-900">{task.title}</div>
+                <div className="text-2xl font-semibold text-slate-900">{title || task.title}</div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>Status: {statusText}</span>
                   <span>•</span>
@@ -459,6 +468,15 @@ export default function TaskDetailsPage() {
               <CardTitle className="text-sm">Update Task</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              <div className="space-y-2">
+                <Label htmlFor="task-title">Title</Label>
+                <Input
+                  id="task-title"
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value)}
+                  placeholder="Task title"
+                />
+              </div>
               <div className="space-y-2">
                 <Label>Status</Label>
                 <Select value={statusValue} onValueChange={(value) => setStatusValue(value as typeof statusValue)}>

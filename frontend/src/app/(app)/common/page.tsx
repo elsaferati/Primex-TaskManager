@@ -1,6 +1,9 @@
 "use client"
 
 import * as React from "react"
+import { toast } from "sonner"
+
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateTimeDMY } from "@/lib/dates"
@@ -344,6 +347,8 @@ const mergeTaskEntriesByVisibleTitle = <
 
 export default function CommonViewPage() {
   const { apiFetch, user, loading: authLoading } = useAuth()
+  const confirm = useConfirm()
+  const userId = user?.id ?? null
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const isStaff = user?.role === "STAFF"
@@ -944,7 +949,7 @@ export default function CommonViewPage() {
             detail = `Failed to update meeting title (${res.status})`
           }
         }
-        alert(detail)
+        toast.error(detail)
         return
       }
       const updated = (await res.json()) as { id: string; title: string; [key: string]: unknown }
@@ -955,7 +960,7 @@ export default function CommonViewPage() {
       setMeetingTitleDraft("")
     } catch (err) {
       console.error("Error updating meeting title:", err)
-      alert("Failed to update meeting title. Please try again.")
+      toast.error("Failed to update meeting title. Please try again.")
     } finally {
       setSavingMeetingTitle(false)
     }
@@ -1082,7 +1087,12 @@ export default function CommonViewPage() {
   const deleteExternalChecklistItem = React.useCallback(
     async (itemId: string) => {
       if (!isAdmin) return
-      const confirmed = window.confirm("Delete this checklist item?")
+      const confirmed = await confirm({
+        title: "Delete checklist item",
+        description: "Delete this checklist item?",
+        confirmLabel: "Delete",
+        variant: "destructive",
+      })
       if (!confirmed) return
       setExternalChecklistDeletingId(itemId)
       try {
@@ -1093,7 +1103,7 @@ export default function CommonViewPage() {
         setExternalChecklistDeletingId(null)
       }
     },
-    [apiFetch, isAdmin, reloadExternalChecklist]
+    [apiFetch, confirm, isAdmin, reloadExternalChecklist]
   )
 
   const addExternalChecklistItem = React.useCallback(async () => {
@@ -1318,7 +1328,12 @@ export default function CommonViewPage() {
 
   const deleteMeetingTemplate = React.useCallback(async () => {
     if (!activeMeeting) return
-    const confirmed = window.confirm("Delete this checklist? This action cannot be undone.")
+    const confirmed = await confirm({
+      title: "Delete checklist",
+      description: "Delete this checklist? This action cannot be undone.",
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
     if (!confirmed) return
     setDeletingMeetingTemplate(true)
     try {
@@ -1337,7 +1352,7 @@ export default function CommonViewPage() {
             detail = `Failed to delete meeting checklist (${res.status}).`
           }
         }
-        alert(detail)
+        toast.error(detail)
         return
       }
 
@@ -1357,11 +1372,11 @@ export default function CommonViewPage() {
       }
     } catch (err) {
       console.error("Failed to delete meeting checklist", err)
-      alert("Failed to delete meeting checklist. Please try again.")
+      toast.error("Failed to delete meeting checklist. Please try again.")
     } finally {
       setDeletingMeetingTemplate(false)
     }
-  }, [activeMeeting, apiFetch, meetingTemplates])
+  }, [activeMeeting, apiFetch, confirm, meetingTemplates])
 
   React.useEffect(() => {
     if (!meetingAutoSelectEnabled) return
@@ -1521,7 +1536,7 @@ export default function CommonViewPage() {
     async function load() {
       try {
         if (authLoading) return
-        if (!user) {
+        if (!userId) {
           if (mounted) setDataLoaded(true)
           return
         }
@@ -2319,7 +2334,7 @@ export default function CommonViewPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, authLoading, user, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
+  }, [apiFetch, authLoading, userId, user?.role, user?.department_id, weekStart, commonViewAggregateEnabled, commonViewIncludeStages, fetchCommonViewStage])
 
   React.useEffect(() => {
     if (!externalMeetingsOpen) return
@@ -2951,7 +2966,7 @@ export default function CommonViewPage() {
       })
       if (!res?.ok) {
         const detail = await res.text()
-        alert(detail || "Failed to export Excel.")
+        toast.error(detail || "Failed to export Excel.")
         return
       }
       const blob = await res.blob()
@@ -2974,7 +2989,7 @@ export default function CommonViewPage() {
       window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error("Failed to export common view Excel", err)
-      alert("Failed to export Excel.")
+      toast.error("Failed to export Excel.")
     } finally {
       setExportingExcel(false)
     }
@@ -2988,7 +3003,7 @@ export default function CommonViewPage() {
       const res = await apiFetch(`/exports/meeting-template.xlsx?checklist_id=${encodeURIComponent(activeMeeting.id)}`)
       if (!res?.ok) {
         const detail = await res.text()
-        alert(detail || "Failed to export Excel.")
+        toast.error(detail || "Failed to export Excel.")
         return
       }
       const blob = await res.blob()
@@ -3011,7 +3026,7 @@ export default function CommonViewPage() {
       window.URL.revokeObjectURL(url)
     } catch (err) {
       console.error("Failed to export meeting Excel", err)
-      alert("Failed to export Excel.")
+      toast.error("Failed to export Excel.")
     } finally {
       setExportingMeetingExcel(false)
     }
@@ -3178,7 +3193,12 @@ export default function CommonViewPage() {
   const deleteCommonEntry = React.useCallback(
     async (entryId: string) => {
       if (!canDeleteCommon) return
-      const confirmed = window.confirm("Delete this common entry? This action cannot be undone.")
+      const confirmed = await confirm({
+        title: "Delete common entry",
+        description: "Delete this common entry? This action cannot be undone.",
+        confirmLabel: "Delete",
+        variant: "destructive",
+      })
       if (!confirmed) return
       try {
         const res = await apiFetch(`/common-entries/${entryId}`, { method: "DELETE" })
@@ -3191,15 +3211,18 @@ export default function CommonViewPage() {
         console.error("Failed to delete common entry", err)
       }
     },
-    [apiFetch, isAdmin]
+    [apiFetch, canDeleteCommon, confirm]
   )
 
   const deleteAllUsersLeaveForDay = React.useCallback(
     async (dayIso: string) => {
       if (!isAdmin) return
-      const confirmed = window.confirm(
-        "Delete ALL annual leave entries for this day? This removes annual leave for every user on this day."
-      )
+      const confirmed = await confirm({
+        title: "Delete all annual leave",
+        description: "Delete ALL annual leave entries for this day? This removes annual leave for every user on this day.",
+        confirmLabel: "Delete all",
+        variant: "destructive",
+      })
       if (!confirmed) return
       try {
         const entryIdsMarked = Array.from(
@@ -3228,7 +3251,7 @@ export default function CommonViewPage() {
         console.error("Failed to delete all-users annual leave entries", err)
       }
     },
-    [apiFetch, commonData.leave, isAdmin]
+    [apiFetch, commonData.leave, confirm, isAdmin]
   )
 
   const toggleChecklistItem = React.useCallback(
@@ -3285,20 +3308,20 @@ export default function CommonViewPage() {
         startsAt = externalMeetingStartsAt ? new Date(externalMeetingStartsAt).toISOString() : null
       } else {
         if (!externalMeetingStartTime) {
-          alert("Time is required for recurring meetings.")
+          toast.error("Time is required for recurring meetings.")
           return
         }
         if (externalMeetingRecurrenceType === "weekly" && externalMeetingRecurrenceDaysOfWeek.length === 0) {
-          alert("Select at least one day.")
+          toast.error("Select at least one day.")
           return
         }
         if (externalMeetingRecurrenceType === "monthly" && externalMeetingRecurrenceDaysOfMonth.length === 0) {
-          alert("Select at least one day.")
+          toast.error("Select at least one day.")
           return
         }
         if (externalMeetingRecurrenceType === "yearly") {
           if (!externalMeetingRecurrenceMonth || !externalMeetingRecurrenceDay) {
-            alert("Select month and date.")
+            toast.error("Select month and date.")
             return
           }
         }
@@ -3316,7 +3339,7 @@ export default function CommonViewPage() {
               : undefined,
         })
         if (!next) {
-          alert("Failed to compute next occurrence.")
+          toast.error("Failed to compute next occurrence.")
           return
         }
         startsAt = next.toISOString()
@@ -3476,20 +3499,20 @@ export default function CommonViewPage() {
           : null
       } else {
         if (!editingExternalMeetingStartTime) {
-          alert("Time is required for recurring meetings.")
+          toast.error("Time is required for recurring meetings.")
           return
         }
         if (editingExternalMeetingRecurrenceType === "weekly" && editingExternalMeetingRecurrenceDaysOfWeek.length === 0) {
-          alert("Select at least one day.")
+          toast.error("Select at least one day.")
           return
         }
         if (editingExternalMeetingRecurrenceType === "monthly" && editingExternalMeetingRecurrenceDaysOfMonth.length === 0) {
-          alert("Select at least one day.")
+          toast.error("Select at least one day.")
           return
         }
         if (editingExternalMeetingRecurrenceType === "yearly") {
           if (!editingExternalMeetingRecurrenceMonth || !editingExternalMeetingRecurrenceDay) {
-            alert("Select month and date.")
+            toast.error("Select month and date.")
             return
           }
         }
@@ -3507,7 +3530,7 @@ export default function CommonViewPage() {
               : undefined,
         })
         if (!next) {
-          alert("Failed to compute next occurrence.")
+          toast.error("Failed to compute next occurrence.")
           return
         }
         startsAt = next.toISOString()
@@ -3537,7 +3560,7 @@ export default function CommonViewPage() {
       })
       if (!res?.ok) {
         console.error("Failed to update meeting", res?.status)
-        alert("Failed to update meeting. Only admins, managers, and the meeting creator can edit meetings.")
+        toast.error("Failed to update meeting. Only admins, managers, and the meeting creator can edit meetings.")
         return
       }
       const updated = (await res.json()) as Meeting
@@ -3556,7 +3579,7 @@ export default function CommonViewPage() {
       }
     } catch (err) {
       console.error("Error updating meeting:", err)
-      alert("Failed to update meeting. Please try again.")
+      toast.error("Failed to update meeting. Please try again.")
     } finally {
       setUpdatingExternalMeeting(false)
     }
@@ -3580,7 +3603,12 @@ export default function CommonViewPage() {
   const deleteExternalMeeting = React.useCallback(
     async (meetingId: string) => {
       if (!isAdmin) return
-      const confirmed = window.confirm("Delete this external meeting? This action cannot be undone.")
+      const confirmed = await confirm({
+        title: "Delete external meeting",
+        description: "Delete this external meeting? This action cannot be undone.",
+        confirmLabel: "Delete",
+        variant: "destructive",
+      })
       if (!confirmed) return
       setDeletingExternalMeetingId(meetingId)
       try {
@@ -3589,7 +3617,7 @@ export default function CommonViewPage() {
         })
         if (!res?.ok) {
           console.error("Failed to delete meeting", res?.status)
-          alert("Failed to delete meeting. Only admins can delete meetings.")
+          toast.error("Failed to delete meeting. Only admins can delete meetings.")
           return
         }
         setExternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
@@ -3604,12 +3632,12 @@ export default function CommonViewPage() {
         }
       } catch (err) {
         console.error("Error deleting meeting:", err)
-        alert("Failed to delete meeting. Please try again.")
+        toast.error("Failed to delete meeting. Please try again.")
       } finally {
         setDeletingExternalMeetingId(null)
       }
     },
-    [isAdmin, apiFetch, commonDepartmentId]
+    [isAdmin, apiFetch, commonDepartmentId, confirm]
   )
 
   const submitInternalMeeting = React.useCallback(async () => {
@@ -3626,20 +3654,20 @@ export default function CommonViewPage() {
         startsAt = internalMeetingStartsAt ? new Date(internalMeetingStartsAt).toISOString() : null
       } else {
         if (!internalMeetingStartTime) {
-          alert("Time is required for recurring meetings.")
+          toast.error("Time is required for recurring meetings.")
           return
         }
         if (internalMeetingRecurrenceType === "weekly" && internalMeetingRecurrenceDaysOfWeek.length === 0) {
-          alert("Select at least one day.")
+          toast.error("Select at least one day.")
           return
         }
         if (internalMeetingRecurrenceType === "monthly" && internalMeetingRecurrenceDaysOfMonth.length === 0) {
-          alert("Select at least one day.")
+          toast.error("Select at least one day.")
           return
         }
         if (internalMeetingRecurrenceType === "yearly") {
           if (!internalMeetingRecurrenceMonth || !internalMeetingRecurrenceDay) {
-            alert("Select month and date.")
+            toast.error("Select month and date.")
             return
           }
         }
@@ -3657,7 +3685,7 @@ export default function CommonViewPage() {
               : undefined,
         })
         if (!next) {
-          alert("Failed to compute next occurrence.")
+          toast.error("Failed to compute next occurrence.")
           return
         }
         startsAt = next.toISOString()
@@ -3807,20 +3835,20 @@ export default function CommonViewPage() {
           : null
       } else {
         if (!editingInternalMeetingStartTime) {
-          alert("Time is required for recurring meetings.")
+          toast.error("Time is required for recurring meetings.")
           return
         }
         if (editingInternalMeetingRecurrenceType === "weekly" && editingInternalMeetingRecurrenceDaysOfWeek.length === 0) {
-          alert("Select at least one day.")
+          toast.error("Select at least one day.")
           return
         }
         if (editingInternalMeetingRecurrenceType === "monthly" && editingInternalMeetingRecurrenceDaysOfMonth.length === 0) {
-          alert("Select at least one day.")
+          toast.error("Select at least one day.")
           return
         }
         if (editingInternalMeetingRecurrenceType === "yearly") {
           if (!editingInternalMeetingRecurrenceMonth || !editingInternalMeetingRecurrenceDay) {
-            alert("Select month and date.")
+            toast.error("Select month and date.")
             return
           }
         }
@@ -3838,7 +3866,7 @@ export default function CommonViewPage() {
               : undefined,
         })
         if (!next) {
-          alert("Failed to compute next occurrence.")
+          toast.error("Failed to compute next occurrence.")
           return
         }
         startsAt = next.toISOString()
@@ -3868,7 +3896,7 @@ export default function CommonViewPage() {
       })
       if (!res?.ok) {
         console.error("Failed to update meeting", res?.status)
-        alert("Failed to update meeting. Only admins, managers, and the meeting creator can edit meetings.")
+        toast.error("Failed to update meeting. Only admins, managers, and the meeting creator can edit meetings.")
         return
       }
       const updated = (await res.json()) as Meeting
@@ -3886,7 +3914,7 @@ export default function CommonViewPage() {
       }
     } catch (err) {
       console.error("Error updating meeting:", err)
-      alert("Failed to update meeting. Please try again.")
+      toast.error("Failed to update meeting. Please try again.")
     } finally {
       setUpdatingInternalMeeting(false)
     }
@@ -3910,7 +3938,12 @@ export default function CommonViewPage() {
   const deleteInternalMeeting = React.useCallback(
     async (meetingId: string) => {
       if (!isAdmin) return
-      const confirmed = window.confirm("Delete this internal meeting? This action cannot be undone.")
+      const confirmed = await confirm({
+        title: "Delete internal meeting",
+        description: "Delete this internal meeting? This action cannot be undone.",
+        confirmLabel: "Delete",
+        variant: "destructive",
+      })
       if (!confirmed) return
       setDeletingInternalMeetingId(meetingId)
       try {
@@ -3919,7 +3952,7 @@ export default function CommonViewPage() {
         })
         if (!res?.ok) {
           console.error("Failed to delete meeting", res?.status)
-          alert("Failed to delete meeting. Only admins can delete meetings.")
+          toast.error("Failed to delete meeting. Only admins can delete meetings.")
           return
         }
         setInternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
@@ -3933,12 +3966,12 @@ export default function CommonViewPage() {
         }
       } catch (err) {
         console.error("Error deleting meeting:", err)
-        alert("Failed to delete meeting. Please try again.")
+        toast.error("Failed to delete meeting. Please try again.")
       } finally {
         setDeletingInternalMeetingId(null)
       }
     },
-    [isAdmin, apiFetch, commonDepartmentId]
+    [isAdmin, apiFetch, commonDepartmentId, confirm]
   )
 
   const buildSwimlaneCells = (items: SwimlaneCell[], targetCount: number) => {
@@ -4605,9 +4638,12 @@ export default function CommonViewPage() {
 
   const deleteMeetingRow = React.useCallback(
     async (meetingId: string, rowId: string) => {
-      const confirmed = window.confirm(
-        "Delete this checklist item? This action cannot be undone."
-      )
+      const confirmed = await confirm({
+        title: "Delete checklist item",
+        description: "Delete this checklist item? This action cannot be undone.",
+        confirmLabel: "Delete",
+        variant: "destructive",
+      })
       if (!confirmed) return
       const previousRows = meetingTemplates.find((meeting) => meeting.id === meetingId)?.rows || []
       setMeetingTemplates((prev) =>
@@ -4649,7 +4685,7 @@ export default function CommonViewPage() {
         )
       }
     },
-    [apiFetch, meetingTemplates, resequenceMeetingRows]
+    [apiFetch, confirm, meetingTemplates, resequenceMeetingRows]
   )
 
   const addMeetingRow = React.useCallback(
