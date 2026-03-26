@@ -79,6 +79,7 @@ class Task(Base):
     is_1h_report: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_r1: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     is_personal: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    fast_task_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

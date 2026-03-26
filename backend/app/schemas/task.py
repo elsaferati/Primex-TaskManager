@@ -48,6 +48,7 @@ class TaskOut(BaseModel):
     is_1h_report: bool
     is_r1: bool
     is_personal: bool
+    fast_task_order: int | None = None
     is_active: bool
     user_comment: str | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
@@ -79,6 +80,7 @@ class TaskCreate(BaseModel):
     is_1h_report: bool | None = None
     is_r1: bool | None = None
     is_personal: bool | None = None
+    fast_task_order: int | None = Field(default=None, ge=1)
     alignment_user_ids: list[uuid.UUID] | None = None
 
 
@@ -111,5 +113,6 @@ class TaskUpdate(BaseModel):
     is_1h_report: bool | None = None
     is_r1: bool | None = None
     is_personal: bool | None = None
+    fast_task_order: int | None = Field(default=None, ge=1)
     alignment_user_ids: list[uuid.UUID] | None = None
 

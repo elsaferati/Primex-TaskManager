@@ -255,6 +255,7 @@ export interface Task {
   is_1h_report?: boolean
   is_r1?: boolean
   is_personal?: boolean
+  fast_task_order?: number | null
   user_comment?: string | null
   alignment_user_ids?: string[] | null
   created_at: string

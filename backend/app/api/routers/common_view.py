@@ -681,6 +681,7 @@ async def get_common_view(
                 user_for_task = users_map.get(t.assigned_to)
                 if user_for_task:
                     assignees = [user_for_task]
+            assignee_id = t.assigned_to or (assignees[0].id if assignees else None)
             assignee_names = [u.full_name or u.username or u.email for u in assignees if u]
             owner_label = ", ".join([n for n in assignee_names if n]) or "Unknown"
             status_value = (t.status or "").lower()
@@ -704,54 +705,67 @@ async def get_common_view(
                     items["blocked"].append(
                         {
                             "id": f"task:{t.id}:{task_date.isoformat()}",
+                            "task_id": str(t.id),
                             "title": t.title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
+                            "user_id": str(assignee_id) if assignee_id else None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
                             "status": task_status,
                             "isDone": is_done,
+                            "fast_task_order": t.fast_task_order,
                         }
                     )
                 if t.is_1h_report:
                     items["oneH"].append(
                         {
                             "id": f"task:{t.id}:{task_date.isoformat()}",
+                            "task_id": str(t.id),
                             "title": t.title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
+                            "user_id": str(assignee_id) if assignee_id else None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
                             "isDone": is_done,
+                            "fast_task_order": t.fast_task_order,
                         }
                     )
                 if t.is_personal:
                     items["personal"].append(
                         {
                             "id": f"task:{t.id}:{task_date.isoformat()}",
+                            "task_id": str(t.id),
                             "title": t.title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
+                            "user_id": str(assignee_id) if assignee_id else None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
+                            "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
                             "isDone": is_done,
+                            "fast_task_order": t.fast_task_order,
                         }
                     )
                 if t.is_r1:
                     items["r1"].append(
                         {
                             "id": f"task:{t.id}:{task_date.isoformat()}",
+                            "task_id": str(t.id),
                             "title": t.title,
                             "date": task_date.isoformat(),
                             "owner": owner_label,
                             "assignees": assignee_names or None,
+                            "user_id": str(assignee_id) if assignee_id else None,
                             "note": t.description or None,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
                             "isDone": is_done,
+                            "fast_task_order": t.fast_task_order,
                         }
                     )
 

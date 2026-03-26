@@ -309,6 +309,7 @@ def _task_to_out(
         is_1h_report=task.is_1h_report,
         is_r1=task.is_r1,
         is_personal=task.is_personal,
+        fast_task_order=task.fast_task_order,
         is_active=task.is_active,
         user_comment=user_comment,
         alignment_user_ids=None,
@@ -375,6 +376,11 @@ async def _is_user_assigned_to_task(db: AsyncSession, task: Task, user_id: uuid.
         )
     ).scalar_one_or_none()
     return assignee_record is not None
+
+
+class FastTaskOrderUpdate(BaseModel):
+    user_id: uuid.UUID
+    ordered_task_ids: list[uuid.UUID]
 
 
 def _can_complete_waiting_confirmation(
@@ -542,6 +548,63 @@ async def list_tasks(
         dto.alignment_user_ids = alignment_map.get(t.id)
         out.append(dto)
     return out
+
+
+@router.patch("/fast-order", response_model=None)
+async def update_fast_task_order(
+    payload: FastTaskOrderUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> Response:
+    ordered_task_ids: list[uuid.UUID] = []
+    seen_task_ids: set[uuid.UUID] = set()
+    for task_id in payload.ordered_task_ids or []:
+        if task_id in seen_task_ids:
+            continue
+        seen_task_ids.add(task_id)
+        ordered_task_ids.append(task_id)
+
+    if not ordered_task_ids:
+        return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+    tasks = (
+        await db.execute(select(Task).where(Task.id.in_(ordered_task_ids)))
+    ).scalars().all()
+    if len(tasks) != len(ordered_task_ids):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Some tasks were not found")
+
+    task_ids = [task.id for task in tasks]
+    assignee_rows = (
+        await db.execute(
+            select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids))
+        )
+    ).all()
+    assignee_map: dict[uuid.UUID, set[uuid.UUID]] = {task_id: set() for task_id in task_ids}
+    for task_id, assignee_id in assignee_rows:
+        assignee_map.setdefault(task_id, set()).add(assignee_id)
+
+    tasks_by_id = {task.id: task for task in tasks}
+    for task_id in ordered_task_ids:
+        task = tasks_by_id[task_id]
+        ensure_task_editor(user, task)
+        if task.department_id is not None:
+            ensure_department_access(user, task.department_id)
+        if not is_fast_task_model(task):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only fast tasks can be reordered")
+        assignee_ids = assignee_map.get(task.id, set())
+        if task.assigned_to is not None:
+            assignee_ids.add(task.assigned_to)
+        if payload.user_id not in assignee_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Ordered tasks must belong to the selected user",
+            )
+
+    for index, task_id in enumerate(ordered_task_ids, start=1):
+        tasks_by_id[task_id].fast_task_order = index
+
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @router.get("/{task_id}", response_model=TaskOut)
@@ -727,6 +790,12 @@ async def create_task(
 
     start_date_value = payload.start_date or datetime.now(timezone.utc)
     due_date_value = payload.due_date
+    if payload.fast_task_order is not None and not is_fast:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Fast task order can only be set for fast tasks",
+        )
+    fast_task_order_value = payload.fast_task_order if is_fast else None
 
     # Development project multi-assignee: create per-assignee copies.
     if project is not None and assignee_ids is not None and len(assignee_ids) > 1:
@@ -778,6 +847,7 @@ async def create_task(
                     is_1h_report=payload.is_1h_report or False,
                     is_r1=payload.is_r1 or False,
                     is_personal=payload.is_personal or False,
+                    fast_task_order=fast_task_order_value,
                 )
                 db.add(t)
                 await db.flush()
@@ -914,6 +984,7 @@ async def create_task(
                             is_1h_report=payload.is_1h_report or False,
                             is_r1=payload.is_r1 or False,
                             is_personal=payload.is_personal or False,
+                            fast_task_order=fast_task_order_value,
                         )
                         db.add(t)
                         await db.flush()
@@ -1030,6 +1101,7 @@ async def create_task(
                 is_1h_report=payload.is_1h_report or False,
                 is_r1=payload.is_r1 or False,
                 is_personal=payload.is_personal or False,
+                fast_task_order=fast_task_order_value,
             )
             db.add(t)
             await db.flush()
@@ -1125,6 +1197,7 @@ async def create_task(
                 is_1h_report=payload.is_1h_report or False,
                 is_r1=payload.is_r1 or False,
                 is_personal=payload.is_personal or False,
+                fast_task_order=fast_task_order_value,
             )
             db.add(t)
             await db.flush()
@@ -1213,6 +1286,7 @@ async def create_task(
         is_1h_report=payload.is_1h_report or False,
         is_r1=payload.is_r1 or False,
         is_personal=payload.is_personal or False,
+        fast_task_order=fast_task_order_value,
     )
     db.add(task)
     await db.flush()
@@ -1619,6 +1693,18 @@ async def update_task(
     
     if payload.is_personal is not None:
         task.is_personal = payload.is_personal
+    fast_task_order_set = False
+    if hasattr(payload, "model_fields_set"):
+        fast_task_order_set = "fast_task_order" in payload.model_fields_set  # type: ignore[attr-defined]
+    elif hasattr(payload, "__fields_set__"):
+        fast_task_order_set = "fast_task_order" in payload.__fields_set__  # type: ignore[attr-defined]
+    if fast_task_order_set:
+        if not is_fast_task_model(task):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Fast task order can only be set for fast tasks",
+            )
+        task.fast_task_order = payload.fast_task_order
     # Optional: update alignment users if provided
     alignment_set = False
     if hasattr(payload, "model_fields_set"):
@@ -1827,6 +1913,8 @@ async def update_task(
             shared_values["is_1h_report"] = task.is_1h_report
         if payload.is_personal is not None:
             shared_values["is_personal"] = task.is_personal
+        if fast_task_order_set:
+            shared_values["fast_task_order"] = task.fast_task_order
 
         if shared_values:
             await db.execute(
@@ -1905,6 +1993,7 @@ async def update_task(
                         is_1h_report=task.is_1h_report,
                         is_r1=task.is_r1,
                         is_personal=task.is_personal,
+                        fast_task_order=task.fast_task_order,
                         is_active=True,
                     )
                     db.add(new_task)

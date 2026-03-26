@@ -39,6 +39,11 @@ type LeaveItem = {
   isAllUsers?: boolean
   userId?: string
 }
+type FastTaskItemMeta = {
+  taskId?: string
+  userId?: string
+  fastTaskOrder?: number | null
+}
 type BlockedItem = {
   title: string
   person: string
@@ -47,7 +52,7 @@ type BlockedItem = {
   assignees?: string[]
   status?: string
   isDone?: boolean
-}
+} & FastTaskItemMeta
 type OneHItem = {
   title: string
   person: string
@@ -57,16 +62,17 @@ type OneHItem = {
   departmentId?: string
   status?: string
   isDone?: boolean
-}
+} & FastTaskItemMeta
 type PersonalItem = {
   title: string
   person: string
   date: string
   note?: string
   assignees?: string[]
+  departmentId?: string
   status?: string
   isDone?: boolean
-}
+} & FastTaskItemMeta
 type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type InternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type R1Item = {
@@ -78,7 +84,7 @@ type R1Item = {
   departmentId?: string
   status?: string
   isDone?: boolean
-}
+} & FastTaskItemMeta
 type ProblemItem = {
   entryId?: string
   title: string
@@ -126,6 +132,8 @@ type CommonBucket =
   | "feedback"
   | "priority"
   | "bz"
+type FastTaskRowId = "blocked" | "oneH" | "personal" | "r1"
+type FastTaskEntry = BlockedItem | OneHItem | PersonalItem | R1Item
 type CommonViewCounts = Record<CommonBucket, number>
 type CommonViewGuardrails = {
   max_items_per_bucket: number
@@ -215,6 +223,9 @@ type SwimlaneCell = {
   entryDate?: string
   status?: string
   isDone?: boolean
+  taskId?: string
+  userId?: string
+  fastTaskOrder?: number | null
 }
 type SwimlaneRow = {
   id: CommonType
@@ -325,24 +336,25 @@ const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: 
   entry.assignees && entry.assignees.length
     ? entry.assignees
     : normalizeAssigneeList(entry.person || entry.owner || "")
-const mergeTaskEntriesByVisibleTitle = <
-  T extends { title: string; assignees?: string[]; person?: string; owner?: string }
->(
-  entries: T[]
+const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId =>
+  rowId === "blocked" || rowId === "oneH" || rowId === "personal" || rowId === "r1"
+
+const getFastTaskAssigneeKey = (entry: FastTaskEntry) =>
+  (entry.userId || entry.person || entry.owner || "").trim().toLowerCase()
+
+const getFastTaskEntryDate = (entry: FastTaskEntry | SwimlaneCell) =>
+  ("date" in entry ? entry.date : entry.entryDate) || ""
+
+const getFastTaskDisplayNumber = (
+  entries: Array<FastTaskEntry | SwimlaneCell>,
+  entry: FastTaskEntry | SwimlaneCell
 ) => {
-  const merged = new Map<string, T>()
-  entries.forEach((entry) => {
-    const visibleTitle = stripInitialsPrefix(entry.title).trim()
-    const key = visibleTitle.toLowerCase()
-    const existing = merged.get(key)
-    if (!existing) {
-      merged.set(key, { ...entry, assignees: [...entryAssignees(entry)] })
-      return
-    }
-    const combinedAssignees = Array.from(new Set([...entryAssignees(existing), ...entryAssignees(entry)]))
-    merged.set(key, { ...existing, assignees: combinedAssignees })
-  })
-  return Array.from(merged.values())
+  if (!entry.userId) return 1
+  const peerEntries = entries.filter(
+    (item) => item.userId === entry.userId && getFastTaskEntryDate(item) === getFastTaskEntryDate(entry)
+  )
+  const currentIndex = peerEntries.findIndex((item) => item.taskId === entry.taskId)
+  return currentIndex >= 0 ? currentIndex + 1 : 1
 }
 
 export default function CommonViewPage() {
@@ -360,6 +372,7 @@ export default function CommonViewPage() {
   const printInitials = initials(user?.full_name || user?.username || "")
   const stickyRef = React.useRef<HTMLDivElement | null>(null)
   const [stickyOffset, setStickyOffset] = React.useState("0px")
+  const [reorderingTaskId, setReorderingTaskId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     const node = stickyRef.current
@@ -769,6 +782,8 @@ export default function CommonViewPage() {
         person?: string
         owner?: string
         assignees?: string[]
+        userId?: string
+        fastTaskOrder?: number | null
       },
       b: {
         status?: string
@@ -778,11 +793,13 @@ export default function CommonViewPage() {
         person?: string
         owner?: string
         assignees?: string[]
+        userId?: string
+        fastTaskOrder?: number | null
       }
     ) => {
-      const statusRankA = commonTaskSortRank(a.status, a.isDone)
-      const statusRankB = commonTaskSortRank(b.status, b.isDone)
-      if (statusRankA !== statusRankB) return statusRankA - statusRankB
+      const isDoneA = Boolean(a.isDone)
+      const isDoneB = Boolean(b.isDone)
+      if (isDoneA !== isDoneB) return isDoneA ? 1 : -1
       const metaA = getDepartmentMeta(a.departmentId)
       const metaB = getDepartmentMeta(b.departmentId)
       if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank
@@ -790,9 +807,15 @@ export default function CommonViewPage() {
         const nameCmp = metaA.name.localeCompare(metaB.name)
         if (nameCmp) return nameCmp
       }
-      const personA = getPersonSortKey(a)
-      const personB = getPersonSortKey(b)
+      const personA = getFastTaskAssigneeKey(a as FastTaskEntry) || getPersonSortKey(a)
+      const personB = getFastTaskAssigneeKey(b as FastTaskEntry) || getPersonSortKey(b)
       if (personA !== personB) return personA.localeCompare(personB)
+      const orderA = a.fastTaskOrder ?? Number.MAX_SAFE_INTEGER
+      const orderB = b.fastTaskOrder ?? Number.MAX_SAFE_INTEGER
+      if (orderA !== orderB) return orderA - orderB
+      const statusRankA = commonTaskSortRank(a.status, a.isDone)
+      const statusRankB = commonTaskSortRank(b.status, b.isDone)
+      if (statusRankA !== statusRankB) return statusRankA - statusRankB
       return (a.title || "").localeCompare(b.title || "")
     },
     [getDepartmentMeta, getPersonSortKey]
@@ -807,6 +830,8 @@ export default function CommonViewPage() {
       person?: string
       owner?: string
       assignees?: string[]
+      userId?: string
+      fastTaskOrder?: number | null
     }>(
       items: T[],
       multiDate: boolean
@@ -1437,30 +1462,61 @@ export default function CommonViewPage() {
         const status = normalizeCommonTaskStatus(item.status, item.isDone)
         return {
           ...item,
+          taskId: item.taskId || item.task_id || undefined,
+          userId: item.userId || item.user_id || undefined,
+          fastTaskOrder:
+            typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
+              ? (item.fastTaskOrder ?? item.fast_task_order)
+              : undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
       })
-      const normalizedOneH = payload.items.oneH.map((item: any) => ({
-        ...item,
-        departmentId: item.departmentId || item.department_id || undefined,
-        status: normalizeCommonTaskStatus(item.status, item.isDone),
-        isDone: isCommonTaskDone(item.status, item.isDone),
-      }))
+      const normalizedOneH = payload.items.oneH.map((item: any) => {
+        const status = normalizeCommonTaskStatus(item.status, item.isDone)
+        return {
+          ...item,
+          taskId: item.taskId || item.task_id || undefined,
+          userId: item.userId || item.user_id || undefined,
+          fastTaskOrder:
+            typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
+              ? (item.fastTaskOrder ?? item.fast_task_order)
+              : undefined,
+          departmentId: item.departmentId || item.department_id || undefined,
+          status,
+          isDone: isCommonTaskDone(status, item.isDone),
+        }
+      })
       const normalizedPersonal = payload.items.personal.map((item: any) => {
         const status = normalizeCommonTaskStatus(item.status, item.isDone)
         return {
           ...item,
+          taskId: item.taskId || item.task_id || undefined,
+          userId: item.userId || item.user_id || undefined,
+          fastTaskOrder:
+            typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
+              ? (item.fastTaskOrder ?? item.fast_task_order)
+              : undefined,
+          departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
       })
-      const normalizedR1 = payload.items.r1.map((item: any) => ({
-        ...item,
-        departmentId: item.departmentId || item.department_id || undefined,
-        status: normalizeCommonTaskStatus(item.status, item.isDone),
-        isDone: isCommonTaskDone(item.status, item.isDone),
-      }))
+      const normalizedR1 = payload.items.r1.map((item: any) => {
+        const status = normalizeCommonTaskStatus(item.status, item.isDone)
+        return {
+          ...item,
+          taskId: item.taskId || item.task_id || undefined,
+          userId: item.userId || item.user_id || undefined,
+          fastTaskOrder:
+            typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
+              ? (item.fastTaskOrder ?? item.fast_task_order)
+              : undefined,
+          departmentId: item.departmentId || item.department_id || undefined,
+          status,
+          isDone: isCommonTaskDone(status, item.isDone),
+        }
+      })
       const normalizedProblems = payload.items.problems.map((item) => {
         const parsed = parseFeedbackNote(item.note)
         return {
@@ -2008,48 +2064,61 @@ export default function CommonViewPage() {
             for (const taskDate of taskDates) {
               if (t.is_bllok) {
                 allData.blocked.push({
+                  taskId: t.id,
                   title: t.title,
                   person: assigneeLabel,
                   assignees: assigneeNames,
+                  userId: assigneeId || undefined,
                   date: taskDate,
                   note: t.description || undefined,
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
+                  fastTaskOrder: t.fast_task_order ?? undefined,
                 })
               }
               if (t.is_1h_report) {
                 allData.oneH.push({
+                  taskId: t.id,
                   title: t.title,
                   person: assigneeLabel,
                   assignees: assigneeNames,
+                  userId: assigneeId || undefined,
                   date: taskDate,
                   note: t.description || undefined,
                   departmentId,
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
+                  fastTaskOrder: t.fast_task_order ?? undefined,
                 })
               }
               if (t.is_personal) {
                 allData.personal.push({
+                  taskId: t.id,
                   title: t.title,
                   person: assigneeLabel,
                   assignees: assigneeNames,
+                  userId: assigneeId || undefined,
                   date: taskDate,
-                  note: t.description || undefined,
-                  status: normalizedTaskStatus,
-                  isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
-                })
-              }
-              if (t.is_r1) {
-                allData.r1.push({
-                  title: t.title,
-                  date: taskDate,
-                  owner: assigneeLabel,
-                  assignees: assigneeNames,
                   note: t.description || undefined,
                   departmentId,
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
+                  fastTaskOrder: t.fast_task_order ?? undefined,
+                })
+              }
+              if (t.is_r1) {
+                allData.r1.push({
+                  taskId: t.id,
+                  title: t.title,
+                  date: taskDate,
+                  owner: assigneeLabel,
+                  assignees: assigneeNames,
+                  userId: assigneeId || undefined,
+                  note: t.description || undefined,
+                  departmentId,
+                  status: normalizedTaskStatus,
+                  isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
+                  fastTaskOrder: t.fast_task_order ?? undefined,
                 })
               }
             }
@@ -2381,6 +2450,128 @@ export default function CommonViewPage() {
     )
     return coveredUsers.size >= activeUserIds.length
   }
+  const canReorderFastTask = React.useCallback(
+    (entry: FastTaskEntry | SwimlaneCell) =>
+      Boolean(entry.taskId && entry.userId && !entry.isDone && (isAdmin || isManager || entry.userId === userId)),
+    [isAdmin, isManager, userId]
+  )
+  const applyFastTaskOrderUpdate = React.useCallback((orderMap: Map<string, number>) => {
+    if (!orderMap.size) return
+    COMMON_VIEW_CACHE.clear()
+    const applyOrder = <T extends FastTaskItemMeta>(items: T[]) =>
+      items.map((item) =>
+        item.taskId && orderMap.has(item.taskId)
+          ? { ...item, fastTaskOrder: orderMap.get(item.taskId) ?? item.fastTaskOrder }
+          : item
+      )
+    setCommonData((prev) => ({
+      ...prev,
+      blocked: applyOrder(prev.blocked),
+      oneH: applyOrder(prev.oneH),
+      personal: applyOrder(prev.personal),
+      r1: applyOrder(prev.r1),
+    }))
+  }, [])
+  const moveFastTaskEntry = React.useCallback(
+    async (
+      entries: Array<FastTaskEntry | SwimlaneCell>,
+      entry: FastTaskEntry | SwimlaneCell,
+      direction: "up" | "down"
+    ) => {
+      if (!entry.taskId || !entry.userId || !canReorderFastTask(entry)) return
+      const entryDate = getFastTaskEntryDate(entry)
+      const peerEntries = entries.filter(
+        (item): item is FastTaskEntry | SwimlaneCell =>
+          Boolean(item.taskId) &&
+          item.userId === entry.userId &&
+          !item.isDone &&
+          getFastTaskEntryDate(item) === entryDate
+      )
+      const currentIndex = peerEntries.findIndex((item) => item.taskId === entry.taskId)
+      if (currentIndex < 0) return
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+      if (targetIndex < 0 || targetIndex >= peerEntries.length) return
+
+      const nextPeers = [...peerEntries]
+      ;[nextPeers[currentIndex], nextPeers[targetIndex]] = [nextPeers[targetIndex], nextPeers[currentIndex]]
+
+      setReorderingTaskId(entry.taskId)
+      try {
+        const res = await apiFetch("/tasks/fast-order", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            user_id: entry.userId,
+            ordered_task_ids: nextPeers.map((item) => item.taskId),
+          }),
+        })
+        if (!res.ok) {
+          let detail = "Failed to reorder fast tasks."
+          try {
+            const data = (await res.json()) as { detail?: string }
+            if (data?.detail) detail = data.detail
+          } catch {
+            // Ignore non-JSON error payloads.
+          }
+          toast.error(detail)
+          return
+        }
+
+        applyFastTaskOrderUpdate(
+          new Map(nextPeers.map((item, index) => [item.taskId as string, index + 1]))
+        )
+      } catch (err) {
+        console.error("Failed to reorder fast tasks", err)
+        toast.error("Failed to reorder fast tasks.")
+      } finally {
+        setReorderingTaskId((current) => (current === entry.taskId ? null : current))
+      }
+    },
+    [apiFetch, applyFastTaskOrderUpdate, canReorderFastTask]
+  )
+  const renderFastTaskReorderControls = React.useCallback(
+    (entries: Array<FastTaskEntry | SwimlaneCell>, entry: FastTaskEntry | SwimlaneCell) => {
+      if (!entry.taskId || !entry.userId || !canReorderFastTask(entry)) return null
+      const entryDate = getFastTaskEntryDate(entry)
+      const peerEntries = entries.filter(
+        (item): item is FastTaskEntry | SwimlaneCell =>
+          Boolean(item.taskId) &&
+          item.userId === entry.userId &&
+          !item.isDone &&
+          getFastTaskEntryDate(item) === entryDate
+      )
+      const currentIndex = peerEntries.findIndex((item) => item.taskId === entry.taskId)
+      if (currentIndex < 0) return null
+      const isBusy = reorderingTaskId === entry.taskId
+      const canMoveUp = currentIndex > 0 && !isBusy
+      const canMoveDown = currentIndex < peerEntries.length - 1 && !isBusy
+      return (
+        <div className="fast-task-order-controls">
+          <button
+            type="button"
+            className="fast-task-order-btn"
+            disabled={!canMoveUp}
+            onClick={() => void moveFastTaskEntry(entries, entry, "up")}
+            aria-label="Move left"
+            title="Move left"
+          >
+            ←
+          </button>
+          <button
+            type="button"
+            className="fast-task-order-btn"
+            disabled={!canMoveDown}
+            onClick={() => void moveFastTaskEntry(entries, entry, "down")}
+            aria-label="Move right"
+            title="Move right"
+          >
+            →
+          </button>
+        </div>
+      )
+    },
+    [canReorderFastTask, moveFastTaskEntry, reorderingTaskId]
+  )
 
   // Filtered data
   const filtered = React.useMemo(() => {
@@ -2899,15 +3090,20 @@ export default function CommonViewPage() {
         })
       }
       if (rowId === "blocked") {
-        return (entries as BlockedItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
+        return (entries as BlockedItem[]).map(
+          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+        )
       }
       if (rowId === "oneH" || rowId === "r1") {
-        return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map(
-          (e: OneHItem | R1Item, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+        return (entries as (OneHItem | R1Item)[]).map(
+          (e: OneHItem | R1Item) =>
+            `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
         )
       }
       if (rowId === "personal") {
-        return (entries as PersonalItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`)
+        return (entries as PersonalItem[]).map(
+          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+        )
       }
       if (rowId === "external") {
         return (entries as ExternalItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
@@ -4141,6 +4337,11 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent blocked",
       status: x.status,
       isDone: x.isDone,
+      number: getFastTaskDisplayNumber(blockedSource, x),
+      taskId: x.taskId,
+      userId: x.userId,
+      fastTaskOrder: x.fastTaskOrder,
+      entryDate: x.date,
     }))
 
     const oneHSource = includeOneH ? sortTasksByOrder(filtered.oneH, isMultiDate) : []
@@ -4152,6 +4353,11 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent oneh",
       status: x.status,
       isDone: x.isDone,
+      number: getFastTaskDisplayNumber(oneHSource, x),
+      taskId: x.taskId,
+      userId: x.userId,
+      fastTaskOrder: x.fastTaskOrder,
+      entryDate: x.date,
     }))
 
     const personalSource = sortTasksByOrder(filtered.personal, isMultiDate)
@@ -4163,6 +4369,11 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent personal",
       status: x.status,
       isDone: x.isDone,
+      number: getFastTaskDisplayNumber(personalSource, x),
+      taskId: x.taskId,
+      userId: x.userId,
+      fastTaskOrder: x.fastTaskOrder,
+      entryDate: x.date,
     }))
 
     const externalSource = isMultiDate
@@ -4204,6 +4415,11 @@ export default function CommonViewPage() {
       accentClass: "swimlane-accent r1",
       status: x.status,
       isDone: x.isDone,
+      number: getFastTaskDisplayNumber(r1Source, x),
+      taskId: x.taskId,
+      userId: x.userId,
+      fastTaskOrder: x.fastTaskOrder,
+      entryDate: x.date,
     }))
 
     const problemSource = isMultiDate
@@ -4420,9 +4636,9 @@ export default function CommonViewPage() {
         late: filtered.late.filter((x) => x.date === iso),
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
-        blocked: filtered.blocked.filter((x) => x.date === iso),
+        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso), false),
         oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
-        personal: filtered.personal.filter((x) => x.date === iso),
+        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
@@ -4440,7 +4656,7 @@ export default function CommonViewPage() {
     })
     
     return dataByDay
-  }, [allDaysSelected, weekISOs, filtered, sortByTime])
+  }, [allDaysSelected, weekISOs, filtered, sortByTime, sortTasksByOrder])
 
   const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
   const scrollSwimlaneRow = React.useCallback((rowId: CommonType, direction: "left" | "right") => {
@@ -5816,6 +6032,9 @@ export default function CommonViewPage() {
           min-width: 0;
           font-weight: 700;
           font-size: 14px;
+          display: flex;
+          align-items: center;
+          gap: 6px;
         }
         .swimlane-date {
           font-size: 12px;
@@ -6065,6 +6284,51 @@ export default function CommonViewPage() {
         .week-table-delete:hover {
           background: #fee2e2;
           border-color: #fecaca;
+        }
+        .fast-task-order-badge {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 20px;
+          height: 20px;
+          padding: 0 6px;
+          border-radius: 999px;
+          background: #eff6ff;
+          border: 1px solid #bfdbfe;
+          color: #1d4ed8;
+          font-weight: 700;
+          font-size: 10px;
+          line-height: 1;
+          flex: 0 0 auto;
+        }
+        .fast-task-order-controls {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          flex: 0 0 auto;
+        }
+        .fast-task-order-btn {
+          border: 1px solid #cbd5e1;
+          background: #ffffff;
+          color: #334155;
+          width: 20px;
+          height: 20px;
+          border-radius: 4px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          font-size: 11px;
+          line-height: 1;
+          transition: background 0.15s ease, border-color 0.15s ease;
+        }
+        .fast-task-order-btn:hover:not(:disabled) {
+          background: #eff6ff;
+          border-color: #93c5fd;
+        }
+        .fast-task-order-btn:disabled {
+          opacity: 0.45;
+          cursor: not-allowed;
         }
         .week-table-avatars {
           display: flex;
@@ -8809,7 +9073,10 @@ export default function CommonViewPage() {
                             className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                              <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                              <span>
+                                <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                {stripInitialsPrefix(e.title)}
+                              </span>
                             </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
@@ -8849,13 +9116,16 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "oneH" || row.id === "r1") {
-                        return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) => (
+                        return (entries as (OneHItem | R1Item)[]).map((e, idx: number) => (
                           <div
                             key={idx}
                             className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                              <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                              <span>
+                                <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                {stripInitialsPrefix(e.title)}
+                              </span>
                             </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
@@ -8873,7 +9143,10 @@ export default function CommonViewPage() {
                             className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                              <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+                              <span>
+                                <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                {stripInitialsPrefix(e.title)}
+                              </span>
                             </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
@@ -9150,6 +9423,12 @@ export default function CommonViewPage() {
                                             {initials(name)}
                                           </span>
                                         ))}
+                                        {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
+                                          <span className="fast-task-order-badge">{cell.number}</span>
+                                        ) : null}
+                                        {isFastTaskRowId(row.id)
+                                          ? renderFastTaskReorderControls(row.items, cell)
+                                          : null}
                                       </div>
                                     ) : !cell.placeholder && cell.assigneeLabels?.length ? (
                                       <div className="swimlane-assignees">
@@ -9158,6 +9437,12 @@ export default function CommonViewPage() {
                                             {label}
                                           </span>
                                         ))}
+                                        {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
+                                          <span className="fast-task-order-badge">{cell.number}</span>
+                                        ) : null}
+                                        {isFastTaskRowId(row.id)
+                                          ? renderFastTaskReorderControls(row.items, cell)
+                                          : null}
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
