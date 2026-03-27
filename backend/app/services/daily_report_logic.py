@@ -35,7 +35,7 @@ def parse_ko_user_id(internal_notes: str | None) -> uuid.UUID | None:
 
 def is_mst_or_tt_project(project) -> bool:
     title = (getattr(project, "title", None) or getattr(project, "name", None) or "").upper().strip()
-    is_tt = title == "TT" or title.startswith("TT ") or title.startswith("TT-")
+    is_tt = title == "TT" or title.startswith(("TT ", "TT-", "TT:"))
     project_type = (getattr(project, "project_type", None) or "").upper().strip()
     return project_type == "MST" or ("MST" in title) or is_tt
 

@@ -55,7 +55,7 @@ def _parse_origin_task_id(text: str | None) -> uuid.UUID | None:
 
 def is_tt_or_mst(project_title: str | None, project_type: Any) -> bool:
     title_upper = (project_title or "").strip().upper()
-    is_tt = title_upper == "TT" or title_upper.startswith("TT ") or title_upper.startswith("TT-")
+    is_tt = title_upper == "TT" or title_upper.startswith(("TT ", "TT-", "TT:"))
     type_upper = _project_type_text(project_type).strip().upper()
     is_mst = type_upper == ProjectType.MST.value or "MST" in title_upper
     return is_tt or is_mst

@@ -88,7 +88,7 @@ router = APIRouter()
 
 def _is_tt_project(project: Project) -> bool:
     title = (project.title or "").upper().strip()
-    return title == "TT" or title.startswith("TT ") or title.startswith("TT-")
+    return title == "TT" or title.startswith(("TT ", "TT-", "TT:"))
 
 
 def _is_mst_project(project: Project) -> bool:

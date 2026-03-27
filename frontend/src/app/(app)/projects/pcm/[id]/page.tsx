@@ -1801,7 +1801,7 @@ export default function PcmProjectPage() {
   const vsVlPhaseRef = React.useRef(vsVlPhase)
 
   React.useEffect(() => {
-    if (!isMst) return
+    if (!isMstLike) return
     if (mstPhaseRef.current === mstPhase) return
     mstPhaseRef.current = mstPhase
     if (mstPhase === "PLANNING") {
@@ -1813,7 +1813,7 @@ export default function PcmProjectPage() {
       return
     }
     setMstTab("tasks")
-  }, [isMst, mstPhase])
+  }, [isMstLike, mstPhase])
 
   React.useEffect(() => {
     if (!isVsVl) return
@@ -3052,6 +3052,7 @@ export default function PcmProjectPage() {
               headers: { "Content-Type": "application/json" },
               signal: abortController.signal,
               body: JSON.stringify({
+                assigned_to: task.assigned_to || null,
                 internal_notes: serializeInternalNotes({
                   originTaskId: task.id,
                   total: totalValue,

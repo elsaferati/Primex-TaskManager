@@ -1805,6 +1805,21 @@ export default function DepartmentKanban() {
   )
   const taskAssigneeInitials = React.useCallback(
     (task: Task) => {
+      const phase = String(task.phase || "").toUpperCase().trim()
+      if (phase === "CONTROL") {
+        const koUserId = parseKoUserId(task.internal_notes)
+        if (koUserId) {
+          const koUser = userMap.get(koUserId)
+          const label = koUser
+            ? assigneeLabel(koUser)
+            : (task.assignees?.find((a) => a.id === koUserId)?.full_name ||
+               task.assignees?.find((a) => a.id === koUserId)?.username ||
+               "-")
+          const value = initials(label)
+          return value && value !== "-" ? [{ id: koUserId, label, value }] : []
+        }
+      }
+
       const ids = new Set<string>()
       if (task.assigned_to) ids.add(task.assigned_to)
       if (task.assignees) {

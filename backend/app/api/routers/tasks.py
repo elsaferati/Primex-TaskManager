@@ -76,7 +76,7 @@ def _as_local_date(value: datetime | date | None) -> date | None:
 
 def _is_mst_or_tt_project(project: Project) -> bool:
     title = (project.title or "").upper().strip()
-    is_tt = title == "TT" or title.startswith("TT ") or title.startswith("TT-")
+    is_tt = title == "TT" or title.startswith(("TT ", "TT-", "TT:"))
     return project.project_type == ProjectType.MST.value or ("MST" in title) or is_tt
 
 
@@ -927,7 +927,7 @@ async def create_task(
     # MST Graphic Design cross-department project tasks: create per-assignee copies.
     if project is not None and assignee_ids is not None and len(assignee_ids) > 1:
         title_upper = (project.title or "").upper().strip()
-        is_tt = title_upper == "TT" or title_upper.startswith("TT ") or title_upper.startswith("TT-")
+        is_tt = title_upper == "TT" or title_upper.startswith(("TT ", "TT-", "TT:"))
         is_mst = project.project_type == ProjectType.MST.value or ("MST" in title_upper)
         if is_mst and not is_tt:
             project_department = None
