@@ -319,6 +319,16 @@ async def _max_timestamp(
     return (await db.execute(stmt)).scalar_one_or_none()
 
 
+async def _count_rows(
+    db: AsyncSession, model, filters: list[Any] | None = None
+) -> int:
+    stmt = select(func.count()).select_from(model)
+    if filters:
+        stmt = stmt.where(and_(*filters))
+    value = (await db.execute(stmt)).scalar_one_or_none()
+    return int(value or 0)
+
+
 async def _compute_etag(
     db: AsyncSession,
     week_start: date,
@@ -350,8 +360,13 @@ async def _compute_etag(
         ts = await _max_timestamp(db, CommonEntry, CommonEntry.updated_at, entry_filters)
         parts.append(ts.isoformat() if ts else "")
     if "meetings" in requested:
-        ts = await _max_timestamp(db, Meeting, Meeting.updated_at)
+        meeting_filters: list[Any] = []
+        if department_id is not None:
+            meeting_filters.append(Meeting.department_id == department_id)
+        ts = await _max_timestamp(db, Meeting, Meeting.updated_at, meeting_filters)
+        meeting_count = await _count_rows(db, Meeting, meeting_filters)
         parts.append(ts.isoformat() if ts else "")
+        parts.append(str(meeting_count))
     if "system_tasks" in requested:
         ts = await _max_timestamp(db, SystemTaskTemplate, SystemTaskTemplate.created_at)
         parts.append(ts.isoformat() if ts else "")
@@ -421,7 +436,7 @@ async def get_common_view(
         cached = _cache.get(cache_key)
         if cached:
             expires_at, cached_etag, payload = cached
-            if expires_at >= datetime.utcnow().timestamp():
+            if expires_at >= datetime.utcnow().timestamp() and cached_etag == etag:
                 if if_match and if_match.strip('"') == cached_etag:
                     return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": cached_etag})
                 payload_copy = dict(payload)

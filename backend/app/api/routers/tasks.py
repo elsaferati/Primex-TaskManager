@@ -36,7 +36,7 @@ from app.services.notifications import add_notification, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
-from app.services.daily_report_logic import business_days_between
+from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 
 
 router = APIRouter()
@@ -351,6 +351,41 @@ async def _project_for_id(db: AsyncSession, project_id: uuid.UUID) -> Project:
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return project
+
+
+async def _sync_control_task_owner_from_ko(
+    db: AsyncSession,
+    *,
+    task: Task,
+    project: Project | None = None,
+) -> uuid.UUID | None:
+    if task.project_id is None:
+        return None
+
+    phase_value = task.phase.value if isinstance(task.phase, ProjectPhaseStatus) else str(task.phase or "").strip()
+    if phase_value != ProjectPhaseStatus.CONTROL.value:
+        return None
+
+    if project is None:
+        project = (
+            await db.execute(select(Project).where(Project.id == task.project_id))
+        ).scalar_one_or_none()
+    if project is None or not _is_mst_or_tt_project(project):
+        return None
+
+    ko_user_id = parse_ko_user_id(task.internal_notes)
+    if ko_user_id is None:
+        return None
+
+    ko_user_exists = (
+        await db.execute(select(User.id).where(User.id == ko_user_id))
+    ).scalar_one_or_none()
+    if ko_user_exists is None:
+        return None
+
+    task.assigned_to = ko_user_id
+    await _replace_task_assignees(db, task, [ko_user_id])
+    return ko_user_id
 
 
 async def _users_by_usernames(db: AsyncSession, usernames: set[str]) -> list[User]:
@@ -852,6 +887,7 @@ async def create_task(
                 db.add(t)
                 await db.flush()
                 await _replace_task_assignees(db, t, [assignee_id])
+                await _sync_control_task_owner_from_ko(db, task=t, project=project)
                 await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
                 if payload.alignment_user_ids:
@@ -989,6 +1025,7 @@ async def create_task(
                         db.add(t)
                         await db.flush()
                         await _replace_task_assignees(db, t, [assignee_id])
+                        await _sync_control_task_owner_from_ko(db, task=t, project=project)
                         await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
                         if payload.alignment_user_ids:
@@ -1106,6 +1143,7 @@ async def create_task(
             db.add(t)
             await db.flush()
             await _replace_task_assignees(db, t, [assignee_id])
+            await _sync_control_task_owner_from_ko(db, task=t, project=project)
             await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
             if payload.alignment_user_ids:
@@ -1290,6 +1328,7 @@ async def create_task(
     )
     db.add(task)
     await db.flush()
+    await _sync_control_task_owner_from_ko(db, task=task, project=project)
 
     # Record per-day progress event for product-count driven project tasks.
     # This is per-day history; it does not retroactively change other days.
@@ -1318,6 +1357,7 @@ async def create_task(
         await _replace_task_assignees(db, task, assignee_ids)
         if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
             task.is_active = False
+    await _sync_control_task_owner_from_ko(db, task=task, project=project)
     await ensure_ko_user_is_task_assignee(db, task=task, project=project)
 
     # If this is a project task, and the project was previously removed from the weekly planner
@@ -1752,6 +1792,8 @@ async def update_task(
         task.is_1h_report = payload.is_1h_report
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
+
+    await _sync_control_task_owner_from_ko(db, task=task)
 
     # Validate fast task type flags are mutually exclusive (only for fast tasks)
     # Fast tasks: no project_id, no system_template_origin_id

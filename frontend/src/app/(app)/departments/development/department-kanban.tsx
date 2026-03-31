@@ -2030,6 +2030,14 @@ export default function DepartmentKanban() {
     () => (isMineView && user?.id ? meetings.filter((m) => m.created_by === user.id) : meetings),
     [meetings, isMineView, user?.id]
   )
+  const visibleExternalMeetings = React.useMemo(
+    () => visibleMeetings.filter((m) => (m.meeting_type || "external") === "external"),
+    [visibleMeetings]
+  )
+  const visibleInternalMeetings = React.useMemo(
+    () => visibleMeetings.filter((m) => m.meeting_type === "internal"),
+    [visibleMeetings]
+  )
   const visibleSystemTemplates = React.useMemo(
     () => {
       const depTasks = department
@@ -2318,6 +2326,14 @@ export default function DepartmentKanban() {
         return isSameDay(start, todayDate)
       }),
     [visibleMeetings, todayDate]
+  )
+  const todayExternalMeetings = React.useMemo(
+    () => visibleExternalMeetings.filter((m) => todayMeetings.some((meeting) => meeting.id === m.id)),
+    [todayMeetings, visibleExternalMeetings]
+  )
+  const todayInternalMeetings = React.useMemo(
+    () => visibleInternalMeetings.filter((m) => todayMeetings.some((meeting) => meeting.id === m.id)),
+    [todayMeetings, visibleInternalMeetings]
   )
   const dailyReportFastTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
@@ -6611,12 +6627,14 @@ export default function DepartmentKanban() {
               <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-slate-800">External Meetings</div>
+                    <div className="text-sm font-semibold text-slate-800">Meetings</div>
                     <div className="text-xs text-slate-500 mt-1">Meetings scheduled for today.</div>
                   </div>
-                  <div className="text-xs font-semibold text-slate-600">{todayMeetings.length}</div>
+                  <div className="text-xs font-semibold text-slate-600">
+                    {todayExternalMeetings.length + todayInternalMeetings.length}
+                  </div>
                 </div>
-                {todayMeetings.length ? (
+                {todayExternalMeetings.length || todayInternalMeetings.length ? (
                   <Table
                     containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
                     className="min-w-[520px] text-[11px]"
@@ -6634,7 +6652,32 @@ export default function DepartmentKanban() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {todayMeetings.map((meeting) => (
+                      {todayExternalMeetings.length ? (
+                        <TableRow className="bg-slate-100/80">
+                          <TableCell colSpan={2} className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                            External Meetings
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                      {todayExternalMeetings.map((meeting) => (
+                        <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
+                          <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                            <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
+                          </TableCell>
+                          <TableCell className={TODAY_TASK_CELL_CLASS}>{formatMeetingDateTime(meeting)}</TableCell>
+                        </TableRow>
+                      ))}
+                      {todayInternalMeetings.length ? (
+                        <TableRow className="bg-slate-100/80">
+                          <TableCell
+                            colSpan={2}
+                            className={`px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 ${todayExternalMeetings.length ? "border-t-4 border-white" : ""}`}
+                          >
+                            Internal Meetings
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                      {todayInternalMeetings.map((meeting) => (
                         <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
                           <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                             <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
@@ -8908,7 +8951,7 @@ export default function DepartmentKanban() {
             <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="text-sm font-semibold">External Meetings</div>
-                {visibleMeetings.length ? (
+                {visibleExternalMeetings.length ? (
                   <div className="rounded-md border border-slate-200">
                     <Table>
                       <TableHeader>
@@ -8924,7 +8967,7 @@ export default function DepartmentKanban() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {visibleMeetings.map((meeting) => {
+                        {visibleExternalMeetings.map((meeting) => {
                           const project = meeting.project_id
                             ? projects.find((p) => p.id === meeting.project_id) || null
                             : null
@@ -9452,6 +9495,26 @@ export default function DepartmentKanban() {
 
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
                 <div className="text-sm font-semibold">Internal Meetings</div>
+                {todayInternalMeetings.length ? (
+                  <div className="rounded-md border border-slate-200">
+                    <Table>
+                      <TableHeader>
+                        <TableRow>
+                          <TableHead className="uppercase">Title</TableHead>
+                          <TableHead className="uppercase">Date & Time</TableHead>
+                        </TableRow>
+                      </TableHeader>
+                      <TableBody>
+                        {todayInternalMeetings.map((meeting) => (
+                          <TableRow key={meeting.id}>
+                            <TableCell className="font-medium">{meeting.title || "Internal meeting"}</TableCell>
+                            <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
+                          </TableRow>
+                        ))}
+                      </TableBody>
+                    </Table>
+                  </div>
+                ) : null}
                 <div>
                   <div className="text-base font-semibold">{INTERNAL_MEETING.title}</div>
                   <div className="mt-1 text-sm text-muted-foreground">

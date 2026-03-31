@@ -216,6 +216,20 @@ def _build_weekly_task_product_metrics(
     return effective_total, effective_completed, weekly_planned, day_total, day_done
 
 
+def _should_add_empty_project_entry_for_department(
+    department_id: uuid.UUID | None,
+    product_content_department_ids: set[uuid.UUID],
+) -> bool:
+    """
+    Decide whether a project may appear in Weekly Planner without any active tasks
+    for the rendered user/day slot.
+
+    Product Content should only show projects when that day has active project tasks.
+    Other departments keep the existing due-date driven fallback.
+    """
+    return department_id not in product_content_department_ids
+
+
 def _parse_production_date(internal_notes: str | None) -> date | None:
     """Parse production_date (YYYY-MM-DD) from task internal_notes."""
     if not internal_notes:
@@ -1312,6 +1326,15 @@ async def weekly_planner(
         # Filter tasks: include if assigned_to matches, assignee matches, or KO field matches (for MST/TT Control)
         filtered_tasks = []
         for t in all_tasks:
+            if t.project_id is not None and t.phase == ProjectPhaseStatus.CONTROL.value:
+                project = project_map.get(t.project_id)
+                if project is not None and _is_mst_or_tt_project(project):
+                    ko_user_id = _parse_ko_user_id(t.internal_notes)
+                    if ko_user_id is not None:
+                        if ko_user_id == user_id:
+                            filtered_tasks.append(t)
+                        continue
+
             # Check assigned_to
             if t.assigned_to == user_id:
                 filtered_tasks.append(t)
@@ -1320,15 +1343,7 @@ async def weekly_planner(
             if t.id in task_ids_with_assignee_set:
                 filtered_tasks.append(t)
                 continue
-            # For MST/TT projects in Control phase, check KO field
-            if t.project_id is not None and t.phase == ProjectPhaseStatus.CONTROL.value:
-                project = project_map.get(t.project_id)
-                if project is not None and _is_mst_or_tt_project(project):
-                    ko_user_id = _parse_ko_user_id(t.internal_notes)
-                    if ko_user_id == user_id:
-                        filtered_tasks.append(t)
-                        continue
-        
+
         all_tasks = filtered_tasks
     
     # Get task assignees
@@ -2724,11 +2739,17 @@ async def weekly_table_planner(
                 # Add projects with due dates that don't have tasks yet
                 # These projects should show for members even without tasks
                 # If project already has tasks in map, keep those tasks
+                allow_empty_project_entries = _should_add_empty_project_entry_for_department(
+                    dept.id,
+                    pc_dept_ids,
+                )
                 for project_id in user_projects_with_due:
                     # Only add if not already in maps (from tasks above)
                     # If project already has tasks, we keep those tasks
                     # The project will show with its tasks on days with tasks,
                     # and without tasks (but still visible) on other days until due date
+                    if not allow_empty_project_entries:
+                        continue
                     if project_id not in am_projects_map and project_id not in pm_projects_map:
                         # Default to AM if no tasks exist
                         if not _is_project_excluded(project_id, dept_user.id, day_date, "AM"):

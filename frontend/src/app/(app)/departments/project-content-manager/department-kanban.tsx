@@ -2175,6 +2175,14 @@ export default function DepartmentKanban() {
     () => (isMineView && user?.id ? meetings.filter((m) => m.created_by === user.id) : meetings),
     [meetings, isMineView, user?.id]
   )
+  const visibleExternalMeetings = React.useMemo(
+    () => visibleMeetings.filter((m) => (m.meeting_type || "external") === "external"),
+    [visibleMeetings]
+  )
+  const visibleInternalMeetings = React.useMemo(
+    () => visibleMeetings.filter((m) => m.meeting_type === "internal"),
+    [visibleMeetings]
+  )
   const visibleSystemTemplates = React.useMemo(
     () => {
       const depTasks = department
@@ -2201,10 +2209,32 @@ export default function DepartmentKanban() {
   const projectTasks = React.useMemo(() => {
     const tasks = visibleDepartmentTasks.filter((t) => t.project_id)
     if (isMineView && user?.id) {
-      return tasks.filter((task) => isTaskOwnedByViewUser(task, user.id))
+      return tasks.filter((task) => {
+        const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
+        const meta = task.project_id ? projectMetaLookup.get(task.project_id) || null : null
+        const phase = String(task.phase || "").toUpperCase().trim()
+        const koUserId = parseKoUserId(task.internal_notes)
+        const projectType = String(project?.project_type || "").toUpperCase().trim()
+        const projectTitle = String(project ? resolveProjectTitle(project) : meta?.title || "").toUpperCase().trim()
+        const isTtProject =
+          projectTitle === "TT" || projectTitle.startsWith("TT ") || projectTitle.startsWith("TT-")
+        const isMstOrTtControl = phase === "CONTROL" && (projectType === "MST" || projectTitle.includes("MST") || isTtProject)
+        const effectiveControlOwnerId = koUserId || task.assigned_to || null
+
+        if (phase === "CONTROL" && effectiveControlOwnerId && (isMstOrTtControl || !projectTitle)) {
+          return effectiveControlOwnerId === user.id
+        }
+        if (isPcmControlTaskOwnedByUser(task, user.id, project)) {
+          return true
+        }
+        if (isMstOrTtProject(project) && String(task.phase || "").toUpperCase().trim() === "CONTROL") {
+          return false
+        }
+        return isTaskOwnedByViewUser(task, user.id)
+      })
     }
     return tasks
-  }, [visibleDepartmentTasks, isMineView, user?.id, isTaskOwnedByViewUser])
+  }, [visibleDepartmentTasks, isMineView, user?.id, projects, projectMetaLookup, isTaskOwnedByViewUser])
   React.useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -2293,21 +2323,36 @@ export default function DepartmentKanban() {
   )
   const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
   const todayProjectTasks = React.useMemo(() => {
+    if (isMineView) {
+      const items = [...(dailyReport?.tasks_today || []), ...(dailyReport?.tasks_overdue || [])]
+      const tasks = items
+        .filter((item): item is { task: Task } => Boolean(item?.task?.project_id))
+        .map((item) => item.task)
+      const dedupedById = new Map<string, Task>()
+      for (const task of tasks) {
+        if (task.id) dedupedById.set(task.id, task)
+      }
+      return Array.from(dedupedById.values())
+    }
+
     return projectTasks.filter((task) => {
       const matchesRange =
         allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
       const completedToday = isTaskCompletedToday(task)
       const isOverdue = overdueTaskIds.has(task.id)
       if (!matchesRange && !completedToday && !isOverdue) return false
-      if (selectedUserId !== "__all__") {
+      if (!isMineView && selectedUserId !== "__all__") {
         return isTaskOwnedByViewUser(task, selectedUserId)
       }
       return true
     })
   }, [
+    isMineView,
+    dailyReport,
     projectTasks,
     todayDate,
     selectedUserId,
+    isMineView,
     allRange,
     isTaskActiveForDate,
     isTaskOwnedByViewUser,
@@ -2463,6 +2508,14 @@ export default function DepartmentKanban() {
       }),
     [visibleMeetings, todayDate]
   )
+  const todayExternalMeetings = React.useMemo(
+    () => visibleExternalMeetings.filter((m) => todayMeetings.some((meeting) => meeting.id === m.id)),
+    [todayMeetings, visibleExternalMeetings]
+  )
+  const todayInternalMeetings = React.useMemo(
+    () => visibleInternalMeetings.filter((m) => todayMeetings.some((meeting) => meeting.id === m.id)),
+    [todayMeetings, visibleInternalMeetings]
+  )
   const dailyReportFastTasks = React.useMemo(() => {
     const todayKey = dayKey(todayDate)
     const targetUserId =
@@ -2499,51 +2552,6 @@ export default function DepartmentKanban() {
     isTaskOwnedByViewUser,
     isTaskActiveForDate,
   ])
-  const dailyReportProjectTasks = React.useMemo(() => {
-    const targetUserId =
-      viewMode === "department"
-        ? selectedUserId !== "__all__"
-          ? selectedUserId
-          : user?.id
-        : user?.id
-
-    return projectTasks.filter((task) => {
-      if (!task.due_date) return false
-      const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
-      if (targetUserId) {
-        if (isPcmControlTaskOwnedByUser(task, targetUserId, project)) {
-          // ok
-        } else if (isMstOrTtProject(project) && String(task.phase || "").toUpperCase().trim() === "CONTROL") {
-          // KO missing or not owner: hide
-          return false
-        } else if (!isTaskOwnedByViewUser(task, targetUserId)) {
-          return false
-        }
-      }
-
-      const completedDate = task.completed_at ? toDate(task.completed_at) : null
-      const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
-      if (completedToday) return true
-      const isDone = Boolean(completedDate) || task.status === "DONE"
-      if (isDone) {
-        return isTaskActiveForDate(task, todayDate)
-      }
-
-      const dueDate = toDate(task.due_date)
-      if (!dueDate) return false
-      return dayKey(todayDate) >= dayKey(dueDate)
-    })
-  }, [
-    projectTasks,
-    projects,
-    todayDate,
-    viewMode,
-    selectedUserId,
-    user?.id,
-    isTaskOwnedByViewUser,
-    isTaskActiveForDate,
-  ])
-
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
     for (const p of projects) {
@@ -2552,10 +2560,12 @@ export default function DepartmentKanban() {
         existingTitles.set(p.id, title)
       }
     }
+    const dailyReportProjectItems = [...(dailyReport?.tasks_today || []), ...(dailyReport?.tasks_overdue || [])]
+      .filter((item): item is { task: Task; project_title?: string | null } => Boolean(item?.task?.project_id))
     const missingIds = Array.from(
       new Set(
-        dailyReportProjectTasks
-          .map((task) => task.project_id)
+        dailyReportProjectItems
+          .map((item) => item.task.project_id)
           .filter((pid): pid is string => typeof pid === "string" && pid.trim().length > 0)
       )
     ).filter((pid) => !existingTitles.has(pid) && !projectTitleLookup.has(pid))
@@ -2573,7 +2583,7 @@ export default function DepartmentKanban() {
         return next
       })
     })()
-  }, [apiFetch, dailyReportProjectTasks, projectTitleLookup, projects])
+  }, [apiFetch, dailyReport, projectTitleLookup, projects])
   const systemTemplateById = React.useMemo(() => {
     const map = new Map<string, SystemTaskTemplate>()
     for (const tmpl of visibleSystemTemplates) {
@@ -2793,10 +2803,15 @@ export default function DepartmentKanban() {
       fastIndex += 1
     }
 
-    for (const task of dailyReportProjectTasks) {
+    const dailyReportProjectItems = [...(dailyReport?.tasks_today || []), ...(dailyReport?.tasks_overdue || [])]
+      .filter((item): item is { task: Task; project_title?: string | null } => Boolean(item?.task?.project_id))
+
+    for (const item of dailyReportProjectItems) {
+      const task = item.task
       const dueDate = task.due_date ? toDate(task.due_date) : null
       const project = task.project_id ? projects.find((p) => p.id === task.project_id) || null : null
       const projectLabel =
+        item.project_title ||
         project?.title ||
         project?.name ||
         (task.project_id ? projectTitleLookup.get(task.project_id) : null) ||
@@ -2842,7 +2857,6 @@ export default function DepartmentKanban() {
   }, [
     dailyReport,
     dailyReportFastTasks,
-    dailyReportProjectTasks,
     projects,
     projectTitleLookup,
     systemTemplateById,
@@ -6400,12 +6414,14 @@ export default function DepartmentKanban() {
               <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-slate-800">External Meetings</div>
+                    <div className="text-sm font-semibold text-slate-800">Meetings</div>
                     <div className="text-xs text-slate-500 mt-1">Meetings scheduled for today.</div>
                   </div>
-                  <div className="text-xs font-semibold text-slate-600">{todayMeetings.length}</div>
+                  <div className="text-xs font-semibold text-slate-600">
+                    {todayExternalMeetings.length + todayInternalMeetings.length}
+                  </div>
                 </div>
-                {todayMeetings.length ? (
+                {todayExternalMeetings.length || todayInternalMeetings.length ? (
                   <Table
                     containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
                     className="min-w-[520px] text-[11px]"
@@ -6423,7 +6439,32 @@ export default function DepartmentKanban() {
                       </TableRow>
                     </TableHeader>
                     <TableBody>
-                      {todayMeetings.map((meeting) => (
+                      {todayExternalMeetings.length ? (
+                        <TableRow className="bg-slate-100/80">
+                          <TableCell colSpan={2} className="px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600">
+                            External Meetings
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                      {todayExternalMeetings.map((meeting) => (
+                        <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
+                          <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
+                            <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
+                          </TableCell>
+                          <TableCell className={TODAY_TASK_CELL_CLASS}>{formatMeetingDateTime(meeting)}</TableCell>
+                        </TableRow>
+                      ))}
+                      {todayInternalMeetings.length ? (
+                        <TableRow className="bg-slate-100/80">
+                          <TableCell
+                            colSpan={2}
+                            className={`px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-slate-600 ${todayExternalMeetings.length ? "border-t-4 border-white" : ""}`}
+                          >
+                            Internal Meetings
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                      {todayInternalMeetings.map((meeting) => (
                         <TableRow key={meeting.id} className={TODAY_TASK_ROW_CLASS}>
                           <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                             <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{meeting.title || "Meeting"}</div>
@@ -8725,8 +8766,8 @@ export default function DepartmentKanban() {
                   </div>
                 ) : null}
                 <div className="space-y-3">
-                  {visibleMeetings.length ? (
-                    visibleMeetings.map((meeting) => {
+                  {visibleExternalMeetings.length ? (
+                    visibleExternalMeetings.map((meeting) => {
                       const project = meeting.project_id
                         ? projects.find((p) => p.id === meeting.project_id) || null
                         : null

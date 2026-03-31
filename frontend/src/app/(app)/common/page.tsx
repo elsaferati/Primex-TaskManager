@@ -622,6 +622,23 @@ export default function CommonViewPage() {
     const timeLabel = resolvedDate ? formatTime(date) : meeting.starts_at ? formatTime(date) : "TBD"
     return `${dateLabel} ${timeLabel}`
   }
+  const mapMeetingToCommonItem = React.useCallback(
+    (meeting: Meeting, meetingType: "external" | "internal", fallbackOwnerName?: string) => {
+      const resolvedDate = resolveExternalMeetingDate(meeting)
+      const createdAt = new Date(meeting.created_at)
+      const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
+      const dateSource = resolvedDate ?? validCreatedAt
+      if (!dateSource) return null
+      return {
+        title: meeting.title || (meetingType === "external" ? "External meeting" : "Internal meeting"),
+        date: toISODate(dateSource),
+        time: resolvedDate ? formatTime(resolvedDate) : "TBD",
+        platform: meeting.platform?.trim() || "TBD",
+        owner: fallbackOwnerName || "Unknown",
+      }
+    },
+    [formatTime, toISODate]
+  )
   const alWeekdayShort = (d: Date) => {
     const days = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
     return days[d.getDay()]
@@ -723,6 +740,23 @@ export default function CommonViewPage() {
   const [internalMeetingRecurrenceMonth, setInternalMeetingRecurrenceMonth] = React.useState("1")
   const [internalMeetingRecurrenceDay, setInternalMeetingRecurrenceDay] = React.useState("1")
   const [internalMeetingDepartmentId, setInternalMeetingDepartmentId] = React.useState("")
+  const syncCommonMeetingBucket = React.useCallback(
+    (meetingType: "external" | "internal", meetings: Meeting[]) => {
+      const meetingItems = meetings
+        .map((meeting) => {
+          const owner = meeting.created_by ? users.find((u) => u.id === meeting.created_by) : null
+          const ownerName = owner?.full_name || owner?.username || "Unknown"
+          return mapMeetingToCommonItem(meeting, meetingType, ownerName)
+        })
+        .filter((item): item is ExternalItem | InternalItem => item !== null)
+
+      setCommonData((prev) => ({
+        ...prev,
+        [meetingType]: meetingItems,
+      }))
+    },
+    [mapMeetingToCommonItem, users]
+  )
   const commonViewAggregateEnabled = COMMON_VIEW_AGGREGATE_ENABLED
   const commonViewIncludeStages = React.useMemo(
     () => [
@@ -3570,22 +3604,15 @@ export default function CommonViewPage() {
       }
       const created = (await res.json()) as Meeting
       setExternalMeetings((prev) => [created, ...prev])
+      COMMON_VIEW_CACHE.clear()
       const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
-      const dateSource = created.starts_at ? new Date(created.starts_at) : new Date(created.created_at)
-      const safeDate = Number.isNaN(dateSource.getTime()) ? new Date() : dateSource
-      setCommonData((prev) => ({
-        ...prev,
-        external: [
-          ...prev.external,
-          {
-            title: created.title || "External meeting",
-            date: toISODate(safeDate),
-            time: created.starts_at ? formatTime(safeDate) : "TBD",
-            platform: created.platform?.trim() || "TBD",
-            owner: ownerName,
-          },
-        ],
-      }))
+      const mapped = mapMeetingToCommonItem(created, "external", ownerName)
+      if (mapped) {
+        setCommonData((prev) => ({
+          ...prev,
+          external: [...prev.external, mapped],
+        }))
+      }
       setExternalMeetingTitle("")
       setExternalMeetingPlatform("")
       setExternalMeetingStartsAt("")
@@ -3763,6 +3790,7 @@ export default function CommonViewPage() {
       setExternalMeetings((prev) =>
         prev.map((m) => (m.id === editingExternalMeetingId ? updated : m))
       )
+      COMMON_VIEW_CACHE.clear()
       cancelEditExternalMeeting()
       // Reload external meetings to update the list
       const meetingsBase = commonDepartmentId
@@ -3772,6 +3800,7 @@ export default function CommonViewPage() {
       if (meetingsRes?.ok) {
         const meetings = (await meetingsRes.json()) as Meeting[]
         setExternalMeetings(meetings)
+        syncCommonMeetingBucket("external", meetings)
       }
     } catch (err) {
       console.error("Error updating meeting:", err)
@@ -3794,6 +3823,7 @@ export default function CommonViewPage() {
     commonDepartmentId,
     apiFetch,
     cancelEditExternalMeeting,
+    syncCommonMeetingBucket,
   ])
 
   const deleteExternalMeeting = React.useCallback(
@@ -3816,6 +3846,7 @@ export default function CommonViewPage() {
           toast.error("Failed to delete meeting. Only admins can delete meetings.")
           return
         }
+        COMMON_VIEW_CACHE.clear()
         setExternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
         // Reload external meetings to update the list
         const meetingsBase = commonDepartmentId
@@ -3825,6 +3856,7 @@ export default function CommonViewPage() {
         if (meetingsRes?.ok) {
           const meetings = (await meetingsRes.json()) as Meeting[]
           setExternalMeetings(meetings)
+          syncCommonMeetingBucket("external", meetings)
         }
       } catch (err) {
         console.error("Error deleting meeting:", err)
@@ -3833,7 +3865,7 @@ export default function CommonViewPage() {
         setDeletingExternalMeetingId(null)
       }
     },
-    [isAdmin, apiFetch, commonDepartmentId, confirm]
+    [isAdmin, apiFetch, commonDepartmentId, confirm, syncCommonMeetingBucket]
   )
 
   const submitInternalMeeting = React.useCallback(async () => {
@@ -3916,22 +3948,15 @@ export default function CommonViewPage() {
       }
       const created = (await res.json()) as Meeting
       setInternalMeetings((prev) => [created, ...prev])
+      COMMON_VIEW_CACHE.clear()
       const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
-      const dateSource = created.starts_at ? new Date(created.starts_at) : new Date(created.created_at)
-      const safeDate = Number.isNaN(dateSource.getTime()) ? new Date() : dateSource
-      setCommonData((prev) => ({
-        ...prev,
-        internal: [
-          ...prev.internal,
-          {
-            title: created.title || "Internal meeting",
-            date: toISODate(safeDate),
-            time: created.starts_at ? formatTime(safeDate) : "TBD",
-            platform: created.platform?.trim() || "TBD",
-            owner: ownerName,
-          },
-        ],
-      }))
+      const mapped = mapMeetingToCommonItem(created, "internal", ownerName)
+      if (mapped) {
+        setCommonData((prev) => ({
+          ...prev,
+          internal: [...prev.internal, mapped],
+        }))
+      }
       setInternalMeetingTitle("")
       setInternalMeetingPlatform("")
       setInternalMeetingStartsAt("")
@@ -3960,8 +3985,7 @@ export default function CommonViewPage() {
     user?.email,
     user?.full_name,
     user?.username,
-    formatTime,
-    toISODate,
+    mapMeetingToCommonItem,
   ])
 
   const canEditInternalMeeting = React.useCallback((meeting: Meeting) => {
@@ -4099,6 +4123,7 @@ export default function CommonViewPage() {
       setInternalMeetings((prev) =>
         prev.map((m) => (m.id === editingInternalMeetingId ? updated : m))
       )
+      COMMON_VIEW_CACHE.clear()
       cancelEditInternalMeeting()
       const meetingsBase = commonDepartmentId
         ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
@@ -4107,6 +4132,7 @@ export default function CommonViewPage() {
       if (meetingsRes?.ok) {
         const meetings = (await meetingsRes.json()) as Meeting[]
         setInternalMeetings(meetings)
+        syncCommonMeetingBucket("internal", meetings)
       }
     } catch (err) {
       console.error("Error updating meeting:", err)
@@ -4129,6 +4155,7 @@ export default function CommonViewPage() {
     commonDepartmentId,
     apiFetch,
     cancelEditInternalMeeting,
+    syncCommonMeetingBucket,
   ])
 
   const deleteInternalMeeting = React.useCallback(
@@ -4151,6 +4178,7 @@ export default function CommonViewPage() {
           toast.error("Failed to delete meeting. Only admins can delete meetings.")
           return
         }
+        COMMON_VIEW_CACHE.clear()
         setInternalMeetings((prev) => prev.filter((m) => m.id !== meetingId))
         const meetingsBase = commonDepartmentId
           ? `/meetings?department_id=${encodeURIComponent(commonDepartmentId)}`
@@ -4159,6 +4187,7 @@ export default function CommonViewPage() {
         if (meetingsRes?.ok) {
           const meetings = (await meetingsRes.json()) as Meeting[]
           setInternalMeetings(meetings)
+          syncCommonMeetingBucket("internal", meetings)
         }
       } catch (err) {
         console.error("Error deleting meeting:", err)
@@ -4167,7 +4196,7 @@ export default function CommonViewPage() {
         setDeletingInternalMeetingId(null)
       }
     },
-    [isAdmin, apiFetch, commonDepartmentId, confirm]
+    [isAdmin, apiFetch, commonDepartmentId, confirm, syncCommonMeetingBucket]
   )
 
   const buildSwimlaneCells = (items: SwimlaneCell[], targetCount: number) => {
