@@ -3972,19 +3972,19 @@ export default function WeeklyPlannerPage() {
                                                 <div
                                                   key={task.task_id}
                                                 className={[
-                                                  "text-[11px] flex justify-between items-center gap-1 rounded border px-1.5 py-0.5 group/task",
+                                                  "text-[11px] flex items-center gap-1 rounded border pl-1.5 pr-0.5 py-0.5 group/task",
                                                   getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at),
                                                 ].join(" ")}
                                               >
                                                   <button
                                                     type="button"
                                                     onClick={() => openChecklistForTask(task.task_id, task.task_title)}
-                                                    className="truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
-                                                    title="View subtasks"
+                                                    className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
+                                                    title={`${taskNumber}. ${task.task_title}`}
                                                   >
                                                     {taskNumber}. {task.task_title}
                                                   </button>
-                                                <div className="flex items-center gap-1">
+                                                <div className="flex shrink-0 items-center gap-1">
                                                   {isNewTask && (
                                                     <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
                                                       NEW
@@ -4017,10 +4017,10 @@ export default function WeeklyPlannerPage() {
                                                       void deleteTask(task.task_id, task.task_title, timeSlot, dayDate, userId)
                                                     }}
                                                     disabled={deletingTaskId === task.task_id}
-                                                    className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity"
+                                                    className="opacity-0 group-hover/task:opacity-100 inline-flex h-3 w-3 items-center justify-center rounded text-red-500 transition-opacity hover:bg-red-100 dark:hover:bg-red-900/30"
                                                     title="Delete task"
                                                   >
-                                                    <X className="h-3 w-3" />
+                                                    <X className="h-2.5 w-2.5" />
                                                   </button>
                                                 </div>
                                               </div>
@@ -4048,12 +4048,14 @@ export default function WeeklyPlannerPage() {
                                           <div
                                             key={task.task_id || idx}
                                           className={[
-                                            "p-1 rounded border text-[11px] flex justify-between items-center group/task",
+                                            "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task",
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at),
                                           ].join(" ")}
                                         >
-                                            <span className="truncate whitespace-nowrap font-semibold text-slate-900">{idx + 1}. {task.title}</span>
-                                          <div className="flex items-center gap-1">
+                                            <span className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-slate-900" title={`${idx + 1}. ${task.title}`}>
+                                              {idx + 1}. {task.title}
+                                            </span>
+                                          <div className="flex shrink-0 items-center gap-1">
                                             {isNewTask && (
                                               <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
                                                 NEW
@@ -4078,10 +4080,10 @@ export default function WeeklyPlannerPage() {
                                                   void deleteTask(task.task_id!, task.title, timeSlot, dayDate, userId)
                                                 }}
                                                 disabled={deletingTaskId === task.task_id}
-                                                className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
+                                                className="opacity-0 group-hover/task:opacity-100 inline-flex h-3 w-3 items-center justify-center rounded text-red-500 transition-opacity hover:bg-red-100 dark:hover:bg-red-900/30"
                                                 title="Delete task"
                                               >
-                                                <X className="h-3 w-3" />
+                                                <X className="h-2.5 w-2.5" />
                                               </button>
                                             )}
                                           </div>
@@ -4101,7 +4103,7 @@ export default function WeeklyPlannerPage() {
                                       <div
                                         key={task.task_id || idx}
                                           className={[
-                                            "p-1 rounded border text-[11px] flex justify-between items-center group/task",
+                                            "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task",
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at),
                                           ].join(" ")}
                                         >
@@ -4109,15 +4111,17 @@ export default function WeeklyPlannerPage() {
                                           <button
                                             type="button"
                                             onClick={() => openFastTaskDescription(task.task_id!, task.title)}
-                                            className="truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
-                                            title="View task description"
+                                            className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
+                                            title={`${idx + 1}. ${task.title}`}
                                           >
                                             {idx + 1}. {task.title}
                                           </button>
                                         ) : (
-                                          <span className="truncate whitespace-nowrap font-semibold text-slate-900">{idx + 1}. {task.title}</span>
+                                          <span className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-slate-900" title={`${idx + 1}. ${task.title}`}>
+                                            {idx + 1}. {task.title}
+                                          </span>
                                         )}
-                                          <div className="flex items-center gap-1">
+                                          <div className="flex shrink-0 items-center gap-1">
                                             {isNewTask && (
                                               <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
                                                 NEW
@@ -4142,10 +4146,10 @@ export default function WeeklyPlannerPage() {
                                                   void deleteTask(task.task_id!, task.title, timeSlot, dayDate, userId)
                                                 }}
                                                 disabled={deletingTaskId === task.task_id}
-                                                className="opacity-0 group-hover/task:opacity-100 p-0.5 rounded hover:bg-red-100 dark:hover:bg-red-900/30 text-red-500 transition-opacity ml-1"
+                                                className="opacity-0 group-hover/task:opacity-100 inline-flex h-3 w-3 items-center justify-center rounded text-red-500 transition-opacity hover:bg-red-100 dark:hover:bg-red-900/30"
                                                 title="Delete task"
                                               >
-                                                <X className="h-3 w-3" />
+                                                <X className="h-2.5 w-2.5" />
                                               </button>
                                             )}
                                           </div>
