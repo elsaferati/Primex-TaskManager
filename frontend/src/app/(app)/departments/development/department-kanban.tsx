@@ -55,6 +55,7 @@ const TABS = [
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
+type AllRange = "today" | "this-week" | "next-week" | "all" | "date"
 
 type MicrosoftEvent = {
   id: string
@@ -1071,6 +1072,7 @@ export default function DepartmentKanban() {
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
   const [pendingPrint, setPendingPrint] = React.useState(false)
   const [systemTasks, setSystemTasks] = React.useState<SystemTaskTemplate[]>([])
+  const [overviewSystemTasks, setOverviewSystemTasks] = React.useState<SystemTaskTemplate[]>([])
   const [closeTaskDialogOpen, setCloseTaskDialogOpen] = React.useState(false)
   const [taskToCloseId, setTaskToCloseId] = React.useState<string | null>(null)
   const [taskToCloseTemplate, setTaskToCloseTemplate] = React.useState<SystemTaskTemplate | null>(null)
@@ -1078,6 +1080,7 @@ export default function DepartmentKanban() {
   const [closingTask, setClosingTask] = React.useState(false)
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
+  const [systemCreatedTasks, setSystemCreatedTasks] = React.useState<Task[]>([])
   const [crossDepartmentConfirmTasks, setCrossDepartmentConfirmTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
@@ -1093,7 +1096,8 @@ export default function DepartmentKanban() {
   const [activeTab, setActiveTab] = React.useState<TabId>(
     isTabId ? (normalizedTab as TabId) : "all"
   )
-  const [allRange, setAllRange] = React.useState<"today" | "week">("today")
+  const [allRange, setAllRange] = React.useState<AllRange>("today")
+  const [allDateInput, setAllDateInput] = React.useState(() => todayInputValue())
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
   const [fastTaskDateInput, setFastTaskDateInput] = React.useState(() => todayInputValue())
   const [showAllFastTasks, setShowAllFastTasks] = React.useState(false)
@@ -1143,8 +1147,10 @@ export default function DepartmentKanban() {
     users: UserLookup[]
     projects: Project[]
     systemTasks: SystemTaskTemplate[]
+    overviewSystemTasks: SystemTaskTemplate[]
     departmentTasks: Task[]
     noProjectTasks: Task[]
+    systemCreatedTasks: Task[]
     gaNotes: GaNote[]
     internalNotes: InternalNote[]
     meetings: Meeting[]
@@ -1159,8 +1165,10 @@ export default function DepartmentKanban() {
     setUsers(payload.users)
     setProjects(payload.projects)
     setSystemTasks(payload.systemTasks)
+    setOverviewSystemTasks(payload.overviewSystemTasks)
     setDepartmentTasks(payload.departmentTasks)
     setNoProjectTasks(payload.noProjectTasks)
+    setSystemCreatedTasks(payload.systemCreatedTasks)
     setGaNotes(payload.gaNotes)
     setInternalNotes(payload.internalNotes)
     setMeetings(payload.meetings)
@@ -1319,22 +1327,27 @@ export default function DepartmentKanban() {
           allUsers = (await usersRes.json()) as UserLookup[]
         }
 
-        const [projRes, sysRes, tasksRes] = await Promise.all([
+        const [projRes, sysRes, allSysRes, tasksRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}&include_overdue=true`),
+          apiFetch(`/system-tasks?department_id=${dep.id}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
         ])
         const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
         const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
+        const allSystemTasks = allSysRes.ok ? ((await allSysRes.json()) as SystemTaskTemplate[]) : []
         const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
         const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
+        const systemTaskRows = taskRows.filter((t) => Boolean(t.system_template_origin_id))
         setDepartments(deps)
         setDepartment(dep)
         setUsers(allUsers)
         setProjects(projects)
         setSystemTasks(systemTasks)
+        setOverviewSystemTasks(allSystemTasks)
         setDepartmentTasks(nonSystemTasks)
         setNoProjectTasks(nonSystemTasks.filter(isNoProjectTask))
+        setSystemCreatedTasks(systemTaskRows)
         setSystemDepartmentId(dep.id)
         setInternalNoteProjects(projects)
         bootstrapSystemTasksKeyRef.current = `${dep.id}|${systemDateKey}`
@@ -1360,8 +1373,10 @@ export default function DepartmentKanban() {
           users: allUsers,
           projects,
           systemTasks,
+          overviewSystemTasks: allSystemTasks,
           departmentTasks: nonSystemTasks,
           noProjectTasks: nonSystemTasks.filter(isNoProjectTask),
+          systemCreatedTasks: systemTaskRows,
           gaNotes,
           internalNotes,
           meetings,
@@ -1397,11 +1412,15 @@ export default function DepartmentKanban() {
     const systemTasksKey = `${department.id}|${formatDateInput(systemDate)}`
     if (bootstrapSystemTasksKeyRef.current === systemTasksKey) return
     const loadSystemTasks = async () => {
-      const res = await apiFetch(
-        `/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}&include_overdue=true`
-      )
+      const [res, allRes] = await Promise.all([
+        apiFetch(`/system-tasks?department_id=${department.id}&occurrence_date=${formatDateInput(systemDate)}&include_overdue=true`),
+        apiFetch(`/system-tasks?department_id=${department.id}`),
+      ])
       if (res.ok) {
         setSystemTasks((await res.json()) as SystemTaskTemplate[])
+      }
+      if (allRes.ok) {
+        setOverviewSystemTasks((await allRes.json()) as SystemTaskTemplate[])
       }
     }
     void loadSystemTasks()
@@ -1755,6 +1774,10 @@ export default function DepartmentKanban() {
   }, [users, editTaskAssignees])
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
+  const selectedAllDate = React.useMemo(
+    () => dateInputToDate(allDateInput) ?? todayDate,
+    [allDateInput, todayDate]
+  )
   const selectedFastTaskDate = React.useMemo(
     () => dateInputToDate(fastTaskDateInput) ?? todayDate,
     [fastTaskDateInput, todayDate]
@@ -1770,6 +1793,19 @@ export default function DepartmentKanban() {
       return new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)
     })
   }, [todayDate])
+  const nextWeekStart = React.useMemo(
+    () => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7),
+    [weekStart]
+  )
+  const nextWeekEnd = React.useMemo(
+    () => new Date(nextWeekStart.getFullYear(), nextWeekStart.getMonth(), nextWeekStart.getDate() + 4),
+    [nextWeekStart]
+  )
+  const nextWeekDates = React.useMemo(() => {
+    return Array.from({ length: 5 }, (_, index) => {
+      return new Date(nextWeekStart.getFullYear(), nextWeekStart.getMonth(), nextWeekStart.getDate() + index)
+    })
+  }, [nextWeekStart])
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const isTaskAssignedToUser = React.useCallback(
     (task: Task, userId?: string | null) => {
@@ -1821,21 +1857,35 @@ export default function DepartmentKanban() {
     if (dueKey != null && targetKey > dueKey) return false
     return true
   }, [])
-  const isTaskOverlappingWeek = React.useCallback(
-    (task: Task) => {
+  const isTaskOverlappingRange = React.useCallback(
+    (task: Task, rangeStart: Date, rangeEnd: Date) => {
       const start = task.start_date ? toDate(task.start_date) : null
       const due = task.due_date ? toDate(task.due_date) : null
       if (!start && !due) return false
-      const rangeStart = start ?? due
-      const rangeEnd = due ?? start
-      if (!rangeStart || !rangeEnd) return false
-      return dayKey(rangeStart) <= dayKey(weekEnd) && dayKey(rangeEnd) >= dayKey(weekStart)
+      const taskRangeStart = start ?? due
+      const taskRangeEnd = due ?? start
+      if (!taskRangeStart || !taskRangeEnd) return false
+      return dayKey(taskRangeStart) <= dayKey(rangeEnd) && dayKey(taskRangeEnd) >= dayKey(rangeStart)
     },
-    [weekEnd, weekStart]
+    []
+  )
+  const isTaskOverlappingWeek = React.useCallback(
+    (task: Task) => isTaskOverlappingRange(task, weekStart, weekEnd),
+    [isTaskOverlappingRange, weekEnd, weekStart]
+  )
+  const isTaskOverlappingNextWeek = React.useCallback(
+    (task: Task) => isTaskOverlappingRange(task, nextWeekStart, nextWeekEnd),
+    [isTaskOverlappingRange, nextWeekEnd, nextWeekStart]
   )
   const isTaskCompletedOnDate = React.useCallback((task: Task, targetDate: Date) => {
     const completedDate = task.completed_at ? toDate(task.completed_at) : null
     return completedDate ? isSameDay(completedDate, targetDate) : false
+  }, [])
+  const isTaskCompletedInRange = React.useCallback((task: Task, rangeStart: Date, rangeEnd: Date) => {
+    const completedDate = task.completed_at ? toDate(task.completed_at) : null
+    if (!completedDate) return false
+    const completedKey = dayKey(completedDate)
+    return completedKey >= dayKey(rangeStart) && completedKey <= dayKey(rangeEnd)
   }, [])
   const isTaskCompletedToday = React.useCallback(
     (task: Task) => isTaskCompletedOnDate(task, todayDate),
@@ -1853,6 +1903,80 @@ export default function DepartmentKanban() {
   const isTaskOverdue = React.useCallback(
     (task: Task) => isTaskOverdueForDate(task, todayDate),
     [isTaskOverdueForDate, todayDate]
+  )
+  const activeAllRangeLabel = React.useMemo(() => {
+    switch (allRange) {
+      case "this-week":
+        return "This Week"
+      case "next-week":
+        return "Next Week"
+      case "all":
+        return "All Open"
+      case "date":
+        return formatDateDMY(selectedAllDate)
+      default:
+        return "Today"
+    }
+  }, [allRange, selectedAllDate])
+  const activeAllRangeTaskLabel = React.useMemo(() => {
+    switch (allRange) {
+      case "this-week":
+        return "this week"
+      case "next-week":
+        return "next week"
+      case "all":
+        return "all open dates"
+      case "date":
+        return formatDateDMY(selectedAllDate)
+      default:
+        return "today"
+    }
+  }, [allRange, selectedAllDate])
+  const matchesTaskAllRange = React.useCallback(
+    (task: Task) => {
+      switch (allRange) {
+        case "this-week":
+          return isTaskOverlappingWeek(task)
+        case "next-week":
+          return isTaskOverlappingNextWeek(task)
+        case "all":
+          return taskStatusValue(task) !== "DONE"
+        case "date":
+          return isTaskActiveForDate(task, selectedAllDate)
+        default:
+          return isTaskActiveForDate(task, todayDate)
+      }
+    },
+    [allRange, isTaskActiveForDate, isTaskOverlappingNextWeek, isTaskOverlappingWeek, selectedAllDate, todayDate]
+  )
+  const isTaskCompletedInAllRange = React.useCallback(
+    (task: Task) => {
+      switch (allRange) {
+        case "this-week":
+          return isTaskCompletedInRange(task, weekStart, weekEnd)
+        case "next-week":
+          return isTaskCompletedInRange(task, nextWeekStart, nextWeekEnd)
+        case "date":
+          return isTaskCompletedOnDate(task, selectedAllDate)
+        default:
+          return isTaskCompletedToday(task)
+      }
+    },
+    [
+      allRange,
+      isTaskCompletedInRange,
+      isTaskCompletedOnDate,
+      isTaskCompletedToday,
+      nextWeekEnd,
+      nextWeekStart,
+      selectedAllDate,
+      weekEnd,
+      weekStart,
+    ]
+  )
+  const shouldIncludeOverdueInSelectedAllRange = React.useMemo(
+    () => activeTab === "all" && allRange === "today" && viewMode === "mine",
+    [activeTab, allRange, viewMode]
   )
   const sortDoneLast = React.useCallback(<T,>(items: T[], isDone: (item: T) => boolean) => {
     const withIndex = items.map((item, index) => ({ item, index }))
@@ -2060,7 +2184,6 @@ export default function DepartmentKanban() {
     },
     [systemTasks, isMineView, user?.id, department]
   )
-
   const projectTasks = React.useMemo(() => {
     const tasks = visibleDepartmentTasks.filter((t) => t.project_id)
     if (isMineView && user?.id) {
@@ -2068,6 +2191,12 @@ export default function DepartmentKanban() {
     }
     return tasks
   }, [visibleDepartmentTasks, isMineView, user?.id, isTaskOwnedByViewUser])
+  const visibleSystemCreatedTasks = React.useMemo(() => {
+    if (isMineView && user?.id) {
+      return systemCreatedTasks.filter((task) => isTaskOwnedByViewUser(task, user.id))
+    }
+    return systemCreatedTasks
+  }, [isMineView, isTaskOwnedByViewUser, systemCreatedTasks, user?.id])
   React.useEffect(() => {
     let cancelled = false
     const run = async () => {
@@ -2104,19 +2233,6 @@ export default function DepartmentKanban() {
       cancelled = true
     }
   }, [apiFetch, departmentTasks, noProjectTasks, user?.id, viewMode])
-  const shouldIncludeOverdueInAllToday = React.useMemo(
-    () =>
-      activeTab === "all" &&
-      allRange === "today" &&
-      viewMode === "mine",
-    [activeTab, allRange, viewMode]
-  )
-  const shouldIncludeOverdueSystemInAllToday = React.useMemo(
-    () =>
-      activeTab === "all" &&
-      viewMode === "mine",
-    [activeTab, viewMode]
-  )
   const isSystemTaskOverdueForDate = React.useCallback(
     (task: SystemTaskTemplate, targetDate: Date) => {
       const status = String(task.status || "").toUpperCase()
@@ -2129,53 +2245,51 @@ export default function DepartmentKanban() {
   )
   const overdueTaskIds = React.useMemo(() => {
     const ids = new Set<string>()
-    if (!shouldIncludeOverdueInAllToday) return ids
+    if (!shouldIncludeOverdueInSelectedAllRange) return ids
     for (const item of dailyReport?.tasks_overdue || []) {
       if (item?.task?.id) ids.add(item.task.id)
     }
     return ids
-  }, [dailyReport?.tasks_overdue, shouldIncludeOverdueInAllToday])
-  const todaySystemTasks = React.useMemo(
-    () => {
-      const todayTasks = visibleSystemTemplates.filter((t) => shouldShowTemplate(t, todayDate))
-
-      if (shouldIncludeOverdueSystemInAllToday) {
-        const todayTaskIds = new Set(todayTasks.map((t) => t.id))
-
-        const overdueTasks = visibleSystemTemplates.filter((t) => {
-          if (todayTaskIds.has(t.id)) return false
-          return isSystemTaskOverdueForDate(t, todayDate)
-        })
-
-        return [...todayTasks, ...overdueTasks]
-      }
-
-      return todayTasks
-    },
-    [isSystemTaskOverdueForDate, shouldIncludeOverdueSystemInAllToday, todayDate, visibleSystemTemplates]
-  )
-  const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
-  const todayProjectTasks = React.useMemo(() => {
-    return projectTasks.filter((task) => {
-      const matchesRange =
-        allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
-      const completedToday = isTaskCompletedToday(task)
-      const isOverdue = overdueTaskIds.has(task.id)
-      if (!matchesRange && !completedToday && !isOverdue) return false
+  }, [dailyReport?.tasks_overdue, shouldIncludeOverdueInSelectedAllRange])
+  const todaySystemTasks = React.useMemo(() => {
+    return visibleSystemCreatedTasks.filter((task) => {
+      const matchesRange = matchesTaskAllRange(task)
+      const completedInRange = isTaskCompletedInAllRange(task)
+      if (!matchesRange && !completedInRange) return false
+      if (allRange === "all" && taskStatusValue(task) === "DONE") return false
       if (selectedUserId !== "__all__") {
         return isTaskOwnedByViewUser(task, selectedUserId)
       }
       return true
     })
   }, [
-    projectTasks,
-    todayDate,
-    selectedUserId,
     allRange,
-    isTaskActiveForDate,
+    isTaskCompletedInAllRange,
     isTaskOwnedByViewUser,
-    isTaskCompletedToday,
-    isTaskOverlappingWeek,
+    matchesTaskAllRange,
+    selectedUserId,
+    visibleSystemCreatedTasks,
+  ])
+  const openNotes = React.useMemo(() => visibleGaNotes.filter((n) => n.status !== "CLOSED" && !n.is_converted_to_task), [visibleGaNotes])
+  const todayProjectTasks = React.useMemo(() => {
+    return projectTasks.filter((task) => {
+      const matchesRange = matchesTaskAllRange(task)
+      const completedToday = isTaskCompletedInAllRange(task)
+      const isOverdue = overdueTaskIds.has(task.id)
+      if (!matchesRange && !completedToday && !isOverdue) return false
+      if (allRange === "all" && taskStatusValue(task) === "DONE") return false
+      if (selectedUserId !== "__all__") {
+        return isTaskOwnedByViewUser(task, selectedUserId)
+      }
+      return true
+    })
+  }, [
+    allRange,
+    isTaskCompletedInAllRange,
+    projectTasks,
+    matchesTaskAllRange,
+    selectedUserId,
+    isTaskOwnedByViewUser,
     overdueTaskIds,
   ])
   const waitingProjectTasksForMeta = React.useMemo(() => {
@@ -2188,21 +2302,19 @@ export default function DepartmentKanban() {
           taskStatusValue(task) === "WAITING_CONFIRMATION"
       )
       .filter((task) => {
-        const matchesRange =
-          allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
-        const completedToday = isTaskCompletedToday(task)
+        const matchesRange = matchesTaskAllRange(task)
+        const completedToday = isTaskCompletedInAllRange(task)
         const overdue = isTaskOverdue(task)
+        if (allRange === "all" && taskStatusValue(task) === "DONE") return false
         return matchesRange || completedToday || overdue
       })
   }, [
     allRange,
     crossDepartmentConfirmTasks,
     isMineView,
-    isTaskActiveForDate,
-    isTaskCompletedToday,
+    isTaskCompletedInAllRange,
     isTaskOverdue,
-    isTaskOverlappingWeek,
-    todayDate,
+    matchesTaskAllRange,
     user?.id,
   ])
   React.useEffect(() => {
@@ -2245,25 +2357,23 @@ export default function DepartmentKanban() {
   }, [apiFetch, projectMetaLookup, projects, todayProjectTasks, waitingProjectTasksForMeta])
   const todayNoProjectTasks = React.useMemo(() => {
     return visibleNoProjectTasks.filter((task) => {
-      const matchesRange =
-        allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
-      const completedToday = isTaskCompletedToday(task)
+      const matchesRange = matchesTaskAllRange(task)
+      const completedToday = isTaskCompletedInAllRange(task)
       const isOverdue = overdueTaskIds.has(task.id)
       if (!matchesRange && !completedToday && !isOverdue) return false
+      if (allRange === "all" && taskStatusValue(task) === "DONE") return false
       if (selectedUserId !== "__all__") {
         return isTaskOwnedByViewUser(task, selectedUserId)
       }
       return true
     })
   }, [
-    visibleNoProjectTasks,
-    todayDate,
-    selectedUserId,
     allRange,
-    isTaskActiveForDate,
+    isTaskCompletedInAllRange,
+    matchesTaskAllRange,
+    visibleNoProjectTasks,
+    selectedUserId,
     isTaskOwnedByViewUser,
-    isTaskCompletedToday,
-    isTaskOverlappingWeek,
     overdueTaskIds,
   ])
   const selectedDateNoProjectTasks = React.useMemo(() => {
@@ -3408,7 +3518,7 @@ export default function DepartmentKanban() {
     }
     for (const task of todaySystemTasks) {
       const period = resolvePeriod(task.finish_period, task.created_at)
-      const userId = task.default_assignee_id || "__unassigned__"
+      const userId = task.assigned_to || task.assigned_to_user_id || task.created_by || "__unassigned__"
       items.push({
         userId,
         period,
@@ -3604,21 +3714,19 @@ export default function DepartmentKanban() {
           task.confirmation_assignee_id === user.id && taskStatusValue(task) === "WAITING_CONFIRMATION"
       )
       .filter((task) => {
-        const matchesRange =
-          allRange === "week" ? isTaskOverlappingWeek(task) : isTaskActiveForDate(task, todayDate)
-        const completedToday = isTaskCompletedToday(task)
+        const matchesRange = matchesTaskAllRange(task)
+        const completedToday = isTaskCompletedInAllRange(task)
         const overdue = isTaskOverdue(task)
+        if (allRange === "all" && taskStatusValue(task) === "DONE") return false
         return matchesRange || completedToday || overdue
       })
   }, [
     allRange,
     crossDepartmentConfirmTasks,
     isMineView,
-    isTaskActiveForDate,
-    isTaskCompletedToday,
+    isTaskCompletedInAllRange,
     isTaskOverdue,
-    isTaskOverlappingWeek,
-    todayDate,
+    matchesTaskAllRange,
     user?.id,
   ])
   const todayWaitingTasks = React.useMemo(
@@ -3643,11 +3751,12 @@ export default function DepartmentKanban() {
     const map = new Map<string, Task>()
     for (const task of departmentTasks) map.set(task.id, task)
     for (const task of noProjectTasks) map.set(task.id, task)
+    for (const task of systemCreatedTasks) map.set(task.id, task)
     for (const task of crossDepartmentConfirmTasks) map.set(task.id, task)
     return map
-  }, [crossDepartmentConfirmTasks, departmentTasks, noProjectTasks])
+  }, [crossDepartmentConfirmTasks, departmentTasks, noProjectTasks, systemCreatedTasks])
   const todaySystemTasksSorted = React.useMemo(
-    () => sortDoneLast(todaySystemTasks, (task) => String(task.status || "").toUpperCase() === "DONE"),
+    () => sortDoneLast(todaySystemTasks, (task) => taskStatusValue(task) === "DONE"),
     [sortDoneLast, todaySystemTasks]
   )
   const showAllTodayPrint = activeTab === "all" && viewMode === "department"
@@ -5863,6 +5972,40 @@ export default function DepartmentKanban() {
           flex-wrap: wrap;
           gap: 8px;
         }
+        .all-range-chip-row {
+          flex-wrap: nowrap;
+          overflow-x: auto;
+          padding-bottom: 2px;
+        }
+        .all-range-chip-row-dev {
+          background: #eef4ff;
+          border: 1px solid #bfdbfe;
+          border-radius: 12px;
+          padding: 6px;
+          gap: 6px;
+        }
+        .chip-all-range {
+          background: #ffffff;
+          color: #1e3a8a;
+          border-color: #93c5fd;
+        }
+        .chip-all-range:hover {
+          background: #dbeafe;
+          border-color: #60a5fa;
+        }
+        .chip-all-range.active {
+          background: #2563eb;
+          color: #ffffff;
+          border-color: #2563eb;
+          box-shadow: 0 4px 10px rgba(37, 99, 235, 0.28);
+        }
+        .all-range-chip-row .chip {
+          white-space: nowrap;
+          flex-shrink: 0;
+        }
+        .all-range-chip-row input {
+          flex-shrink: 0;
+        }
         .chip {
           background: #f1f5f9;
           color: #475569;
@@ -5937,21 +6080,45 @@ export default function DepartmentKanban() {
               })}
             </div>
             {activeTab === "all" ? (
-              <div className="chip-row">
+              <div className="chip-row all-range-chip-row all-range-chip-row-dev">
                 <button
                   type="button"
                   onClick={() => setAllRange("today")}
-                  className={`chip ${allRange === "today" ? "active" : ""}`}
+                  className={`chip chip-all-range ${allRange === "today" ? "active" : ""}`}
                 >
                   Today
                 </button>
                 <button
                   type="button"
-                  onClick={() => setAllRange("week")}
-                  className={`chip ${allRange === "week" ? "active" : ""}`}
+                  onClick={() => setAllRange("this-week")}
+                  className={`chip chip-all-range ${allRange === "this-week" ? "active" : ""}`}
                 >
                   This Week
                 </button>
+                <button
+                  type="button"
+                  onClick={() => setAllRange("next-week")}
+                  className={`chip chip-all-range ${allRange === "next-week" ? "active" : ""}`}
+                >
+                  Next Week
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setAllRange("all")}
+                  className={`chip chip-all-range ${allRange === "all" ? "active" : ""}`}
+                >
+                  All
+                </button>
+                <Input
+                  type="date"
+                  value={allDateInput}
+                  onChange={(e) => {
+                    const nextValue = e.target.value || todayInputValue()
+                    setAllDateInput(nextValue)
+                    setAllRange("date")
+                  }}
+                  className={`h-9 w-[160px] rounded-xl border-blue-300 bg-white text-xs text-blue-900 sm:text-sm ${allRange === "date" ? "ring-2 ring-blue-300" : ""}`}
+                />
               </div>
             ) : null}
           </div>
@@ -6232,13 +6399,13 @@ export default function DepartmentKanban() {
               <div>
                 <div className="text-xl sm:text-2xl font-bold tracking-tight text-slate-800">
                   {viewMode === "department"
-                    ? `All (${allRange === "week" ? "This Week" : "Today"}) - Department`
-                    : `All (${allRange === "week" ? "This Week" : "Today"})`}
+                    ? `All (${activeAllRangeLabel}) - Department`
+                    : `All (${activeAllRangeLabel})`}
                 </div>
                 <div className="text-xs sm:text-sm text-slate-600 mt-1">
                   {viewMode === "department"
-                    ? "All of today's tasks for the department team."
-                    : "All of today's tasks, organized in one place."}
+                    ? `All ${activeAllRangeTaskLabel} tasks for the department team.`
+                    : `All ${activeAllRangeTaskLabel} tasks, organized in one place.`}
                 </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
@@ -6808,7 +6975,9 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
-                    <div className="text-xs text-slate-500 mt-1">Tasks scheduled for today.</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {allRange === "all" ? "Open project tasks across all dates." : `Tasks scheduled for ${activeAllRangeTaskLabel}.`}
+                    </div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">{todayProjectTasks.length}</div>
                 </div>
@@ -6899,7 +7068,7 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <div className="mt-3 text-sm text-slate-500">No project tasks today.</div>
+                  <div className="mt-3 text-sm text-slate-500">No project tasks for {activeAllRangeTaskLabel}.</div>
                 )}
               </Card>
 
@@ -6907,7 +7076,9 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">Fast Tasks</div>
-                    <div className="text-xs text-slate-500 mt-1">Ad-hoc tasks due today.</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {allRange === "all" ? "Open fast tasks across all dates." : `Ad-hoc tasks due ${activeAllRangeTaskLabel}.`}
+                    </div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">{todayNoProjectTasks.length}</div>
                 </div>
@@ -6987,7 +7158,7 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <div className="mt-3 text-sm text-slate-500">No fast tasks today.</div>
+                  <div className="mt-3 text-sm text-slate-500">No fast tasks for {activeAllRangeTaskLabel}.</div>
                 )}
               </Card>
 
@@ -6995,7 +7166,11 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">System Tasks</div>
-                    <div className="text-xs text-slate-500 mt-1">Scheduled and overdue system tasks for today.</div>
+                    <div className="text-xs text-slate-500 mt-1">
+                      {allRange === "all"
+                        ? "Open system tasks across all dates."
+                        : `Scheduled system tasks for ${activeAllRangeTaskLabel}.`}
+                    </div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">{todaySystemTasks.length}</div>
                 </div>
@@ -7006,7 +7181,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "FREQUENCY", "ASSIGNED", "TASK TITLE", "DATE", "FINISH BY", "STATUS", "PRIORITY", "ACTIONS"].map((label) => (
+                        {["NR", "ASSIGNED", "TASK TITLE", "STATUS", "PRIORITY", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -7018,21 +7193,12 @@ export default function DepartmentKanban() {
                     </TableHeader>
                     <TableBody>
                       {todaySystemTasksSorted.map((task, index) => {
-                        const statusValue = task.status ?? null
-                        const statusLabel = formatSystemOccurrenceStatus(statusValue)
-                        const isDoneStatus = String(statusValue || "").toUpperCase() === "DONE"
-                        const isOverdue = isSystemTaskOverdueForDate(task, todayDate)
-                        const displayDate = systemTaskDisplayDate(task)
-                        const assignees = systemAssigneeInitials(task)
-                        const priorityValue = normalizePriority(task.priority)
-                        const canEditSystemDate = canEditSystemDateRow(task, statusValue)
-                        const canMarkDone = canEditSystemDate && !isDoneStatus
+                        const assignees = taskAssigneeInitials(task)
                         return (
                           <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
                               {index + 1}
                             </TableCell>
-                            <TableCell className={TODAY_TASK_CELL_CLASS}>{systemFrequencyReportLabel(task.frequency)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">
@@ -7053,53 +7219,28 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{task.title || "-"}</span>
-                                {isGaTask(task) ? (
-                                  <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
-                                ) : null}
-                                {isOverdue ? (
-                                  <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-rose-100 text-rose-700 border-rose-200">
-                                    Late
-                                  </Badge>
-                                ) : null}
+                                <Badge className="text-[10px] px-1.5 py-0 border-slate-200 bg-slate-50 text-slate-700">SYS</Badge>
                               </div>
                             </TableCell>
-                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(displayDate)}</TableCell>
-                            <TableCell className={TODAY_TASK_CELL_CLASS}>{task.finish_period || "-"}</TableCell>
-                            <TableCell className={`${TODAY_TASK_CELL_CLASS} ${isDoneStatus ? "bg-emerald-100 text-emerald-800 font-medium" : ""}`}>{statusLabel}</TableCell>
-                            <TableCell className={TODAY_TASK_CELL_CLASS}>{PRIORITY_LABELS[priorityValue]}</TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
+                              {reportStatusLabel(taskStatusValue(task))}
+                            </TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{reportPriorityLabel(task.priority)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.created_at)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
+                            <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>
-                              {canMarkDone || canEditSystemDate ? (
-                                <div className="flex items-center gap-2">
-                                  {canMarkDone ? (
-                                    <Button
-                                      variant="outline"
-                                      size="sm"
-                                      className="h-7 border-emerald-200 px-2 text-xs text-emerald-600 hover:border-emerald-300 hover:text-emerald-700"
-                                      title="Mark done"
-                                      aria-label={`Mark ${task.title || "system task"} as done`}
-                                      onClick={() => handleCloseTaskClick(task)}
-                                      disabled={closingTask}
-                                    >
-                                      {closingTask ? "Updating..." : "Mark done"}
-                                    </Button>
-                                  ) : null}
-                                  {canEditSystemDate ? (
-                                    <Button
-                                      variant="outline"
-                                      size="icon"
-                                      className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                      title="Edit date"
-                                      aria-label={`Edit date ${task.title || "system task"}`}
-                                      disabled={savingSystemDateOverride}
-                                      onClick={() => openSystemDateEditor(task, statusValue)}
-                                    >
-                                      <Pencil className="h-3 w-3" />
-                                    </Button>
-                                  ) : null}
-                                </div>
-                              ) : (
-                                <span className="text-slate-400">-</span>
-                              )}
+                              <Button
+                                variant="outline"
+                                size="icon"
+                                className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                title="Edit"
+                                aria-label={`Edit ${task.title || "system task"}`}
+                                onClick={() => startAllTodayTaskEdit(task)}
+                                disabled={!canEditAllTodayTask(task)}
+                              >
+                                <Pencil className="h-3 w-3" />
+                              </Button>
                             </TableCell>
                           </TableRow>
                         )
@@ -7107,7 +7248,7 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <div className="mt-3 text-sm text-slate-500">No system tasks for today.</div>
+                  <div className="mt-3 text-sm text-slate-500">No system tasks for {activeAllRangeTaskLabel}.</div>
                 )}
               </Card>
 
