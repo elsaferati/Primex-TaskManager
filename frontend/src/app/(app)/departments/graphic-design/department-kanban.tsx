@@ -56,7 +56,7 @@ const TABS = [
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
-type AllRange = "today" | "this-week" | "next-week" | "all" | "date"
+type AllRange = "today" | "past-7-days" | "this-week" | "next-week" | "all" | "date"
 
 const GENERAL_PROJECT_PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 const MST_PROJECT_PHASES = ["PLANNING", "PRODUCT", "CONTROL", "FINAL"] as const
@@ -1603,6 +1603,10 @@ export default function DepartmentKanban() {
       return new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)
     })
   }, [todayDate])
+  const pastSevenDaysStart = React.useMemo(
+    () => new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - 6),
+    [todayDate]
+  )
   const nextWeekStart = React.useMemo(
     () => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7),
     [weekStart]
@@ -1705,6 +1709,8 @@ export default function DepartmentKanban() {
   )
   const activeAllRangeLabel = React.useMemo(() => {
     switch (allRange) {
+      case "past-7-days":
+        return "Last 7 Days"
       case "this-week":
         return "This Week"
       case "next-week":
@@ -1719,6 +1725,8 @@ export default function DepartmentKanban() {
   }, [allRange, selectedAllDate])
   const activeAllRangeTaskLabel = React.useMemo(() => {
     switch (allRange) {
+      case "past-7-days":
+        return "Last 7 Days"
       case "this-week":
         return "this week"
       case "next-week":
@@ -1734,6 +1742,8 @@ export default function DepartmentKanban() {
   const matchesTaskAllRange = React.useCallback(
     (task: Task) => {
       switch (allRange) {
+        case "past-7-days":
+          return isTaskOverlappingRange(task, pastSevenDaysStart, todayDate)
         case "this-week":
           return isTaskOverlappingWeek(task)
         case "next-week":
@@ -1746,11 +1756,22 @@ export default function DepartmentKanban() {
           return isTaskActiveForDate(task, todayDate)
       }
     },
-    [allRange, isTaskActiveForDate, isTaskOverlappingNextWeek, isTaskOverlappingWeek, selectedAllDate, todayDate]
+    [
+      allRange,
+      isTaskActiveForDate,
+      isTaskOverlappingNextWeek,
+      isTaskOverlappingRange,
+      isTaskOverlappingWeek,
+      pastSevenDaysStart,
+      selectedAllDate,
+      todayDate,
+    ]
   )
   const isTaskCompletedInAllRange = React.useCallback(
     (task: Task) => {
       switch (allRange) {
+        case "past-7-days":
+          return isTaskCompletedInRange(task, pastSevenDaysStart, todayDate)
         case "this-week":
           return isTaskCompletedInRange(task, weekStart, weekEnd)
         case "next-week":
@@ -1768,7 +1789,9 @@ export default function DepartmentKanban() {
       isTaskCompletedToday,
       nextWeekEnd,
       nextWeekStart,
+      pastSevenDaysStart,
       selectedAllDate,
+      todayDate,
       weekEnd,
       weekStart,
     ]
@@ -5032,26 +5055,26 @@ export default function DepartmentKanban() {
   return (
     <div className="min-h-screen ">
       <div className="relative rounded-3xl bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 p-6 print:hidden dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/30">
-        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-3xl">
+        <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
           <div className="absolute -top-24 right-0 h-56 w-56 rounded-full bg-emerald-200/40 blur-3xl dark:bg-emerald-900/30" />
           <div className="absolute -bottom-24 left-0 h-56 w-56 rounded-full bg-sky-200/40 blur-3xl dark:bg-sky-900/30" />
         </div>
 
-        <div className="relative space-y-6">
-          <div className="sticky top-0 z-40 rounded-3xl bg-gradient-to-br from-slate-50 via-white to-emerald-50 pb-4 px-4 pt-4 -mt-4 -mx-4 print:static">
-            <div className="space-y-6">
-            <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="relative space-y-2">
+          <div className="sticky top-0 z-40 rounded-2xl bg-gradient-to-br from-slate-50 via-white to-emerald-50 pb-2 px-3 pt-2 -mt-4 -mx-4 print:static">
+            <div className="space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="space-y-1">
                 <div className="text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">Department</div>
-                <div className="text-3xl font-semibold tracking-tight">{departmentName}</div>
-                <div className="text-sm text-muted-foreground">Manage projects and daily tasks.</div>
+                <div className="text-xl font-semibold tracking-tight">{departmentName}</div>
+                <div className="text-xs text-muted-foreground">Manage projects and daily tasks.</div>
               </div>
               <div className="inline-flex rounded-full bg-card/70 p-1 backdrop-blur">
                 <button
                   type="button"
                   onClick={() => setViewMode("department")}
                   className={[
-                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
                     viewMode === "department"
                       ? "bg-foreground text-background shadow-sm"
                       : "text-muted-foreground hover:text-foreground",
@@ -5063,7 +5086,7 @@ export default function DepartmentKanban() {
                   type="button"
                   onClick={() => setViewMode("mine")}
                   className={[
-                    "rounded-full px-4 py-2 text-sm font-medium transition-colors",
+                    "rounded-full px-3 py-1.5 text-xs font-medium transition-colors",
                     viewMode === "mine"
                       ? "bg-foreground text-background shadow-sm"
                       : "text-muted-foreground hover:text-foreground",
@@ -5091,7 +5114,7 @@ export default function DepartmentKanban() {
                       type="button"
                       onClick={() => setActiveTab(tab.id)}
                       className={[
-                        "relative flex items-center gap-2 rounded-xl px-3 py-2 text-sm font-medium transition-colors",
+                        "relative flex items-center gap-2 rounded-xl px-3 py-1.5 text-xs font-medium transition-colors",
                         isActive
                           ? "bg-foreground text-background shadow-sm"
                           : "text-muted-foreground hover:text-foreground hover:bg-background/70",
@@ -5106,9 +5129,21 @@ export default function DepartmentKanban() {
                   <div className="flex items-center gap-2 overflow-x-auto whitespace-nowrap rounded-2xl border border-fuchsia-200/80 bg-fuchsia-50/70 px-2 py-1 pr-1">
                     <button
                       type="button"
+                      onClick={() => setAllRange("past-7-days")}
+                      className={[
+                        "relative flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors",
+                        allRange === "past-7-days"
+                          ? "border-fuchsia-600 bg-fuchsia-600 text-white shadow-sm"
+                          : "border-fuchsia-200 bg-white/80 text-fuchsia-700 hover:border-fuchsia-300 hover:bg-white",
+                      ].join(" ")}
+                    >
+                      <span className="uppercase tracking-wide">Last 7 Days</span>
+                    </button>
+                    <button
+                      type="button"
                       onClick={() => setAllRange("today")}
                       className={[
-                        "relative flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors",
+                        "relative flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors",
                         allRange === "today"
                           ? "border-fuchsia-600 bg-fuchsia-600 text-white shadow-sm"
                           : "border-fuchsia-200 bg-white/80 text-fuchsia-700 hover:border-fuchsia-300 hover:bg-white",
@@ -5120,7 +5155,7 @@ export default function DepartmentKanban() {
                       type="button"
                       onClick={() => setAllRange("this-week")}
                       className={[
-                        "relative flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors",
+                        "relative flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors",
                         allRange === "this-week"
                           ? "border-fuchsia-600 bg-fuchsia-600 text-white shadow-sm"
                           : "border-fuchsia-200 bg-white/80 text-fuchsia-700 hover:border-fuchsia-300 hover:bg-white",
@@ -5132,7 +5167,7 @@ export default function DepartmentKanban() {
                       type="button"
                       onClick={() => setAllRange("next-week")}
                       className={[
-                        "relative flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors",
+                        "relative flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors",
                         allRange === "next-week"
                           ? "border-fuchsia-600 bg-fuchsia-600 text-white shadow-sm"
                           : "border-fuchsia-200 bg-white/80 text-fuchsia-700 hover:border-fuchsia-300 hover:bg-white",
@@ -5144,7 +5179,7 @@ export default function DepartmentKanban() {
                       type="button"
                       onClick={() => setAllRange("all")}
                       className={[
-                        "relative flex items-center gap-2 rounded-xl border px-3 py-2 text-sm font-medium transition-colors",
+                        "relative flex items-center gap-2 rounded-xl border px-3 py-1.5 text-xs font-medium transition-colors",
                         allRange === "all"
                           ? "border-fuchsia-600 bg-fuchsia-600 text-white shadow-sm"
                           : "border-fuchsia-200 bg-white/80 text-fuchsia-700 hover:border-fuchsia-300 hover:bg-white",
@@ -5160,7 +5195,7 @@ export default function DepartmentKanban() {
                         setAllDateInput(nextValue)
                         setAllRange("date")
                       }}
-                      className={`h-10 w-[168px] rounded-xl border-fuchsia-300 bg-white text-sm text-fuchsia-800 ${allRange === "date" ? "ring-2 ring-fuchsia-300" : ""}`}
+                      className={`h-9 w-[156px] rounded-xl border-fuchsia-300 bg-white text-xs text-fuchsia-800 ${allRange === "date" ? "ring-2 ring-fuchsia-300" : ""}`}
                     />
                   </div>
                 ) : null}

@@ -55,7 +55,7 @@ const TABS = [
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
-type AllRange = "today" | "this-week" | "next-week" | "all" | "date"
+type AllRange = "today" | "past-7-days" | "this-week" | "next-week" | "all" | "date"
 
 type MicrosoftEvent = {
   id: string
@@ -1793,6 +1793,10 @@ export default function DepartmentKanban() {
       return new Date(start.getFullYear(), start.getMonth(), start.getDate() + index)
     })
   }, [todayDate])
+  const pastSevenDaysStart = React.useMemo(
+    () => new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() - 6),
+    [todayDate]
+  )
   const nextWeekStart = React.useMemo(
     () => new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + 7),
     [weekStart]
@@ -1906,6 +1910,8 @@ export default function DepartmentKanban() {
   )
   const activeAllRangeLabel = React.useMemo(() => {
     switch (allRange) {
+      case "past-7-days":
+        return "Last 7 Days"
       case "this-week":
         return "This Week"
       case "next-week":
@@ -1920,6 +1926,8 @@ export default function DepartmentKanban() {
   }, [allRange, selectedAllDate])
   const activeAllRangeTaskLabel = React.useMemo(() => {
     switch (allRange) {
+      case "past-7-days":
+        return "Last 7 Days"
       case "this-week":
         return "this week"
       case "next-week":
@@ -1935,6 +1943,8 @@ export default function DepartmentKanban() {
   const matchesTaskAllRange = React.useCallback(
     (task: Task) => {
       switch (allRange) {
+        case "past-7-days":
+          return isTaskOverlappingRange(task, pastSevenDaysStart, todayDate)
         case "this-week":
           return isTaskOverlappingWeek(task)
         case "next-week":
@@ -1947,11 +1957,22 @@ export default function DepartmentKanban() {
           return isTaskActiveForDate(task, todayDate)
       }
     },
-    [allRange, isTaskActiveForDate, isTaskOverlappingNextWeek, isTaskOverlappingWeek, selectedAllDate, todayDate]
+    [
+      allRange,
+      isTaskActiveForDate,
+      isTaskOverlappingNextWeek,
+      isTaskOverlappingRange,
+      isTaskOverlappingWeek,
+      pastSevenDaysStart,
+      selectedAllDate,
+      todayDate,
+    ]
   )
   const isTaskCompletedInAllRange = React.useCallback(
     (task: Task) => {
       switch (allRange) {
+        case "past-7-days":
+          return isTaskCompletedInRange(task, pastSevenDaysStart, todayDate)
         case "this-week":
           return isTaskCompletedInRange(task, weekStart, weekEnd)
         case "next-week":
@@ -1969,7 +1990,9 @@ export default function DepartmentKanban() {
       isTaskCompletedToday,
       nextWeekEnd,
       nextWeekStart,
+      pastSevenDaysStart,
       selectedAllDate,
+      todayDate,
       weekEnd,
       weekStart,
     ]
@@ -6081,6 +6104,14 @@ export default function DepartmentKanban() {
             </div>
             {activeTab === "all" ? (
               <div className="chip-row all-range-chip-row all-range-chip-row-dev">
+                
+                <button
+                  type="button"
+                  onClick={() => setAllRange("past-7-days")}
+                  className={`chip chip-all-range ${allRange === "past-7-days" ? "active" : ""}`}
+                >
+                  Last 7 Days
+                </button>
                 <button
                   type="button"
                   onClick={() => setAllRange("today")}
