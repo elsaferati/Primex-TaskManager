@@ -14,6 +14,7 @@ type CommonType =
   | "late"
   | "absent"
   | "leave"
+  | "externalHoliday"
   | "blocked"
   | "oneH"
   | "personal"
@@ -39,6 +40,7 @@ type LeaveItem = {
   isAllUsers?: boolean
   userId?: string
 }
+type ExternalHolidayItem = { entryId?: string; title: string; date: string; note?: string }
 type FastTaskItemMeta = {
   taskId?: string
   userId?: string
@@ -122,6 +124,7 @@ type CommonBucket =
   | "late"
   | "absent"
   | "leave"
+  | "externalHoliday"
   | "blocked"
   | "oneH"
   | "personal"
@@ -152,6 +155,7 @@ type CommonViewPayload = {
     late: LateItem[]
     absent: AbsentItem[]
     leave: LeaveItem[]
+    externalHoliday: ExternalHolidayItem[]
     blocked: BlockedItem[]
     oneH: OneHItem[]
     personal: PersonalItem[]
@@ -324,6 +328,36 @@ const initials = (name: string) => {
 }
 const stripInitialsPrefix = (value: string) => {
   return value
+}
+const normalizeTitle = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase()
+const mergePersonalItems = (items: PersonalItem[]): PersonalItem[] => {
+  const merged = new Map<string, PersonalItem>()
+  for (const item of items) {
+    const key = `${normalizeTitle(item.title)}\0${item.date}`
+    const existing = merged.get(key)
+    const itemNames = item.assignees?.length
+      ? item.assignees
+      : item.person
+        ? item.person.split(",").map((s) => s.trim()).filter(Boolean)
+        : []
+    if (existing) {
+      const seen = new Set((existing.assignees || []).map((a) => a.toLowerCase()))
+      for (const name of itemNames) {
+        if (!seen.has(name.toLowerCase())) {
+          existing.assignees = [...(existing.assignees || []), name]
+          seen.add(name.toLowerCase())
+        }
+      }
+      existing.person = (existing.assignees || []).join(", ")
+      if (existing.isDone && !item.isDone) {
+        existing.isDone = false
+        existing.status = item.status
+      }
+    } else {
+      merged.set(key, { ...item, assignees: [...itemNames] })
+    }
+  }
+  return Array.from(merged.values())
 }
 const normalizeAssigneeList = (value?: string) =>
   value
@@ -655,6 +689,7 @@ export default function CommonViewPage() {
     late: [] as LateItem[],
     absent: [] as AbsentItem[],
     leave: [] as LeaveItem[],
+    externalHoliday: [] as ExternalHolidayItem[],
     blocked: [] as BlockedItem[],
     oneH: [] as OneHItem[],
     personal: [] as PersonalItem[],
@@ -687,7 +722,7 @@ export default function CommonViewPage() {
 
   // Modal state
   const [modalOpen, setModalOpen] = React.useState(false)
-  const [formType, setFormType] = React.useState<"late" | "absent" | "leave" | "problem" | "feedback">("late")
+  const [formType, setFormType] = React.useState<"late" | "absent" | "leave" | "externalHoliday" | "problem" | "feedback">("late")
   const [formPerson, setFormPerson] = React.useState("")
   const [formDate, setFormDate] = React.useState(toISODate(new Date()))
   const [formDateDisplay, setFormDateDisplay] = React.useState(toDDMMYYYY(toISODate(new Date())))
@@ -767,7 +802,7 @@ export default function CommonViewPage() {
   )
   const includeToBuckets: Record<string, CommonBucket[]> = React.useMemo(
     () => ({
-      entries: ["late", "absent", "leave", "problems", "feedback"],
+      entries: ["late", "absent", "leave", "externalHoliday", "problems", "feedback"],
       meetings: ["external", "internal"],
       system_tasks: ["bz"],
       tasks: ["blocked", "oneH", "personal", "r1", "priority"],
@@ -1572,7 +1607,7 @@ export default function CommonViewPage() {
             } else if (bucket === "oneH") {
               next = { ...next, oneH: normalizedOneH }
             } else if (bucket === "personal") {
-              next = { ...next, personal: normalizedPersonal }
+              next = { ...next, personal: mergePersonalItems(normalizedPersonal) }
             } else if (bucket === "r1") {
               next = { ...next, r1: normalizedR1 }
             } else if (bucket === "problems") {
@@ -1640,6 +1675,7 @@ export default function CommonViewPage() {
                 late: [],
                 absent: [],
                 leave: [],
+                externalHoliday: [],
                 blocked: [],
                 oneH: [],
                 personal: [],
@@ -1678,6 +1714,7 @@ export default function CommonViewPage() {
           late: [] as LateItem[],
           absent: [] as AbsentItem[],
           leave: [] as LeaveItem[],
+          externalHoliday: [] as ExternalHolidayItem[],
           blocked: [] as BlockedItem[],
           oneH: [] as OneHItem[],
           personal: [] as PersonalItem[],
@@ -1925,6 +1962,13 @@ export default function CommonViewPage() {
                 time: "14:00",
                 platform: "Zoom",
                 owner: personName,
+              })
+            } else if (e.category === "External Holiday") {
+              allData.externalHoliday.push({
+                entryId: e.id,
+                title: e.title,
+                date,
+                note: e.description || undefined,
               })
             } else if (e.category === "Problems") {
               const parsed = parseFeedbackNote(e.description)
@@ -2301,6 +2345,8 @@ export default function CommonViewPage() {
           allData.priority = expandedPriority
         }
 
+        allData.personal = mergePersonalItems(allData.personal)
+
         if (externalMeetingsRes?.ok) {
           const meetings = (await externalMeetingsRes.json()) as Meeting[]
           if (mounted) setExternalMeetings(meetings)
@@ -2627,6 +2673,7 @@ export default function CommonViewPage() {
 
     const late = commonData.late.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const absent = commonData.absent.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const externalHoliday = commonData.externalHoliday.filter((x) => inSelectedDates(x.date))
     const leave = commonData.leave.filter((x) => {
       const visibleDates = datesToUse.filter((d) => d >= x.startDate && d <= x.endDate)
       if (!visibleDates.length) return false
@@ -2655,6 +2702,7 @@ export default function CommonViewPage() {
       late,
       absent,
       leave,
+      externalHoliday,
       blocked,
       oneH,
       personal,
@@ -3007,6 +3055,7 @@ export default function CommonViewPage() {
         late: LateItem[]
         absent: AbsentItem[]
         leave: LeaveItem[]
+        externalHoliday: ExternalHolidayItem[]
         blocked: BlockedItem[]
         oneH: OneHItem[]
         personal: PersonalItem[]
@@ -3035,6 +3084,7 @@ export default function CommonViewPage() {
               isAllUsers: true,
             },
           ],
+          externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
           blocked: [],
           oneH: [],
           personal: [],
@@ -3052,6 +3102,7 @@ export default function CommonViewPage() {
         late: filtered.late.filter((x) => x.date === iso),
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
+        externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
         blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso), false),
         oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
         personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso), false),
@@ -3086,27 +3137,29 @@ export default function CommonViewPage() {
             ? dayData.absent
             : rowId === "leave"
               ? dayData.leave
-              : rowId === "blocked"
-                ? dayData.blocked
-                : rowId === "oneH"
-                  ? dayData.oneH
-                  : rowId === "r1"
-                    ? dayData.r1
-                    : rowId === "personal"
-                      ? dayData.personal
-                      : rowId === "external"
-                        ? dayData.external
-                        : rowId === "internal"
-                          ? dayData.internal
-                          : rowId === "bz"
-                            ? dayData.bz
-                            : rowId === "priority"
-                              ? dayData.priority
-                              : rowId === "problem"
-                                ? dayData.problems
-                                : rowId === "feedback"
-                                  ? dayData.feedback
-                                  : []
+              : rowId === "externalHoliday"
+                ? dayData.externalHoliday
+                : rowId === "blocked"
+                  ? dayData.blocked
+                  : rowId === "oneH"
+                    ? dayData.oneH
+                    : rowId === "r1"
+                      ? dayData.r1
+                      : rowId === "personal"
+                        ? dayData.personal
+                        : rowId === "external"
+                          ? dayData.external
+                          : rowId === "internal"
+                            ? dayData.internal
+                            : rowId === "bz"
+                              ? dayData.bz
+                              : rowId === "priority"
+                                ? dayData.priority
+                                : rowId === "problem"
+                                  ? dayData.problems
+                                  : rowId === "feedback"
+                                    ? dayData.feedback
+                                    : []
       if (!entries.length) return []
 
       if (rowId === "late") {
@@ -3122,6 +3175,9 @@ export default function CommonViewPage() {
           const label = isAllUsers ? `${timeLabel} ALL` : timeLabel
           return `${idx + 1}. ${label}${isAllUsers ? "" : assigneesSuffix(e)}`
         })
+      }
+      if (rowId === "externalHoliday") {
+        return (entries as ExternalHolidayItem[]).map((e, idx: number) => `${idx + 1}. ${e.title}${e.note ? ` - ${e.note}` : ""}`)
       }
       if (rowId === "blocked") {
         return (entries as BlockedItem[]).map(
@@ -3311,6 +3367,7 @@ export default function CommonViewPage() {
       if (formType === "late") category = "Delays"
       else if (formType === "absent") category = "Absences"
       else if (formType === "leave") category = "Annual Leave"
+      else if (formType === "externalHoliday") category = "External Holiday"
       else if (formType === "problem") category = "Problems"
       else category = "Requests"
 
@@ -3318,7 +3375,7 @@ export default function CommonViewPage() {
 
       // Find the user by name if person is selected
       let assignedUserId: string | null = null
-      if (formPerson && formType !== "feedback" && !isAllUsersLeave) {
+      if (formPerson && formType !== "feedback" && formType !== "externalHoliday" && !isAllUsersLeave) {
         const selectedUser = users.find(
           (u) =>
             u.full_name === formPerson ||
@@ -3354,7 +3411,7 @@ export default function CommonViewPage() {
       }
       
       // Add date information
-      if (formDate && formType !== "leave" && formType !== "feedback" && formType !== "problem") {
+      if (formDate && formType !== "leave" && formType !== "feedback" && formType !== "problem" && formType !== "externalHoliday") {
         description = description ? `${description}\nDate: ${formDate}` : `Date: ${formDate}`
       }
       if (formType === "feedback" || formType === "problem") {
@@ -3395,10 +3452,10 @@ export default function CommonViewPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             category,
-            title: formType === "feedback" || formType === "problem" ? formTitle : formPerson || "Untitled",
+            title: formType === "feedback" || formType === "problem" || formType === "externalHoliday" ? formTitle : formPerson || "Untitled",
             description: description || null,
             entry_date: formType === "feedback" || formType === "problem" ? null : formDate || null,
-            assigned_to_user_id: assignedUserId || null,
+            assigned_to_user_id: formType === "externalHoliday" ? null : assignedUserId || null,
           }),
         })
 
@@ -4213,6 +4270,7 @@ export default function CommonViewPage() {
     late: "Vonese",
     absent: "Mungese",
     leave: "Pushim vjetor ose feste",
+    externalHoliday: "Festa zyrtare / External holiday",
     blocked: "JANE DETYRA ME PRIORITET TE LARTE MERRET VETËM ME ATË DETYRË ",
     oneH: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
     personal: "JANË DETYRA TË VENDOSURA NGA GA/KA DHE PERGJEGJESIT BARAZOHEMI VETËM ME TA ORA PËR BZ: 16:00",
@@ -4356,6 +4414,18 @@ export default function CommonViewPage() {
         entryDate: x.startDate,
       }
     })
+
+    const externalHolidaySource = isMultiDate
+      ? sortByDate(filtered.externalHoliday, (x) => x.date, (x) => x.title)
+      : filtered.externalHoliday
+    const externalHolidayItems: SwimlaneCell[] = externalHolidaySource.map((x) => ({
+      title: x.title,
+      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatDateHuman(x.date),
+      accentClass: "swimlane-accent externalHoliday",
+      entryId: x.entryId,
+      entryDate: x.date,
+    }))
 
     const blockedSource = sortTasksByOrder(filtered.blocked, isMultiDate)
     const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
@@ -4518,6 +4588,14 @@ export default function CommonViewPage() {
         items: leaveItems,
       },
       {
+        id: "externalHoliday",
+        label: "FESTA EXT",
+        count: filtered.externalHoliday.length,
+        headerClass: "swimlane-header externalHoliday",
+        badgeClass: "swimlane-badge externalHoliday",
+        items: externalHolidayItems,
+      },
+      {
         id: "external",
         label: "TAK EXT",
         count: filtered.external.length,
@@ -4619,6 +4697,7 @@ export default function CommonViewPage() {
       late: LateItem[]
       absent: AbsentItem[]
       leave: LeaveItem[]
+      externalHoliday: ExternalHolidayItem[]
       blocked: BlockedItem[]
       oneH: OneHItem[]
       personal: PersonalItem[]
@@ -4648,6 +4727,7 @@ export default function CommonViewPage() {
               isAllUsers: true,
             },
           ],
+          externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
           blocked: [],
           oneH: [],
           personal: [],
@@ -4665,6 +4745,7 @@ export default function CommonViewPage() {
         late: filtered.late.filter((x) => x.date === iso),
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
+        externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
         blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso), false),
         oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
         personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso), false),
@@ -5034,6 +5115,8 @@ export default function CommonViewPage() {
           --problem-accent: #0891b2;
           --feedback-bg: #e2e8f0;
           --feedback-accent: #64748b;
+          --externalHoliday-bg: #fce7f3;
+          --externalHoliday-accent: #ec4899;
           --priority-bg: #fef3c7;
           --priority-accent: #d97706;
           --cell-bg: #ffffff;
@@ -5349,6 +5432,7 @@ export default function CommonViewPage() {
           .swimlane-header.delay { background: var(--delay-bg) !important; color: #c2410c !important; }
           .swimlane-header.absence { background: var(--absence-bg) !important; color: #b91c1c !important; }
           .swimlane-header.leave { background: var(--leave-bg) !important; color: #15803d !important; }
+          .swimlane-header.externalHoliday { background: var(--externalHoliday-bg) !important; color: #be185d !important; }
           .swimlane-header.blocked { background: var(--blocked-bg) !important; color: #9f1239 !important; }
           .swimlane-header.oneh { background: var(--oneh-bg) !important; color: #0369a1 !important; }
           .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
@@ -5362,6 +5446,7 @@ export default function CommonViewPage() {
           .swimlane-badge.delay { border-color: var(--delay-accent) !important; color: #c2410c !important; }
           .swimlane-badge.absence { border-color: var(--absence-accent) !important; color: #b91c1c !important; }
           .swimlane-badge.leave { border-color: var(--leave-accent) !important; color: #15803d !important; }
+          .swimlane-badge.externalHoliday { border-color: var(--externalHoliday-accent) !important; color: #be185d !important; }
           .swimlane-badge.blocked { border-color: var(--blocked-accent) !important; color: #9f1239 !important; }
           .swimlane-badge.oneh { border-color: var(--oneh-accent) !important; color: #0369a1 !important; }
           .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
@@ -6210,6 +6295,9 @@ export default function CommonViewPage() {
         .week-table-row.leave .week-table-label {
           background: var(--leave-bg);
         }
+        .week-table-row.externalHoliday .week-table-label {
+          background: var(--externalHoliday-bg);
+        }
         .week-table-row.blocked .week-table-label {
           background: var(--blocked-bg);
         }
@@ -6502,6 +6590,7 @@ export default function CommonViewPage() {
         .swimlane-header.delay { background: var(--delay-bg); color: #c2410c; }
         .swimlane-header.absence { background: var(--absence-bg); color: #b91c1c; }
         .swimlane-header.leave { background: var(--leave-bg); color: #15803d; }
+        .swimlane-header.externalHoliday { background: var(--externalHoliday-bg); color: #be185d; }
         .swimlane-header.blocked { background: var(--blocked-bg); color: #9f1239; }
         .swimlane-header.oneh { background: var(--oneh-bg); color: #0369a1; }
         .swimlane-header.personal { background: var(--personal-bg); color: #7e22ce; }
@@ -6515,6 +6604,7 @@ export default function CommonViewPage() {
         .swimlane-badge.delay { border-color: var(--delay-accent); color: #c2410c; }
         .swimlane-badge.absence { border-color: var(--absence-accent); color: #b91c1c; }
         .swimlane-badge.leave { border-color: var(--leave-accent); color: #15803d; }
+        .swimlane-badge.externalHoliday { border-color: var(--externalHoliday-accent); color: #be185d; }
         .swimlane-badge.blocked { border-color: var(--blocked-accent); color: #9f1239; }
         .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #0369a1; }
         .swimlane-badge.personal { border-color: var(--personal-accent); color: #7e22ce; }
@@ -6528,6 +6618,7 @@ export default function CommonViewPage() {
         .swimlane-accent.delay { border-left: 4px solid var(--delay-accent); }
         .swimlane-accent.absence { border-left: 4px solid var(--absence-accent); }
         .swimlane-accent.leave { border-left: 4px solid var(--leave-accent); }
+        .swimlane-accent.externalHoliday { border-left: 4px solid var(--externalHoliday-accent); }
         .swimlane-accent.blocked { border-left: 4px solid var(--blocked-accent); }
         .swimlane-accent.oneh { border-left: 4px solid var(--oneh-accent); }
         .swimlane-accent.personal { border-left: 4px solid var(--personal-accent); }
@@ -8966,6 +9057,7 @@ export default function CommonViewPage() {
                       if (row.id === "late") dayEntries[iso] = dayData?.late || []
                       else if (row.id === "absent") dayEntries[iso] = dayData?.absent || []
                       else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
+                      else if (row.id === "externalHoliday") dayEntries[iso] = dayData?.externalHoliday || []
                       else if (row.id === "blocked") dayEntries[iso] = dayData?.blocked || []
                       else if (row.id === "oneH") dayEntries[iso] = includeOneH ? dayData?.oneH || [] : []
                       else if (row.id === "r1") dayEntries[iso] = includeR1 ? dayData?.r1 || [] : []
@@ -8982,6 +9074,7 @@ export default function CommonViewPage() {
                       if (rowId === "late") return "delay"
                       if (rowId === "absent") return "absence"
                       if (rowId === "leave") return "leave"
+                      if (rowId === "externalHoliday") return "externalHoliday"
                       if (rowId === "blocked") return "blocked"
                       if (rowId === "oneH") return "oneh"
                       if (rowId === "personal") return "personal"
@@ -9095,6 +9188,23 @@ export default function CommonViewPage() {
                             </div>
                           )
                         })
+                      } else if (row.id === "externalHoliday") {
+                        return entries.map((e: ExternalHolidayItem, idx: number) => (
+                          <div key={idx} className="week-table-entry">
+                            <span>{idx + 1}. {e.title}{e.note ? ` - ${e.note}` : ""}</span>
+                            {canDeleteCommon && e.entryId ? (
+                              <button
+                                type="button"
+                                className="week-table-delete week-table-delete-red"
+                                onClick={() => deleteCommonEntry(e.entryId!)}
+                                aria-label="Delete entry"
+                                title="Delete"
+                              >
+                                ×
+                              </button>
+                            ) : null}
+                          </div>
+                        ))
                       } else if (row.id === "blocked") {
                         return entries.map((e: BlockedItem, idx: number) => (
                           <div
@@ -9556,10 +9666,12 @@ export default function CommonViewPage() {
                   <option value="late">Vonese</option>
                   <option value="absent">Mungese</option>
                   <option value="leave">Pushim Vjetor</option>
+                  <option value="externalHoliday">Feste Externe</option>
                   <option value="problem">Problem</option>
                   <option value="feedback">Ankese/Kerkese/Propozim</option>
             </select>
           </div>
+                  {formType !== "externalHoliday" && (
                   <div className="form-row">
                     <label htmlFor="cv-person">Person</label>
                     <select
@@ -9583,15 +9695,16 @@ export default function CommonViewPage() {
                       ))}
                     </select>
                   </div>
+                  )}
 
-                  {(formType === "feedback" || formType === "problem") && (
+                  {(formType === "feedback" || formType === "problem" || formType === "externalHoliday") && (
                     <div className="form-row span-2">
-                      <label htmlFor="cv-title">Title</label>
+                      <label htmlFor="cv-title">{formType === "externalHoliday" ? "Holiday name" : "Title"}</label>
                       <input
                         id="cv-title"
                         className="input"
                         type="text"
-                        placeholder="e.g. Issue: server access"
+                        placeholder={formType === "externalHoliday" ? "e.g. Christmas, New Year" : "e.g. Issue: server access"}
                         value={formTitle}
                         onChange={(e) => setFormTitle(e.target.value)}
                         required

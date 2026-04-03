@@ -6,6 +6,7 @@ from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.common_entry import CommonEntry
 from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.department import Department
+from app.models.external_platform_link import ExternalPlatformLink
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.ga_note_attachment import GaNoteAttachment
@@ -54,6 +55,7 @@ __all__ = [
     "CommonEntry",
     "DailyReportGaEntry",
     "Department",
+    "ExternalPlatformLink",
     "FeedbackLog",
     "GaNote",
     "GaNoteAttachment",

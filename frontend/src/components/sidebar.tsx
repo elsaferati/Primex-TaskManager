@@ -21,10 +21,10 @@ import {
   Briefcase,
   DollarSign,
   Clock3,
+  Shield,
   X,
   type LucideIcon
 } from "lucide-react"
-
 import { cn } from "@/lib/utils"
 import type { UserRole } from "@/lib/types"
 import { useSidebar } from "./sidebar-context"
@@ -120,6 +120,11 @@ const items: NavItem[] = [
     href: "/reports", 
     label: "Reports & Exports", 
     icon: BarChart3 
+  },
+  {
+    href: "/platforms",
+    label: "PrimexEU Links",
+    icon: Shield,
   },
   { 
     href: "/users", 

@@ -44,6 +44,7 @@ BUCKETS = [
     "late",
     "absent",
     "leave",
+    "externalHoliday",
     "blocked",
     "oneH",
     "personal",
@@ -72,6 +73,7 @@ class CommonViewCounts(BaseModel):
     late: int = 0
     absent: int = 0
     leave: int = 0
+    externalHoliday: int = 0
     blocked: int = 0
     oneH: int = 0
     personal: int = 0
@@ -88,6 +90,7 @@ class CommonViewItemPayload(BaseModel):
     late: list[dict[str, Any]] = Field(default_factory=list)
     absent: list[dict[str, Any]] = Field(default_factory=list)
     leave: list[dict[str, Any]] = Field(default_factory=list)
+    externalHoliday: list[dict[str, Any]] = Field(default_factory=list)
     blocked: list[dict[str, Any]] = Field(default_factory=list)
     oneH: list[dict[str, Any]] = Field(default_factory=list)
     personal: list[dict[str, Any]] = Field(default_factory=list)
@@ -620,6 +623,16 @@ async def get_common_view(
                         "platform": "Zoom",
                         "owner": person_name or "Unknown",
                         "department": None,
+                    }
+                )
+            elif e.category == CommonCategory.external_holiday:
+                items["externalHoliday"].append(
+                    {
+                        "id": f"entry:{e.id}",
+                        "entryId": str(e.id),
+                        "title": e.title,
+                        "date": entry_date.isoformat(),
+                        "note": e.description or None,
                     }
                 )
             elif e.category == CommonCategory.problems:

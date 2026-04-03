@@ -10,7 +10,8 @@ import {
   CalendarRange, 
   BarChart3, 
   Settings, 
-  Layers 
+  Layers,
+  Shield
 } from "lucide-react"
 
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -69,6 +70,11 @@ export default function DashboardPage() {
       label: "Reports & Exports",
       href: "/reports",
       icon: BarChart3,
+    },
+    {
+      label: "PrimexEU Links",
+      href: "/platforms",
+      icon: Shield,
     },
     ...(user?.role !== "STAFF" 
       ? [{ label: "Settings", href: "/settings", icon: Settings }]

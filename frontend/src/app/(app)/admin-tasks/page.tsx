@@ -3516,7 +3516,7 @@ export default function AdminTasksPage() {
           )
         }
         if (rowId === "personal") {
-          return entries.map((e: PersonalItem, idx: number) =>
+          return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) =>
             `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
           )
         }
@@ -3714,7 +3714,7 @@ export default function AdminTasksPage() {
         ))
       }
       if (rowId === "personal") {
-        return entries.map((e: PersonalItem, idx: number) => (
+        return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) => (
           <div key={idx} className="week-table-entry">
             <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
             <div className="week-table-avatars">
@@ -5485,4 +5485,3 @@ export default function AdminTasksPage() {
     </div>
   )
 }
-

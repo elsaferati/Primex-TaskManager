@@ -133,6 +133,7 @@ export type CommonCategory =
   | "Annual Leave"
   | "Blocks"
   | "External Tasks"
+  | "External Holiday"
   | "Problems"
   | "Complaints"
   | "Requests"
@@ -417,6 +418,17 @@ export interface ProjectPrompt {
   title: string
   content: string
   created_at: string
+}
+
+export interface ExternalPlatformLink {
+  id: string
+  label: string
+  href: string
+  description?: string | null
+  sort_order: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
 }
 
 export interface TaskTemplate {
