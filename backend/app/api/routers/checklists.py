@@ -20,6 +20,7 @@ from app.schemas.checklist_item import ChecklistItemAssigneeOut, ChecklistItemOu
 
 
 router = APIRouter()
+MST_PRODUCT_TEMPLATE_GROUP_KEY = "MST_PRODUCT_CHECKLIST_TEMPLATE"
 
 
 def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
@@ -148,6 +149,8 @@ async def create_checklist(
     if payload.group_key:
         if payload.group_key in ("board", "staff"):
             ensure_manager_or_admin(user)
+        elif payload.group_key == MST_PRODUCT_TEMPLATE_GROUP_KEY:
+            ensure_manager_or_admin(user)
         else:
             existing = (
                 await db.execute(select(Checklist).where(Checklist.group_key == payload.group_key))
@@ -208,9 +211,11 @@ async def update_checklist(
     if checklist is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist not found")
     
-    # Only admins can update meeting templates (checklists with group_key)
+    # Global template-style checklists are restricted by group key.
     if checklist.group_key:
         if checklist.group_key in ("board", "staff"):
+            ensure_manager_or_admin(user)
+        elif checklist.group_key == MST_PRODUCT_TEMPLATE_GROUP_KEY:
             ensure_manager_or_admin(user)
         elif user.role != UserRole.ADMIN:
             raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only admins can update meeting templates")
@@ -257,6 +262,8 @@ async def delete_checklist(
 
     if checklist.group_key:
         if checklist.group_key in ("board", "staff"):
+            ensure_manager_or_admin(user)
+        elif checklist.group_key == MST_PRODUCT_TEMPLATE_GROUP_KEY:
             ensure_manager_or_admin(user)
         else:
             ensure_admin(user)

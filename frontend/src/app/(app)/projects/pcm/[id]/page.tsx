@@ -20,7 +20,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
-import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
+import type { ChecklistItem, ChecklistWithItems, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
 import { VsWorkflow } from "@/components/projects/vs-workflow"
 
 
@@ -75,6 +75,7 @@ const MST_PLANNING_ORDER = new Map(
   MST_PLANNING_QUESTIONS.map((question, index) => [question.trim().toLowerCase(), index])
 )
 MST_PLANNING_ORDER.set(MST_PROGRAM_QUESTION_LEGACY.trim().toLowerCase(), 1)
+const MST_PRODUCT_TEMPLATE_GROUP_KEY = "MST_PRODUCT_CHECKLIST_TEMPLATE"
 
 function getMstPlanningOrder(item: ChecklistItem) {
   const key = (item.description || item.title || "").trim().toLowerCase()
@@ -92,8 +93,9 @@ const FINALIZATION_CHECKLIST = [
 async function initializeMstChecklistItems(
   projectId: string,
   existingItems: ChecklistItem[],
+  templateRows: MstChecklistRow[],
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>,
-  allowDelete: boolean
+  allowDelete = false
 ) {
   // Create a map of existing items by path + title for quick lookup
   // Also detect and remove duplicates
@@ -132,7 +134,7 @@ async function initializeMstChecklistItems(
   // For now, we'll create items without assignees and they can be added later
 
   // Create missing items from final checklist
-  const finalItemsToCreate = MST_FINAL_CHECKLIST.filter((row) => {
+  const finalItemsToCreate = templateRows.filter((row) => {
     const key = `${row.path}|${row.detyrat}`
     return !existingMap.has(key)
   })
@@ -164,6 +166,7 @@ async function initializeMstChecklistItems(
       keyword: row.keywords,
       description: row.pershkrimi,
       category: row.kategoria,
+      owner: row.incl,
       position: index + 1,
     })),
     ...finalizationItemsToCreate.map((entry) => ({
@@ -198,8 +201,9 @@ async function initializeMstChecklistItems(
           keyword: item.keyword,
           description: item.description,
           category: item.category,
+          owner: "owner" in item ? item.owner : undefined,
           is_checked: false,
-          position: item.position,
+          position: "position" in item ? item.position : undefined,
         }),
       })
       if (!res.ok) {
@@ -230,7 +234,7 @@ async function initializeVsVlPlanningItems(
   projectId: string,
   existingItems: ChecklistItem[],
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>,
-  allowDelete: boolean
+  allowDelete = false
 ) {
   // Get all existing VS/VL planning items (including duplicates)
   const vsVlItems = existingItems.filter(
@@ -290,6 +294,37 @@ type MstChecklistRow = {
   kategoria: string
   incl: string
 }
+
+function normalizeMstChecklistRows(rows: MstChecklistRow[]): MstChecklistRow[] {
+  return rows.map((row) => ({
+    path: row.path || "",
+    detyrat: row.detyrat || "",
+    keywords: row.keywords || "",
+    pershkrimi: row.pershkrimi || "",
+    shembull: row.shembull || "",
+    kategoria: row.kategoria || "",
+    incl: row.incl || "DV, DM",
+  }))
+}
+
+function checklistItemsToMstTemplateRows(items: ChecklistItem[]): MstChecklistRow[] {
+  return normalizeMstChecklistRows(
+    items
+      .filter((item) => item.item_type === "CHECKBOX")
+      .sort((a, b) => {
+        if ((a.position ?? 0) !== (b.position ?? 0)) return (a.position ?? 0) - (b.position ?? 0)
+        return String(a.title || "").localeCompare(String(b.title || ""))
+      })
+      .map((item) => ({
+        path: item.path || "",
+        detyrat: item.title || "",
+        keywords: item.keyword || "",
+        pershkrimi: item.description || "",
+        kategoria: item.category || "",
+        incl: item.owner || "DV, DM",
+      }))
+  )
+}
 type VsVlTaskMeta = {
   vs_vl_phase?: (typeof VS_VL_PHASES)[number]
   dependency_text?: string
@@ -308,7 +343,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     pershkrimi:
       "Hapet grupi ne Teams per program, dhe dergohen te gjitha dokumentet duke perfshire: AI/PDF PRICELIST/ EXCEL-ARTIKLE DATEN & FOTOT",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "CHECKLISTA",
@@ -316,7 +351,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     keywords: "CHECKLISTA",
     pershkrimi: "Shtypet Checklista per klient, nese nuk kemi duke e punuar rastin e pare krijohet checklista",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "TEMPLATE",
@@ -324,7 +359,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     keywords: "TEMPLATE",
     pershkrimi: "Hapet template paraprak - nese kemi kategori te njejte qe e kemi punuar me heret",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "TRELLO",
@@ -332,7 +367,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     keywords: "TRELLO",
     pershkrimi: "Hapet projekti ne Trello, dhe krijohet checklista me te gjithe hapat, ndahen detyrat",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "REGJISTRATOR",
@@ -341,7 +376,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     pershkrimi:
       "Dokumentet e shtypura dhe Checklistat ruhen ne regj. Nese nuk kemi, duhet te krijohet regjistratori per klient",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "Rast 1",
@@ -350,7 +385,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     pershkrimi:
       "Kur kemi rast te ri per kategori/subkategori qe nuk e kemi punuar me heret, hulumtojme funksione te reja dhe top seller ne portale.",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "Krahasimi i dimensioneve/kg-ve dhe atributeve tjera",
@@ -359,7 +394,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     pershkrimi:
       "Krahaso te dhenat kg/dim dhe atributet tjera ne: 1. PDF (pricelist) 2. Excel databaza 3. Assembly Instructions 4. Portale (OTTO).",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "BESONDERE MERKMALE",
@@ -367,7 +402,16 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     keywords: "BESONDERE",
     pershkrimi: "Besondere Merkmale max. 70 karaktere. T'i cekim me te vecantat e produktit.",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
+  },
+  {
+    path: "SELLING POINT GENERAL",
+    detyrat: "SELLING POINT",
+    keywords: "PRODUKTE TE NJEJTA",
+    pershkrimi:
+      "Kur kemi nje produkt te njejte, por vetem ne dimensione te ndryshme, duhet te vendosen te gjitha dimensionet sepse 5 selling points duhet te jene identike. Mund te ndryshoje vetem Besondere Merkmale. Formati: Maße (B/H/T in cm): 220/240/280 x 46 x 45 cm.",
+    kategoria: "GJENERALE",
+    incl: "DV, DM",
   },
   {
     path: "SELLING POINTS",
@@ -376,16 +420,16 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     pershkrimi:
       "Selling points te shkurta. Produkte identike me ngjyra ndryshe nuk duhet te kene pershkrime te ndryshme.",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
-  { path: "SELLING POINT 1", detyrat: "5 JAHRE GARANTIE", keywords: "GARANTIE", pershkrimi: "", kategoria: "GJENERALE", incl: "DV, LM" },
+  { path: "SELLING POINT 1", detyrat: "5 JAHRE GARANTIE", keywords: "GARANTIE", pershkrimi: "", kategoria: "GJENERALE", incl: "DV, DM" },
   {
     path: "SELLING POINT 2",
     detyrat: "MATERIALI & DIZAJNI",
     keywords: "MATERIALI",
     pershkrimi: "",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "SELLING POINT 3",
@@ -393,7 +437,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     keywords: "FUNKSIONET",
     pershkrimi: "",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "SELLING POINT 4",
@@ -401,7 +445,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     keywords: "DIMENSIONI",
     pershkrimi: "",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "SELLING POINT 5",
@@ -409,7 +453,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     keywords: "MADE IN DE",
     pershkrimi: "",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "MARKENINFORMATIONEN",
@@ -418,7 +462,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     pershkrimi:
       "Tekstet copy/paste: 1) Set One by MST ... 2) MST ... (shiko checkliste per tekstin e plote).",
     kategoria: "GJENERALE",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "SPECIFIKA PER KARRIGE, SET APO TYPE",
@@ -426,7 +470,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     keywords: "CHAIRS",
     pershkrimi: "Pyet klientin nese shitet si set apo type (2,4,6,8). Konfirmo per kategori karrigesh.",
     kategoria: "CHAIRS",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
   {
     path: "SPECIFIKA PER SOFA, SET APO TYPE",
@@ -435,9 +479,14 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
     pershkrimi:
       "Kontrollo mekanizmat e perfshire apo extra cmim. Kerkohen foto per konfirmim ngjyrash. BZ1N1 me PDF duhet te perputhen me LDB/bullet points.",
     kategoria: "SOFA",
-    incl: "DV, LM",
+    incl: "DV, DM",
   },
 ]
+const DEFAULT_MST_PRODUCT_TEMPLATE_ROWS = normalizeMstChecklistRows(MST_FINAL_CHECKLIST)
+
+function buildMstTemplateOrderMap(rows: MstChecklistRow[]) {
+  return new Map(rows.map((row, index) => [`${row.path}|${row.detyrat}`, index]))
+}
 
 const TABS = [
   { id: "description", label: "Description" },
@@ -1163,20 +1212,27 @@ export default function PcmProjectPage() {
   const [vsVlDreamrobotChecklistTab, setVsVlDreamrobotChecklistTab] = React.useState<"vs" | "vl">("vs")
   const [mstChecklistChecked, setMstChecklistChecked] = React.useState<Record<string, boolean>>({})
   const [mstChecklistComments, setMstChecklistComments] = React.useState<Record<string, string>>({})
+  const [mstTemplateChecklist, setMstTemplateChecklist] = React.useState<ChecklistWithItems | null>(null)
+  const [loadingMstTemplate, setLoadingMstTemplate] = React.useState(false)
+  const [initializingMstTemplate, setInitializingMstTemplate] = React.useState(false)
   const [editingMstChecklistKey, setEditingMstChecklistKey] = React.useState<string | null>(null)
   const [editingMstChecklistRow, setEditingMstChecklistRow] = React.useState({
+    number: "",
     path: "",
     detyrat: "",
     keywords: "",
     pershkrimi: "",
     kategoria: "",
+    incl: "DV, DM",
   })
   const [newMstChecklistRow, setNewMstChecklistRow] = React.useState({
+    number: "",
     path: "",
     detyrat: "",
     keywords: "",
     pershkrimi: "",
     kategoria: "",
+    incl: "DV, DM",
   })
   const [savingMstChecklistRow, setSavingMstChecklistRow] = React.useState(false)
   const [viewingChecklistField, setViewingChecklistField] = React.useState<{ key: string; field: string; value: string; label: string } | null>(null)
@@ -1303,8 +1359,11 @@ export default function PcmProjectPage() {
       const p = (await pRes.json()) as Project
       setProject(p)
       setEditingDescription(p.description || "")
+      const pTitleUpper = (p.title || p.name || "").toUpperCase()
+      const isTtProject = pTitleUpper.includes("TT")
+      const shouldLoadMstTemplate = isMstProject(p) || isTtProject
 
-      const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes] = await Promise.all([
+      const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes, mstTemplateRes] = await Promise.all([
         apiFetch(`/tasks?project_id=${p.id}&include_done=true`),
         apiFetch(`/project-members?project_id=${p.id}`),
         apiFetch(`/checklist-items?project_id=${p.id}`),
@@ -1312,7 +1371,19 @@ export default function PcmProjectPage() {
         apiFetch(`/project-prompts?project_id=${p.id}`),
         apiFetch("/users?include_all_departments=true"),
         apiFetch(`/meetings?project_id=${p.id}`),
+        shouldLoadMstTemplate
+          ? apiFetch(`/checklists?template_only=true&group_key=${encodeURIComponent(MST_PRODUCT_TEMPLATE_GROUP_KEY)}`)
+          : Promise.resolve(null),
       ])
+      let loadedMstTemplate: ChecklistWithItems | null = null
+
+      if (mstTemplateRes && "ok" in mstTemplateRes && mstTemplateRes.ok) {
+        const templates = (await mstTemplateRes.json()) as ChecklistWithItems[]
+        loadedMstTemplate = templates[0] || null
+        setMstTemplateChecklist(loadedMstTemplate)
+      } else if (shouldLoadMstTemplate) {
+        setMstTemplateChecklist(null)
+      }
 
       if (tRes.ok) setTasks((await tRes.json()) as Task[])
       if (mRes.ok) setMembers((await mRes.json()) as User[])
@@ -1320,8 +1391,6 @@ export default function PcmProjectPage() {
         const items = (await cRes.json()) as ChecklistItem[]
         setChecklistItems(items)
 
-        const pTitleUpper = (p.title || p.name || "").toUpperCase()
-        const isTtProject = pTitleUpper.includes("TT")
         try {
           if (isVsVlProject(p)) {
             const hasVsVlItems = items.some(
@@ -1344,7 +1413,10 @@ export default function PcmProjectPage() {
               return !MST_EXCLUDED_PATHS.has(item.path)
             })
             if (!hasMstItems) {
-              await initializeMstChecklistItems(p.id, items, apiFetch)
+              const templateRows = loadedMstTemplate
+                ? checklistItemsToMstTemplateRows(loadedMstTemplate.items || [])
+                : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
+              await initializeMstChecklistItems(p.id, items, templateRows, apiFetch)
               const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
               if (reloadRes.ok) {
                 setChecklistItems((await reloadRes.json()) as ChecklistItem[])
@@ -1369,8 +1441,6 @@ export default function PcmProjectPage() {
         setAllUsers(users)
         setDepartmentUsers(users.filter((u) => u.department_id === p.department_id))
       }
-      const pTitleUpper = (p.title || p.name || "").toUpperCase()
-      const isTtProject = pTitleUpper.includes("TT")
       if (isMstProject(p) || isTtProject) {
         setMstPhase(MST_PHASES[0])
       }
@@ -1390,6 +1460,11 @@ export default function PcmProjectPage() {
   const titleUpper = (project?.title || project?.name || "").toUpperCase()
   const isTtProject = titleUpper.includes("TT")
   const isMstLike = isMst || isTtProject
+  const mstTemplateRows = React.useMemo(
+    () => (mstTemplateChecklist ? checklistItemsToMstTemplateRows(mstTemplateChecklist.items || []) : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS),
+    [mstTemplateChecklist]
+  )
+  const templateOrderMap = React.useMemo(() => buildMstTemplateOrderMap(mstTemplateRows), [mstTemplateRows])
   const planningItems = React.useMemo(
     () => checklistItems.filter((item) => item.item_type === "CHECKBOX" && item.path === "PLANNING"),
     [checklistItems]
@@ -1415,6 +1490,80 @@ export default function PcmProjectPage() {
       return !MST_EXCLUDED_PATHS.has(item.path)
     })
   }, [checklistItems])
+  const loadMstTemplateChecklist = React.useCallback(async () => {
+    setLoadingMstTemplate(true)
+    try {
+      const res = await apiFetch(
+        `/checklists?template_only=true&group_key=${encodeURIComponent(MST_PRODUCT_TEMPLATE_GROUP_KEY)}`
+      )
+      if (!res.ok) {
+        setMstTemplateChecklist(null)
+        return null
+      }
+      const templates = (await res.json()) as ChecklistWithItems[]
+      const checklist = templates[0] || null
+      setMstTemplateChecklist(checklist)
+      return checklist
+    } catch (error) {
+      console.error("Failed to load MST template checklist:", error)
+      setMstTemplateChecklist(null)
+      return null
+    } finally {
+      setLoadingMstTemplate(false)
+    }
+  }, [apiFetch])
+
+  const createMstTemplateFromDefaults = React.useCallback(async () => {
+    if (user?.role !== "ADMIN" && user?.role !== "MANAGER") return null
+    setInitializingMstTemplate(true)
+    try {
+      const createChecklistRes = await apiFetch("/checklists", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "MST Product Checklist Template",
+          group_key: MST_PRODUCT_TEMPLATE_GROUP_KEY,
+        }),
+      })
+      if (!createChecklistRes.ok) {
+        toast.error("Failed to create MST template checklist")
+        return null
+      }
+      const checklist = (await createChecklistRes.json()) as ChecklistWithItems
+      const existingTemplate = await loadMstTemplateChecklist()
+      const templateChecklistId = existingTemplate?.id || checklist.id
+      const rowsToCreate = DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
+
+      for (const [index, row] of rowsToCreate.entries()) {
+        const itemRes = await apiFetch("/checklist-items", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            checklist_id: templateChecklistId,
+            item_type: "CHECKBOX",
+            path: row.path,
+            title: row.detyrat,
+            keyword: row.keywords,
+            description: row.pershkrimi,
+            category: row.kategoria,
+            owner: row.incl,
+            is_checked: false,
+            position: index + 1,
+          }),
+        })
+        if (!itemRes.ok) {
+          toast.error(`Failed to add template row "${row.detyrat}"`)
+          break
+        }
+      }
+
+      const reloaded = await loadMstTemplateChecklist()
+      if (reloaded) toast.success("MST template initialized from defaults")
+      return reloaded
+    } finally {
+      setInitializingMstTemplate(false)
+    }
+  }, [apiFetch, loadMstTemplateChecklist, user?.role])
 
   // Initialize MST checklist checked state and comments from database
   React.useEffect(() => {
@@ -5602,15 +5751,18 @@ export default function PcmProjectPage() {
         setAddingPlanningItem(false)
       }
     }
-    const templateOrderMap = new Map(
-      MST_FINAL_CHECKLIST.map((row, index) => [`${row.path}|${row.detyrat}`, index])
+    const isMstTemplateEditor = Boolean(
+      project?.is_template && isMstLike && (user?.role === "ADMIN" || user?.role === "MANAGER")
     )
+    const activeMstChecklistItems = isMstTemplateEditor
+      ? (mstTemplateChecklist?.items || []).filter((item) => item.item_type === "CHECKBOX" && item.path && item.title)
+      : mstChecklistItems
 
-    const mstChecklistRows = mstChecklistItems
-      .map((item) => {
+    const mstChecklistRows = activeMstChecklistItems
+      .map((item, index) => {
         const key = `${item.path}|${item.title}`
         const templateRow = templateOrderMap.has(key)
-          ? MST_FINAL_CHECKLIST[templateOrderMap.get(key) as number]
+          ? mstTemplateRows[templateOrderMap.get(key) as number]
           : null
         const order = templateOrderMap.has(key)
           ? (templateOrderMap.get(key) as number)
@@ -5619,12 +5771,13 @@ export default function PcmProjectPage() {
           key,
           order,
           item,
+          number: String(index + 1),
           path: item.path || "",
           detyrat: item.title || "",
           keywords: item.keyword || "",
           pershkrimi: item.description || "",
           kategoria: item.category || "",
-          incl: templateRow?.incl || "",
+          incl: item.owner || templateRow?.incl || "",
         }
       })
       .sort((a, b) => {
@@ -5726,40 +5879,55 @@ export default function PcmProjectPage() {
 
     const startEditMstChecklistRow = (row: {
       key: string
+      number: string
       path: string
       detyrat: string
       keywords: string
       pershkrimi: string
       kategoria: string
+      incl: string
     }) => {
       setEditingMstChecklistKey(row.key)
       setEditingMstChecklistRow({
+        number: row.number,
         path: row.path,
         detyrat: row.detyrat,
         keywords: row.keywords,
         pershkrimi: row.pershkrimi,
         kategoria: row.kategoria,
+        incl: row.incl || "DV, DM",
       })
     }
 
     const cancelEditMstChecklistRow = () => {
       setEditingMstChecklistKey(null)
       setEditingMstChecklistRow({
+        number: "",
         path: "",
         detyrat: "",
         keywords: "",
         pershkrimi: "",
         kategoria: "",
+        incl: "DV, DM",
       })
     }
 
     const saveMstChecklistRow = async (row: { key: string; item: ChecklistItem }) => {
-      if (!project) return
       const path = editingMstChecklistRow.path.trim()
       const title = editingMstChecklistRow.detyrat.trim()
       if (!path || !title) {
         toast.error("Path and detyrat are required.")
         return
+      }
+      const rawNumber = editingMstChecklistRow.number.trim()
+      let position: number | undefined
+      if (rawNumber) {
+        const parsed = Number.parseInt(rawNumber, 10)
+        if (Number.isNaN(parsed) || parsed < 1) {
+          toast.error("Invalid position number")
+          return
+        }
+        position = parsed
       }
       setSavingMstChecklistRow(true)
       try {
@@ -5769,6 +5937,8 @@ export default function PcmProjectPage() {
           keyword: editingMstChecklistRow.keywords.trim() || null,
           description: editingMstChecklistRow.pershkrimi.trim() || null,
           category: editingMstChecklistRow.kategoria.trim() || null,
+          owner: editingMstChecklistRow.incl.trim() || "DV, DM",
+          position,
         }
         if (row.item?.id) {
           const res = await apiFetch(`/checklist-items/${row.item.id}`, {
@@ -5780,8 +5950,15 @@ export default function PcmProjectPage() {
             toast.error("Failed to update checklist row")
             return
           }
+          if (isMstTemplateEditor) {
+            await loadMstTemplateChecklist()
+          } else if (project?.id) {
+            const reloadRes = await apiFetch(`/checklist-items?project_id=${project.id}`)
+            if (reloadRes.ok) {
+              setChecklistItems((await reloadRes.json()) as ChecklistItem[])
+            }
+          }
           const updated = (await res.json()) as ChecklistItem
-          setChecklistItems((prev) => prev.map((i) => (i.id === updated.id ? updated : i)))
           const oldKey = row.key
           const newKey = `${updated.path}|${updated.title}`
           if (oldKey !== newKey) {
@@ -5815,7 +5992,17 @@ export default function PcmProjectPage() {
         toast.error("Failed to delete checklist row")
         return
       }
-      setChecklistItems((prev) => prev.filter((i) => i.id !== row.item.id))
+      if (isMstTemplateEditor) {
+        setMstTemplateChecklist((prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            items: prev.items.filter((i) => i.id !== row.item.id),
+          }
+        })
+      } else {
+        setChecklistItems((prev) => prev.filter((i) => i.id !== row.item.id))
+      }
       setMstChecklistChecked((prev) => {
         if (!(row.key in prev)) return prev
         const next = { ...prev }
@@ -5832,16 +6019,27 @@ export default function PcmProjectPage() {
     }
 
     const addMstChecklistRow = async () => {
-      if (!project) return
       const path = newMstChecklistRow.path.trim()
       const title = newMstChecklistRow.detyrat.trim()
       if (!path || !title) {
         toast.error("Path and detyrat are required.")
         return
       }
+      const rawNumber = newMstChecklistRow.number.trim()
+      let position: number | undefined
+      if (rawNumber) {
+        const parsed = Number.parseInt(rawNumber, 10)
+        if (Number.isNaN(parsed) || parsed < 1) {
+          toast.error("Invalid position number")
+          return
+        }
+        position = parsed
+      }
+      const targetChecklistId = isMstTemplateEditor ? mstTemplateChecklist?.id : null
+      if (!project && !targetChecklistId) return
       setSavingMstChecklistRow(true)
       try {
-        const maxPosition = mstChecklistItems.reduce(
+        const maxPosition = activeMstChecklistItems.reduce(
           (max, item) => Math.max(max, item.position ?? 0),
           templateOrderMap.size
         )
@@ -5849,29 +6047,39 @@ export default function PcmProjectPage() {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            project_id: project.id,
+            project_id: isMstTemplateEditor ? undefined : project?.id,
+            checklist_id: targetChecklistId || undefined,
             item_type: "CHECKBOX",
             path,
             title,
             keyword: newMstChecklistRow.keywords.trim() || null,
             description: newMstChecklistRow.pershkrimi.trim() || null,
             category: newMstChecklistRow.kategoria.trim() || null,
+            owner: newMstChecklistRow.incl.trim() || "DV, DM",
             is_checked: false,
-            position: maxPosition + 1,
+            position: position ?? (maxPosition + 1),
           }),
         })
         if (!res.ok) {
           toast.error("Failed to add checklist row")
           return
         }
-        const created = (await res.json()) as ChecklistItem
-        setChecklistItems((prev) => [...prev, created])
+        if (isMstTemplateEditor) {
+          await loadMstTemplateChecklist()
+        } else if (project?.id) {
+          const reloadRes = await apiFetch(`/checklist-items?project_id=${project.id}`)
+          if (reloadRes.ok) {
+            setChecklistItems((await reloadRes.json()) as ChecklistItem[])
+          }
+        }
         setNewMstChecklistRow({
+          number: "",
           path: "",
           detyrat: "",
           keywords: "",
           pershkrimi: "",
           kategoria: "",
+          incl: "DV, DM",
         })
         toast.success("Checklist row added")
       } finally {
@@ -7042,24 +7250,64 @@ export default function PcmProjectPage() {
                 <Card>
                   <div className="p-4 space-y-4">
                     <div className="flex items-center justify-between">
-                      <div className="text-lg font-semibold">Checklists</div>
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        onClick={() => void exportMstChecklist()}
-                        disabled={exportingMstChecklist || mstChecklistItems.length === 0}
-                        className="h-8 rounded-xl border-slate-200 text-xs"
-                      >
-                        <Download className="mr-2 h-4 w-4" />
-                        {exportingMstChecklist ? "Exporting..." : "Export Excel"}
-                      </Button>
+                      <div>
+                        <div className="text-lg font-semibold">Checklists</div>
+                        {isMstTemplateEditor ? (
+                          <div className="text-xs text-slate-500">Admin template editor for future MST projects</div>
+                        ) : null}
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isMstTemplateEditor && !mstTemplateChecklist ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void createMstTemplateFromDefaults()}
+                            disabled={initializingMstTemplate || loadingMstTemplate}
+                            className="h-8 rounded-xl border-slate-200 text-xs"
+                          >
+                            {initializingMstTemplate ? "Initializing..." : "Create Template From Defaults"}
+                          </Button>
+                        ) : null}
+                        {isMstTemplateEditor && mstTemplateChecklist ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void loadMstTemplateChecklist()}
+                            disabled={loadingMstTemplate}
+                            className="h-8 rounded-xl border-slate-200 text-xs"
+                          >
+                            {loadingMstTemplate ? "Refreshing..." : "Refresh Template"}
+                          </Button>
+                        ) : null}
+                        {!isMstTemplateEditor ? (
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void exportMstChecklist()}
+                            disabled={exportingMstChecklist || mstChecklistItems.length === 0}
+                            className="h-8 rounded-xl border-slate-200 text-xs"
+                          >
+                            <Download className="mr-2 h-4 w-4" />
+                            {exportingMstChecklist ? "Exporting..." : "Export Excel"}
+                          </Button>
+                        ) : null}
+                      </div>
                     </div>
+                    {isMstTemplateEditor && !mstTemplateChecklist ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                        No saved MST template exists yet. Initialize it from the current defaults, then edit the rows
+                        here. New MST projects will seed from this saved template.
+                      </div>
+                    ) : null}
                     <div className="text-sm text-red-600 space-y-1">
                       <div>!!! EMRI I PLOTE I KLIENTIT NUK GUXON TE SHKRUHET I PLOTE NE ASNJE EMERTIM TE FILE AS ASKUND TJETER</div>
                       <div>!!! CDO KATEGORI E RE PARAQITET SI RAST I PARE, DHE GJITHMONE DUHET TE KONFIRMOHET R1 ME GA</div>
                       <div>!!! KRAHASO TE DHENAT QE DERGOHEN TE PLOTESUARA, A JANE NE PERPUTHSHMERI ME DROPDOWN DHE ME TE DHENAT QE NA I KANE DERGUAR NE PDF/EXCEL</div>
                       <div>!!! BESONDERE MERKMALE - MAX 70 CHARACTERS</div>
+                      <div>!!! PER PRODUKTE TE NJEJTA ME DIMENSIONE TE NDRYSHME, TE VENDOSEN TE GJITHA DIMENSIONET TEK SELLING POINT GENERAL: Maße (B/H/T in cm): 220/240/280 x 46 x 45 cm.</div>
                       <div>!!! SELLING POINT 1: 5 JAHRE GARANTIE (FIKSE)</div>
                       <div>!!! TO SELLING POINTS & BESONDERE MERKMALE - WE SHOULD CREATE SAME DESCRIPTIONS FOR PRODUCTS THAT ARE IDENTICAL EXCEPT FOR COLOR.</div>
                     </div>
@@ -7109,7 +7357,14 @@ export default function PcmProjectPage() {
                           <div className="col-span-1 text-right">ACTIONS</div>
                         </div>
                         <div className="grid grid-cols-[repeat(15,minmax(0,1fr))] gap-3 py-3 text-sm items-center border-b">
-                          <div className="col-span-1 text-xs font-semibold text-slate-400">+</div>
+                          <div className="col-span-1">
+                            <Input
+                              value={newMstChecklistRow.number}
+                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, number: e.target.value }))}
+                              placeholder="No"
+                              className="h-8 text-xs"
+                            />
+                          </div>
                           <div className="col-span-2">
                             <Input
                               value={newMstChecklistRow.path}
@@ -7151,14 +7406,26 @@ export default function PcmProjectPage() {
                             />
                           </div>
                           <div className="col-span-1" />
-                          <div className="col-span-1" />
+                          <div className="col-span-1">
+                            <Input
+                              value={newMstChecklistRow.incl}
+                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, incl: e.target.value }))}
+                              placeholder="Incl"
+                              className="h-8 text-xs"
+                            />
+                          </div>
                           <div className="col-span-2" />
                           <div className="col-span-1 flex justify-end">
                             <Button
                               size="sm"
                               variant="outline"
                               onClick={() => void addMstChecklistRow()}
-                              disabled={savingMstChecklistRow || !newMstChecklistRow.path.trim() || !newMstChecklistRow.detyrat.trim()}
+                              disabled={
+                                savingMstChecklistRow ||
+                                !newMstChecklistRow.path.trim() ||
+                                !newMstChecklistRow.detyrat.trim() ||
+                                (isMstTemplateEditor && !mstTemplateChecklist)
+                              }
                             >
                               {savingMstChecklistRow ? "Saving..." : "Add"}
                             </Button>
@@ -7186,7 +7453,18 @@ export default function PcmProjectPage() {
 
                             return (
                               <div key={rowKey} className="grid grid-cols-[repeat(15,minmax(0,1fr))] gap-3 py-3 text-sm items-center">
-                                <div className="col-span-1 text-xs text-slate-500">{index + 1}</div>
+                                <div className="col-span-1 text-xs text-slate-500">
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingMstChecklistRow.number}
+                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, number: e.target.value }))}
+                                      className="h-8 text-xs"
+                                      placeholder="No"
+                                    />
+                                  ) : (
+                                    index + 1
+                                  )}
+                                </div>
                                 <div className="col-span-2" title={row.path}>
                                   {isEditing ? (
                                     <Input
@@ -7347,24 +7625,42 @@ export default function PcmProjectPage() {
                                   )}
                                 </div>
                                 <div className="col-span-1 flex justify-center">
-                                  <Checkbox
-                                    checked={isChecked}
-                                    onCheckedChange={() => toggleFinalChecklist(row.item)}
-                                  />
+                                  {isMstTemplateEditor ? (
+                                    <span className="text-xs text-slate-400">-</span>
+                                  ) : (
+                                    <Checkbox
+                                      checked={isChecked}
+                                      onCheckedChange={() => toggleFinalChecklist(row.item)}
+                                    />
+                                  )}
                                 </div>
-                                <div className="col-span-1 truncate" title={assigneeInitials}>{assigneeInitials}</div>
+                                <div className="col-span-1 truncate" title={assigneeInitials}>
+                                  {isEditing ? (
+                                    <Input
+                                      value={editingMstChecklistRow.incl}
+                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, incl: e.target.value }))}
+                                      className="h-8 text-xs"
+                                    />
+                                  ) : (
+                                    assigneeInitials
+                                  )}
+                                </div>
                                 <div className="col-span-2 pr-3">
-                                  <Input
-                                    placeholder="Koment"
-                                    className="h-8 text-xs w-full"
-                                    value={comment}
-                                    onChange={(e) => {
-                                      const newComment = e.target.value
-                                      setMstChecklistComments((prev) => ({ ...prev, [key]: newComment }))
-                                      queueMstCommentSave(row.item, newComment)
-                                    }}
-                                    onBlur={(e) => updateMstChecklistComment(row.item, e.target.value)}
-                                  />
+                                  {isMstTemplateEditor ? (
+                                    <div className="text-xs text-slate-400">Template rows do not store comments</div>
+                                  ) : (
+                                    <Input
+                                      placeholder="Koment"
+                                      className="h-8 text-xs w-full"
+                                      value={comment}
+                                      onChange={(e) => {
+                                        const newComment = e.target.value
+                                        setMstChecklistComments((prev) => ({ ...prev, [key]: newComment }))
+                                        queueMstCommentSave(row.item, newComment)
+                                      }}
+                                      onBlur={(e) => updateMstChecklistComment(row.item, e.target.value)}
+                                    />
+                                  )}
                                 </div>
                                 <div className="col-span-1 flex items-center justify-end gap-2">
                                   {isEditing ? (

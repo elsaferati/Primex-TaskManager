@@ -3890,7 +3890,7 @@ export default function DepartmentKanban() {
         todayMeetings.length,
       projects: filteredProjects.length,
       system: visibleSystemTemplates.length,
-      "no-project": visibleNoProjectTasks.length,
+      "no-project": selectedDateNoProjectTasks.length,
       "ga-ka": visibleGaNotes.filter((n) => n.status !== "CLOSED").length,
       "internal-notes": groupedInternalNotes.length,
       meetings: visibleMeetings.length,
@@ -3898,7 +3898,7 @@ export default function DepartmentKanban() {
     [
       filteredProjects.length,
       visibleSystemTemplates.length,
-      visibleNoProjectTasks.length,
+      selectedDateNoProjectTasks.length,
       visibleGaNotes,
       visibleInternalNotes.length,
       visibleMeetings,
@@ -4271,8 +4271,6 @@ export default function DepartmentKanban() {
         oneHour.push(t)
       } else if (t.is_personal) {
         personal.push(t)
-      } else if (t.ga_note_origin_id) {
-        continue
       } else if (isFastNormalTask(t)) {
         normal.push(t)
       }
@@ -5915,7 +5913,7 @@ export default function DepartmentKanban() {
       <div className="px-6 pb-6 pt-4 print:hidden">
         {activeTab === "projects" ? (
           <div className="space-y-4">
-            <div className="sticky top-[200px] z-[90] -mx-6 rounded-b-2xl border-b border-stone-200/70 bg-white px-6 pb-3 pt-3 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
+            <div className="sticky top-0 z-[90] -mx-6 rounded-b-2xl border-b border-stone-200/70 bg-white px-6 pb-3 pt-3 shadow-sm dark:border-stone-800/70 dark:bg-stone-950">
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="text-lg font-semibold">Active Projects</div>
@@ -7797,7 +7795,7 @@ export default function DepartmentKanban() {
                                   ) : null}
                                 </div>
                                 <div className="sm:px-3 flex items-start">
-                                  {t.ga_note_origin_id && (t.is_bllok || t.is_1h_report || t.is_r1 || t.is_personal) ? (
+                                  {t.ga_note_origin_id ? (
                                     <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
                                       GA
                                     </Badge>

@@ -353,6 +353,24 @@ export interface ChecklistItem {
   assignees?: ChecklistItemAssignee[]
 }
 
+export interface Checklist {
+  id: string
+  title?: string | null
+  task_id?: string | null
+  project_id?: string | null
+  note?: string | null
+  default_owner?: string | null
+  default_time?: string | null
+  group_key?: string | null
+  columns?: Array<{ key: string; label: string; width?: string | null }> | null
+  position?: number | null
+  created_at: string
+}
+
+export interface ChecklistWithItems extends Checklist {
+  items: ChecklistItem[]
+}
+
 export interface ProjectPhaseChecklistItem {
   id: string
   project_id: string

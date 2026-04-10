@@ -35,6 +35,7 @@ from app.schemas.project_phase_checklist_item import (
 
 
 router = APIRouter()
+MST_PRODUCT_TEMPLATE_GROUP_KEY = "MST_PRODUCT_CHECKLIST_TEMPLATE"
 
 PROJECT_ACCEPTANCE_PATH = "project acceptance"
 GA_DV_MEETING_PATH = "ga/dv meeting"
@@ -1487,6 +1488,8 @@ async def create_checklist_item(
         if checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
             if checklist.group_key in ("board", "staff"):
                 ensure_manager_or_admin(user)
+            elif checklist.group_key == MST_PRODUCT_TEMPLATE_GROUP_KEY:
+                ensure_manager_or_admin(user)
             else:
                 is_internal_meeting = checklist.group_key in ("development_internal_meetings", "pcm_internal_meetings")
                 if is_internal_meeting:
@@ -1704,6 +1707,8 @@ async def update_checklist_item(
         # Board/Staff meeting templates allow admin/manager.
         if checklist and checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
             if checklist.group_key in ("board", "staff"):
+                ensure_manager_or_admin(user)
+            elif checklist.group_key == MST_PRODUCT_TEMPLATE_GROUP_KEY:
                 ensure_manager_or_admin(user)
             else:
                 is_internal_meeting = checklist.group_key in ("development_internal_meetings", "pcm_internal_meetings")
