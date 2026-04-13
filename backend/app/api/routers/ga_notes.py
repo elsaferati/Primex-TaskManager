@@ -55,6 +55,7 @@ def _note_out(note: GaNote) -> GaNoteOut:
         due_date=note.due_date,
         completed_at=note.completed_at,
         is_converted_to_task=note.is_converted_to_task,
+        is_discussed=note.is_discussed,
         project_id=note.project_id,
         department_id=note.department_id,
         created_at=note.created_at,
@@ -228,6 +229,7 @@ async def create_ga_note(
         due_date=payload.due_date,
         completed_at=payload.completed_at,
         is_converted_to_task=payload.is_converted_to_task or False,
+        is_discussed=payload.is_discussed or False,
         project_id=payload.project_id,
         department_id=department_id,
     )
@@ -259,6 +261,8 @@ async def update_ga_note(
         note.priority = payload.priority
     if payload.is_converted_to_task is not None:
         note.is_converted_to_task = payload.is_converted_to_task
+    if payload.is_discussed is not None:
+        note.is_discussed = payload.is_discussed
 
     await db.commit()
     await db.refresh(note)

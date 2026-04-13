@@ -1046,6 +1046,20 @@ export default function GaKaNotesPage() {
     }
   }
 
+  const markNoteDiscussed = async (id: string) => {
+    const res = await apiFetch(`/ga-notes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ is_discussed: true }),
+    })
+    if (res?.ok) {
+      const updated = (await res.json()) as GaNote
+      setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)))
+    } else {
+      toast.error("Failed to mark note discussed")
+    }
+  }
+
   const markWaitingTasksDone = async (noteId: string) => {
     if (!canMarkDone) {
       toast.error("Only admins and managers can mark tasks done")
@@ -1871,8 +1885,8 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1180px] sm:min-w-[1370px]">
-                <table className="w-full table-fixed caption-bottom text-sm min-w-[1180px] sm:min-w-[1370px]">
+              <div className="w-full min-w-[1230px] sm:min-w-[1420px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1230px] sm:min-w-[1420px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
@@ -1885,6 +1899,7 @@ export default function GaKaNotesPage() {
                       <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
                       <th className="min-w-[110px] w-[110px] max-w-[110px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MARK DONE</th>
+                      <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal text-[11px]" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK.</th>
                       <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
@@ -2093,6 +2108,14 @@ export default function GaKaNotesPage() {
                                   Edited
                                 </Badge>
                               ) : null}
+                              {note.is_discussed ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200"
+                                >
+                                  Discussed
+                                </Badge>
+                              ) : null}
                               {isClosed ? (
                                 <Badge className="text-[10px] px-1.5 py-0 bg-slate-300 text-slate-700 border border-slate-400">
                                   Closed
@@ -2271,6 +2294,25 @@ export default function GaKaNotesPage() {
                               </Button>
                             ) : (
                               <span className="text-xs text-slate-400">-</span>
+                            )}
+                          </div>
+                        </td>
+                        <td className="border border-slate-600 p-1 align-middle whitespace-nowrap min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            {note.is_discussed ? (
+                              <Badge className="text-[10px] px-2 py-0 bg-emerald-600 text-white border border-emerald-700 h-6 flex items-center font-semibold">
+                                YES
+                              </Badge>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
+                                title="Mark as discussed"
+                                onClick={() => void markNoteDiscussed(note.id)}
+                              >
+                                YES
+                              </Button>
                             )}
                           </div>
                         </td>

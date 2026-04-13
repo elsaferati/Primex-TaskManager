@@ -5470,7 +5470,7 @@ async def export_ga_notes_xlsx(
         return "TODO"
     
     # Build rows
-    headers = ["NR", "SHENIMI", "DATA,ORA", "NGA", "PER", "DEP", "PRJK", "KRIJO DETYRE", "MBYLL SHENIM"]
+    headers = ["NR", "SHENIMI", "DATA,ORA", "NGA", "PER", "DEP", "PRJK", "KRIJO DETYRE", "DISKUTUAR YES/JO?", "MBYLL SHENIM"]
     rows = []
     row_shenimi_fills: list[PatternFill] = []
 
@@ -5534,6 +5534,7 @@ async def export_ga_notes_xlsx(
             dept_abbrev,
             project_name,
             task_status,
+            "YES" if getattr(note, "is_discussed", False) else "JO",
             note_status,
         ])
         row_shenimi_fills.append(shenimi_fill)
@@ -6278,4 +6279,3 @@ async def export_weekly_snapshot_compare_xlsx(
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
-

@@ -29,6 +29,7 @@ class GaNoteOut(BaseModel):
     due_date: datetime | None = None
     completed_at: datetime | None = None
     is_converted_to_task: bool
+    is_discussed: bool = False
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     created_at: datetime
@@ -54,6 +55,7 @@ class GaNoteCreate(BaseModel):
     due_date: datetime | None = None
     completed_at: datetime | None = None
     is_converted_to_task: bool | None = None
+    is_discussed: bool | None = None
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
 
@@ -63,4 +65,5 @@ class GaNoteUpdate(BaseModel):
     status: GaNoteStatus | None = None
     priority: GaNotePriority | None = None
     is_converted_to_task: bool | None = None
+    is_discussed: bool | None = None
 

@@ -30,6 +30,7 @@ class GaNote(Base):
     completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     is_converted_to_task: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    is_discussed: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     project_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("projects.id"))
     department_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("departments.id"))
 

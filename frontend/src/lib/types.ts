@@ -395,6 +395,7 @@ export interface GaNote {
   due_date?: string | null
   completed_at?: string | null
   is_converted_to_task: boolean
+  is_discussed?: boolean
   project_id?: string | null
   department_id?: string | null
   created_at: string

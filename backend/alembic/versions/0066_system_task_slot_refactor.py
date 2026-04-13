@@ -1,7 +1,7 @@
 """system task slot refactor with task-origin scheduling
 
 Revision ID: 0066_system_task_slot_refactor
-Revises: 0065_add_task_confirmation_assignee, d4c7f6b8a9c1_ga_note_task_status_guard
+Revises: 0065_add_task_confirmation_assignee, d4c7f6b8a9c1
 Create Date: 2026-03-03 14:00:00
 """
 
@@ -13,7 +13,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = "0066_system_task_slot_refactor"
-down_revision = ("0065_add_task_confirmation_assignee", "d4c7f6b8a9c1_ga_note_task_status_guard")
+down_revision = ("0065_add_task_confirmation_assignee", "d4c7f6b8a9c1")
 branch_labels = None
 depends_on = None
 
