@@ -64,10 +64,164 @@ const MAX_ATTACHMENT_FILES = 20
 const MAX_ATTACHMENT_MB = 25
 const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024
 const EMAIL_MARKER_RE = /(^|\s)em:/i
+const DONE_MARK_START = "[[done]]"
+const DONE_MARK_END = "[[/done]]"
+const DONE_MARK_RE = /\[\[done\]\]([\s\S]*?)\[\[\/done\]\]/g
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
 type ContentFilter = "all" | "emails"
+type DoneMarkRange = { start: number; end: number }
+
+function parseMarkedNoteContent(content?: string | null): { text: string; doneRanges: DoneMarkRange[] } {
+  if (!content) return { text: "", doneRanges: [] }
+  const doneRanges: DoneMarkRange[] = []
+  let text = ""
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  DONE_MARK_RE.lastIndex = 0
+  while ((match = DONE_MARK_RE.exec(content)) !== null) {
+    text += content.slice(lastIndex, match.index)
+    const start = text.length
+    text += match[1]
+    doneRanges.push({ start, end: text.length })
+    lastIndex = match.index + match[0].length
+  }
+  text += content.slice(lastIndex)
+
+  return { text, doneRanges }
+}
+
+function normalizeDoneRanges(ranges: DoneMarkRange[]) {
+  const sorted = ranges
+    .filter((range) => range.end > range.start)
+    .sort((a, b) => a.start - b.start || a.end - b.end)
+  const normalized: DoneMarkRange[] = []
+
+  for (const range of sorted) {
+    const previous = normalized[normalized.length - 1]
+    if (previous && range.start <= previous.end) {
+      previous.end = Math.max(previous.end, range.end)
+    } else {
+      normalized.push({ ...range })
+    }
+  }
+
+  return normalized
+}
+
+function serializeMarkedNoteContent(text: string, ranges: DoneMarkRange[]) {
+  const normalized = normalizeDoneRanges(ranges)
+  let result = ""
+  let lastIndex = 0
+
+  for (const range of normalized) {
+    result += text.slice(lastIndex, range.start)
+    result += `${DONE_MARK_START}${text.slice(range.start, range.end)}${DONE_MARK_END}`
+    lastIndex = range.end
+  }
+
+  return result + text.slice(lastIndex)
+}
+
+function adjustDoneRangesForTextChange(previousText: string, nextText: string, ranges: DoneMarkRange[]) {
+  if (previousText === nextText) return ranges
+
+  let prefixLength = 0
+  while (
+    prefixLength < previousText.length &&
+    prefixLength < nextText.length &&
+    previousText[prefixLength] === nextText[prefixLength]
+  ) {
+    prefixLength += 1
+  }
+
+  let suffixLength = 0
+  while (
+    suffixLength < previousText.length - prefixLength &&
+    suffixLength < nextText.length - prefixLength &&
+    previousText[previousText.length - 1 - suffixLength] === nextText[nextText.length - 1 - suffixLength]
+  ) {
+    suffixLength += 1
+  }
+
+  const previousChangeEnd = previousText.length - suffixLength
+  const nextChangeEnd = nextText.length - suffixLength
+  const delta = nextChangeEnd - previousChangeEnd
+
+  return normalizeDoneRanges(
+    ranges
+      .map((range) => {
+        if (range.end <= prefixLength) return range
+        if (range.start >= previousChangeEnd) {
+          return { start: range.start + delta, end: range.end + delta }
+        }
+
+        const start = range.start <= prefixLength ? range.start : prefixLength
+        const end = range.end >= previousChangeEnd ? range.end + delta : prefixLength
+        return { start, end }
+      })
+      .filter((range) => range.end > range.start)
+  )
+}
+
+function renderMarkedNoteContent(content?: string | null) {
+  if (!content) return "-"
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  DONE_MARK_RE.lastIndex = 0
+  while ((match = DONE_MARK_RE.exec(content)) !== null) {
+    if (match.index > lastIndex) {
+      parts.push(content.slice(lastIndex, match.index))
+    }
+    parts.push(
+      <span
+        key={`done-${match.index}`}
+        className="rounded bg-emerald-100 px-1 text-emerald-800 line-through decoration-emerald-700 decoration-2"
+      >
+        {match[1]}
+      </span>
+    )
+    lastIndex = match.index + match[0].length
+  }
+
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex))
+  }
+
+  return parts.length > 0 ? parts : content
+}
+
+function renderNoteContentWithRanges(content: string, ranges: DoneMarkRange[]) {
+  if (!content) return "-"
+  const normalized = normalizeDoneRanges(ranges)
+  const parts: React.ReactNode[] = []
+  let lastIndex = 0
+
+  normalized.forEach((range, idx) => {
+    if (range.start > lastIndex) {
+      parts.push(content.slice(lastIndex, range.start))
+    }
+    parts.push(
+      <span
+        key={`edit-done-${idx}-${range.start}`}
+        className="rounded bg-emerald-100 px-1 text-emerald-800 line-through decoration-emerald-700 decoration-2"
+      >
+        {content.slice(range.start, range.end)}
+      </span>
+    )
+    lastIndex = range.end
+  })
+
+  if (lastIndex < content.length) {
+    parts.push(content.slice(lastIndex))
+  }
+
+  return parts.length > 0 ? parts : content
+}
 
 function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   if (!value) return "UNKNOWN"
@@ -218,9 +372,13 @@ export default function GaKaNotesPage() {
   >(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
   const [editContent, setEditContent] = React.useState("")
+  const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
   const [editDescription, setEditDescription] = React.useState("")
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
+  const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
+  const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const editHighlightMirrorRef = React.useRef<HTMLDivElement | null>(null)
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
@@ -737,10 +895,120 @@ export default function GaKaNotesPage() {
   }
 
   const openEditNote = (note: GaNote) => {
+    const parsedContent = parseMarkedNoteContent(note.content)
     setEditNoteId(note.id)
-    setEditContent(note.content || "")
+    setEditContent(parsedContent.text)
+    setEditDoneRanges(parsedContent.doneRanges)
     const taskInfo = noteTaskInfo.get(note.id)
     setEditDescription(taskInfo?.description || "")
+  }
+
+  const handleEditContentChange = (nextContent: string) => {
+    setEditDoneRanges((current) => adjustDoneRangesForTextChange(editContent, nextContent, current))
+    setEditContent(nextContent)
+  }
+
+  const syncEditHighlightScroll = () => {
+    const textarea = editTextareaRef.current
+    const mirror = editHighlightMirrorRef.current
+    if (!textarea || !mirror) return
+
+    mirror.scrollTop = textarea.scrollTop
+    mirror.scrollLeft = textarea.scrollLeft
+  }
+
+  const markSelectedEditTextDone = () => {
+    const textarea = editTextareaRef.current
+    if (!textarea) return
+
+    const value = textarea.value
+    let start = textarea.selectionStart
+    let end = textarea.selectionEnd
+
+    if (start === end) {
+      start = value.lastIndexOf("\n", start - 1) + 1
+      const nextLineBreak = value.indexOf("\n", end)
+      end = nextLineBreak === -1 ? value.length : nextLineBreak
+    }
+
+    const selected = value.slice(start, end)
+    if (!selected.trim()) {
+      toast.error("Select the text or place cursor on the line to mark done")
+      return
+    }
+
+    const exactRangeIndex = editDoneRanges.findIndex((range) => range.start === start && range.end === end)
+    const nextRanges =
+      exactRangeIndex >= 0
+        ? editDoneRanges.filter((_, idx) => idx !== exactRangeIndex)
+        : normalizeDoneRanges([...editDoneRanges, { start, end }])
+
+    setEditDoneRanges(nextRanges)
+    window.setTimeout(() => {
+      textarea.focus()
+      textarea.setSelectionRange(start, end)
+    }, 0)
+  }
+
+  const getNoteSelectionRange = (noteId: string) => {
+    const container = document.getElementById(`ga-note-content-${noteId}`)
+    const selection = window.getSelection()
+    if (!container || !selection || selection.rangeCount === 0 || selection.isCollapsed) return null
+
+    const range = selection.getRangeAt(0)
+    const containsNode = (node: Node) => node === container || container.contains(node)
+    if (!containsNode(range.startContainer) || !containsNode(range.endContainer)) return null
+
+    const beforeSelection = range.cloneRange()
+    beforeSelection.selectNodeContents(container)
+    beforeSelection.setEnd(range.startContainer, range.startOffset)
+
+    const start = beforeSelection.toString().length
+    const end = start + range.toString().length
+    return end > start ? { start, end } : null
+  }
+
+  const markSelectedNoteTextDone = async (note: GaNote) => {
+    const parsedContent = parseMarkedNoteContent(note.content)
+    const selectionRange = getNoteSelectionRange(note.id)
+    if (!selectionRange) {
+      toast.error("Select text inside the note to mark done")
+      return
+    }
+
+    const selected = parsedContent.text.slice(selectionRange.start, selectionRange.end)
+    if (!selected.trim()) {
+      toast.error("Select text inside the note to mark done")
+      return
+    }
+
+    const exactRangeIndex = parsedContent.doneRanges.findIndex(
+      (range) => range.start === selectionRange.start && range.end === selectionRange.end
+    )
+    const nextRanges =
+      exactRangeIndex >= 0
+        ? parsedContent.doneRanges.filter((_, idx) => idx !== exactRangeIndex)
+        : normalizeDoneRanges([...parsedContent.doneRanges, selectionRange])
+
+    setMarkingSelectedNoteId(note.id)
+    try {
+      const res = await apiFetch(`/ga-notes/${note.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ content: serializeMarkedNoteContent(parsedContent.text, nextRanges).trim() }),
+      })
+      if (!res?.ok) {
+        toast.error("Failed to mark selected text done")
+        return
+      }
+      const updated = (await res.json()) as GaNote
+      setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)))
+    } catch (error) {
+      console.error("Failed to mark selected note text done:", error)
+      toast.error("Failed to mark selected text done")
+    } finally {
+      setMarkingSelectedNoteId(null)
+    }
   }
 
   const saveEditNote = async () => {
@@ -756,7 +1024,7 @@ export default function GaKaNotesPage() {
       const res = await apiFetch(`/ga-notes/${editNoteId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: trimmed }),
+        body: JSON.stringify({ content: serializeMarkedNoteContent(editContent, editDoneRanges).trim() }),
       })
       if (res?.ok) {
         const updated = (await res.json()) as GaNote
@@ -836,6 +1104,7 @@ export default function GaKaNotesPage() {
         
         toast.success("Note updated")
         setEditNoteId(null)
+        setEditDoneRanges([])
       } else {
         toast.error("Failed to update note")
       }
@@ -1892,14 +2161,14 @@ export default function GaKaNotesPage() {
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
                       <th className="min-w-[340px] w-[340px] max-w-[340px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
                       <th className="hidden sm:table-cell min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
+                      <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
                       <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
-                      <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DETYRE</th>
+                      <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DET</th>
                       <th className="min-w-[110px] w-[110px] max-w-[110px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MARK DONE</th>
-                      <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal text-[11px]" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK.</th>
                       <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
@@ -2020,9 +2289,25 @@ export default function GaKaNotesPage() {
                                     ) : null}
                                   </span>
                                 ) : null}
-                                <span className="min-w-0 text-sm break-words">{note.content}</span>
+                                <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
+                                  {renderMarkedNoteContent(note.content)}
+                                </span>
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
+                                {!editDisabled ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    disabled={markingSelectedNoteId === note.id}
+                                    className="h-5 w-5 shrink-0 border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                    aria-label="Mark selected note text done"
+                                    title="Mark selected text done"
+                                    onMouseDown={(event) => event.preventDefault()}
+                                    onClick={() => void markSelectedNoteTextDone(note)}
+                                  >
+                                    <Check className="h-3 w-3" />
+                                  </Button>
+                                ) : null}
                                 {canAddAttachments || attachments.length > 0 ? (
                                   <Button
                                     variant="outline"
@@ -2200,6 +2485,25 @@ export default function GaKaNotesPage() {
                             </div>
                           )}
                         </td>
+                        <td className="border border-slate-600 p-1 align-middle whitespace-nowrap min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            {note.is_discussed ? (
+                              <Badge className="text-[10px] px-2 py-0 bg-emerald-600 text-white border border-emerald-700 h-6 flex items-center font-semibold">
+                                YES
+                              </Badge>
+                            ) : (
+                              <Button
+                                variant="outline"
+                                size="sm"
+                                className="h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
+                                title="Mark as discussed"
+                                onClick={() => void markNoteDiscussed(note.id)}
+                              >
+                                YES
+                              </Button>
+                            )}
+                          </div>
+                        </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{formatDate(note.created_at)}</td>
                         <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex items-center gap-2 text-xs">
@@ -2297,25 +2601,6 @@ export default function GaKaNotesPage() {
                             )}
                           </div>
                         </td>
-                        <td className="border border-slate-600 p-1 align-middle whitespace-nowrap min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
-                          <div className="flex justify-center">
-                            {note.is_discussed ? (
-                              <Badge className="text-[10px] px-2 py-0 bg-emerald-600 text-white border border-emerald-700 h-6 flex items-center font-semibold">
-                                YES
-                              </Badge>
-                            ) : (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-6 px-2 text-[11px] border-dashed border-slate-300 bg-white text-slate-500 hover:border-emerald-300 hover:bg-emerald-50 hover:text-emerald-700"
-                                title="Mark as discussed"
-                                onClick={() => void markNoteDiscussed(note.id)}
-                              >
-                                YES
-                              </Button>
-                            )}
-                          </div>
-                        </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[80px] w-[80px] max-w-[80px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {note.status !== "CLOSED" ? (
@@ -2373,7 +2658,7 @@ export default function GaKaNotesPage() {
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Note</div>
                 <div className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">
-                  {attachmentsDialogNote.content || "-"}
+                  {renderMarkedNoteContent(attachmentsDialogNote.content)}
                 </div>
               </div>
               {attachmentsDialogCanAddFiles ? (
@@ -2746,6 +3031,7 @@ export default function GaKaNotesPage() {
       <Dialog open={Boolean(editNoteId)} onOpenChange={(open) => {
         if (!open) {
           setEditNoteId(null)
+          setEditDoneRanges([])
           setEditDescription("")
         }
       }}>
@@ -2755,12 +3041,37 @@ export default function GaKaNotesPage() {
           </DialogHeader>
           <div className="space-y-3">
             <div className="space-y-2">
-              <Label>Note text</Label>
-              <Textarea
-                value={editContent}
-                onChange={(e) => setEditContent(e.target.value)}
-                className="min-h-[140px]"
-              />
+              <div className="flex items-center justify-between gap-2">
+                <Label>Note text</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-8"
+                  onClick={markSelectedEditTextDone}
+                >
+                  Mark selected done
+                </Button>
+              </div>
+              <div className="relative min-h-[140px] rounded-md border border-input bg-background">
+                <div
+                  ref={editHighlightMirrorRef}
+                  aria-hidden="true"
+                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2 text-sm leading-normal text-slate-900"
+                >
+                  {renderNoteContentWithRanges(editContent, editDoneRanges)}
+                </div>
+                <Textarea
+                  ref={editTextareaRef}
+                  value={editContent}
+                  onChange={(e) => handleEditContentChange(e.target.value)}
+                  onScroll={syncEditHighlightScroll}
+                  className="relative z-10 min-h-[140px] resize-y border-0 bg-transparent text-transparent shadow-none caret-slate-950 focus-visible:ring-1 focus-visible:ring-ring"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Select text and click mark done, or place the cursor on a line to mark the whole line.
+              </p>
             </div>
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
               <div className="space-y-2">
@@ -2771,6 +3082,7 @@ export default function GaKaNotesPage() {
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => {
                 setEditNoteId(null)
+                setEditDoneRanges([])
                 setEditDescription("")
               }}>
                 Cancel

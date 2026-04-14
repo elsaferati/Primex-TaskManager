@@ -218,6 +218,7 @@ type SwimlaneCell = {
   title: string
   subtitle?: string
   dateLabel?: string
+  note?: string
   accentClass?: string
   assignees?: string[]
   assigneeLabels?: string[]
@@ -373,8 +374,11 @@ const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: 
 const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId =>
   rowId === "blocked" || rowId === "oneH" || rowId === "personal" || rowId === "r1"
 
-const getFastTaskAssigneeKey = (entry: FastTaskEntry) =>
-  (entry.userId || entry.person || entry.owner || "").trim().toLowerCase()
+const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
+  const person = "person" in entry ? entry.person : ""
+  const owner = "owner" in entry ? entry.owner : ""
+  return (entry.userId || person || owner || "").trim().toLowerCase()
+}
 
 const getFastTaskEntryDate = (entry: FastTaskEntry | SwimlaneCell) =>
   ("date" in entry ? entry.date : entry.entryDate) || ""
@@ -737,6 +741,7 @@ export default function CommonViewPage() {
   const [formNote, setFormNote] = React.useState("")
   const [formError, setFormError] = React.useState("")
   const [openInfoId, setOpenInfoId] = React.useState<CommonType | null>(null)
+  const [openSwimlaneNoteId, setOpenSwimlaneNoteId] = React.useState<string | null>(null)
   const infoPopoverRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingAutoSelectEnabled, setMeetingAutoSelectEnabled] = React.useState(true)
@@ -4528,8 +4533,9 @@ export default function CommonViewPage() {
       const createdLabel = x.createdDate ? formatDateHuman(x.createdDate) : formatDateHuman(x.date)
       return {
         title: x.title,
-        subtitle: `${x.person}${x.note ? ` - ${x.note}` : ""} - Date Created: ${createdLabel}`,
+        subtitle: `${x.person} - Date Created: ${createdLabel}`,
         dateLabel: `Date Created: ${createdLabel}`,
+        note: x.note,
         accentClass: "swimlane-accent problem",
         entryId: x.entryId,
         assignees: x.person ? [x.person] : undefined,
@@ -4543,8 +4549,9 @@ export default function CommonViewPage() {
       const createdLabel = x.createdDate ? formatDateHuman(x.createdDate) : formatDateHuman(x.date)
       return {
         title: x.title,
-        subtitle: `${x.person}${x.note ? ` - ${x.note}` : ""} - Date Created: ${createdLabel}`,
+        subtitle: `${x.person} - Date Created: ${createdLabel}`,
         dateLabel: `Date Created: ${createdLabel}`,
+        note: x.note,
         accentClass: "swimlane-accent feedback",
         entryId: x.entryId,
         assignees: x.person ? [x.person] : undefined,
@@ -6148,7 +6155,37 @@ export default function CommonViewPage() {
           font-size: 14px;
           display: flex;
           align-items: center;
-          gap: 6px;
+        }
+        .swimlane-note-toggle {
+          position: absolute;
+          top: 8px;
+          right: 34px;
+          width: 24px;
+          height: 24px;
+          border: 1px solid #bfdbfe;
+          border-radius: 6px;
+          background: #eff6ff;
+          color: #1d4ed8;
+          font-size: 14px;
+          font-weight: 800;
+          line-height: 1;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          padding: 0;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+          z-index: 3;
+        }
+        .swimlane-note-toggle:hover {
+          background: #dbeafe;
+          border-color: #93c5fd;
+          color: #1e40af;
+        }
+        .swimlane-note-toggle[aria-expanded="true"] {
+          background: #1d4ed8;
+          border-color: #1d4ed8;
+          color: #ffffff;
         }
         .swimlane-date {
           font-size: 12px;
@@ -6158,6 +6195,18 @@ export default function CommonViewPage() {
         .swimlane-subtitle {
           font-size: 12px;
           color: var(--swim-muted);
+        }
+        .swimlane-note {
+          width: 100%;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          background: #ffffff;
+          color: #334155;
+          font-size: 12px;
+          line-height: 1.35;
+          padding: 6px 8px;
+          white-space: pre-wrap;
+          word-break: break-word;
         }
         .swimlane-meta {
           margin-top: auto;
@@ -9513,8 +9562,13 @@ export default function CommonViewPage() {
                         }}
                       >
                         <div className="swimlane-content">
-                          {cells.map((cell, index) =>
-                            cell ? (
+                          {cells.map((cell, index) => {
+                            if (!cell) {
+                              return <div key={`${row.id}-empty-${index}`} className="swimlane-cell empty" />
+                            }
+                            const noteKey = cell.entryId || `${row.id}-${index}`
+                            const isNoteOpen = openSwimlaneNoteId === noteKey
+                            return (
                               <div
                                 key={`${row.id}-${index}`}
                                 className={[
@@ -9585,9 +9639,21 @@ export default function CommonViewPage() {
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
-                                      {stripInitialsPrefix(cell.title)}
+                                      <span>{stripInitialsPrefix(cell.title)}</span>
                                     </div>
                                   </div>
+                                  {cell.note ? (
+                                    <button
+                                      type="button"
+                                      className="swimlane-note-toggle"
+                                      onClick={() => setOpenSwimlaneNoteId((prev) => (prev === noteKey ? null : noteKey))}
+                                      aria-expanded={isNoteOpen}
+                                      aria-label={isNoteOpen ? "Hide note" : "Show note"}
+                                      title={isNoteOpen ? "Hide note" : "Show note"}
+                                    >
+                                      {isNoteOpen ? "-" : "+"}
+                                    </button>
+                                  ) : null}
                                   {(() => {
                                     const showSubtitle =
                                       (row.id === "external" ||
@@ -9600,7 +9666,7 @@ export default function CommonViewPage() {
                                     const showDate =
                                       Boolean(cell.dateLabel) &&
                                       !["late", "absent", "leave"].includes(row.id)
-                                    if (!showSubtitle && !showDate) return null
+                                    if (!showSubtitle && !showDate && !isNoteOpen) return null
                                     return (
                                       <div className="swimlane-meta">
                                         {showSubtitle ? (
@@ -9609,15 +9675,16 @@ export default function CommonViewPage() {
                                         {showDate ? (
                                           <div className="swimlane-date">{cell.dateLabel}</div>
                                         ) : null}
+                                        {isNoteOpen && cell.note ? (
+                                          <div className="swimlane-note">{cell.note}</div>
+                                        ) : null}
                                       </div>
                                     )
                                   })()}
                                 </div>
                               </div>
-                            ) : (
-                              <div key={`${row.id}-empty-${index}`} className="swimlane-cell empty" />
                             )
-                          )}
+                          })}
                         </div>
                       </div>
                     </div>
