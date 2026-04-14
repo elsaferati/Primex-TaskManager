@@ -111,6 +111,33 @@ function normalizeDoneRanges(ranges: DoneMarkRange[]) {
   return normalized
 }
 
+function toggleDoneRange(ranges: DoneMarkRange[], selectedRange: DoneMarkRange) {
+  const normalized = normalizeDoneRanges(ranges)
+  const overlapsExisting = normalized.some(
+    (range) => selectedRange.start < range.end && selectedRange.end > range.start
+  )
+
+  if (!overlapsExisting) {
+    return normalizeDoneRanges([...normalized, selectedRange])
+  }
+
+  const nextRanges: DoneMarkRange[] = []
+  for (const range of normalized) {
+    if (selectedRange.end <= range.start || selectedRange.start >= range.end) {
+      nextRanges.push(range)
+      continue
+    }
+    if (range.start < selectedRange.start) {
+      nextRanges.push({ start: range.start, end: selectedRange.start })
+    }
+    if (selectedRange.end < range.end) {
+      nextRanges.push({ start: selectedRange.end, end: range.end })
+    }
+  }
+
+  return normalizeDoneRanges(nextRanges)
+}
+
 function serializeMarkedNoteContent(text: string, ranges: DoneMarkRange[]) {
   const normalized = normalizeDoneRanges(ranges)
   let result = ""
@@ -937,11 +964,7 @@ export default function GaKaNotesPage() {
       return
     }
 
-    const exactRangeIndex = editDoneRanges.findIndex((range) => range.start === start && range.end === end)
-    const nextRanges =
-      exactRangeIndex >= 0
-        ? editDoneRanges.filter((_, idx) => idx !== exactRangeIndex)
-        : normalizeDoneRanges([...editDoneRanges, { start, end }])
+    const nextRanges = toggleDoneRange(editDoneRanges, { start, end })
 
     setEditDoneRanges(nextRanges)
     window.setTimeout(() => {
@@ -982,13 +1005,7 @@ export default function GaKaNotesPage() {
       return
     }
 
-    const exactRangeIndex = parsedContent.doneRanges.findIndex(
-      (range) => range.start === selectionRange.start && range.end === selectionRange.end
-    )
-    const nextRanges =
-      exactRangeIndex >= 0
-        ? parsedContent.doneRanges.filter((_, idx) => idx !== exactRangeIndex)
-        : normalizeDoneRanges([...parsedContent.doneRanges, selectionRange])
+    const nextRanges = toggleDoneRange(parsedContent.doneRanges, selectionRange)
 
     setMarkingSelectedNoteId(note.id)
     try {
@@ -2300,8 +2317,8 @@ export default function GaKaNotesPage() {
                                     size="icon"
                                     disabled={markingSelectedNoteId === note.id}
                                     className="h-5 w-5 shrink-0 border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
-                                    aria-label="Mark selected note text done"
-                                    title="Mark selected text done"
+                                    aria-label="Mark or undo selected note text done"
+                                    title="Mark or undo selected text done"
                                     onMouseDown={(event) => event.preventDefault()}
                                     onClick={() => void markSelectedNoteTextDone(note)}
                                   >
@@ -2393,14 +2410,16 @@ export default function GaKaNotesPage() {
                                   Edited
                                 </Badge>
                               ) : null}
-                              {note.is_discussed ? (
-                                <Badge
-                                  variant="outline"
-                                  className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200"
-                                >
-                                  Discussed
-                                </Badge>
-                              ) : null}
+                              <Badge
+                                variant="outline"
+                                className={`text-[10px] px-1.5 py-0 ${
+                                  note.is_discussed
+                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                    : "bg-slate-50 text-slate-600 border-slate-200"
+                                }`}
+                              >
+                                {note.is_discussed ? "Discussed" : "Not Discussed"}
+                              </Badge>
                               {isClosed ? (
                                 <Badge className="text-[10px] px-1.5 py-0 bg-slate-300 text-slate-700 border border-slate-400">
                                   Closed
@@ -3050,7 +3069,7 @@ export default function GaKaNotesPage() {
                   className="h-8"
                   onClick={markSelectedEditTextDone}
                 >
-                  Mark selected done
+                  Mark / undo selected done
                 </Button>
               </div>
               <div className="relative min-h-[140px] rounded-md border border-input bg-background">
@@ -3070,7 +3089,7 @@ export default function GaKaNotesPage() {
                 />
               </div>
               <p className="text-xs text-muted-foreground">
-                Select text and click mark done, or place the cursor on a line to mark the whole line.
+                Select text and click mark done to toggle it, or place the cursor on a line to toggle the whole line.
               </p>
             </div>
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
