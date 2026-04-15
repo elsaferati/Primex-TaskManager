@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { usePathname, useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
 import { Check, Pencil, Printer, RotateCcw, Trash2 } from "lucide-react"
@@ -1177,7 +1177,6 @@ export default function DepartmentKanban() {
   const { apiFetch, user } = useAuth()
   const confirm = useConfirm()
   const pathname = usePathname()
-  const router = useRouter()
   const searchParams = useSearchParams()
   const tabParam = searchParams.get("tab")
   const normalizedTab = tabParam === "tasks" ? "no-project" : tabParam
@@ -1349,6 +1348,11 @@ export default function DepartmentKanban() {
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
   const [meetingProjectId, setMeetingProjectId] = React.useState("__none__")
   const [creatingMeeting, setCreatingMeeting] = React.useState(false)
+  const [internalMeetingTaskDialogOpen, setInternalMeetingTaskDialogOpen] = React.useState(false)
+  const [internalMeetingTaskTitle, setInternalMeetingTaskTitle] = React.useState("")
+  const [internalMeetingTaskPlatform, setInternalMeetingTaskPlatform] = React.useState("")
+  const [internalMeetingTaskStartsAt, setInternalMeetingTaskStartsAt] = React.useState("")
+  const [creatingInternalMeetingFromTask, setCreatingInternalMeetingFromTask] = React.useState(false)
   const [editingMeetingId, setEditingMeetingId] = React.useState<string | null>(null)
   const [editMeetingTitle, setEditMeetingTitle] = React.useState("")
   const [editMeetingPlatform, setEditMeetingPlatform] = React.useState("")
@@ -5237,6 +5241,72 @@ export default function DepartmentKanban() {
     }
   }
 
+  const closeInternalMeetingTaskDialog = React.useCallback(() => {
+    setInternalMeetingTaskDialogOpen(false)
+    setInternalMeetingTaskTitle("")
+    setInternalMeetingTaskPlatform("")
+    setInternalMeetingTaskStartsAt("")
+  }, [])
+
+  const openInternalMeetingFromFastTask = React.useCallback((task: Task) => {
+    setInternalMeetingTaskTitle(task.title || "")
+    setInternalMeetingTaskPlatform("")
+    setInternalMeetingTaskStartsAt("")
+    setInternalMeetingTaskDialogOpen(true)
+  }, [])
+
+  const submitInternalMeetingFromTask = React.useCallback(async () => {
+    const title = internalMeetingTaskTitle.trim()
+    const departmentId = department?.id || user?.department_id
+    if (!title) return
+    if (!departmentId) {
+      toast.error("Department is required to create an internal meeting.")
+      return
+    }
+    setCreatingInternalMeetingFromTask(true)
+    try {
+      const startsAt = internalMeetingTaskStartsAt ? new Date(internalMeetingTaskStartsAt).toISOString() : null
+      const payload = {
+        title,
+        platform: internalMeetingTaskPlatform.trim() || null,
+        starts_at: startsAt,
+        department_id: departmentId,
+        project_id: null,
+        meeting_type: "internal",
+      }
+      const res = await apiFetch("/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create internal meeting"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      const created = (await res.json()) as Meeting
+      setMeetings((prev) => [created, ...prev])
+      closeInternalMeetingTaskDialog()
+      toast.success("Internal meeting created")
+    } finally {
+      setCreatingInternalMeetingFromTask(false)
+    }
+  }, [
+    apiFetch,
+    closeInternalMeetingTaskDialog,
+    department?.id,
+    internalMeetingTaskPlatform,
+    internalMeetingTaskStartsAt,
+    internalMeetingTaskTitle,
+    user?.department_id,
+  ])
+
   const startEditMeeting = (meeting: Meeting) => {
     setEditingMeetingId(meeting.id)
     setEditMeetingTitle(meeting.title)
@@ -6829,17 +6899,29 @@ export default function DepartmentKanban() {
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                title="Edit"
-                                aria-label={`Edit ${task.title}`}
-                                onClick={() => startAllTodayTaskEdit(task)}
-                                disabled={!canEditAllTodayTask(task)}
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-6 rounded-md border-slate-200 px-2 text-[10px] font-semibold text-slate-600 hover:border-emerald-200 hover:text-emerald-700"
+                                  title="Create internal meeting"
+                                  aria-label={`Create internal meeting from ${task.title}`}
+                                  onClick={() => openInternalMeetingFromFastTask(task)}
+                                >
+                                  INT
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                  title="Edit"
+                                  aria-label={`Edit ${task.title}`}
+                                  onClick={() => startAllTodayTaskEdit(task)}
+                                  disabled={!canEditAllTodayTask(task)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                              </div>
                             </TableCell>
                           </TableRow>
                         )
@@ -7734,6 +7816,58 @@ export default function DepartmentKanban() {
                 </DialogContent>
               </Dialog>
             ) : null}
+            <Dialog
+              open={internalMeetingTaskDialogOpen}
+              onOpenChange={(open) => {
+                if (!open) closeInternalMeetingTaskDialog()
+              }}
+            >
+              <DialogContent className="sm:max-w-md bg-white border-slate-200 rounded-2xl z-[110]">
+                <DialogHeader>
+                  <DialogTitle className="text-slate-800">Create Internal Meeting</DialogTitle>
+                </DialogHeader>
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label className="text-slate-700">Meeting title</Label>
+                    <Input
+                      value={internalMeetingTaskTitle}
+                      onChange={(e) => setInternalMeetingTaskTitle(e.target.value)}
+                      className="border-slate-200 focus:border-slate-400 rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-700">Platform</Label>
+                    <Input
+                      value={internalMeetingTaskPlatform}
+                      onChange={(e) => setInternalMeetingTaskPlatform(e.target.value)}
+                      placeholder="Zoom, Meet, Office..."
+                      className="border-slate-200 focus:border-slate-400 rounded-xl"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-slate-700">Date and time</Label>
+                    <Input
+                      type="datetime-local"
+                      value={internalMeetingTaskStartsAt}
+                      onChange={(e) => setInternalMeetingTaskStartsAt(e.target.value)}
+                      className="border-slate-200 focus:border-slate-400 rounded-xl"
+                    />
+                  </div>
+                  <div className="flex justify-end gap-2">
+                    <Button variant="outline" onClick={closeInternalMeetingTaskDialog} className="rounded-xl border-slate-200">
+                      Cancel
+                    </Button>
+                    <Button
+                      disabled={!internalMeetingTaskTitle.trim() || creatingInternalMeetingFromTask}
+                      onClick={() => void submitInternalMeetingFromTask()}
+                      className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+                    >
+                      {creatingInternalMeetingFromTask ? "Creating..." : "Create"}
+                    </Button>
+                  </div>
+                </div>
+              </DialogContent>
+            </Dialog>
             <div className="space-y-4">
               {statusRows.map((row) => (
                 <div
@@ -7860,6 +7994,20 @@ export default function DepartmentKanban() {
                                   {formatDateOnly(t.due_date)}
                                 </div>
                                 <div className="sm:px-3 flex items-start justify-end gap-2">
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-5 rounded-md border-slate-200 px-1.5 text-[9px] font-semibold text-slate-600 hover:border-emerald-200 hover:text-emerald-700"
+                                    title="Create internal meeting"
+                                    aria-label={`Create internal meeting from ${t.title}`}
+                                    onClick={(event) => {
+                                      event.preventDefault()
+                                      event.stopPropagation()
+                                      openInternalMeetingFromFastTask(t)
+                                    }}
+                                  >
+                                    INT
+                                  </Button>
                                   {canEditNoProjectTask(t) ? (
                                     <Button
                                       variant="outline"
