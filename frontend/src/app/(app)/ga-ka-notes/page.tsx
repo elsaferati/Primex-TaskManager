@@ -66,38 +66,71 @@ const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024
 const EMAIL_MARKER_RE = /(^|\s)em:/i
 const DONE_MARK_START = "[[done]]"
 const DONE_MARK_END = "[[/done]]"
-const DONE_MARK_RE = /\[\[done\]\]([\s\S]*?)\[\[\/done\]\]/g
+const ADDED_MARK_START = "[[added]]"
+const ADDED_MARK_END = "[[/added]]"
+const NOTE_MARK_TOKEN_RE = /\[\[(done|added)\]\]|\[\[\/(done|added)\]\]/g
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
 type ContentFilter = "all" | "emails"
-type DoneMarkRange = { start: number; end: number }
+type TextMarkRange = { start: number; end: number }
+type DoneMarkRange = TextMarkRange
+type NoteTaskInfo = {
+  assignees: TaskAssignee[]
+  description: string | null
+  taskId: string | null
+  taskDepartmentId: string | null
+  taskProjectId: string | null
+  taskStatus: string | null
+  taskStatuses: string[]
+  taskTypeLabels: string[]
+}
 
-function parseMarkedNoteContent(content?: string | null): { text: string; doneRanges: DoneMarkRange[] } {
-  if (!content) return { text: "", doneRanges: [] }
+function parseMarkedNoteContent(content?: string | null): {
+  text: string
+  doneRanges: TextMarkRange[]
+  addedRanges: TextMarkRange[]
+} {
+  if (!content) return { text: "", doneRanges: [], addedRanges: [] }
   const doneRanges: DoneMarkRange[] = []
+  const addedRanges: TextMarkRange[] = []
+  const openMarks: Record<"done" | "added", number[]> = { done: [], added: [] }
   let text = ""
   let lastIndex = 0
   let match: RegExpExecArray | null
 
-  DONE_MARK_RE.lastIndex = 0
-  while ((match = DONE_MARK_RE.exec(content)) !== null) {
+  NOTE_MARK_TOKEN_RE.lastIndex = 0
+  while ((match = NOTE_MARK_TOKEN_RE.exec(content)) !== null) {
     text += content.slice(lastIndex, match.index)
-    const start = text.length
-    text += match[1]
-    doneRanges.push({ start, end: text.length })
+
+    const openingMark = match[1] as "done" | "added" | undefined
+    const closingMark = match[2] as "done" | "added" | undefined
+    if (openingMark) {
+      openMarks[openingMark].push(text.length)
+    } else if (closingMark) {
+      const start = openMarks[closingMark].pop()
+      if (start !== undefined && text.length > start) {
+        const targetRanges = closingMark === "done" ? doneRanges : addedRanges
+        targetRanges.push({ start, end: text.length })
+      }
+    }
+
     lastIndex = match.index + match[0].length
   }
   text += content.slice(lastIndex)
 
-  return { text, doneRanges }
+  return {
+    text,
+    doneRanges: normalizeTextRanges(doneRanges),
+    addedRanges: normalizeAddedRanges(text, addedRanges),
+  }
 }
 
-function normalizeDoneRanges(ranges: DoneMarkRange[]) {
+function normalizeTextRanges(ranges: TextMarkRange[]) {
   const sorted = ranges
     .filter((range) => range.end > range.start)
     .sort((a, b) => a.start - b.start || a.end - b.end)
-  const normalized: DoneMarkRange[] = []
+  const normalized: TextMarkRange[] = []
 
   for (const range of sorted) {
     const previous = normalized[normalized.length - 1]
@@ -109,6 +142,27 @@ function normalizeDoneRanges(ranges: DoneMarkRange[]) {
   }
 
   return normalized
+}
+
+function normalizeAddedRanges(text: string, ranges: TextMarkRange[]) {
+  const normalized = normalizeTextRanges(ranges)
+  const merged: TextMarkRange[] = []
+
+  for (const range of normalized) {
+    const previous = merged[merged.length - 1]
+    const gap = previous ? text.slice(previous.end, range.start) : ""
+    if (previous && /^[ \t]*$/.test(gap)) {
+      previous.end = range.end
+    } else {
+      merged.push({ ...range })
+    }
+  }
+
+  return merged
+}
+
+function normalizeDoneRanges(ranges: DoneMarkRange[]) {
+  return normalizeTextRanges(ranges)
 }
 
 function toggleDoneRange(ranges: DoneMarkRange[], selectedRange: DoneMarkRange) {
@@ -138,23 +192,45 @@ function toggleDoneRange(ranges: DoneMarkRange[], selectedRange: DoneMarkRange) 
   return normalizeDoneRanges(nextRanges)
 }
 
-function serializeMarkedNoteContent(text: string, ranges: DoneMarkRange[]) {
-  const normalized = normalizeDoneRanges(ranges)
-  let result = ""
-  let lastIndex = 0
+function serializeMarkedNoteContent(text: string, doneRanges: TextMarkRange[], addedRanges: TextMarkRange[] = []) {
+  const normalizedDoneRanges = normalizeTextRanges(doneRanges)
+  const normalizedAddedRanges = normalizeAddedRanges(text, addedRanges)
+  const boundaries = new Set([0, text.length])
 
-  for (const range of normalized) {
-    result += text.slice(lastIndex, range.start)
-    result += `${DONE_MARK_START}${text.slice(range.start, range.end)}${DONE_MARK_END}`
-    lastIndex = range.end
+  normalizedDoneRanges.forEach((range) => {
+    boundaries.add(range.start)
+    boundaries.add(range.end)
+  })
+  normalizedAddedRanges.forEach((range) => {
+    boundaries.add(range.start)
+    boundaries.add(range.end)
+  })
+
+  const orderedBoundaries = Array.from(boundaries)
+    .filter((boundary) => boundary >= 0 && boundary <= text.length)
+    .sort((a, b) => a - b)
+  let result = ""
+
+  for (let idx = 0; idx < orderedBoundaries.length - 1; idx += 1) {
+    const start = orderedBoundaries[idx]
+    const end = orderedBoundaries[idx + 1]
+    const segment = text.slice(start, end)
+    if (!segment) continue
+
+    const isDone = normalizedDoneRanges.some((range) => range.start <= start && range.end >= end)
+    const isAdded = normalizedAddedRanges.some((range) => range.start <= start && range.end >= end)
+    let markedSegment = segment
+
+    if (isAdded) markedSegment = `${ADDED_MARK_START}${markedSegment}${ADDED_MARK_END}`
+    if (isDone) markedSegment = `${DONE_MARK_START}${markedSegment}${DONE_MARK_END}`
+
+    result += markedSegment
   }
 
-  return result + text.slice(lastIndex)
+  return result
 }
 
-function adjustDoneRangesForTextChange(previousText: string, nextText: string, ranges: DoneMarkRange[]) {
-  if (previousText === nextText) return ranges
-
+function getTextChangeBounds(previousText: string, nextText: string) {
   let prefixLength = 0
   while (
     prefixLength < previousText.length &&
@@ -175,9 +251,17 @@ function adjustDoneRangesForTextChange(previousText: string, nextText: string, r
 
   const previousChangeEnd = previousText.length - suffixLength
   const nextChangeEnd = nextText.length - suffixLength
+
+  return { prefixLength, previousChangeEnd, nextChangeEnd }
+}
+
+function adjustTextRangesForTextChange(previousText: string, nextText: string, ranges: TextMarkRange[]) {
+  if (previousText === nextText) return ranges
+
+  const { prefixLength, previousChangeEnd, nextChangeEnd } = getTextChangeBounds(previousText, nextText)
   const delta = nextChangeEnd - previousChangeEnd
 
-  return normalizeDoneRanges(
+  return normalizeTextRanges(
     ranges
       .map((range) => {
         if (range.end <= prefixLength) return range
@@ -193,58 +277,74 @@ function adjustDoneRangesForTextChange(previousText: string, nextText: string, r
   )
 }
 
-function renderMarkedNoteContent(content?: string | null) {
-  if (!content) return "-"
-  const parts: React.ReactNode[] = []
-  let lastIndex = 0
-  let match: RegExpExecArray | null
+function addInsertedTextRange(previousText: string, nextText: string, ranges: TextMarkRange[]) {
+  if (previousText === nextText) return normalizeAddedRanges(nextText, ranges)
 
-  DONE_MARK_RE.lastIndex = 0
-  while ((match = DONE_MARK_RE.exec(content)) !== null) {
-    if (match.index > lastIndex) {
-      parts.push(content.slice(lastIndex, match.index))
-    }
-    parts.push(
-      <span
-        key={`done-${match.index}`}
-        className="rounded bg-emerald-100 px-1 text-emerald-800 line-through decoration-emerald-700 decoration-2"
-      >
-        {match[1]}
-      </span>
-    )
-    lastIndex = match.index + match[0].length
-  }
+  const { prefixLength, nextChangeEnd } = getTextChangeBounds(previousText, nextText)
+  const adjustedRanges = adjustTextRangesForTextChange(previousText, nextText, ranges)
+  if (nextChangeEnd <= prefixLength) return normalizeAddedRanges(nextText, adjustedRanges)
 
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex))
-  }
+  const insertedText = nextText.slice(prefixLength, nextChangeEnd)
+  if (!insertedText.trim()) return normalizeAddedRanges(nextText, adjustedRanges)
 
-  return parts.length > 0 ? parts : content
+  return normalizeAddedRanges(nextText, [...adjustedRanges, { start: prefixLength, end: nextChangeEnd }])
 }
 
-function renderNoteContentWithRanges(content: string, ranges: DoneMarkRange[]) {
-  if (!content) return "-"
-  const normalized = normalizeDoneRanges(ranges)
-  const parts: React.ReactNode[] = []
-  let lastIndex = 0
+function getNoteMarkClass(isDone: boolean, isAdded: boolean) {
+  if (isDone && isAdded) {
+    return "rounded bg-yellow-100 px-1 text-emerald-900 ring-1 ring-yellow-300 line-through decoration-emerald-700 decoration-2"
+  }
+  if (isAdded) return "rounded bg-yellow-200 px-1 text-slate-950 ring-1 ring-yellow-300"
+  if (isDone) {
+    return "rounded bg-emerald-100 px-1 text-emerald-800 line-through decoration-emerald-700 decoration-2"
+  }
+  return ""
+}
 
-  normalized.forEach((range, idx) => {
-    if (range.start > lastIndex) {
-      parts.push(content.slice(lastIndex, range.start))
-    }
-    parts.push(
-      <span
-        key={`edit-done-${idx}-${range.start}`}
-        className="rounded bg-emerald-100 px-1 text-emerald-800 line-through decoration-emerald-700 decoration-2"
-      >
-        {content.slice(range.start, range.end)}
-      </span>
-    )
-    lastIndex = range.end
+function renderMarkedNoteContent(content?: string | null) {
+  if (!content) return "-"
+  const parsed = parseMarkedNoteContent(content)
+  return renderNoteContentWithRanges(parsed.text, parsed.doneRanges, parsed.addedRanges)
+}
+
+function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[], addedRanges: TextMarkRange[] = []) {
+  if (!content) return "-"
+  const normalizedDoneRanges = normalizeTextRanges(doneRanges)
+  const normalizedAddedRanges = normalizeAddedRanges(content, addedRanges)
+  const boundaries = new Set([0, content.length])
+
+  normalizedDoneRanges.forEach((range) => {
+    boundaries.add(range.start)
+    boundaries.add(range.end)
+  })
+  normalizedAddedRanges.forEach((range) => {
+    boundaries.add(range.start)
+    boundaries.add(range.end)
   })
 
-  if (lastIndex < content.length) {
-    parts.push(content.slice(lastIndex))
+  const orderedBoundaries = Array.from(boundaries)
+    .filter((boundary) => boundary >= 0 && boundary <= content.length)
+    .sort((a, b) => a - b)
+  const parts: React.ReactNode[] = []
+
+  for (let idx = 0; idx < orderedBoundaries.length - 1; idx += 1) {
+    const start = orderedBoundaries[idx]
+    const end = orderedBoundaries[idx + 1]
+    const segment = content.slice(start, end)
+    if (!segment) continue
+
+    const isDone = normalizedDoneRanges.some((range) => range.start <= start && range.end >= end)
+    const isAdded = normalizedAddedRanges.some((range) => range.start <= start && range.end >= end)
+    const className = getNoteMarkClass(isDone, isAdded)
+    parts.push(
+      className ? (
+        <span key={`note-mark-${idx}-${start}`} className={className}>
+          {segment}
+        </span>
+      ) : (
+        segment
+      )
+    )
   }
 
   return parts.length > 0 ? parts : content
@@ -304,6 +404,20 @@ function formatFileSize(bytes: number) {
   if (mb < 1024) return `${mb.toFixed(1)} MB`
   const gb = mb / 1024
   return `${gb.toFixed(2)} GB`
+}
+
+function getTaskTypeLabels(task: Task) {
+  const labels: string[] = []
+  if (task.is_1h_report) labels.push("1H")
+  if (task.is_bllok) labels.push("BLL")
+  if (task.is_r1) labels.push("R1")
+  if (task.is_personal) labels.push("P")
+  if (labels.length === 0 && task.priority) labels.push(task.priority === "NORMAL" ? "N" : task.priority)
+  return labels
+}
+
+function mergeTaskTypeLabels(base: string[] = [], incoming: string[] = []) {
+  return Array.from(new Set([...base, ...incoming].filter(Boolean)))
 }
 
 function getInitials(label: string) {
@@ -386,26 +500,16 @@ export default function GaKaNotesPage() {
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
-  const [noteTaskInfo, setNoteTaskInfo] = React.useState<
-    Map<string, {
-      assignees: TaskAssignee[]
-      description: string | null
-      taskId: string | null
-      taskDepartmentId: string | null
-      taskProjectId: string | null
-      taskStatus: string | null
-      taskStatuses: string[]
-    }>
-  >(new Map())
+  const [noteTaskInfo, setNoteTaskInfo] = React.useState<Map<string, NoteTaskInfo>>(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
   const [editContent, setEditContent] = React.useState("")
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
+  const [editAddedRanges, setEditAddedRanges] = React.useState<TextMarkRange[]>([])
   const [editDescription, setEditDescription] = React.useState("")
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
   const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
-  const editHighlightMirrorRef = React.useRef<HTMLDivElement | null>(null)
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
@@ -588,15 +692,7 @@ export default function GaKaNotesPage() {
     }
     const userMapById = new Map(users.map((u) => [u.id, u]))
 
-    const map = new Map<string, {
-      assignees: TaskAssignee[]
-      description: string | null
-      taskId: string | null
-      taskDepartmentId: string | null
-      taskProjectId: string | null
-      taskStatus: string | null
-      taskStatuses: string[]
-    }>()
+    const map = new Map<string, NoteTaskInfo>()
     const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
       const result: TaskAssignee[] = []
       const seen = new Set<string>()
@@ -645,6 +741,7 @@ export default function GaKaNotesPage() {
         taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
         taskStatus: existing?.taskStatus ?? t.status ?? null,
         taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
+        taskTypeLabels: mergeTaskTypeLabels(existing?.taskTypeLabels, getTaskTypeLabels(t)),
       })
     }
     setNoteTaskInfo(map)
@@ -926,22 +1023,15 @@ export default function GaKaNotesPage() {
     setEditNoteId(note.id)
     setEditContent(parsedContent.text)
     setEditDoneRanges(parsedContent.doneRanges)
+    setEditAddedRanges(parsedContent.addedRanges)
     const taskInfo = noteTaskInfo.get(note.id)
     setEditDescription(taskInfo?.description || "")
   }
 
   const handleEditContentChange = (nextContent: string) => {
-    setEditDoneRanges((current) => adjustDoneRangesForTextChange(editContent, nextContent, current))
+    setEditDoneRanges((current) => adjustTextRangesForTextChange(editContent, nextContent, current))
+    setEditAddedRanges((current) => addInsertedTextRange(editContent, nextContent, current))
     setEditContent(nextContent)
-  }
-
-  const syncEditHighlightScroll = () => {
-    const textarea = editTextareaRef.current
-    const mirror = editHighlightMirrorRef.current
-    if (!textarea || !mirror) return
-
-    mirror.scrollTop = textarea.scrollTop
-    mirror.scrollLeft = textarea.scrollLeft
   }
 
   const markSelectedEditTextDone = () => {
@@ -1012,7 +1102,9 @@ export default function GaKaNotesPage() {
       const res = await apiFetch(`/ga-notes/${note.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeMarkedNoteContent(parsedContent.text, nextRanges).trim() }),
+        body: JSON.stringify({
+          content: serializeMarkedNoteContent(parsedContent.text, nextRanges, parsedContent.addedRanges).trim(),
+        }),
       })
       if (!res?.ok) {
         toast.error("Failed to mark selected text done")
@@ -1041,7 +1133,7 @@ export default function GaKaNotesPage() {
       const res = await apiFetch(`/ga-notes/${editNoteId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeMarkedNoteContent(editContent, editDoneRanges).trim() }),
+        body: JSON.stringify({ content: serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim() }),
       })
       if (res?.ok) {
         const updated = (await res.json()) as GaNote
@@ -1061,15 +1153,7 @@ export default function GaKaNotesPage() {
             if (notesRes?.ok) {
               const tasksData = (await notesRes.json()) as Task[]
               const userMapById = new Map(users.map((u) => [u.id, u]))
-              const map = new Map<string, {
-                assignees: TaskAssignee[]
-                description: string | null
-                taskId: string | null
-                taskDepartmentId: string | null
-                taskProjectId: string | null
-                taskStatus: string | null
-                taskStatuses: string[]
-              }>()
+              const map = new Map<string, NoteTaskInfo>()
               const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
                 const result: TaskAssignee[] = []
                 const seen = new Set<string>()
@@ -1112,6 +1196,7 @@ export default function GaKaNotesPage() {
                   taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
                   taskStatus: existing?.taskStatus ?? t.status ?? null,
                   taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
+                  taskTypeLabels: mergeTaskTypeLabels(existing?.taskTypeLabels, getTaskTypeLabels(t)),
                 })
               }
               setNoteTaskInfo(map)
@@ -1122,6 +1207,7 @@ export default function GaKaNotesPage() {
         toast.success("Note updated")
         setEditNoteId(null)
         setEditDoneRanges([])
+        setEditAddedRanges([])
       } else {
         toast.error("Failed to update note")
       }
@@ -1308,6 +1394,9 @@ export default function GaKaNotesPage() {
           taskId: createdTask.id,
           taskDepartmentId: createdTask.department_id ?? null,
           taskProjectId: createdTask.project_id ?? null,
+          taskStatus: createdTask.status ?? null,
+          taskStatuses: [createdTask.status ?? ""],
+          taskTypeLabels: getTaskTypeLabels(createdTask),
         })
         return next
       })
@@ -1797,6 +1886,15 @@ export default function GaKaNotesPage() {
                     </TableRow>
                     <TableRow className="h-8">
                       <TableCell className="p-1">
+                        <span className="rounded bg-yellow-200 px-1 text-xs text-slate-950 ring-1 ring-yellow-300">
+                          New
+                        </span>
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Shtuar ne edit</TableCell>
+                      <TableCell className="text-sm text-slate-600">Pjese e shtuar pas krijimit</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
                         <div className="w-4 h-4 rounded-sm border border-rose-200 bg-rose-100" />
                       </TableCell>
                       <TableCell className="text-sm font-semibold">GA</TableCell>
@@ -2239,13 +2337,12 @@ export default function GaKaNotesPage() {
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
                         : normalizeTaskStatus(taskInfo?.taskStatus)
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
+                    const taskTypeLabels = taskInfo?.taskTypeLabels ?? []
                     const canAddAttachments = !isClosed && aggregatedStatus !== "DONE"
-                    const editDisabled = hasTask || isClosed
-                    const editDisabledTitle = hasTask
-                      ? "Edit disabled when task exists"
-                      : isClosed
-                        ? "Edit disabled when note is closed"
-                        : "Edit"
+                    const editDisabled = isClosed
+                    const editDisabledTitle = isClosed
+                      ? "Edit disabled when note is closed"
+                      : "Edit"
                     const canCreateTask = !isClosed && (!hasProject || isDevLinked)
                     const showManualOnly = hasProject && !isDevLinked
                     const shenimiCellClass = isClosed
@@ -2351,20 +2448,18 @@ export default function GaKaNotesPage() {
                                     {attachments.length > 0 ? <ImageIcon className="h-4 w-4" /> : <Paperclip className="h-4 w-4" />}
                                   </Button>
                                 ) : null}
-                                {!hasTask ? (
-                                  <Button
-                                    variant="outline"
-                                    size="icon"
-                                    disabled={editDisabled}
-                                    aria-disabled={editDisabled}
-                                    className={`h-7 w-7 shrink-0 sm:hidden ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                                    aria-label={editDisabledTitle}
-                                    title={editDisabledTitle}
-                                    onClick={() => !editDisabled && openEditNote(note)}
-                                  >
-                                    <Pencil className="h-4 w-4" />
-                                  </Button>
-                                ) : null}
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  disabled={editDisabled}
+                                  aria-disabled={editDisabled}
+                                  className={`h-7 w-7 shrink-0 sm:hidden ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                                  aria-label={editDisabledTitle}
+                                  title={editDisabledTitle}
+                                  onClick={() => !editDisabled && openEditNote(note)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
                                 {canMarkDone && hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
                                   <Button
                                     variant="outline"
@@ -2401,6 +2496,18 @@ export default function GaKaNotesPage() {
                                   {note.priority}
                                 </Badge>
                               ) : null}
+                              {hasTask
+                                ? taskTypeLabels.map((label) => (
+                                    <Badge
+                                      key={label}
+                                      variant="outline"
+                                      className="text-[10px] px-1.5 py-0 bg-cyan-50 text-cyan-800 border-cyan-200 font-semibold"
+                                      title="Created task type"
+                                    >
+                                      {label}
+                                    </Badge>
+                                  ))
+                                : null}
                               {isEdited && !hasTask ? (
                                 <Badge
                                   variant="outline"
@@ -2410,16 +2517,14 @@ export default function GaKaNotesPage() {
                                   Edited
                                 </Badge>
                               ) : null}
-                              <Badge
-                                variant="outline"
-                                className={`text-[10px] px-1.5 py-0 ${
-                                  note.is_discussed
-                                    ? "bg-emerald-50 text-emerald-700 border-emerald-200"
-                                    : "bg-slate-50 text-slate-600 border-slate-200"
-                                }`}
-                              >
-                                {note.is_discussed ? "Discussed" : "Not Discussed"}
-                              </Badge>
+                              {note.is_discussed ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 py-0 bg-emerald-50 text-emerald-700 border-emerald-200"
+                                >
+                                  Discussed
+                                </Badge>
+                              ) : null}
                               {isClosed ? (
                                 <Badge className="text-[10px] px-1.5 py-0 bg-slate-300 text-slate-700 border border-slate-400">
                                   Closed
@@ -3051,6 +3156,7 @@ export default function GaKaNotesPage() {
         if (!open) {
           setEditNoteId(null)
           setEditDoneRanges([])
+          setEditAddedRanges([])
           setEditDescription("")
         }
       }}>
@@ -3072,22 +3178,12 @@ export default function GaKaNotesPage() {
                   Mark / undo selected done
                 </Button>
               </div>
-              <div className="relative min-h-[140px] rounded-md border border-input bg-background">
-                <div
-                  ref={editHighlightMirrorRef}
-                  aria-hidden="true"
-                  className="pointer-events-none absolute inset-0 overflow-hidden whitespace-pre-wrap break-words px-3 py-2 text-sm leading-normal text-slate-900"
-                >
-                  {renderNoteContentWithRanges(editContent, editDoneRanges)}
-                </div>
-                <Textarea
-                  ref={editTextareaRef}
-                  value={editContent}
-                  onChange={(e) => handleEditContentChange(e.target.value)}
-                  onScroll={syncEditHighlightScroll}
-                  className="relative z-10 min-h-[140px] resize-y border-0 bg-transparent text-transparent shadow-none caret-slate-950 focus-visible:ring-1 focus-visible:ring-ring"
-                />
-              </div>
+              <Textarea
+                ref={editTextareaRef}
+                value={editContent}
+                onChange={(e) => handleEditContentChange(e.target.value)}
+                className="min-h-[140px] resize-y text-sm leading-normal"
+              />
               <p className="text-xs text-muted-foreground">
                 Select text and click mark done to toggle it, or place the cursor on a line to toggle the whole line.
               </p>
@@ -3102,6 +3198,7 @@ export default function GaKaNotesPage() {
               <Button variant="outline" onClick={() => {
                 setEditNoteId(null)
                 setEditDoneRanges([])
+                setEditAddedRanges([])
                 setEditDescription("")
               }}>
                 Cancel
