@@ -6744,14 +6744,19 @@ export default function DepartmentKanban() {
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
                               <td className="border border-slate-200 px-2 py-2 align-top uppercase font-semibold">
-                                {row.typeLabel === "PRJK" && row.projectTitle ? (
-                                  <>
-                                    <span>{row.projectTitle}</span>
-                                    <span> : {row.title}</span>
-                                  </>
-                                ) : (
-                                  row.title
-                                )}
+                                {(() => {
+                                  const hasMarks = typeof row.title === "string" && row.title.includes("[[")
+                                  const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
+                                  if (row.typeLabel === "PRJK" && row.projectTitle) {
+                                    return (
+                                      <>
+                                        <span>{row.projectTitle}</span>
+                                        <span> : {renderedTitle}</span>
+                                      </>
+                                    )
+                                  }
+                                  return renderedTitle
+                                })()}
                                 {row.typeLabel === "PRJK" && row.taskId ? (
                                   (() => {
                                     const counts = getChecklistCountsForTask(row.taskId)
