@@ -19,6 +19,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { ChecklistItem, ChecklistWithItems, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
 import { VsWorkflow } from "@/components/projects/vs-workflow"
@@ -6929,7 +6930,9 @@ export default function PcmProjectPage() {
                                   autoFocus
                                 />
                               ) : (
-                                <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
+                                <span className="font-medium text-slate-700">
+                                  {index + 1}. {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                                </span>
                               )}
                             </div>
                             <div className="col-span-1 px-2 min-w-0">
@@ -8052,7 +8055,9 @@ export default function PcmProjectPage() {
                                   autoFocus
                                 />
                               ) : (
-                                <span className="font-medium text-slate-700">{index + 1}. {task.title}</span>
+                                <span className="font-medium text-slate-700">
+                                  {index + 1}. {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                                </span>
                               )}
                             </div>
                             <div className="col-span-1 px-2 min-w-0">

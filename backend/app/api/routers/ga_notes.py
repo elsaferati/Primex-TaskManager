@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
+import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import or_, select
@@ -28,6 +29,37 @@ router = APIRouter()
 class MarkWaitingDoneResponse(BaseModel):
     updated_count: int
     skipped_count: int
+
+
+def _ga_note_default_task_title(content: str | None) -> str:
+    cleaned = re.sub(r"\s+", " ", (content or "").strip())
+    if not cleaned:
+        return "GA/KA note task"
+    if len(cleaned) <= 80:
+        return cleaned
+    return f"{cleaned[:77]}..."
+
+
+def _ga_note_frontend_default_task_title(content: str | None, note_type: GaNoteType | str | None) -> str:
+    # Keep in sync with frontend `noteToTaskTitle()` used when creating a task from a note.
+    prefix = ""
+    if note_type:
+        value = note_type.value if hasattr(note_type, "value") else str(note_type)
+        value = value.strip()
+        if value:
+            prefix = f"{value}: "
+    cleaned = re.sub(r"\s+", " ", (content or "").strip())
+    base = f"{prefix}{cleaned}".strip()
+    if not base:
+        return "GA/KA Note Task"
+    if len(base) <= 120:
+        return base
+    return f"{base[:117]}..."
+
+
+def _ga_note_default_task_description(content: str | None) -> str | None:
+    trimmed = (content or "").strip()
+    return trimmed or None
 
 
 def _attachment_out(attachment: GaNoteAttachment) -> GaNoteAttachmentOut:
@@ -251,6 +283,7 @@ async def update_ga_note(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA note not found")
     await _ensure_note_access(note, user, db)
 
+    old_content = note.content
     if payload.content is not None:
         note.content = payload.content
     if payload.status is not None:
@@ -263,6 +296,25 @@ async def update_ga_note(
         note.is_converted_to_task = payload.is_converted_to_task
     if payload.is_discussed is not None:
         note.is_discussed = payload.is_discussed
+
+    if payload.content is not None and payload.content != old_content:
+        old_default_title = _ga_note_default_task_title(old_content)
+        new_default_title = _ga_note_default_task_title(note.content)
+        old_frontend_title = _ga_note_frontend_default_task_title(old_content, note.note_type)
+        new_frontend_title = _ga_note_frontend_default_task_title(note.content, note.note_type)
+        old_default_description = _ga_note_default_task_description(old_content)
+        new_default_description = _ga_note_default_task_description(note.content)
+
+        linked_tasks = (
+            await db.execute(select(Task).where(Task.ga_note_origin_id == note.id))
+        ).scalars().all()
+
+        for task in linked_tasks:
+            # Tasks created from GA/KA notes should always track the note title.
+            # This ensures any `[[added]]...[[/added]]` edits show up everywhere (fast tasks, project tasks, common view).
+            task.title = new_frontend_title
+            if task.description == old_default_description:
+                task.description = new_default_description
 
     await db.commit()
     await db.refresh(note)

@@ -14,6 +14,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
 
@@ -476,6 +477,14 @@ export default function TaskDetailsPage() {
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Task title"
                 />
+                {task.ga_note_origin_id ? (
+                  <div className="text-xs text-muted-foreground">
+                    Preview:{" "}
+                    <span className="text-slate-900">
+                      {renderMarkedNoteContent(title, title)}
+                    </span>
+                  </div>
+                ) : null}
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>

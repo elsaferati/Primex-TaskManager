@@ -7,6 +7,7 @@ import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateTimeDMY } from "@/lib/dates"
+import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
@@ -9263,7 +9264,7 @@ export default function CommonViewPage() {
                             <div className="week-table-entry-main">
                               <span>
                                 <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
-                                {stripInitialsPrefix(e.title)}
+                                {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
                               </span>
                             </div>
                             <div className="week-table-avatars">
@@ -9312,7 +9313,7 @@ export default function CommonViewPage() {
                             <div className="week-table-entry-main">
                               <span>
                                 <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
-                                {stripInitialsPrefix(e.title)}
+                                {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
                               </span>
                             </div>
                             <div className="week-table-avatars">
@@ -9333,7 +9334,7 @@ export default function CommonViewPage() {
                             <div className="week-table-entry-main">
                               <span>
                                 <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
-                                {stripInitialsPrefix(e.title)}
+                                {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
                               </span>
                             </div>
                             <div className="week-table-avatars">
@@ -9639,7 +9640,7 @@ export default function CommonViewPage() {
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
-                                      <span>{stripInitialsPrefix(cell.title)}</span>
+                                      <span>{renderMarkedNoteContent(stripInitialsPrefix(cell.title), stripInitialsPrefix(cell.title))}</span>
                                     </div>
                                   </div>
                                   {cell.note ? (
@@ -9670,13 +9671,17 @@ export default function CommonViewPage() {
                                     return (
                                       <div className="swimlane-meta">
                                         {showSubtitle ? (
-                                          <div className="swimlane-subtitle">{cell.subtitle}</div>
+                                          <div className="swimlane-subtitle">
+                                            {renderMarkedNoteContent(cell.subtitle, cell.subtitle)}
+                                          </div>
                                         ) : null}
                                         {showDate ? (
                                           <div className="swimlane-date">{cell.dateLabel}</div>
                                         ) : null}
                                         {isNoteOpen && cell.note ? (
-                                          <div className="swimlane-note">{cell.note}</div>
+                                          <div className="swimlane-note">
+                                            {renderMarkedNoteContent(cell.note, cell.note)}
+                                          </div>
                                         ) : null}
                                       </div>
                                     )

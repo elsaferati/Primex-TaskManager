@@ -23,6 +23,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
+import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -7921,11 +7922,13 @@ export default function DepartmentKanban() {
                                 <div className="sm:px-3">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <div className={`font-medium text-[12px] ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                      {t.title}
+                                      {t.ga_note_origin_id ? renderMarkedNoteContent(t.title, t.title) : t.title}
                                     </div>
                                   </div>
                                   {t.description ? (
-                                    <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
+                                    <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">
+                                      {t.ga_note_origin_id ? renderMarkedNoteContent(t.description, t.description) : t.description}
+                                    </div>
                                   ) : null}
                                 </div>
                                 <div className="sm:px-3 flex items-start">

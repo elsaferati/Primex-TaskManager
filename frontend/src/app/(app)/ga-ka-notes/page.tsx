@@ -292,9 +292,9 @@ function addInsertedTextRange(previousText: string, nextText: string, ranges: Te
 
 function getNoteMarkClass(isDone: boolean, isAdded: boolean) {
   if (isDone && isAdded) {
-    return "rounded bg-yellow-100 px-1 text-emerald-900 ring-1 ring-yellow-300 line-through decoration-emerald-700 decoration-2"
+    return "rounded bg-blue-100 px-1 text-emerald-900 ring-1 ring-blue-300 line-through decoration-emerald-700 decoration-2"
   }
-  if (isAdded) return "rounded bg-yellow-200 px-1 text-slate-950 ring-1 ring-yellow-300"
+  if (isAdded) return "rounded bg-blue-200 px-1 text-blue-950 ring-1 ring-blue-300"
   if (isDone) {
     return "rounded bg-emerald-100 px-1 text-emerald-800 line-through decoration-emerald-700 decoration-2"
   }
@@ -381,8 +381,8 @@ function aggregateTaskStatus(statuses: Array<string | null | undefined>): Normal
   return "TODO"
 }
 
-function formatDate(value?: string | null) {
-  if (!value) return "-"
+function formatDateParts(value?: string | null) {
+  if (!value) return { date: "-", time: "" }
   const date = new Date(value)
   const day = date.getDate().toString().padStart(2, "0")
   const month = (date.getMonth() + 1).toString().padStart(2, "0")
@@ -392,7 +392,7 @@ function formatDate(value?: string | null) {
   hours = hours % 12
   hours = hours ? hours : 12 // the hour '0' should be '12'
   const hoursStr = hours.toString().padStart(2, "0")
-  return `${day}.${month}, ${hoursStr}:${minutes} ${ampm}`
+  return { date: `${day}.${month}`, time: `${hoursStr}:${minutes} ${ampm}` }
 }
 
 function formatFileSize(bytes: number) {
@@ -514,6 +514,13 @@ export default function GaKaNotesPage() {
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
   const [previewTitle, setPreviewTitle] = React.useState<string | null>(null)
+
+  const [internalMeetingTaskDialogOpen, setInternalMeetingTaskDialogOpen] = React.useState(false)
+  const [internalMeetingTaskTitle, setInternalMeetingTaskTitle] = React.useState("")
+  const [internalMeetingTaskPlatform, setInternalMeetingTaskPlatform] = React.useState("")
+  const [internalMeetingTaskStartsAt, setInternalMeetingTaskStartsAt] = React.useState("")
+  const [creatingInternalMeetingFromTask, setCreatingInternalMeetingFromTask] = React.useState(false)
+  const internalMeetingDepartmentIdRef = React.useRef<string | null>(null)
   const [voiceLanguage, setVoiceLanguage] = React.useState<"en" | "sq">("en")
   const speechLang = voiceLanguage === "sq" ? "sq-AL" : "en-US"
   const cloudLang = voiceLanguage === "sq" ? "sq" : "en"
@@ -795,6 +802,78 @@ export default function GaKaNotesPage() {
   const removeAttachmentUploadFile = (index: number) => {
     setAttachmentUploadFiles((prev) => prev.filter((_, idx) => idx !== index))
   }
+
+  const closeInternalMeetingTaskDialog = React.useCallback(() => {
+    setInternalMeetingTaskDialogOpen(false)
+    setInternalMeetingTaskTitle("")
+    setInternalMeetingTaskPlatform("")
+    setInternalMeetingTaskStartsAt("")
+    internalMeetingDepartmentIdRef.current = null
+  }, [])
+
+  const openInternalMeetingFromNoteTask = React.useCallback(
+    (note: GaNote, taskInfo?: NoteTaskInfo | null) => {
+      const parsed = parseMarkedNoteContent(note.content)
+      const cleanTitle = (parsed.text || "").trim().replace(/\s+/g, " ")
+      const title = cleanTitle.length > 255 ? `${cleanTitle.slice(0, 252)}...` : cleanTitle
+
+      setInternalMeetingTaskTitle(title || "Internal meeting")
+      setInternalMeetingTaskPlatform("")
+      setInternalMeetingTaskStartsAt("")
+      internalMeetingDepartmentIdRef.current =
+        taskInfo?.taskDepartmentId || note.department_id || user?.department_id || null
+      setInternalMeetingTaskDialogOpen(true)
+    },
+    [user?.department_id]
+  )
+
+  const submitInternalMeetingFromNoteTask = React.useCallback(async () => {
+    const title = internalMeetingTaskTitle.trim()
+    const departmentId = internalMeetingDepartmentIdRef.current
+    if (!title) return
+    if (!departmentId) {
+      toast.error("Department is required to create an internal meeting.")
+      return
+    }
+    setCreatingInternalMeetingFromTask(true)
+    try {
+      const startsAt = internalMeetingTaskStartsAt ? new Date(internalMeetingTaskStartsAt).toISOString() : null
+      const payload = {
+        title,
+        platform: internalMeetingTaskPlatform.trim() || null,
+        starts_at: startsAt,
+        department_id: departmentId,
+        project_id: null,
+        meeting_type: "internal",
+      }
+      const res = await apiFetch("/meetings", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) {
+        let detail = "Failed to create internal meeting"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      closeInternalMeetingTaskDialog()
+      toast.success("Internal meeting created")
+    } finally {
+      setCreatingInternalMeetingFromTask(false)
+    }
+  }, [
+    apiFetch,
+    closeInternalMeetingTaskDialog,
+    internalMeetingTaskPlatform,
+    internalMeetingTaskStartsAt,
+    internalMeetingTaskTitle,
+  ])
 
   const uploadNoteAttachments = async (noteId: string, files: File[]) => {
     const buildFormData = (includeNoteId: boolean) => {
@@ -1886,7 +1965,7 @@ export default function GaKaNotesPage() {
                     </TableRow>
                     <TableRow className="h-8">
                       <TableCell className="p-1">
-                        <span className="rounded bg-yellow-200 px-1 text-xs text-slate-950 ring-1 ring-yellow-300">
+                        <span className="rounded bg-blue-200 px-1 text-xs text-blue-950 ring-1 ring-blue-300">
                           New
                         </span>
                       </TableCell>
@@ -2275,15 +2354,15 @@ export default function GaKaNotesPage() {
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
                       <th className="min-w-[340px] w-[340px] max-w-[340px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
-                      <th className="hidden sm:table-cell min-w-[320px] w-[320px] max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
+                      <th className="hidden sm:table-cell min-w-[220px] w-[220px] max-w-[220px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
-                      <th className="w-[140px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
+                      <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
-                      <th className="w-[120px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
+                      <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DET</th>
-                      <th className="min-w-[110px] w-[110px] max-w-[110px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MARK DONE</th>
+                      <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>INT</th>
                       <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
@@ -2488,7 +2567,10 @@ export default function GaKaNotesPage() {
                               </div>
                             </div>
                             <div className="text-[11px] text-slate-600 sm:hidden">
-                              {formatDate(note.created_at)}
+                              {(() => {
+                                const parts = formatDateParts(note.created_at)
+                                return parts.time ? `${parts.date}, ${parts.time}` : parts.date
+                              })()}
                             </div>
                             <div className="flex items-center gap-2">
                               {note.priority ? (
@@ -2512,7 +2594,10 @@ export default function GaKaNotesPage() {
                                 <Badge
                                   variant="outline"
                                   className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200"
-                                  title={`Edited ${formatDate(note.updated_at)}`}
+                                  title={`Edited ${(() => {
+                                    const parts = formatDateParts(note.updated_at)
+                                    return parts.time ? `${parts.date}, ${parts.time}` : parts.date
+                                  })()}`}
                                 >
                                   Edited
                                 </Badge>
@@ -2535,7 +2620,7 @@ export default function GaKaNotesPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="hidden sm:table-cell border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[320px] w-[320px] max-w-[320px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="hidden sm:table-cell border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[220px] w-[220px] max-w-[220px]" style={{ verticalAlign: 'bottom' }}>
                           {taskInfo?.description || attachments.length > 0 ? (
                             <div className="space-y-2">
                               {canAddAttachments || attachments.length > 0 ? (
@@ -2628,7 +2713,17 @@ export default function GaKaNotesPage() {
                             )}
                           </div>
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{formatDate(note.created_at)}</td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap w-[96px]" style={{ verticalAlign: 'bottom' }}>
+                          {(() => {
+                            const parts = formatDateParts(note.created_at)
+                            return (
+                              <div className="leading-tight">
+                                <div>{parts.date}</div>
+                                {parts.time ? <div>{parts.time}</div> : null}
+                              </div>
+                            )
+                          })()}
+                        </td>
                         <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex items-center gap-2 text-xs">
                             <div
@@ -2675,7 +2770,7 @@ export default function GaKaNotesPage() {
                             </Badge>
                           ) : null}
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap w-[90px]" style={{ verticalAlign: 'bottom' }}>
                           {displayProject ? (
                             <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
                               {displayProject.title || displayProject.name || "Project"}
@@ -2708,17 +2803,17 @@ export default function GaKaNotesPage() {
                             )}
                           </div>
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[110px] w-[110px] max-w-[110px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap w-[60px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
-                            {canMarkDone && hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
+                            {hasTask ? (
                               <Button
                                 variant="outline"
                                 size="sm"
-                                disabled={markingDoneNoteId === note.id}
-                                className="h-7 text-xs border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
-                                onClick={() => void markWaitingTasksDone(note.id)}
+                                className="h-7 px-2 text-[10px] border-slate-200 text-slate-700 hover:bg-slate-50"
+                                title="Create internal meeting from task"
+                                onClick={() => openInternalMeetingFromNoteTask(note, taskInfo)}
                               >
-                                Mark Done
+                                INT
                               </Button>
                             ) : (
                               <span className="text-xs text-slate-400">-</span>
@@ -2849,7 +2944,10 @@ export default function GaKaNotesPage() {
                           {item.attachment.original_filename}
                         </div>
                         <div className="text-xs text-slate-500">
-                          {formatFileSize(item.attachment.size_bytes)} • {formatDate(item.noteCreatedAt)}
+                          {formatFileSize(item.attachment.size_bytes)} • {(() => {
+                            const parts = formatDateParts(item.noteCreatedAt)
+                            return parts.time ? `${parts.date}, ${parts.time}` : parts.date
+                          })()}
                         </div>
                         <div className="mt-2 text-xs text-slate-600 truncate">
                           {item.noteContent}
@@ -2892,6 +2990,59 @@ export default function GaKaNotesPage() {
               })}
             </div>
           )}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={internalMeetingTaskDialogOpen}
+        onOpenChange={(open) => {
+          if (!open) closeInternalMeetingTaskDialog()
+        }}
+      >
+        <DialogContent className="sm:max-w-md bg-white border-slate-200 rounded-2xl">
+          <DialogHeader>
+            <DialogTitle className="text-slate-800">Create Internal Meeting</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-slate-700">Meeting title</Label>
+              <Input
+                value={internalMeetingTaskTitle}
+                onChange={(e) => setInternalMeetingTaskTitle(e.target.value)}
+                className="border-slate-200 focus:border-slate-400 rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-700">Platform</Label>
+              <Input
+                value={internalMeetingTaskPlatform}
+                onChange={(e) => setInternalMeetingTaskPlatform(e.target.value)}
+                placeholder="Zoom, Meet, Office..."
+                className="border-slate-200 focus:border-slate-400 rounded-xl"
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-slate-700">Date and time</Label>
+              <Input
+                type="datetime-local"
+                value={internalMeetingTaskStartsAt}
+                onChange={(e) => setInternalMeetingTaskStartsAt(e.target.value)}
+                className="border-slate-200 focus:border-slate-400 rounded-xl"
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={closeInternalMeetingTaskDialog} className="rounded-xl border-slate-200">
+                Cancel
+              </Button>
+              <Button
+                disabled={!internalMeetingTaskTitle.trim() || creatingInternalMeetingFromTask}
+                onClick={() => void submitInternalMeetingFromNoteTask()}
+                className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
+              >
+                {creatingInternalMeetingFromTask ? "Creating..." : "Create"}
+              </Button>
+            </div>
+          </div>
         </DialogContent>
       </Dialog>
 

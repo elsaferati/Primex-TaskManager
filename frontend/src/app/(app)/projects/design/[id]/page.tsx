@@ -20,6 +20,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { ChecklistItem, GaNote, Meeting, Project, ProjectPrompt, Task, TaskPriority, User } from "@/lib/types"
 
@@ -4006,7 +4007,9 @@ export default function DesignProjectPage() {
                     <div key={task.id} className="flex items-center justify-between p-3 border rounded-lg">
                       <div>
                         <div className="flex items-center gap-2">
-                          <span className="font-medium">{task.title}</span>
+                          <span className="font-medium">
+                            {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                          </span>
                           {task.ga_note_origin_id ? (
                             <Badge variant="outline" className="bg-rose-100 text-rose-700 border-rose-200 text-[11px]">
                               GA
@@ -4791,7 +4794,9 @@ export default function DesignProjectPage() {
                             }
                           />
                         ) : (
-                          `${index + 1}. ${task.title}`
+                          <span>
+                            {index + 1}. {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                          </span>
                         )}
                       </div>
                       <div className="col-span-1 text-slate-500">
@@ -5079,7 +5084,9 @@ export default function DesignProjectPage() {
                             }
                           />
                         ) : (
-                          `${index + 1}. ${task.title}`
+                          <span>
+                            {index + 1}. {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                          </span>
                         )}
                       </div>
                       <div className="col-span-1 text-slate-500">

@@ -23,6 +23,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
+import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -7025,7 +7026,9 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{task.title}</div>
+                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>
+                                {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                              </div>
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
@@ -7133,7 +7136,7 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                                <span>{task.title}</span>
+                                <span>{task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}</span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
@@ -7239,7 +7242,7 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                                <span>{task.title}</span>
+                                <span>{task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}</span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
@@ -8184,14 +8187,16 @@ export default function DepartmentKanban() {
                                 </div>
                                 <div className="sm:px-3">
                                   <div className="flex items-center gap-2 flex-wrap">
-                                    <div className={`font-medium text-[12px] ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                      {t.title}
+                                      <div className={`font-medium text-[12px] ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                          {t.ga_note_origin_id ? renderMarkedNoteContent(t.title, t.title) : t.title}
+                                      </div>
                                     </div>
+                                    {t.description ? (
+                                      <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">
+                                        {t.ga_note_origin_id ? renderMarkedNoteContent(t.description, t.description) : t.description}
+                                      </div>
+                                    ) : null}
                                   </div>
-                                  {t.description ? (
-                                    <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">{t.description}</div>
-                                  ) : null}
-                                </div>
                                 <div className="sm:px-3 flex items-start">
                                   {t.ga_note_origin_id ? (
                                     <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">

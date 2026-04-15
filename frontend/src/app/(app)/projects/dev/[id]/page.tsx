@@ -20,6 +20,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { ChevronDown, Eye } from "lucide-react"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { renderMarkedNoteContent } from "@/lib/note-markup"
 import type {
   ChecklistItem,
   GaNote,
@@ -2259,7 +2260,9 @@ export default function DevelopmentProjectPage() {
                         >
                           <div className="font-medium text-slate-800 flex items-center gap-2 flex-wrap min-w-0">
                             <span className="mr-2 text-xs font-semibold text-slate-400 shrink-0">{index + 1}.</span>
-                            <span className="min-w-0 flex-1">{task.title}</span>
+                            <span className="min-w-0 flex-1">
+                              {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                            </span>
                             <Badge
                               variant="secondary"
                               className={`text-xs ${
