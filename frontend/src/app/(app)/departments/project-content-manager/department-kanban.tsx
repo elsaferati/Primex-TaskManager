@@ -1313,6 +1313,8 @@ export default function DepartmentKanban() {
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTaskTitle, setEditTaskTitle] = React.useState("")
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
+  const [editTaskType, setEditTaskType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
+  const [editTaskStatus, setEditTaskStatus] = React.useState<string>("TODO")
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
@@ -4937,6 +4939,23 @@ export default function DepartmentKanban() {
     setEditingTaskId(task.id)
     setEditTaskTitle(task.title || "")
     setEditTaskDescription(task.description || "")
+    setEditTaskType(
+      task.is_bllok
+        ? "blocked"
+        : task.is_1h_report
+          ? "hourly"
+          : task.is_r1
+            ? "r1"
+            : task.is_personal
+              ? "personal"
+              : "normal"
+    )
+    const statusValue = (task.status || "").toUpperCase()
+    setEditTaskStatus(
+      ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
+        ? statusValue
+        : "TODO"
+    )
     setEditTaskStartDate(toDateInputValue(task.start_date))
     setEditTaskDueDate(toDateInputValue(task.due_date))
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
@@ -4951,6 +4970,8 @@ export default function DepartmentKanban() {
     setEditingTaskId(null)
     setEditTaskTitle("")
     setEditTaskDescription("")
+    setEditTaskType("normal")
+    setEditTaskStatus("TODO")
     setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
@@ -4971,6 +4992,11 @@ export default function DepartmentKanban() {
         body: JSON.stringify({
           title: editTaskTitle.trim(),
           description: editTaskDescription.trim() || null,
+          is_bllok: editTaskType === "blocked",
+          is_1h_report: editTaskType === "hourly",
+          is_r1: editTaskType === "r1",
+          is_personal: editTaskType === "personal",
+          status: editTaskStatus,
           start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
@@ -7705,6 +7731,41 @@ export default function DepartmentKanban() {
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
+                        <Label className="text-slate-700">Type</Label>
+                        <Select value={editTaskType} onValueChange={(value) => setEditTaskType(value as typeof editTaskType)}>
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {NO_PROJECT_TYPES.map((opt) => (
+                              <SelectItem key={opt.id} value={opt.id}>
+                                {opt.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <div className="text-xs text-slate-500">
+                          {NO_PROJECT_TYPES.find((opt) => opt.id === editTaskType)?.description}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Status</Label>
+                        <Select value={editTaskStatus} onValueChange={setEditTaskStatus}>
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="Select status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {reportStatusLabel(value)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
                         <Label className="text-slate-700">Finish by (optional)</Label>
                         <Select
                           value={editTaskFinishPeriod}
@@ -7896,7 +7957,7 @@ export default function DepartmentKanban() {
                   <div className="mt-2 flex flex-col max-h-[300px] overflow-y-auto">
                     {row.items.length ? (
                       <div className="flex flex-col gap-2">
-                        <div className="hidden sm:grid sm:gap-0 sm:divide-x sm:divide-slate-200 sm:grid-cols-[36px_minmax(0,2.2fr)_minmax(0,0.5fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.6fr)] px-2 py-1 border border-slate-200 rounded-md bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
+                        <div className="hidden sm:grid sm:gap-0 sm:divide-x sm:divide-slate-200 sm:grid-cols-[36px_minmax(0,3.2fr)_minmax(0,0.45fr)_minmax(0,0.75fr)_minmax(0,0.55fr)_minmax(0,0.45fr)_minmax(0,0.65fr)_minmax(0,0.65fr)_minmax(0,0.55fr)] px-2 py-1 border border-slate-200 rounded-md bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400 font-semibold">
                           <div className="sm:px-2 text-center">Nr</div>
                           <div className="sm:px-3">Title</div>
                           <div className="sm:px-3">GA</div>
@@ -7920,7 +7981,7 @@ export default function DepartmentKanban() {
                                 : `${row.borderClass} bg-white`
                                 }`}
                             >
-                              <div className="grid gap-2 sm:gap-0 sm:grid-cols-[36px_minmax(0,2.2fr)_minmax(0,0.5fr)_minmax(0,0.8fr)_minmax(0,0.6fr)_minmax(0,1fr)_minmax(0,0.7fr)_minmax(0,0.7fr)_minmax(0,0.6fr)] sm:divide-x sm:divide-slate-200">
+                              <div className="grid gap-2 sm:gap-0 sm:grid-cols-[36px_minmax(0,3.2fr)_minmax(0,0.45fr)_minmax(0,0.75fr)_minmax(0,0.55fr)_minmax(0,0.45fr)_minmax(0,0.65fr)_minmax(0,0.65fr)_minmax(0,0.55fr)] sm:divide-x sm:divide-slate-200">
                                 <div className="sm:px-2 text-center text-[11px] font-semibold text-slate-500">
                                   {index + 1}
                                 </div>

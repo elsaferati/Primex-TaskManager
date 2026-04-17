@@ -1739,6 +1739,7 @@ async def export_all_tasks_report_xlsx(
         "TITULLI",
         "PERSHKRIMI",
         "REGJ/PATH/CHECKLISTA/TRAINING/GROUP",
+        "STATUS",
         "USER",
     ]
     title_text = _safe_filename(payload.title or "ALL TASKS REPORT")
@@ -1783,6 +1784,7 @@ async def export_all_tasks_report_xlsx(
             (r.title or "-"),
             (r.description or ""),
             (r.details or ""),
+            (r.status or "-"),
             (r.userInitials or "-"),
         ]
         for col_idx, value in enumerate(values, start=1):
@@ -1807,7 +1809,8 @@ async def export_all_tasks_report_xlsx(
         9: 42,  # TITULLI
         10: 46, # PERSHKRIMI
         11: 46, # REGJ/PATH/CHECKLISTA/TRAINING/GROUP
-        12: 10, # USER
+        12: 14, # STATUS
+        13: 10, # USER
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)

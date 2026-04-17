@@ -40,9 +40,93 @@ type RowView = {
   canMarkDone: boolean
 }
 
+type FinanceExportRow = {
+  typeLabel: string
+  subtype: string
+  dateLabel: string
+  bzMe: string
+  kohaBz: string
+  department: string
+  period: string
+  title: string
+  description: string
+  details: string
+  status: string
+  userInitials: string
+}
+
 function userLabel(user?: User | null) {
   if (!user) return ""
   return user.full_name || user.username || user.email || ""
+}
+
+function initials(src: string) {
+  return src
+    .split(" ")
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("")
+}
+
+function parseFilenameFromDisposition(headerValue: string | null) {
+  if (!headerValue) return ""
+  const match =
+    /filename\*=(?:UTF-8'')?([^;]+)/i.exec(headerValue) || /filename=\"?([^\";]+)\"?/i.exec(headerValue)
+  if (!match) return ""
+  try {
+    return decodeURIComponent(match[1].trim().replace(/^\"|\"$/g, ""))
+  } catch {
+    return match[1].trim().replace(/^\"|\"$/g, "")
+  }
+}
+
+function parseInternalNotes(notes?: string | null) {
+  if (!notes) return {}
+  const values: Record<string, string> = {}
+  for (const raw of notes.split("\n")) {
+    if (!raw.includes(":")) continue
+    const [key, ...rest] = raw.split(":")
+    const value = rest.join(":").trim()
+    const normalizedKey = (key || "").trim().toUpperCase()
+    if (!normalizedKey || !value) continue
+    values[normalizedKey] = value
+  }
+  return values
+}
+
+function formatInternalDetails(notes?: string | null) {
+  const values = parseInternalNotes(notes)
+  const regj = values["REGJ"] || "-"
+  const path = values["PATH"] || "-"
+  const check = values["CHECKLISTA"] || values["CHECK"] || "-"
+  const training = values["TRAINING"] || "-"
+  const bzGroup = values["BZ GROUP"] || "-"
+  if ([regj, path, check, training, bzGroup].every((value) => value === "-")) {
+    return ""
+  }
+  return [
+    `1.REGJ: ${regj}`,
+    `2.PATH: ${path}`,
+    `3.CHECKLISTA: ${check}`,
+    `4.TRAINING: ${training}`,
+    `5.BZ GROUP: ${bzGroup}`,
+  ].join("\n")
+}
+
+function resolvePeriod(finishPeriod?: Task["finish_period"] | null) {
+  if (finishPeriod === "PM") return "PM"
+  if (finishPeriod === "AM") return "AM"
+  return "AM/PM"
+}
+
+function fastReportSubtypeShort(task: Task) {
+  if (task.is_bllok) return "BLL"
+  if (task.is_1h_report) return "1H"
+  if (task.is_r1) return "R1"
+  if (task.is_personal) return "P:"
+  if (task.ga_note_origin_id) return "GA"
+  return "N"
 }
 
 function isoOrEmpty(value?: string | null) {
@@ -132,6 +216,7 @@ export default function DepartmentKanban() {
   const [dateTo, setDateTo] = React.useState("")
   const [showDone, setShowDone] = React.useState(false)
   const [updatingTaskIds, setUpdatingTaskIds] = React.useState<Record<string, boolean>>({})
+  const [exportingExcel, setExportingExcel] = React.useState(false)
   const [editingTask, setEditingTask] = React.useState<Task | null>(null)
   const todayIso = React.useMemo(() => toDateInputValue(new Date()), [])
 
@@ -288,6 +373,45 @@ export default function DepartmentKanban() {
     return userLabel(selectedUser) || selectedUser?.email || "Selected user"
   }, [selectedUserId, users])
 
+  const financeExportRows = React.useMemo<FinanceExportRow[]>(() => {
+    const departmentLabel = department?.code || department?.name || "FIN"
+    return filteredRows.map((row) => {
+      const task = row.task
+      const alignmentInitials = (task.alignment_user_ids || [])
+        .map((id) => {
+          const entry = usersById.get(id)
+          return entry ? initials(userLabel(entry)) : ""
+        })
+        .filter(Boolean)
+        .join(", ")
+
+      const assigneeInitials = Array.from(new Set(row.assigneeIds))
+        .map((id) => {
+          const entry = usersById.get(id)
+          if (entry) return initials(userLabel(entry))
+          const fallback = task.assignees?.find((assignee) => assignee.id === id)
+          return fallback ? initials(fallback.full_name || fallback.username || fallback.email || "") : ""
+        })
+        .filter(Boolean)
+        .join(", ")
+
+      return {
+        typeLabel: task.system_template_origin_id ? "SYS" : task.project_id ? "PRJK" : "FT",
+        subtype: task.system_template_origin_id ? "SYS" : task.project_id ? "-" : fastReportSubtypeShort(task),
+        dateLabel: row.dueDateIso ? formatDateDMY(row.dueDateIso) : row.startDateIso ? formatDateDMY(row.startDateIso) : "-",
+        bzMe: alignmentInitials,
+        kohaBz: "-",
+        department: departmentLabel,
+        period: resolvePeriod(task.finish_period),
+        title: task.title || "-",
+        description: task.description || "",
+        details: formatInternalDetails(task.internal_notes),
+        status: row.status,
+        userInitials: assigneeInitials,
+      }
+    })
+  }, [department?.code, department?.name, filteredRows, usersById])
+
   const handleTaskUpdated = React.useCallback((updatedTask: Task) => {
     setTasks((prev) => prev.map((task) => (task.id === updatedTask.id ? updatedTask : task)))
   }, [])
@@ -330,6 +454,56 @@ export default function DepartmentKanban() {
     },
     [apiFetch]
   )
+
+  const handleExportExcel = React.useCallback(async () => {
+    if (exportingExcel || !financeExportRows.length) return
+    setExportingExcel(true)
+    try {
+      const usersInitials = Array.from(
+        new Set(
+          financeExportRows
+            .map((row) => row.userInitials.trim().toUpperCase())
+            .filter(Boolean)
+        )
+      ).sort().join("_")
+
+      const res = await apiFetch(`/exports/all-tasks-report.xlsx`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          title: "ALL FINANCE TASK REPORT",
+          usersInitials,
+          rows: financeExportRows,
+        }),
+      })
+
+      if (!res.ok) {
+        let detail = "Failed to export Finance tasks."
+        try {
+          detail = (await res.text()) || detail
+        } catch {
+          // Ignore body parse errors for export failures.
+        }
+        throw new Error(detail)
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = parseFilenameFromDisposition(res.headers.get("content-disposition")) || "ALL_FINANCE_TASK_REPORT.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (exportError) {
+      const message = exportError instanceof Error ? exportError.message : "Failed to export Finance tasks."
+      console.error("Failed to export Finance tasks", exportError)
+      toast.error(message)
+    } finally {
+      setExportingExcel(false)
+    }
+  }, [apiFetch, exportingExcel, financeExportRows])
 
   return (
     <div className="space-y-6">
@@ -394,6 +568,13 @@ export default function DepartmentKanban() {
               {filteredRows.length} rows for {selectedUserLabel}
             </CardDescription>
           </div>
+          <Button
+            variant="outline"
+            onClick={() => void handleExportExcel()}
+            disabled={loading || !!error || !financeExportRows.length || exportingExcel}
+          >
+            {exportingExcel ? "Exporting..." : "Export Excel"}
+          </Button>
         </CardHeader>
         <CardContent>
           {loading ? (

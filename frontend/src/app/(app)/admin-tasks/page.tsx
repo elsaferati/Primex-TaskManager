@@ -2712,6 +2712,7 @@ export default function AdminTasksPage() {
           title: row.title,
           description: row.description,
           details: row.details,
+          status: row.status,
           userInitials: row.userInitials || "",
         }
       })
