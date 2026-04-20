@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/lib/auth"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { formatDateDMY, formatDateTimeDMY, toDateInputValue } from "@/lib/dates"
+import { cn } from "@/lib/utils"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
@@ -1007,6 +1008,7 @@ export default function AdminTasksPage() {
   const [gaTimeDrafts, setGaTimeDrafts] = React.useState<Record<string, string>>({})
   const [gaTimeAddingCell, setGaTimeAddingCell] = React.useState<string | null>(null)
   const [gaTimeAddDrafts, setGaTimeAddDrafts] = React.useState<Record<string, string>>({})
+  const [secondarySectionsReady, setSecondarySectionsReady] = React.useState(false)
   const confirmerCandidates = React.useMemo(
     () => getConfirmerCandidates(users as UserLookup[]),
     [users]
@@ -1028,6 +1030,14 @@ export default function AdminTasksPage() {
     setPrintTarget(target)
     window.setTimeout(() => window.print(), 80)
   }, [])
+
+  React.useEffect(() => {
+    if (loadingTasks || secondarySectionsReady) return
+    const timeoutId = window.setTimeout(() => {
+      setSecondarySectionsReady(true)
+    }, 0)
+    return () => window.clearTimeout(timeoutId)
+  }, [loadingTasks, secondarySectionsReady])
 
   const commonDepartmentsById = React.useMemo(
     () => new Map(commonDepartments.map((d) => [d.id, d])),
@@ -1113,6 +1123,7 @@ export default function AdminTasksPage() {
   )
 
   React.useEffect(() => {
+    if (!secondarySectionsReady) return
     let mounted = true
     async function loadCommonWeek() {
       setCommonLoading(true)
@@ -1184,7 +1195,7 @@ export default function AdminTasksPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, commonWeekStart])
+  }, [apiFetch, commonWeekStart, secondarySectionsReady])
 
   const isAdmin = user?.role === "ADMIN"
   const ganeUser = React.useMemo(
@@ -1246,6 +1257,7 @@ export default function AdminTasksPage() {
   }, [fastTaskAssignees, users])
 
   React.useEffect(() => {
+    if (!secondarySectionsReady) return
     let mounted = true
     async function loadGaTimeSlots() {
       setGaTimeLoading(true)
@@ -1270,9 +1282,10 @@ export default function AdminTasksPage() {
     return () => {
       mounted = false
     }
-  }, [apiFetch, commonWeekStart])
+  }, [apiFetch, commonWeekStart, secondarySectionsReady])
 
   React.useEffect(() => {
+    if (!secondarySectionsReady) return
     let mounted = true
     async function loadGaSystemByDay() {
       if (!ganeUserId) {
@@ -1313,7 +1326,7 @@ export default function AdminTasksPage() {
     return () => {
       mounted = false
     }
-  }, [adminDepartmentId, apiFetch, commonWeekISOs, ganeUserId])
+  }, [adminDepartmentId, apiFetch, commonWeekISOs, ganeUserId, secondarySectionsReady])
 
   const loadDailyReport = React.useCallback(async () => {
     if (!user?.id) return
@@ -1809,6 +1822,10 @@ export default function AdminTasksPage() {
   const regularNonConfirmationRows = React.useMemo(
     () => regularAllTasksRows.filter((row) => !row.needsGaneConfirmation),
     [regularAllTasksRows]
+  )
+  const combinedNonConfirmationRows = React.useMemo(
+    () => [...highlightedAllTasksRows, ...regularNonConfirmationRows],
+    [highlightedAllTasksRows, regularNonConfirmationRows]
   )
 
   const dailyUserReportRows = React.useMemo(() => {
@@ -2950,21 +2967,25 @@ export default function AdminTasksPage() {
     description,
     actions,
     children,
+    headerClassName,
+    contentClassName,
   }: {
     title: string
     description?: string
     actions?: React.ReactNode
     children?: React.ReactNode
+    headerClassName?: string
+    contentClassName?: string
   }) => (
     <Card className={sectionCardClass}>
-      <CardHeader className={sectionHeaderClass}>
+      <CardHeader className={cn(sectionHeaderClass, headerClassName)}>
         <div>
           <CardTitle className="text-base font-semibold text-slate-900">{title}</CardTitle>
           {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </CardHeader>
-      {children ? <CardContent>{children}</CardContent> : null}
+      {children ? <CardContent className={contentClassName}>{children}</CardContent> : null}
     </Card>
   )
 
@@ -3821,19 +3842,15 @@ export default function AdminTasksPage() {
 
     const renderAllTasksTable = (
       rows: typeof filteredAllTasksRows,
-      options?: { accent?: boolean; emptyLabel?: string; showBzColumns?: boolean }
+      options?: { accent?: boolean; emptyLabel?: string }
     ) => {
-      const showBzColumns = options?.showBzColumns ?? true
       const headers = [
         "NR",
         "LL",
-        "NLL",
-        "ASSIGNED",
-        "START DATE",
         "DATE",
         "AM/PM",
         "TITLE",
-        ...(showBzColumns ? ["BZ", "KOHA BZ"] : []),
+        "KOHA BZ",
         "STATUS",
         "PRIORITY",
         "KOMENT",
@@ -3842,15 +3859,35 @@ export default function AdminTasksPage() {
       return (
       <Table
         containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-        className="min-w-[1200px] text-[11px]"
+        className="min-w-[940px] text-[10px]"
       >
         <TableHeader>
           <TableRow className="bg-slate-50">
             {headers.map((label) => (
               <TableHead
                 key={label}
-                className={`text-[10px] font-semibold uppercase tracking-wide text-slate-500 ${
-                  label === "TITLE" ? "min-w-[360px]" : ""
+                className={`h-8 border-r border-slate-200 px-1.5 text-[10px] font-bold uppercase tracking-wide text-slate-600 last:border-r-0 ${
+                  label === "NR"
+                    ? "w-[26px] px-1 text-center"
+                    : label === "LL"
+                      ? "w-[30px] px-1 text-center"
+                      : label === "DATE"
+                        ? "w-[74px] px-1"
+                        : label === "AM/PM"
+                          ? "w-[54px]"
+                          : label === "TITLE"
+                            ? "min-w-[220px]"
+                            : label === "KOHA BZ"
+                              ? "w-[70px]"
+                              : label === "STATUS"
+                                ? "w-[86px]"
+                                : label === "PRIORITY"
+                                  ? "w-[70px]"
+                                  : label === "KOMENT"
+                                    ? "min-w-[120px]"
+                                    : label === "ACTIONS"
+                                      ? "w-[82px]"
+                                      : ""
                 }`}
               >
                 {label}
@@ -3878,13 +3915,10 @@ export default function AdminTasksPage() {
               const rowTask = tasks.find((task) => task.id === row.taskId) || null
               return (
                 <TableRow key={row.id}>
-                  <TableCell className="align-middle font-semibold text-slate-700">{index + 1}</TableCell>
-                  <TableCell className="align-middle font-semibold">{row.ll}</TableCell>
-                  <TableCell className="align-middle">{row.nll}</TableCell>
-                  <TableCell className="align-middle">{renderAssignedBadges(row.assigned)}</TableCell>
-                  <TableCell className="align-middle">{row.startDateLabel}</TableCell>
-                  <TableCell className="align-middle">
-                    <div className="flex flex-col gap-1">
+                  <TableCell className="w-[26px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold text-slate-700 last:border-r-0">{index + 1}</TableCell>
+                  <TableCell className="w-[30px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold last:border-r-0">{row.ll}</TableCell>
+                  <TableCell className="w-[74px] border-r border-slate-200 px-1 py-1 align-middle last:border-r-0">
+                    <div className="flex flex-col gap-0.5">
                       <span>{row.dateLabel}</span>
                       {row.isLateSystemTask ? (
                         <Badge variant="destructive" className="rounded-sm px-1.5 py-0 text-[10px] uppercase">
@@ -3893,25 +3927,24 @@ export default function AdminTasksPage() {
                       ) : null}
                     </div>
                   </TableCell>
-                  <TableCell className="align-middle">{row.period || "-"}</TableCell>
+                  <TableCell className="w-[54px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0">{row.period || "-"}</TableCell>
                   <TableCell
-                    className="min-w-[360px] align-middle whitespace-normal break-words font-medium text-slate-800"
+                    className="min-w-[220px] border-r border-slate-200 px-1.5 py-1 align-middle whitespace-normal break-words font-medium text-slate-800 last:border-r-0"
                     title={row.title}
                   >
                     {row.title}
                   </TableCell>
-                  {showBzColumns ? <TableCell className="align-middle">{row.bz}</TableCell> : null}
-                  {showBzColumns ? <TableCell className="align-middle">{row.kohaBz}</TableCell> : null}
-                  <TableCell className={`align-middle uppercase ${statusClass}`}>
+                  <TableCell className="w-[70px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0">{row.kohaBz}</TableCell>
+                  <TableCell className={`w-[86px] border-r border-slate-200 px-1.5 py-1 align-middle uppercase last:border-r-0 ${statusClass}`}>
                     {statusLabel}
                   </TableCell>
-                  <TableCell className="align-middle uppercase">{row.priority}</TableCell>
-                  <TableCell className="align-middle">
-                    <div className="flex items-center gap-2">
+                  <TableCell className="w-[70px] border-r border-slate-200 px-1.5 py-1 align-middle uppercase last:border-r-0">{row.priority}</TableCell>
+                  <TableCell className="min-w-[120px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0">
+                    <div className="flex items-center gap-1">
                       <input
                         type="text"
                         aria-label="Koment"
-                        className="h-4 w-full border-b border-slate-300 bg-transparent"
+                        className="h-4 w-full min-w-0 border-b border-slate-300 bg-transparent"
                         value={commentValue}
                         onChange={(e) => {
                           if (!commentKey) return
@@ -3926,13 +3959,13 @@ export default function AdminTasksPage() {
                       <span className="text-[10px] text-slate-400">{isSaving ? "Saving" : ""}</span>
                     </div>
                   </TableCell>
-                  <TableCell className="align-middle">
-                    <div className="flex items-center gap-2">
+                  <TableCell className="w-[82px] px-1.5 py-1 align-middle">
+                    <div className="flex items-center gap-1">
                       {canMarkDone ? (
                         <Button
                           variant="outline"
                           size="sm"
-                          className="h-7 text-xs"
+                          className="h-6 px-2 text-[10px]"
                           disabled={isUpdating}
                           onClick={() => void updateTaskStatus(row.taskId, "DONE")}
                         >
@@ -3945,7 +3978,7 @@ export default function AdminTasksPage() {
                         <Button
                           variant="outline"
                           size="icon"
-                          className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                          className="h-5 w-5 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
                           title={row.isFastTask ? "Edit task dates" : "Edit due date"}
                           aria-label={`Edit ${row.title}`}
                           onClick={() => startEditTask(rowTask)}
@@ -3972,6 +4005,112 @@ export default function AdminTasksPage() {
 
     return (
       <div className="admin-week-table">
+        <div className="print-section" data-print-section="all-tasks">
+          <AdminTasksSection
+            title="ALL TASKS"
+            description=""
+            headerClassName="px-3 sm:px-6"
+            contentClassName="px-3 sm:px-6"
+            actions={
+              <div className="flex items-center gap-2 print:hidden">
+                <Button variant="outline" size="sm" onClick={() => setFastTaskOpen(true)}>
+                  + Add Fast Task
+                </Button>
+                <Button variant="outline" size="sm" onClick={() => handleSectionPrint("all-tasks")}>
+                  Print
+                </Button>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void exportAllTasks()}
+                  disabled={exportingAllTasks}
+                >
+                  {exportingAllTasks ? "Exporting..." : "Export"}
+                </Button>
+              </div>
+            }
+          >
+          <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
+            <div>Total: {filteredAllTasksRows.length}</div>
+            <div className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 sm:hidden">
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={`h-8 w-fit px-3 ${allTasksDateFrom || allTasksDateTo ? "" : "border-blue-500 bg-blue-50 text-blue-700"}`}
+                onClick={() => {
+                  setAllTasksDateFrom("")
+                  setAllTasksDateTo("")
+                }}
+              >
+                All dates
+              </Button>
+              <span />
+              <span>From</span>
+              <Input
+                type="date"
+                className="h-8 w-full min-w-0 text-xs"
+                value={allTasksDateFrom || ""}
+                onChange={(event) => setAllTasksDateFrom(event.target.value)}
+              />
+              <span>To</span>
+              <Input
+                type="date"
+                className="h-8 w-full min-w-0 text-xs"
+                value={allTasksDateTo || ""}
+                onChange={(event) => setAllTasksDateTo(event.target.value)}
+              />
+            </div>
+            <div className="hidden sm:flex sm:items-center sm:gap-2">
+              <span>Date</span>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                className={`h-8 px-3 ${allTasksDateFrom || allTasksDateTo ? "" : "border-blue-500 bg-blue-50 text-blue-700"}`}
+                onClick={() => {
+                  setAllTasksDateFrom("")
+                  setAllTasksDateTo("")
+                }}
+              >
+                All
+              </Button>
+              <span>From</span>
+              <Input
+                type="date"
+                className="h-8 w-[160px] text-xs"
+                value={allTasksDateFrom || ""}
+                onChange={(event) => setAllTasksDateFrom(event.target.value)}
+              />
+              <span>To</span>
+              <Input
+                type="date"
+                className="h-8 w-[160px] text-xs"
+                value={allTasksDateTo || ""}
+                onChange={(event) => setAllTasksDateTo(event.target.value)}
+              />
+            </div>
+          </div>
+          <div className="mt-4">
+            {renderAllTasksTable(combinedNonConfirmationRows, {
+              emptyLabel: "No tasks available.",
+            })}
+          </div>
+          {waitingConfirmationRows.length ? (
+            <div className="mt-5">
+              <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
+                Waiting Confirmation For Gane
+              </div>
+              <div className="mt-1 text-xs text-slate-500">
+                
+              </div>
+              {renderAllTasksTable(waitingConfirmationRows, {
+                emptyLabel: "No waiting confirmation tasks.",
+              })}
+            </div>
+          ) : null}
+          </AdminTasksSection>
+        </div>
         <div className="print-section" data-print-section="common">
           <div className="print-only week-table-view">
             <div className="print-page">
@@ -4373,111 +4512,13 @@ export default function AdminTasksPage() {
           </AdminTasksSection>
           </div>
         </div>
-        <div className="print-section" data-print-section="all-tasks">
-          <AdminTasksSection
-            title="ALL TASKS"
-            description=""
-            actions={
-              <div className="flex items-center gap-2 print:hidden">
-                <Button variant="outline" size="sm" onClick={() => setFastTaskOpen(true)}>
-                  + Add Fast Task
-                </Button>
-                <Button variant="outline" size="sm" onClick={() => handleSectionPrint("all-tasks")}>
-                  Print
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => void exportAllTasks()}
-                  disabled={exportingAllTasks}
-                >
-                  {exportingAllTasks ? "Exporting..." : "Export"}
-                </Button>
-              </div>
-            }
-          >
-          <div className="flex flex-wrap items-center justify-between gap-3 text-xs text-slate-500">
-            <div>Total: {filteredAllTasksRows.length}</div>
-            <div className="flex items-center gap-2">
-              <span>Date</span>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className={allTasksDateFrom || allTasksDateTo ? "" : "border-blue-500 bg-blue-50 text-blue-700"}
-                onClick={() => {
-                  setAllTasksDateFrom("")
-                  setAllTasksDateTo("")
-                }}
-              >
-                All
-              </Button>
-              <span>From</span>
-              <Input
-                type="date"
-                className="h-8 w-[160px] text-xs"
-                value={allTasksDateFrom || ""}
-                onChange={(event) => setAllTasksDateFrom(event.target.value)}
-              />
-              <span>To</span>
-              <Input
-                type="date"
-                className="h-8 w-[160px] text-xs"
-                value={allTasksDateTo || ""}
-                onChange={(event) => setAllTasksDateTo(event.target.value)}
-              />
-            </div>
-          </div>
-          {highlightedAllTasksRows.length ? (
-            <div className="mt-4">
-              <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
-                System Tasks with BZ Gane
-              </div>
-              <div className="mt-1 text-xs text-slate-500">
-                
-              </div>
-              {renderAllTasksTable(highlightedAllTasksRows, {
-                emptyLabel: "No aligned system tasks.",
-              })}
-            </div>
-          ) : null}
-          {waitingConfirmationRows.length ? (
-            <div className={highlightedAllTasksRows.length ? "mt-5" : "mt-4"}>
-              <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
-                Waiting Confirmation For Gane
-              </div>
-              <div className="mt-1 text-xs text-slate-500">
-                
-              </div>
-              {renderAllTasksTable(waitingConfirmationRows, {
-                emptyLabel: "No waiting confirmation tasks.",
-                showBzColumns: false,
-              })}
-            </div>
-          ) : null}
-          <div className={highlightedAllTasksRows.length || waitingConfirmationRows.length ? "mt-5" : "mt-4"}>
-            <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
-              Fast Tasks
-            </div>
-            <div className="mt-1 text-xs text-slate-500">
-              
-            </div>
-            {renderAllTasksTable(regularNonConfirmationRows, {
-              emptyLabel:
-                highlightedAllTasksRows.length || waitingConfirmationRows.length
-                  ? "No other tasks available."
-                  : "No tasks available.",
-            })}
-          </div>
-          </AdminTasksSection>
-        </div>
       </div>
     )
   }
 
   return (
     <div className="bg-slate-50/30" data-print-target={printTarget || ""}>
-      <div className="mx-auto max-w-none space-y-6 px-16 py-4">
+      <div className="mx-auto max-w-none space-y-6 px-0 py-4 md:px-6 xl:px-16">
         <div className="space-y-8">
           <AdminCommonWeekTable />
         </div>

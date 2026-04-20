@@ -84,7 +84,7 @@ export default function DashboardPage() {
 
   return (
     <div className="space-y-6">
-      <div className="text-lg font-semibold">Dashboarddddd</div>
+      <div className="text-lg font-semibold">Dashboard</div>
 
       {/* Stats Cards */}
       <div className="grid gap-4 grid-cols-1 sm:grid-cols-2 lg:grid-cols-3">

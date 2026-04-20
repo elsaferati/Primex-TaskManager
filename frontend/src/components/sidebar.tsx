@@ -144,6 +144,8 @@ export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const { isOpen, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
+  const touchStartXRef = React.useRef<number | null>(null)
+  const touchStartYRef = React.useRef<number | null>(null)
   const projectRoute =
     pathname.startsWith("/projects/pcm") ? "pcm" : pathname.startsWith("/projects/design") ? "design" : pathname.startsWith("/projects/dev") ? "dev" : pathname.startsWith("/projects/") ? "dev" : null
 
@@ -151,6 +153,37 @@ export function Sidebar({ role }: { role: UserRole }) {
   React.useEffect(() => {
     setIsOpen(false)
   }, [pathname, setIsOpen])
+
+  const resetTouchState = React.useCallback(() => {
+    touchStartXRef.current = null
+    touchStartYRef.current = null
+  }, [])
+
+  const handleTouchStart = React.useCallback((event: React.TouchEvent<HTMLElement>) => {
+    const touch = event.touches[0]
+    if (!touch) return
+    touchStartXRef.current = touch.clientX
+    touchStartYRef.current = touch.clientY
+  }, [])
+
+  const handleTouchMove = React.useCallback((event: React.TouchEvent<HTMLElement>) => {
+    if (!isOpen) return
+
+    const startX = touchStartXRef.current
+    const startY = touchStartYRef.current
+    const touch = event.touches[0]
+
+    if (startX == null || startY == null || !touch) return
+
+    const deltaX = touch.clientX - startX
+    const deltaY = touch.clientY - startY
+    const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY) * 1.2
+
+    if (deltaX < -70 && isHorizontalSwipe) {
+      setIsOpen(false)
+      resetTouchState()
+    }
+  }, [isOpen, resetTouchState, setIsOpen])
 
   return (
     <>
@@ -163,11 +196,16 @@ export function Sidebar({ role }: { role: UserRole }) {
       )}
       
       <aside
+        onTouchStart={handleTouchStart}
+        onTouchMove={handleTouchMove}
+        onTouchEnd={resetTouchState}
+        onTouchCancel={resetTouchState}
         className={cn(
           "fixed md:sticky md:top-0 left-0 z-[110] md:z-50 w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen md:h-[100vh] print:hidden transition-transform duration-300 ease-in-out",
           "md:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
         )}
+        style={{ touchAction: "pan-y" }}
       >
         {/* Header / Logo Area */}
         <div className="flex h-16 items-center justify-between border-b px-6">
@@ -226,5 +264,4 @@ export function Sidebar({ role }: { role: UserRole }) {
     </>
   )
 }
-
 
