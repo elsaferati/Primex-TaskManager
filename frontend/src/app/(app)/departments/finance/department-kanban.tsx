@@ -28,6 +28,7 @@ type RowView = {
   task: Task
   id: string
   title: string
+  typeLabel: string
   assigneeIds: string[]
   assigneeLabel: string
   startDateIso: string
@@ -127,6 +128,12 @@ function fastReportSubtypeShort(task: Task) {
   if (task.is_personal) return "P:"
   if (task.ga_note_origin_id) return "GA"
   return "N"
+}
+
+function financeTaskTypeLabel(task: Task) {
+  if (task.system_template_origin_id || task.task_type === "system") return "SYS"
+  if (task.project_id) return "PRJK"
+  return fastReportSubtypeShort(task)
 }
 
 function isoOrEmpty(value?: string | null) {
@@ -294,6 +301,7 @@ export default function DepartmentKanban() {
           task,
           id: task.id,
           title: task.title || "-",
+          typeLabel: financeTaskTypeLabel(task),
           assigneeIds: assigneeInfo.ids,
           assigneeLabel: assigneeInfo.label,
           startDateIso: isoOrEmpty(task.start_date),
@@ -590,6 +598,7 @@ export default function DepartmentKanban() {
                   <TableRow className="bg-slate-50">
                     <TableHead>NR</TableHead>
                     <TableHead>Title</TableHead>
+                    <TableHead>Type</TableHead>
                     <TableHead>Assignee</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
@@ -606,6 +615,9 @@ export default function DepartmentKanban() {
                         <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                         <TableCell className="min-w-[320px] whitespace-normal font-medium text-slate-800">
                           {row.title}
+                        </TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{row.typeLabel}</Badge>
                         </TableCell>
                         <TableCell>{row.assigneeLabel}</TableCell>
                         <TableCell>{formatDateDMY(row.startDateIso)}</TableCell>
@@ -652,7 +664,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={9} className="py-8 text-center text-sm text-slate-500">
+                      <TableCell colSpan={10} className="py-8 text-center text-sm text-slate-500">
                         No Finance tasks match the selected filters.
                       </TableCell>
                     </TableRow>

@@ -269,11 +269,11 @@ function BoldOnlyEditor({ value, onChange }: BoldOnlyEditorProps) {
   )
 }
 
-function formatDate(value?: string | null) {
+function formatDateDayMonth(value?: string | null) {
   if (!value) return "-"
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return "-"
-  return date.toLocaleDateString(undefined, { year: "numeric", month: "short", day: "2-digit" })
+  return date.toLocaleDateString("en-GB", { month: "2-digit", day: "2-digit" })
 }
 
 function getMondayBasedDay(date: Date) {
@@ -1763,7 +1763,7 @@ export default function AdminTasksPage() {
         startDateIso,
         startDateLabel: startDateIso ? formatDateDMY(startDateIso) : "-",
         dateIso,
-        dateLabel: dateIso ? formatDateDMY(dateIso) : "-",
+        dateLabel: dateIso ? formatDateDayMonth(dateIso) : "-",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
         bz: hasTaskAlignment || hasTemplateAlignment ? "GA" : "-",
@@ -3904,7 +3904,7 @@ export default function AdminTasksPage() {
       return (
       <Table
         containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-        className="min-w-[940px] text-[10px]"
+        className="min-w-[760px] text-[10px] sm:min-w-[940px]"
       >
         <TableHeader>
           <TableRow className="bg-slate-50">
@@ -3917,13 +3917,13 @@ export default function AdminTasksPage() {
                     : label === "LL"
                       ? "w-[30px] px-1 text-center"
                       : label === "DATE"
-                        ? "w-[74px] px-1"
+                        ? "w-[42px] max-w-[42px] px-0.5 sm:w-[74px] sm:max-w-none sm:px-1"
                         : label === "AM/PM"
                           ? "w-[54px]"
                           : label === "TITLE"
-                            ? "min-w-[220px]"
+                            ? "min-w-[160px] sm:min-w-[220px]"
                             : label === "KOHA BZ"
-                              ? "w-[70px]"
+                              ? "hidden w-[70px] sm:table-cell"
                               : label === "STATUS"
                                 ? "w-[86px]"
                                 : label === "PRIORITY"
@@ -3962,11 +3962,14 @@ export default function AdminTasksPage() {
                 <TableRow key={row.id}>
                   <TableCell className="w-[26px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold text-slate-700 last:border-r-0">{index + 1}</TableCell>
                   <TableCell className="w-[30px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold last:border-r-0">{row.ll}</TableCell>
-                  <TableCell className="w-[74px] border-r border-slate-200 px-1 py-1 align-middle last:border-r-0">
-                    <div className="flex flex-col gap-0.5">
+                  <TableCell className="w-[42px] max-w-[42px] border-r border-slate-200 px-0.5 py-1 align-middle last:border-r-0 sm:w-[74px] sm:max-w-none sm:px-1">
+                    <div className="flex flex-col items-start gap-0.5 leading-none">
                       <span>{row.dateLabel}</span>
                       {row.isLateSystemTask ? (
-                        <Badge variant="destructive" className="rounded-sm px-1.5 py-0 text-[10px] uppercase">
+                        <Badge
+                          variant="destructive"
+                          className="w-fit rounded-sm px-1 py-0 text-[8px] uppercase leading-tight sm:px-1.5 sm:text-[10px]"
+                        >
                           {row.lateDays ? `Late ${row.lateDays}` : "Late"}
                         </Badge>
                       ) : null}
@@ -3974,12 +3977,21 @@ export default function AdminTasksPage() {
                   </TableCell>
                   <TableCell className="w-[54px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0">{row.period || "-"}</TableCell>
                   <TableCell
-                    className="min-w-[220px] border-r border-slate-200 px-1.5 py-1 align-middle whitespace-normal break-words font-medium text-slate-800 last:border-r-0"
+                    className="min-w-[160px] border-r border-slate-200 px-1.5 py-1 align-middle whitespace-normal break-words font-medium text-slate-800 last:border-r-0 sm:min-w-[220px]"
                     title={row.title}
                   >
-                    {row.title}
+                    <div className="flex items-start gap-1.5 sm:block">
+                      {row.kohaBz !== "-" ? (
+                        <span className="inline-flex shrink-0 rounded-sm bg-slate-100 px-1 py-0.5 text-[9px] font-semibold text-slate-600 sm:hidden">
+                          {row.kohaBz}
+                        </span>
+                      ) : null}
+                      <span>{row.title}</span>
+                    </div>
                   </TableCell>
-                  <TableCell className="w-[70px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0">{row.kohaBz}</TableCell>
+                  <TableCell className="hidden w-[70px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0 sm:table-cell">
+                    {row.kohaBz}
+                  </TableCell>
                   <TableCell className={`w-[86px] border-r border-slate-200 px-1.5 py-1 align-middle uppercase last:border-r-0 ${statusClass}`}>
                     {statusLabel}
                   </TableCell>

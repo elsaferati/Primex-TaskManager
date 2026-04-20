@@ -26,7 +26,30 @@ const TASK_STATUS_OPTIONS = [
   { value: "DONE", label: "Done" },
 ] as const
 
+const FAST_TASK_TYPES = [
+  { value: "N", label: "N (Normal)" },
+  { value: "BLL", label: "BLL (BLLOK)" },
+  { value: "R1", label: "R1" },
+  { value: "1H", label: "1H (1 Hour Report)" },
+  { value: "P:", label: "P: (Personal)" },
+] as const
+
 type TaskStatusValue = typeof TASK_STATUS_OPTIONS[number]["value"]
+type FastTaskTypeValue = typeof FAST_TASK_TYPES[number]["value"]
+
+function getCurrentFastTaskType(task: Task | null): FastTaskTypeValue {
+  if (!task) return "N"
+  if (task.is_bllok) return "BLL"
+  if (task.is_r1) return "R1"
+  if (task.is_1h_report) return "1H"
+  if (task.is_personal) return "P:"
+  return "N"
+}
+
+function isFastTask(task: Task | null) {
+  if (!task) return false
+  return task.project_id == null && task.dependency_task_id == null && task.system_template_origin_id == null
+}
 
 export function TaskEditDialog({
   task,
@@ -42,6 +65,7 @@ export function TaskEditDialog({
   const { apiFetch } = useAuth()
   const [title, setTitle] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<TaskStatusValue>("TODO")
+  const [fastTaskType, setFastTaskType] = React.useState<FastTaskTypeValue>("N")
   const [dueDate, setDueDate] = React.useState("")
   const [saving, setSaving] = React.useState(false)
 
@@ -49,6 +73,7 @@ export function TaskEditDialog({
     if (!task) return
     setTitle(task.title || "")
     setStatusValue((task.status as TaskStatusValue | undefined) || "TODO")
+    setFastTaskType(getCurrentFastTaskType(task))
     setDueDate(toDateInputValue(task.due_date))
   }, [task])
 
@@ -81,6 +106,7 @@ export function TaskEditDialog({
 
     setSaving(true)
     try {
+      const currentFastTaskType = getCurrentFastTaskType(task)
       const res = await apiFetch(`/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -88,6 +114,14 @@ export function TaskEditDialog({
           title: nextTitle,
           status: statusValue,
           due_date: dueDate || null,
+          ...(isFastTask(task) && fastTaskType !== currentFastTaskType
+            ? {
+                is_bllok: fastTaskType === "BLL",
+                is_r1: fastTaskType === "R1",
+                is_1h_report: fastTaskType === "1H",
+                is_personal: fastTaskType === "P:",
+              }
+            : {}),
         }),
       })
 
@@ -112,7 +146,7 @@ export function TaskEditDialog({
     } finally {
       setSaving(false)
     }
-  }, [apiFetch, dueDate, onOpenChange, onUpdated, statusValue, task, title])
+  }, [apiFetch, dueDate, fastTaskType, onOpenChange, onUpdated, statusValue, task, title])
 
   if (!task) return null
 
@@ -122,7 +156,7 @@ export function TaskEditDialog({
         <DialogHeader>
           <DialogTitle>Edit task</DialogTitle>
           <DialogDescription>
-            Update the title, status, and due date without leaving this table.
+            Update the title, type, status, and due date without leaving this table.
           </DialogDescription>
         </DialogHeader>
 
@@ -136,6 +170,24 @@ export function TaskEditDialog({
               disabled={saving}
             />
           </div>
+
+          {isFastTask(task) ? (
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select value={fastTaskType} onValueChange={(value) => setFastTaskType(value as FastTaskTypeValue)}>
+                <SelectTrigger disabled={saving}>
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {FAST_TASK_TYPES.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
 
           <div className="space-y-2">
             <Label>Status</Label>
