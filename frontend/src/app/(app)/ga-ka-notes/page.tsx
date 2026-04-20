@@ -1259,7 +1259,7 @@ export default function GaKaNotesPage() {
                   if (fallback) {
                     assignees = [{
                       id: fallback.id,
-                      email: fallback.email ?? null,
+                      email: null,
                       username: fallback.username || null,
                       full_name: fallback.full_name || null,
                       department_id: fallback.department_id || null,
@@ -1280,6 +1280,17 @@ export default function GaKaNotesPage() {
               }
               setNoteTaskInfo(map)
             }
+          } else {
+            let errorMessage = "Note updated, but linked task description could not be updated"
+            try {
+              const errorData = (await taskRes.json()) as { detail?: string }
+              if (errorData?.detail) {
+                errorMessage = `Note updated, but linked task description could not be updated: ${errorData.detail}`
+              }
+            } catch {
+              // Keep the generic fallback message.
+            }
+            toast.error(errorMessage)
           }
         }
         
@@ -1288,7 +1299,16 @@ export default function GaKaNotesPage() {
         setEditDoneRanges([])
         setEditAddedRanges([])
       } else {
-        toast.error("Failed to update note")
+        let errorMessage = "Failed to update note"
+        try {
+          const errorData = (await res.json()) as { detail?: string }
+          if (errorData?.detail) {
+            errorMessage = errorData.detail
+          }
+        } catch {
+          // Keep the generic fallback message.
+        }
+        toast.error(errorMessage)
       }
     } finally {
       setSavingEdit(false)
@@ -3338,6 +3358,12 @@ export default function GaKaNotesPage() {
               <p className="text-xs text-muted-foreground">
                 Select text and click mark done to toggle it, or place the cursor on a line to toggle the whole line.
               </p>
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground">Preview</Label>
+                <div className="min-h-[72px] whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-normal">
+                  {renderNoteContentWithRanges(editContent, editDoneRanges, editAddedRanges)}
+                </div>
+              </div>
             </div>
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
               <div className="space-y-2">
