@@ -1264,6 +1264,22 @@ export default function WeeklyPlannerPage() {
     return project.project_title || "Untitled project"
   }, [])
 
+  const getPlannerTaskDisplayTitle = React.useCallback(
+    (task: { ga_note_origin_id?: string | null; title?: string | null; task_title?: string | null }) => {
+      const rawTitle = task.task_title ?? task.title ?? ""
+      if (!task.ga_note_origin_id) return rawTitle
+      const cleanedTitle = rawTitle
+        .replace(/\[\[added\]\]/gi, "")
+        .replace(/\[\[\/added\]\]/gi, "")
+        .replace(/\[\/added\]\]/gi, "")
+        .replace(/\[\[added\]/gi, "")
+        .replace(/\[added\]\]/gi, "")
+        .trim()
+      return cleanedTitle || rawTitle
+    },
+    []
+  )
+
   const getFastTaskBadge = React.useCallback((task: {
     is_bllok?: boolean
     is_1h_report?: boolean
@@ -2211,7 +2227,7 @@ export default function WeeklyPlannerPage() {
             html += `<div style="font-size: 4pt; color: #1e40af;">`
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}${buildPrintNewBadge(task.created_at)}</div>`
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
             })
             html += `</div>`
           } else {
@@ -2240,7 +2256,7 @@ export default function WeeklyPlannerPage() {
             html += `<div style="font-size: 4pt; color: #0f172a;">`
             fastTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}`
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
               const badge = getFastTaskBadge(task)
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2293,7 +2309,7 @@ export default function WeeklyPlannerPage() {
               project.tasks.forEach((task, taskIndex) => {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
-                html += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
+                html += `<div class="task-item ${statusClass}">${taskNumber}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
                 const productLabel = formatTaskProducts(task, project, departmentName)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
@@ -2335,7 +2351,7 @@ export default function WeeklyPlannerPage() {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
-            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}`
+            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
             const badge = getFastTaskBadge(task)
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2374,7 +2390,7 @@ export default function WeeklyPlannerPage() {
             html += `<div style="font-size: 4pt; color: #1e40af;">`
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}${buildPrintNewBadge(task.created_at)}</div>`
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
             })
             html += `</div>`
           } else {
@@ -2403,7 +2419,7 @@ export default function WeeklyPlannerPage() {
             html += `<div style="font-size: 4pt; color: #0f172a;">`
             fastTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}`
+              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
               const badge = getFastTaskBadge(task)
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2449,7 +2465,7 @@ export default function WeeklyPlannerPage() {
               project.tasks.forEach((task, taskIndex) => {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
-                html += `<div class="task-item ${statusClass}">${taskNumber}. ${task.task_title}`
+                html += `<div class="task-item ${statusClass}">${taskNumber}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
                 const productLabel = formatTaskProducts(task, project, departmentName)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
@@ -2491,7 +2507,7 @@ export default function WeeklyPlannerPage() {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
-            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${task.title}`
+            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
             const badge = getFastTaskBadge(task)
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2596,6 +2612,7 @@ export default function WeeklyPlannerPage() {
     getFastTaskBadge,
     getBlockForSlot,
     getProjectDisplayTitle,
+    getPlannerTaskDisplayTitle,
     getStatusValueForDay,
     getTaskStatusBadge,
     isTaskNewForWeek,
@@ -3968,6 +3985,7 @@ export default function WeeklyPlannerPage() {
                                               const statusBadge = getTaskStatusBadge(task)
                                               const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                               const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
+                                              const displayTitle = getPlannerTaskDisplayTitle(task)
                                               return (
                                                 <div
                                                   key={task.task_id}
@@ -3978,11 +3996,11 @@ export default function WeeklyPlannerPage() {
                                               >
                                                   <button
                                                     type="button"
-                                                    onClick={() => openChecklistForTask(task.task_id, task.task_title)}
+                                                    onClick={() => openChecklistForTask(task.task_id, displayTitle)}
                                                     className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
-                                                    title={`${taskNumber}. ${task.task_title}`}
+                                                    title={`${taskNumber}. ${displayTitle}`}
                                                   >
-                                                    {taskNumber}. {task.task_title}
+                                                    {taskNumber}. {displayTitle}
                                                   </button>
                                                 <div className="flex shrink-0 items-center gap-1">
                                                   {isNewTask && (
@@ -4014,7 +4032,7 @@ export default function WeeklyPlannerPage() {
                                                     type="button"
                                                     onClick={(e) => {
                                                       e.stopPropagation()
-                                                      void deleteTask(task.task_id, task.task_title, timeSlot, dayDate, userId)
+                                                      void deleteTask(task.task_id, displayTitle, timeSlot, dayDate, userId)
                                                     }}
                                                     disabled={deletingTaskId === task.task_id}
                                                     className="opacity-0 group-hover/task:opacity-100 inline-flex h-3 w-3 items-center justify-center rounded text-red-500 transition-opacity hover:bg-red-100 dark:hover:bg-red-900/30"
@@ -4044,6 +4062,7 @@ export default function WeeklyPlannerPage() {
                                       {systemTasksList.map((task, idx) => {
                                         const statusBadge = getTaskStatusBadge(task)
                                         const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
+                                        const displayTitle = getPlannerTaskDisplayTitle(task)
                                         return (
                                           <div
                                             key={task.task_id || idx}
@@ -4052,8 +4071,8 @@ export default function WeeklyPlannerPage() {
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at),
                                           ].join(" ")}
                                         >
-                                            <span className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-slate-900" title={`${idx + 1}. ${task.title}`}>
-                                              {idx + 1}. {task.title}
+                                            <span className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-slate-900" title={`${idx + 1}. ${displayTitle}`}>
+                                              {idx + 1}. {displayTitle}
                                             </span>
                                           <div className="flex shrink-0 items-center gap-1">
                                             {isNewTask && (
@@ -4077,7 +4096,7 @@ export default function WeeklyPlannerPage() {
                                                 type="button"
                                                 onClick={(e) => {
                                                   e.stopPropagation()
-                                                  void deleteTask(task.task_id!, task.title, timeSlot, dayDate, userId)
+                                                  void deleteTask(task.task_id!, displayTitle, timeSlot, dayDate, userId)
                                                 }}
                                                 disabled={deletingTaskId === task.task_id}
                                                 className="opacity-0 group-hover/task:opacity-100 inline-flex h-3 w-3 items-center justify-center rounded text-red-500 transition-opacity hover:bg-red-100 dark:hover:bg-red-900/30"
@@ -4099,6 +4118,7 @@ export default function WeeklyPlannerPage() {
                                   {fastTasksList.map((task, idx) => {
                                     const statusBadge = getFastTaskBadge(task)
                                     const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
+                                    const displayTitle = getPlannerTaskDisplayTitle(task)
                                     return (
                                       <div
                                         key={task.task_id || idx}
@@ -4110,15 +4130,15 @@ export default function WeeklyPlannerPage() {
                                         {task.task_id ? (
                                           <button
                                             type="button"
-                                            onClick={() => openFastTaskDescription(task.task_id!, task.title)}
+                                            onClick={() => openFastTaskDescription(task.task_id!, displayTitle)}
                                             className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
-                                            title={`${idx + 1}. ${task.title}`}
+                                            title={`${idx + 1}. ${displayTitle}`}
                                           >
-                                            {idx + 1}. {task.title}
+                                            {idx + 1}. {displayTitle}
                                           </button>
                                         ) : (
-                                          <span className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-slate-900" title={`${idx + 1}. ${task.title}`}>
-                                            {idx + 1}. {task.title}
+                                          <span className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-slate-900" title={`${idx + 1}. ${displayTitle}`}>
+                                            {idx + 1}. {displayTitle}
                                           </span>
                                         )}
                                           <div className="flex shrink-0 items-center gap-1">
@@ -4143,7 +4163,7 @@ export default function WeeklyPlannerPage() {
                                                 type="button"
                                                 onClick={(e) => {
                                                   e.stopPropagation()
-                                                  void deleteTask(task.task_id!, task.title, timeSlot, dayDate, userId)
+                                                  void deleteTask(task.task_id!, displayTitle, timeSlot, dayDate, userId)
                                                 }}
                                                 disabled={deletingTaskId === task.task_id}
                                                 className="opacity-0 group-hover/task:opacity-100 inline-flex h-3 w-3 items-center justify-center rounded text-red-500 transition-opacity hover:bg-red-100 dark:hover:bg-red-900/30"

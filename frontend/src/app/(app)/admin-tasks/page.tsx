@@ -1719,6 +1719,8 @@ export default function AdminTasksPage() {
       showInSystemTasksSection?: boolean
       isLateSystemTask?: boolean
       lateDays?: number
+      isGaneAssigned?: boolean
+      isBzOnly?: boolean
     }> = []
 
     if (!ganeUserId) return rows
@@ -1726,29 +1728,33 @@ export default function AdminTasksPage() {
     for (const task of tasks) {
       if (task.is_active === false) continue
 
+      const isSystemTask = Boolean(task.system_template_origin_id || task.task_type === "system")
+      const systemTemplate = task.system_template_origin_id
+        ? systemTaskByTemplateId.get(task.system_template_origin_id)
+        : undefined
+      const hasTaskAlignment = Boolean(ganeUserId && task.alignment_user_ids?.includes(ganeUserId))
+      const hasTemplateAlignment = Boolean(
+        isSystemTask && ganeUserId && systemTemplate?.alignment_user_ids?.includes(ganeUserId)
+      )
       const isAssigned =
         task.assigned_to === ganeUserId ||
         task.assignees?.some((assignee) => assignee.id === ganeUserId) ||
-        task.alignment_user_ids?.includes(ganeUserId)
+        hasTaskAlignment
       const needsGaneConfirmation =
         task.status === "WAITING_CONFIRMATION" && task.confirmation_assignee_id === ganeUserId
-      if (!isAssigned && !needsGaneConfirmation) continue
 
       const startDateIso = toDateOnlyIso(task.start_date || task.due_date || null)
       const dueDateIso = getTaskDateIso(task)
       const dateIso = dueDateIso || startDateIso
       const statusValue = task.status || (task.completed_at ? "DONE" : "TODO")
-      const isSystemTask = Boolean(task.system_template_origin_id || task.task_type === "system")
-      const systemTemplate = task.system_template_origin_id
-        ? systemTaskByTemplateId.get(task.system_template_origin_id)
-        : undefined
-      const hasTemplateAlignment =
-        Boolean(isSystemTask && ganeUserId && systemTemplate?.alignment_user_ids?.includes(ganeUserId))
+      const hasGaneBzToday = (hasTaskAlignment || hasTemplateAlignment) && dateIso === todayIso
       const computedLateDays =
         statusValue !== "DONE" && dueDateIso && dueDateIso < todayIso
           ? Math.max(task.late_days ?? 0, dayDiffInclusive(dueDateIso, todayIso))
           : 0
-      const isLateSystemTask = Boolean(isSystemTask && isAssigned && computedLateDays > 0)
+      const isLateSystemTask = Boolean(isSystemTask && (isAssigned || hasTemplateAlignment) && computedLateDays > 0)
+      if (!isAssigned && !needsGaneConfirmation && !hasGaneBzToday) continue
+
       rows.push({
         id: `task:${task.id}`,
         ll: isSystemTask ? "SYS" : "FT",
@@ -1760,7 +1766,7 @@ export default function AdminTasksPage() {
         dateLabel: dateIso ? formatDateDMY(dateIso) : "-",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
-        bz: hasTemplateAlignment ? "BZ (TPL)" : "-",
+        bz: hasTaskAlignment || hasTemplateAlignment ? "GA" : "-",
         kohaBz: hasTemplateAlignment ? formatTimeLabel(systemTemplate?.alignment_time || "") || "TPL" : "-",
         status: statusValue,
         priority: getDisplayPriority(task),
@@ -1772,18 +1778,57 @@ export default function AdminTasksPage() {
         showInSystemTasksSection: hasTemplateAlignment || isLateSystemTask,
         isLateSystemTask,
         lateDays: computedLateDays,
+        isGaneAssigned: isAssigned,
+        isBzOnly: !isAssigned && !needsGaneConfirmation && hasGaneBzToday,
       })
     }
 
-    rows.sort((a, b) => {
+    const dedupedRows = new Map<string, (typeof rows)[number]>()
+    for (const row of rows) {
+      const dedupeKey = [
+        row.ll,
+        row.nll,
+        row.title.trim().toLowerCase(),
+        row.startDateIso || "-",
+        row.dateIso || "-",
+        row.period || "-",
+        row.kohaBz || "-",
+      ].join("|")
+      const existing = dedupedRows.get(dedupeKey)
+      if (!existing) {
+        dedupedRows.set(dedupeKey, row)
+        continue
+      }
+      dedupedRows.set(dedupeKey, {
+        ...existing,
+        assigned: existing.assigned.length >= row.assigned.length ? existing.assigned : row.assigned,
+        needsGaneConfirmation: Boolean(existing.needsGaneConfirmation || row.needsGaneConfirmation),
+        showInSystemTasksSection: Boolean(existing.showInSystemTasksSection || row.showInSystemTasksSection),
+        isLateSystemTask: Boolean(existing.isLateSystemTask || row.isLateSystemTask),
+        lateDays: Math.max(existing.lateDays ?? 0, row.lateDays ?? 0) || undefined,
+        isGaneAssigned: Boolean(existing.isGaneAssigned || row.isGaneAssigned),
+        isBzOnly: Boolean(existing.isBzOnly && row.isBzOnly),
+      })
+    }
+
+    const orderedRows = Array.from(dedupedRows.values())
+    orderedRows.sort((a, b) => {
       const aFast = Boolean(a.isFastTask)
       const bFast = Boolean(b.isFastTask)
       if (aFast !== bFast) return aFast ? 1 : -1
+      const aMinutes = parseTimeToMinutes(a.kohaBz)
+      const bMinutes = parseTimeToMinutes(b.kohaBz)
+      if (aMinutes !== null && bMinutes !== null && aMinutes !== bMinutes) return aMinutes - bMinutes
+      if (aMinutes !== null && bMinutes === null) return -1
+      if (aMinutes === null && bMinutes !== null) return 1
+      const aLate = a.isLateSystemTask ? 1 : 0
+      const bLate = b.isLateSystemTask ? 1 : 0
+      if (aLate !== bLate) return bLate - aLate
       if (a.dateIso !== b.dateIso) return b.dateIso.localeCompare(a.dateIso)
       return a.title.localeCompare(b.title)
     })
 
-    return rows
+    return orderedRows
   }, [
     tasks,
     ganeUserId,
@@ -3909,7 +3954,7 @@ export default function AdminTasksPage() {
               const previousValue = row.comment ?? ""
               const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
               const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
-              const canMarkDone = statusValue !== "DONE"
+              const canMarkDone = statusValue !== "DONE" && !row.isBzOnly
               const actionLabel =
                 row.needsGaneConfirmation && statusValue === "WAITING_CONFIRMATION" ? "Confirm" : "Done"
               const rowTask = tasks.find((task) => task.id === row.taskId) || null
@@ -3971,6 +4016,8 @@ export default function AdminTasksPage() {
                         >
                           {isUpdating ? "Updating..." : actionLabel}
                         </Button>
+                      ) : row.isBzOnly && statusValue !== "DONE" ? (
+                        <span className="text-[10px] text-amber-700">You&apos;re not assigned</span>
                       ) : (
                         <span className="text-xs text-emerald-700">Done</span>
                       )}
