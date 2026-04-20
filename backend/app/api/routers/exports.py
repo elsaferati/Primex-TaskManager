@@ -17,7 +17,7 @@ from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.units import inch
 from reportlab.pdfgen import canvas
-from sqlalchemy import and_, case, cast, func, or_, select, Date as SQLDate
+from sqlalchemy import and_, case, cast, false, func, or_, select, Date as SQLDate
 from sqlalchemy.orm import aliased
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
@@ -171,7 +171,9 @@ def _day_code(d: date) -> str:
 def _strip_html(value: str | None) -> str:
     if not value:
         return ""
-    return re.sub(r"<[^>]+>", "", value).strip()
+    text = re.sub(r"<[^>]+>", "", value)
+    text = re.sub(r"\[\[/?added\]\]", "", text, flags=re.IGNORECASE)
+    return text.strip()
 
 
 def _strip_html_keep_breaks(value: str | None) -> str:
@@ -181,6 +183,7 @@ def _strip_html_keep_breaks(value: str | None) -> str:
     text = re.sub(r"(?i)</p\s*>", "\n", text)
     text = re.sub(r"(?i)</div\s*>", "\n", text)
     text = re.sub(r"<[^>]+>", "", text)
+    text = re.sub(r"\[\[/?added\]\]", "", text, flags=re.IGNORECASE)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text.strip()
 
@@ -346,18 +349,19 @@ def _safe_sheet_title(label: str | None, fallback: str = "MEETING") -> str:
 
 
 def _fast_task_badge(task) -> str:
-    if task.is_bllok:
+    if getattr(task, "is_bllok", False):
         return "BLL"
-    if task.is_r1:
+    if getattr(task, "is_r1", False):
         return "R1"
-    if task.is_1h_report:
+    if getattr(task, "is_1h_report", False):
         return "1H"
-    if task.ga_note_origin_id:
+    if getattr(task, "ga_note_origin_id", None):
         return "GA"
-    if task.is_personal:
+    if getattr(task, "is_personal", False):
         return "P:"
-    if task.fast_task_type:
-        return task.fast_task_type
+    fast_task_type = getattr(task, "fast_task_type", None)
+    if fast_task_type:
+        return str(fast_task_type)
     return ""
 
 
@@ -374,6 +378,115 @@ def _apply_preview_limit(rows: list[list[str]], limit: int | None) -> tuple[list
     if not limit or limit <= 0 or total <= limit:
         return rows, total, False
     return rows[:limit], total, True
+
+
+def _normalize_fast_task_kind(value: str | None) -> str | None:
+    normalized = (value or "").strip().lower()
+    if not normalized or normalized == "all":
+        return None
+    aliases = {
+        "block": "bllok",
+        "bll": "bllok",
+        "personal": "p",
+    }
+    return aliases.get(normalized, normalized)
+
+
+def _fast_task_kind_condition(kind: str):
+    if kind == "fast":
+        return and_(
+            Task.is_bllok.is_(False),
+            Task.is_1h_report.is_(False),
+            Task.is_personal.is_(False),
+            Task.is_r1.is_(False),
+        )
+    if kind == "1h":
+        return Task.is_1h_report.is_(True)
+    if kind == "p":
+        return Task.is_personal.is_(True)
+    if kind == "r1":
+        return Task.is_r1.is_(True)
+    if kind == "bllok":
+        return Task.is_bllok.is_(True)
+    return None
+
+
+def _apply_fast_task_kind_filter(
+    stmt,
+    fast_task_kind: str | None = None,
+    fast_task_kinds: list[str] | None = None,
+):
+    normalized_kinds: list[str] = []
+    for raw_value in (fast_task_kinds or []):
+        normalized = _normalize_fast_task_kind(raw_value)
+        if normalized and normalized not in normalized_kinds:
+            normalized_kinds.append(normalized)
+
+    if not normalized_kinds:
+        normalized = _normalize_fast_task_kind(fast_task_kind)
+        if normalized == "__none__":
+            return stmt.where(false())
+        if normalized:
+            normalized_kinds.append(normalized)
+
+    conditions = [condition for kind in normalized_kinds if (condition := _fast_task_kind_condition(kind)) is not None]
+    if conditions:
+        return stmt.where(or_(*conditions))
+    return stmt
+
+
+def _apply_fast_task_date_filter(
+    stmt,
+    planned_from: date | None = None,
+    planned_to: date | None = None,
+):
+    range_start = planned_from or planned_to
+    range_end = planned_to or planned_from
+    if range_start is None or range_end is None:
+        return stmt
+
+    planned_expr = cast(Task.planned_for, SQLDate) if hasattr(Task, "planned_for") else None
+    start_expr = cast(Task.start_date, SQLDate) if hasattr(Task, "start_date") else None
+    due_expr = cast(Task.due_date, SQLDate) if hasattr(Task, "due_date") else None
+    created_expr = cast(Task.created_at, SQLDate) if hasattr(Task, "created_at") else None
+
+    branches = []
+    planned_missing_condition = None
+    if planned_expr is not None:
+        planned_column = Task.planned_for
+        planned_missing_condition = planned_column.is_(None)
+        branches.append(
+            and_(
+                planned_column.is_not(None),
+                planned_expr >= range_start,
+                planned_expr <= range_end,
+            )
+        )
+
+    if start_expr is not None and due_expr is not None:
+        span_branch_conditions = [
+            start_expr.is_not(None),
+            due_expr.is_not(None),
+            func.least(start_expr, due_expr) <= range_end,
+            func.greatest(start_expr, due_expr) >= range_start,
+        ]
+        if planned_missing_condition is not None:
+            span_branch_conditions.insert(0, planned_missing_condition)
+        branches.append(and_(*span_branch_conditions))
+
+    fallback_exprs = [expr for expr in (due_expr, start_expr, created_expr) if expr is not None]
+    if fallback_exprs:
+        fallback_expr = fallback_exprs[0] if len(fallback_exprs) == 1 else func.coalesce(*fallback_exprs)
+        fallback_branch_conditions = [fallback_expr >= range_start, fallback_expr <= range_end]
+        if planned_missing_condition is not None:
+            fallback_branch_conditions.insert(0, planned_missing_condition)
+        if start_expr is not None and due_expr is not None:
+            fallback_branch_conditions.insert(1 if planned_missing_condition is not None else 0, or_(start_expr.is_(None), due_expr.is_(None)))
+        branches.append(and_(*fallback_branch_conditions))
+
+    if branches:
+        return stmt.where(or_(*branches))
+    return stmt
 
 
 def _is_new_for_week(created_at: datetime | None, week_start_date: date) -> bool:
@@ -1368,6 +1481,8 @@ async def export_fast_tasks_xlsx(
     department_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
     status_id: uuid.UUID | None = None,
+    fast_task_kind: str | None = None,
+    fast_task_kinds: list[str] | None = Query(default=None),
     planned_from: date | None = None,
     planned_to: date | None = None,
     db: AsyncSession = Depends(get_db),
@@ -1402,10 +1517,6 @@ async def export_fast_tasks_xlsx(
                 Task.fast_task_group_id.is_not(None),
             )
         )
-        .where(Task.system_template_origin_id.is_(None))
-        .where(Task.project_id.is_(None))
-        .where(Task.internal_notes.is_(None))
-        .where(Task.status != "DONE")
     )
 
     if not is_admin:
@@ -1422,10 +1533,8 @@ async def export_fast_tasks_xlsx(
         stmt = stmt.where(Task.assigned_to == user_id)
     if status_name:
         stmt = stmt.where(Task.status == status_name)
-    if planned_from:
-        stmt = stmt.where(func.date(Task.start_date) >= planned_from)
-    if planned_to:
-        stmt = stmt.where(func.date(Task.start_date) <= planned_to)
+    stmt = _apply_fast_task_kind_filter(stmt, fast_task_kind, fast_task_kinds)
+    stmt = _apply_fast_task_date_filter(stmt, planned_from, planned_to)
 
     sort_key = case(
         (Task.is_bllok.is_(True), 1),
@@ -1440,6 +1549,7 @@ async def export_fast_tasks_xlsx(
 
     headers = [
         "NR",
+        "TYPE",
         "TITLE",
         "DESCRIPTION",
         "DEP",
@@ -1448,7 +1558,6 @@ async def export_fast_tasks_xlsx(
         "GA NOTE ORIGIN",
         "STATUS",
         "PRIORITY",
-        "CREATION DATE",
         "START DATE",
         "DUE DATE",
     ]
@@ -1489,9 +1598,11 @@ async def export_fast_tasks_xlsx(
     }
 
     for idx, (task, department, assigned, created) in enumerate(rows, start=1):
+        fast_task_type = _fast_task_badge(task).rstrip(":")
         values = [
             idx,
-            task.title or "",
+            fast_task_type,
+            _strip_html(task.title) or "",
             _strip_html(task.description) or "",
             (department.code if department else ""),
             _initials_compact((assigned.full_name or assigned.username) if assigned else ""),
@@ -1499,7 +1610,6 @@ async def export_fast_tasks_xlsx(
             "Yes" if task.ga_note_origin_id else "No",
             task.status or "",
             (task.priority or "").upper(),
-            _format_excel_datetime(task.created_at),
             _format_excel_datetime(task.start_date),
             _format_excel_datetime(task.due_date),
         ]
@@ -1508,7 +1618,7 @@ async def export_fast_tasks_xlsx(
             cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
             if col_idx == 1:
                 cell.font = Font(bold=True)
-            if col_idx == 8:
+            if col_idx == 9:
                 normalized_status = (str(value) if value is not None else "").upper().replace(" ", "_")
                 fill = status_fills.get(normalized_status)
                 if fill:
@@ -1519,15 +1629,15 @@ async def export_fast_tasks_xlsx(
 
     widths = {
         1: 5,    # NR
-        2: 36,   # TITLE
-        3: 44,   # DESCRIPTION
-        4: 8,    # DEP
-        5: 6,    # PUNOI
-        6: 8,    # CREATED BY
-        7: 12,   # GA NOTE ORIGIN
-        8: 12,   # STATUS
-        9: 10,   # PRIORITY
-        10: 16,  # CREATION DATE
+        2: 8,    # TYPE
+        3: 36,   # TITLE
+        4: 44,   # DESCRIPTION
+        5: 8,    # DEP
+        6: 6,    # PUNOI
+        7: 8,    # CREATED BY
+        8: 12,   # GA NOTE ORIGIN
+        9: 12,   # STATUS
+        10: 10,  # PRIORITY
         11: 14,  # START DATE
         12: 14,  # DUE DATE
     }
@@ -1602,6 +1712,8 @@ async def preview_fast_tasks(
     department_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
     status_id: uuid.UUID | None = None,
+    fast_task_kind: str | None = None,
+    fast_task_kinds: list[str] | None = Query(default=None),
     planned_from: date | None = None,
     planned_to: date | None = None,
     limit: int | None = 200,
@@ -1637,10 +1749,6 @@ async def preview_fast_tasks(
                 Task.fast_task_group_id.is_not(None),
             )
         )
-        .where(Task.system_template_origin_id.is_(None))
-        .where(Task.project_id.is_(None))
-        .where(Task.internal_notes.is_(None))
-        .where(Task.status != "DONE")
     )
 
     if not is_admin:
@@ -1671,10 +1779,8 @@ async def preview_fast_tasks(
         stmt = stmt.where(Task.assigned_to == user_id)
     if status_name:
         stmt = stmt.where(Task.status == status_name)
-    if planned_from:
-        stmt = stmt.where(func.date(Task.start_date) >= planned_from)
-    if planned_to:
-        stmt = stmt.where(func.date(Task.start_date) <= planned_to)
+    stmt = _apply_fast_task_kind_filter(stmt, fast_task_kind, fast_task_kinds)
+    stmt = _apply_fast_task_date_filter(stmt, planned_from, planned_to)
 
     sort_key = case(
         (Task.is_bllok.is_(True), 1),

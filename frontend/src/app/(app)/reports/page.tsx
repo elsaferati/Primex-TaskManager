@@ -4,6 +4,7 @@ import * as React from "react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -13,6 +14,18 @@ import type { Department, Project, TaskStatus, User } from "@/lib/types"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 
 type PreviewType = "fast" | "system" | "project"
+type FastTaskKind = "fast" | "1h" | "p" | "r1" | "bllok"
+
+const FAST_TASK_KIND_OPTIONS: Array<{ value: FastTaskKind; label: string }> = [
+  { value: "fast", label: "Fast" },
+  { value: "1h", label: "1H" },
+  { value: "p", label: "P" },
+  { value: "r1", label: "R1" },
+  { value: "bllok", label: "BLL" },
+]
+
+const ALL_FAST_TASK_KINDS = FAST_TASK_KIND_OPTIONS.map((option) => option.value)
+const REPORT_BUNDLE_FAST_TASK_KINDS: FastTaskKind[] = ["1h", "r1", "p", "bllok"]
 
 type PreviewResponse = {
   headers: string[]
@@ -36,6 +49,7 @@ export default function ReportsPage() {
   const [userId, setUserId] = React.useState(ALL_USERS_VALUE)
   const [projectId, setProjectId] = React.useState(ALL_PROJECTS_VALUE)
   const [statusId, setStatusId] = React.useState(ALL_STATUSES_VALUE)
+  const [selectedFastTaskKinds, setSelectedFastTaskKinds] = React.useState<FastTaskKind[]>(ALL_FAST_TASK_KINDS)
   const [plannedFrom, setPlannedFrom] = React.useState("")
   const [plannedTo, setPlannedTo] = React.useState("")
   const [previewType, setPreviewType] = React.useState<PreviewType>("fast")
@@ -86,8 +100,24 @@ export default function ReportsPage() {
     if (user) void boot()
   }, [apiFetch, user])
 
+  const allFastTaskKindsSelected = selectedFastTaskKinds.length === ALL_FAST_TASK_KINDS.length
+
+  const toggleFastTaskKind = React.useCallback((kind: FastTaskKind, checked: boolean) => {
+    setSelectedFastTaskKinds((current) => {
+      if (checked) {
+        if (current.includes(kind)) return current
+        return [...current, kind]
+      }
+      return current.filter((value) => value !== kind)
+    })
+  }, [])
+
+  const toggleAllFastTaskKinds = React.useCallback((checked: boolean) => {
+    setSelectedFastTaskKinds(checked ? ALL_FAST_TASK_KINDS : [])
+  }, [ALL_FAST_TASK_KINDS])
+
   const buildReportParams = React.useCallback(
-    (options: { includeProject?: boolean } = {}) => {
+    (options: { includeProject?: boolean; includeFastTaskKind?: boolean } = {}) => {
       const qs = new URLSearchParams()
       if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
         qs.set("department_id", departmentId)
@@ -99,6 +129,13 @@ export default function ReportsPage() {
       if (options.includeProject && projectId && projectId !== ALL_PROJECTS_VALUE) {
         qs.set("project_id", projectId)
       }
+      if (options.includeFastTaskKind) {
+        if (selectedFastTaskKinds.length === 0) {
+          qs.set("fast_task_kind", "__none__")
+        } else if (selectedFastTaskKinds.length !== ALL_FAST_TASK_KINDS.length) {
+          selectedFastTaskKinds.forEach((kind) => qs.append("fast_task_kinds", kind))
+        }
+      }
       if (plannedFrom) qs.set("planned_from", plannedFrom)
       if (plannedTo) qs.set("planned_to", plannedTo)
       return qs
@@ -108,10 +145,12 @@ export default function ReportsPage() {
       plannedFrom,
       plannedTo,
       projectId,
+      selectedFastTaskKinds,
       statusId,
       user,
       userId,
       ALL_DEPARTMENTS_VALUE,
+      ALL_FAST_TASK_KINDS.length,
       ALL_USERS_VALUE,
       ALL_PROJECTS_VALUE,
       ALL_STATUSES_VALUE,
@@ -119,7 +158,7 @@ export default function ReportsPage() {
   )
 
   const downloadFastTasks = async () => {
-    const qs = buildReportParams()
+    const qs = buildReportParams({ includeFastTaskKind: true })
     const res = await apiFetch(`/exports/fast-tasks.xlsx?${qs.toString()}`)
     if (!res.ok) return
     const blob = await res.blob()
@@ -128,6 +167,24 @@ export default function ReportsPage() {
     a.href = url
     const downloadName =
       getFilenameFromDisposition(res.headers.get("content-disposition")) ?? "FAST_TASKS.xlsx"
+    a.download = downloadName
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+  }
+
+  const downloadBundleFastTasks = async () => {
+    const qs = buildReportParams()
+    REPORT_BUNDLE_FAST_TASK_KINDS.forEach((kind) => qs.append("fast_task_kinds", kind))
+    const res = await apiFetch(`/exports/fast-tasks.xlsx?${qs.toString()}`)
+    if (!res.ok) return
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement("a")
+    a.href = url
+    const downloadName =
+      getFilenameFromDisposition(res.headers.get("content-disposition")) ?? "FAST_TASKS_1H_R1_P_BLL.xlsx"
     a.download = downloadName
     document.body.appendChild(a)
     a.click()
@@ -183,7 +240,10 @@ export default function ReportsPage() {
       setPreviewLoading(true)
       setPreviewError(null)
       try {
-        const qs = buildReportParams({ includeProject: previewType === "project" })
+        const qs = buildReportParams({
+          includeProject: previewType === "project",
+          includeFastTaskKind: previewType === "fast",
+        })
         qs.set("limit", "200")
         const endpoint =
           previewType === "fast"
@@ -333,10 +393,36 @@ export default function ReportsPage() {
               <Label>Planned to</Label>
               <Input type="date" value={plannedTo} onChange={(e) => setPlannedTo(e.target.value)} />
             </div>
+            <div className="space-y-2 md:col-span-2">
+              <Label>Fast task types for preview/export</Label>
+              <div className="rounded-md border border-slate-200 bg-slate-50 p-3">
+                <div className="flex flex-wrap gap-x-6 gap-y-3">
+                  <label className="flex items-center gap-2 text-sm font-medium text-slate-700">
+                    <Checkbox
+                      checked={allFastTaskKindsSelected}
+                      onCheckedChange={(value) => toggleAllFastTaskKinds(Boolean(value))}
+                    />
+                    <span>All fast task types</span>
+                  </label>
+                  {FAST_TASK_KIND_OPTIONS.map((option) => (
+                    <label key={option.value} className="flex items-center gap-2 text-sm text-slate-700">
+                      <Checkbox
+                        checked={selectedFastTaskKinds.includes(option.value)}
+                        onCheckedChange={(value) => toggleFastTaskKind(option.value, Boolean(value))}
+                      />
+                      <span>{option.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </div>
+            </div>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" onClick={() => void downloadFastTasks()}>
               Download Fast Tasks XLSX
+            </Button>
+            <Button variant="outline" onClick={() => void downloadBundleFastTasks()}>
+              Download 1H + R1 + P + BLL XLSX
             </Button>
             <Button variant="outline" onClick={() => void downloadSystemTasks()}>
               Download System Tasks XLSX
