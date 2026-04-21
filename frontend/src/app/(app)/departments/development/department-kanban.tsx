@@ -23,7 +23,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
-import { renderMarkedNoteContent } from "@/lib/note-markup"
+import { buildMarkedAppendOnlyText, getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -4907,7 +4907,7 @@ export default function DepartmentKanban() {
       return
     }
     setEditingTaskId(task.id)
-    setEditTaskTitle(task.title || "")
+    setEditTaskTitle(getPlainMarkedText(task.title))
     setEditTaskDescription(task.description || "")
     setEditTaskType(
       task.is_bllok
@@ -4960,7 +4960,10 @@ export default function DepartmentKanban() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: editTaskTitle.trim(),
+          title: buildMarkedAppendOnlyText(
+            noProjectTasks.find((candidate) => candidate.id === editingTaskId)?.title,
+            editTaskTitle.trim()
+          ),
           description: editTaskDescription.trim() || null,
           is_bllok: editTaskType === "blocked",
           is_1h_report: editTaskType === "hourly",
@@ -5000,7 +5003,7 @@ export default function DepartmentKanban() {
       return
     }
     setAllTodayEditingTaskId(task.id)
-    setAllTodayEditTitle(task.title || "")
+    setAllTodayEditTitle(getPlainMarkedText(task.title))
     setAllTodayEditDescription(task.description || "")
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
@@ -5046,7 +5049,7 @@ export default function DepartmentKanban() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: allTodayEditTitle.trim(),
+          title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
           description: allTodayEditDescription.trim() || null,
           status: allTodayEditStatus,
           start_date: startDateValue,
@@ -7140,7 +7143,9 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>
-                                {task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}
+                                {typeof task.title === "string" && task.title.includes("[[")
+                                  ? renderMarkedNoteContent(task.title, task.title)
+                                  : task.title}
                               </div>
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
@@ -7249,7 +7254,11 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                                <span>{task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}</span>
+                                <span>
+                                  {typeof task.title === "string" && task.title.includes("[[")
+                                    ? renderMarkedNoteContent(task.title, task.title)
+                                    : task.title}
+                                </span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
@@ -7355,7 +7364,11 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                                <span>{task.ga_note_origin_id ? renderMarkedNoteContent(task.title, task.title) : task.title}</span>
+                                <span>
+                                  {typeof task.title === "string" && task.title.includes("[[")
+                                    ? renderMarkedNoteContent(task.title, task.title)
+                                    : task.title}
+                                </span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
@@ -8343,12 +8356,16 @@ export default function DepartmentKanban() {
                                 <div className="sm:px-3">
                                   <div className="flex items-center gap-2 flex-wrap">
                                       <div className={`font-medium text-[12px] ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                          {t.ga_note_origin_id ? renderMarkedNoteContent(t.title, t.title) : t.title}
+                                          {typeof t.title === "string" && t.title.includes("[[")
+                                            ? renderMarkedNoteContent(t.title, t.title)
+                                            : t.title}
                                       </div>
                                     </div>
                                     {t.description ? (
                                       <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">
-                                        {t.ga_note_origin_id ? renderMarkedNoteContent(t.description, t.description) : t.description}
+                                        {typeof t.description === "string" && t.description.includes("[[")
+                                          ? renderMarkedNoteContent(t.description, t.description)
+                                          : t.description}
                                       </div>
                                     ) : null}
                                   </div>

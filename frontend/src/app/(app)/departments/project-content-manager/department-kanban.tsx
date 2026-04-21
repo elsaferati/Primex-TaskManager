@@ -23,7 +23,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
-import { renderMarkedNoteContent } from "@/lib/note-markup"
+import { buildMarkedAppendOnlyText, getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
@@ -257,14 +257,14 @@ function isNoProjectTask(task: Task) {
   if (task.system_template_origin_id != null) return false
   const normalizedTitle = normalizeTaskTitle(task.title || "")
   if (isPcmProjectLikeFastTaskTitleKey(normalizedTitle)) return false
-  if (VS_VL_TEMPLATE_TITLE_KEYS.has(normalizedTitle)) return false
+  if (isVsVlTemplateTitle(normalizedTitle)) return false
   return true
 }
 
 function isFastNormalTask(task: Task) {
   // Exclude VS/VL tasks - check if task title matches VS/VL template task titles
   const normalizedTitle = normalizeTaskTitle(task.title || "")
-  const isVsVlTask = VS_VL_TEMPLATE_TITLE_KEYS.has(normalizedTitle)
+  const isVsVlTask = isVsVlTemplateTitle(normalizedTitle)
 
   return (
     isNoProjectTask(task) &&
@@ -391,6 +391,10 @@ const VS_VL_TEMPLATE_TITLE_KEYS = new Set(VS_VL_TEMPLATE_TASKS.map((task) => nor
 const VS_VL_PHASE_BY_TITLE = new Map(
   VS_VL_TEMPLATE_TASKS.map((task) => [normalizeTaskTitle(task.title), task.phase])
 )
+
+function isVsVlTemplateTitle(normalizedTitle: string) {
+  return VS_VL_TEMPLATE_TITLE_KEYS.has(normalizedTitle)
+}
 
 function initials(src: string) {
   return src
@@ -1280,25 +1284,6 @@ export default function DepartmentKanban() {
     internalNoteDepartmentId: string | null
     internalNoteProjects: Project[]
   }
-  const applyBootstrap = React.useCallback((payload: DepartmentBootstrapPayload) => {
-    setDepartments(payload.departments)
-    setDepartment(payload.department)
-    setUsers(payload.users)
-    setProjects(payload.projects)
-    setSystemTasks(payload.systemTasks)
-    setOverviewSystemTasks(payload.overviewSystemTasks)
-    setDepartmentTasks(payload.departmentTasks)
-    setNoProjectTasks(payload.noProjectTasks)
-    setSystemCreatedTasks(payload.systemCreatedTasks)
-    setGaNotes(payload.gaNotes)
-    setInternalNotes(payload.internalNotes)
-    setMeetings(payload.meetings)
-    setSystemDepartmentId(payload.systemDepartmentId)
-    setInternalNoteProjects(payload.internalNoteProjects)
-    bootstrapSystemTasksKeyRef.current = payload.systemTasksKey
-    bootstrapInternalNoteDeptIdRef.current = payload.internalNoteDepartmentId
-    bootstrapInternalNoteProjectsRef.current = payload.internalNoteProjects
-  }, [])
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [dailyReportManualOrder, setDailyReportManualOrder] = React.useState<string[]>([])
   const [dailyReportPeriodFilter, setDailyReportPeriodFilter] = React.useState<"all" | "am_side" | "pm_side">("all")
@@ -1442,6 +1427,25 @@ export default function DepartmentKanban() {
   const [internalNotesFilter, setInternalNotesFilter] = React.useState<"all" | "done" | "undone">("all")
   const [updatingInternalNoteIds, setUpdatingInternalNoteIds] = React.useState<string[]>([])
   const [expandedSystemDescriptions, setExpandedSystemDescriptions] = React.useState<Record<string, boolean>>({})
+  const applyBootstrap = React.useCallback((payload: DepartmentBootstrapPayload) => {
+    setDepartments(payload.departments)
+    setDepartment(payload.department)
+    setUsers(payload.users)
+    setProjects(payload.projects)
+    setSystemTasks(payload.systemTasks)
+    setOverviewSystemTasks(payload.overviewSystemTasks)
+    setDepartmentTasks(payload.departmentTasks)
+    setNoProjectTasks(payload.noProjectTasks)
+    setSystemCreatedTasks(payload.systemCreatedTasks)
+    setGaNotes(payload.gaNotes)
+    setInternalNotes(payload.internalNotes)
+    setMeetings(payload.meetings)
+    setSystemDepartmentId(payload.systemDepartmentId)
+    setInternalNoteProjects(payload.internalNoteProjects)
+    bootstrapSystemTasksKeyRef.current = payload.systemTasksKey
+    bootstrapInternalNoteDeptIdRef.current = payload.internalNoteDepartmentId
+    bootstrapInternalNoteProjectsRef.current = payload.internalNoteProjects
+  }, [])
 
   const loadBootstrapData = React.useCallback(
     async (options: { silent: boolean }) => {
@@ -2505,6 +2509,42 @@ export default function DepartmentKanban() {
     isTaskOwnedByViewUser,
     overdueTaskIds,
   ])
+  const dailyReportFastTasks = React.useMemo(() => {
+    const todayKey = dayKey(todayDate)
+    const targetUserId =
+      viewMode === "department"
+        ? selectedUserId !== "__all__"
+          ? selectedUserId
+          : user?.id
+        : user?.id
+
+    return visibleNoProjectTasks.filter((task) => {
+      if (!task.due_date) return false
+      if (targetUserId && !isTaskOwnedByViewUser(task, targetUserId)) {
+        return false
+      }
+
+      const completedDate = task.completed_at ? toDate(task.completed_at) : null
+      const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
+      if (completedToday) return true
+      const isDone = Boolean(completedDate) || task.status === "DONE"
+      if (isDone) {
+        return isTaskActiveForDate(task, todayDate)
+      }
+
+      const startDate = toDate(task.start_date) || toDate(task.due_date) || toDate(task.created_at)
+      if (!startDate) return false
+      return todayKey >= dayKey(startDate)
+    })
+  }, [
+    todayDate,
+    visibleNoProjectTasks,
+    viewMode,
+    selectedUserId,
+    user?.id,
+    isTaskOwnedByViewUser,
+    isTaskActiveForDate,
+  ])
   const deadlineImportantTaskIds = React.useMemo(() => {
     const ids = new Set<string>()
     for (const task of dailyReportFastTasks) {
@@ -2686,42 +2726,6 @@ export default function DepartmentKanban() {
     () => visibleInternalMeetings.filter((m) => todayMeetings.some((meeting) => meeting.id === m.id)),
     [todayMeetings, visibleInternalMeetings]
   )
-  const dailyReportFastTasks = React.useMemo(() => {
-    const todayKey = dayKey(todayDate)
-    const targetUserId =
-      viewMode === "department"
-        ? selectedUserId !== "__all__"
-          ? selectedUserId
-          : user?.id
-        : user?.id
-
-    return visibleNoProjectTasks.filter((task) => {
-      if (!task.due_date) return false
-      if (targetUserId && !isTaskOwnedByViewUser(task, targetUserId)) {
-        return false
-      }
-
-      const completedDate = task.completed_at ? toDate(task.completed_at) : null
-      const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
-      if (completedToday) return true
-      const isDone = Boolean(completedDate) || task.status === "DONE"
-      if (isDone) {
-        return isTaskActiveForDate(task, todayDate)
-      }
-
-      const startDate = toDate(task.start_date) || toDate(task.due_date) || toDate(task.created_at)
-      if (!startDate) return false
-      return todayKey >= dayKey(startDate)
-    })
-  }, [
-    todayDate,
-    visibleNoProjectTasks,
-    viewMode,
-    selectedUserId,
-    user?.id,
-    isTaskOwnedByViewUser,
-    isTaskActiveForDate,
-  ])
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
     for (const p of projects) {
@@ -4988,7 +4992,7 @@ export default function DepartmentKanban() {
       return
     }
     setEditingTaskId(task.id)
-    setEditTaskTitle(task.title || "")
+    setEditTaskTitle(getPlainMarkedText(task.title))
     setEditTaskDescription(task.description || "")
     setEditTaskType(
       task.is_bllok
@@ -5041,7 +5045,10 @@ export default function DepartmentKanban() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: editTaskTitle.trim(),
+          title: buildMarkedAppendOnlyText(
+            noProjectTasks.find((candidate) => candidate.id === editingTaskId)?.title,
+            editTaskTitle.trim()
+          ),
           description: editTaskDescription.trim() || null,
           is_bllok: editTaskType === "blocked",
           is_1h_report: editTaskType === "hourly",
@@ -5081,7 +5088,7 @@ export default function DepartmentKanban() {
       return
     }
     setAllTodayEditingTaskId(task.id)
-    setAllTodayEditTitle(task.title || "")
+    setAllTodayEditTitle(getPlainMarkedText(task.title))
     setAllTodayEditDescription(task.description || "")
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
@@ -5127,7 +5134,7 @@ export default function DepartmentKanban() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: allTodayEditTitle.trim(),
+          title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
           description: allTodayEditDescription.trim() || null,
           status: allTodayEditStatus,
           start_date: startDateValue,
@@ -6888,7 +6895,11 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{task.title}</div>
+                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>
+                                {typeof task.title === "string" && task.title.includes("[[")
+                                  ? renderMarkedNoteContent(task.title, task.title)
+                                  : task.title}
+                              </div>
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
@@ -6996,7 +7007,11 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                                <span>{task.title}</span>
+                                <span>
+                                  {typeof task.title === "string" && task.title.includes("[[")
+                                    ? renderMarkedNoteContent(task.title, task.title)
+                                    : task.title}
+                                </span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
@@ -7102,7 +7117,11 @@ export default function DepartmentKanban() {
                           </TableCell>
                           <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                             <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
-                              <span>{task.title}</span>
+                              <span>
+                                {typeof task.title === "string" && task.title.includes("[[")
+                                  ? renderMarkedNoteContent(task.title, task.title)
+                                  : task.title}
+                              </span>
                               {isGaTask(task) ? (
                                 <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                               ) : null}
@@ -8077,12 +8096,16 @@ export default function DepartmentKanban() {
                                 <div className="sm:px-3">
                                   <div className="flex items-center gap-2 flex-wrap">
                                     <div className={`font-medium text-[12px] ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
-                                      {t.ga_note_origin_id ? renderMarkedNoteContent(t.title, t.title) : t.title}
+                                      {typeof t.title === "string" && t.title.includes("[[")
+                                        ? renderMarkedNoteContent(t.title, t.title)
+                                        : t.title}
                                     </div>
                                   </div>
                                   {t.description ? (
                                     <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">
-                                      {t.ga_note_origin_id ? renderMarkedNoteContent(t.description, t.description) : t.description}
+                                      {typeof t.description === "string" && t.description.includes("[[")
+                                        ? renderMarkedNoteContent(t.description, t.description)
+                                        : t.description}
                                     </div>
                                   ) : null}
                                 </div>

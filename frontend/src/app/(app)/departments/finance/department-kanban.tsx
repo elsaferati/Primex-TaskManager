@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, toDateInputValue } from "@/lib/dates"
+import { renderMarkedNoteContent } from "@/lib/note-markup"
 import type { Department, Task, User } from "@/lib/types"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 
@@ -614,7 +615,9 @@ export default function DepartmentKanban() {
                       <TableRow key={row.id}>
                         <TableCell className="font-semibold text-slate-700">{index + 1}</TableCell>
                         <TableCell className="min-w-[320px] whitespace-normal font-medium text-slate-800">
-                          {row.title}
+                          {typeof row.title === "string" && row.title.includes("[[")
+                            ? renderMarkedNoteContent(row.title, row.title)
+                            : row.title}
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline">{row.typeLabel}</Badge>

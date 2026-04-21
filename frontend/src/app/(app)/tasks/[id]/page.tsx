@@ -13,8 +13,9 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
+import { clearDepartmentBootstrapCacheByPrefix } from "@/lib/department-bootstrap-cache"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
-import { renderMarkedNoteContent } from "@/lib/note-markup"
+import { buildMarkedAppendOnlyText, getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
 
@@ -159,7 +160,7 @@ export default function TaskDetailsPage() {
 
   React.useEffect(() => {
     if (!task) return
-    setTitle(task.title || "")
+    setTitle(getPlainMarkedText(task.title))
     setDescription(task.description || "")
     setStatusValue(task.status || "")
     setStartDate(toDateInputValue(task.start_date))
@@ -289,7 +290,7 @@ export default function TaskDetailsPage() {
       }
 
       const payload: Record<string, unknown> = {
-        title: trimmedTitle,
+        title: buildMarkedAppendOnlyText(task.title, trimmedTitle),
         description,
         reminder_enabled: reminder,
       }
@@ -371,6 +372,7 @@ export default function TaskDetailsPage() {
       }
       toast.success("Task updated")
       if (returnTo) {
+        clearDepartmentBootstrapCacheByPrefix("department:")
         router.push(returnTo)
         return
       }
@@ -441,7 +443,9 @@ export default function TaskDetailsPage() {
                 >
                   Back
                 </Button>
-                <div className="text-2xl font-semibold text-slate-900">{title || task.title}</div>
+                <div className="text-2xl font-semibold text-slate-900">
+                  {renderMarkedNoteContent(title || task.title, title || task.title)}
+                </div>
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>Status: {statusText}</span>
                   <span>•</span>
@@ -477,14 +481,12 @@ export default function TaskDetailsPage() {
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Task title"
                 />
-                {task.ga_note_origin_id ? (
-                  <div className="text-xs text-muted-foreground">
-                    Preview:{" "}
-                    <span className="text-slate-900">
-                      {renderMarkedNoteContent(title, title)}
-                    </span>
-                  </div>
-                ) : null}
+                <div className="text-xs text-muted-foreground">
+                  Preview:{" "}
+                  <span className="text-slate-900">
+                    {renderMarkedNoteContent(buildMarkedAppendOnlyText(task?.title, title), title)}
+                  </span>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Status</Label>

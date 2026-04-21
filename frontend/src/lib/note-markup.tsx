@@ -1,8 +1,11 @@
 import * as React from "react"
 
-const NOTE_MARK_TOKEN_RE = /\[\[(done|added)\]\]|\[\[\/(done|added)\]\]/g
+// Some older titles were saved with a missing leading "[" token, e.g. `[added]]...[/added]]`.
+// Accept both forms when parsing so legacy task titles still render cleanly.
+const NOTE_MARK_TOKEN_RE = /\[{1,2}(done|added)\]\]|\[{1,2}\/(done|added)\]\]/g
 
 type TextMarkRange = { start: number; end: number }
+const LEGACY_ADD_WORD_RE = /\bADD\b/g
 
 function normalizeTextRanges(ranges: TextMarkRange[]) {
   const sorted = ranges
@@ -84,11 +87,40 @@ export function parseMarkedNoteContent(content?: string | null): {
   }
   text += content.slice(lastIndex)
 
+  const legacyAddedRanges: TextMarkRange[] = []
+  let legacyMatch: RegExpExecArray | null
+  LEGACY_ADD_WORD_RE.lastIndex = 0
+  while ((legacyMatch = LEGACY_ADD_WORD_RE.exec(text)) !== null) {
+    legacyAddedRanges.push({
+      start: legacyMatch.index,
+      end: legacyMatch.index + legacyMatch[0].length,
+    })
+  }
+
   return {
     text,
     doneRanges: normalizeTextRanges(doneRanges),
-    addedRanges: normalizeAddedRanges(text, addedRanges),
+    addedRanges: normalizeAddedRanges(text, [...addedRanges, ...legacyAddedRanges]),
   }
+}
+
+export function getPlainMarkedText(content?: string | null) {
+  return parseMarkedNoteContent(content).text
+}
+
+export function buildMarkedAppendOnlyText(previousContent?: string | null, nextPlainText?: string | null) {
+  const previousMarked = previousContent || ""
+  const previousPlain = getPlainMarkedText(previousContent).trim()
+  const nextPlain = (nextPlainText || "").trim()
+
+  if (!previousPlain || !nextPlain) return nextPlain
+  if (nextPlain === previousPlain) return previousMarked
+  if (!nextPlain.startsWith(previousPlain)) return nextPlain
+
+  const suffix = nextPlain.slice(previousPlain.length)
+  if (!suffix) return previousMarked
+
+  return `${previousMarked}[[added]]${suffix}[[/added]]`
 }
 
 export function renderMarkedNoteContent(content?: string | null, emptyFallback: React.ReactNode = "-") {

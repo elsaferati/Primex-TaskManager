@@ -19,3 +19,19 @@ export function getDepartmentBootstrapCache<T>(key: string): T | null {
 export function setDepartmentBootstrapCache<T>(key: string, value: T, ttlMs: number = DEFAULT_TTL_MS) {
   cache.set(key, { value, expiresAt: Date.now() + ttlMs })
 }
+
+export function clearDepartmentBootstrapCache(key?: string) {
+  if (!key) {
+    cache.clear()
+    return
+  }
+  cache.delete(key)
+}
+
+export function clearDepartmentBootstrapCacheByPrefix(prefix: string) {
+  for (const key of cache.keys()) {
+    if (key.startsWith(prefix)) {
+      cache.delete(key)
+    }
+  }
+}
