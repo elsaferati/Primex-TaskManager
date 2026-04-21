@@ -445,6 +445,7 @@ export default function DesignProjectPage() {
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
   const [newStartDate, setNewStartDate] = React.useState("")
+  const [newDeadlineImportant, setNewDeadlineImportant] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [editingDescription, setEditingDescription] = React.useState("")
   const [savingDescription, setSavingDescription] = React.useState(false)
@@ -650,6 +651,7 @@ export default function DesignProjectPage() {
         phase: newTaskPhase || activePhase,
         start_date: newStartDate || null,
         due_date: newDueDate || null,
+        is_deadline_important: newDeadlineImportant,
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -687,6 +689,7 @@ export default function DesignProjectPage() {
       setNewTaskPhase("")
       setNewDueDate("")
       setNewStartDate("")
+      setNewDeadlineImportant(false)
       toast.success("Task created")
     } finally {
       setCreating(false)
@@ -3975,6 +3978,13 @@ export default function DesignProjectPage() {
                         />
                       </div>
                     </div>
+                    <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                      <Checkbox
+                        checked={newDeadlineImportant}
+                        onCheckedChange={(checked) => setNewDeadlineImportant(checked === true)}
+                      />
+                      <span className="text-sm font-medium">Deadline important</span>
+                    </label>
                     <Button 
                       onClick={() => void submitCreateTask()} 
                       disabled={creating || !newTitle.trim() || !newAssignees || newAssignees.length === 0 || !newDueDate || !newDueDate.trim()} 

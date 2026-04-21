@@ -225,6 +225,7 @@ export default function DevelopmentProjectPage() {
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newStartDate, setNewStartDate] = React.useState("")
   const [newDueDate, setNewDueDate] = React.useState("")
+  const [newDeadlineImportant, setNewDeadlineImportant] = React.useState(false)
   const [newFinishPeriod, setNewFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
@@ -593,6 +594,7 @@ export default function DevelopmentProjectPage() {
         phase: newTaskPhase || activePhase,
         start_date: newStartDate ? new Date(newStartDate).toISOString() : null,
         due_date: newDueDate || null,
+        is_deadline_important: newDeadlineImportant,
         finish_period: newFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : newFinishPeriod,
       }
       const res = await apiFetch("/tasks", {
@@ -631,6 +633,7 @@ export default function DevelopmentProjectPage() {
       setNewTaskPhase("")
       setNewStartDate("")
       setNewDueDate("")
+      setNewDeadlineImportant(false)
       setNewFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
     } finally {
@@ -1950,6 +1953,13 @@ export default function DevelopmentProjectPage() {
                           </Select>
                         </div>
                       </div>
+                      <label className="flex items-center gap-3 rounded-xl border border-sky-200 px-3 py-2">
+                        <Checkbox
+                          checked={newDeadlineImportant}
+                          onCheckedChange={(checked) => setNewDeadlineImportant(checked === true)}
+                        />
+                        <span className="text-sm font-medium text-slate-700">Deadline important</span>
+                      </label>
                       <div className="flex justify-end">
                         <Button
                           disabled={!newTitle.trim() || !newAssignees || newAssignees.length === 0 || !newDueDate || !newDueDate.trim() || creating}

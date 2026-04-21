@@ -910,6 +910,7 @@ export default function AdminTasksPage() {
   const [selectFastTaskAssigneesOpen, setSelectFastTaskAssigneesOpen] = React.useState(false)
   const [fastTaskStartDate, setFastTaskStartDate] = React.useState("")
   const [fastTaskDueDate, setFastTaskDueDate] = React.useState("")
+  const [fastTaskDeadlineImportant, setFastTaskDeadlineImportant] = React.useState(false)
   const [fastTaskFinishPeriod, setFastTaskFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
   >(FINISH_PERIOD_NONE_VALUE)
@@ -1421,6 +1422,7 @@ export default function AdminTasksPage() {
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         start_date: startDateValue,
         due_date: dueDateValue,
+        is_deadline_important: false,
         assigned_to: ganeUserId,
         ...(isBllok && { is_bllok: true }),
       }
@@ -2868,6 +2870,7 @@ export default function AdminTasksPage() {
     setFastTaskAssignees([])
     setFastTaskStartDate("")
     setFastTaskDueDate("")
+    setFastTaskDeadlineImportant(false)
     setFastTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
   }, [])
 
@@ -2896,6 +2899,7 @@ export default function AdminTasksPage() {
         status: "TODO",
         priority: "NORMAL",
         finish_period: fastTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : fastTaskFinishPeriod,
+        is_deadline_important: fastTaskDeadlineImportant,
         is_bllok: fastTaskType === "blocked",
         is_1h_report: fastTaskType === "hourly",
         is_r1: fastTaskType === "r1",
@@ -4816,6 +4820,13 @@ export default function AdminTasksPage() {
                 />
               </div>
             </div>
+            <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
+              <Checkbox
+                checked={fastTaskDeadlineImportant}
+                onCheckedChange={(checked) => setFastTaskDeadlineImportant(checked === true)}
+              />
+              <span className="text-sm font-medium text-slate-700">Deadline important</span>
+            </label>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setFastTaskOpen(false)} className="rounded-xl border-slate-200">
                 Cancel

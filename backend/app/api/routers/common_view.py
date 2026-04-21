@@ -743,6 +743,8 @@ async def get_common_view(
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
+                            "is_deadline_important": bool(t.is_deadline_important),
+                            "due_date": t.due_date.isoformat() if t.due_date else None,
                         }
                     )
                 if t.is_1h_report:
@@ -760,6 +762,8 @@ async def get_common_view(
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
+                            "is_deadline_important": bool(t.is_deadline_important),
+                            "due_date": t.due_date.isoformat() if t.due_date else None,
                         }
                     )
                 if t.is_personal:
@@ -777,6 +781,8 @@ async def get_common_view(
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
+                            "is_deadline_important": bool(t.is_deadline_important),
+                            "due_date": t.due_date.isoformat() if t.due_date else None,
                         }
                     )
                 if t.is_r1:
@@ -794,6 +800,8 @@ async def get_common_view(
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
+                            "is_deadline_important": bool(t.is_deadline_important),
+                            "due_date": t.due_date.isoformat() if t.due_date else None,
                         }
                     )
 

@@ -1256,6 +1256,7 @@ export default function PcmProjectPage() {
   const [vsVlTaskTitle, setVsVlTaskTitle] = React.useState("")
   const [vsVlTaskDetail, setVsVlTaskDetail] = React.useState("")
   const [vsVlTaskDate, setVsVlTaskDate] = React.useState("")
+  const [vsVlTaskDeadlineImportant, setVsVlTaskDeadlineImportant] = React.useState(false)
   const [vsVlTaskPriority, setVsVlTaskPriority] = React.useState<TaskPriority>("NORMAL")
   const [vsVlTaskStatus, setVsVlTaskStatus] = React.useState<Task["status"]>("TODO")
   const [vsVlTaskAssignees, setVsVlTaskAssignees] = React.useState<string[]>([])
@@ -1298,6 +1299,7 @@ export default function PcmProjectPage() {
   >(FINISH_PERIOD_NONE_VALUE)
   const [controlStartDate, setControlStartDate] = React.useState("")
   const [controlProductionDate, setControlProductionDate] = React.useState("")
+  const [controlDeadlineImportant, setControlDeadlineImportant] = React.useState(false)
   const [controlTotal, setControlTotal] = React.useState("0")
   const [controlCompleted, setControlCompleted] = React.useState("0")
   const [creatingControlTask, setCreatingControlTask] = React.useState(false)
@@ -1306,6 +1308,7 @@ export default function PcmProjectPage() {
   const [newInlineTaskAssignee, setNewInlineTaskAssignee] = React.useState<string>("__unassigned__")
   const [newInlineTaskStartDate, setNewInlineTaskStartDate] = React.useState("")
   const [newInlineTaskDueDate, setNewInlineTaskDueDate] = React.useState("")
+  const [newInlineTaskDeadlineImportant, setNewInlineTaskDeadlineImportant] = React.useState(false)
   const [newInlineTaskFinishPeriod, setNewInlineTaskFinishPeriod] = React.useState<
     TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
   >(FINISH_PERIOD_NONE_VALUE)
@@ -2160,6 +2163,7 @@ export default function PcmProjectPage() {
         priority: newPriority,
         phase: newTaskPhase || activePhase,
         due_date: newDueDate || null,
+        is_deadline_important: false,
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -5097,6 +5101,7 @@ export default function PcmProjectPage() {
                                 priority: vsVlTaskPriority,
                                 phase: vsVlPhase,
                                 due_date: vsVlTaskDate ? new Date(vsVlTaskDate).toISOString() : null,
+                                is_deadline_important: vsVlTaskDeadlineImportant,
                                 internal_notes: serializeVsVlMeta(meta),
                               }),
                             })
@@ -5109,6 +5114,7 @@ export default function PcmProjectPage() {
                             setVsVlTaskTitle("")
                             setVsVlTaskDetail("")
                             setVsVlTaskDate("")
+                            setVsVlTaskDeadlineImportant(false)
                             setVsVlTaskPriority("NORMAL")
                             setVsVlTaskStatus("TODO")
                             setVsVlTaskAssignees([])
@@ -5132,6 +5138,13 @@ export default function PcmProjectPage() {
                       rows={2}
                       className="text-xs border-slate-300 bg-white resize-none"
                     />
+                    <label className="flex items-center gap-3 rounded-md border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <Checkbox
+                        checked={vsVlTaskDeadlineImportant}
+                        onCheckedChange={(checked) => setVsVlTaskDeadlineImportant(checked === true)}
+                      />
+                      <span className="font-medium text-slate-700">Deadline important</span>
+                    </label>
                   </div>
                 )}
 
@@ -6815,6 +6828,13 @@ export default function PcmProjectPage() {
                           onChange={(e) => setNewInlineTaskDueDate(e.target.value)}
                         />
                       </div>
+                      <div className="col-span-1 flex items-center gap-2 text-xs text-slate-600">
+                        <Checkbox
+                          checked={newInlineTaskDeadlineImportant}
+                          onCheckedChange={(checked) => setNewInlineTaskDeadlineImportant(checked === true)}
+                        />
+                        <span>Important</span>
+                      </div>
                       <div className="col-span-1">
                         <Select
                           value={newInlineTaskFinishPeriod}
@@ -6873,6 +6893,7 @@ export default function PcmProjectPage() {
                                   phase: "PRODUCT",
                                   start_date: newInlineTaskStartDate ? new Date(newInlineTaskStartDate).toISOString() : null,
                                   due_date: newInlineTaskDueDate ? new Date(newInlineTaskDueDate).toISOString() : null,
+                                  is_deadline_important: newInlineTaskDeadlineImportant,
                                   finish_period:
                                     newInlineTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE
                                       ? null
@@ -6891,6 +6912,7 @@ export default function PcmProjectPage() {
                               setNewInlineTaskAssignee("__unassigned__")
                               setNewInlineTaskStartDate("")
                               setNewInlineTaskDueDate("")
+                              setNewInlineTaskDeadlineImportant(false)
                               setNewInlineTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                               setNewInlineTaskTotal("")
                               setNewInlineTaskCompleted("")
@@ -7915,6 +7937,13 @@ export default function PcmProjectPage() {
                           onChange={(e) => setControlProductionDate(e.target.value)}
                         />
                       </div>
+                      <div className="col-span-1 flex items-center gap-2 text-xs text-slate-600">
+                        <Checkbox
+                          checked={controlDeadlineImportant}
+                          onCheckedChange={(checked) => setControlDeadlineImportant(checked === true)}
+                        />
+                        <span>Important</span>
+                      </div>
                       <div className="col-span-1">
                         <Select
                           value={controlFinishPeriod}
@@ -7990,6 +8019,7 @@ export default function PcmProjectPage() {
                                     controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
                                   start_date: controlStartDate ? new Date(controlStartDate).toISOString() : null,
                                   due_date: controlProductionDate ? new Date(controlProductionDate).toISOString() : null,
+                                  is_deadline_important: controlDeadlineImportant,
                                   internal_notes: serializeInternalNotes({
                                     total: controlTotal || "0",
                                     completed: controlCompleted || "0",
@@ -8009,6 +8039,7 @@ export default function PcmProjectPage() {
                               setControlKoUserId("__unassigned__")
                               setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
                               setControlStartDate("")
+                              setControlDeadlineImportant(false)
                               setControlTotal("0")
                               setControlCompleted("0")
                               toast.success("Task added")

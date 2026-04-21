@@ -200,6 +200,7 @@ async def _copy_tasks_from_template_project(
             progress_percentage=template_task.progress_percentage or 0,
             daily_products=template_task.daily_products,
             assigned_to=template_task.assigned_to,  # Copy assigned_to from template
+            is_deadline_important=template_task.is_deadline_important,
             is_bllok=template_task.is_bllok,
             is_1h_report=template_task.is_1h_report,
             is_r1=template_task.is_r1,
@@ -280,6 +281,7 @@ async def _copy_tasks_from_mst_template_project(
             created_by=created_by_id,
             finish_period=template_task.finish_period,
             progress_percentage=template_task.progress_percentage or 0,
+            is_deadline_important=template_task.is_deadline_important,
             is_bllok=template_task.is_bllok,
             is_1h_report=template_task.is_1h_report,
             is_r1=template_task.is_r1,

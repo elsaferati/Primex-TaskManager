@@ -497,6 +497,7 @@ export default function GaKaNotesPage() {
   )
   const [taskDueDate, setTaskDueDate] = React.useState("")
   const [taskStartDate, setTaskStartDate] = React.useState("")
+  const [taskDeadlineImportant, setTaskDeadlineImportant] = React.useState(false)
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
@@ -1337,6 +1338,7 @@ export default function GaKaNotesPage() {
     setTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setTaskDueDate("")
     setTaskStartDate("")
+    setTaskDeadlineImportant(false)
     setTaskAssigneeIds([])
     setTaskDepartmentIds([])
     setTaskProjectId(note.project_id ?? "NONE")
@@ -1428,6 +1430,7 @@ export default function GaKaNotesPage() {
           finish_period: taskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : taskFinishPeriod,
           due_date: dueDateValue,
           start_date: startDateValue,
+          is_deadline_important: taskDeadlineImportant,
           assigned_to: taskAssigneeIds[0] ?? null,
           assignees: taskAssigneeIds,
           ga_note_origin_id: note.id,
@@ -3168,8 +3171,14 @@ export default function GaKaNotesPage() {
                   <Label>Due date</Label>
                   <Input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
                 </div>
-               
               </div>
+              <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                <Checkbox
+                  checked={taskDeadlineImportant}
+                  onCheckedChange={(checked) => setTaskDeadlineImportant(checked === true)}
+                />
+                <span className="text-sm font-medium">Deadline important</span>
+              </label>
               <div className="grid gap-2 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Departments</Label>

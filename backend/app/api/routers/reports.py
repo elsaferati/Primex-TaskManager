@@ -181,6 +181,7 @@ def _task_to_out(
         start_date=t.start_date,
         due_date=t.due_date,
         completed_at=t.completed_at,
+        is_deadline_important=t.is_deadline_important,
         is_bllok=t.is_bllok,
         is_1h_report=t.is_1h_report,
         is_r1=t.is_r1,

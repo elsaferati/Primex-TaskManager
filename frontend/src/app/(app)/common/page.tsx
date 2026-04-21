@@ -6,7 +6,7 @@ import { toast } from "sonner"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
-import { formatDateTimeDMY } from "@/lib/dates"
+import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
@@ -46,6 +46,8 @@ type FastTaskItemMeta = {
   taskId?: string
   userId?: string
   fastTaskOrder?: number | null
+  isDeadlineImportant?: boolean
+  dueDate?: string | null
 }
 type BlockedItem = {
   title: string
@@ -232,6 +234,8 @@ type SwimlaneCell = {
   taskId?: string
   userId?: string
   fastTaskOrder?: number | null
+  isDeadlineImportant?: boolean
+  dueDate?: string | null
 }
 type SwimlaneRow = {
   id: CommonType
@@ -395,6 +399,13 @@ const getFastTaskDisplayNumber = (
   const currentIndex = peerEntries.findIndex((item) => item.taskId === entry.taskId)
   return currentIndex >= 0 ? currentIndex + 1 : 1
 }
+
+const getDeadlineIndicatorLabel = (dueDate?: string | null) => {
+  if (!dueDate) return "Deadline"
+  return `DL ${formatDateDMY(dueDate)}`
+}
+
+const hasEightAmIndicator = (title?: string | null) => /\b0?8:00\b/.test(title || "")
 
 export default function CommonViewPage() {
   const { apiFetch, user, loading: authLoading } = useAuth()
@@ -859,6 +870,8 @@ export default function CommonViewPage() {
         assignees?: string[]
         userId?: string
         fastTaskOrder?: number | null
+        isDeadlineImportant?: boolean
+        dueDate?: string | null
       },
       b: {
         status?: string
@@ -870,6 +883,8 @@ export default function CommonViewPage() {
         assignees?: string[]
         userId?: string
         fastTaskOrder?: number | null
+        isDeadlineImportant?: boolean
+        dueDate?: string | null
       }
     ) => {
       const isDoneA = Boolean(a.isDone)
@@ -885,6 +900,12 @@ export default function CommonViewPage() {
       const personA = getFastTaskAssigneeKey(a as FastTaskEntry) || getPersonSortKey(a)
       const personB = getFastTaskAssigneeKey(b as FastTaskEntry) || getPersonSortKey(b)
       if (personA !== personB) return personA.localeCompare(personB)
+      const importantA = Boolean(a.isDeadlineImportant)
+      const importantB = Boolean(b.isDeadlineImportant)
+      if (importantA !== importantB) return importantA ? -1 : 1
+      const eightAmA = hasEightAmIndicator(a.title)
+      const eightAmB = hasEightAmIndicator(b.title)
+      if (eightAmA !== eightAmB) return eightAmA ? -1 : 1
       const orderA = a.fastTaskOrder ?? Number.MAX_SAFE_INTEGER
       const orderB = b.fastTaskOrder ?? Number.MAX_SAFE_INTEGER
       if (orderA !== orderB) return orderA - orderB
@@ -907,6 +928,8 @@ export default function CommonViewPage() {
       assignees?: string[]
       userId?: string
       fastTaskOrder?: number | null
+      isDeadlineImportant?: boolean
+      dueDate?: string | null
     }>(
       items: T[],
       multiDate: boolean
@@ -1543,6 +1566,8 @@ export default function CommonViewPage() {
             typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
+          isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
+          dueDate: item.dueDate || item.due_date || null,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -1557,6 +1582,8 @@ export default function CommonViewPage() {
             typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
+          isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
+          dueDate: item.dueDate || item.due_date || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -1572,6 +1599,8 @@ export default function CommonViewPage() {
             typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
+          isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
+          dueDate: item.dueDate || item.due_date || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -1587,6 +1616,8 @@ export default function CommonViewPage() {
             typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
+          isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
+          dueDate: item.dueDate || item.due_date || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -2158,6 +2189,8 @@ export default function CommonViewPage() {
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
+                  isDeadlineImportant: Boolean(t.is_deadline_important),
+                  dueDate: t.due_date || null,
                 })
               }
               if (t.is_1h_report) {
@@ -2173,6 +2206,8 @@ export default function CommonViewPage() {
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
+                  isDeadlineImportant: Boolean(t.is_deadline_important),
+                  dueDate: t.due_date || null,
                 })
               }
               if (t.is_personal) {
@@ -2188,6 +2223,8 @@ export default function CommonViewPage() {
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
+                  isDeadlineImportant: Boolean(t.is_deadline_important),
+                  dueDate: t.due_date || null,
                 })
               }
               if (t.is_r1) {
@@ -2203,6 +2240,8 @@ export default function CommonViewPage() {
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
+                  isDeadlineImportant: Boolean(t.is_deadline_important),
+                  dueDate: t.due_date || null,
                 })
               }
             }
@@ -4447,6 +4486,8 @@ export default function CommonViewPage() {
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
       entryDate: x.date,
+      isDeadlineImportant: x.isDeadlineImportant,
+      dueDate: x.dueDate,
     }))
 
     const oneHSource = includeOneH ? sortTasksByOrder(filtered.oneH, isMultiDate) : []
@@ -4463,6 +4504,8 @@ export default function CommonViewPage() {
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
       entryDate: x.date,
+      isDeadlineImportant: x.isDeadlineImportant,
+      dueDate: x.dueDate,
     }))
 
     const personalSource = sortTasksByOrder(filtered.personal, isMultiDate)
@@ -4479,6 +4522,8 @@ export default function CommonViewPage() {
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
       entryDate: x.date,
+      isDeadlineImportant: x.isDeadlineImportant,
+      dueDate: x.dueDate,
     }))
 
     const externalSource = isMultiDate
@@ -4525,6 +4570,8 @@ export default function CommonViewPage() {
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
       entryDate: x.date,
+      isDeadlineImportant: x.isDeadlineImportant,
+      dueDate: x.dueDate,
     }))
 
     const problemSource = isMultiDate
@@ -6145,6 +6192,10 @@ export default function CommonViewPage() {
           align-items: flex-start;
           flex-wrap: nowrap;
         }
+        .swimlane-title-main.fast-task-layout .swimlane-title {
+          flex: 0 0 100%;
+          width: 100%;
+        }
         .swimlane-title-main.priority .swimlane-assignees,
         .swimlane-title-main.priority .swimlane-title {
           width: 100%;
@@ -6468,6 +6519,40 @@ export default function CommonViewPage() {
           line-height: 1;
           flex: 0 0 auto;
         }
+        .deadline-indicator {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 0;
+          height: 20px;
+          padding: 0 7px;
+          border-radius: 999px;
+          background: #fef2f2;
+          border: 1px solid #fecaca;
+          color: #b91c1c;
+          font-weight: 700;
+          font-size: 10px;
+          line-height: 1;
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
+        .time-indicator {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 0;
+          height: 20px;
+          padding: 0 7px;
+          border-radius: 999px;
+          background: #dc2626;
+          border: 1px solid #b91c1c;
+          color: #ffffff;
+          font-weight: 700;
+          font-size: 10px;
+          line-height: 1;
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
         .fast-task-order-controls {
           display: inline-flex;
           align-items: center;
@@ -6519,6 +6604,10 @@ export default function CommonViewPage() {
         .week-table-empty {
           color: #adb5bd;
           font-style: italic;
+        }
+        .week-table-entry.deadline-important:not(.task-state-done) {
+          background: linear-gradient(90deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.98));
+          border-color: #fca5a5;
         }
         .form-error {
           color: #b91c1c;
@@ -6679,6 +6768,50 @@ export default function CommonViewPage() {
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
         .swimlane-accent.priority { border-left: 4px solid var(--priority-accent); }
+        .swimlane-cell.deadline-important:not(.done) {
+          background: #dc2626;
+          border-color: #b91c1c;
+          box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
+          color: #ffffff;
+        }
+        .swimlane-cell.deadline-important:not(.done) .swimlane-title,
+        .swimlane-cell.deadline-important:not(.done) .swimlane-date,
+        .swimlane-cell.deadline-important:not(.done) .swimlane-subtitle,
+        .swimlane-cell.deadline-important:not(.done) .swimlane-note,
+        .swimlane-cell.deadline-important:not(.done) .swimlane-note * {
+          color: #ffffff;
+        }
+        .swimlane-cell.deadline-important:not(.done) .swimlane-note {
+          background: rgba(127, 29, 29, 0.35);
+          border-color: rgba(255, 255, 255, 0.32);
+        }
+        .swimlane-cell.deadline-important:not(.done) .swimlane-avatar,
+        .swimlane-cell.deadline-important:not(.done) .fast-task-order-badge,
+        .swimlane-cell.deadline-important:not(.done) .deadline-indicator,
+        .swimlane-cell.deadline-important:not(.done) .time-indicator {
+          background: rgba(255, 255, 255, 0.12);
+          border-color: rgba(255, 255, 255, 0.38);
+          color: #ffffff;
+        }
+        .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle,
+        .swimlane-cell.deadline-important:not(.done) .swimlane-delete,
+        .swimlane-cell.deadline-important:not(.done) .fast-task-order-btn {
+          background: rgba(255, 255, 255, 0.12);
+          border-color: rgba(255, 255, 255, 0.38);
+          color: #ffffff;
+        }
+        .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle:hover,
+        .swimlane-cell.deadline-important:not(.done) .swimlane-delete:hover,
+        .swimlane-cell.deadline-important:not(.done) .fast-task-order-btn:hover {
+          background: rgba(255, 255, 255, 0.2);
+          border-color: rgba(255, 255, 255, 0.5);
+          color: #ffffff;
+        }
+        .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle[aria-expanded="true"] {
+          background: #ffffff;
+          border-color: #ffffff;
+          color: #b91c1c;
+        }
         
         /* Modern Toolbar */
         .common-toolbar { 
@@ -9259,14 +9392,24 @@ export default function CommonViewPage() {
                         return entries.map((e: BlockedItem, idx: number) => (
                           <div
                             key={idx}
-                            className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
+                            className={[
+                              "week-table-entry",
+                              commonTaskStateClassName(e.status, e.isDone),
+                              e.isDeadlineImportant ? "deadline-important" : "",
+                            ].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                              <span>
-                                <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
-                                {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
-                              </span>
-                            </div>
+                                <span>
+                                  <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  {e.isDeadlineImportant ? (
+                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
+                                  ) : null}
+                                  {hasEightAmIndicator(e.title) ? (
+                                    <span className="time-indicator">08:00</span>
+                                  ) : null}
+                                  {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
+                                </span>
+                              </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -9308,14 +9451,24 @@ export default function CommonViewPage() {
                         return (entries as (OneHItem | R1Item)[]).map((e, idx: number) => (
                           <div
                             key={idx}
-                            className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
+                            className={[
+                              "week-table-entry",
+                              commonTaskStateClassName(e.status, e.isDone),
+                              e.isDeadlineImportant ? "deadline-important" : "",
+                            ].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                              <span>
-                                <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
-                                {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
-                              </span>
-                            </div>
+                                <span>
+                                  <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  {e.isDeadlineImportant ? (
+                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
+                                  ) : null}
+                                  {hasEightAmIndicator(e.title) ? (
+                                    <span className="time-indicator">08:00</span>
+                                  ) : null}
+                                  {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
+                                </span>
+                              </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -9329,14 +9482,24 @@ export default function CommonViewPage() {
                         return entries.map((e: PersonalItem, idx: number) => (
                           <div
                             key={idx}
-                            className={["week-table-entry", commonTaskStateClassName(e.status, e.isDone)].filter(Boolean).join(" ")}
+                            className={[
+                              "week-table-entry",
+                              commonTaskStateClassName(e.status, e.isDone),
+                              e.isDeadlineImportant ? "deadline-important" : "",
+                            ].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                              <span>
-                                <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
-                                {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
-                              </span>
-                            </div>
+                                <span>
+                                  <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  {e.isDeadlineImportant ? (
+                                    <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
+                                  ) : null}
+                                  {hasEightAmIndicator(e.title) ? (
+                                    <span className="time-indicator">08:00</span>
+                                  ) : null}
+                                  {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
+                                </span>
+                              </div>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -9576,6 +9739,7 @@ export default function CommonViewPage() {
                                   "swimlane-cell",
                                   cell.accentClass || "",
                                   cell.placeholder ? "placeholder" : "",
+                                  cell.isDeadlineImportant ? "deadline-important" : "",
                                   cell.isDone ? "done" : "",
                                   commonTaskStateClassName(cell.status, cell.isDone),
                                 ]
@@ -9609,7 +9773,13 @@ export default function CommonViewPage() {
                                   </button>
                                 ) : null}
                                 <div className="swimlane-title-row">
-                                  <div className={`swimlane-title-main ${row.id === "priority" ? "priority" : ""}`}>
+                                  <div
+                                    className={[
+                                      "swimlane-title-main",
+                                      row.id === "priority" ? "priority" : "",
+                                      isFastTaskRowId(row.id) ? "fast-task-layout" : "",
+                                    ].filter(Boolean).join(" ")}
+                                  >
                                     {!cell.placeholder && cell.assignees?.length ? (
                                       <div className="swimlane-assignees">
                                         {cell.assignees.map((name) => (
@@ -9619,6 +9789,16 @@ export default function CommonViewPage() {
                                         ))}
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
                                           <span className="fast-task-order-badge">{cell.number}</span>
+                                        ) : null}
+                                        {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
+                                          <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
+                                            {getDeadlineIndicatorLabel(cell.dueDate)}
+                                          </span>
+                                        ) : null}
+                                        {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? (
+                                          <span className="time-indicator" title="08:00 task">
+                                            08:00
+                                          </span>
                                         ) : null}
                                         {isFastTaskRowId(row.id)
                                           ? renderFastTaskReorderControls(row.items, cell)
@@ -9633,6 +9813,16 @@ export default function CommonViewPage() {
                                         ))}
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
                                           <span className="fast-task-order-badge">{cell.number}</span>
+                                        ) : null}
+                                        {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
+                                          <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
+                                            {getDeadlineIndicatorLabel(cell.dueDate)}
+                                          </span>
+                                        ) : null}
+                                        {isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? (
+                                          <span className="time-indicator" title="08:00 task">
+                                            08:00
+                                          </span>
                                         ) : null}
                                         {isFastTaskRowId(row.id)
                                           ? renderFastTaskReorderControls(row.items, cell)

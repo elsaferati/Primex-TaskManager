@@ -44,6 +44,7 @@ class TaskOut(BaseModel):
     late_days: int | None = None
     moved_days: int | None = None
     completed_at: datetime | None = None
+    is_deadline_important: bool
     is_bllok: bool
     is_1h_report: bool
     is_r1: bool
@@ -76,6 +77,7 @@ class TaskCreate(BaseModel):
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
+    is_deadline_important: bool | None = None
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
     is_r1: bool | None = None
@@ -109,6 +111,7 @@ class TaskUpdate(BaseModel):
     start_date: datetime | None = None
     due_date: datetime | None = None
     completed_at: datetime | None = None
+    is_deadline_important: bool | None = None
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
     is_r1: bool | None = None

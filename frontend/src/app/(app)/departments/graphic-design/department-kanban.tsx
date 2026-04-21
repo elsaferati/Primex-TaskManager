@@ -852,6 +852,18 @@ function getDailyReportTyo({
   return "-"
 }
 
+function formatTyoDisplay(value: string, dateValue?: string | null, showDate = true) {
+  if (!showDate) return value
+  const dateLabel = formatDateDMY(dateValue)
+  if (!dateLabel || dateLabel === "-") return value
+  if (value === "-") return dateLabel
+  return `${value} - ${dateLabel}`
+}
+
+function titleHasEightAmIndicator(title?: string | null) {
+  return typeof title === "string" && /\b08:00\b/.test(title)
+}
+
 function fastReportSubtypeShort(task: Task) {
   const base = noProjectTypeLabel(task)
   if (base === "BLLOK") return "BLL"
@@ -1092,6 +1104,7 @@ export default function DepartmentKanban() {
   const [selectNoProjectAssigneesOpen, setSelectNoProjectAssigneesOpen] = React.useState(false)
   const [noProjectStartDate, setNoProjectStartDate] = React.useState("")
   const [noProjectDueDate, setNoProjectDueDate] = React.useState("")
+  const [noProjectDeadlineImportant, setNoProjectDeadlineImportant] = React.useState(false)
   const [noProjectFinishPeriod, setNoProjectFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
@@ -1132,6 +1145,7 @@ export default function DepartmentKanban() {
   const [newGaNote, setNewGaNote] = React.useState("")
 
   const [gaNoteCreateTask, setGaNoteCreateTask] = React.useState(false)
+  const [gaNoteCreateTaskDeadlineImportant, setGaNoteCreateTaskDeadlineImportant] = React.useState(false)
   const [gaNoteTaskOpenId, setGaNoteTaskOpenId] = React.useState<string | null>(null)
   const [creatingGaNoteTask, setCreatingGaNoteTask] = React.useState(false)
   const [gaNoteTaskAssigneeIds, setGaNoteTaskAssigneeIds] = React.useState<string[]>([])
@@ -1141,6 +1155,7 @@ export default function DepartmentKanban() {
   const [gaNoteTaskHasProject, setGaNoteTaskHasProject] = React.useState(false)
   const [gaNoteTaskStartDate, setGaNoteTaskStartDate] = React.useState(todayInputValue())
   const [gaNoteTaskDueDate, setGaNoteTaskDueDate] = React.useState("")
+  const [gaNoteTaskDeadlineImportant, setGaNoteTaskDeadlineImportant] = React.useState(false)
   const [gaNoteTaskFinishPeriod, setGaNoteTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
@@ -2326,6 +2341,35 @@ export default function DepartmentKanban() {
       return todayKey >= dayKey(dueDate)
     })
   }, [projectTasks, todayDate, viewMode, selectedUserId, user?.id, isTaskOwnedByViewUser])
+  const deadlineImportantTaskIds = React.useMemo(() => {
+    const ids = new Set<string>()
+    for (const task of dailyReportFastTasks) {
+      if (task.is_deadline_important) ids.add(task.id)
+    }
+    for (const task of dailyReportProjectTasks) {
+      if (task.is_deadline_important) ids.add(task.id)
+    }
+    for (const task of todaySystemTasks) {
+      if (task.is_deadline_important) ids.add(task.id)
+    }
+    return ids
+  }, [dailyReportFastTasks, dailyReportProjectTasks, todaySystemTasks])
+  const dailyReportTyoDateByTaskId = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const task of dailyReportFastTasks) {
+      const dateValue = task.due_date || task.start_date || task.created_at
+      if (dateValue) map.set(task.id, dateValue)
+    }
+    for (const task of dailyReportProjectTasks) {
+      const dateValue = task.due_date || task.start_date || task.created_at
+      if (dateValue) map.set(task.id, dateValue)
+    }
+    for (const task of todaySystemTasks) {
+      const dateValue = task.due_date || task.start_date || task.origin_run_at || task.created_at
+      if (dateValue) map.set(task.id, dateValue)
+    }
+    return map
+  }, [dailyReportFastTasks, dailyReportProjectTasks, todaySystemTasks])
 
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
@@ -2637,6 +2681,12 @@ export default function DepartmentKanban() {
     return rows
       .map((row, index) => ({ row, index }))
       .sort((a, b) => {
+        const importantDiff =
+          Number(deadlineImportantTaskIds.has(b.row.taskId || "")) -
+          Number(deadlineImportantTaskIds.has(a.row.taskId || ""))
+        if (importantDiff !== 0) return importantDiff
+        const eightAmDiff = Number(titleHasEightAmIndicator(b.row.title)) - Number(titleHasEightAmIndicator(a.row.title))
+        if (eightAmDiff !== 0) return eightAmDiff
         const statusDiff =
           statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
         return statusDiff !== 0 ? statusDiff : a.index - b.index
@@ -2653,6 +2703,7 @@ export default function DepartmentKanban() {
     todayIso,
     todaySystemTasks,
     userMap,
+    deadlineImportantTaskIds,
   ])
 
   const dailyUserReportDisplayRows = React.useMemo(() => {
@@ -4378,6 +4429,7 @@ export default function DepartmentKanban() {
         ga_note_origin_id: null,
         start_date: startDate,
         due_date: dueDate,
+        is_deadline_important: noProjectDeadlineImportant,
       }
       // Create one task with multiple assignees instead of multiple tasks
       const assigneeIds = noProjectAssignees.length > 0 ? noProjectAssignees : null
@@ -4429,6 +4481,7 @@ export default function DepartmentKanban() {
       setNoProjectAssignees([])
       setNoProjectStartDate("")
       setNoProjectDueDate("")
+      setNoProjectDeadlineImportant(false)
     } finally {
       setCreatingNoProject(false)
     }
@@ -4846,6 +4899,7 @@ export default function DepartmentKanban() {
           ga_note_origin_id: created.id,
           start_date: startDateValue,
           due_date: gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null,
+          is_deadline_important: gaNoteCreateTaskDeadlineImportant,
           finish_period: gaNoteTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteTaskFinishPeriod,
         }
         const taskRes = await apiFetch("/tasks", {
@@ -4875,6 +4929,7 @@ export default function DepartmentKanban() {
       setGaNoteTaskPriority("NORMAL")
       setGaNoteTaskStartDate(todayInputValue())
       setGaNoteTaskDueDate("")
+      setGaNoteCreateTaskDeadlineImportant(false)
       setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setGaNoteTaskAssigneeIds([])
       setGaNoteOpen(false)
@@ -5094,6 +5149,7 @@ export default function DepartmentKanban() {
         ga_note_origin_id: note.id,
         start_date: startDateValue,
         due_date: dueDateValue,
+        is_deadline_important: gaNoteTaskDeadlineImportant,
         finish_period: gaNoteTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : gaNoteTaskFinishPeriod,
         is_bllok: isBllok,
         is_1h_report: is1hReport,
@@ -5129,6 +5185,7 @@ export default function DepartmentKanban() {
       setGaNoteTaskPriority("NORMAL")
       setGaNoteTaskStartDate(todayInputValue())
       setGaNoteTaskDueDate("")
+      setGaNoteTaskDeadlineImportant(false)
       setGaNoteTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       toast.success("Task created")
     } finally {
@@ -5807,10 +5864,15 @@ export default function DepartmentKanban() {
                               const previousValue = row.comment ?? ""
                               const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
                               const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
+                              const isDeadlineImportant = row.taskId ? deadlineImportantTaskIds.has(row.taskId) : false
+                              const hasEightAmIndicator = titleHasEightAmIndicator(row.title)
                               return (
                                 <tr
                                   key={rowId}
-                                  className={overDailyReportRowId === rowId ? "bg-blue-50/60" : ""}
+                              className={[
+                                overDailyReportRowId === rowId ? "bg-blue-50/60" : "",
+                                isDeadlineImportant ? "bg-red-100/90" : "",
+                              ].join(" ")}
                                   onDragOver={(event) => {
                                     event.preventDefault()
                                     if (dragDailyReportRowId && dragDailyReportRowId !== rowId) {
@@ -5849,20 +5911,34 @@ export default function DepartmentKanban() {
                                   <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
-                                  <td className="border border-slate-200 px-2 py-2 align-top uppercase font-semibold">
-                                    {(() => {
-                                      const hasMarks = typeof row.title === "string" && row.title.includes("[[")
-                                      const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
-                                      if (row.typeLabel === "PRJK" && row.projectTitle) {
-                                        return (
-                                          <>
-                                            <span>{row.projectTitle}</span>
-                                            <span> : {renderedTitle}</span>
-                                          </>
-                                        )
-                                      }
-                                      return renderedTitle
-                                    })()}
+                              <td
+                                className={[
+                                  "border border-slate-200 px-2 py-2 align-top uppercase font-semibold",
+                                  isDeadlineImportant ? "text-red-800" : "",
+                                ].join(" ")}
+                              >
+                                    <div className="flex flex-wrap items-start gap-2">
+                                      {hasEightAmIndicator ? (
+                                        <span className="inline-flex rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                                          08:00
+                                        </span>
+                                      ) : null}
+                                      <span>
+                                        {(() => {
+                                          const hasMarks = typeof row.title === "string" && row.title.includes("[[")
+                                          const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
+                                          if (row.typeLabel === "PRJK" && row.projectTitle) {
+                                            return (
+                                              <>
+                                                <span>{row.projectTitle}</span>
+                                                <span> : {renderedTitle}</span>
+                                              </>
+                                            )
+                                          }
+                                          return renderedTitle
+                                        })()}
+                                      </span>
+                                    </div>
                                   </td>
                                   <td
                                     className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
@@ -5871,7 +5947,13 @@ export default function DepartmentKanban() {
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
-                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.tyo}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">
+                                    {formatTyoDisplay(
+                                      row.tyo,
+                                      row.taskId ? dailyReportTyoDateByTaskId.get(row.taskId) : null,
+                                      row.taskId ? deadlineImportantTaskIds.has(row.taskId) : false,
+                                    )}
+                                  </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">
                                     <div className="flex items-center gap-2">
                                       <input
@@ -6959,6 +7041,13 @@ export default function DepartmentKanban() {
                               />
                             </div>
                           </div>
+                          <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
+                            <Checkbox
+                              checked={noProjectDeadlineImportant}
+                              onCheckedChange={(checked) => setNoProjectDeadlineImportant(checked === true)}
+                            />
+                            <span className="text-sm font-medium text-slate-700">Deadline important</span>
+                          </label>
                           <div className="flex justify-end gap-2">
                             <Button variant="outline" onClick={() => setNoProjectOpen(false)} className="rounded-xl border-slate-200">
                               Cancel
@@ -7559,8 +7648,17 @@ export default function DepartmentKanban() {
                                   onChange={(e) => setGaNoteTaskDueDate(normalizeDueDateInput(e.target.value))}
                                 />
                               </div>
-                            </div>
-                          )}
+                            <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                              <Checkbox
+                                checked={gaNoteCreateTaskDeadlineImportant}
+                                onCheckedChange={(checked) =>
+                                  setGaNoteCreateTaskDeadlineImportant(checked === true)
+                                }
+                              />
+                              <span className="text-sm font-medium">Deadline important</span>
+                            </label>
+                          </div>
+                        )}
                         </div>
                         <div className="flex justify-end gap-2">
                           <Button variant="ghost" onClick={() => setGaNoteOpen(false)}>
@@ -7718,6 +7816,13 @@ export default function DepartmentKanban() {
                             />
                           </div>
                         </div>
+                        <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                          <Checkbox
+                            checked={gaNoteTaskDeadlineImportant}
+                            onCheckedChange={(checked) => setGaNoteTaskDeadlineImportant(checked === true)}
+                          />
+                          <span className="text-sm font-medium">Deadline important</span>
+                        </label>
                       </div>
                       <div className="flex justify-end gap-2">
                         <Button variant="ghost" onClick={() => setGaNoteTaskOpenId(null)}>
@@ -8585,6 +8690,12 @@ export default function DepartmentKanban() {
                   return 4
                 }
                 const sortedRows = [...allRows].sort((a, b) => {
+                  const importantDiff =
+                    Number(deadlineImportantTaskIds.has(b.taskId || "")) -
+                    Number(deadlineImportantTaskIds.has(a.taskId || ""))
+                  if (importantDiff !== 0) return importantDiff
+                  const eightAmDiff = Number(titleHasEightAmIndicator(b.title)) - Number(titleHasEightAmIndicator(a.title))
+                  if (eightAmDiff !== 0) return eightAmDiff
                   const typeDiff = typeOrder(a) - typeOrder(b)
                   if (typeDiff !== 0) return typeDiff
                   if (a.typeLabel === "FT" && b.typeLabel === "FT") {
@@ -8641,7 +8752,10 @@ export default function DepartmentKanban() {
                     <tbody>
                       {sortedRows.length ? (
                         sortedRows.map((row, index) => (
-                          <tr key={`${row.userName}-${row.typeLabel}-${row.title}-${index}`}>
+                          <tr
+                            key={`${row.userName}-${row.typeLabel}-${row.title}-${index}`}
+                            className={row.taskId && deadlineImportantTaskIds.has(row.taskId) ? "bg-red-100/90" : ""}
+                          >
                             <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
@@ -8651,19 +8765,28 @@ export default function DepartmentKanban() {
                               {row.period}
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                              {(() => {
-                                const hasMarks = typeof row.title === "string" && row.title.includes("[[")
-                                const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
-                                if (row.typeLabel === "PRJK" && row.projectTitle) {
-                                  return (
-                                    <>
-                                      <span className="font-semibold">{row.projectTitle}</span>
-                                      <span> : {renderedTitle}</span>
-                                    </>
-                                  )
-                                }
-                                return renderedTitle
-                              })()}
+                              <div className="flex flex-wrap items-start gap-2">
+                                {titleHasEightAmIndicator(row.title) ? (
+                                  <span className="inline-flex rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                                    08:00
+                                  </span>
+                                ) : null}
+                                <span>
+                                  {(() => {
+                                    const hasMarks = typeof row.title === "string" && row.title.includes("[[")
+                                    const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
+                                    if (row.typeLabel === "PRJK" && row.projectTitle) {
+                                      return (
+                                        <>
+                                          <span className="font-semibold">{row.projectTitle}</span>
+                                          <span> : {renderedTitle}</span>
+                                        </>
+                                      )
+                                    }
+                                    return renderedTitle
+                                  })()}
+                                </span>
+                              </div>
                             </td>
                             <td
                               className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
@@ -8673,7 +8796,11 @@ export default function DepartmentKanban() {
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
-                              {row.tyo}
+                              {formatTyoDisplay(
+                                row.tyo,
+                                row.taskId ? dailyReportTyoDateByTaskId.get(row.taskId) : null,
+                                row.taskId ? deadlineImportantTaskIds.has(row.taskId) : false,
+                              )}
                             </td>
                             <td className="border border-slate-900 px-2 py-2 align-top">
                               <div className="h-4 w-full border-b border-slate-400" />
@@ -8728,25 +8855,37 @@ export default function DepartmentKanban() {
                 <tbody>
                   {dailyUserReportRows.length ? (
                     dailyUserReportRows.map((row, index) => (
-                      <tr key={`${row.typeLabel}-${row.title}-${index}`}>
+                          <tr
+                            key={`${row.typeLabel}-${row.title}-${index}`}
+                            className={row.taskId && deadlineImportantTaskIds.has(row.taskId) ? "bg-red-100/90" : ""}
+                          >
                         <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.subtype}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.period}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top uppercase">
-                          {(() => {
-                            const hasMarks = typeof row.title === "string" && row.title.includes("[[")
-                            const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
-                            if (row.typeLabel === "PRJK" && row.projectTitle) {
-                              return (
-                                <>
-                                  <span className="font-semibold">{row.projectTitle}</span>
-                                  <span> : {renderedTitle}</span>
-                                </>
-                              )
-                            }
-                            return renderedTitle
-                          })()}
+                          <div className="flex flex-wrap items-start gap-2">
+                            {titleHasEightAmIndicator(row.title) ? (
+                                  <span className="inline-flex rounded-full border border-red-300 bg-red-100 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-red-700">
+                                    08:00
+                                  </span>
+                            ) : null}
+                            <span>
+                              {(() => {
+                                const hasMarks = typeof row.title === "string" && row.title.includes("[[")
+                                const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
+                                if (row.typeLabel === "PRJK" && row.projectTitle) {
+                                  return (
+                                    <>
+                                      <span className="font-semibold">{row.projectTitle}</span>
+                                      <span> : {renderedTitle}</span>
+                                    </>
+                                  )
+                                }
+                                return renderedTitle
+                              })()}
+                            </span>
+                          </div>
                         </td>
                         <td
                           className={`border border-slate-900 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
@@ -8755,7 +8894,13 @@ export default function DepartmentKanban() {
                         </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
-                        <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">{row.tyo}</td>
+                        <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
+                          {formatTyoDisplay(
+                            row.tyo,
+                            row.taskId ? dailyReportTyoDateByTaskId.get(row.taskId) : null,
+                            row.taskId ? deadlineImportantTaskIds.has(row.taskId) : false,
+                          )}
+                        </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">
                           <div className="h-4 w-full border-b border-slate-400" />
                         </td>

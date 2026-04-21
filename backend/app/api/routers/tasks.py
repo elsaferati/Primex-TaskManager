@@ -305,6 +305,7 @@ def _task_to_out(
         late_days=late_days,
         moved_days=moved_days,
         completed_at=task.completed_at,
+        is_deadline_important=task.is_deadline_important,
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
         is_r1=task.is_r1,
@@ -878,6 +879,7 @@ async def create_task(
                     start_date=start_date_value,
                     due_date=due_date_value,
                     completed_at=completed_at,
+                    is_deadline_important=payload.is_deadline_important or False,
                     is_bllok=payload.is_bllok or False,
                     is_1h_report=payload.is_1h_report or False,
                     is_r1=payload.is_r1 or False,
@@ -1016,6 +1018,7 @@ async def create_task(
                             start_date=start_date_value,
                             due_date=due_date_value,
                             completed_at=completed_at,
+                            is_deadline_important=payload.is_deadline_important or False,
                             is_bllok=payload.is_bllok or False,
                             is_1h_report=payload.is_1h_report or False,
                             is_r1=payload.is_r1 or False,
@@ -1134,6 +1137,7 @@ async def create_task(
                 start_date=start_date_value,
                 due_date=due_date_value,
                 completed_at=completed_at,
+                is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
                 is_r1=payload.is_r1 or False,
@@ -1231,6 +1235,7 @@ async def create_task(
                 start_date=start_date_value,
                 due_date=due_date_value,
                 completed_at=completed_at,
+                is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
                 is_r1=payload.is_r1 or False,
@@ -1320,6 +1325,7 @@ async def create_task(
         start_date=start_date_value,
         due_date=due_date_value,
         completed_at=completed_at,
+        is_deadline_important=payload.is_deadline_important or False,
         is_bllok=payload.is_bllok or False,
         is_1h_report=payload.is_1h_report or False,
         is_r1=payload.is_r1 or False,
@@ -1529,6 +1535,7 @@ async def update_task(
         "confirmation_assignee_id": str(task.confirmation_assignee_id) if task.confirmation_assignee_id else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
+        "is_deadline_important": task.is_deadline_important,
     }
 
     # Snapshot completion values before update for MST/TT daily progress logging.
@@ -1786,6 +1793,8 @@ async def update_task(
         task.due_date = payload.due_date
     if payload.completed_at is not None:
         task.completed_at = payload.completed_at
+    if payload.is_deadline_important is not None:
+        task.is_deadline_important = payload.is_deadline_important
     if payload.is_bllok is not None:
         task.is_bllok = payload.is_bllok
     if payload.is_1h_report is not None:
@@ -1937,6 +1946,8 @@ async def update_task(
             shared_values["due_date"] = task.due_date
         if payload.start_date is not None:
             shared_values["start_date"] = task.start_date
+        if payload.is_deadline_important is not None:
+            shared_values["is_deadline_important"] = task.is_deadline_important
         if payload.priority is not None:
             shared_values["priority"] = task.priority
         if finish_period_set:
@@ -2031,6 +2042,7 @@ async def update_task(
                         due_date=task.due_date,
                         original_due_date=task.original_due_date,
                         completed_at=None,
+                        is_deadline_important=task.is_deadline_important,
                         is_bllok=task.is_bllok,
                         is_1h_report=task.is_1h_report,
                         is_r1=task.is_r1,
@@ -2075,6 +2087,7 @@ async def update_task(
         "confirmation_assignee_id": str(task.confirmation_assignee_id) if task.confirmation_assignee_id else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
+        "is_deadline_important": task.is_deadline_important,
     }
 
     add_audit_log(

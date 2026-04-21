@@ -303,6 +303,7 @@ export default function WeeklyPlannerPage() {
   const [manualTaskDays, setManualTaskDays] = React.useState<string[]>([])
   const [manualTaskUserIds, setManualTaskUserIds] = React.useState<string[]>([])
   const [manualTaskPeriod, setManualTaskPeriod] = React.useState<"AM" | "PM">("AM")
+  const [manualTaskDeadlineImportant, setManualTaskDeadlineImportant] = React.useState(false)
   const [manualTaskDepartmentId, setManualTaskDepartmentId] = React.useState("")
   const [manualTaskFastType, setManualTaskFastType] = React.useState<string>("")
   const [manualTaskProjectId, setManualTaskProjectId] = React.useState("")
@@ -967,6 +968,7 @@ export default function WeeklyPlannerPage() {
               priority: "NORMAL",
               finish_period: manualTaskPeriod,
               due_date: dueDateIso,
+              is_deadline_important: manualTaskDeadlineImportant,
             }
 
             // Set fast task type flags
@@ -1017,6 +1019,7 @@ export default function WeeklyPlannerPage() {
                   priority: "NORMAL",
                   finish_period: manualTaskPeriod,
                   due_date: dueDateIso,
+                  is_deadline_important: manualTaskDeadlineImportant,
                 }),
               })
             )
@@ -1036,6 +1039,7 @@ export default function WeeklyPlannerPage() {
       setManualTaskTitle("")
       setManualTaskDays([])
       setManualTaskUserIds([])
+      setManualTaskDeadlineImportant(false)
       setManualTaskPeriod("AM")
       setManualTaskDepartmentId("")
       setManualTaskFastType("")
@@ -1343,6 +1347,9 @@ export default function WeeklyPlannerPage() {
     const selectedDept = departmentId !== ALL_DEPARTMENTS_VALUE
       ? formatDepartmentName(departments.find(d => d.id === departmentId)?.name || "All Departments")
       : "All Departments"
+    const printTitle = selectedDept !== "All Departments"
+      ? `WEEKLY PLANNER - ${selectedDept.toUpperCase()}`
+      : "WEEKLY PLANNER"
     const printedAt = new Date()
     const printInitials = (user?.full_name || user?.username || "")
       .trim()
@@ -1868,7 +1875,7 @@ export default function WeeklyPlannerPage() {
       header.innerHTML = showTitle
         ? `
         <div></div>
-        <div class="print-title">Weekly Planner</div>
+        <div class="print-title">${printTitle}</div>
         <div class="print-datetime">${formatPrintedAt}</div>
       `
         : `
@@ -3425,6 +3432,13 @@ export default function WeeklyPlannerPage() {
                     </Select>
                   </div>
                 </div>
+                <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                  <Checkbox
+                    checked={manualTaskDeadlineImportant}
+                    onCheckedChange={(checked) => setManualTaskDeadlineImportant(checked === true)}
+                  />
+                  <span className="text-sm font-medium">Deadline important</span>
+                </label>
                 <div className="space-y-2">
                   <Label>Days (Select multiple)</Label>
                   <DropdownMenu>
@@ -3582,6 +3596,13 @@ export default function WeeklyPlannerPage() {
                     </SelectContent>
                   </Select>
                 </div>
+                <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                  <Checkbox
+                    checked={manualTaskDeadlineImportant}
+                    onCheckedChange={(checked) => setManualTaskDeadlineImportant(checked === true)}
+                  />
+                  <span className="text-sm font-medium">Deadline important</span>
+                </label>
                 <div className="space-y-2">
                   <Label>Members (Select multiple)</Label>
                   <DropdownMenu>
