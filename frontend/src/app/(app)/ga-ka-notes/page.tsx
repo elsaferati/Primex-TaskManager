@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Check, Clock, Image as ImageIcon, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
+import { Bold, Check, Clock, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -307,8 +307,13 @@ function renderMarkedNoteContent(content?: string | null) {
   return renderNoteContentWithRanges(parsed.text, parsed.doneRanges, parsed.addedRanges)
 }
 
-function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[], addedRanges: TextMarkRange[] = []) {
-  if (!content) return "-"
+type MarkedSegment = {
+  text: string
+  isDone: boolean
+  isAdded: boolean
+}
+
+function buildMarkedSegments(content: string, doneRanges: TextMarkRange[], addedRanges: TextMarkRange[] = []) {
   const normalizedDoneRanges = normalizeTextRanges(doneRanges)
   const normalizedAddedRanges = normalizeAddedRanges(content, addedRanges)
   const boundaries = new Set([0, content.length])
@@ -325,29 +330,268 @@ function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[
   const orderedBoundaries = Array.from(boundaries)
     .filter((boundary) => boundary >= 0 && boundary <= content.length)
     .sort((a, b) => a - b)
-  const parts: React.ReactNode[] = []
 
+  const segments: MarkedSegment[] = []
   for (let idx = 0; idx < orderedBoundaries.length - 1; idx += 1) {
     const start = orderedBoundaries[idx]
     const end = orderedBoundaries[idx + 1]
-    const segment = content.slice(start, end)
-    if (!segment) continue
+    const text = content.slice(start, end)
+    if (!text) continue
 
-    const isDone = normalizedDoneRanges.some((range) => range.start <= start && range.end >= end)
-    const isAdded = normalizedAddedRanges.some((range) => range.start <= start && range.end >= end)
-    const className = getNoteMarkClass(isDone, isAdded)
-    parts.push(
-      className ? (
-        <span key={`note-mark-${idx}-${start}`} className={className}>
-          {segment}
-        </span>
-      ) : (
-        segment
-      )
-    )
+    segments.push({
+      text,
+      isDone: normalizedDoneRanges.some((range) => range.start <= start && range.end >= end),
+      isAdded: normalizedAddedRanges.some((range) => range.start <= start && range.end >= end),
+    })
   }
 
-  return parts.length > 0 ? parts : content
+  return segments
+}
+
+function splitSegmentsByNewline(segments: MarkedSegment[]) {
+  const lines: MarkedSegment[][] = [[]]
+
+  for (const segment of segments) {
+    const parts = segment.text.split("\n")
+    parts.forEach((part, index) => {
+      if (part) {
+        lines[lines.length - 1].push({
+          text: part,
+          isDone: segment.isDone,
+          isAdded: segment.isAdded,
+        })
+      }
+      if (index < parts.length - 1) {
+        lines.push([])
+      }
+    })
+  }
+
+  return lines
+}
+
+function trimLinePrefix(segments: MarkedSegment[], charsToTrim: number) {
+  if (charsToTrim <= 0) return segments
+
+  let remaining = charsToTrim
+  const trimmed: MarkedSegment[] = []
+
+  for (const segment of segments) {
+    if (remaining >= segment.text.length) {
+      remaining -= segment.text.length
+      continue
+    }
+    if (remaining > 0) {
+      trimmed.push({
+        ...segment,
+        text: segment.text.slice(remaining),
+      })
+      remaining = 0
+      continue
+    }
+    trimmed.push(segment)
+  }
+
+  return trimmed.filter((segment) => segment.text.length > 0)
+}
+
+function renderInlineMarkedSegments(segments: MarkedSegment[], keyPrefix: string) {
+  if (segments.length === 0) return null
+
+  const chars = segments.flatMap((segment) =>
+    Array.from(segment.text).map((char) => ({
+      char,
+      isDone: segment.isDone,
+      isAdded: segment.isAdded,
+    }))
+  )
+
+  const runs: Array<{ text: string; isDone: boolean; isAdded: boolean; isBold: boolean }> = []
+  let buffer = ""
+  let currentBold = false
+  let currentDone: boolean | null = null
+  let currentAdded: boolean | null = null
+
+  const flushBuffer = () => {
+    if (!buffer) return
+    runs.push({
+      text: buffer,
+      isDone: Boolean(currentDone),
+      isAdded: Boolean(currentAdded),
+      isBold: currentBold,
+    })
+    buffer = ""
+  }
+
+  for (let index = 0; index < chars.length; index += 1) {
+    const current = chars[index]
+    const next = chars[index + 1]
+
+    if (current.char === "*" && next?.char === "*") {
+      flushBuffer()
+      currentBold = !currentBold
+      currentDone = null
+      currentAdded = null
+      index += 1
+      continue
+    }
+
+    if (
+      buffer &&
+      (currentDone !== current.isDone || currentAdded !== current.isAdded)
+    ) {
+      flushBuffer()
+    }
+
+    currentDone = current.isDone
+    currentAdded = current.isAdded
+    buffer += current.char
+  }
+
+  flushBuffer()
+
+  return runs.map((run, index) => {
+    const className = getNoteMarkClass(run.isDone, run.isAdded)
+    const contentNode = run.isBold ? <strong>{run.text}</strong> : run.text
+
+    if (!className) {
+      return <React.Fragment key={`${keyPrefix}-run-${index}`}>{contentNode}</React.Fragment>
+    }
+
+    return (
+      <span key={`${keyPrefix}-run-${index}`} className={className}>
+        {contentNode}
+      </span>
+    )
+  })
+}
+
+function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[], addedRanges: TextMarkRange[] = []) {
+  if (!content) return "-"
+  const lines = splitSegmentsByNewline(buildMarkedSegments(content, doneRanges, addedRanges))
+  const blocks: React.ReactNode[] = []
+  let index = 0
+
+  while (index < lines.length) {
+    const lineSegments = lines[index]
+    const lineText = lineSegments.map((segment) => segment.text).join("")
+    const bulletMatch = lineText.match(/^\s*[•\-*]\s+/)
+    const orderedMatch = lineText.match(/^\s*\d+\.\s+/)
+
+    if (bulletMatch) {
+      const items: React.ReactNode[] = []
+      while (index < lines.length) {
+        const itemSegments = lines[index]
+        const itemText = itemSegments.map((segment) => segment.text).join("")
+        const match = itemText.match(/^\s*[•\-*]\s+/)
+        if (!match) break
+        items.push(
+          <li key={`note-bullet-${index}`}>
+            {renderInlineMarkedSegments(trimLinePrefix(itemSegments, match[0].length), `note-bullet-${index}`)}
+          </li>
+        )
+        index += 1
+      }
+      blocks.push(
+        <ul key={`note-ul-${index}`} className="list-disc pl-5 space-y-1">
+          {items}
+        </ul>
+      )
+      continue
+    }
+
+    if (orderedMatch) {
+      const items: React.ReactNode[] = []
+      while (index < lines.length) {
+        const itemSegments = lines[index]
+        const itemText = itemSegments.map((segment) => segment.text).join("")
+        const match = itemText.match(/^\s*\d+\.\s+/)
+        if (!match) break
+        items.push(
+          <li key={`note-ordered-${index}`}>
+            {renderInlineMarkedSegments(trimLinePrefix(itemSegments, match[0].length), `note-ordered-${index}`)}
+          </li>
+        )
+        index += 1
+      }
+      blocks.push(
+        <ol key={`note-ol-${index}`} className="list-decimal pl-5 space-y-1">
+          {items}
+        </ol>
+      )
+      continue
+    }
+
+    blocks.push(
+      <div key={`note-line-${index}`} className={lineText ? "" : "min-h-[1.25rem]"}>
+        {lineText ? renderInlineMarkedSegments(lineSegments, `note-line-${index}`) : "\u00A0"}
+      </div>
+    )
+    index += 1
+  }
+
+  return blocks.length > 0 ? blocks : content
+}
+
+type TextSelectionTransformResult = {
+  nextValue: string
+  selectionStart: number
+  selectionEnd: number
+}
+
+function applyTextSelectionTransform(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  transform: (value: string, selectionStart: number, selectionEnd: number) => TextSelectionTransformResult
+) {
+  return transform(value, selectionStart, selectionEnd)
+}
+
+function wrapSelectedText(value: string, selectionStart: number, selectionEnd: number, wrapper: string): TextSelectionTransformResult {
+  const selected = value.slice(selectionStart, selectionEnd)
+  const nextValue = `${value.slice(0, selectionStart)}${wrapper}${selected}${wrapper}${value.slice(selectionEnd)}`
+  return {
+    nextValue,
+    selectionStart: selectionStart + wrapper.length,
+    selectionEnd: selectionEnd + wrapper.length,
+  }
+}
+
+function prefixSelectedLines(
+  value: string,
+  selectionStart: number,
+  selectionEnd: number,
+  prefixBuilder: (lineIndex: number) => string
+): TextSelectionTransformResult {
+  const lineStart = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1
+  const lineEndIndex = value.indexOf("\n", selectionEnd)
+  const blockEnd = lineEndIndex === -1 ? value.length : lineEndIndex
+  const block = value.slice(lineStart, blockEnd)
+  const lines = block.split("\n")
+
+  let nextBlock = ""
+  let addedBeforeSelectionStart = 0
+  let addedBeforeSelectionEnd = 0
+  let consumed = 0
+
+  lines.forEach((line, index) => {
+    const prefix = prefixBuilder(index)
+    if (index > 0) {
+      nextBlock += "\n"
+      consumed += 1
+    }
+    if (consumed <= selectionStart - lineStart) addedBeforeSelectionStart += prefix.length
+    if (consumed <= selectionEnd - lineStart) addedBeforeSelectionEnd += prefix.length
+    nextBlock += `${prefix}${line}`
+    consumed += line.length
+  })
+
+  return {
+    nextValue: `${value.slice(0, lineStart)}${nextBlock}${value.slice(blockEnd)}`,
+    selectionStart: selectionStart + addedBeforeSelectionStart,
+    selectionEnd: selectionEnd + addedBeforeSelectionEnd,
+  }
 }
 
 function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
@@ -510,6 +754,7 @@ export default function GaKaNotesPage() {
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
+  const contentTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
@@ -1113,6 +1358,65 @@ export default function GaKaNotesPage() {
     setEditAddedRanges((current) => addInsertedTextRange(editContent, nextContent, current))
     setEditContent(nextContent)
   }
+
+  const applyTextEditToTextarea = React.useCallback(
+    (
+      textarea: HTMLTextAreaElement | null,
+      currentValue: string,
+      onChange: (nextValue: string) => void,
+      transform: (value: string, selectionStart: number, selectionEnd: number) => TextSelectionTransformResult
+    ) => {
+      if (!textarea) return
+      const result = applyTextSelectionTransform(
+        currentValue,
+        textarea.selectionStart,
+        textarea.selectionEnd,
+        transform
+      )
+      onChange(result.nextValue)
+      window.setTimeout(() => {
+        textarea.focus()
+        textarea.setSelectionRange(result.selectionStart, result.selectionEnd)
+      }, 0)
+    },
+    []
+  )
+
+  const applyNewNoteBold = React.useCallback(() => {
+    applyTextEditToTextarea(contentTextareaRef.current, content, setContent, (value, selectionStart, selectionEnd) =>
+      wrapSelectedText(value, selectionStart, selectionEnd, "**")
+    )
+  }, [applyTextEditToTextarea, content])
+
+  const applyNewNoteBullets = React.useCallback(() => {
+    applyTextEditToTextarea(contentTextareaRef.current, content, setContent, (value, selectionStart, selectionEnd) =>
+      prefixSelectedLines(value, selectionStart, selectionEnd, () => "• ")
+    )
+  }, [applyTextEditToTextarea, content])
+
+  const applyNewNoteNumbers = React.useCallback(() => {
+    applyTextEditToTextarea(contentTextareaRef.current, content, setContent, (value, selectionStart, selectionEnd) =>
+      prefixSelectedLines(value, selectionStart, selectionEnd, (lineIndex) => `${lineIndex + 1}. `)
+    )
+  }, [applyTextEditToTextarea, content])
+
+  const applyEditNoteBold = React.useCallback(() => {
+    applyTextEditToTextarea(editTextareaRef.current, editContent, handleEditContentChange, (value, selectionStart, selectionEnd) =>
+      wrapSelectedText(value, selectionStart, selectionEnd, "**")
+    )
+  }, [applyTextEditToTextarea, editContent])
+
+  const applyEditNoteBullets = React.useCallback(() => {
+    applyTextEditToTextarea(editTextareaRef.current, editContent, handleEditContentChange, (value, selectionStart, selectionEnd) =>
+      prefixSelectedLines(value, selectionStart, selectionEnd, () => "• ")
+    )
+  }, [applyTextEditToTextarea, editContent])
+
+  const applyEditNoteNumbers = React.useCallback(() => {
+    applyTextEditToTextarea(editTextareaRef.current, editContent, handleEditContentChange, (value, selectionStart, selectionEnd) =>
+      prefixSelectedLines(value, selectionStart, selectionEnd, (lineIndex) => `${lineIndex + 1}. `)
+    )
+  }, [applyTextEditToTextarea, editContent])
 
   const markSelectedEditTextDone = () => {
     const textarea = editTextareaRef.current
@@ -1860,7 +2164,23 @@ export default function GaKaNotesPage() {
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyNewNoteBold}>
+                <Bold className="h-4 w-4" />
+                Bold
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyNewNoteBullets}>
+                <List className="h-4 w-4" />
+                Bullets
+              </Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyNewNoteNumbers}>
+                <ListOrdered className="h-4 w-4" />
+                Numbers
+              </Button>
+              <span className="text-xs text-muted-foreground">Select text for bold, or lines for bullets/numbers.</span>
+            </div>
             <Textarea
+              ref={contentTextareaRef}
               value={content}
               onChange={(e) => setContent(e.target.value)}
               rows={6}
@@ -3340,36 +3660,50 @@ export default function GaKaNotesPage() {
           setEditDescription("")
         }
       }}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
           <DialogHeader>
             <DialogTitle>Edit Note</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="flex-1 space-y-3 overflow-y-auto pr-1">
             <div className="space-y-2">
-              <div className="flex items-center justify-between gap-2">
+              <div className="flex flex-wrap items-center justify-between gap-2">
                 <Label>Note text</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-8"
-                  onClick={markSelectedEditTextDone}
-                >
-                  Mark / undo selected done
-                </Button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyEditNoteBold}>
+                    <Bold className="h-4 w-4" />
+                    Bold
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyEditNoteBullets}>
+                    <List className="h-4 w-4" />
+                    Bullets
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyEditNoteNumbers}>
+                    <ListOrdered className="h-4 w-4" />
+                    Numbers
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-8"
+                    onClick={markSelectedEditTextDone}
+                  >
+                    Mark / undo selected done
+                  </Button>
+                </div>
               </div>
               <Textarea
                 ref={editTextareaRef}
                 value={editContent}
                 onChange={(e) => handleEditContentChange(e.target.value)}
-                className="min-h-[140px] resize-y text-sm leading-normal"
+                className="min-h-[180px] max-h-[42vh] resize-y overflow-y-auto text-sm leading-normal"
               />
               <p className="text-xs text-muted-foreground">
                 Select text and click mark done to toggle it, or place the cursor on a line to toggle the whole line.
               </p>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Preview</Label>
-                <div className="min-h-[72px] whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-normal">
+                <div className="min-h-[120px] max-h-[32vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-normal">
                   {renderNoteContentWithRanges(editContent, editDoneRanges, editAddedRanges)}
                 </div>
               </div>

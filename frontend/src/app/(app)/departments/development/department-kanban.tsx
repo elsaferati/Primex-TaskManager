@@ -1206,6 +1206,7 @@ export default function DepartmentKanban() {
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
+  const [editTaskDeadlineImportant, setEditTaskDeadlineImportant] = React.useState(false)
   const [editTaskAssignees, setEditTaskAssignees] = React.useState<string[]>([])
   const [selectEditTaskAssigneesOpen, setSelectEditTaskAssigneesOpen] = React.useState(false)
   const [updatingTask, setUpdatingTask] = React.useState(false)
@@ -4929,6 +4930,7 @@ export default function DepartmentKanban() {
     setEditTaskStartDate(toDateInputValue(task.start_date))
     setEditTaskDueDate(toDateInputValue(task.due_date))
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+    setEditTaskDeadlineImportant(Boolean(task.is_deadline_important))
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
     const assigneeIds = task.assignees && task.assignees.length > 0
       ? task.assignees.map(a => a.id).filter((id): id is string => Boolean(id))
@@ -4945,6 +4947,7 @@ export default function DepartmentKanban() {
     setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
+    setEditTaskDeadlineImportant(false)
     setEditTaskAssignees([])
   }
 
@@ -4973,6 +4976,8 @@ export default function DepartmentKanban() {
           start_date: startDateValue,
           due_date: dueDateValue,
           finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
+          is_deadline_important: editTaskDeadlineImportant,
+          assignees: editTaskAssignees,
           assigned_to: assignedToValue,
         }),
       })
@@ -8173,6 +8178,13 @@ export default function DepartmentKanban() {
                           />
                         </div>
                       </div>
+                      <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
+                        <Checkbox
+                          checked={editTaskDeadlineImportant}
+                          onCheckedChange={(checked) => setEditTaskDeadlineImportant(checked === true)}
+                        />
+                        <span className="text-sm font-medium text-slate-700">Deadline important</span>
+                      </label>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Assign to</Label>
                         <Dialog open={selectEditTaskAssigneesOpen} onOpenChange={setSelectEditTaskAssigneesOpen}>

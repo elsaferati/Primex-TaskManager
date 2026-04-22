@@ -2304,10 +2304,14 @@ async def delete_task(
                 if origin_id == task.id:
                     control_task.internal_notes = _strip_origin_task_id(control_task.internal_notes)
 
-    # Fast task groups: "delete only for me" -> soft-delete only this copy.
+    # Fast task groups: delete only this assignee copy, but remove the row entirely.
     if task.fast_task_group_id is not None and is_fast_task_model(task):
-        task.is_active = False
         await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
+        await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
+        await db.execute(delete(TaskUserComment).where(TaskUserComment.task_id == task.id))
+        await db.flush()
+        db.expire(task, ["assignees"])
+        await db.delete(task)
         await db.commit()
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
