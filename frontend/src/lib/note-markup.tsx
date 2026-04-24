@@ -108,6 +108,58 @@ export function getPlainMarkedText(content?: string | null) {
   return parseMarkedNoteContent(content).text
 }
 
+function getMarkedIndexForPlainIndex(content: string, plainIndex: number) {
+  if (plainIndex <= 0) return 0
+
+  let plainOffset = 0
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  NOTE_MARK_TOKEN_RE.lastIndex = 0
+  while ((match = NOTE_MARK_TOKEN_RE.exec(content)) !== null) {
+    const segment = content.slice(lastIndex, match.index)
+    const nextPlainOffset = plainOffset + segment.length
+    if (plainIndex <= nextPlainOffset) {
+      return lastIndex + (plainIndex - plainOffset)
+    }
+
+    plainOffset = nextPlainOffset
+    lastIndex = match.index + match[0].length
+  }
+
+  const trailingSegment = content.slice(lastIndex)
+  const trailingPlainOffset = plainOffset + trailingSegment.length
+  if (plainIndex <= trailingPlainOffset) {
+    return lastIndex + (plainIndex - plainOffset)
+  }
+
+  return content.length
+}
+
+function insertMarkedAddition(previousMarked: string, plainIndex: number, insertedText: string) {
+  if (!insertedText) return previousMarked
+
+  const { addedRanges } = parseMarkedNoteContent(previousMarked)
+  const containingAddedRange = addedRanges.find((range) => range.start <= plainIndex && plainIndex <= range.end)
+
+  if (containingAddedRange) {
+    const insertIndex = getMarkedIndexForPlainIndex(previousMarked, plainIndex)
+    return `${previousMarked.slice(0, insertIndex)}${insertedText}${previousMarked.slice(insertIndex)}`
+  }
+
+  const adjacentAddedRange = addedRanges.find((range) => range.end === plainIndex)
+  if (adjacentAddedRange) {
+    const insertIndex = getMarkedIndexForPlainIndex(previousMarked, adjacentAddedRange.end)
+    const closingToken = "[[/added]]"
+    if (previousMarked.slice(insertIndex, insertIndex + closingToken.length) === closingToken) {
+      return `${previousMarked.slice(0, insertIndex)}${insertedText}${previousMarked.slice(insertIndex)}`
+    }
+  }
+
+  const insertIndex = getMarkedIndexForPlainIndex(previousMarked, plainIndex)
+  return `${previousMarked.slice(0, insertIndex)}[[added]]${insertedText}[[/added]]${previousMarked.slice(insertIndex)}`
+}
+
 export function buildMarkedAppendOnlyText(previousContent?: string | null, nextPlainText?: string | null) {
   const previousMarked = previousContent || ""
   const previousPlain = getPlainMarkedText(previousContent).trim()
@@ -115,6 +167,33 @@ export function buildMarkedAppendOnlyText(previousContent?: string | null, nextP
 
   if (!previousPlain || !nextPlain) return nextPlain
   if (nextPlain === previousPlain) return previousMarked
+
+  let prefixLength = 0
+  while (
+    prefixLength < previousPlain.length &&
+    prefixLength < nextPlain.length &&
+    previousPlain[prefixLength] === nextPlain[prefixLength]
+  ) {
+    prefixLength += 1
+  }
+
+  let previousSuffixStart = previousPlain.length
+  let nextSuffixStart = nextPlain.length
+  while (
+    previousSuffixStart > prefixLength &&
+    nextSuffixStart > prefixLength &&
+    previousPlain[previousSuffixStart - 1] === nextPlain[nextSuffixStart - 1]
+  ) {
+    previousSuffixStart -= 1
+    nextSuffixStart -= 1
+  }
+
+  const removedText = previousPlain.slice(prefixLength, previousSuffixStart)
+  const insertedText = nextPlain.slice(prefixLength, nextSuffixStart)
+  if (insertedText && !removedText) {
+    return insertMarkedAddition(previousMarked, prefixLength, insertedText)
+  }
+
   if (!nextPlain.startsWith(previousPlain)) return nextPlain
 
   const suffix = nextPlain.slice(previousPlain.length)

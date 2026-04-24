@@ -4592,35 +4592,49 @@ export default function DepartmentKanban() {
     setEditTaskAssignees([])
   }
 
+  const sameIdSet = (a: string[], b: string[]) => {
+    if (a.length !== b.length) return false
+    const aSet = new Set(a)
+    if (aSet.size !== b.length) return false
+    for (const id of b) {
+      if (!aSet.has(id)) return false
+    }
+    return true
+  }
+
   const updateNoProjectTask = async () => {
     if (!editingTaskId || !editTaskTitle.trim() || !editTaskStartDate) return
     setUpdatingTask(true)
     try {
+      const editingTask = noProjectTasks.find((candidate) => candidate.id === editingTaskId) || null
       const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
-      // Use first assignee for backward compatibility, or null if no assignees
-      const assignedToValue = editTaskAssignees.length > 0 ? editTaskAssignees[0] : null
+      const currentTaskAssigneeIds =
+        editingTask?.assignees && editingTask.assignees.length > 0
+          ? editingTask.assignees.map((a) => a.id).filter((id): id is string => Boolean(id))
+          : (editingTask?.assigned_to ? [editingTask.assigned_to] : [])
+      const assigneesChanged = !sameIdSet(editTaskAssignees, currentTaskAssigneeIds)
+      const payload: Record<string, unknown> = {
+        title: buildMarkedAppendOnlyText(editingTask?.title, editTaskTitle.trim()),
+        description: editTaskDescription.trim() || null,
+        is_bllok: editTaskType === "blocked",
+        is_1h_report: editTaskType === "hourly",
+        is_r1: editTaskType === "r1",
+        is_personal: editTaskType === "personal",
+        status: editTaskStatus,
+        start_date: startDateValue,
+        due_date: dueDateValue,
+        finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
+        is_deadline_important: editTaskDeadlineImportant,
+      }
+      if (assigneesChanged) {
+        payload.assignees = editTaskAssignees
+        payload.assigned_to = editTaskAssignees.length > 0 ? editTaskAssignees[0] : null
+      }
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: buildMarkedAppendOnlyText(
-            noProjectTasks.find((candidate) => candidate.id === editingTaskId)?.title,
-            editTaskTitle.trim()
-          ),
-          description: editTaskDescription.trim() || null,
-          is_bllok: editTaskType === "blocked",
-          is_1h_report: editTaskType === "hourly",
-          is_r1: editTaskType === "r1",
-          is_personal: editTaskType === "personal",
-          status: editTaskStatus,
-          start_date: startDateValue,
-          due_date: dueDateValue,
-          finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
-          is_deadline_important: editTaskDeadlineImportant,
-          assignees: editTaskAssignees,
-          assigned_to: assignedToValue,
-        }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) {
         let detail = "Failed to update task"
