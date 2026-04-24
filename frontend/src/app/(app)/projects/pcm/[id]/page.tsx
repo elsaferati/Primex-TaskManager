@@ -1464,6 +1464,10 @@ export default function PcmProjectPage() {
   const titleUpper = (project?.title || project?.name || "").toUpperCase()
   const isTtProject = titleUpper.includes("TT")
   const isMstLike = isMst || isTtProject
+  const isMstTemplateEditor = React.useMemo(
+    () => Boolean(project?.is_template && isMstLike && (user?.role === "ADMIN" || user?.role === "MANAGER")),
+    [isMstLike, project?.is_template, user?.role]
+  )
   const mstTemplateRows = React.useMemo(
     () => (mstTemplateChecklist ? checklistItemsToMstTemplateRows(mstTemplateChecklist.items || []) : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS),
     [mstTemplateChecklist]
@@ -2437,7 +2441,7 @@ export default function PcmProjectPage() {
   }
 
   const exportMstChecklist = async () => {
-    const checklistId = mstChecklistItems[0]?.checklist_id
+    const checklistId = isMstTemplateEditor ? mstTemplateChecklist?.id : mstChecklistItems[0]?.checklist_id
     if (!checklistId) {
       toast.error("No checklist items to export.")
       return
@@ -2465,9 +2469,8 @@ export default function PcmProjectPage() {
       const blob = await res.blob()
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
-      const projectTitle = (project?.title || project?.name || "mst").replace(/\s+/g, "_")
       link.href = url
-      link.download = `${projectTitle}_mst_checklist.xlsx`
+      link.download = isMstTemplateEditor ? "MST_PRODUCT_TEMPLATE_CHECKLIST.xlsx" : "MST_PRODUCT_CHECKLIST.xlsx"
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -5765,9 +5768,6 @@ export default function PcmProjectPage() {
         setAddingPlanningItem(false)
       }
     }
-    const isMstTemplateEditor = Boolean(
-      project?.is_template && isMstLike && (user?.role === "ADMIN" || user?.role === "MANAGER")
-    )
     const activeMstChecklistItems = isMstTemplateEditor
       ? (mstTemplateChecklist?.items || []).filter((item) => item.item_type === "CHECKBOX" && item.path && item.title)
       : mstChecklistItems
@@ -7306,13 +7306,13 @@ export default function PcmProjectPage() {
                             {loadingMstTemplate ? "Refreshing..." : "Refresh Template"}
                           </Button>
                         ) : null}
-                        {!isMstTemplateEditor ? (
+                        {!isMstTemplateEditor || mstTemplateChecklist ? (
                           <Button
                             type="button"
                             variant="outline"
                             size="sm"
                             onClick={() => void exportMstChecklist()}
-                            disabled={exportingMstChecklist || mstChecklistItems.length === 0}
+                            disabled={exportingMstChecklist || activeMstChecklistItems.length === 0}
                             className="h-8 rounded-xl border-slate-200 text-xs"
                           >
                             <Download className="mr-2 h-4 w-4" />

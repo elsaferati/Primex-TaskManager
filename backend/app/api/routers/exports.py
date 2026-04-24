@@ -2446,6 +2446,16 @@ async def export_checklist_xlsx(
         if include_ko2:
             headers.append("KO2")
 
+    mst_intro_lines = [
+        "!!! EMRI I PLOTE I KLIENTIT NUK GUXON TE SHKRUHET I PLOTE NE ASNJE EMERTIM TE FILE AS ASKUND TJETER",
+        "!!! CDO KATEGORI E RE PARAQITET SI RAST I PARE, DHE GJITHMONE DUHET TE KONFIRMOHET R1 ME GA",
+        "!!! KRAHASO TE DHENAT QE DERGOHEN TE PLOTESUARA, A JANE NE PERPUTHSHMERI ME DROPDOWN DHE ME TE DHENAT QE NA I KANE DERGUAR NE PDF/EXCEL",
+        "!!! BESONDERE MERKMALE - MAX 70 CHARACTERS",
+        "!!! PER PRODUKTE TE NJEJTA ME DIMENSIONE TE NDRYSHME, TE VENDOSEN TE GJITHA DIMENSIONET TEK SELLING POINT GENERAL: Maße (B/H/T in cm): 220/240/280 x 46 x 45 cm.",
+        "!!! SELLING POINT 1: 5 JAHRE GARANTIE (FIKSE)",
+        "!!! TO SELLING POINTS & BESONDERE MERKMALE - WE SHOULD CREATE SAME DESCRIPTIONS FOR PRODUCTS THAT ARE IDENTICAL EXCEPT FOR COLOR.",
+    ]
+
     assignee_initials: dict[uuid.UUID, str] = {}
     if format == "mst" and items:
         item_ids = [item.id for item in items if item.id is not None]
@@ -2481,6 +2491,22 @@ async def export_checklist_xlsx(
     title_cell.alignment = Alignment(horizontal="center", vertical="center")
 
     header_row = 3
+    if format == "mst":
+        subtitle_row = 2
+        ws.merge_cells(start_row=subtitle_row, start_column=1, end_row=subtitle_row, end_column=len(headers))
+        subtitle_cell = ws.cell(row=subtitle_row, column=1, value="Admin template editor for future MST projects")
+        subtitle_cell.font = Font(size=10, color="64748B")
+        subtitle_cell.alignment = Alignment(horizontal="left", vertical="center")
+
+        notes_start_row = subtitle_row + 2
+        for index, note in enumerate(mst_intro_lines):
+            row = notes_start_row + index
+            ws.merge_cells(start_row=row, start_column=1, end_row=row, end_column=len(headers))
+            note_cell = ws.cell(row=row, column=1, value=note)
+            note_cell.font = Font(color="FF0000")
+            note_cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
+        header_row = notes_start_row + len(mst_intro_lines) + 1
+
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
@@ -2550,8 +2576,8 @@ async def export_checklist_xlsx(
                 cell.font = Font(bold=True)
         data_row += 1
 
-    ws.freeze_panes = ws["B4"]
-    ws.print_title_rows = "3:3"
+    ws.freeze_panes = f"B{header_row + 1}"
+    ws.print_title_rows = f"{header_row}:{header_row}"
     ws.page_setup.fitToWidth = 1
     ws.page_setup.fitToHeight = 0
     ws.page_setup.fitToPage = True
@@ -2584,7 +2610,14 @@ async def export_checklist_xlsx(
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
-    filename = checklist.title or "checklist_export"
+    if format == "mst":
+        filename = (
+            "MST_PRODUCT_TEMPLATE_CHECKLIST"
+            if checklist.group_key == "MST_PRODUCT_CHECKLIST_TEMPLATE"
+            else "MST_PRODUCT_CHECKLIST"
+        )
+    else:
+        filename = checklist.title or "checklist_export"
     safe_filename = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in filename)
     return StreamingResponse(
         bio,

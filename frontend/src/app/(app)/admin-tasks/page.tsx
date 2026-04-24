@@ -339,26 +339,6 @@ function isIsoWithinInclusiveRange(targetIso: string, startIso?: string | null, 
   return targetIso >= normalizedEnd && targetIso <= normalizedStart
 }
 
-function doesIsoRangeOverlapInclusive(
-  filterStartIso?: string | null,
-  filterEndIso?: string | null,
-  valueStartIso?: string | null,
-  valueEndIso?: string | null
-) {
-  const normalizedFilterStart = filterStartIso || filterEndIso || ""
-  const normalizedFilterEnd = filterEndIso || filterStartIso || ""
-  const normalizedValueStart = valueStartIso || valueEndIso || ""
-  const normalizedValueEnd = valueEndIso || valueStartIso || ""
-  if (!normalizedFilterStart || !normalizedFilterEnd || !normalizedValueStart || !normalizedValueEnd) {
-    return false
-  }
-  const filterMin = normalizedFilterStart <= normalizedFilterEnd ? normalizedFilterStart : normalizedFilterEnd
-  const filterMax = normalizedFilterStart <= normalizedFilterEnd ? normalizedFilterEnd : normalizedFilterStart
-  const valueMin = normalizedValueStart <= normalizedValueEnd ? normalizedValueStart : normalizedValueEnd
-  const valueMax = normalizedValueStart <= normalizedValueEnd ? normalizedValueEnd : normalizedValueStart
-  return valueMin <= filterMax && valueMax >= filterMin
-}
-
 function getSystemDateIso(task: SystemTaskOut): string {
   return toDateOnlyIso(systemTaskDisplayDate(task) || null)
 }
@@ -1774,7 +1754,7 @@ export default function AdminTasksPage() {
         priority: getDisplayPriority(task),
         comment: taskCommentMap.get(task.id) ?? null,
         taskId: task.id,
-        isFastTask: !task.project_id,
+        isFastTask: !task.project_id && !isSystemTask,
         isTemplateAlignedSystem: hasTemplateAlignment,
         needsGaneConfirmation,
         showInSystemTasksSection: hasTemplateAlignment || isLateSystemTask,
@@ -1845,9 +1825,6 @@ export default function AdminTasksPage() {
     return allTasksTableRows.filter((row) => {
       if (row.isLateSystemTask && isIsoWithinInclusiveRange(todayIso, allTasksDateFrom, allTasksDateTo)) {
         return true
-      }
-      if (row.isFastTask) {
-        return doesIsoRangeOverlapInclusive(allTasksDateFrom, allTasksDateTo, row.startDateIso, row.dateIso)
       }
       return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
     })
@@ -2591,6 +2568,7 @@ export default function AdminTasksPage() {
       taskId?: string
       startDateIso?: string
       isFastTask?: boolean
+      isLateSystemTask?: boolean
       createdDate?: string
       systemTemplateId?: string
       systemOccurrenceDate?: string
@@ -2749,12 +2727,12 @@ export default function AdminTasksPage() {
   const filteredAllTasksReportRows = React.useMemo(() => {
     if (!allTasksDateFrom && !allTasksDateTo) return allTasksReportRows
     return allTasksReportRows.filter((row) => {
-      if (row.isFastTask) {
-        return doesIsoRangeOverlapInclusive(allTasksDateFrom, allTasksDateTo, row.startDateIso, row.dateIso)
+      if (row.isLateSystemTask && isIsoWithinInclusiveRange(todayIso, allTasksDateFrom, allTasksDateTo)) {
+        return true
       }
       return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
     })
-  }, [allTasksDateFrom, allTasksDateTo, allTasksReportRows])
+  }, [allTasksDateFrom, allTasksDateTo, allTasksReportRows, todayIso])
 
   const exportAllTasks = async () => {
     if (!user?.id) return

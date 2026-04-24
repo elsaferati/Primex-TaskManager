@@ -1271,15 +1271,24 @@ export default function WeeklyPlannerPage() {
   const getPlannerTaskDisplayTitle = React.useCallback(
     (task: { ga_note_origin_id?: string | null; title?: string | null; task_title?: string | null }) => {
       const rawTitle = task.task_title ?? task.title ?? ""
-      if (!task.ga_note_origin_id) return rawTitle
-      const cleanedTitle = rawTitle
+      const cleanedTitle = task.ga_note_origin_id
+        ? rawTitle
         .replace(/\[\[added\]\]/gi, "")
         .replace(/\[\[\/added\]\]/gi, "")
         .replace(/\[\/added\]\]/gi, "")
         .replace(/\[\[added\]/gi, "")
         .replace(/\[added\]\]/gi, "")
         .trim()
-      return cleanedTitle || rawTitle
+        : rawTitle.trim()
+      const normalizedTitle = (cleanedTitle || rawTitle)
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/(div|p)>/gi, "\n")
+        .replace(/<(div|p)[^>]*>/gi, "")
+      const firstLine = normalizedTitle
+        .split(/\r?\n/)
+        .map((line) => line.trim())
+        .find(Boolean)
+      return firstLine || normalizedTitle.trim() || rawTitle
     },
     []
   )
