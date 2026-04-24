@@ -12,9 +12,9 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import type { Task } from "@/lib/types"
@@ -163,10 +163,13 @@ export function TaskEditDialog({
         <div className="space-y-4">
           <div className="space-y-2">
             <Label htmlFor="task-edit-title">Title</Label>
-            <Input
+            <Textarea
               id="task-edit-title"
               value={title}
               onChange={(event) => setTitle(event.target.value)}
+              autoResize
+              rows={3}
+              className="min-h-[88px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere]"
               disabled={saving}
             />
           </div>

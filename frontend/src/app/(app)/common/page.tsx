@@ -388,6 +388,16 @@ const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
 const getFastTaskEntryDate = (entry: FastTaskEntry | SwimlaneCell) =>
   ("date" in entry ? entry.date : entry.entryDate) || ""
 
+const getSwimlaneTaskUserKey = (entry: SwimlaneCell | null) => {
+  if (!entry || entry.placeholder) return ""
+  if (entry.userId) return entry.userId.trim().toLowerCase()
+  const assigneeKey = (entry.assignees || entry.assigneeLabels || [])
+    .map((name) => name.trim().toLowerCase())
+    .filter(Boolean)
+    .join("|")
+  return assigneeKey || entry.title.trim().toLowerCase()
+}
+
 const getFastTaskDisplayNumber = (
   entries: Array<FastTaskEntry | SwimlaneCell>,
   entry: FastTaskEntry | SwimlaneCell
@@ -4311,6 +4321,22 @@ export default function CommonViewPage() {
     ]
   }
 
+  const getSwimlaneDividerClass = React.useCallback(
+    (rowId: CommonType, cells: Array<SwimlaneCell | null>, index: number) => {
+      if (!isFastTaskRowId(rowId) || index === 0) return ""
+      const currentCell = cells[index]
+      const previousCell = cells[index - 1]
+      if (!currentCell || currentCell.placeholder || !previousCell || previousCell.placeholder) return ""
+
+      const currentUserKey = getSwimlaneTaskUserKey(currentCell)
+      const previousUserKey = getSwimlaneTaskUserKey(previousCell)
+      if (!currentUserKey || !previousUserKey || currentUserKey === previousUserKey) return ""
+
+      return "swimlane-cell-user-break"
+    },
+    []
+  )
+
   const swimlaneInfoText: Record<CommonType, string> = {
     late: "Vonese",
     absent: "Mungese",
@@ -6134,7 +6160,7 @@ export default function CommonViewPage() {
         }
         .swimlane-cell {
           padding: 12px 44px 12px 14px;
-          border-right: 1px solid var(--swim-border);
+          border-right: 1px solid #94a3b8;
           border-bottom: 1px solid var(--swim-border);
           min-height: 68px;
           display: flex;
@@ -6144,6 +6170,17 @@ export default function CommonViewPage() {
           color: var(--swim-text);
           background: linear-gradient(180deg, var(--cell-bg) 0%, var(--cell-tint) 100%);
           position: relative;
+        }
+        .swimlane-cell.swimlane-cell-user-break::before {
+          content: "";
+          position: absolute;
+          top: 0;
+          bottom: -1px;
+          left: -1px;
+          width: 4px;
+          background: #111827;
+          pointer-events: none;
+          z-index: 1;
         }
         .swimlane-cell:nth-child(3n) {
           border-right: 0;
@@ -6758,13 +6795,13 @@ export default function CommonViewPage() {
         .swimlane-accent.absence { border-left: 4px solid var(--absence-accent); }
         .swimlane-accent.leave { border-left: 4px solid var(--leave-accent); }
         .swimlane-accent.externalHoliday { border-left: 4px solid var(--externalHoliday-accent); }
-        .swimlane-accent.blocked { border-left: 4px solid var(--blocked-accent); }
-        .swimlane-accent.oneh { border-left: 4px solid var(--oneh-accent); }
-        .swimlane-accent.personal { border-left: 4px solid var(--personal-accent); }
+        .swimlane-accent.blocked { border-left: 0; }
+        .swimlane-accent.oneh { border-left: 0; }
+        .swimlane-accent.personal { border-left: 0; }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
         .swimlane-accent.internal { border-left: 4px solid var(--internal-accent); }
         .swimlane-accent.bz { border-left: 4px solid var(--bz-accent); }
-        .swimlane-accent.r1 { border-left: 4px solid var(--r1-accent); }
+        .swimlane-accent.r1 { border-left: 0; }
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
         .swimlane-accent.priority { border-left: 4px solid var(--priority-accent); }
@@ -9738,6 +9775,7 @@ export default function CommonViewPage() {
                                 className={[
                                   "swimlane-cell",
                                   cell.accentClass || "",
+                                  getSwimlaneDividerClass(row.id, cells, index),
                                   cell.placeholder ? "placeholder" : "",
                                   cell.isDeadlineImportant ? "deadline-important" : "",
                                   cell.isDone ? "done" : "",

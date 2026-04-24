@@ -1156,8 +1156,14 @@ function reportPriorityLabel(priority?: TaskPriority | string | null) {
 function gaNoteTaskDefaultTitle(note: string) {
   const cleaned = note.trim().replace(/\s+/g, " ")
   if (!cleaned) return "GA/KA note task"
-  if (cleaned.length <= 80) return cleaned
-  return `${cleaned.slice(0, 77)}...`
+  return cleaned
+}
+
+function isLegacyTruncatedGaNoteTitle(title: string, note: string) {
+  const cleanedTitle = title.trim()
+  const cleanedNote = note.trim().replace(/\s+/g, " ")
+  if (!cleanedTitle || !cleanedNote || cleanedNote.length <= 80) return false
+  return cleanedTitle === `${cleanedNote.slice(0, 77)}...`
 }
 
 function truncateDescription(value: string, limit = 120) {
@@ -1329,6 +1335,13 @@ export default function DepartmentKanban() {
   const [allTodayUpdating, setAllTodayUpdating] = React.useState(false)
   const [markingWaitingTaskId, setMarkingWaitingTaskId] = React.useState<string | null>(null)
   const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
+  const gaNoteContentById = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const note of gaNotes) {
+      map.set(note.id, note.content || "")
+    }
+    return map
+  }, [gaNotes])
   const [editingSystemTaskId, setEditingSystemTaskId] = React.useState<string | null>(null)
   const [editingSystemDateSource, setEditingSystemDateSource] = React.useState("")
   const [editingSystemDateTarget, setEditingSystemDateTarget] = React.useState("")
@@ -4992,8 +5005,14 @@ export default function DepartmentKanban() {
       toast.error("You do not have permission to edit this task")
       return
     }
+    const plainTitle = getPlainMarkedText(task.title)
+    const sourceGaNoteContent = task.ga_note_origin_id ? (gaNoteContentById.get(task.ga_note_origin_id) || "") : ""
     setEditingTaskId(task.id)
-    setEditTaskTitle(getPlainMarkedText(task.title))
+    setEditTaskTitle(
+      isLegacyTruncatedGaNoteTitle(plainTitle, sourceGaNoteContent)
+        ? sourceGaNoteContent.trim().replace(/\s+/g, " ")
+        : plainTitle
+    )
     setEditTaskDescription(task.description || "")
     setEditTaskType(
       task.is_bllok
@@ -5092,8 +5111,14 @@ export default function DepartmentKanban() {
       toast.error("You do not have permission to edit this task")
       return
     }
+    const plainTitle = getPlainMarkedText(task.title)
+    const sourceGaNoteContent = task.ga_note_origin_id ? (gaNoteContentById.get(task.ga_note_origin_id) || "") : ""
     setAllTodayEditingTaskId(task.id)
-    setAllTodayEditTitle(getPlainMarkedText(task.title))
+    setAllTodayEditTitle(
+      isLegacyTruncatedGaNoteTitle(plainTitle, sourceGaNoteContent)
+        ? sourceGaNoteContent.trim().replace(/\s+/g, " ")
+        : plainTitle
+    )
     setAllTodayEditDescription(task.description || "")
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
@@ -7259,10 +7284,12 @@ export default function DepartmentKanban() {
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
-                      <Input
+                      <Textarea
                         value={allTodayEditTitle}
                         onChange={(e) => setAllTodayEditTitle(e.target.value)}
-                        className="border-slate-200 focus:border-slate-400 rounded-xl"
+                        autoResize
+                        rows={3}
+                        className="min-h-[88px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere] border-slate-200 focus:border-slate-400 rounded-xl"
                       />
                     </div>
                     <div className="space-y-2">
@@ -7836,7 +7863,13 @@ export default function DepartmentKanban() {
                   <div className="space-y-4">
                     <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
-                      <Input value={editTaskTitle} onChange={(e) => setEditTaskTitle(e.target.value)} className="border-slate-200 focus:border-slate-400 rounded-xl" />
+                      <Textarea
+                        value={editTaskTitle}
+                        onChange={(e) => setEditTaskTitle(e.target.value)}
+                        autoResize
+                        rows={3}
+                        className="min-h-[88px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere] border-slate-200 focus:border-slate-400 rounded-xl"
+                      />
                     </div>
                     <div className="space-y-2">
                       <Label className="text-slate-700">Description</Label>
@@ -10019,5 +10052,3 @@ export default function DepartmentKanban() {
     </div>
   )
 }
-
-
