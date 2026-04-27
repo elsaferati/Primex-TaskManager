@@ -188,6 +188,7 @@ const INTERNAL_MEETING = {
         "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
         "A ka e-mails te reja ne IT?",
         "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
+        "Testimi i Agent-ave",
       ],
     },
     M2: {
@@ -196,6 +197,7 @@ const INTERNAL_MEETING = {
         "A ka shenime GA/KA ne grupe/Trello?",
         "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
         "Cka mbetet per PM?",
+        "Testimi i Agent-ave",
       ],
     },
     M3: {
@@ -204,6 +206,7 @@ const INTERNAL_MEETING = {
         "A ka shenime GA/KA ne grupe/Trello?",
         "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
         "Cka kemi me punu neser?",
+        "Testimi i Agent-ave",
       ],
     },
   },
@@ -1681,6 +1684,60 @@ export default function DepartmentKanban() {
         if (deletePromises.length > 0) {
           await Promise.all(deletePromises)
           // Reload items after deletion
+          const reloadRes = await apiFetch(`/checklist-items?checklist_id=${selected.id}`)
+          if (reloadRes.ok) {
+            items = (await reloadRes.json()) as ChecklistItem[]
+          }
+        }
+
+        const missingDefaultItems: Array<{
+          day: keyof typeof INTERNAL_MEETING.slots
+          title: string
+          position: number
+        }> = []
+
+        for (const slot of Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>) {
+          const slotItems = items.filter((item) => (item.day || slot) === slot)
+          const existingTitles = new Set(
+            slotItems
+              .map((item) => (item.title || "").trim().toLowerCase())
+              .filter(Boolean)
+          )
+          let nextPosition =
+            slotItems.reduce((max, item) => Math.max(max, item.position ?? 0), -1) + 1
+
+          for (const defaultTitle of INTERNAL_MEETING.slots[slot].items) {
+            const normalizedTitle = defaultTitle.trim().toLowerCase()
+            if (existingTitles.has(normalizedTitle)) continue
+            missingDefaultItems.push({
+              day: slot,
+              title: defaultTitle,
+              position: nextPosition,
+            })
+            existingTitles.add(normalizedTitle)
+            nextPosition += 1
+          }
+        }
+
+        if (missingDefaultItems.length > 0) {
+          await Promise.all(
+            missingDefaultItems.map((item) =>
+              apiFetch("/checklist-items", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  checklist_id: selected.id,
+                  item_type: "CHECKBOX",
+                  path: "INTERNAL_MEETINGS",
+                  day: item.day,
+                  title: item.title,
+                  is_checked: false,
+                  position: item.position,
+                }),
+              })
+            )
+          )
+
           const reloadRes = await apiFetch(`/checklist-items?checklist_id=${selected.id}`)
           if (reloadRes.ok) {
             items = (await reloadRes.json()) as ChecklistItem[]
