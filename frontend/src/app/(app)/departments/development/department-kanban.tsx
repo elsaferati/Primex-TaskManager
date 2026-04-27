@@ -181,6 +181,7 @@ const INTERNAL_MEETING = {
   team: ["Elsa Ferati", "Rinesa Ahmedi", "Laurent Hoxha", "Endi Hyseni"],
   slots: {
     M1: {
+      tabLabel: "M1",
       label: "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)",
       items: [
         "A ka mungesa, a ndryshon plani per sot?",
@@ -188,31 +189,41 @@ const INTERNAL_MEETING = {
         "Detyrat e secilit per sot (secili hap RD/Trello side-by-side dhe diskuton detyrat).",
         "A ka e-mails te reja ne IT?",
         "Shenimet ne grup te zhvillimit vendosen copy/paste ne Trello tek shenimet GA/KA.",
-        "Testimi i Agent-ave",
       ],
     },
     M2: {
+      tabLabel: "M2",
       label: "M2 PER ZHVILLIM (11:45-12:00 MAX)",
       items: [
         "A ka shenime GA/KA ne grupe/Trello?",
         "Detyrat e secilit diskutohen, cka kemi punu deri 12:00?",
         "Cka mbetet per PM?",
-        "Testimi i Agent-ave",
       ],
     },
     M3: {
+      tabLabel: "M3",
       label: "M3 (ME TRELLO) PER ZHVILLIM (15:45-16:00 MAX)",
       items: [
         "A ka shenime GA/KA ne grupe/Trello?",
         "Diskuto detyrat e te gjithve, cka kemi punu deri tash?",
         "Cka kemi me punu neser?",
-        "Testimi i Agent-ave",
       ],
+    },
+    TESTIMI_I_AGENT: {
+      tabLabel: "Testimi i Agent",
+      label: "TESTIMI I AGENT",
+      items: [],
     },
   },
 } as const
 
 const INTERNAL_MEETING_GROUP_KEY = "development_internal_meetings"
+const INTERNAL_MEETING_ARCHIVED_CHECKLIST_TITLES = new Set(["testimi i agent-ave"])
+const INTERNAL_MEETING_ARCHIVED_MEETING_TITLES = new Set([
+  "testimi i agent-ave (m1)",
+  "testimi i agent-ave (m2)",
+  "testimi i agent-ave (m3)",
+])
 
 function initials(src: string) {
   return src
@@ -1636,7 +1647,7 @@ export default function DepartmentKanban() {
           `/checklists?group_key=${INTERNAL_MEETING_GROUP_KEY}&include_items=true`
         )
         if (!res.ok) return
-        let checklist = (await res.json()) as {
+        const checklist = (await res.json()) as {
           id: string
           items?: ChecklistItem[]
         }[]
@@ -1672,12 +1683,16 @@ export default function DepartmentKanban() {
           console.error("Failed to ensure internal meeting session", error)
         }
 
-        // Delete only the test item "dssdgsdg" if it exists
+        // Remove obsolete seeded checklist items that should no longer appear.
         const itemsToDelete = ["dssdgsdg"]
         const deletePromises: Promise<Response>[] = []
         for (const item of items) {
           const itemTitle = (item.title || "").trim()
-          if (itemsToDelete.some((toDelete) => itemTitle.toLowerCase() === toDelete.toLowerCase())) {
+          const normalizedTitle = itemTitle.toLowerCase()
+          if (
+            itemsToDelete.some((toDelete) => normalizedTitle === toDelete.toLowerCase()) ||
+            INTERNAL_MEETING_ARCHIVED_CHECKLIST_TITLES.has(normalizedTitle)
+          ) {
             deletePromises.push(apiFetch(`/checklist-items/${item.id}`, { method: "DELETE" }))
           }
         }
@@ -1755,6 +1770,34 @@ export default function DepartmentKanban() {
       cancelled = true
     }
   }, [apiFetch, department])
+
+  React.useEffect(() => {
+    const archivedMeetings = meetings.filter((meeting) =>
+      INTERNAL_MEETING_ARCHIVED_MEETING_TITLES.has((meeting.title || "").trim().toLowerCase())
+    )
+    if (!archivedMeetings.length) return
+
+    let cancelled = false
+
+    const removeArchivedMeetings = async () => {
+      setMeetings((prev) =>
+        prev.filter((meeting) => !INTERNAL_MEETING_ARCHIVED_MEETING_TITLES.has((meeting.title || "").trim().toLowerCase()))
+      )
+
+      for (const meeting of archivedMeetings) {
+        const res = await apiFetch(`/meetings/${meeting.id}`, { method: "DELETE" })
+        if (!res.ok && !cancelled) {
+          console.error("Failed to delete archived internal meeting", meeting.id)
+        }
+      }
+    }
+
+    void removeArchivedMeetings()
+
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, meetings])
 
   React.useEffect(() => {
     if (isTabId) {
@@ -10164,7 +10207,7 @@ export default function DepartmentKanban() {
                           : "text-muted-foreground hover:text-foreground",
                       ].join(" ")}
                     >
-                      {slot}
+                      {INTERNAL_MEETING.slots[slot].tabLabel}
                     </button>
                   ))}
                 </div>
