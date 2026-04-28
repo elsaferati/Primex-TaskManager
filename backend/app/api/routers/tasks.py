@@ -28,6 +28,7 @@ from app.models.task_user_comment import TaskUserComment
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
+from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
 from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFromDayRequest, TaskUpdate
 from pydantic import BaseModel
@@ -44,6 +45,53 @@ router = APIRouter()
 MENTION_RE = re.compile(r"@([A-Za-z0-9_\\-\\.]{3,64})")
 TOTAL_PRODUCTS_RE = re.compile(r"total_products[:=]\s*(\d+)", re.IGNORECASE)
 COMPLETED_PRODUCTS_RE = re.compile(r"completed_products[:=]\s*(\d+)", re.IGNORECASE)
+
+async def _ensure_system_task_instance_integrity(db: AsyncSession, task: Task) -> None:
+    """
+    DB has a CHECK constraint requiring:
+      system_template_origin_id IS NULL OR (origin_run_at IS NOT NULL AND system_task_slot_id IS NOT NULL)
+
+    Some legacy/system tasks can end up with a NULL `system_task_slot_id` (e.g. older data or slot drift),
+    which makes *any* update (like setting status DONE) fail.
+    """
+    if task.system_template_origin_id is None:
+        return
+
+    # Ensure origin_run_at exists for system tasks.
+    if task.origin_run_at is None and task.start_date is not None:
+        task.origin_run_at = task.start_date
+
+    if task.system_task_slot_id is not None:
+        return
+
+    # Best-effort repair: find an existing slot for this template + assigned_to.
+    if task.assigned_to is not None:
+        slot_id = (
+            await db.execute(
+                select(SystemTaskTemplateAssigneeSlot.id)
+                .where(SystemTaskTemplateAssigneeSlot.template_id == task.system_template_origin_id)
+                .where(SystemTaskTemplateAssigneeSlot.primary_user_id == task.assigned_to)
+                .order_by(SystemTaskTemplateAssigneeSlot.is_active.desc(), SystemTaskTemplateAssigneeSlot.created_at.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if slot_id is not None:
+            task.system_task_slot_id = slot_id
+            return
+
+    # Last resort: create an inactive slot to keep existing task rows valid.
+    # This avoids breaking historical tasks while preventing scheduler from using it.
+    if task.assigned_to is not None and task.origin_run_at is not None:
+        new_slot = SystemTaskTemplateAssigneeSlot(
+            id=uuid.uuid4(),
+            template_id=task.system_template_origin_id,
+            primary_user_id=task.assigned_to,
+            next_run_at=task.origin_run_at,
+            is_active=False,
+        )
+        db.add(new_slot)
+        task.system_task_slot_id = new_slot.id
+
 
 def _as_local_date(value: datetime | date | None) -> date | None:
     if value is None:
@@ -1494,6 +1542,9 @@ async def update_task(
         current_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status).strip()
         if current_status != normalized_status.value:
             task.status = normalized_status
+
+    # Prevent DB constraint failures when updating legacy/system tasks.
+    await _ensure_system_task_instance_integrity(db, task)
     
     # For system task status updates, allow admins and managers to bypass department check
     is_system_task_status_update = (
