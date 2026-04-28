@@ -225,6 +225,15 @@ const INTERNAL_MEETING_ARCHIVED_MEETING_TITLES = new Set([
   "testimi i agent-ave (m3)",
 ])
 
+function resolveInternalMeetingSlot(
+  value: ChecklistItem["day"] | undefined | null
+): keyof typeof INTERNAL_MEETING.slots {
+  const fallback: keyof typeof INTERNAL_MEETING.slots = "M1"
+  if (!value) return fallback
+  const keys = Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>
+  return (keys as string[]).includes(value) ? (value as keyof typeof INTERNAL_MEETING.slots) : fallback
+}
+
 function initials(src: string) {
   return src
     .split(" ")
@@ -1652,6 +1661,7 @@ export default function DepartmentKanban() {
           items?: ChecklistItem[]
         }[]
         let selected = checklist[0]
+        let createdChecklist = false
         if (!selected) {
           const createRes = await apiFetch("/checklists", {
             method: "POST",
@@ -1664,6 +1674,7 @@ export default function DepartmentKanban() {
           })
           if (!createRes.ok) return
           selected = (await createRes.json()) as { id: string }
+          createdChecklist = true
         }
         if (cancelled) return
         setInternalMeetingChecklistId(selected.id)
@@ -1705,6 +1716,15 @@ export default function DepartmentKanban() {
           }
         }
 
+        // IMPORTANT: Only seed defaults when the checklist is first created (or truly empty).
+        // Otherwise, deleting a default item would cause it to be re-created on the next reload.
+        const shouldSeedDefaults = createdChecklist || items.length === 0
+        if (!shouldSeedDefaults) {
+          if (cancelled) return
+          setInternalMeetingItems(items)
+          return
+        }
+
         const missingDefaultItems: Array<{
           day: keyof typeof INTERNAL_MEETING.slots
           title: string
@@ -1712,7 +1732,7 @@ export default function DepartmentKanban() {
         }> = []
 
         for (const slot of Object.keys(INTERNAL_MEETING.slots) as Array<keyof typeof INTERNAL_MEETING.slots>) {
-          const slotItems = items.filter((item) => (item.day || slot) === slot)
+          const slotItems = items.filter((item) => resolveInternalMeetingSlot(item.day) === slot)
           const existingTitles = new Set(
             slotItems
               .map((item) => (item.title || "").trim().toLowerCase())
@@ -5650,7 +5670,7 @@ export default function DepartmentKanban() {
     setAddingInternalMeetingItem(true)
     try {
       const nextPosition =
-        internalMeetingItems.reduce((max, item) => Math.max(max, item.position ?? 0), 0) + 1
+        internalMeetingItems.reduce((max, item) => Math.max(max, item.position ?? -1), -1) + 1
       const res = await apiFetch("/checklist-items", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -10233,7 +10253,7 @@ export default function DepartmentKanban() {
                   ) : null}
                   <div className="space-y-2">
                     {internalMeetingItems
-                      .filter((item) => (item.day || internalSlot) === internalSlot)
+                      .filter((item) => resolveInternalMeetingSlot(item.day) === internalSlot)
                       .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
                       .map((item, idx) => {
                         const isEditing = editingInternalMeetingItemId === item.id
@@ -10310,7 +10330,7 @@ export default function DepartmentKanban() {
                           </div>
                         )
                       })}
-                    {!internalMeetingItems.some((item) => (item.day || internalSlot) === internalSlot) ? (
+                    {!internalMeetingItems.some((item) => resolveInternalMeetingSlot(item.day) === internalSlot) ? (
                       <div className="text-sm text-muted-foreground">No checklist items yet.</div>
                     ) : null}
                   </div>

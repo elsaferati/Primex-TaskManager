@@ -209,20 +209,47 @@ async def _sync_template_slots_from_payload(
         normalized_slots.append(item)
 
     existing_slots = await _slots_for_template(db, template.id)
-    for slot in existing_slots:
-        await db.delete(slot)
-    await db.flush()
+    # IMPORTANT:
+    # We must not delete slots that have already been referenced by generated tasks.
+    # `tasks.system_task_slot_id` is `ON DELETE SET NULL`, but tasks that originate
+    # from a system template must keep a non-null slot_id due to the DB check constraint
+    # `ck_tasks_system_task_instance_integrity`.
+    #
+    # So we "soft-remove" by setting `is_active = False`, and we re-use existing slot
+    # records whenever possible to keep historical tasks valid.
+    existing_by_id: dict[uuid.UUID, SystemTaskTemplateAssigneeSlot] = {s.id: s for s in existing_slots}
+    existing_by_primary: dict[uuid.UUID, SystemTaskTemplateAssigneeSlot] = {
+        s.primary_user_id: s for s in existing_slots
+    }
+    used_slot_ids: set[uuid.UUID] = set()
 
     now = datetime.now(timezone.utc)
     for item in normalized_slots:
-        slot = SystemTaskTemplateAssigneeSlot(
-            id=item.id or uuid.uuid4(),
-            template_id=template.id,
-            primary_user_id=item.primary_user_id,
-            next_run_at=first_run_at(template, now),
-            is_active=True if item.is_active is None else item.is_active,
-        )
-        db.add(slot)
+        slot: SystemTaskTemplateAssigneeSlot | None = None
+        if item.id is not None:
+            slot = existing_by_id.get(item.id)
+        if slot is None:
+            slot = existing_by_primary.get(item.primary_user_id)
+
+        if slot is None:
+            slot = SystemTaskTemplateAssigneeSlot(
+                id=item.id or uuid.uuid4(),
+                template_id=template.id,
+                primary_user_id=item.primary_user_id,
+                next_run_at=first_run_at(template, now),
+                is_active=True if item.is_active is None else item.is_active,
+            )
+            db.add(slot)
+        else:
+            slot.primary_user_id = item.primary_user_id
+            slot.is_active = True if item.is_active is None else item.is_active
+            # Keep slot.next_run_at as-is; only schedule resets should change it.
+        used_slot_ids.add(slot.id)
+
+    # Deactivate removed slots instead of deleting them (keeps existing tasks valid).
+    for slot in existing_slots:
+        if slot.id not in used_slot_ids:
+            slot.is_active = False
     await db.flush()
     return await _slots_for_template(db, template.id)
 

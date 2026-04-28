@@ -1,4 +1,4 @@
-﻿from __future__ import annotations
+from __future__ import annotations
 
 import asyncio
 import uuid
@@ -1712,7 +1712,7 @@ async def update_checklist_item(
                 ensure_manager_or_admin(user)
             else:
                 is_internal_meeting = checklist.group_key in ("development_internal_meetings", "pcm_internal_meetings")
-                # For internal meetings, allow department members to update is_checked, but require admin for other fields
+                # For internal meetings, allow department members to update items.
                 if is_internal_meeting:
                     # Determine department from group_key
                     if checklist.group_key == "development_internal_meetings":
@@ -1728,24 +1728,10 @@ async def update_checklist_item(
                         ).scalar_one_or_none()
                         if dept:
                             ensure_department_access(user, dept.id)
-                            # If only updating is_checked, allow it. Otherwise require admin for other fields.
-                            if payload.is_checked is None and (
-                                payload.title is not None
-                                or payload.position is not None
-                                or payload.comment is not None
-                                or payload.item_type is not None
-                            ):
-                                if user.role != "ADMIN":
-                                    raise HTTPException(
-                                        status_code=status.HTTP_403_FORBIDDEN,
-                                        detail="Admin only for editing internal meeting items",
-                                    )
                         else:
-                            if user.role != "ADMIN":
-                                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+                            ensure_manager_or_admin(user)
                     else:
-                        if user.role != "ADMIN":
-                            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
+                        ensure_manager_or_admin(user)
                 else:
                     if user.role != "ADMIN":
                         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin only")
@@ -1902,8 +1888,30 @@ async def delete_checklist_item(
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
         ).scalar_one_or_none()
         # Global template-style checklists (group_key set, no project/task) are admin/manager-only to delete.
+        # Exception: Internal meeting checklists allow department members to delete items.
         if checklist and checklist.project_id is None and checklist.task_id is None and checklist.group_key is not None:
-            ensure_manager_or_admin(user)
+            is_internal_meeting = checklist.group_key in ("development_internal_meetings", "pcm_internal_meetings")
+            if is_internal_meeting:
+                # Determine department from group_key
+                if checklist.group_key == "development_internal_meetings":
+                    dept_name = "Development"
+                elif checklist.group_key == "pcm_internal_meetings":
+                    dept_name = "Project Content Manager"
+                else:
+                    dept_name = None
+
+                if dept_name:
+                    dept = (
+                        await db.execute(select(Department).where(Department.name == dept_name))
+                    ).scalar_one_or_none()
+                    if dept:
+                        ensure_department_access(user, dept.id)
+                    else:
+                        ensure_manager_or_admin(user)
+                else:
+                    ensure_manager_or_admin(user)
+            else:
+                ensure_manager_or_admin(user)
         if checklist and checklist.project_id is not None:
             project = (
                 await db.execute(select(Project).where(Project.id == checklist.project_id))
