@@ -77,6 +77,7 @@ const MST_PLANNING_ORDER = new Map(
 )
 MST_PLANNING_ORDER.set(MST_PROGRAM_QUESTION_LEGACY.trim().toLowerCase(), 1)
 const MST_PRODUCT_TEMPLATE_GROUP_KEY = "MST_PRODUCT_CHECKLIST_TEMPLATE"
+const TT_PRODUCT_TEMPLATE_GROUP_KEY = "TT_PRODUCT_CHECKLIST_TEMPLATE"
 
 function getMstPlanningOrder(item: ChecklistItem) {
   const key = (item.description || item.title || "").trim().toLowerCase()
@@ -484,6 +485,7 @@ const MST_FINAL_CHECKLIST: MstChecklistRow[] = [
   },
 ]
 const DEFAULT_MST_PRODUCT_TEMPLATE_ROWS = normalizeMstChecklistRows(MST_FINAL_CHECKLIST)
+const DEFAULT_TT_PRODUCT_TEMPLATE_ROWS = DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
 
 function buildMstTemplateOrderMap(rows: MstChecklistRow[]) {
   return new Map(rows.map((row, index) => [`${row.path}|${row.detyrat}`, index]))
@@ -617,16 +619,20 @@ function formatDateDisplay(value?: string | null) {
   return formatted || null
 }
 
+function isTtProjectTitle(title: string) {
+  const normalized = title.toUpperCase().trim()
+  return normalized === "TT" || normalized.startsWith("TT ") || normalized.startsWith("TT-") || normalized.startsWith("TT:")
+}
+
 function isMstProject(project?: Project | null) {
   if (!project) return false
   const title = (project.title || project.name || "").toUpperCase().trim()
-  const isTt = title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")
-  return title.includes("MST") || isTt
+  return project.project_type === "MST" || title.includes("MST") || isTtProjectTitle(title)
 }
 function mstBadgeLabel(project?: Project | null) {
   if (!project) return "MST"
   const title = (project.title || project.name || "").toUpperCase().trim()
-  if (title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")) {
+  if (isTtProjectTitle(title)) {
     return "TT"
   }
   return "MST"
@@ -1364,10 +1370,12 @@ export default function PcmProjectPage() {
       setProject(p)
       setEditingDescription(p.description || "")
       const pTitleUpper = (p.title || p.name || "").toUpperCase()
-      const isTtProject = pTitleUpper.includes("TT")
+      const isTtProject = isTtProjectTitle(pTitleUpper)
+      const productTemplateGroupKey = isTtProject ? TT_PRODUCT_TEMPLATE_GROUP_KEY : MST_PRODUCT_TEMPLATE_GROUP_KEY
+      const fallbackProductTemplateGroupKey = isTtProject ? MST_PRODUCT_TEMPLATE_GROUP_KEY : null
       const shouldLoadMstTemplate = isMstProject(p) || isTtProject
 
-      const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes, mstTemplateRes] = await Promise.all([
+      const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes, mstTemplateRes, fallbackMstTemplateRes] = await Promise.all([
         apiFetch(`/tasks?project_id=${p.id}&include_done=true`),
         apiFetch(`/project-members?project_id=${p.id}`),
         apiFetch(`/checklist-items?project_id=${p.id}`),
@@ -1376,7 +1384,10 @@ export default function PcmProjectPage() {
         apiFetch("/users?include_all_departments=true"),
         apiFetch(`/meetings?project_id=${p.id}`),
         shouldLoadMstTemplate
-          ? apiFetch(`/checklists?template_only=true&group_key=${encodeURIComponent(MST_PRODUCT_TEMPLATE_GROUP_KEY)}`)
+          ? apiFetch(`/checklists?template_only=true&group_key=${encodeURIComponent(productTemplateGroupKey)}`)
+          : Promise.resolve(null),
+        fallbackProductTemplateGroupKey
+          ? apiFetch(`/checklists?template_only=true&group_key=${encodeURIComponent(fallbackProductTemplateGroupKey)}`)
           : Promise.resolve(null),
       ])
       let loadedMstTemplate: ChecklistWithItems | null = null
@@ -1384,9 +1395,13 @@ export default function PcmProjectPage() {
       if (mstTemplateRes && "ok" in mstTemplateRes && mstTemplateRes.ok) {
         const templates = (await mstTemplateRes.json()) as ChecklistWithItems[]
         loadedMstTemplate = templates[0] || null
+      }
+      if (!loadedMstTemplate && fallbackMstTemplateRes && "ok" in fallbackMstTemplateRes && fallbackMstTemplateRes.ok) {
+        const templates = (await fallbackMstTemplateRes.json()) as ChecklistWithItems[]
+        loadedMstTemplate = templates[0] || null
+      }
+      if (loadedMstTemplate || shouldLoadMstTemplate) {
         setMstTemplateChecklist(loadedMstTemplate)
-      } else if (shouldLoadMstTemplate) {
-        setMstTemplateChecklist(null)
       }
 
       if (tRes.ok) setTasks((await tRes.json()) as Task[])
@@ -1419,7 +1434,9 @@ export default function PcmProjectPage() {
             if (!hasMstItems) {
               const templateRows = loadedMstTemplate
                 ? checklistItemsToMstTemplateRows(loadedMstTemplate.items || [])
-                : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
+                : isTtProject
+                  ? DEFAULT_TT_PRODUCT_TEMPLATE_ROWS
+                  : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
               await initializeMstChecklistItems(p.id, items, templateRows, apiFetch)
               const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
               if (reloadRes.ok) {
@@ -1462,15 +1479,18 @@ export default function PcmProjectPage() {
 
   const isMst = React.useMemo(() => isMstProject(project), [project])
   const titleUpper = (project?.title || project?.name || "").toUpperCase()
-  const isTtProject = titleUpper.includes("TT")
+  const isTtProject = isTtProjectTitle(titleUpper)
   const isMstLike = isMst || isTtProject
+  const productChecklistLabel = isTtProject ? "TT" : "MST"
+  const productTemplateGroupKey = isTtProject ? TT_PRODUCT_TEMPLATE_GROUP_KEY : MST_PRODUCT_TEMPLATE_GROUP_KEY
+  const defaultProductTemplateRows = isTtProject ? DEFAULT_TT_PRODUCT_TEMPLATE_ROWS : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
   const isMstTemplateEditor = React.useMemo(
     () => Boolean(project?.is_template && isMstLike && (user?.role === "ADMIN" || user?.role === "MANAGER")),
     [isMstLike, project?.is_template, user?.role]
   )
   const mstTemplateRows = React.useMemo(
-    () => (mstTemplateChecklist ? checklistItemsToMstTemplateRows(mstTemplateChecklist.items || []) : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS),
-    [mstTemplateChecklist]
+    () => (mstTemplateChecklist ? checklistItemsToMstTemplateRows(mstTemplateChecklist.items || []) : defaultProductTemplateRows),
+    [defaultProductTemplateRows, mstTemplateChecklist]
   )
   const templateOrderMap = React.useMemo(() => buildMstTemplateOrderMap(mstTemplateRows), [mstTemplateRows])
   const planningItems = React.useMemo(
@@ -1502,7 +1522,7 @@ export default function PcmProjectPage() {
     setLoadingMstTemplate(true)
     try {
       const res = await apiFetch(
-        `/checklists?template_only=true&group_key=${encodeURIComponent(MST_PRODUCT_TEMPLATE_GROUP_KEY)}`
+        `/checklists?template_only=true&group_key=${encodeURIComponent(productTemplateGroupKey)}`
       )
       if (!res.ok) {
         setMstTemplateChecklist(null)
@@ -1519,7 +1539,7 @@ export default function PcmProjectPage() {
     } finally {
       setLoadingMstTemplate(false)
     }
-  }, [apiFetch])
+  }, [apiFetch, productTemplateGroupKey])
 
   const createMstTemplateFromDefaults = React.useCallback(async () => {
     if (user?.role !== "ADMIN" && user?.role !== "MANAGER") return null
@@ -1529,18 +1549,18 @@ export default function PcmProjectPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: "MST Product Checklist Template",
-          group_key: MST_PRODUCT_TEMPLATE_GROUP_KEY,
+          title: `${productChecklistLabel} Product Checklist Template`,
+          group_key: productTemplateGroupKey,
         }),
       })
       if (!createChecklistRes.ok) {
-        toast.error("Failed to create MST template checklist")
+        toast.error(`Failed to create ${productChecklistLabel} template checklist`)
         return null
       }
       const checklist = (await createChecklistRes.json()) as ChecklistWithItems
       const existingTemplate = await loadMstTemplateChecklist()
       const templateChecklistId = existingTemplate?.id || checklist.id
-      const rowsToCreate = DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
+      const rowsToCreate = defaultProductTemplateRows
 
       for (const [index, row] of rowsToCreate.entries()) {
         const itemRes = await apiFetch("/checklist-items", {
@@ -1566,12 +1586,12 @@ export default function PcmProjectPage() {
       }
 
       const reloaded = await loadMstTemplateChecklist()
-      if (reloaded) toast.success("MST template initialized from defaults")
+      if (reloaded) toast.success(`${productChecklistLabel} template initialized`)
       return reloaded
     } finally {
       setInitializingMstTemplate(false)
     }
-  }, [apiFetch, loadMstTemplateChecklist, user?.role])
+  }, [apiFetch, defaultProductTemplateRows, loadMstTemplateChecklist, productChecklistLabel, productTemplateGroupKey, user?.role])
 
   // Initialize MST checklist checked state and comments from database
   React.useEffect(() => {
@@ -2470,7 +2490,9 @@ export default function PcmProjectPage() {
       const url = URL.createObjectURL(blob)
       const link = document.createElement("a")
       link.href = url
-      link.download = isMstTemplateEditor ? "MST_PRODUCT_TEMPLATE_CHECKLIST.xlsx" : "MST_PRODUCT_CHECKLIST.xlsx"
+      link.download = isMstTemplateEditor
+        ? `${productChecklistLabel}_PRODUCT_TEMPLATE_CHECKLIST.xlsx`
+        : `${productChecklistLabel}_PRODUCT_CHECKLIST.xlsx`
       document.body.appendChild(link)
       link.click()
       link.remove()
@@ -7278,7 +7300,7 @@ export default function PcmProjectPage() {
                       <div>
                         <div className="text-lg font-semibold">Checklists</div>
                         {isMstTemplateEditor ? (
-                          <div className="text-xs text-slate-500">Admin template editor for future MST projects</div>
+                          <div className="text-xs text-slate-500">Admin template editor for future {productChecklistLabel} projects</div>
                         ) : null}
                       </div>
                       <div className="flex items-center gap-2">
@@ -7291,7 +7313,7 @@ export default function PcmProjectPage() {
                             disabled={initializingMstTemplate || loadingMstTemplate}
                             className="h-8 rounded-xl border-slate-200 text-xs"
                           >
-                            {initializingMstTemplate ? "Initializing..." : "Create Template From Defaults"}
+                            {initializingMstTemplate ? "Initializing..." : "Create Template"}
                           </Button>
                         ) : null}
                         {isMstTemplateEditor && mstTemplateChecklist ? (
@@ -7323,8 +7345,8 @@ export default function PcmProjectPage() {
                     </div>
                     {isMstTemplateEditor && !mstTemplateChecklist ? (
                       <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-                        No saved MST template exists yet. Initialize it from the current defaults, then edit the rows
-                        here. New MST projects will seed from this saved template.
+                        No saved {productChecklistLabel} template exists yet. Create it, then edit the rows here.
+                        New {productChecklistLabel} projects will seed from this saved template.
                       </div>
                     ) : null}
                     <div className="text-sm text-red-600 space-y-1">
@@ -8899,4 +8921,3 @@ export default function PcmProjectPage() {
     </div>
   )
 }
-

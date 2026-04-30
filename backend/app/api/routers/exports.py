@@ -2494,7 +2494,8 @@ async def export_checklist_xlsx(
     if format == "mst":
         subtitle_row = 2
         ws.merge_cells(start_row=subtitle_row, start_column=1, end_row=subtitle_row, end_column=len(headers))
-        subtitle_cell = ws.cell(row=subtitle_row, column=1, value="Admin template editor for future MST projects")
+        template_label = "TT" if checklist.group_key == "TT_PRODUCT_CHECKLIST_TEMPLATE" else "MST"
+        subtitle_cell = ws.cell(row=subtitle_row, column=1, value=f"Admin template editor for future {template_label} projects")
         subtitle_cell.font = Font(size=10, color="64748B")
         subtitle_cell.alignment = Alignment(horizontal="left", vertical="center")
 
@@ -2611,11 +2612,12 @@ async def export_checklist_xlsx(
     wb.save(bio)
     bio.seek(0)
     if format == "mst":
-        filename = (
-            "MST_PRODUCT_TEMPLATE_CHECKLIST"
-            if checklist.group_key == "MST_PRODUCT_CHECKLIST_TEMPLATE"
-            else "MST_PRODUCT_CHECKLIST"
-        )
+        if checklist.group_key == "MST_PRODUCT_CHECKLIST_TEMPLATE":
+            filename = "MST_PRODUCT_TEMPLATE_CHECKLIST"
+        elif checklist.group_key == "TT_PRODUCT_CHECKLIST_TEMPLATE":
+            filename = "TT_PRODUCT_TEMPLATE_CHECKLIST"
+        else:
+            filename = "MST_PRODUCT_CHECKLIST"
     else:
         filename = checklist.title or "checklist_export"
     safe_filename = "".join(ch if ch.isalnum() or ch in ("-", "_") else "_" for ch in filename)

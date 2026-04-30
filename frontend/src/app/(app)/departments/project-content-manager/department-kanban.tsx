@@ -75,13 +75,18 @@ const PHASE_LABELS: Record<string, string> = {
   CLOSED: "Closed",
 }
 
+function isTtProjectTitle(title: string) {
+  const normalized = title.toUpperCase().trim()
+  return normalized === "TT" || normalized.startsWith("TT ") || normalized.startsWith("TT-") || normalized.startsWith("TT:")
+}
+
 // Get project-specific phases based on project type
 function getProjectPhases(project: Project): string[] {
   const projectType = project.project_type
   const title = (resolveProjectTitle(project) || "").toUpperCase()
 
   // MST and TT projects (both use MST phases)
-  if (projectType === "MST" || title.includes("MST") || title === "TT" || title.startsWith("TT ")) {
+  if (projectType === "MST" || title.includes("MST") || isTtProjectTitle(title)) {
     return ["PLANNING", "PRODUCT", "CONTROL", "FINAL", "CLOSED"]
   }
 
@@ -245,8 +250,7 @@ function isPcmProjectLikeFastTaskTitleKey(normalizedTitle: string) {
   return (
     normalizedTitle === "MST" ||
     normalizedTitle.startsWith("MST ") ||
-    normalizedTitle === "TT" ||
-    normalizedTitle.startsWith("TT ") ||
+    isTtProjectTitle(normalizedTitle) ||
     normalizedTitle === "VS VL" ||
     normalizedTitle.startsWith("VS VL ")
   )
@@ -835,8 +839,7 @@ function isMstOrTtProject(project: Project | null): boolean {
   if (!project) return false
   const projectType = project.project_type
   const title = (resolveProjectTitle(project) || "").toUpperCase().trim()
-  const isTt = title === "TT" || title.startsWith("TT ") || title.startsWith("TT-")
-  return projectType === "MST" || title.includes("MST") || isTt
+  return projectType === "MST" || title.includes("MST") || isTtProjectTitle(title)
 }
 
 function isPcmControlTaskOwnedByUser(task: Task, userId: string, project: Project | null): boolean {
@@ -2402,8 +2405,7 @@ export default function DepartmentKanban() {
         const koUserId = parseKoUserId(task.internal_notes)
         const projectType = String(project?.project_type || "").toUpperCase().trim()
         const projectTitle = String(project ? resolveProjectTitle(project) : meta?.title || "").toUpperCase().trim()
-        const isTtProject =
-          projectTitle === "TT" || projectTitle.startsWith("TT ") || projectTitle.startsWith("TT-")
+        const isTtProject = isTtProjectTitle(projectTitle)
         const isMstOrTtControl = phase === "CONTROL" && (projectType === "MST" || projectTitle.includes("MST") || isTtProject)
         const effectiveControlOwnerId = koUserId || task.assigned_to || null
 
