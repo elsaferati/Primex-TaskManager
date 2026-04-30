@@ -15,7 +15,7 @@ class TestWeeklyTableProjectVisibility(unittest.TestCase):
 
         self.assertFalse(result)
 
-    def test_other_departments_keep_empty_project_fallback(self) -> None:
+    def test_other_departments_hide_empty_projects(self) -> None:
         department_id = uuid.uuid4()
 
         result = _should_add_empty_project_entry_for_department(
@@ -23,15 +23,15 @@ class TestWeeklyTableProjectVisibility(unittest.TestCase):
             {uuid.uuid4()},
         )
 
-        self.assertTrue(result)
+        self.assertFalse(result)
 
-    def test_missing_department_id_keeps_existing_behavior(self) -> None:
+    def test_missing_department_id_hides_empty_projects(self) -> None:
         result = _should_add_empty_project_entry_for_department(
             None,
             {uuid.uuid4()},
         )
 
-        self.assertTrue(result)
+        self.assertFalse(result)
 
 
 if __name__ == "__main__":

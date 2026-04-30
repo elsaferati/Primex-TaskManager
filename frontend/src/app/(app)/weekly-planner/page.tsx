@@ -179,6 +179,10 @@ const isMstOrTtProjectForWeeklyPlanner = (project?: WeeklyTableProjectEntry | nu
   return isTt || (isMst && !isTt)
 }
 
+const hasVisibleProjectTasks = (project?: WeeklyTableProjectEntry | null) => {
+  return Boolean(project?.tasks?.length)
+}
+
 function mondayISO(today = new Date()) {
   const d = new Date(today)
   const day = (d.getDay() + 6) % 7
@@ -2307,7 +2311,7 @@ export default function WeeklyPlannerPage() {
       }
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
-        const projects = userDay?.am_projects || []
+        const projects = (userDay?.am_projects || []).filter(hasVisibleProjectTasks)
         const block = getBlockForSlot(user.user_id, dayIso, "am")
         const isBlocked = Boolean(block)
 
@@ -2463,7 +2467,7 @@ export default function WeeklyPlannerPage() {
       
       allUsers.forEach((user) => {
         const userDay = day.users.find(u => u.user_id === user.user_id)
-        const projects = userDay?.pm_projects || []
+        const projects = (userDay?.pm_projects || []).filter(hasVisibleProjectTasks)
         const block = getBlockForSlot(user.user_id, dayIso, "pm")
         const isBlocked = Boolean(block)
 
@@ -3931,7 +3935,7 @@ export default function WeeklyPlannerPage() {
                             userId: string
                           ) => {
                             // Ensure arrays are defined
-                            const projectsList = projects || []
+                            const projectsList = (projects || []).filter(hasVisibleProjectTasks)
                             const systemTasksList = systemTasks || []
                             const fastTasksList = sortFastTasks(fastTasks || [])
 

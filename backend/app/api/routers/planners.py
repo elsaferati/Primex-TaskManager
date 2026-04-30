@@ -224,10 +224,9 @@ def _should_add_empty_project_entry_for_department(
     Decide whether a project may appear in Weekly Planner without any active tasks
     for the rendered user/day slot.
 
-    Product Content should only show projects when that day has active project tasks.
-    Other departments keep the existing due-date driven fallback.
+    Weekly Planner should only show projects when that day has active project tasks.
     """
-    return department_id not in product_content_department_ids
+    return False
 
 
 def _parse_production_date(internal_notes: str | None) -> date | None:
