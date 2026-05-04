@@ -46,7 +46,7 @@ const NOTE_TO_TASK_PRIORITY: Record<NotePriority, TaskPriority> = {
 
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const TASK_TYPE_OPTIONS_NO_PROJECT = ["NORMAL", "R1", "1H", "PERSONAL", "BLLOK"] as const
-const TASK_TYPE_OPTIONS_WITH_PROJECT: TaskPriority[] = ["NORMAL", "HIGH"]
+const TASK_TYPE_OPTIONS_WITH_PROJECT = ["NORMAL", "HIGH", "1H", "R1", "PERSONAL", "BLLOK"] as const
 type TaskTypeOption = typeof TASK_TYPE_OPTIONS_NO_PROJECT[number] | TaskPriority
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
@@ -1702,8 +1702,22 @@ export default function GaKaNotesPage() {
       let isPersonal = false
 
       if (isProjectTask) {
-        // For project tasks: only HIGH or NORMAL
-        actualPriority = taskPriority === "HIGH" ? "HIGH" : "NORMAL"
+        // For project tasks: allow HIGH, NORMAL, 1H, R1, Personal, or BLLOK
+        if (taskPriority === "1H") {
+          is1hReport = true
+          actualPriority = "NORMAL"
+        } else if (taskPriority === "R1") {
+          isR1 = true
+          actualPriority = "NORMAL"
+        } else if (taskPriority === "PERSONAL") {
+          isPersonal = true
+          actualPriority = "NORMAL"
+        } else if (taskPriority === "BLLOK") {
+          isBllok = true
+          actualPriority = "NORMAL"
+        } else {
+          actualPriority = taskPriority === "HIGH" ? "HIGH" : "NORMAL"
+        }
       } else {
         // For non-project tasks: map to priority or boolean flags
         if (taskPriority === "BLLOK") {

@@ -12,6 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
@@ -34,8 +35,18 @@ const FAST_TASK_TYPES = [
   { value: "P:", label: "P: (Personal)" },
 ] as const
 
+const PROJECT_TASK_TYPES = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "HIGH", label: "High" },
+  { value: "1H", label: "1H (1 Hour Report)" },
+  { value: "R1", label: "R1" },
+  { value: "PERSONAL", label: "P: (Personal)" },
+  { value: "BLLOK", label: "BLLOK" },
+] as const
+
 type TaskStatusValue = typeof TASK_STATUS_OPTIONS[number]["value"]
 type FastTaskTypeValue = typeof FAST_TASK_TYPES[number]["value"]
+type ProjectTaskTypeValue = typeof PROJECT_TASK_TYPES[number]["value"]
 
 function getCurrentFastTaskType(task: Task | null): FastTaskTypeValue {
   if (!task) return "N"
@@ -49,6 +60,21 @@ function getCurrentFastTaskType(task: Task | null): FastTaskTypeValue {
 function isFastTask(task: Task | null) {
   if (!task) return false
   return task.project_id == null && task.dependency_task_id == null && task.system_template_origin_id == null
+}
+
+function isProjectTask(task: Task | null) {
+  if (!task) return false
+  return task.project_id != null && task.system_template_origin_id == null
+}
+
+function getCurrentProjectTaskType(task: Task | null): ProjectTaskTypeValue {
+  if (!task) return "NORMAL"
+  if (task.is_1h_report) return "1H"
+  if (task.is_r1) return "R1"
+  if (task.is_personal) return "PERSONAL"
+  if (task.is_bllok) return "BLLOK"
+  if (task.priority === "HIGH") return "HIGH"
+  return "NORMAL"
 }
 
 export function TaskEditDialog({
@@ -66,6 +92,7 @@ export function TaskEditDialog({
   const [title, setTitle] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<TaskStatusValue>("TODO")
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskTypeValue>("N")
+  const [projectTaskType, setProjectTaskType] = React.useState<ProjectTaskTypeValue>("NORMAL")
   const [dueDate, setDueDate] = React.useState("")
   const [saving, setSaving] = React.useState(false)
 
@@ -74,6 +101,7 @@ export function TaskEditDialog({
     setTitle(task.title || "")
     setStatusValue((task.status as TaskStatusValue | undefined) || "TODO")
     setFastTaskType(getCurrentFastTaskType(task))
+    setProjectTaskType(getCurrentProjectTaskType(task))
     setDueDate(toDateInputValue(task.due_date))
   }, [task])
 
@@ -107,6 +135,7 @@ export function TaskEditDialog({
     setSaving(true)
     try {
       const currentFastTaskType = getCurrentFastTaskType(task)
+      const currentProjectTaskType = getCurrentProjectTaskType(task)
       const res = await apiFetch(`/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -120,6 +149,15 @@ export function TaskEditDialog({
                 is_r1: fastTaskType === "R1",
                 is_1h_report: fastTaskType === "1H",
                 is_personal: fastTaskType === "P:",
+              }
+            : {}),
+          ...(isProjectTask(task) && projectTaskType !== currentProjectTaskType
+            ? {
+                priority: projectTaskType === "HIGH" ? "HIGH" : "NORMAL",
+                is_1h_report: projectTaskType === "1H",
+                is_r1: projectTaskType === "R1",
+                is_personal: projectTaskType === "PERSONAL",
+                is_bllok: projectTaskType === "BLLOK",
               }
             : {}),
         }),
@@ -146,7 +184,7 @@ export function TaskEditDialog({
     } finally {
       setSaving(false)
     }
-  }, [apiFetch, dueDate, fastTaskType, onOpenChange, onUpdated, statusValue, task, title])
+  }, [apiFetch, dueDate, fastTaskType, onOpenChange, onUpdated, projectTaskType, statusValue, task, title])
 
   if (!task) return null
 
@@ -183,6 +221,24 @@ export function TaskEditDialog({
                 </SelectTrigger>
                 <SelectContent>
                   {FAST_TASK_TYPES.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
+
+          {isProjectTask(task) ? (
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select value={projectTaskType} onValueChange={(value) => setProjectTaskType(value as ProjectTaskTypeValue)}>
+                <SelectTrigger disabled={saving}>
+                  <SelectValue placeholder="Type" />
+                </SelectTrigger>
+                <SelectContent>
+                  {PROJECT_TASK_TYPES.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>

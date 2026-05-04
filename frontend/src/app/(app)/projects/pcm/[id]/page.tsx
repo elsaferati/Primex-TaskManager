@@ -48,6 +48,7 @@ const MST_PHASE_LABELS: Record<(typeof MST_PHASES)[number], string> = {
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const FINISH_PERIOD_NONE_LABEL = "All day"
+const PROJECT_TASK_TYPES = ["NORMAL", "HIGH", "1H", "R1", "PERSONAL", "BLLOK"] as const
 
 const VS_VL_PHASES = ["PLANNING", "AMAZON", "CHECK", "DREAMROBOT"] as const
 const VS_VL_PHASE_LABELS: Record<(typeof VS_VL_PHASES)[number], string> = {
@@ -666,6 +667,15 @@ function vsVlPriorityLabel(priority?: string | null) {
   return priority === "HIGH" ? "I LARTE" : "NORMAL"
 }
 
+function getProjectTaskType(task: Task | null): (typeof PROJECT_TASK_TYPES)[number] {
+  if (!task) return "NORMAL"
+  if (task.is_1h_report) return "1H"
+  if (task.is_r1) return "R1"
+  if (task.is_personal) return "PERSONAL"
+  if (task.is_bllok) return "BLLOK"
+  return task.priority === "HIGH" ? "HIGH" : "NORMAL"
+}
+
 function normalizeTaskTitle(value: string) {
   return value
     .normalize("NFD")
@@ -919,7 +929,7 @@ export default function PcmProjectPage() {
   const [pendingStatusTaskId, setPendingStatusTaskId] = React.useState<string | null>(null)
   const [pendingStatusValue, setPendingStatusValue] = React.useState<Task["status"]>("TODO")
   const [pendingConfirmationAssigneeId, setPendingConfirmationAssigneeId] = React.useState("")
-  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
+  const [newTaskType, setNewTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [newAssignedTo, setNewAssignedTo] = React.useState<string>("__unassigned__")
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
@@ -2184,7 +2194,11 @@ export default function PcmProjectPage() {
         department_id: project.department_id,
         assigned_to: newAssignedTo === "__unassigned__" ? null : newAssignedTo,
         status: newStatus,
-        priority: newPriority,
+        priority: newTaskType === "HIGH" ? "HIGH" : "NORMAL",
+        is_1h_report: newTaskType === "1H",
+        is_r1: newTaskType === "R1",
+        is_personal: newTaskType === "PERSONAL",
+        is_bllok: newTaskType === "BLLOK",
         phase: newTaskPhase || activePhase,
         due_date: newDueDate || null,
         is_deadline_important: false,
@@ -2211,7 +2225,7 @@ export default function PcmProjectPage() {
       setNewTitle("")
       setNewDescription("")
       setNewStatus("TODO")
-      setNewPriority("NORMAL")
+      setNewTaskType("NORMAL")
       setNewAssignedTo("__unassigned__")
       setNewTaskPhase("")
       setNewDueDate("")
@@ -5291,27 +5305,46 @@ export default function PcmProjectPage() {
                               />
                             </div>
                             <Select
-                              value={(task.priority || "NORMAL").toUpperCase()}
+                              value={getProjectTaskType(task)}
                               onValueChange={(value) => {
                                 if (isLocked || !isEditing) return
-                                const nextPriority = (value || "NORMAL").toUpperCase()
-                                if (nextPriority === (task.priority || "NORMAL").toUpperCase()) return
-                                void patchTask(task.id, { priority: nextPriority }, "Failed to update priority")
+                                const nextTaskType = (value || "NORMAL").toUpperCase() as (typeof PROJECT_TASK_TYPES)[number]
+                                if (nextTaskType === getProjectTaskType(task)) return
+                                void patchTask(
+                                  task.id,
+                                  {
+                                    priority: nextTaskType === "HIGH" ? "HIGH" : "NORMAL",
+                                    is_1h_report: nextTaskType === "1H",
+                                    is_r1: nextTaskType === "R1",
+                                    is_personal: nextTaskType === "PERSONAL",
+                                    is_bllok: nextTaskType === "BLLOK",
+                                  },
+                                  "Failed to update priority"
+                                )
                               }}
                               disabled={isLocked || !isEditing}
                             >
                               <SelectTrigger
-                                className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${task.priority === "HIGH"
+                                className={`h-7 min-w-[90px] text-xs px-2 flex-shrink-0 ${
+                                  task.priority === "HIGH"
                                     ? "bg-rose-50 text-rose-700 border-rose-200"
-                                    : "bg-slate-50 text-slate-700 border-slate-200"
-                                  }`}
+                                    : task.is_1h_report
+                                      ? "bg-amber-50 text-amber-700 border-amber-200"
+                                      : task.is_r1
+                                        ? "bg-sky-50 text-sky-700 border-sky-200"
+                                        : task.is_personal
+                                          ? "bg-emerald-50 text-emerald-700 border-emerald-200"
+                                          : task.is_bllok
+                                            ? "bg-slate-200 text-slate-700 border-slate-300"
+                                            : "bg-slate-50 text-slate-700 border-slate-200"
+                                }`}
                               >
                                 <SelectValue />
                               </SelectTrigger>
                               <SelectContent>
-                                {TASK_PRIORITIES.map((priority) => (
-                                  <SelectItem key={priority} value={priority}>
-                                    {vsVlPriorityLabel(priority)}
+                                {PROJECT_TASK_TYPES.map((type) => (
+                                  <SelectItem key={type} value={type}>
+                                    {type === "HIGH" ? "I LARTE" : type === "PERSONAL" ? "P" : type}
                                   </SelectItem>
                                 ))}
                               </SelectContent>

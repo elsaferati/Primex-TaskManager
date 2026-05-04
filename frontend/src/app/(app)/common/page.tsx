@@ -245,6 +245,7 @@ type SwimlaneRow = {
   headerClass: string
   badgeClass: string
   badges?: { value: number; className: string; label?: string }[]
+  headerBreakdown?: { value: number; label: string; className?: string }[]
   items: SwimlaneCell[]
 }
 
@@ -4643,6 +4644,20 @@ export default function CommonViewPage() {
       dateLabel: formatDateHuman(p.date),
     }))
 
+    const buildFastHeaderBreakdown = (items: SwimlaneCell[]) => {
+      const eightAmCount = items.filter((item) => hasEightAmIndicator(item.title)).length
+      const deadlineCount = items.filter((item) => item.isDeadlineImportant).length
+      return [
+        ...(eightAmCount > 0 ? [{ value: eightAmCount, label: "08:00", className: "swimlane-badge-sub swimlane-badge-sub-time" }] : []),
+        ...(deadlineCount > 0 ? [{ value: deadlineCount, label: "deadline", className: "swimlane-badge-sub swimlane-badge-sub-deadline" }] : []),
+      ]
+    }
+
+    const blockedHeaderBreakdown = buildFastHeaderBreakdown(blockedItems)
+    const oneHHeaderBreakdown = buildFastHeaderBreakdown(oneHItems)
+    const r1HeaderBreakdown = buildFastHeaderBreakdown(r1Items)
+    const personalHeaderBreakdown = buildFastHeaderBreakdown(personalItems)
+
     return [
       {
         id: "late",
@@ -4706,6 +4721,7 @@ export default function CommonViewPage() {
         count: filtered.blocked.length,
         headerClass: "swimlane-header blocked",
         badgeClass: "swimlane-badge blocked",
+        headerBreakdown: blockedHeaderBreakdown,
         items: blockedItems,
       },
       {
@@ -4715,6 +4731,7 @@ export default function CommonViewPage() {
         countLabel: oneHTotal === 0 ? "0" : `${oneHTotal}/${oneHDone}`,
         headerClass: "swimlane-header oneh",
         badgeClass: "swimlane-badge oneh",
+        headerBreakdown: oneHHeaderBreakdown,
         items: oneHItems,
       },
       {
@@ -4724,6 +4741,7 @@ export default function CommonViewPage() {
         countLabel: r1Total === 0 ? "0" : `${r1Total}/${r1Done}`,
         headerClass: "swimlane-header r1",
         badgeClass: "swimlane-badge r1",
+        headerBreakdown: r1HeaderBreakdown,
         items: r1Items,
       },
       {
@@ -4732,6 +4750,7 @@ export default function CommonViewPage() {
         count: filtered.personal.length,
         headerClass: "swimlane-header personal",
         badgeClass: "swimlane-badge personal",
+        headerBreakdown: personalHeaderBreakdown,
         items: personalItems,
       },
       {
@@ -6024,8 +6043,14 @@ export default function CommonViewPage() {
         .swimlane-badges {
           position: relative;
           display: inline-flex;
-          align-items: center;
+          align-items: flex-start;
           gap: 6px;
+        }
+        .swimlane-badge-stack {
+          display: inline-flex;
+          flex-direction: column;
+          align-items: flex-end;
+          gap: 3px;
         }
         .swimlane-badge {
           min-width: 24px;
@@ -6039,6 +6064,27 @@ export default function CommonViewPage() {
           justify-content: center;
           background: #ffffff;
           border: 1px solid rgba(15, 23, 42, 0.12);
+        }
+        .swimlane-badge-sub {
+          display: inline-flex;
+          align-items: center;
+          gap: 4px;
+          font-size: 10px;
+          font-weight: 700;
+          line-height: 1.1;
+          color: #475569;
+          white-space: nowrap;
+          padding: 1px 6px;
+          border-radius: 999px;
+          border: 1px solid transparent;
+        }
+        .swimlane-badge-sub-time {
+          color: #0f766e;
+          border-color: #fca5a5;
+        }
+        .swimlane-badge-sub-deadline {
+          color: #b91c1c;
+          border-color: #fca5a5;
         }
         .swimlane-info-btn {
           border: none;
@@ -9705,7 +9751,21 @@ export default function CommonViewPage() {
                         const headerSubtext = swimlaneHeaderSubtext[row.id]
                         const badges = (
                           <span className="swimlane-badges">
-                            {row.badges?.length ? (
+                            {row.headerBreakdown?.length ? (
+                              <span className="swimlane-badge-stack">
+                                <span className={row.badgeClass}>{row.countLabel ?? row.count}</span>
+                                {row.headerBreakdown.map((item, idx) => (
+                                  <span
+                                    key={`${row.id}-breakdown-${idx}`}
+                                    className={item.className ?? "swimlane-badge-sub"}
+                                    title={item.label}
+                                  >
+                                    <span>{item.value}</span>
+                                    <span>{item.label}</span>
+                                  </span>
+                                ))}
+                              </span>
+                            ) : row.badges?.length ? (
                               row.badges.map((badge, idx) => (
                                 <span key={`${row.id}-badge-${idx}`} className={badge.className} title={badge.label}>
                                   {badge.value}

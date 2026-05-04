@@ -47,7 +47,17 @@ const FAST_TASK_TYPES = [
   { value: "P:", label: "P: (Personal)" },
 ] as const
 
+const PROJECT_TASK_TYPES = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "HIGH", label: "High" },
+  { value: "1H", label: "1H (1 Hour Report)" },
+  { value: "R1", label: "R1" },
+  { value: "PERSONAL", label: "P: (Personal)" },
+  { value: "BLLOK", label: "BLLOK" },
+] as const
+
 type FastTaskType = typeof FAST_TASK_TYPES[number]["value"]
+type ProjectTaskType = typeof PROJECT_TASK_TYPES[number]["value"]
 
 function getCurrentFastTaskType(task: Task | null): FastTaskType {
   if (!task) return "N"
@@ -66,6 +76,21 @@ function isFastTask(task: Task | null): boolean {
     task.dependency_task_id === null &&
     task.system_template_origin_id === null
   )
+}
+
+function isProjectTask(task: Task | null): boolean {
+  if (!task) return false
+  return task.project_id !== null && task.system_template_origin_id === null
+}
+
+function getCurrentProjectTaskType(task: Task | null): ProjectTaskType {
+  if (!task) return "NORMAL"
+  if (task.is_1h_report) return "1H"
+  if (task.is_r1) return "R1"
+  if (task.is_personal) return "PERSONAL"
+  if (task.is_bllok) return "BLLOK"
+  if (task.priority === "HIGH") return "HIGH"
+  return "NORMAL"
 }
 
 function formatDate(value?: string | null) {
@@ -131,6 +156,7 @@ export default function TaskDetailsPage() {
   const [selectAssigneesOpen, setSelectAssigneesOpen] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskType>("N")
+  const [projectTaskType, setProjectTaskType] = React.useState<ProjectTaskType>("NORMAL")
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
@@ -175,6 +201,7 @@ export default function TaskDetailsPage() {
     setReminder(Boolean(task.reminder_enabled))
     // Initialize fast task type
     setFastTaskType(getCurrentFastTaskType(task))
+    setProjectTaskType(getCurrentProjectTaskType(task))
     setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }, [task])
 
@@ -345,6 +372,17 @@ export default function TaskDetailsPage() {
               // Normal - all flags already false
               break
           }
+        }
+      }
+
+      if (isProjectTask(task)) {
+        const currentType = getCurrentProjectTaskType(task)
+        if (projectTaskType !== currentType) {
+          payload.priority = projectTaskType === "HIGH" ? "HIGH" : "NORMAL"
+          payload.is_1h_report = projectTaskType === "1H"
+          payload.is_r1 = projectTaskType === "R1"
+          payload.is_personal = projectTaskType === "PERSONAL"
+          payload.is_bllok = projectTaskType === "BLLOK"
         }
       }
 
@@ -545,7 +583,6 @@ export default function TaskDetailsPage() {
                           <SelectItem
                             key={option.value}
                             value={option.value}
-                            disabled={option.value === "GA" && !task?.ga_note_origin_id}
                           >
                             {option.label}
                           </SelectItem>
@@ -572,6 +609,27 @@ export default function TaskDetailsPage() {
                       </SelectContent>
                     </Select>
                   </div>
+                </div>
+              ) : null}
+
+              {isProjectTask(task) ? (
+                <div className="space-y-2">
+                  <Label>Type</Label>
+                  <Select
+                    value={projectTaskType}
+                    onValueChange={(value) => setProjectTaskType(value as ProjectTaskType)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select type" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {PROJECT_TASK_TYPES.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>
+                          {option.label}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
                 </div>
               ) : null}
 
@@ -724,8 +782,9 @@ export default function TaskDetailsPage() {
                   {task.is_bllok ? <Badge variant="secondary">BLLOK</Badge> : null}
                   {task.is_1h_report ? <Badge variant="secondary">1H</Badge> : null}
                   {task.is_r1 ? <Badge variant="secondary">R1</Badge> : null}
+                  {task.is_personal ? <Badge variant="secondary">P</Badge> : null}
                   {task.ga_note_origin_id ? <Badge variant="secondary">GA/KA Note</Badge> : null}
-                  {!task.is_bllok && !task.is_1h_report && !task.is_r1 && !task.ga_note_origin_id ? (
+                  {!task.is_bllok && !task.is_1h_report && !task.is_r1 && !task.is_personal && !task.ga_note_origin_id ? (
                     <span className="text-sm text-muted-foreground">No special flags.</span>
                   ) : null}
                 </div>

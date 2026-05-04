@@ -103,6 +103,7 @@ type TabId =
 // Task statuses and priorities
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
+const PROJECT_TASK_TYPES = ["NORMAL", "HIGH", "1H"] as const
 
 
 function initials(src: string) {
@@ -440,7 +441,7 @@ export default function DesignProjectPage() {
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
-  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
+  const [newTaskType, setNewTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [newAssignees, setNewAssignees] = React.useState<string[]>([])
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newDueDate, setNewDueDate] = React.useState("")
@@ -647,7 +648,8 @@ export default function DesignProjectPage() {
         department_id: project.department_id,
         assignees: newAssignees,
         status: newStatus,
-        priority: newPriority,
+        priority: newTaskType === "HIGH" ? "HIGH" : "NORMAL",
+        is_1h_report: newTaskType === "1H",
         phase: newTaskPhase || activePhase,
         start_date: newStartDate || null,
         due_date: newDueDate || null,
@@ -684,7 +686,7 @@ export default function DesignProjectPage() {
       setNewTitle("")
       setNewDescription("")
       setNewStatus("TODO")
-      setNewPriority("NORMAL")
+      setNewTaskType("NORMAL")
       setNewAssignees([])
       setNewTaskPhase("")
       setNewDueDate("")
@@ -2053,7 +2055,8 @@ export default function DesignProjectPage() {
           department_id: project.department_id,
           assigned_to: gaNoteTaskAssigneeId === "__unassigned__" ? null : gaNoteTaskAssigneeId,
           status: "TODO",
-          priority: gaNoteTaskPriority || note.priority || "NORMAL",
+          priority: gaNoteTaskPriority === "HIGH" ? "HIGH" : "NORMAL",
+          is_1h_report: gaNoteTaskPriority === "1H",
           phase: project.current_phase || "PLANNING",
           due_date: new Date(gaNoteTaskDueDate).toISOString(),
           ga_note_origin_id: note.id,
@@ -3889,13 +3892,13 @@ export default function DesignProjectPage() {
                         </Select>
                       </div>
                       <div>
-                        <Label>Priority</Label>
-                        <Select value={newPriority} onValueChange={(v) => setNewPriority(v as typeof newPriority)}>
+                        <Label>Type</Label>
+                        <Select value={newTaskType} onValueChange={(v) => setNewTaskType(v as typeof newTaskType)}>
                           <SelectTrigger>
                             <SelectValue />
                           </SelectTrigger>
                           <SelectContent>
-                            {TASK_PRIORITIES.map((p) => (
+                            {PROJECT_TASK_TYPES.map((p) => (
                               <SelectItem key={p} value={p}>{p}</SelectItem>
                             ))}
                           </SelectContent>

@@ -86,6 +86,7 @@ type TaskChecklist = {
 
 const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
+const PROJECT_TASK_TYPES = ["NORMAL", "HIGH", "1H", "R1", "PERSONAL", "BLLOK"] as const
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
@@ -96,6 +97,15 @@ const TASK_STATUS_LABELS: Record<(typeof TASK_STATUSES)[number], string> = {
   IN_PROGRESS: "In Progress",
   WAITING_CONFIRMATION: "Waiting Confirmation",
   DONE: "Done",
+}
+
+function getProjectTaskType(task: Task | null): (typeof PROJECT_TASK_TYPES)[number] {
+  if (!task) return "NORMAL"
+  if (task.is_1h_report) return "1H"
+  if (task.is_r1) return "R1"
+  if (task.is_personal) return "PERSONAL"
+  if (task.is_bllok) return "BLLOK"
+  return task.priority === "HIGH" ? "HIGH" : "NORMAL"
 }
 
 const MEETING_FOCUS_POINTS = [
@@ -400,7 +410,7 @@ export default function ProjectPage() {
   const [newTitle, setNewTitle] = React.useState("")
   const [newDescription, setNewDescription] = React.useState("")
   const [newStatus, setNewStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
-  const [newPriority, setNewPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
+  const [newTaskType, setNewTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [newAssignees, setNewAssignees] = React.useState<string[]>([])
   const [newTaskPhase, setNewTaskPhase] = React.useState<string>("")
   const [newStartDate, setNewStartDate] = React.useState("")
@@ -418,7 +428,7 @@ export default function ProjectPage() {
   const [viewingTaskTitle, setViewingTaskTitle] = React.useState("")
   const [viewingTaskDescription, setViewingTaskDescription] = React.useState("")
   const [editStatus, setEditStatus] = React.useState<(typeof TASK_STATUSES)[number]>("TODO")
-  const [editPriority, setEditPriority] = React.useState<(typeof TASK_PRIORITIES)[number]>("NORMAL")
+  const [editTaskType, setEditTaskType] = React.useState<(typeof PROJECT_TASK_TYPES)[number]>("NORMAL")
   const [editAssignees, setEditAssignees] = React.useState<string[]>([])
   const [editPhase, setEditPhase] = React.useState<string>("")
   const [editStartDate, setEditStartDate] = React.useState("")
@@ -977,7 +987,11 @@ export default function ProjectPage() {
         department_id: project.department_id,
         assignees: newAssignees,
         status: newStatus,
-        priority: newPriority,
+        priority: newTaskType === "HIGH" ? "HIGH" : "NORMAL",
+        is_1h_report: newTaskType === "1H",
+        is_r1: newTaskType === "R1",
+        is_personal: newTaskType === "PERSONAL",
+        is_bllok: newTaskType === "BLLOK",
         phase: newTaskPhase || activePhase,
         start_date: newStartDate ? new Date(newStartDate).toISOString() : null,
         due_date: newDueDate || null,
@@ -1006,7 +1020,7 @@ export default function ProjectPage() {
       setNewTitle("")
       setNewDescription("")
       setNewStatus("TODO")
-      setNewPriority("NORMAL")
+      setNewTaskType("NORMAL")
       setNewAssignees([])
       setNewTaskPhase("")
       setNewStartDate("")
@@ -1310,7 +1324,7 @@ export default function ProjectPage() {
     setEditTitle(task.title || "")
     setEditDescription(task.description || "")
     setEditStatus(task.status || "TODO")
-    setEditPriority(task.priority || "NORMAL")
+    setEditTaskType(getProjectTaskType(task))
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
     const assigneeIds = task.assignees && task.assignees.length > 0
       ? task.assignees.map(a => a.id)
@@ -1361,7 +1375,11 @@ export default function ProjectPage() {
         title: editTitle.trim(),
         description: editDescription.trim() || null,
         status: editStatus,
-        priority: editPriority,
+        priority: editTaskType === "HIGH" ? "HIGH" : "NORMAL",
+        is_1h_report: editTaskType === "1H",
+        is_r1: editTaskType === "R1",
+        is_personal: editTaskType === "PERSONAL",
+        is_bllok: editTaskType === "BLLOK",
         assignees: editAssignees,
         phase: editPhase || activePhase,
         start_date: editStartDate ? new Date(editStartDate).toISOString() : null,
@@ -3442,15 +3460,15 @@ export default function ProjectPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select value={newPriority} onValueChange={(v) => setNewPriority(v as typeof newPriority)}>
+                      <Label>Type</Label>
+                      <Select value={newTaskType} onValueChange={(v) => setNewTaskType(v as typeof newTaskType)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Priority" />
+                          <SelectValue placeholder="Type" />
                         </SelectTrigger>
                         <SelectContent>
-                          {TASK_PRIORITIES.map((p) => (
+                          {PROJECT_TASK_TYPES.map((p) => (
                             <SelectItem key={p} value={p}>
-                              {statusLabel(p)}
+                              {p}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -3618,15 +3636,15 @@ export default function ProjectPage() {
                       </Select>
                     </div>
                     <div className="space-y-2">
-                      <Label>Priority</Label>
-                      <Select value={editPriority} onValueChange={(v) => setEditPriority(v as Task["priority"])}>
+                      <Label>Type</Label>
+                      <Select value={editTaskType} onValueChange={(v) => setEditTaskType(v as typeof editTaskType)}>
                         <SelectTrigger>
-                          <SelectValue placeholder="Priority" />
+                          <SelectValue placeholder="Type" />
                         </SelectTrigger>
                         <SelectContent>
-                          {TASK_PRIORITIES.map((p) => (
+                          {PROJECT_TASK_TYPES.map((p) => (
                             <SelectItem key={p} value={p}>
-                              {statusLabel(p)}
+                              {p}
                             </SelectItem>
                           ))}
                         </SelectContent>
@@ -3869,6 +3887,26 @@ export default function ProjectPage() {
                               {taskPriority}
                             </Badge>
                           )}
+                          {task.is_1h_report ? (
+                            <Badge variant="secondary" className="text-xs bg-amber-100 text-amber-700 border-amber-200">
+                              1H
+                            </Badge>
+                          ) : null}
+                          {task.is_r1 ? (
+                            <Badge variant="secondary" className="text-xs bg-sky-100 text-sky-700 border-sky-200">
+                              R1
+                            </Badge>
+                          ) : null}
+                          {task.is_personal ? (
+                            <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 border-emerald-200">
+                              P
+                            </Badge>
+                          ) : null}
+                          {task.is_bllok ? (
+                            <Badge variant="secondary" className="text-xs bg-slate-200 text-slate-700 border-slate-300">
+                              BLLOK
+                            </Badge>
+                          ) : null}
                         </div>
                         <div className="flex items-center gap-1 flex-wrap">
                           {assignees.length > 0 ? (
@@ -4959,4 +4997,3 @@ export default function ProjectPage() {
     </div>
   )
 }
-

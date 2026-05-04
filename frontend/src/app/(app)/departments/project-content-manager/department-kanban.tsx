@@ -181,6 +181,15 @@ const NO_PROJECT_TYPES = [
   { id: "hourly", label: "1H", description: "Hourly meeting/reporting task." },
   { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
 ] as const
+const PROJECT_ALL_TODAY_TYPES = [
+  { id: "normal", label: "Normal", description: "Standard project task." },
+  { id: "high", label: "High", description: "High priority project task." },
+  { id: "hourly", label: "1H", description: "Hourly meeting/reporting task." },
+  { id: "r1", label: "R1", description: "First case must be discussed with the manager." },
+  { id: "personal", label: "Personal", description: "Personal task inside the project." },
+  { id: "blocked", label: "BLLOK", description: "Blocked project task." },
+] as const
+type AllTodayEditTypeId = (typeof PROJECT_ALL_TODAY_TYPES)[number]["id"]
 
 const PROJECT_TEMPLATES = [
   {
@@ -530,17 +539,26 @@ const PRIORITY_BADGE: Record<"NORMAL" | "HIGH", string> = {
   HIGH: "bg-rose-100 text-rose-800 border-rose-200",
 }
 const GA_BADGE_CLASSES = "bg-rose-100 text-rose-800 border-rose-200"
+const ONE_H_BADGE_CLASSES = "bg-amber-100 text-amber-800 border-amber-200"
+const R1_BADGE_CLASSES = "bg-sky-100 text-sky-800 border-sky-200"
+const PERSONAL_BADGE_CLASSES = "bg-emerald-100 text-emerald-800 border-emerald-200"
+const BLLOK_BADGE_CLASSES = "bg-slate-200 text-slate-800 border-slate-300"
 
-type GaNoteTaskType = "NORMAL" | "HIGH" | "BLLOK" | "1H" | "R1" | "GA"
+type GaNoteTaskType = "NORMAL" | "HIGH" | "BLLOK" | "1H" | "R1" | "PERSONAL" | "GA"
 const GA_NOTE_TASK_TYPE_OPTIONS_PROJECT: Array<{ value: GaNoteTaskType; label: string }> = [
   { value: "NORMAL", label: "Normal" },
   { value: "HIGH", label: "High" },
+  { value: "1H", label: "1H" },
+  { value: "R1", label: "R1" },
+  { value: "PERSONAL", label: "Personal" },
+  { value: "BLLOK", label: "BLLOK" },
 ]
 const GA_NOTE_TASK_TYPE_OPTIONS_FAST: Array<{ value: GaNoteTaskType; label: string }> = [
   { value: "NORMAL", label: "Normal" },
   { value: "BLLOK", label: "BLLOK" },
   { value: "1H", label: "1H" },
   { value: "R1", label: "R1" },
+  { value: "PERSONAL", label: "Personal" },
   { value: "GA", label: "GA" },
 ]
 
@@ -798,6 +816,15 @@ function noProjectTypeLabel(task: Task) {
   if (task.is_r1) return "R1"
   if (task.is_personal) return "Personal"
   return "Normal"
+}
+
+function getAllTodayTaskType(task: Task): AllTodayEditTypeId {
+  if (task.is_bllok) return "blocked"
+  if (task.is_1h_report) return "hourly"
+  if (task.is_r1) return "r1"
+  if (task.is_personal) return "personal"
+  if (hasProjectId(task.project_id) && task.priority === "HIGH") return "high"
+  return "normal"
 }
 
 const MS_PER_DAY = 24 * 60 * 60 * 1000
@@ -1091,6 +1118,14 @@ function fastReportSubtypeShort(task: Task) {
   return base
 }
 
+function projectReportSubtypeShort(task: Task) {
+  const base = noProjectTypeLabel(task)
+  if (base === "BLLOK") return "BLL"
+  if (base === "Personal") return "P"
+  if (base === "Normal") return "-"
+  return base
+}
+
 function taskStatusLabel(task: Task) {
   if (task.status) return reportStatusLabel(task.status)
   if (task.completed_at) return "Done"
@@ -1331,6 +1366,7 @@ export default function DepartmentKanban() {
   const [allTodayEditingTaskId, setAllTodayEditingTaskId] = React.useState<string | null>(null)
   const [allTodayEditTitle, setAllTodayEditTitle] = React.useState("")
   const [allTodayEditDescription, setAllTodayEditDescription] = React.useState("")
+  const [allTodayEditType, setAllTodayEditType] = React.useState<AllTodayEditTypeId>("normal")
   const [allTodayEditStatus, setAllTodayEditStatus] = React.useState<string>("TODO")
   const [allTodayEditConfirmationAssigneeId, setAllTodayEditConfirmationAssigneeId] = React.useState("")
   const [allTodayEditStartDate, setAllTodayEditStartDate] = React.useState("")
@@ -1650,7 +1686,7 @@ export default function DepartmentKanban() {
   }, [apiFetch, editInternalNoteDepartmentId, internalNoteDepartmentId, internalNoteProjects])
 
   React.useEffect(() => {
-    if (gaNoteTaskHasProject && gaNoteTaskPriority !== "NORMAL" && gaNoteTaskPriority !== "HIGH") {
+    if (gaNoteTaskHasProject && gaNoteTaskPriority !== "NORMAL" && gaNoteTaskPriority !== "HIGH" && gaNoteTaskPriority !== "1H" && gaNoteTaskPriority !== "R1" && gaNoteTaskPriority !== "PERSONAL" && gaNoteTaskPriority !== "BLLOK") {
       setGaNoteTaskPriority("NORMAL")
     }
     if (!gaNoteTaskHasProject && gaNoteTaskPriority === "HIGH") {
@@ -3009,7 +3045,7 @@ export default function DepartmentKanban() {
         null
       projectRows.push({
         typeLabel: "PRJK",
-        subtype: "-",
+        subtype: projectReportSubtypeShort(task),
         period: resolveDailyReportProjectPeriod(task, projectLabel),
         title: task.title || "-",
         projectTitle: projectLabel,
@@ -3311,7 +3347,7 @@ export default function DepartmentKanban() {
         if (isProject) {
           projectRows.push({
             typeLabel: "PRJK",
-            subtype: "-",
+            subtype: projectReportSubtypeShort(task),
             period: resolveDailyReportProjectPeriod(task, projectLabel),
             title: task.title || "-",
             projectTitle: projectLabel,
@@ -4054,6 +4090,10 @@ export default function DepartmentKanban() {
     for (const task of crossDepartmentConfirmTasks) map.set(task.id, task)
     return map
   }, [crossDepartmentConfirmTasks, departmentTasks, noProjectTasks, systemCreatedTasks])
+  const allTodayEditingTask = React.useMemo(
+    () => (allTodayEditingTaskId ? allTodayTaskLookup.get(allTodayEditingTaskId) ?? null : null),
+    [allTodayEditingTaskId, allTodayTaskLookup]
+  )
   const todaySystemTasksSorted = React.useMemo(
     () => sortDoneLast(todaySystemTasks, (task) => taskStatusValue(task) === "DONE"),
     [sortDoneLast, todaySystemTasks]
@@ -5136,6 +5176,7 @@ export default function DepartmentKanban() {
         : plainTitle
     )
     setAllTodayEditDescription(task.description || "")
+    setAllTodayEditType(getAllTodayTaskType(task))
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
       ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
@@ -5152,6 +5193,7 @@ export default function DepartmentKanban() {
     setAllTodayEditStatus("TODO")
     setAllTodayEditTitle("")
     setAllTodayEditDescription("")
+    setAllTodayEditType("normal")
     setAllTodayEditConfirmationAssigneeId("")
     setAllTodayEditStartDate("")
     setAllTodayEditDueDate("")
@@ -5174,6 +5216,7 @@ export default function DepartmentKanban() {
     }
     setAllTodayUpdating(true)
     try {
+      const isProjectLinked = hasProjectId(editingTask?.project_id)
       const startDateValue = allTodayEditStartDate ? new Date(allTodayEditStartDate).toISOString() : null
       const dueDateValue = allTodayEditDueDate ? new Date(allTodayEditDueDate).toISOString() : null
       const res = await apiFetch(`/tasks/${allTodayEditingTaskId}`, {
@@ -5182,6 +5225,20 @@ export default function DepartmentKanban() {
         body: JSON.stringify({
           title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
           description: allTodayEditDescription.trim() || null,
+          ...(isProjectLinked
+            ? {
+                priority: allTodayEditType === "high" ? "HIGH" : "NORMAL",
+                is_bllok: allTodayEditType === "blocked",
+                is_1h_report: allTodayEditType === "hourly",
+                is_r1: allTodayEditType === "r1",
+                is_personal: allTodayEditType === "personal",
+              }
+            : {
+                is_bllok: allTodayEditType === "blocked",
+                is_1h_report: allTodayEditType === "hourly",
+                is_r1: allTodayEditType === "r1",
+                is_personal: allTodayEditType === "personal",
+              }),
           status: allTodayEditStatus,
           start_date: startDateValue,
           due_date: dueDateValue,
@@ -5881,9 +5938,10 @@ export default function DepartmentKanban() {
       const dueDateValue = gaNoteTaskDueDate ? new Date(gaNoteTaskDueDate).toISOString() : null
       const isProjectLinked = gaNoteTaskHasProject
       const priorityValue: TaskPriority = isProjectLinked && gaNoteTaskPriority === "HIGH" ? "HIGH" : "NORMAL"
-      const isBllok = !isProjectLinked && gaNoteTaskPriority === "BLLOK"
-      const is1hReport = !isProjectLinked && gaNoteTaskPriority === "1H"
-      const isR1 = !isProjectLinked && gaNoteTaskPriority === "R1"
+      const isBllok = gaNoteTaskPriority === "BLLOK"
+      const is1hReport = gaNoteTaskPriority === "1H"
+      const isR1 = gaNoteTaskPriority === "R1"
+      const isPersonal = gaNoteTaskPriority === "PERSONAL"
       const taskPayload = {
         title: gaNoteTaskTitle.trim() || gaNoteTaskDefaultTitle(note.content || ""),
         description: gaNoteTaskDescription.trim() || null,
@@ -5901,7 +5959,7 @@ export default function DepartmentKanban() {
         is_bllok: isBllok,
         is_1h_report: is1hReport,
         is_r1: isR1,
-        is_personal: false,
+        is_personal: isPersonal,
       }
       const res = await apiFetch("/tasks", {
         method: "POST",
@@ -7061,6 +7119,18 @@ export default function DepartmentKanban() {
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
+                                {task.is_1h_report ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${ONE_H_BADGE_CLASSES}`}>1H</Badge>
+                                ) : null}
+                                {task.is_r1 ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${R1_BADGE_CLASSES}`}>R1</Badge>
+                                ) : null}
+                                {task.is_personal ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${PERSONAL_BADGE_CLASSES}`}>P</Badge>
+                                ) : null}
+                                {task.is_bllok ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${BLLOK_BADGE_CLASSES}`}>BLLOK</Badge>
+                                ) : null}
                               </div>
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words`}>
@@ -7312,20 +7382,40 @@ export default function DepartmentKanban() {
                       <Label className="text-slate-700">Description</Label>
                       <BoldOnlyEditor value={allTodayEditDescription} onChange={setAllTodayEditDescription} />
                     </div>
-                    <div className="space-y-2">
-                      <Label className="text-slate-700">Status</Label>
-                      <Select value={allTodayEditStatus} onValueChange={setAllTodayEditStatus}>
-                        <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
-                          <SelectValue placeholder="Select status" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
-                            <SelectItem key={value} value={value}>
-                              {reportStatusLabel(value)}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Type</Label>
+                        <Select value={allTodayEditType} onValueChange={(value) => setAllTodayEditType(value as AllTodayEditTypeId)}>
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="Select type" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {(hasProjectId(allTodayEditingTask?.project_id) ? PROJECT_ALL_TODAY_TYPES : NO_PROJECT_TYPES).map((option) => (
+                              <SelectItem key={option.id} value={option.id}>
+                                {option.label}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <div className="text-xs text-slate-500">
+                          {(hasProjectId(allTodayEditingTask?.project_id) ? PROJECT_ALL_TODAY_TYPES : NO_PROJECT_TYPES).find((option) => option.id === allTodayEditType)?.description}
+                        </div>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Status</Label>
+                        <Select value={allTodayEditStatus} onValueChange={setAllTodayEditStatus}>
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="Select status" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {reportStatusLabel(value)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                     {isWaitingConfirmation(allTodayEditStatus) ? (
                       <div className="space-y-2">
@@ -7380,9 +7470,7 @@ export default function DepartmentKanban() {
                           !allTodayEditStatus ||
                           allTodayUpdating ||
                           (isWaitingConfirmation(allTodayEditStatus) && !allTodayEditConfirmationAssigneeId) ||
-                          !canEditAllTodayTask(
-                            allTodayTaskLookup.get(allTodayEditingTaskId || "") || null
-                          )
+                          !canEditAllTodayTask(allTodayEditingTask)
                         }
                         onClick={() => void updateAllTodayTask()}
                         className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
