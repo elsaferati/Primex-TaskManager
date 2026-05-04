@@ -4649,7 +4649,7 @@ export default function CommonViewPage() {
       const deadlineCount = items.filter((item) => item.isDeadlineImportant).length
       return [
         ...(eightAmCount > 0 ? [{ value: eightAmCount, label: "08:00", className: "swimlane-badge-sub swimlane-badge-sub-time" }] : []),
-        ...(deadlineCount > 0 ? [{ value: deadlineCount, label: "deadline", className: "swimlane-badge-sub swimlane-badge-sub-deadline" }] : []),
+        ...(deadlineCount > 0 ? [{ value: deadlineCount, label: "dl", className: "swimlane-badge-sub swimlane-badge-sub-deadline" }] : []),
       ]
     }
 
@@ -6079,12 +6079,14 @@ export default function CommonViewPage() {
           border: 1px solid transparent;
         }
         .swimlane-badge-sub-time {
-          color: #0f766e;
-          border-color: #fca5a5;
+          color: #ffffff;
+          background: #dc2626;
+          border-color: #dc2626;
         }
         .swimlane-badge-sub-deadline {
-          color: #b91c1c;
-          border-color: #fca5a5;
+          color: #ffffff;
+          background: #dc2626;
+          border-color: #dc2626;
         }
         .swimlane-info-btn {
           border: none;
@@ -9760,8 +9762,7 @@ export default function CommonViewPage() {
                                     className={item.className ?? "swimlane-badge-sub"}
                                     title={item.label}
                                   >
-                                    <span>{item.value}</span>
-                                    <span>{item.label}</span>
+                                    <span>{`${item.value}/${item.label}`}</span>
                                   </span>
                                 ))}
                               </span>
