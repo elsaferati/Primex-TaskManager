@@ -709,7 +709,6 @@ export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
   const confirm = useConfirm()
   const searchParams = useSearchParams()
-  const canMarkDone = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [notes, setNotes] = React.useState<GaNote[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
@@ -1863,22 +1862,13 @@ export default function GaKaNotesPage() {
   }
 
   const markWaitingTasksDone = async (noteId: string) => {
-    if (!canMarkDone) {
-      toast.error("Only admins and managers can mark tasks done")
-      return
-    }
-
     setMarkingDoneNoteId(noteId)
     try {
       const res = await apiFetch(`/ga-notes/${noteId}/mark-waiting-done`, {
         method: "POST",
       })
       if (!res?.ok) {
-        if (res?.status === 403) {
-          toast.error("Only admins and managers can mark tasks done")
-        } else {
-          toast.error("Failed to update tasks")
-        }
+        toast.error("Failed to update tasks")
         return
       }
       const result = (await res.json()) as { updated_count?: number; skipped_count?: number }
@@ -2951,7 +2941,7 @@ export default function GaKaNotesPage() {
                                 >
                                   <Pencil className="h-4 w-4" />
                                 </Button>
-                                {canMarkDone && hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
+                                {hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
                                   <Button
                                     variant="outline"
                                     size="icon"

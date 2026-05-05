@@ -26,6 +26,7 @@ import {
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { useAuth } from "@/lib/auth"
 import type { UserRole } from "@/lib/types"
 import { useSidebar } from "./sidebar-context"
 import { useWaitingConfirmationGa } from "./waiting-confirmation-ga-context"
@@ -142,12 +143,78 @@ const items: NavItem[] = [
 
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const { apiFetch } = useAuth()
   const { isOpen, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
   const touchStartXRef = React.useRef<number | null>(null)
   const touchStartYRef = React.useRef<number | null>(null)
+  const [resolvedProjectRoute, setResolvedProjectRoute] = React.useState<"dev" | "pcm" | "design" | null>(null)
+  const genericProjectId = React.useMemo(() => {
+    const match = pathname.match(/^\/projects\/([^/]+)$/)
+    return match ? decodeURIComponent(match[1]) : null
+  }, [pathname])
+
+  React.useEffect(() => {
+    if (!genericProjectId) {
+      setResolvedProjectRoute(null)
+      return
+    }
+
+    let cancelled = false
+
+    const resolveProjectRoute = async () => {
+      try {
+        const [projectRes, departmentsRes] = await Promise.all([
+          apiFetch(`/projects/${genericProjectId}`),
+          apiFetch("/departments"),
+        ])
+
+        if (!projectRes.ok || !departmentsRes.ok) {
+          if (!cancelled) setResolvedProjectRoute(null)
+          return
+        }
+
+        const project = (await projectRes.json()) as { department_id?: string | null }
+        const departments = (await departmentsRes.json()) as Array<{ id: string; name: string; code?: string | null }>
+        const department = departments.find((item) => item.id === project.department_id) || null
+        const departmentKey = (department?.code || department?.name || "").trim().toLowerCase()
+
+        let nextRoute: "dev" | "pcm" | "design" | null = null
+        if (departmentKey === "development" || departmentKey === "dev") nextRoute = "dev"
+        else if (
+          departmentKey === "graphic design" ||
+          departmentKey === "graphic-design" ||
+          departmentKey === "gd"
+        ) nextRoute = "design"
+        else if (
+          departmentKey === "project content manager" ||
+          departmentKey === "project-content-manager" ||
+          departmentKey === "pcm"
+        ) nextRoute = "pcm"
+
+        if (!cancelled) setResolvedProjectRoute(nextRoute)
+      } catch {
+        if (!cancelled) setResolvedProjectRoute(null)
+      }
+    }
+
+    void resolveProjectRoute()
+
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, genericProjectId])
+
   const projectRoute =
-    pathname.startsWith("/projects/pcm") ? "pcm" : pathname.startsWith("/projects/design") ? "design" : pathname.startsWith("/projects/dev") ? "dev" : pathname.startsWith("/projects/") ? "dev" : null
+    pathname.startsWith("/projects/pcm")
+      ? "pcm"
+      : pathname.startsWith("/projects/design")
+        ? "design"
+        : pathname.startsWith("/projects/dev")
+          ? "dev"
+          : genericProjectId
+            ? resolvedProjectRoute
+            : null
 
   // Close sidebar when route changes on mobile
   React.useEffect(() => {

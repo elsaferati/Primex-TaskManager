@@ -305,9 +305,6 @@ async def mark_note_waiting_tasks_done(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> MarkWaitingDoneResponse:
-    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-
     note = await _get_note_or_404(note_id, db)
     await _ensure_note_access(note, user, db)
 
