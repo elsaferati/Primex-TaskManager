@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
@@ -10,13 +11,140 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
-from app.models.enums import TaskPriority, TaskStatus
+from app.models.common_entry import CommonEntry
+from app.models.enums import CommonCategory, TaskPriority, TaskStatus
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.services.system_task_schedule import first_run_at, next_occurrence, template_due_time, template_tz
+
+ALL_USERS_MARKER = "[ALL_USERS]"
+
+
+def _safe_iso_date(value: str | None, fallback: date) -> date:
+    if not value:
+        return fallback
+    try:
+        return date.fromisoformat(value)
+    except ValueError:
+        return fallback
+
+
+def _parse_annual_leave_entry(
+    entry: CommonEntry | object,
+) -> tuple[date, date, bool, str | None, str | None, str | None, bool]:
+    note = getattr(entry, "description", None) or ""
+    entry_date = getattr(entry, "entry_date", None)
+    created_at = getattr(entry, "created_at", None)
+    base_date = entry_date or (created_at.date() if isinstance(created_at, datetime) else date.today())
+    start_date = base_date
+    end_date = base_date
+    full_day = True
+    start_time: str | None = None
+    end_time: str | None = None
+    is_all_users = False
+
+    if ALL_USERS_MARKER in note:
+        is_all_users = True
+        note = note.replace(ALL_USERS_MARKER, "").strip()
+
+    date_range_match = re.search(r"Date range:\s*(\d{4}-\d{2}-\d{2})\s+to\s+(\d{4}-\d{2}-\d{2})", note, re.I)
+    if date_range_match:
+        start_date = _safe_iso_date(date_range_match.group(1), start_date)
+        end_date = _safe_iso_date(date_range_match.group(2), end_date)
+        note = re.sub(
+            r"Date range:\s*\d{4}-\d{2}-\d{2}\s+to\s+\d{4}-\d{2}-\d{2}",
+            "",
+            note,
+            flags=re.I,
+        ).strip()
+    else:
+        date_match = re.search(r"Date:\s*(\d{4}-\d{2}-\d{2})", note, re.I)
+        if date_match:
+            parsed = _safe_iso_date(date_match.group(1), start_date)
+            start_date = parsed
+            end_date = parsed
+            note = re.sub(r"Date:\s*\d{4}-\d{2}-\d{2}", "", note, flags=re.I).strip()
+        else:
+            date_matches = re.findall(r"\d{4}-\d{2}-\d{2}", note)
+            if date_matches:
+                start_date = _safe_iso_date(date_matches[0], start_date)
+                end_date = _safe_iso_date(date_matches[1] if len(date_matches) > 1 else date_matches[0], end_date)
+
+    if re.search(r"\(Full day\)", note, re.I):
+        full_day = True
+        note = re.sub(r"\(Full day\)", "", note, flags=re.I).strip()
+    else:
+        time_match = re.search(r"\((\d{1,2}:\d{2})\s*-\s*(\d{1,2}:\d{2})\)", note)
+        if time_match:
+            full_day = False
+            start_time = time_match.group(1)
+            end_time = time_match.group(2)
+            note = re.sub(r"\(\d{1,2}:\d{2}\s*-\s*\d{1,2}:\d{2}\)", "", note).strip()
+
+    cleaned_note = note.strip() if note.strip() else None
+    return start_date, end_date, full_day, start_time, end_time, cleaned_note, is_all_users
+
+
+def _template_assignee_ids(template: SystemTaskTemplate) -> list[uuid.UUID]:
+    assignee_ids = list(getattr(template, "assignee_ids", None) or [])
+    if not assignee_ids and template.default_assignee_id:
+        assignee_ids = [template.default_assignee_id]
+    return assignee_ids
+
+
+def _date_in_ranges(day: date, ranges: list[tuple[date, date]]) -> bool:
+    return any(start <= day <= end for start, end in ranges)
+
+
+def _build_annual_leave_snapshot(
+    entries: list[CommonEntry | object],
+) -> tuple[dict[uuid.UUID, list[tuple[date, date]]], list[tuple[date, date]]]:
+    by_user: dict[uuid.UUID, list[tuple[date, date]]] = {}
+    all_users_ranges: list[tuple[date, date]] = []
+
+    for entry in entries:
+        start_date, end_date, full_day, _, _, _, is_all_users = _parse_annual_leave_entry(entry)
+        if not full_day:
+            continue
+        if is_all_users:
+            all_users_ranges.append((start_date, end_date))
+            continue
+        user_id = getattr(entry, "assigned_to_user_id", None) or getattr(entry, "created_by_user_id", None)
+        if user_id is None:
+            continue
+        by_user.setdefault(user_id, []).append((start_date, end_date))
+
+    return by_user, all_users_ranges
+
+
+def _all_template_assignees_on_leave(
+    assignee_ids: list[uuid.UUID],
+    occurrence_day: date,
+    leave_by_user: dict[uuid.UUID, list[tuple[date, date]]],
+    all_users_ranges: list[tuple[date, date]],
+) -> bool:
+    if _date_in_ranges(occurrence_day, all_users_ranges):
+        return True
+    if not assignee_ids:
+        return False
+    return all(_date_in_ranges(occurrence_day, leave_by_user.get(user_id, [])) for user_id in assignee_ids)
+
+
+def _resolve_shifted_occurrence_local_dt(
+    occurrence_local_dt: datetime,
+    assignee_ids: list[uuid.UUID],
+    leave_by_user: dict[uuid.UUID, list[tuple[date, date]]],
+    all_users_ranges: list[tuple[date, date]],
+) -> datetime:
+    candidate = occurrence_local_dt
+    while _all_template_assignees_on_leave(assignee_ids, candidate.date(), leave_by_user, all_users_ranges):
+        candidate = candidate - timedelta(days=1)
+        while candidate.weekday() > 4:
+            candidate = candidate - timedelta(days=1)
+    return candidate
 
 
 def _adjust_due_datetime_local(
@@ -51,6 +179,7 @@ async def _insert_system_task_instance(
     template: SystemTaskTemplate,
     department_id: uuid.UUID | None,
     origin_run_at: datetime,
+    start_at: datetime,
     due_utc: datetime,
     now_utc: datetime,
 ) -> bool:
@@ -67,7 +196,7 @@ async def _insert_system_task_instance(
             "system_template_origin_id": template.id,
             "system_task_slot_id": slot.id,
             "origin_run_at": origin_run_at,
-            "start_date": origin_run_at,
+            "start_date": start_at,
             "due_date": due_utc,
             "status": TaskStatus.TODO,
             "priority": getattr(template, "priority", None) or TaskPriority.NORMAL,
@@ -133,6 +262,10 @@ async def generate_system_task_instances(
         db,
         {slot.primary_user_id for slot, _ in slot_rows},
     )
+    annual_leave_entries = (
+        await db.execute(select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave))
+    ).scalars().all()
+    leave_by_user, all_users_ranges = _build_annual_leave_snapshot(annual_leave_entries)
 
     created = 0
     for slot, template in slot_rows:
@@ -146,6 +279,8 @@ async def generate_system_task_instances(
         )
         range_start = start
         next_run = slot.next_run_at or first_run_at(template, now_utc)
+        can_shift_next_occurrence = True
+        template_assignee_ids = _template_assignee_ids(template)
 
         while True:
             occurrence_local = next_run.astimezone(tz)
@@ -156,10 +291,21 @@ async def generate_system_task_instances(
                 next_run = next_occurrence(template, next_run)
                 continue
 
+            effective_origin_run_at = next_run
+            if can_shift_next_occurrence:
+                shifted_occurrence_local = _resolve_shifted_occurrence_local_dt(
+                    occurrence_local,
+                    template_assignee_ids,
+                    leave_by_user,
+                    all_users_ranges,
+                )
+                effective_origin_run_at = shifted_occurrence_local.astimezone(timezone.utc)
+                can_shift_next_occurrence = False
+
             due_local = _adjust_due_datetime_local(
                 tz=tz,
                 due_time=due_time,
-                start_local_dt=occurrence_local,
+                start_local_dt=effective_origin_run_at.astimezone(tz),
                 duration_days=int(getattr(template, "duration_days", 1) or 1),
             )
             inserted = await _insert_system_task_instance(
@@ -167,7 +313,8 @@ async def generate_system_task_instances(
                 slot=slot,
                 template=template,
                 department_id=department_map.get(slot.primary_user_id) or template.department_id,
-                origin_run_at=next_run,
+                origin_run_at=effective_origin_run_at,
+                start_at=next_run,
                 due_utc=due_local.astimezone(timezone.utc),
                 now_utc=now_utc,
             )
