@@ -4255,7 +4255,7 @@ export default function WeeklyPlannerPage() {
                                 <>
                                   {/* GA Department: SYS, FT, PRJK order */}
                                   {/* AM SYS Row */}
-                                  <TableRow>
+                                  <TableRow className={dayIndex > 0 ? "border-t-3 border-gray-500" : undefined}>
                                     <TableCell
                                       className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
                                       rowSpan={rowSpan}
@@ -4421,7 +4421,7 @@ export default function WeeklyPlannerPage() {
                                 <>
                                   {/* Other Departments: PRJK, FT order (original) */}
                                   {/* AM PRJK Row */}
-                                  <TableRow>
+                                  <TableRow className={dayIndex > 0 ? "border-t-3 border-gray-500" : undefined}>
                                     <TableCell
                                       className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
                                       rowSpan={rowSpan}
