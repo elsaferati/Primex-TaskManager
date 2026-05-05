@@ -1610,9 +1610,17 @@ async def update_task(
 
     if payload.title is not None:
         task.title = payload.title
-    if payload.description is not None:
+    description_set = False
+    internal_notes_set = False
+    if hasattr(payload, "model_fields_set"):
+        description_set = "description" in payload.model_fields_set  # type: ignore[attr-defined]
+        internal_notes_set = "internal_notes" in payload.model_fields_set  # type: ignore[attr-defined]
+    elif hasattr(payload, "__fields_set__"):
+        description_set = "description" in payload.__fields_set__  # type: ignore[attr-defined]
+        internal_notes_set = "internal_notes" in payload.__fields_set__  # type: ignore[attr-defined]
+    if description_set:
         task.description = payload.description
-    if payload.internal_notes is not None:
+    if internal_notes_set:
         task.internal_notes = payload.internal_notes
     dependency_set = False
     if hasattr(payload, "model_fields_set"):
@@ -1985,9 +1993,9 @@ async def update_task(
         shared_values: dict[str, object] = {}
         if payload.title is not None:
             shared_values["title"] = task.title
-        if payload.description is not None:
+        if description_set:
             shared_values["description"] = task.description
-        if payload.internal_notes is not None:
+        if internal_notes_set:
             shared_values["internal_notes"] = task.internal_notes
         if payload.department_id is not None:
             shared_values["department_id"] = task.department_id

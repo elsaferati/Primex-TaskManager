@@ -31,30 +31,11 @@ class MarkWaitingDoneResponse(BaseModel):
     skipped_count: int
 
 
-def _ga_note_default_task_title(content: str | None) -> str:
+def _ga_note_task_title(content: str | None) -> str:
     cleaned = re.sub(r"\s+", " ", (content or "").strip())
     if not cleaned:
         return "GA/KA note task"
-    if len(cleaned) <= 80:
-        return cleaned
-    return f"{cleaned[:77]}..."
-
-
-def _ga_note_frontend_default_task_title(content: str | None, note_type: GaNoteType | str | None) -> str:
-    # Keep in sync with frontend `noteToTaskTitle()` used when creating a task from a note.
-    prefix = ""
-    if note_type:
-        value = note_type.value if hasattr(note_type, "value") else str(note_type)
-        value = value.strip()
-        if value:
-            prefix = f"{value}: "
-    cleaned = re.sub(r"\s+", " ", (content or "").strip())
-    base = f"{prefix}{cleaned}".strip()
-    if not base:
-        return "GA/KA Note Task"
-    if len(base) <= 120:
-        return base
-    return f"{base[:117]}..."
+    return cleaned
 
 
 def _ga_note_default_task_description(content: str | None) -> str | None:
@@ -298,10 +279,7 @@ async def update_ga_note(
         note.is_discussed = payload.is_discussed
 
     if payload.content is not None and payload.content != old_content:
-        old_default_title = _ga_note_default_task_title(old_content)
-        new_default_title = _ga_note_default_task_title(note.content)
-        old_frontend_title = _ga_note_frontend_default_task_title(old_content, note.note_type)
-        new_frontend_title = _ga_note_frontend_default_task_title(note.content, note.note_type)
+        new_task_title = _ga_note_task_title(note.content)
         old_default_description = _ga_note_default_task_description(old_content)
         new_default_description = _ga_note_default_task_description(note.content)
 
@@ -311,8 +289,8 @@ async def update_ga_note(
 
         for task in linked_tasks:
             # Tasks created from GA/KA notes should always track the note title.
-            # This ensures any `[[added]]...[[/added]]` edits show up everywhere (fast tasks, project tasks, common view).
-            task.title = new_frontend_title
+            # Keep the stored title aligned with the full note text, only truncating at the task schema limit.
+            task.title = new_task_title
             if task.description == old_default_description:
                 task.description = new_default_description
 

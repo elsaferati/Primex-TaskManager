@@ -58,7 +58,7 @@ class TaskOut(BaseModel):
 
 
 class TaskCreate(BaseModel):
-    title: str = Field(min_length=2, max_length=255)
+    title: str = Field(min_length=2)
     description: str | None = Field(default=None)
     internal_notes: str | None = None
     project_id: uuid.UUID | None = None
@@ -93,7 +93,7 @@ class TaskRemoveFromDayRequest(BaseModel):
 
 
 class TaskUpdate(BaseModel):
-    title: str | None = Field(default=None, min_length=2, max_length=255)
+    title: str | None = Field(default=None, min_length=2)
     description: str | None = Field(default=None)
     internal_notes: str | None = None
     project_id: uuid.UUID | None = None

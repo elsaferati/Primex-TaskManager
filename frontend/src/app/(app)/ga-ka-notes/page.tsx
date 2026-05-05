@@ -672,6 +672,12 @@ function getInitials(label: string) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
 }
 
+function noteToTaskTitle(content: string) {
+  const cleaned = content.trim().replace(/\s+/g, " ")
+  if (!cleaned) return "GA/KA note task"
+  return cleaned
+}
+
 function getDueTone(value?: string | null) {
   if (!value) return "text-slate-500"
   const due = new Date(value)
@@ -1635,8 +1641,7 @@ export default function GaKaNotesPage() {
       toast.error("Tasks for non-development project notes must be created manually")
       return
     }
-    const trimmed = note.content.trim()
-    const defaultTitle = trimmed ? trimmed : "GA/KA note task"
+    const defaultTitle = noteToTaskTitle(note.content || "")
     setTaskDialogNoteId(note.id)
     setTaskTitle(defaultTitle)
     setTaskDescription("") // start empty so creator can add detailed description
@@ -1743,7 +1748,7 @@ export default function GaKaNotesPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: taskTitle.trim(),
+          title: taskTitle.trim() || noteToTaskTitle(note.content || ""),
           description: taskDescription.trim() || null,
           status: "TODO",
           priority: actualPriority,

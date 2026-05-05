@@ -121,9 +121,9 @@ const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
   HIGH: "border-l-red-600",
 }
 
-const TODAY_TASK_ROW_CLASS = "h-12"
-const TODAY_TASK_CELL_CLASS = "h-12 align-middle"
-const TODAY_TASK_TEXT_CLAMP_CLASS = "max-h-10 overflow-hidden leading-4"
+const TODAY_TASK_ROW_CLASS = "align-top"
+const TODAY_TASK_CELL_CLASS = "py-3 align-top"
+const TODAY_TASK_TEXT_CLAMP_CLASS = "leading-4 whitespace-pre-line break-words"
 
 // Grid layout for system tasks table - matches system-tasks page
 const GRID_CLASS = "grid grid-cols-[32px_minmax(200px,1fr)_120px_120px_90px_96px_96px_56px_80px_88px] xl:grid-cols-[36px_1fr_150px_150px_120px_120px_120px_64px_100px_100px] gap-2 xl:gap-4 items-center px-4"
@@ -757,9 +757,16 @@ function gaNoteTaskDefaultTitle(note: string) {
 }
 
 function isLegacyTruncatedGaNoteTitle(title: string, note: string) {
-  const cleanedTitle = title.trim()
+  const cleanedTitle = title.trim().replace(/\s+/g, " ")
   const cleanedNote = note.trim().replace(/\s+/g, " ")
-  if (!cleanedTitle || !cleanedNote || cleanedNote.length <= 80) return false
+  if (!cleanedTitle || !cleanedNote) return false
+  if (cleanedTitle.endsWith("...")) {
+    const prefix = cleanedTitle.slice(0, -3).trim()
+    if (prefix && cleanedNote.startsWith(prefix) && cleanedNote.length > prefix.length) {
+      return true
+    }
+  }
+  if (cleanedNote.length <= 80) return false
   return cleanedTitle === `${cleanedNote.slice(0, 77)}...`
 }
 
@@ -1158,6 +1165,7 @@ export default function DepartmentKanban() {
   const [departmentTasks, setDepartmentTasks] = React.useState<Task[]>([])
   const [noProjectTasks, setNoProjectTasks] = React.useState<Task[]>([])
   const [systemCreatedTasks, setSystemCreatedTasks] = React.useState<Task[]>([])
+  const [crossDepartmentAssignedTasks, setCrossDepartmentAssignedTasks] = React.useState<Task[]>([])
   const [crossDepartmentConfirmTasks, setCrossDepartmentConfirmTasks] = React.useState<Task[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [gaNotes, setGaNotes] = React.useState<GaNote[]>([])
@@ -2222,9 +2230,26 @@ export default function DepartmentKanban() {
     })
   }, [projects, projectMembers, user?.id, viewMode])
 
+  const crossDepartmentTaskUserId = React.useMemo(() => {
+    if (isMineView && user?.id) return user.id
+    if (selectedUserId !== "__all__") return selectedUserId
+    return null
+  }, [isMineView, selectedUserId, user?.id])
+  const localProjectIds = React.useMemo(() => new Set(projects.map((project) => project.id)), [projects])
+  const isCrossDepartmentTask = React.useCallback(
+    (task: Task) => {
+      if (!department?.id) return false
+      if (task.project_id) return !localProjectIds.has(task.project_id)
+      return Boolean(task.department_id && task.department_id !== department.id)
+    },
+    [department?.id, localProjectIds]
+  )
   const visibleDepartmentTasks = React.useMemo(() => departmentTasks, [departmentTasks])
   const visibleNoProjectTasks = React.useMemo(() => {
-    const filtered = noProjectTasks.filter(isNoProjectTask)
+    const filtered = [
+      ...noProjectTasks.filter(isNoProjectTask),
+      ...crossDepartmentAssignedTasks.filter(isNoProjectTask),
+    ]
 
     // Deduplicate only exact duplicates by ID.
     // Fast tasks can intentionally exist as per-user copies (same title, different IDs),
@@ -2285,7 +2310,7 @@ export default function DepartmentKanban() {
       deduped = deduped.filter((task) => isTaskOwnedByViewUser(task, user.id))
     }
     return deduped
-  }, [noProjectTasks, userMap, isMineView, user?.id, isTaskOwnedByViewUser])
+  }, [crossDepartmentAssignedTasks, noProjectTasks, userMap, isMineView, user?.id, isTaskOwnedByViewUser])
   const visibleGaNotes = React.useMemo(
     () => (isMineView && user?.id ? gaNotes.filter((n) => n.created_by === user.id) : gaNotes),
     [gaNotes, isMineView, user?.id]
@@ -2401,12 +2426,77 @@ export default function DepartmentKanban() {
     [systemTasks, isMineView, user?.id, department]
   )
   const projectTasks = React.useMemo(() => {
-    const tasks = visibleDepartmentTasks.filter((t) => t.project_id)
+    const taskMap = new Map<string, Task>()
+    for (const task of visibleDepartmentTasks.filter((t) => t.project_id)) {
+      taskMap.set(task.id, task)
+    }
+    for (const task of crossDepartmentAssignedTasks.filter((t) => t.project_id)) {
+      if (!taskMap.has(task.id)) taskMap.set(task.id, task)
+    }
+    const tasks = Array.from(taskMap.values())
     if (isMineView && user?.id) {
       return tasks.filter((task) => isTaskOwnedByViewUser(task, user.id))
     }
     return tasks
-  }, [visibleDepartmentTasks, isMineView, user?.id, isTaskOwnedByViewUser])
+  }, [crossDepartmentAssignedTasks, visibleDepartmentTasks, isMineView, user?.id, isTaskOwnedByViewUser])
+  const crossDepartmentVisibleTasks = React.useMemo(() => {
+    const taskMap = new Map<string, Task>()
+    for (const task of crossDepartmentAssignedTasks) taskMap.set(task.id, task)
+    for (const task of crossDepartmentConfirmTasks) {
+      if (!taskMap.has(task.id)) taskMap.set(task.id, task)
+    }
+    return Array.from(taskMap.values())
+  }, [crossDepartmentAssignedTasks, crossDepartmentConfirmTasks])
+  React.useEffect(() => {
+    let cancelled = false
+    const run = async () => {
+      if (!crossDepartmentTaskUserId) {
+        setCrossDepartmentAssignedTasks([])
+        return
+      }
+      try {
+        const qs = new URLSearchParams({
+          include_done: "true",
+          assigned_to: crossDepartmentTaskUserId,
+        })
+        const res = await apiFetch(`/tasks?${qs.toString()}`)
+        if (!res.ok) {
+          console.warn("Failed to load cross-department assigned tasks", res.status)
+          if (!cancelled) setCrossDepartmentAssignedTasks([])
+          return
+        }
+        const payload = (await res.json()) as Task[]
+        if (cancelled) return
+        const localTaskIds = new Set([...departmentTasks, ...noProjectTasks].map((task) => task.id))
+        const filtered = payload.filter(
+          (task) =>
+            !task.system_template_origin_id &&
+            !localTaskIds.has(task.id) &&
+            isCrossDepartmentTask(task) &&
+            isTaskOwnedByViewUser(task, crossDepartmentTaskUserId)
+        )
+        const taskMap = new Map<string, Task>()
+        for (const task of filtered) {
+          if (!taskMap.has(task.id)) taskMap.set(task.id, task)
+        }
+        setCrossDepartmentAssignedTasks(Array.from(taskMap.values()))
+      } catch (error) {
+        console.warn("Failed to load cross-department assigned tasks", error)
+        if (!cancelled) setCrossDepartmentAssignedTasks([])
+      }
+    }
+    void run()
+    return () => {
+      cancelled = true
+    }
+  }, [
+    apiFetch,
+    crossDepartmentTaskUserId,
+    departmentTasks,
+    isCrossDepartmentTask,
+    isTaskOwnedByViewUser,
+    noProjectTasks,
+  ])
   const visibleSystemCreatedTasks = React.useMemo(() => {
     if (isMineView && user?.id) {
       return systemCreatedTasks.filter((task) => isTaskOwnedByViewUser(task, user.id))
@@ -2510,7 +2600,7 @@ export default function DepartmentKanban() {
   ])
   const waitingProjectTasksForMeta = React.useMemo(() => {
     if (!isMineView || !user?.id) return []
-    return crossDepartmentConfirmTasks
+    return crossDepartmentVisibleTasks
       .filter(
         (task) =>
           task.project_id &&
@@ -2526,7 +2616,7 @@ export default function DepartmentKanban() {
       })
   }, [
     allRange,
-    crossDepartmentConfirmTasks,
+    crossDepartmentVisibleTasks,
     isMineView,
     isTaskCompletedInAllRange,
     isTaskOverdue,
@@ -3960,7 +4050,7 @@ export default function DepartmentKanban() {
   )
   const crossDepartmentWaitingTasks = React.useMemo(() => {
     if (!isMineView || !user?.id) return []
-    return crossDepartmentConfirmTasks
+    return crossDepartmentVisibleTasks
       .filter(
         (task) =>
           task.confirmation_assignee_id === user.id && taskStatusValue(task) === "WAITING_CONFIRMATION"
@@ -3974,7 +4064,7 @@ export default function DepartmentKanban() {
       })
   }, [
     allRange,
-    crossDepartmentConfirmTasks,
+    crossDepartmentVisibleTasks,
     isMineView,
     isTaskCompletedInAllRange,
     isTaskOverdue,
@@ -4004,9 +4094,9 @@ export default function DepartmentKanban() {
     for (const task of departmentTasks) map.set(task.id, task)
     for (const task of noProjectTasks) map.set(task.id, task)
     for (const task of systemCreatedTasks) map.set(task.id, task)
-    for (const task of crossDepartmentConfirmTasks) map.set(task.id, task)
+    for (const task of crossDepartmentVisibleTasks) map.set(task.id, task)
     return map
-  }, [crossDepartmentConfirmTasks, departmentTasks, noProjectTasks, systemCreatedTasks])
+  }, [crossDepartmentVisibleTasks, departmentTasks, noProjectTasks, systemCreatedTasks])
   const allTodayEditingTask = React.useMemo(
     () => (allTodayEditingTaskId ? allTodayTaskLookup.get(allTodayEditingTaskId) ?? null : null),
     [allTodayEditingTaskId, allTodayTaskLookup]
@@ -7431,7 +7521,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "DESCRIPTION", "STATUS", "PRIORITY", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
+                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "STATUS", "PRIORITY", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -7475,7 +7565,7 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                              <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>
                                   {typeof task.title === "string" && task.title.includes("[[")
                                     ? renderMarkedNoteContent(task.title, task.title)
@@ -7497,9 +7587,6 @@ export default function DepartmentKanban() {
                                   <Badge className={`text-[10px] px-1.5 py-0 ${BLLOK_BADGE_CLASSES}`}>BLLOK</Badge>
                                 ) : null}
                               </div>
-                            </TableCell>
-                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words`}>
-                              <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{task.description || "-"}</div>
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
@@ -7597,7 +7684,7 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                              <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>
                                   {typeof task.title === "string" && task.title.includes("[[")
                                     ? renderMarkedNoteContent(task.title, task.title)
@@ -7692,7 +7779,7 @@ export default function DepartmentKanban() {
                               )}
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
-                              <div className={`flex items-center gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
+                              <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>{task.title || "-"}</span>
                                 <Badge className="text-[10px] px-1.5 py-0 border-slate-200 bg-slate-50 text-slate-700">SYS</Badge>
                               </div>
@@ -8611,7 +8698,7 @@ export default function DepartmentKanban() {
                               key={t.id}
                               id={`task-${t.id}`}
                               href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
-                              className={`block rounded-lg border border-slate-200 border-l-4 px-2 py-1.5 text-sm transition hover:bg-slate-50 ${isCompleted
+                              className={`block rounded-lg border border-slate-200 border-l-4 px-2 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
                                 ? "border-green-500 bg-green-50/30 opacity-75"
                                 : `${row.borderClass} bg-white`
                                 }`}
@@ -8621,20 +8708,13 @@ export default function DepartmentKanban() {
                                   {index + 1}
                                 </div>
                                 <div className="sm:px-3">
-                                  <div className="flex items-center gap-2 flex-wrap">
-                                      <div className={`font-medium text-[12px] ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
+                                  <div className="flex items-center gap-2 flex-wrap min-w-0">
+                                      <div className={`min-w-0 whitespace-pre-line break-words text-[12px] font-medium leading-4.5 ${isCompleted ? "text-slate-500" : "text-slate-800"}`}>
                                           {typeof t.title === "string" && t.title.includes("[[")
                                             ? renderMarkedNoteContent(t.title, t.title)
                                             : t.title}
                                       </div>
                                     </div>
-                                    {t.description ? (
-                                      <div className="mt-0.5 text-[10px] text-slate-500 line-clamp-1">
-                                        {typeof t.description === "string" && t.description.includes("[[")
-                                          ? renderMarkedNoteContent(t.description, t.description)
-                                          : t.description}
-                                      </div>
-                                    ) : null}
                                   </div>
                                 <div className="sm:px-3 flex items-start">
                                   {t.ga_note_origin_id ? (

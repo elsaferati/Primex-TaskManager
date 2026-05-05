@@ -154,6 +154,25 @@ def task_is_visible_to_user(
     return False
 
 
+def task_matches_department_scope(
+    task,
+    *,
+    project,
+    department_id: uuid.UUID | None,
+    include_cross_department_assigned: bool,
+) -> bool:
+    if department_id is None:
+        return True
+
+    project_department_id = getattr(project, "department_id", None) if project is not None else None
+    owner_department_id = project_department_id or getattr(task, "department_id", None)
+    if owner_department_id is None:
+        return False
+    if owner_department_id == department_id:
+        return True
+    return include_cross_department_assigned
+
+
 def daily_report_tyo_label(
     *,
     report_day: date,

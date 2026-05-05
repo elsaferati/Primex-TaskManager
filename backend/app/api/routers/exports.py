@@ -56,6 +56,7 @@ from app.services.daily_report_logic import (
     completed_on_day,
     daily_report_tyo_label,
     planned_range_for_daily_report,
+    task_matches_department_scope,
     task_is_visible_to_user,
 )
 
@@ -2634,6 +2635,7 @@ async def _daily_report_rows_for_user(
     day: date,
     department_id: uuid.UUID | None,
     user_id: uuid.UUID,
+    include_cross_department_assigned: bool = False,
 ) -> list[list[str]]:
     dept_code: str | None = None
     if department_id is not None:
@@ -2673,7 +2675,7 @@ async def _daily_report_rows_for_user(
         )
         .distinct()
     )
-    if department_id is not None:
+    if department_id is not None and not include_cross_department_assigned:
         task_stmt = task_stmt.where(or_(Task.department_id == department_id, Project.department_id == department_id))
 
     tasks = (await db.execute(task_stmt.order_by(Task.due_date, Task.created_at))).scalars().all()
@@ -2702,6 +2704,13 @@ async def _daily_report_rows_for_user(
     planned_range_by_task_id: dict[uuid.UUID, tuple[date, date]] = {}
     for task in tasks:
         project = project_by_id.get(task.project_id) if task.project_id else None
+        if not task_matches_department_scope(
+            task,
+            project=project,
+            department_id=department_id,
+            include_cross_department_assigned=include_cross_department_assigned,
+        ):
+            continue
         if not task_is_visible_to_user(
             task,
             user_id=user_id,
@@ -3064,6 +3073,7 @@ async def export_daily_report_xlsx(
             day=day,
             department_id=department_id,
             user_id=member.id,
+            include_cross_department_assigned=not all_users,
         )
         member_label = _initials(member.full_name or member.username or "") or "-"
         for row in member_rows:

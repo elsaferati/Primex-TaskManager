@@ -8,6 +8,7 @@ from app.services.daily_report_logic import (
     daily_report_tyo_label,
     parse_ko_user_id,
     planned_range_for_daily_report,
+    task_matches_department_scope,
     task_is_visible_to_user,
 )
 
@@ -55,6 +56,43 @@ class TestDailyReportLogic(unittest.TestCase):
         self.assertTrue(task_is_visible_to_user(task, user_id=u1, assignee_ids=set(), project=project))
         self.assertTrue(task_is_visible_to_user(task, user_id=u2, assignee_ids={u2}, project=project))
         self.assertFalse(task_is_visible_to_user(task, user_id=u2, assignee_ids=set(), project=project))
+
+    def test_department_scope_allows_cross_department_task_for_single_user_reports(self) -> None:
+        department_id = uuid.uuid4()
+        other_department_id = uuid.uuid4()
+        task = SimpleNamespace(department_id=other_department_id)
+        project = SimpleNamespace(department_id=other_department_id)
+
+        self.assertTrue(
+            task_matches_department_scope(
+                task,
+                project=project,
+                department_id=department_id,
+                include_cross_department_assigned=True,
+            )
+        )
+        self.assertFalse(
+            task_matches_department_scope(
+                task,
+                project=project,
+                department_id=department_id,
+                include_cross_department_assigned=False,
+            )
+        )
+
+    def test_department_scope_prefers_project_department_for_local_membership(self) -> None:
+        department_id = uuid.uuid4()
+        task = SimpleNamespace(department_id=uuid.uuid4())
+        project = SimpleNamespace(department_id=department_id)
+
+        self.assertTrue(
+            task_matches_department_scope(
+                task,
+                project=project,
+                department_id=department_id,
+                include_cross_department_assigned=False,
+            )
+        )
 
     def test_planned_range_dev_project_uses_start_to_due(self) -> None:
         task = SimpleNamespace(

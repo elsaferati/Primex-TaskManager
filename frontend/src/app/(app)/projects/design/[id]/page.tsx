@@ -326,12 +326,10 @@ function checklistItemsForPhase(phase: string, items: ChecklistItem[]) {
   return []
 }
 
-function noteToTaskTitle(content: string, noteType?: string | null) {
-  const prefix = noteType ? `${noteType}: ` : ""
+function noteToTaskTitle(content: string) {
   const trimmed = content.trim().replace(/\s+/g, " ")
-  const base = `${prefix}${trimmed}`.trim()
-  if (!base) return "GA/KA Note Task"
-  return base.length > 120 ? `${base.slice(0, 117)}...` : base
+  if (!trimmed) return "GA/KA note task"
+  return trimmed
 }
 
 
@@ -2053,7 +2051,7 @@ export default function DesignProjectPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          title: gaNoteTaskTitle.trim() || noteToTaskTitle(note.content, note.note_type),
+          title: gaNoteTaskTitle.trim() || noteToTaskTitle(note.content),
           description: gaNoteTaskDescription.trim() || note.content,
           project_id: project.id,
           department_id: project.department_id,

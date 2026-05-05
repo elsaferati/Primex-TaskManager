@@ -37,6 +37,7 @@ from app.services.project_display_title import build_project_display_title_map
 from app.services.daily_report_logic import (
     completed_on_day,
     planned_range_for_daily_report,
+    task_matches_department_scope,
     task_is_visible_to_user,
     business_days_between,
 )
@@ -266,7 +267,8 @@ async def daily_report(
         .where(Task.system_template_origin_id.is_(None))
         .where(Task.due_date.is_not(None))
     )
-    if department_id is not None:
+    include_cross_department_assigned = user_id is not None
+    if department_id is not None and not include_cross_department_assigned:
         task_stmt = task_stmt.where(or_(Task.department_id == department_id, Project.department_id == department_id))
 
     # Prefilter by user to avoid scanning all tasks (still apply KO filtering in Python for correctness).
@@ -316,6 +318,13 @@ async def daily_report(
     tasks_overdue: list[DailyReportTaskItem] = []
     for t in tasks:
         project = project_by_id.get(t.project_id) if t.project_id else None
+        if not task_matches_department_scope(
+            t,
+            project=project,
+            department_id=department_id,
+            include_cross_department_assigned=include_cross_department_assigned,
+        ):
+            continue
         if user_id is not None and not task_is_visible_to_user(
             t,
             user_id=user_id,
@@ -709,4 +718,3 @@ async def upsert_daily_ga_entry(
         created_at=entry.created_at,
         updated_at=entry.updated_at,
     )
-
