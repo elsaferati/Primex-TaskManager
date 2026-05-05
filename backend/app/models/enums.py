@@ -109,6 +109,7 @@ class ProjectPhaseStatus(str, enum.Enum):
 class ProjectType(str, enum.Enum):
     GENERAL = "GENERAL"
     MST = "MST"
+    GD_DEVELOPMENT = "GD_DEVELOPMENT"
 
 
 class CommonCategory(str, enum.Enum):

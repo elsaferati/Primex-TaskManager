@@ -15,7 +15,7 @@ from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import ProjectPhaseStatus, ProjectType, TaskPriority, TaskStatus, UserRole
 from app.models.checklist import Checklist
-from app.models.checklist_item import ChecklistItem
+from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.internal_note import InternalNote
@@ -301,6 +301,163 @@ async def _copy_tasks_from_mst_template_project(
             )
 
 
+async def _copy_project_template_data(
+    db: AsyncSession,
+    project: Project,
+    created_by_id: uuid.UUID,
+    template_project: Project,
+    *,
+    default_phase: ProjectPhaseStatus,
+    reset_task_status_to_todo: bool,
+) -> None:
+    if project.is_template or template_project.id == project.id:
+        return
+
+    template_tasks = (
+        await db.execute(
+            select(Task).where(Task.project_id == template_project.id).order_by(Task.created_at)
+        )
+    ).scalars().all()
+
+    template_task_ids = [task.id for task in template_tasks]
+    task_assignees_by_task_id: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if template_task_ids:
+        assignee_records = (
+            await db.execute(select(TaskAssignee).where(TaskAssignee.task_id.in_(template_task_ids)))
+        ).scalars().all()
+        for assignee in assignee_records:
+            task_assignees_by_task_id.setdefault(assignee.task_id, []).append(assignee.user_id)
+
+    old_to_new_task_id: dict[uuid.UUID, uuid.UUID] = {}
+    for template_task in template_tasks:
+        new_task = Task(
+            title=template_task.title,
+            description=template_task.description,
+            internal_notes=template_task.internal_notes,
+            priority=template_task.priority or TaskPriority.NORMAL,
+            status=TaskStatus.TODO if reset_task_status_to_todo else (template_task.status or TaskStatus.TODO),
+            phase=template_task.phase or project.current_phase or default_phase,
+            project_id=project.id,
+            department_id=project.department_id,
+            created_by=created_by_id,
+            start_date=template_task.start_date,
+            due_date=template_task.due_date,
+            finish_period=template_task.finish_period,
+            progress_percentage=template_task.progress_percentage or 0,
+            daily_products=template_task.daily_products,
+            assigned_to=template_task.assigned_to,
+            is_deadline_important=template_task.is_deadline_important,
+            is_bllok=template_task.is_bllok,
+            is_1h_report=template_task.is_1h_report,
+            is_r1=template_task.is_r1,
+            is_personal=template_task.is_personal,
+            is_active=template_task.is_active,
+        )
+        db.add(new_task)
+        await db.flush()
+        old_to_new_task_id[template_task.id] = new_task.id
+
+        task_assignee_values = [
+            {"task_id": new_task.id, "user_id": user_id}
+            for user_id in task_assignees_by_task_id.get(template_task.id, [])
+        ]
+        if task_assignee_values:
+            await db.execute(insert(TaskAssignee), task_assignee_values)
+
+    for template_task in template_tasks:
+        if template_task.dependency_task_id and template_task.dependency_task_id in old_to_new_task_id:
+            new_task_id = old_to_new_task_id[template_task.id]
+            new_dependency_id = old_to_new_task_id[template_task.dependency_task_id]
+            await db.execute(
+                update(Task).where(Task.id == new_task_id).values(dependency_task_id=new_dependency_id)
+            )
+
+    template_checklists = (
+        await db.execute(
+            select(Checklist).where(Checklist.project_id == template_project.id).order_by(Checklist.created_at)
+        )
+    ).scalars().all()
+    if not template_checklists:
+        return
+
+    template_checklist_ids = [checklist.id for checklist in template_checklists]
+    template_items = []
+    if template_checklist_ids:
+        template_items = (
+            await db.execute(
+                select(ChecklistItem)
+                .where(ChecklistItem.checklist_id.in_(template_checklist_ids))
+                .order_by(ChecklistItem.position, ChecklistItem.id)
+            )
+        ).scalars().all()
+
+    item_assignees_by_item_id: dict[uuid.UUID, list[uuid.UUID]] = {}
+    template_item_ids = [item.id for item in template_items]
+    if template_item_ids:
+        item_assignee_records = (
+            await db.execute(
+                select(ChecklistItemAssignee).where(
+                    ChecklistItemAssignee.checklist_item_id.in_(template_item_ids)
+                )
+            )
+        ).scalars().all()
+        for assignee in item_assignee_records:
+            item_assignees_by_item_id.setdefault(assignee.checklist_item_id, []).append(assignee.user_id)
+
+    items_by_checklist_id: dict[uuid.UUID, list[ChecklistItem]] = {}
+    for item in template_items:
+        items_by_checklist_id.setdefault(item.checklist_id, []).append(item)
+
+    for template_checklist in template_checklists:
+        new_task_id = (
+            old_to_new_task_id.get(template_checklist.task_id)
+            if template_checklist.task_id is not None
+            else None
+        )
+        if template_checklist.task_id is not None and new_task_id is None:
+            continue
+
+        new_checklist = Checklist(
+            title=template_checklist.title,
+            task_id=new_task_id,
+            project_id=project.id,
+            note=template_checklist.note,
+            default_owner=template_checklist.default_owner,
+            default_time=template_checklist.default_time,
+            group_key=template_checklist.group_key,
+            columns=template_checklist.columns,
+            position=template_checklist.position,
+        )
+        db.add(new_checklist)
+        await db.flush()
+
+        for template_item in items_by_checklist_id.get(template_checklist.id, []):
+            new_item = ChecklistItem(
+                checklist_id=new_checklist.id,
+                item_type=template_item.item_type,
+                position=template_item.position,
+                path=template_item.path,
+                keyword=template_item.keyword,
+                description=template_item.description,
+                category=template_item.category,
+                day=template_item.day,
+                owner=template_item.owner,
+                time=template_item.time,
+                title=template_item.title,
+                comment=template_item.comment,
+                is_checked=template_item.is_checked,
+            )
+            db.add(new_item)
+            await db.flush()
+
+            item_assignee_values = [
+                {"checklist_item_id": new_item.id, "user_id": user_id}
+                for user_id in item_assignees_by_item_id.get(template_item.id, [])
+            ]
+            if item_assignee_values:
+                await db.execute(insert(ChecklistItemAssignee), item_assignee_values)
+
+
 DEV_PHASES = [
     ProjectPhaseStatus.MEETINGS,
     ProjectPhaseStatus.PLANNING,
@@ -346,7 +503,7 @@ PHASE_SEQUENCE = [
 def get_project_sequence(project: Project, department_name: str | None = None) -> list[ProjectPhaseStatus]:
     if project.project_type == ProjectType.MST.value:
         return MST_PHASES
-    if project.project_type == ProjectType.GENERAL.value:
+    if project.project_type in {ProjectType.GENERAL.value, ProjectType.GD_DEVELOPMENT.value}:
         return DEV_PHASES
 
     # Legacy fallback based on title/department
@@ -435,6 +592,17 @@ async def create_project(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project must be MST type")
         if template_project.project_type is None and "MST" not in template_title:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project must be MST type")
+    if project_type_value == ProjectType.GD_DEVELOPMENT.value and template_project is None:
+        gd_template_stmt = select(Project).where(
+            Project.is_template == True,
+            Project.project_type == ProjectType.GD_DEVELOPMENT.value,
+        )
+        if payload.department_id is not None:
+            gd_template_stmt = gd_template_stmt.where(Project.department_id == payload.department_id)
+        template_project = (
+            await db.execute(gd_template_stmt.order_by(Project.created_at))
+        ).scalars().first()
+
     project = Project(
         title=payload.title,
         description=payload.description,
@@ -464,7 +632,23 @@ async def create_project(
         await _copy_tasks_from_template_project(db, project, user.id)
     # Copy tasks from MST template project only if explicitly selected
     if project.project_type == ProjectType.MST.value and template_project is not None:
-        await _copy_tasks_from_mst_template_project(db, project, user.id, template_project)
+        await _copy_project_template_data(
+            db,
+            project,
+            user.id,
+            template_project,
+            default_phase=ProjectPhaseStatus.PLANNING,
+            reset_task_status_to_todo=True,
+        )
+    if project.project_type == ProjectType.GD_DEVELOPMENT.value and template_project is not None:
+        await _copy_project_template_data(
+            db,
+            project,
+            user.id,
+            template_project,
+            default_phase=ProjectPhaseStatus.MEETINGS,
+            reset_task_status_to_todo=True,
+        )
     
     await db.commit()
     await db.refresh(project)

@@ -731,6 +731,8 @@ export default function GaKaNotesPage() {
   const [noteTypeFilter, setNoteTypeFilter] = React.useState<"all" | "GA" | "KA">("all")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
   const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
+  const [searchQuery, setSearchQuery] = React.useState("")
+  const deferredSearchQuery = React.useDeferredValue(searchQuery)
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [showLegend, setShowLegend] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
@@ -1971,6 +1973,7 @@ export default function GaKaNotesPage() {
     const now = Date.now()
     const weekAgo = now - 7 * 24 * 60 * 60 * 1000
     const closedCutoff = now - 30 * 24 * 60 * 60 * 1000
+    const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase()
 
     const withinRange = (note: GaNote) => {
       const isClosed = note.status === "CLOSED"
@@ -2008,6 +2011,43 @@ export default function GaKaNotesPage() {
       if (contentFilter === "all") return true
       return EMAIL_MARKER_RE.test(note.content || "")
     }
+    const matchesSearchQuery = (note: GaNote) => {
+      if (!normalizedSearchQuery) return true
+
+      const taskInfo = noteTaskInfo.get(note.id)
+      const creator = note.created_by ? users.find((person) => person.id === note.created_by) : null
+      const noteDepartment = note.department_id ? departments.find((dept) => dept.id === note.department_id) : null
+      const taskDepartment = taskInfo?.taskDepartmentId
+        ? departments.find((dept) => dept.id === taskInfo.taskDepartmentId)
+        : null
+      const noteProject = note.project_id ? projects.find((project) => project.id === note.project_id) : null
+      const taskProject = taskInfo?.taskProjectId
+        ? projects.find((project) => project.id === taskInfo.taskProjectId)
+        : null
+
+      const searchHaystack = [
+        parseMarkedNoteContent(note.content).text,
+        taskInfo?.description,
+        note.note_type,
+        note.status,
+        creator?.full_name,
+        creator?.username,
+        noteDepartment?.name,
+        taskDepartment?.name,
+        noteProject?.title,
+        noteProject?.name,
+        taskProject?.title,
+        taskProject?.name,
+        ...(taskInfo?.taskTypeLabels ?? []),
+        ...(taskInfo?.assignees ?? []).flatMap((assignee) => [assignee.full_name, assignee.username]),
+        ...(note.attachments ?? []).map((attachment) => attachment.original_filename),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+
+      return searchHaystack.includes(normalizedSearchQuery)
+    }
     const taskDoneBucket = (note: GaNote) => {
       const taskInfo = noteTaskInfo.get(note.id)
       if (!taskInfo) return 0
@@ -2022,6 +2062,7 @@ export default function GaKaNotesPage() {
       .filter(matchesNoteType)
       .filter(matchesTaskStatusFilter)
       .filter(matchesContentFilter)
+      .filter(matchesSearchQuery)
       .sort((a, b) => {
         // First, sort by status: open notes first, closed notes last
         const aIsClosed = a.status === "CLOSED"
@@ -2041,7 +2082,7 @@ export default function GaKaNotesPage() {
         return bCreated - aCreated
       })
     return sorted
-  }, [notes, rangeFilter, noteTypeFilter, taskStatusFilter, contentFilter, noteTaskInfo])
+  }, [notes, rangeFilter, noteTypeFilter, taskStatusFilter, contentFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
 
   const attachmentDialogItems = React.useMemo(() => {
     if (!attachmentsDialogNoteId) return []
@@ -2456,6 +2497,15 @@ export default function GaKaNotesPage() {
                   <SelectItem value="emails">Emails</SelectItem>
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1">
+              <Input
+                value={searchQuery}
+                onChange={(event) => setSearchQuery(event.target.value)}
+                placeholder="Search notes..."
+                className="h-9 w-[220px]"
+                aria-label="Search notes"
+              />
             </div>
           </div>
           <div className="flex items-center gap-2">

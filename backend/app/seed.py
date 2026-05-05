@@ -75,7 +75,16 @@ GD_PROJECTS = [
         "progress_percentage": 0,
         "project_type": ProjectType.MST.value,
         "is_template": True,
-    }
+    },
+    {
+        "title": "DEV TEMPLATE",
+        "description": "Graphic Design development-style template with phases: Meetings, Planning, Development, Testing, Documentation.",
+        "status": TaskStatus.IN_PROGRESS,
+        "current_phase": ProjectPhaseStatus.MEETINGS,
+        "progress_percentage": 0,
+        "project_type": ProjectType.GD_DEVELOPMENT.value,
+        "is_template": True,
+    },
 ]
 
 VS_VL_LARGE_TEMPLATE_TITLE = "VS/VL PROJEKT I MADH"
@@ -915,6 +924,13 @@ async def seed() -> None:
                 ).scalars().all()
 
                 for project in gd_projects:
+                    is_mst_project = project.project_type == ProjectType.MST.value
+                    if not is_mst_project:
+                        title_upper = (project.title or "").upper()
+                        is_mst_project = "MST" in title_upper
+                    if not is_mst_project:
+                        continue
+
                     # Get or create default checklist for the project
                     checklist = (
                         await db.execute(

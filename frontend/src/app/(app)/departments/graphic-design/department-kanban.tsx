@@ -79,6 +79,7 @@ const WEEKDAYS_SQ = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Sa
 const PROJECT_TYPES = [
   { id: "GENERAL", label: "General" },
   { id: "MST", label: "MST Project" },
+  { id: "GD_DEVELOPMENT", label: "Dev Template" },
 ] as const
 
 const formatProjectTitle = (title: string, type: (typeof PROJECT_TYPES)[number]["id"]) => {
@@ -89,6 +90,9 @@ const formatProjectTitle = (title: string, type: (typeof PROJECT_TYPES)[number][
   if (normalized.includes("MST")) return trimmed
   return `MST - ${trimmed}`
 }
+
+const projectDetailHref = (project: Project) =>
+  project.project_type === "GD_DEVELOPMENT" ? `/projects/${project.id}` : `/projects/design/${project.id}`
 
 const formatProjectTitleWithProducts = (project: Project | null | undefined): string => {
   if (!project) return ""
@@ -5491,7 +5495,7 @@ export default function DepartmentKanban() {
                         </DialogHeader>
                         <div className="grid gap-4 py-4">
                           <div className="space-y-2">
-                            <Label>Template</Label>
+                            <Label>Project Type</Label>
                             <Select
                               value={projectType}
                               onValueChange={(value) => {
@@ -5752,7 +5756,7 @@ export default function DepartmentKanban() {
                                 -
                               </div>
                             )}
-                            <Link href={`/projects/design/${project.id}`} className="flex items-center gap-1 text-xs font-semibold text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400">
+                            <Link href={projectDetailHref(project)} className="flex items-center gap-1 text-xs font-semibold text-slate-700 hover:text-blue-600 dark:text-slate-300 dark:hover:text-blue-400">
                               View {"->"}
                             </Link>
                           </div>

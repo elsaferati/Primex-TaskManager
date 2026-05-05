@@ -564,6 +564,10 @@ export default function DesignProjectPage() {
       const pRes = await apiFetch(`/projects/${projectId}`)
       if (!pRes.ok) return
       const p = (await pRes.json()) as Project
+      if (p.project_type === "GD_DEVELOPMENT") {
+        router.replace(`/projects/${p.id}`)
+        return
+      }
       setProject(p)
       setEditingDescription(p.description || "")
 
@@ -593,7 +597,7 @@ export default function DesignProjectPage() {
       }
     }
     void load()
-  }, [apiFetch, projectId])
+  }, [apiFetch, projectId, router])
 
   React.useEffect(() => {
     if (project?.current_phase) setViewedPhase(project.current_phase)
