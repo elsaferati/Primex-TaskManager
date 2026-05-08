@@ -1276,6 +1276,7 @@ export default function DepartmentKanban() {
   const [projectDueDate, setProjectDueDate] = React.useState("")
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
   const [deletingNoProjectTaskId, setDeletingNoProjectTaskId] = React.useState<string | null>(null)
+  const [deletingAllTodayTaskId, setDeletingAllTodayTaskId] = React.useState<string | null>(null)
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTaskTitle, setEditTaskTitle] = React.useState("")
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
@@ -1296,6 +1297,7 @@ export default function DepartmentKanban() {
   const [allTodayEditConfirmationAssigneeId, setAllTodayEditConfirmationAssigneeId] = React.useState("")
   const [allTodayEditStartDate, setAllTodayEditStartDate] = React.useState("")
   const [allTodayEditDueDate, setAllTodayEditDueDate] = React.useState("")
+  const [allTodayEditDeadlineImportant, setAllTodayEditDeadlineImportant] = React.useState(false)
   const [allTodayUpdating, setAllTodayUpdating] = React.useState(false)
   const [markingWaitingTaskId, setMarkingWaitingTaskId] = React.useState<string | null>(null)
   const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
@@ -4397,6 +4399,7 @@ export default function DepartmentKanban() {
   const showSystemActions = viewMode === "mine"
   const canDeleteProjects = user?.role === "ADMIN" && !isReadOnly
   const canDeleteNoProject = user?.role === "ADMIN" && !isReadOnly
+  const canDeleteAllTodayTask = user?.role === "ADMIN" && !isReadOnly
   const canEditNoProjectTask = React.useCallback(
     (task?: Task | null) => {
       if (!task || !user?.id) return false
@@ -5171,6 +5174,41 @@ export default function DepartmentKanban() {
     }
   }
 
+  const deleteAllTodayTask = async (taskId: string) => {
+    const task = allTodayTaskLookup.get(taskId) || null
+    const taskLabel = task?.title || "this task"
+    const confirmed = await confirm({
+      title: "Delete task",
+      description: `Delete "${taskLabel}"? This cannot be undone.`,
+      confirmLabel: "Delete",
+      variant: "destructive",
+    })
+    if (!confirmed) return
+
+    setDeletingAllTodayTaskId(taskId)
+    try {
+      const res = await apiFetch(`/tasks/${taskId}`, { method: "DELETE" })
+      if (!res.ok) {
+        let detail = "Failed to delete task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (typeof data?.detail === "string") detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(detail)
+        return
+      }
+      setDepartmentTasks((prev) => prev.filter((t) => t.id !== taskId))
+      setNoProjectTasks((prev) => prev.filter((t) => t.id !== taskId))
+      setSystemCreatedTasks((prev) => prev.filter((t) => t.id !== taskId))
+      setCrossDepartmentConfirmTasks((prev) => prev.filter((t) => t.id !== taskId))
+      toast.success("Task deleted")
+    } finally {
+      setDeletingAllTodayTaskId((prev) => (prev === taskId ? null : prev))
+    }
+  }
+
   const startEditTask = (task: Task) => {
     if (!canEditNoProjectTask(task)) {
       toast.error("You do not have permission to edit this task")
@@ -5315,6 +5353,7 @@ export default function DepartmentKanban() {
     setAllTodayEditConfirmationAssigneeId(task.confirmation_assignee_id || "")
     setAllTodayEditStartDate(toDateInputValue(task.start_date))
     setAllTodayEditDueDate(toDateInputValue(task.due_date))
+    setAllTodayEditDeadlineImportant(Boolean(task.is_deadline_important))
   }
 
   const cancelAllTodayTaskEdit = () => {
@@ -5326,6 +5365,7 @@ export default function DepartmentKanban() {
     setAllTodayEditConfirmationAssigneeId("")
     setAllTodayEditStartDate("")
     setAllTodayEditDueDate("")
+    setAllTodayEditDeadlineImportant(false)
   }
 
   const updateAllTodayTask = async () => {
@@ -5371,6 +5411,7 @@ export default function DepartmentKanban() {
           status: allTodayEditStatus,
           start_date: startDateValue,
           due_date: dueDateValue,
+          is_deadline_important: allTodayEditDeadlineImportant,
           ...(isWaitingConfirmation(allTodayEditStatus)
             ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
             : {}),
@@ -7498,6 +7539,19 @@ export default function DepartmentKanban() {
                                 >
                                   <Pencil className="h-3 w-3" />
                                 </Button>
+                                {canDeleteAllTodayTask ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-6 w-6 border-slate-200 text-slate-500 hover:border-rose-200 hover:text-rose-600"
+                                    title="Delete"
+                                    aria-label={`Delete ${task.title}`}
+                                    onClick={() => void deleteAllTodayTask(task.id)}
+                                    disabled={deletingAllTodayTaskId === task.id}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                ) : null}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -7527,7 +7581,7 @@ export default function DepartmentKanban() {
                   >
                     <TableHeader>
                       <TableRow className="bg-slate-50">
-                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "STATUS", "PRIORITY", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
+                        {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
                           <TableHead
                             key={label}
                             className="text-[10px] font-semibold uppercase tracking-wide text-slate-500"
@@ -7597,7 +7651,6 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} ${weeklyPlanStatusBgClass(taskStatusValue(task))}`}>
                               {reportStatusLabel(taskStatusValue(task))}
                             </TableCell>
-                            <TableCell className={TODAY_TASK_CELL_CLASS}>{reportPriorityLabel(task.priority)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.created_at)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
@@ -7624,6 +7677,19 @@ export default function DepartmentKanban() {
                                 >
                                   <Pencil className="h-3 w-3" />
                                 </Button>
+                                {canDeleteAllTodayTask ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-6 w-6 border-slate-200 text-slate-500 hover:border-rose-200 hover:text-rose-600"
+                                    title="Delete"
+                                    aria-label={`Delete ${task.title}`}
+                                    onClick={() => void deleteAllTodayTask(task.id)}
+                                    disabled={deletingAllTodayTaskId === task.id}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                ) : null}
                               </div>
                             </TableCell>
                           </TableRow>
@@ -7708,17 +7774,32 @@ export default function DepartmentKanban() {
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                title="Edit"
-                                aria-label={`Edit ${task.title}`}
-                                onClick={() => startAllTodayTaskEdit(task)}
-                                disabled={!canEditAllTodayTask(task)}
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                  title="Edit"
+                                  aria-label={`Edit ${task.title}`}
+                                  onClick={() => startAllTodayTaskEdit(task)}
+                                  disabled={!canEditAllTodayTask(task)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                                {canDeleteAllTodayTask ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-6 w-6 border-slate-200 text-slate-500 hover:border-rose-200 hover:text-rose-600"
+                                    title="Delete"
+                                    aria-label={`Delete ${task.title}`}
+                                    onClick={() => void deleteAllTodayTask(task.id)}
+                                    disabled={deletingAllTodayTaskId === task.id}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                ) : null}
+                              </div>
                             </TableCell>
                           </TableRow>
                         )
@@ -7798,17 +7879,32 @@ export default function DepartmentKanban() {
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.start_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{formatDateOnly(task.due_date)}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>
-                              <Button
-                                variant="outline"
-                                size="icon"
-                                className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
-                                title="Edit"
-                                aria-label={`Edit ${task.title || "system task"}`}
-                                onClick={() => startAllTodayTaskEdit(task)}
-                                disabled={!canEditAllTodayTask(task)}
-                              >
-                                <Pencil className="h-3 w-3" />
-                              </Button>
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  className="h-6 w-6 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
+                                  title="Edit"
+                                  aria-label={`Edit ${task.title || "system task"}`}
+                                  onClick={() => startAllTodayTaskEdit(task)}
+                                  disabled={!canEditAllTodayTask(task)}
+                                >
+                                  <Pencil className="h-3 w-3" />
+                                </Button>
+                                {canDeleteAllTodayTask ? (
+                                  <Button
+                                    variant="outline"
+                                    size="icon"
+                                    className="h-6 w-6 border-slate-200 text-slate-500 hover:border-rose-200 hover:text-rose-600"
+                                    title="Delete"
+                                    aria-label={`Delete ${task.title || "system task"}`}
+                                    onClick={() => void deleteAllTodayTask(task.id)}
+                                    disabled={deletingAllTodayTaskId === task.id}
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </Button>
+                                ) : null}
+                              </div>
                             </TableCell>
                           </TableRow>
                         )
@@ -7909,7 +8005,7 @@ export default function DepartmentKanban() {
                         />
                       </div>
                       <div className="space-y-2">
-                        <Label className="text-slate-700">Due date</Label>
+                        <Label className="text-slate-700">Due date (optional)</Label>
                         <Input
                           type="date"
                           value={allTodayEditDueDate}
@@ -7918,6 +8014,13 @@ export default function DepartmentKanban() {
                         />
                       </div>
                     </div>
+                    <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
+                      <Checkbox
+                        checked={allTodayEditDeadlineImportant}
+                        onCheckedChange={(checked) => setAllTodayEditDeadlineImportant(checked === true)}
+                      />
+                      <span className="text-sm font-medium text-slate-700">Deadline important</span>
+                    </label>
                     <div className="flex justify-end gap-2">
                       <Button variant="outline" onClick={cancelAllTodayTaskEdit} className="rounded-xl border-slate-200">
                         Cancel
