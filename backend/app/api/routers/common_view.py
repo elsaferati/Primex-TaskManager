@@ -24,6 +24,7 @@ from app.db import get_db
 from app.models.common_entry import CommonEntry
 from app.models.department import Department
 from app.models.enums import CommonCategory, UserRole
+from app.models.ga_note import GaNote
 from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.system_task_template import SystemTaskTemplate
@@ -59,7 +60,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "2"
+COMMON_VIEW_CACHE_VERSION = "3"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -253,6 +254,14 @@ def _initials(name: str) -> str:
     return f"{first}{last}".upper()
 
 
+def _normalize_multiline_title(value: str | None) -> str:
+    lines = [
+        re.sub(r"[ \t\f\v]+", " ", line).strip()
+        for line in (value or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ]
+    return "\n".join(line for line in lines if line)
+
+
 def _should_include_task(task: Task) -> bool:
     status_value = (task.status or "").lower()
     is_done = bool(task.completed_at) or status_value in {"done", "completed"}
@@ -380,7 +389,9 @@ async def _compute_etag(
         effective_date = cast(func.coalesce(*effective_columns), Date)
         task_filters = [effective_date >= week_start, effective_date <= week_end]
         ts = await _max_timestamp(db, Task, Task.updated_at, task_filters)
+        ga_note_ts = await _max_timestamp(db, GaNote, GaNote.updated_at)
         parts.append(ts.isoformat() if ts else "")
+        parts.append(ga_note_ts.isoformat() if ga_note_ts else "")
 
     raw = "|".join(parts).encode("utf-8")
     return hashlib.sha1(raw).hexdigest()
@@ -695,6 +706,18 @@ async def get_common_view(
             rows = (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()
             projects = {p.id: p for p in rows}
 
+        ga_note_origin_ids = list({t.ga_note_origin_id for t in tasks if t.ga_note_origin_id})
+        ga_note_titles: dict[uuid.UUID, str] = {}
+        if ga_note_origin_ids:
+            rows = (
+                await db.execute(select(GaNote.id, GaNote.content).where(GaNote.id.in_(ga_note_origin_ids)))
+            ).all()
+            ga_note_titles = {
+                note_id: normalized
+                for note_id, content in rows
+                if (normalized := _normalize_multiline_title(content))
+            }
+
         product_content_dept_id: uuid.UUID | None = None
         for d in departments_map.values():
             name_lower = (d.name or "").lower()
@@ -704,6 +727,8 @@ async def get_common_view(
 
         priority_map: dict[uuid.UUID, dict[str, Any]] = {}
         for t in tasks:
+            display_title = ga_note_titles.get(t.ga_note_origin_id) if t.ga_note_origin_id else None
+            display_title = display_title or t.title
             assignees = assignees_by_task.get(t.id) or []
             if not assignees and t.assigned_to:
                 user_for_task = users_map.get(t.assigned_to)
@@ -734,7 +759,7 @@ async def get_common_view(
                         {
                             "id": f"task:{t.id}:{task_date.isoformat()}",
                             "task_id": str(t.id),
-                            "title": t.title,
+                            "title": display_title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
                             "user_id": str(assignee_id) if assignee_id else None,
@@ -752,7 +777,7 @@ async def get_common_view(
                         {
                             "id": f"task:{t.id}:{task_date.isoformat()}",
                             "task_id": str(t.id),
-                            "title": t.title,
+                            "title": display_title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
                             "user_id": str(assignee_id) if assignee_id else None,
@@ -771,7 +796,7 @@ async def get_common_view(
                         {
                             "id": f"task:{t.id}:{task_date.isoformat()}",
                             "task_id": str(t.id),
-                            "title": t.title,
+                            "title": display_title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
                             "user_id": str(assignee_id) if assignee_id else None,
@@ -790,7 +815,7 @@ async def get_common_view(
                         {
                             "id": f"task:{t.id}:{task_date.isoformat()}",
                             "task_id": str(t.id),
-                            "title": t.title,
+                            "title": display_title,
                             "date": task_date.isoformat(),
                             "owner": owner_label,
                             "assignees": assignee_names or None,

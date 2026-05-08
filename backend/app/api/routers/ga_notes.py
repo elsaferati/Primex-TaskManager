@@ -32,7 +32,11 @@ class MarkWaitingDoneResponse(BaseModel):
 
 
 def _ga_note_task_title(content: str | None) -> str:
-    cleaned = re.sub(r"\s+", " ", (content or "").strip())
+    lines = [
+        re.sub(r"[ \t\f\v]+", " ", line).strip()
+        for line in (content or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
+    ]
+    cleaned = "\n".join(line for line in lines if line)
     if not cleaned:
         return "GA/KA note task"
     return cleaned

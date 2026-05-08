@@ -1192,7 +1192,13 @@ function reportPriorityLabel(priority?: TaskPriority | string | null) {
 }
 
 function gaNoteTaskDefaultTitle(note: string) {
-  const cleaned = note.trim().replace(/\s+/g, " ")
+  const cleaned = note
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim().replace(/[ \t\f\v]+/g, " "))
+    .filter(Boolean)
+    .join("\n")
   if (!cleaned) return "GA/KA note task"
   return cleaned
 }

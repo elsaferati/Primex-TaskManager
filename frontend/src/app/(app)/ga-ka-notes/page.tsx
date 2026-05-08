@@ -713,7 +713,13 @@ function getInitials(label: string) {
 }
 
 function noteToTaskTitle(content: string) {
-  const cleaned = content.trim().replace(/\s+/g, " ")
+  const cleaned = content
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .split("\n")
+    .map((line) => line.trim().replace(/[ \t\f\v]+/g, " "))
+    .filter(Boolean)
+    .join("\n")
   if (!cleaned) return "GA/KA note task"
   return cleaned
 }

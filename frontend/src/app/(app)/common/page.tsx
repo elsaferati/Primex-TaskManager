@@ -6292,6 +6292,8 @@ export default function CommonViewPage() {
           font-size: 14px;
           display: flex;
           align-items: center;
+          white-space: pre-wrap;
+          line-height: 1.35;
         }
         .swimlane-note-toggle {
           position: absolute;
@@ -6568,6 +6570,9 @@ export default function CommonViewPage() {
         .week-table-entry > span,
         .week-table-entry-main > span:first-child {
           flex: 1;
+          min-width: 0;
+          white-space: pre-wrap;
+          line-height: 1.35;
         }
         .week-table-delete {
           border: 1px solid #cbd5e1;
