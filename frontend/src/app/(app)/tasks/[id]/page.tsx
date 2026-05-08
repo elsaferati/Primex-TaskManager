@@ -783,8 +783,7 @@ export default function TaskDetailsPage() {
                   {task.is_1h_report ? <Badge variant="secondary">1H</Badge> : null}
                   {task.is_r1 ? <Badge variant="secondary">R1</Badge> : null}
                   {task.is_personal ? <Badge variant="secondary">P</Badge> : null}
-                  {task.ga_note_origin_id ? <Badge variant="secondary">GA/KA Note</Badge> : null}
-                  {!task.is_bllok && !task.is_1h_report && !task.is_r1 && !task.is_personal && !task.ga_note_origin_id ? (
+                  {!task.is_bllok && !task.is_1h_report && !task.is_r1 && !task.is_personal ? (
                     <span className="text-sm text-muted-foreground">No special flags.</span>
                   ) : null}
                 </div>

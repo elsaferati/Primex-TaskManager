@@ -177,7 +177,6 @@ export default function OpenTasksPage() {
   )
 
   const sourceLabel = React.useCallback((task: Task) => {
-    if (task.ga_note_origin_id) return "GA/KA"
     if (task.system_template_origin_id) return "System"
     if (task.project_id) return "Project"
     if (task.is_bllok) return "BLL"

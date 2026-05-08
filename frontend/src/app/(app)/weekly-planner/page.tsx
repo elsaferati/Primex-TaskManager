@@ -1062,7 +1062,6 @@ export default function WeeklyPlannerPage() {
 
   const taskSourceLabel = React.useCallback(
     (task: Task) => {
-      if (task.ga_note_origin_id) return "GA/KA"
       if (task.system_template_origin_id) return "System"
       if (task.project_id) return "Project"
       if (task.is_bllok) return "BLL"
@@ -1579,7 +1578,7 @@ export default function WeeklyPlannerPage() {
     is_personal?: boolean
     ga_note_origin_id?: string | null
     fast_task_type?: string | null
-  }): { label: string; className: string } | null => {
+  }): { label: string; className: string } => {
     if (task.is_bllok) {
       return { label: "BLL", className: "border-red-200 bg-red-50 text-red-700" }
     }
@@ -1592,7 +1591,7 @@ export default function WeeklyPlannerPage() {
     if (task.is_personal) {
       return { label: "P:", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
     }
-    return null // NORMAL = no badge
+    return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
   }, [])
 
   const formatTaskProducts = React.useCallback((
@@ -4605,14 +4604,6 @@ export default function WeeklyPlannerPage() {
                                                       title={statusBadge.label}
                                                     >
                                                       {statusBadge.label}
-                                                    </span>
-                                                  )}
-                                                  {task.ga_note_origin_id && (
-                                                    <span
-                                                      className="inline-flex h-5 items-center justify-center rounded-full border border-blue-200 bg-blue-50 px-1.5 text-[10px] font-semibold text-blue-700"
-                                                      title="Created from GA/KA note"
-                                                    >
-                                                      GA/KA
                                                     </span>
                                                   )}
                                                   {(() => {

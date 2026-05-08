@@ -340,7 +340,7 @@ const getTaskCardClassesForDay = (
   return getStatusCardClassesForDay(status, completedAt, dayDate, dailyStatus)
 }
 
-const getTaskStatusBadge = (task: SnapshotTaskEntry): { label: string; className: string } | null => {
+const getTaskStatusBadge = (task: SnapshotTaskEntry): { label: string; className: string } => {
   if (task.is_bllok) {
     return { label: "BLL", className: "border-red-200 bg-red-50 text-red-700" }
   }
@@ -353,7 +353,7 @@ const getTaskStatusBadge = (task: SnapshotTaskEntry): { label: string; className
   if (task.is_personal) {
     return { label: "P:", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
   }
-  return null
+  return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
 }
 
 const getFastTaskBadge = (task: SnapshotTaskEntry): { label: string; className: string } => {
