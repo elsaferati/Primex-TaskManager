@@ -18,7 +18,7 @@ import { toast } from "sonner"
 import { ChevronDown, Plus, X, Printer, GripVertical, Download } from "lucide-react"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
-import { formatDateTimeDMY } from "@/lib/dates"
+import { formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { resolveProjectTitle } from "@/lib/project-display-title"
@@ -40,7 +40,7 @@ import {
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
-import type { ChecklistItem, Department, Project, Task, UserLookup } from "@/lib/types"
+import type { ChecklistItem, Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
   task_id: string
@@ -157,6 +157,8 @@ type TaskChecklist = {
 }
 
 type SelectedWeek = "last" | "this" | "next"
+type PlanningInboxFilter = "all" | "unplanned" | "ga" | "project" | "fast" | "planned"
+type PlannerTaskDialogMode = "plan" | "edit"
 
 const ALL_DEPARTMENTS_VALUE = "__all__"
 const DAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"]
@@ -202,6 +204,29 @@ const fromISODate = (iso: string) => {
   const [y, m, d] = iso.split("-").map(Number)
   return new Date(y, m - 1, d)
 }
+
+const taskDateKey = (value?: string | null) => {
+  if (!value) return null
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10)
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return toISODate(date)
+}
+
+const isTaskPlannedForWeek = (task: Task, weekStart?: string | null, weekEnd?: string | null) => {
+  if (!weekStart || !weekEnd) return false
+  const due = taskDateKey(task.due_date)
+  if (!due) return false
+  const startCandidate = taskDateKey(task.start_date)
+  const start = startCandidate && startCandidate <= due ? startCandidate : due
+  return start <= weekEnd && due >= weekStart
+}
+
+const isFastPlannerTask = (task: Task) => {
+  return !task.project_id && !task.system_template_origin_id
+}
+
+const nextWeekDefaultDay = (weekStart?: string | null) => weekStart || shiftIsoDateByDays(mondayISO(), 7)
 
 const timeToMinutes = (value?: string | null) => {
   if (!value) return null
@@ -312,6 +337,21 @@ export default function WeeklyPlannerPage() {
   const [manualTaskFastType, setManualTaskFastType] = React.useState<string>("")
   const [manualTaskProjectId, setManualTaskProjectId] = React.useState("")
   const [isCreatingManualTask, setIsCreatingManualTask] = React.useState(false)
+  const [planningTasks, setPlanningTasks] = React.useState<Task[]>([])
+  const [planningNotes, setPlanningNotes] = React.useState<GaNote[]>([])
+  const [planningInboxLoading, setPlanningInboxLoading] = React.useState(false)
+  const [planningFilter, setPlanningFilter] = React.useState<PlanningInboxFilter>("all")
+  const [planningUserId, setPlanningUserId] = React.useState(ALL_DEPARTMENTS_VALUE)
+  const [planningSearch, setPlanningSearch] = React.useState("")
+  const [plannerTaskDialogOpen, setPlannerTaskDialogOpen] = React.useState(false)
+  const [plannerTaskDialogMode, setPlannerTaskDialogMode] = React.useState<PlannerTaskDialogMode>("plan")
+  const [plannerTask, setPlannerTask] = React.useState<Task | null>(null)
+  const [plannerTaskStartDate, setPlannerTaskStartDate] = React.useState("")
+  const [plannerTaskDueDate, setPlannerTaskDueDate] = React.useState("")
+  const [plannerTaskFinishPeriod, setPlannerTaskFinishPeriod] = React.useState<"AM" | "PM" | "__none__">("AM")
+  const [plannerTaskAssigneeIds, setPlannerTaskAssigneeIds] = React.useState<string[]>([])
+  const [plannerTaskSaving, setPlannerTaskSaving] = React.useState(false)
+  const [plannerTaskClearingId, setPlannerTaskClearingId] = React.useState<string | null>(null)
   const canDeleteProjects = user?.role === "ADMIN"
   const canSaveSnapshots = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canReorderUsers = user?.role === "ADMIN" || user?.role === "MANAGER"
@@ -728,6 +768,46 @@ export default function WeeklyPlannerPage() {
     }
   }, [apiFetch, buildCurrentWeekParams])
 
+  const loadPlanningInbox = React.useCallback(async () => {
+    setPlanningInboxLoading(true)
+    try {
+      const taskParams = new URLSearchParams()
+      taskParams.set("include_done", "false")
+      taskParams.set("include_all_departments", "true")
+      if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+        taskParams.set("department_id", departmentId)
+      }
+
+      const notesParams = new URLSearchParams()
+      if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+        notesParams.set("department_id", departmentId)
+      }
+
+      const [tasksRes, notesRes] = await Promise.all([
+        apiFetch(`/tasks?${taskParams.toString()}`),
+        apiFetch(`/ga-notes${notesParams.toString() ? `?${notesParams.toString()}` : ""}`),
+      ])
+
+      if (tasksRes.ok) {
+        setPlanningTasks((await tasksRes.json()) as Task[])
+      } else {
+        setPlanningTasks([])
+      }
+
+      if (notesRes.ok) {
+        setPlanningNotes((await notesRes.json()) as GaNote[])
+      } else {
+        setPlanningNotes([])
+      }
+    } catch (error) {
+      console.error("Failed to load planning inbox", error)
+      setPlanningTasks([])
+      setPlanningNotes([])
+    } finally {
+      setPlanningInboxLoading(false)
+    }
+  }, [apiFetch, departmentId])
+
   const saveUserOrder = React.useCallback(async () => {
     if (!canEditUserOrder) return
     const deptId = departmentId
@@ -767,6 +847,11 @@ export default function WeeklyPlannerPage() {
     if (viewMode !== "current") return
     void loadPlanner()
   }, [loadPlanner, viewMode])
+
+  React.useEffect(() => {
+    if (viewMode !== "current") return
+    void loadPlanningInbox()
+  }, [loadPlanningInbox, viewMode])
 
   React.useEffect(() => {
     if (!data) {
@@ -906,8 +991,260 @@ export default function WeeklyPlannerPage() {
       .sort((a, b) => projectLabel(a).localeCompare(projectLabel(b)))
   }, [manualTaskDepartmentId, projects, isProjectClosed, projectLabel])
 
+  const planningUserOptions = React.useMemo(() => {
+    const scopedUsers =
+      departmentId !== ALL_DEPARTMENTS_VALUE ? users.filter((u) => u.department_id === departmentId) : users
+    return scopedUsers
+      .map((u) => ({ id: u.id, name: u.full_name || u.username || u.id }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [departmentId, users])
+
+  const planningNoteById = React.useMemo(() => {
+    const map = new Map<string, GaNote>()
+    for (const note of planningNotes) map.set(note.id, note)
+    return map
+  }, [planningNotes])
+
+  const planningUserById = React.useMemo(() => {
+    const map = new Map<string, UserLookup>()
+    for (const item of users) map.set(item.id, item)
+    return map
+  }, [users])
+
+  const planningDepartmentById = React.useMemo(() => {
+    const map = new Map<string, Department>()
+    for (const item of departments) map.set(item.id, item)
+    return map
+  }, [departments])
+
+  const planningProjectById = React.useMemo(() => {
+    const map = new Map<string, Project>()
+    for (const item of projects) map.set(item.id, item)
+    return map
+  }, [projects])
+
+  const taskAssigneeIds = React.useCallback((task: Task) => {
+    const ids = new Set<string>()
+    if (task.assigned_to) ids.add(task.assigned_to)
+    for (const assignee of task.assignees || []) {
+      if (assignee.id) ids.add(assignee.id)
+    }
+    return Array.from(ids)
+  }, [])
+
+  const taskAssigneeLabel = React.useCallback(
+    (task: Task) => {
+      const ids = taskAssigneeIds(task)
+      if (!ids.length) return "Unassigned"
+      return ids
+        .map((id) => {
+          const found = planningUserById.get(id)
+          return found?.full_name || found?.username || id
+        })
+        .join(", ")
+    },
+    [planningUserById, taskAssigneeIds]
+  )
+
+  const taskSourceLabel = React.useCallback(
+    (task: Task) => {
+      if (task.ga_note_origin_id) return "GA/KA"
+      if (task.system_template_origin_id) return "System"
+      if (task.project_id) return "Project"
+      if (task.is_bllok) return "BLL"
+      if (task.is_r1) return "R1"
+      if (task.is_1h_report) return "1H"
+      if (task.is_personal) return "P:"
+      return "Fast"
+    },
+    []
+  )
+
+  const plannerWeekStart = data?.week_start || nextWeekDefaultDay(null)
+  const plannerWeekEnd = data?.week_end || shiftIsoDateByDays(plannerWeekStart, 4)
+
+  const filteredPlanningTasks = React.useMemo(() => {
+    const query = planningSearch.trim().toLowerCase()
+    return planningTasks.filter((task) => {
+      const planned = isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)
+      const isGa = Boolean(task.ga_note_origin_id)
+      const isFast = isFastPlannerTask(task)
+      const ids = taskAssigneeIds(task)
+
+      if (planningUserId !== ALL_DEPARTMENTS_VALUE && !ids.includes(planningUserId)) return false
+      if (planningFilter === "unplanned" && planned) return false
+      if (planningFilter === "ga" && !isGa) return false
+      if (planningFilter === "project" && !task.project_id) return false
+      if (planningFilter === "fast" && !isFast) return false
+      if (planningFilter === "planned" && !planned) return false
+      if (query) {
+        const note = task.ga_note_origin_id ? planningNoteById.get(task.ga_note_origin_id) : null
+        const project = task.project_id ? planningProjectById.get(task.project_id) : null
+        const haystack = [
+          task.title,
+          task.description,
+          task.status,
+          taskSourceLabel(task),
+          taskAssigneeLabel(task),
+          note?.content,
+          project ? projectLabel(project) : "",
+        ]
+          .filter(Boolean)
+          .join(" ")
+          .toLowerCase()
+        if (!haystack.includes(query)) return false
+      }
+      return true
+    })
+  }, [
+    plannerWeekEnd,
+    plannerWeekStart,
+    planningFilter,
+    planningNoteById,
+    planningProjectById,
+    planningSearch,
+    planningTasks,
+    planningUserId,
+    projectLabel,
+    taskAssigneeIds,
+    taskAssigneeLabel,
+    taskSourceLabel,
+  ])
+
+  const gaPlanningTasks = React.useMemo(
+    () => filteredPlanningTasks.filter((task) => task.ga_note_origin_id),
+    [filteredPlanningTasks]
+  )
+  const plannedNextWeekTasks = React.useMemo(
+    () => filteredPlanningTasks.filter((task) => !task.ga_note_origin_id && isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)),
+    [filteredPlanningTasks, plannerWeekEnd, plannerWeekStart]
+  )
+  const openBacklogTasks = React.useMemo(
+    () => filteredPlanningTasks.filter((task) => !task.ga_note_origin_id && !isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)),
+    [filteredPlanningTasks, plannerWeekEnd, plannerWeekStart]
+  )
+
   const manualTaskDepartmentValue =
     departmentId !== ALL_DEPARTMENTS_VALUE ? departmentId : manualTaskDepartmentId
+
+  const openPlannerTaskDialog = React.useCallback(
+    (task: Task, mode: PlannerTaskDialogMode) => {
+      const defaultDay = nextWeekDefaultDay(data?.week_start)
+      setPlannerTask(task)
+      setPlannerTaskDialogMode(mode)
+      setPlannerTaskStartDate(toDateInputValue(task.start_date) || defaultDay)
+      setPlannerTaskDueDate(toDateInputValue(task.due_date) || defaultDay)
+      setPlannerTaskFinishPeriod((task.finish_period as "AM" | "PM" | null) || "AM")
+      setPlannerTaskAssigneeIds(taskAssigneeIds(task))
+      setPlannerTaskDialogOpen(true)
+    },
+    [data?.week_start, taskAssigneeIds]
+  )
+
+  const savePlannerTask = React.useCallback(async () => {
+    if (!plannerTask) return
+    if (!plannerTaskDueDate) {
+      toast.error("Due date is required to place a task in the weekly planner.")
+      return
+    }
+    if (plannerTaskStartDate && plannerTaskStartDate > plannerTaskDueDate) {
+      toast.error("Start date cannot be after due date.")
+      return
+    }
+
+    setPlannerTaskSaving(true)
+    try {
+      const res = await apiFetch(`/tasks/${plannerTask.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_date: plannerTaskStartDate ? new Date(plannerTaskStartDate).toISOString() : null,
+          due_date: new Date(plannerTaskDueDate).toISOString(),
+          finish_period: plannerTaskFinishPeriod === "__none__" ? null : plannerTaskFinishPeriod,
+          assigned_to: plannerTaskAssigneeIds[0] ?? null,
+          assignees: plannerTaskAssigneeIds,
+        }),
+      })
+
+      if (!res.ok) {
+        let detail = "Failed to update task planning."
+        try {
+          const payload = (await res.json()) as { detail?: string }
+          if (payload?.detail) detail = payload.detail
+        } catch {
+          // Keep fallback.
+        }
+        toast.error(detail)
+        return
+      }
+
+      const updated = (await res.json()) as Task
+      setPlanningTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      setPlannerTaskDialogOpen(false)
+      setPlannerTask(null)
+      toast.success(plannerTaskDialogMode === "plan" ? "Task planned for the week." : "Task planning updated.")
+      await Promise.all([loadPlanner(), loadPlanningInbox()])
+    } catch (error) {
+      console.error("Failed to save planner task", error)
+      toast.error("Failed to update task planning.")
+    } finally {
+      setPlannerTaskSaving(false)
+    }
+  }, [
+    apiFetch,
+    loadPlanner,
+    loadPlanningInbox,
+    plannerTask,
+    plannerTaskAssigneeIds,
+    plannerTaskDialogMode,
+    plannerTaskDueDate,
+    plannerTaskFinishPeriod,
+    plannerTaskStartDate,
+  ])
+
+  const clearTaskFromNextWeek = React.useCallback(
+    async (task: Task) => {
+      const isPlanned = isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)
+      if (!isPlanned) return
+
+      const confirmed = await confirm({
+        title: "Remove from next week plan",
+        description: task.project_id
+          ? "This clears the task start/due dates, which may also affect its project deadline display. Continue?"
+          : "This clears the task start/due dates so it leaves the weekly planner.",
+        confirmLabel: "Remove from plan",
+        variant: "destructive",
+      })
+      if (!confirmed) return
+
+      setPlannerTaskClearingId(task.id)
+      try {
+        const res = await apiFetch(`/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            start_date: null,
+            due_date: null,
+            finish_period: null,
+          }),
+        })
+        if (!res.ok) {
+          toast.error("Failed to remove task from planner.")
+          return
+        }
+        const updated = (await res.json()) as Task
+        setPlanningTasks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
+        toast.success("Task removed from next week plan.")
+        await Promise.all([loadPlanner(), loadPlanningInbox()])
+      } catch (error) {
+        console.error("Failed to remove task from next week", error)
+        toast.error("Failed to remove task from planner.")
+      } finally {
+        setPlannerTaskClearingId(null)
+      }
+    },
+    [apiFetch, confirm, loadPlanner, loadPlanningInbox, plannerWeekEnd, plannerWeekStart]
+  )
 
   const handleCreateManualTask = async () => {
     if (!manualTaskTitle.trim()) {
@@ -3122,6 +3459,97 @@ export default function WeeklyPlannerPage() {
     </div>
   )
 
+  const renderPlanningTaskCard = (task: Task) => {
+    const planned = isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)
+    const note = task.ga_note_origin_id ? planningNoteById.get(task.ga_note_origin_id) : null
+    const project = task.project_id ? planningProjectById.get(task.project_id) : null
+    const dept = task.department_id ? planningDepartmentById.get(task.department_id) : null
+    const source = taskSourceLabel(task)
+    const due = taskDateKey(task.due_date)
+
+    return (
+      <div key={task.id} className="rounded-lg border border-slate-200 bg-white p-3 shadow-sm">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-700">
+                {source}
+              </span>
+              {planned ? (
+                <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-700">
+                  Planned
+                </span>
+              ) : (
+                <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-amber-700">
+                  Unplanned
+                </span>
+              )}
+              <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600">
+                {formatPlannerStatusLabel(task.status)}
+              </span>
+            </div>
+            <div className="mt-1 line-clamp-2 text-sm font-semibold leading-snug text-slate-900" title={task.title}>
+              {task.title}
+            </div>
+          </div>
+        </div>
+
+        {note?.content ? (
+          <div className="mt-2 line-clamp-2 rounded-md border border-blue-100 bg-blue-50 px-2 py-1 text-xs text-blue-900">
+            Source note: {note.content}
+          </div>
+        ) : null}
+
+        <div className="mt-2 grid gap-1 text-xs text-slate-600">
+          <div>Assignee: {taskAssigneeLabel(task)}</div>
+          <div>Due: {due ? formatDate(due) : "Not scheduled"} {task.finish_period ? `(${task.finish_period})` : ""}</div>
+          {dept ? <div>Department: {formatDepartmentName(dept.name)}</div> : null}
+          {project ? <div className="truncate">Project: {projectLabel(project)}</div> : null}
+        </div>
+
+        <div className="mt-3 flex flex-wrap gap-2">
+          <Button size="sm" className="h-7 px-2 text-xs" onClick={() => openPlannerTaskDialog(task, planned ? "edit" : "plan")}>
+            {planned ? "Edit" : "Plan next week"}
+          </Button>
+          {planned ? (
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2 text-xs"
+              disabled={plannerTaskClearingId === task.id}
+              onClick={() => void clearTaskFromNextWeek(task)}
+            >
+              {plannerTaskClearingId === task.id ? "Removing..." : "Remove from plan"}
+            </Button>
+          ) : null}
+          {task.ga_note_origin_id ? (
+            <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
+              <Link href={`/ga-ka-notes${task.department_id ? `?department_id=${task.department_id}` : ""}`}>
+                Open source note
+              </Link>
+            </Button>
+          ) : null}
+        </div>
+      </div>
+    )
+  }
+
+  const renderPlanningSection = (title: string, subtitle: string, tasks: Task[]) => (
+    <div className="space-y-2">
+      <div>
+        <div className="text-sm font-semibold text-slate-900">{title} ({tasks.length})</div>
+        <div className="text-xs text-slate-500">{subtitle}</div>
+      </div>
+      {tasks.length ? (
+        <div className="space-y-2">{tasks.map(renderPlanningTaskCard)}</div>
+      ) : (
+        <div className="rounded-md border border-dashed border-slate-200 px-3 py-4 text-xs text-slate-500">
+          No tasks in this group.
+        </div>
+      )}
+    </div>
+  )
+
   return (
     <div className="space-y-4">
       <style dangerouslySetInnerHTML={{
@@ -4051,6 +4479,14 @@ export default function WeeklyPlannerPage() {
                                                       title={statusBadge.label}
                                                     >
                                                       {statusBadge.label}
+                                                    </span>
+                                                  )}
+                                                  {task.ga_note_origin_id && (
+                                                    <span
+                                                      className="inline-flex h-5 items-center justify-center rounded-full border border-blue-200 bg-blue-50 px-1.5 text-[10px] font-semibold text-blue-700"
+                                                      title="Created from GA/KA note"
+                                                    >
+                                                      GA/KA
                                                     </span>
                                                   )}
                                                   {(() => {

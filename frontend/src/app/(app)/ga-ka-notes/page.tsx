@@ -84,6 +84,46 @@ type NoteTaskInfo = {
   taskStatus: string | null
   taskStatuses: string[]
   taskTypeLabels: string[]
+  dueDate?: string | null
+  startDate?: string | null
+  finishPeriod?: TaskFinishPeriod | null
+}
+
+const pad2 = (value: number) => String(value).padStart(2, "0")
+const toISODate = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`
+
+function mondayISO(today = new Date()) {
+  const d = new Date(today)
+  const day = (d.getDay() + 6) % 7
+  d.setDate(d.getDate() - day)
+  return toISODate(d)
+}
+
+function shiftIsoDateByDays(iso: string, days: number) {
+  const [year, month, day] = iso.split("-").map(Number)
+  const date = new Date(year, month - 1, day)
+  date.setDate(date.getDate() + days)
+  return toISODate(date)
+}
+
+function taskDateKey(value?: string | null) {
+  if (!value) return null
+  if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10)
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return null
+  return toISODate(date)
+}
+
+function weekdayShort(value?: string | null) {
+  const key = taskDateKey(value)
+  if (!key) return null
+  const [year, month, day] = key.split("-").map(Number)
+  return new Date(year, month - 1, day).toLocaleDateString("en-US", { weekday: "short" })
+}
+
+function isDateInsideRange(value: string | null | undefined, start: string, end: string) {
+  const key = taskDateKey(value)
+  return Boolean(key && key >= start && key <= end)
 }
 
 function parseMarkedNoteContent(content?: string | null): {
@@ -732,6 +772,11 @@ export default function GaKaNotesPage() {
   const [deletingAttachmentIds, setDeletingAttachmentIds] = React.useState<string[]>([])
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
   const [creatingTask, setCreatingTask] = React.useState(false)
+  const [sendingNextWeekNoteIds, setSendingNextWeekNoteIds] = React.useState<string[]>([])
+  const [nextWeekDialogNoteId, setNextWeekDialogNoteId] = React.useState<string | null>(null)
+  const [nextWeekDepartmentId, setNextWeekDepartmentId] = React.useState("NONE")
+  const [nextWeekAssigneeIds, setNextWeekAssigneeIds] = React.useState<string[]>([])
+  const [nextWeekFinishPeriod, setNextWeekFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>("AM")
   const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("week")
   const [noteTypeFilter, setNoteTypeFilter] = React.useState<"all" | "GA" | "KA">("all")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
@@ -1002,6 +1047,9 @@ export default function GaKaNotesPage() {
         taskStatus: existing?.taskStatus ?? t.status ?? null,
         taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
         taskTypeLabels: mergeTaskTypeLabels(existing?.taskTypeLabels, getTaskTypeLabels(t)),
+        dueDate: existing?.dueDate ?? t.due_date ?? null,
+        startDate: existing?.startDate ?? t.start_date ?? null,
+        finishPeriod: existing?.finishPeriod ?? t.finish_period ?? null,
       })
     }
     setNoteTaskInfo(map)
@@ -1793,7 +1841,7 @@ export default function GaKaNotesPage() {
             const user = userMapById.get(id)
             return {
               id,
-              email: user?.email ?? null,
+              email: null,
               username: user?.username || null,
               full_name: user?.full_name || null,
               department_id: user?.department_id || null,
@@ -1806,7 +1854,7 @@ export default function GaKaNotesPage() {
           if (fallback) {
             assignees = [{
               id: fallback.id,
-              email: fallback.email ?? null,
+              email: null,
               username: fallback.username || null,
               full_name: fallback.full_name || null,
               department_id: fallback.department_id || null,
@@ -1823,6 +1871,9 @@ export default function GaKaNotesPage() {
           taskStatus: createdTask.status ?? null,
           taskStatuses: [createdTask.status ?? ""],
           taskTypeLabels: getTaskTypeLabels(createdTask),
+          dueDate: createdTask.due_date ?? null,
+          startDate: createdTask.start_date ?? null,
+          finishPeriod: createdTask.finish_period ?? null,
         })
         return next
       })
@@ -1832,6 +1883,171 @@ export default function GaKaNotesPage() {
       setCreatingTask(false)
     }
   }
+
+  const nextWeekStart = React.useMemo(() => shiftIsoDateByDays(mondayISO(), 7), [])
+  const nextWeekEnd = React.useMemo(() => shiftIsoDateByDays(nextWeekStart, 4), [nextWeekStart])
+
+  const notePlannedNextWeekLabel = React.useCallback(
+    (taskInfo?: NoteTaskInfo | null) => {
+      if (!taskInfo?.dueDate || !isDateInsideRange(taskInfo.dueDate, nextWeekStart, nextWeekEnd)) return null
+      const day = weekdayShort(taskInfo.dueDate)
+      const period = taskInfo.finishPeriod ? ` ${taskInfo.finishPeriod}` : ""
+      const assignee =
+        taskInfo.assignees[0]?.full_name ||
+        taskInfo.assignees[0]?.username ||
+        taskInfo.assignees[0]?.email ||
+        "Unassigned"
+      return `Already planned: ${day || "Next week"}${period} / ${assignee}`
+    },
+    [nextWeekEnd, nextWeekStart]
+  )
+
+  const openNextWeekDialog = React.useCallback(
+    (note: GaNote) => {
+      if (note.status === "CLOSED") return
+      const taskInfo = noteTaskInfo.get(note.id) || null
+      const noteProject = note.project_id ? projects.find((project) => project.id === note.project_id) || null : null
+      const defaultDepartmentId =
+        taskInfo?.taskDepartmentId ||
+        note.department_id ||
+        noteProject?.department_id ||
+        "NONE"
+      const defaultAssigneeIds = (taskInfo?.assignees || [])
+        .map((assignee) => assignee.id)
+        .filter((id): id is string => Boolean(id))
+
+      setNextWeekDialogNoteId(note.id)
+      setNextWeekDepartmentId(defaultDepartmentId)
+      setNextWeekAssigneeIds(defaultAssigneeIds)
+      setNextWeekFinishPeriod(taskInfo?.finishPeriod || "AM")
+    },
+    [noteTaskInfo, projects]
+  )
+
+  const closeNextWeekDialog = React.useCallback(() => {
+    setNextWeekDialogNoteId(null)
+    setNextWeekDepartmentId("NONE")
+    setNextWeekAssigneeIds([])
+    setNextWeekFinishPeriod("AM")
+  }, [])
+
+  const sendNoteToNextWeek = React.useCallback(
+    async (note: GaNote) => {
+      if (note.status === "CLOSED") return
+      const taskInfo = noteTaskInfo.get(note.id) || null
+      const existingTaskId = taskInfo?.taskId || null
+      const nextWeekIso = new Date(nextWeekStart).toISOString()
+      const selectedDepartmentId = nextWeekDepartmentId === "NONE" ? null : nextWeekDepartmentId
+      const selectedFinishPeriod = nextWeekFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : nextWeekFinishPeriod
+
+      setSendingNextWeekNoteIds((prev) => (prev.includes(note.id) ? prev : [...prev, note.id]))
+      try {
+        if (existingTaskId) {
+          const res = await apiFetch(`/tasks/${existingTaskId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              start_date: nextWeekIso,
+              due_date: nextWeekIso,
+              finish_period: selectedFinishPeriod,
+              department_id: selectedDepartmentId,
+              assigned_to: nextWeekAssigneeIds[0] ?? null,
+              assignees: nextWeekAssigneeIds,
+            }),
+          })
+          if (!res.ok) {
+            toast.error("Failed to send linked task to next week")
+            return
+          }
+          const updatedTask = (await res.json()) as Task
+          setNoteTaskInfo((prev) => {
+            const next = new Map(prev)
+            const existing = next.get(note.id)
+            next.set(note.id, {
+              assignees: updatedTask.assignees?.length ? updatedTask.assignees : existing?.assignees ?? [],
+              description: updatedTask.description ?? existing?.description ?? null,
+              taskId: updatedTask.id,
+              taskDepartmentId: updatedTask.department_id ?? existing?.taskDepartmentId ?? null,
+              taskProjectId: updatedTask.project_id ?? existing?.taskProjectId ?? null,
+              taskStatus: updatedTask.status ?? existing?.taskStatus ?? null,
+              taskStatuses: [updatedTask.status ?? ""],
+              taskTypeLabels: getTaskTypeLabels(updatedTask),
+              dueDate: updatedTask.due_date ?? null,
+              startDate: updatedTask.start_date ?? null,
+              finishPeriod: updatedTask.finish_period ?? null,
+            })
+            return next
+          })
+          toast.success("Linked task sent to next week")
+          closeNextWeekDialog()
+          return
+        }
+
+        const noteProject = note.project_id ? projects.find((project) => project.id === note.project_id) || null : null
+        const projectDepartmentId = noteProject?.department_id || null
+        const taskDepartmentId = note.project_id ? (selectedDepartmentId || projectDepartmentId) : selectedDepartmentId
+
+        const taskRes = await apiFetch("/tasks", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            title: noteToTaskTitle(note.content || ""),
+            description: note.content || null,
+            status: "TODO",
+            priority: NOTE_TO_TASK_PRIORITY[(note.priority as NotePriority | null) || "NONE"],
+            finish_period: selectedFinishPeriod,
+            start_date: nextWeekIso,
+            due_date: nextWeekIso,
+            ga_note_origin_id: note.id,
+            department_id: taskDepartmentId,
+            assigned_to: nextWeekAssigneeIds[0] ?? null,
+            assignees: nextWeekAssigneeIds,
+            project_id: note.project_id ?? null,
+          }),
+        })
+        if (!taskRes.ok) {
+          let detail = "Failed to create next week task"
+          try {
+            const payload = (await taskRes.json()) as { detail?: string }
+            if (payload?.detail) detail = payload.detail
+          } catch {
+            // Keep fallback.
+          }
+          toast.error(detail)
+          return
+        }
+        const createdTask = (await taskRes.json()) as Task
+        await apiFetch(`/ga-notes/${note.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ is_converted_to_task: true }),
+        })
+        setNotes((prev) => prev.map((item) => (item.id === note.id ? { ...item, is_converted_to_task: true } : item)))
+        setNoteTaskInfo((prev) => {
+          const next = new Map(prev)
+          next.set(note.id, {
+            assignees: createdTask.assignees || [],
+            description: createdTask.description ?? null,
+            taskId: createdTask.id,
+            taskDepartmentId: createdTask.department_id ?? null,
+            taskProjectId: createdTask.project_id ?? null,
+            taskStatus: createdTask.status ?? null,
+            taskStatuses: [createdTask.status ?? ""],
+            taskTypeLabels: getTaskTypeLabels(createdTask),
+            dueDate: createdTask.due_date ?? null,
+            startDate: createdTask.start_date ?? null,
+            finishPeriod: createdTask.finish_period ?? null,
+          })
+          return next
+        })
+        toast.success("Note sent to next week")
+        closeNextWeekDialog()
+      } finally {
+        setSendingNextWeekNoteIds((prev) => prev.filter((id) => id !== note.id))
+      }
+    },
+    [apiFetch, closeNextWeekDialog, nextWeekAssigneeIds, nextWeekDepartmentId, nextWeekFinishPeriod, nextWeekStart, noteTaskInfo, projects]
+  )
 
   const closeNote = async (id: string) => {
     const res = await apiFetch(`/ga-notes/${id}`, {
@@ -1930,6 +2146,18 @@ export default function GaKaNotesPage() {
 
   // Project list is used only in the task creation dialog (filtered separately).
   const taskDialogNote = taskDialogNoteId ? notes.find((n) => n.id === taskDialogNoteId) || null : null
+  const nextWeekDialogNote = nextWeekDialogNoteId ? notes.find((n) => n.id === nextWeekDialogNoteId) || null : null
+  const nextWeekDialogProject = nextWeekDialogNote?.project_id
+    ? projects.find((project) => project.id === nextWeekDialogNote.project_id) || null
+    : null
+  const nextWeekProjectDepartment = nextWeekDialogProject?.department_id
+    ? departments.find((dept) => dept.id === nextWeekDialogProject.department_id) || null
+    : null
+  const nextWeekDepartmentLocked = Boolean(nextWeekDialogProject?.department_id)
+  const nextWeekAssigneeOptions = React.useMemo(() => {
+    if (nextWeekDepartmentId === "NONE") return users
+    return users.filter((person) => person.department_id === nextWeekDepartmentId)
+  }, [nextWeekDepartmentId, users])
   const taskDepartmentLocked = false
   const effectiveTaskDepartmentIds = React.useMemo(() => {
     if (taskDepartmentIds.length > 0) return taskDepartmentIds
@@ -2565,14 +2793,16 @@ export default function GaKaNotesPage() {
                 
                 // Ensure NR column is bold and wraps
                 clonedTable.querySelectorAll('tbody td:first-child').forEach((td) => {
-                  td.style.fontWeight = 'bold'
-                  td.style.whiteSpace = 'normal'
+                  const cell = td as HTMLElement
+                  cell.style.fontWeight = 'bold'
+                  cell.style.whiteSpace = 'normal'
                 })
                 
                 // Remove fixed widths from table and cells to allow auto-sizing, except SHENIMI column
                 clonedTable.style.width = 'auto'
                 clonedTable.style.minWidth = 'auto'
-                clonedTable.querySelectorAll('th, td').forEach((cell, index) => {
+                clonedTable.querySelectorAll('th, td').forEach((item) => {
+                  const cell = item as HTMLTableCellElement
                   // Keep SHENIMI column (2nd column) with fixed width
                   const isShenimiColumn = cell.cellIndex === 1 // 0-indexed, so 1 is 2nd column
                   if (!isShenimiColumn) {
@@ -2818,6 +3048,7 @@ export default function GaKaNotesPage() {
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
                         : normalizeTaskStatus(taskInfo?.taskStatus)
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
+                    const plannedNextWeekLabel = notePlannedNextWeekLabel(taskInfo)
                     const taskTypeLabels = taskInfo?.taskTypeLabels ?? []
                     const canAddAttachments = !isClosed && aggregatedStatus !== "DONE"
                     const editDisabled = isClosed
@@ -3182,18 +3413,42 @@ export default function GaKaNotesPage() {
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {hasTask ? (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center">
-                                Task Created
-                              </Badge>
+                              <div className="flex flex-col items-center gap-1">
+                                <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center text-center">
+                                  {plannedNextWeekLabel || "Task Created"}
+                                </Badge>
+                                {!plannedNextWeekLabel && note.status !== "CLOSED" ? (
+                                  <Button
+                                    variant="outline"
+                                    size="sm"
+                                    className="h-7 px-2 text-[10px] border-blue-200 text-blue-700 hover:bg-blue-50"
+                                    disabled={sendingNextWeekNoteIds.includes(note.id)}
+                                    onClick={() => openNextWeekDialog(note)}
+                                  >
+                                    {sendingNextWeekNoteIds.includes(note.id) ? "Sending..." : "Send Next Week"}
+                                  </Button>
+                                ) : null}
+                              </div>
                             ) : canCreateTask ? (
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                className="h-7 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
-                                onClick={() => openTaskDialog(note)}
-                              >
-                                Create Task
-                              </Button>
+                              <div className="flex flex-col items-center gap-1">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 text-xs border-indigo-200 text-indigo-700 hover:bg-indigo-50"
+                                  onClick={() => openTaskDialog(note)}
+                                >
+                                  Create Task
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="h-7 px-2 text-[10px] border-blue-200 text-blue-700 hover:bg-blue-50"
+                                  disabled={sendingNextWeekNoteIds.includes(note.id)}
+                                  onClick={() => openNextWeekDialog(note)}
+                                >
+                                  {sendingNextWeekNoteIds.includes(note.id) ? "Sending..." : "Send Next Week"}
+                                </Button>
+                              </div>
                             ) : showManualOnly ? (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-slate-50 text-slate-600 border-slate-200 h-7 flex items-center">
                                 Manual only
@@ -3467,6 +3722,162 @@ export default function GaKaNotesPage() {
           {previewUrl ? (
             <div className="flex max-h-[70vh] items-center justify-center overflow-hidden rounded border border-slate-200 bg-white p-2">
               <img src={previewUrl} alt={previewTitle || "Attachment preview"} className="max-h-[66vh] w-auto object-contain" />
+            </div>
+          ) : null}
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={Boolean(nextWeekDialogNoteId)}
+        onOpenChange={(open) => {
+          if (!open && !sendingNextWeekNoteIds.includes(nextWeekDialogNoteId || "")) {
+            closeNextWeekDialog()
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Send note to next week</DialogTitle>
+          </DialogHeader>
+          {nextWeekDialogNote ? (
+            <div className="space-y-4">
+              <div className="rounded-md border bg-slate-50 p-3">
+                <div className="text-xs font-semibold uppercase text-slate-500">Note</div>
+                <div className="mt-1 max-h-28 overflow-y-auto whitespace-pre-wrap text-sm text-slate-800">
+                  {renderMarkedNoteContent(nextWeekDialogNote.content)}
+                </div>
+              </div>
+
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Department (optional)</Label>
+                  <Select
+                    value={nextWeekDepartmentId}
+                    disabled={nextWeekDepartmentLocked}
+                    onValueChange={(value) => {
+                      setNextWeekDepartmentId(value)
+                      if (value !== "NONE") {
+                        setNextWeekAssigneeIds((prev) =>
+                          prev.filter((id) => users.find((person) => person.id === id)?.department_id === value)
+                        )
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="No department" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="NONE">No department</SelectItem>
+                      {departments.map((dept) => (
+                        <SelectItem key={dept.id} value={dept.id}>
+                          {formatDepartmentName(dept.name)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  {nextWeekDepartmentLocked ? (
+                    <p className="text-xs text-muted-foreground">
+                      Project note uses project department{nextWeekProjectDepartment ? `: ${formatDepartmentName(nextWeekProjectDepartment.name)}` : "."}
+                    </p>
+                  ) : (
+                    <p className="text-xs text-muted-foreground">You can send this without choosing a department.</p>
+                  )}
+                </div>
+
+                <div className="space-y-2">
+                  <Label>Finish by</Label>
+                  <Select
+                    value={nextWeekFinishPeriod}
+                    onValueChange={(value) => setNextWeekFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="None (all day)" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={FINISH_PERIOD_NONE_VALUE}>None (all day)</SelectItem>
+                      {FINISH_PERIOD_OPTIONS.map((value) => (
+                        <SelectItem key={value} value={value}>
+                          {value}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label>Assign person (optional)</Label>
+                <div className="rounded-md border bg-white p-2">
+                  <div className="mb-2 flex flex-wrap gap-2">
+                    {nextWeekAssigneeIds.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">No assignee selected.</span>
+                    ) : (
+                      nextWeekAssigneeIds.map((id) => {
+                        const person = users.find((u) => u.id === id)
+                        const label = person?.full_name || person?.username || id
+                        return (
+                          <button
+                            key={id}
+                            type="button"
+                            className="flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs"
+                            onClick={() => setNextWeekAssigneeIds((prev) => prev.filter((item) => item !== id))}
+                          >
+                            {label}
+                            <span className="text-slate-500">x</span>
+                          </button>
+                        )
+                      })
+                    )}
+                  </div>
+                  <Select
+                    value="__next_week_assignee_picker__"
+                    disabled={nextWeekAssigneeOptions.length === 0}
+                    onValueChange={(value) => {
+                      if (value === "__next_week_assignee_picker__") return
+                      setNextWeekAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                      const person = users.find((u) => u.id === value)
+                      if (nextWeekDepartmentId === "NONE" && person?.department_id) {
+                        setNextWeekDepartmentId(person.department_id)
+                      }
+                    }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Add assignee" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="__next_week_assignee_picker__" disabled>
+                        Add assignee
+                      </SelectItem>
+                      {nextWeekAssigneeOptions
+                        .filter((person) => person.id && !nextWeekAssigneeIds.includes(person.id))
+                        .map((person) => (
+                          <SelectItem key={person.id} value={person.id}>
+                            {person.full_name || person.username || person.id}
+                          </SelectItem>
+                        ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  If you leave this empty, the task is sent to next week as unassigned.
+                </p>
+              </div>
+
+              <div className="flex justify-end gap-2">
+                <Button
+                  variant="outline"
+                  disabled={sendingNextWeekNoteIds.includes(nextWeekDialogNote.id)}
+                  onClick={closeNextWeekDialog}
+                >
+                  Cancel
+                </Button>
+                <Button
+                  disabled={sendingNextWeekNoteIds.includes(nextWeekDialogNote.id)}
+                  onClick={() => void sendNoteToNextWeek(nextWeekDialogNote)}
+                >
+                  {sendingNextWeekNoteIds.includes(nextWeekDialogNote.id) ? "Sending..." : "Send to next week"}
+                </Button>
+              </div>
             </div>
           ) : null}
         </DialogContent>

@@ -12,6 +12,7 @@ import {
   CalendarDays, 
   CalendarRange, 
   BarChart3, 
+  ListTodo,
   Users, 
   Settings,
   Layers,
@@ -111,6 +112,11 @@ const items: NavItem[] = [
     href: "/weekly-planner", 
     label: "Weekly Planner", 
     icon: CalendarDays 
+  },
+  {
+    href: "/open-tasks",
+    label: "Open Tasks",
+    icon: ListTodo,
   },
   { 
     href: "/monthly-planner", 
@@ -331,4 +337,3 @@ export function Sidebar({ role }: { role: UserRole }) {
     </>
   )
 }
-

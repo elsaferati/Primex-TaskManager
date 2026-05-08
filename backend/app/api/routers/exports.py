@@ -1997,6 +1997,360 @@ async def export_all_tasks_report_xlsx(
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
+
+def _open_task_source_label(task: Task) -> str:
+    if task.ga_note_origin_id:
+        return "GA/KA"
+    if task.system_template_origin_id:
+        return "SYSTEM"
+    if task.project_id:
+        return "PROJECT"
+    if task.is_bllok:
+        return "BLL"
+    if task.is_r1:
+        return "R1"
+    if task.is_1h_report:
+        return "1H"
+    if task.is_personal:
+        return "P:"
+    return "FAST"
+
+
+def _task_date_key(value: datetime | date | None) -> date | None:
+    if value is None:
+        return None
+    if isinstance(value, datetime):
+        return value.date()
+    return value
+
+
+def _open_task_overlaps_week(task: Task, week_start: date, week_end: date) -> bool:
+    due = _task_date_key(task.due_date)
+    if due is None:
+        return False
+    start_candidate = _task_date_key(task.start_date)
+    start = start_candidate if start_candidate is not None and start_candidate <= due else due
+    return start <= week_end and due >= week_start
+
+
+def _open_task_group(task: Task, this_week_start: date, this_week_end: date, next_week_start: date, next_week_end: date) -> str:
+    if _open_task_overlaps_week(task, this_week_start, this_week_end):
+        return "PLANNED THIS WEEK"
+    if _open_task_overlaps_week(task, next_week_start, next_week_end):
+        return "PLANNED NEXT WEEK"
+    return "UNPLANNED"
+
+
+@router.get("/open-tasks.xlsx")
+async def export_open_tasks_xlsx(
+    department_id: uuid.UUID | None = Query(default=None),
+    user_id: uuid.UUID | None = Query(default=None),
+    filter: str = Query(default="all"),
+    search: str | None = Query(default=None),
+    this_week_start: date | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+
+    monday = this_week_start or (datetime.now(timezone.utc).date() - timedelta(days=datetime.now(timezone.utc).date().weekday()))
+    this_week_end = monday + timedelta(days=4)
+    next_week_start = monday + timedelta(days=7)
+    next_week_end = next_week_start + timedelta(days=4)
+
+    task_stmt = (
+        select(Task)
+        .outerjoin(Project, Task.project_id == Project.id)
+        .where(Task.is_active.is_(True))
+        .where(func.upper(Task.status) != TaskStatusEnum.DONE.value)
+        .where(or_(Task.project_id.is_(None), Project.is_template.is_(False)))
+        .options(selectinload(Task.assignees))
+        .order_by(Task.due_date.asc().nulls_last(), Task.created_at.desc())
+    )
+
+    role_value = getattr(user.role, "value", str(user.role)).upper()
+    if role_value == UserRole.STAFF.value:
+        if not user.department_id:
+            tasks: list[Task] = []
+        else:
+            if department_id and department_id != user.department_id:
+                ensure_department_access(user, department_id)
+            task_stmt = task_stmt.where(Task.department_id == user.department_id)
+            tasks = (await db.execute(task_stmt)).scalars().unique().all()
+    else:
+        if department_id:
+            ensure_department_access(user, department_id)
+            task_stmt = task_stmt.where(Task.department_id == department_id)
+        tasks = (await db.execute(task_stmt)).scalars().unique().all()
+
+    project_ids = {task.project_id for task in tasks if task.project_id}
+    department_ids = {task.department_id for task in tasks if task.department_id}
+    ga_note_ids = {task.ga_note_origin_id for task in tasks if task.ga_note_origin_id}
+    assignee_user_ids: set[uuid.UUID] = set()
+    for task in tasks:
+        if task.assigned_to:
+            assignee_user_ids.add(task.assigned_to)
+        for assignee in task.assignees or []:
+            assignee_user_ids.add(assignee.user_id)
+
+    project_map: dict[uuid.UUID, Project] = {}
+    if project_ids:
+        project_map = {
+            project.id: project
+            for project in (await db.execute(select(Project).where(Project.id.in_(project_ids)))).scalars().all()
+        }
+
+    department_map: dict[uuid.UUID, Department] = {}
+    if department_ids:
+        department_map = {
+            department.id: department
+            for department in (await db.execute(select(Department).where(Department.id.in_(department_ids)))).scalars().all()
+        }
+
+    ga_note_map: dict[uuid.UUID, GaNote] = {}
+    if ga_note_ids:
+        ga_note_map = {
+            note.id: note
+            for note in (await db.execute(select(GaNote).where(GaNote.id.in_(ga_note_ids)))).scalars().all()
+        }
+
+    user_map: dict[uuid.UUID, User] = {}
+    if assignee_user_ids:
+        user_map = {
+            assignee.id: assignee
+            for assignee in (await db.execute(select(User).where(User.id.in_(assignee_user_ids)))).scalars().all()
+        }
+
+    def assignee_ids_for(task: Task) -> list[uuid.UUID]:
+        ids: list[uuid.UUID] = []
+        if task.assigned_to:
+            ids.append(task.assigned_to)
+        for assignee in task.assignees or []:
+            if assignee.user_id not in ids:
+                ids.append(assignee.user_id)
+        return ids
+
+    def assignee_label(task: Task) -> str:
+        labels: list[str] = []
+        for assignee_id in assignee_ids_for(task):
+            assignee = user_map.get(assignee_id)
+            if assignee:
+                labels.append(assignee.full_name or assignee.username or str(assignee_id))
+            else:
+                labels.append(str(assignee_id))
+        return ", ".join(labels) if labels else "Unassigned"
+
+    normalized_filter = (filter or "all").strip().lower()
+    normalized_search = (search or "").strip().lower()
+    filtered_tasks: list[Task] = []
+    for task in tasks:
+        planned_this_week = _open_task_overlaps_week(task, monday, this_week_end)
+        planned_next_week = _open_task_overlaps_week(task, next_week_start, next_week_end)
+        source = _open_task_source_label(task)
+        if user_id and user_id not in assignee_ids_for(task):
+            continue
+        if normalized_filter == "unplanned" and (planned_this_week or planned_next_week):
+            continue
+        if normalized_filter == "this_week" and not planned_this_week:
+            continue
+        if normalized_filter == "next_week" and not planned_next_week:
+            continue
+        if normalized_filter == "ga" and not task.ga_note_origin_id:
+            continue
+        if normalized_filter == "project" and not task.project_id:
+            continue
+        if normalized_filter == "fast" and not (not task.project_id and not task.system_template_origin_id):
+            continue
+        if normalized_search:
+            project = project_map.get(task.project_id) if task.project_id else None
+            note = ga_note_map.get(task.ga_note_origin_id) if task.ga_note_origin_id else None
+            haystack = " ".join(
+                [
+                    task.title or "",
+                    task.description or "",
+                    task.status or "",
+                    source,
+                    assignee_label(task),
+                    project.title if project else "",
+                    note.content if note else "",
+                ]
+            ).lower()
+            if normalized_search not in haystack:
+                continue
+        filtered_tasks.append(task)
+
+    group_order = {"UNPLANNED": 0, "PLANNED THIS WEEK": 1, "PLANNED NEXT WEEK": 2}
+    export_rows: list[tuple[str, Task]] = []
+    for task in filtered_tasks:
+        planned_this_week = _open_task_overlaps_week(task, monday, this_week_end)
+        planned_next_week = _open_task_overlaps_week(task, next_week_start, next_week_end)
+        if not planned_this_week and not planned_next_week:
+            export_rows.append(("UNPLANNED", task))
+        if planned_this_week:
+            export_rows.append(("PLANNED THIS WEEK", task))
+        if planned_next_week:
+            export_rows.append(("PLANNED NEXT WEEK", task))
+
+    export_rows.sort(
+        key=lambda item: (
+            group_order.get(item[0], 9),
+            _task_date_key(item[1].due_date) or date.max,
+            (item[1].title or "").lower(),
+        )
+    )
+
+    headers = [
+        "NR",
+        "GROUP",
+        "SOURCE",
+        "DEP",
+        "ASSIGNEE",
+        "AM/PM",
+        "START DATE",
+        "DUE DATE",
+        "STATUS",
+        "PRIORITY",
+        "TITLE",
+        "PROJECT",
+        "SOURCE NOTE",
+        "DESCRIPTION",
+    ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "OPEN TASKS"[:31]
+    last_col = len(headers)
+
+    title = (
+        f"OPEN TASKS - THIS WEEK {_format_excel_date(monday)} - {_format_excel_date(this_week_end)} / "
+        f"NEXT WEEK {_format_excel_date(next_week_start)} - {_format_excel_date(next_week_end)}"
+    )
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    header_row = 4
+    data_row = 5
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    for col_idx, header in enumerate(headers, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=header)
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        cell.number_format = "@"
+
+    for idx, (group, task) in enumerate(export_rows, start=1):
+        project = project_map.get(task.project_id) if task.project_id else None
+        department = department_map.get(task.department_id) if task.department_id else None
+        note = ga_note_map.get(task.ga_note_origin_id) if task.ga_note_origin_id else None
+        values = [
+            idx,
+            group,
+            _open_task_source_label(task),
+            _department_short(_display_department_name(department.name if department else "")) if department else "",
+            assignee_label(task),
+            task.finish_period or "",
+            _format_excel_datetime(task.start_date),
+            _format_excel_datetime(task.due_date),
+            task.status or "",
+            (task.priority or "").upper(),
+            task.title or "",
+            project.title if project else "",
+            _strip_html_keep_breaks(note.content if note else ""),
+            _strip_html_keep_breaks(task.description),
+        ]
+        for col_idx, value in enumerate(values, start=1):
+            cell = ws.cell(row=data_row, column=col_idx, value=value)
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            if col_idx == 1:
+                cell.font = Font(bold=True)
+        data_row += 1
+
+    last_row = max(header_row, data_row - 1)
+    widths = {
+        1: 5,
+        2: 20,
+        3: 10,
+        4: 9,
+        5: 24,
+        6: 8,
+        7: 12,
+        8: 12,
+        9: 15,
+        10: 10,
+        11: 44,
+        12: 34,
+        13: 44,
+        14: 44,
+    }
+    for col_idx in range(1, last_col + 1):
+        ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
+
+    ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    ws.freeze_panes = "B5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    user_initials = _initials(user.full_name or user.username or "") or "____"
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials}"
+    ws.evenHeader.right.text = ws.oddHeader.right.text
+    ws.evenFooter.center.text = ws.oddFooter.center.text
+    ws.evenFooter.right.text = ws.oddFooter.right.text
+    ws.firstHeader.right.text = ws.oddHeader.right.text
+    ws.firstFooter.center.text = ws.oddFooter.center.text
+    ws.firstFooter.right.text = ws.oddFooter.right.text
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    for r_idx in range(header_row, last_row + 1):
+        max_lines = 1
+        for c_idx in range(1, last_col + 1):
+            cell = ws.cell(row=r_idx, column=c_idx)
+            is_header = r_idx == header_row
+            is_first_col = c_idx == 1
+            is_last_col = c_idx == last_col
+            is_last_row = r_idx == last_row
+            cell.border = Border(
+                left=thick if is_first_col or is_header else thin,
+                right=thick if is_last_col or is_header else thin,
+                top=thick if is_header else thin,
+                bottom=thick if is_header or is_last_row else thin,
+            )
+            value = cell.value
+            if r_idx > header_row and value is not None:
+                max_lines = max(max_lines, str(value).count("\n") + 1)
+        if r_idx > header_row:
+            ws.row_dimensions[r_idx].height = max(18, min(180, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    filename_date = f"{monday.day:02d}_{monday.month:02d}_{str(monday.year)[-2:]}"
+    filename = f"OPEN_TASKS_{filename_date}_EF ({user_initials}).xlsx"
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
 @router.post("/common-view.xlsx")
 async def export_common_view_xlsx(
     payload: CommonViewExportIn,
