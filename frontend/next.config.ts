@@ -1,12 +1,12 @@
 import type { NextConfig } from "next";
 
-const nextConfig = {
+const nextConfig: NextConfig = {
   typescript: {
-    ignoreBuildErrors: true, // Kjo është jetike!
+    ignoreBuildErrors: true,
   },
-  eslint: {
-    ignoreDuringBuilds: true,
-  }
+  turbopack: {
+    root: process.cwd(),
+  },
 };
- 
+
 export default nextConfig;

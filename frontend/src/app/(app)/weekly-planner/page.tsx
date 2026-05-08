@@ -914,6 +914,20 @@ export default function WeeklyPlannerPage() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [manualTaskDepartmentId, users])
 
+  const plannerTaskUsers = React.useMemo(() => {
+    const departmentFilter = plannerTask?.department_id ?? null
+    const filtered = departmentFilter
+      ? users.filter((u) => u.department_id === departmentFilter || plannerTaskAssigneeIds.includes(u.id))
+      : users
+    return filtered
+      .map((u) => ({
+        id: u.id,
+        name: u.full_name || u.username || "",
+      }))
+      .filter((u) => u.name.trim().length > 0)
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [plannerTask?.department_id, plannerTaskAssigneeIds, users])
+
   const availableDepartments = React.useMemo(() => {
     return departments.slice().sort((a, b) => a.name.localeCompare(b.name))
   }, [departments])
@@ -934,7 +948,7 @@ export default function WeeklyPlannerPage() {
     const map = new Map<string, Map<string, WeeklyPlannerBlock[]>>()
     for (const block of pvFestBlocks) {
       if (!block.user_id || !block.start_date || !block.end_date) continue
-      let current = fromISODate(block.start_date)
+      const current = fromISODate(block.start_date)
       const end = fromISODate(block.end_date)
       while (current <= end) {
         const iso = toISODate(current)
@@ -4092,6 +4106,118 @@ export default function WeeklyPlannerPage() {
               </Button>
               <Button onClick={handleCreateManualTask} disabled={isCreatingManualTask}>
                 {isCreatingManualTask ? "Adding..." : "Add Task"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog
+        open={plannerTaskDialogOpen}
+        onOpenChange={(open) => {
+          setPlannerTaskDialogOpen(open)
+          if (!open) setPlannerTask(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-[520px]">
+          <DialogHeader>
+            <DialogTitle>{plannerTaskDialogMode === "plan" ? "Plan Task" : "Edit Task Plan"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4">
+            {plannerTask ? (
+              <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                <div className="line-clamp-2 text-sm font-semibold text-slate-900">{plannerTask.title}</div>
+              </div>
+            ) : null}
+
+            <div className="grid gap-3 md:grid-cols-2">
+              <div className="space-y-2">
+                <Label>Start date</Label>
+                <Input
+                  type="date"
+                  value={plannerTaskStartDate}
+                  onChange={(event) => setPlannerTaskStartDate(event.target.value)}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Due date</Label>
+                <Input
+                  type="date"
+                  value={plannerTaskDueDate}
+                  onChange={(event) => setPlannerTaskDueDate(event.target.value)}
+                />
+              </div>
+            </div>
+
+            <div className="space-y-2">
+              <Label>AM / PM</Label>
+              <Select
+                value={plannerTaskFinishPeriod}
+                onValueChange={(value) => setPlannerTaskFinishPeriod(value as "AM" | "PM" | "__none__")}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="AM/PM" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="AM">AM</SelectItem>
+                  <SelectItem value="PM">PM</SelectItem>
+                  <SelectItem value="__none__">Both</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label>Members</Label>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" className="w-full justify-between">
+                    {plannerTaskAssigneeIds.length > 0 ? `Members (${plannerTaskAssigneeIds.length})` : "Select members"}
+                    <ChevronDown className="h-4 w-4 opacity-50" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent className="w-64 max-h-64 z-[120]">
+                  <DropdownMenuLabel>Members</DropdownMenuLabel>
+                  <DropdownMenuSeparator />
+                  {plannerTaskUsers.map((entry) => (
+                    <DropdownMenuCheckboxItem
+                      key={entry.id}
+                      checked={plannerTaskAssigneeIds.includes(entry.id)}
+                      onCheckedChange={(checked) => {
+                        if (checked) {
+                          setPlannerTaskAssigneeIds([...plannerTaskAssigneeIds, entry.id])
+                        } else {
+                          setPlannerTaskAssigneeIds(plannerTaskAssigneeIds.filter((id) => id !== entry.id))
+                        }
+                      }}
+                    >
+                      {entry.name}
+                    </DropdownMenuCheckboxItem>
+                  ))}
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    onSelect={(event) => {
+                      event.preventDefault()
+                      setPlannerTaskAssigneeIds([])
+                    }}
+                  >
+                    Clear members
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            </div>
+
+            <div className="flex justify-end gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setPlannerTaskDialogOpen(false)
+                  setPlannerTask(null)
+                }}
+              >
+                Cancel
+              </Button>
+              <Button onClick={() => void savePlannerTask()} disabled={plannerTaskSaving}>
+                {plannerTaskSaving ? "Saving..." : "Save"}
               </Button>
             </div>
           </div>

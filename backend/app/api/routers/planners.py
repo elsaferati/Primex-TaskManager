@@ -2026,12 +2026,29 @@ async def weekly_table_planner(
             return False
         return start <= working_days[-1] and end >= working_days[0]
 
+    # Replanned tasks may move out of this week, but any per-day progress rows
+    # are still historical work that should remain visible on the days it happened.
+    progress_days_by_task: dict[uuid.UUID, set[date]] = {}
+    all_task_ids = [t.id for t in all_tasks]
+    if all_task_ids:
+        progress_day_rows = (
+            await db.execute(
+                select(TaskDailyProgress.task_id, TaskDailyProgress.day_date)
+                .where(TaskDailyProgress.task_id.in_(all_task_ids))
+                .where(TaskDailyProgress.day_date >= working_days[0])
+                .where(TaskDailyProgress.day_date <= working_days[-1])
+            )
+        ).all()
+        for progress_task_id, progress_day in progress_day_rows:
+            progress_days_by_task.setdefault(progress_task_id, set()).add(progress_day)
+
     week_tasks: list[Task] = []
     task_project_ids: set[uuid.UUID] = set()
     for t in all_tasks:
         if t.system_template_origin_id is not None:
             continue
-        if not _overlaps_week(t):
+        has_progress_this_week = bool(progress_days_by_task.get(t.id))
+        if not _overlaps_week(t) and not has_progress_this_week:
             continue
         week_tasks.append(t)
         if t.project_id is not None:
@@ -2481,13 +2498,16 @@ async def weekly_table_planner(
                     if t.id not in user_task_ids:
                         continue
                     start, end = _task_active_range(t)
-                    if start is None or end is None:
+                    has_progress_for_day = day_date in progress_days_by_task.get(t.id, set())
+                    if (start is None or end is None) and not has_progress_for_day:
                         continue
                     
                     # DEBUG: Log day filtering for LEA BLLOK TASK
                     if t.title and "LEA BLLOK" in t.title.upper():
                         logger = logging.getLogger(__name__)
-                        appears_today = start <= day_date <= end
+                        appears_today = has_progress_for_day or (
+                            start is not None and end is not None and start <= day_date <= end
+                        )
                         logger.warning(
                             f"[DAY_FILTER DEBUG] task_id={t.id}, day={day_date}: "
                             f"range=({start}, {end}), "
@@ -2495,7 +2515,7 @@ async def weekly_table_planner(
                             f"check: {start} <= {day_date} <= {end}"
                         )
                     
-                    if start <= day_date <= end:
+                    if has_progress_for_day or (start is not None and end is not None and start <= day_date <= end):
                         user_tasks.append(t)
                 
                 # Add projects with due dates for this user

@@ -240,6 +240,49 @@ def _user_to_assignee(user: User) -> TaskAssigneeOut:
     )
 
 
+def _payload_has_field(payload: BaseModel, field_name: str) -> bool:
+    if hasattr(payload, "model_fields_set"):
+        return field_name in payload.model_fields_set  # type: ignore[attr-defined]
+    if hasattr(payload, "__fields_set__"):
+        return field_name in payload.__fields_set__  # type: ignore[attr-defined]
+    return False
+
+
+def _iter_workdays(start_day: date, end_day: date) -> list[date]:
+    if end_day < start_day:
+        return []
+    days: list[date] = []
+    current = start_day
+    while current <= end_day:
+        if current.weekday() < 5:
+            days.append(current)
+        current += timedelta(days=1)
+    return days
+
+
+def _planner_replan_exclusion_days(
+    *,
+    old_start: date | None,
+    old_end: date | None,
+    new_start: date | None,
+    progress_days: set[date],
+    today: date,
+) -> list[date]:
+    if old_start is None or old_end is None or new_start is None:
+        return []
+    if old_end < old_start or new_start <= old_start:
+        return []
+
+    latest_worked_day = max(
+        (day for day in progress_days if old_start <= day <= old_end and day < new_start),
+        default=None,
+    )
+    gap_start = (latest_worked_day + timedelta(days=1)) if latest_worked_day is not None else today
+    gap_start = max(gap_start, old_start)
+    gap_end = min(old_end, new_start - timedelta(days=1))
+    return _iter_workdays(gap_start, gap_end)
+
+
 async def _assignees_for_tasks(
     db: AsyncSession, task_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, list[TaskAssigneeOut]]:
@@ -299,6 +342,62 @@ async def _replace_task_assignees(
     if assignee_ids:
         values = [{"task_id": task.id, "user_id": user_id} for user_id in assignee_ids]
         await db.execute(insert(TaskAssignee), values)
+
+
+async def _task_assignee_ids_for_planner(db: AsyncSession, task: Task) -> list[uuid.UUID]:
+    rows = (
+        await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id))
+    ).scalars().all()
+    ids: list[uuid.UUID] = []
+    seen: set[uuid.UUID] = set()
+    for user_id in rows:
+        if user_id not in seen:
+            seen.add(user_id)
+            ids.append(user_id)
+    if task.assigned_to is not None and task.assigned_to not in seen:
+        ids.append(task.assigned_to)
+    return ids
+
+
+async def _add_task_planner_exclusions(
+    db: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    user_ids: list[uuid.UUID],
+    day_dates: list[date],
+    created_by: uuid.UUID | None,
+) -> None:
+    if not user_ids or not day_dates:
+        return
+
+    existing_rows = (
+        await db.execute(
+            select(
+                TaskPlannerExclusion.user_id,
+                TaskPlannerExclusion.day_date,
+                TaskPlannerExclusion.time_slot,
+            )
+            .where(TaskPlannerExclusion.task_id == task_id)
+            .where(TaskPlannerExclusion.user_id.in_(user_ids))
+            .where(TaskPlannerExclusion.day_date.in_(day_dates))
+            .where(TaskPlannerExclusion.time_slot == "ALL")
+        )
+    ).all()
+    existing = {(user_id, day_date, time_slot) for user_id, day_date, time_slot in existing_rows}
+    for user_id in user_ids:
+        for day_date in day_dates:
+            key = (user_id, day_date, "ALL")
+            if key in existing:
+                continue
+            db.add(
+                TaskPlannerExclusion(
+                    task_id=task_id,
+                    user_id=user_id,
+                    day_date=day_date,
+                    time_slot="ALL",
+                    created_by=created_by,
+                )
+            )
 
 
 async def _user_comments_for_tasks(
@@ -1591,9 +1690,13 @@ async def update_task(
 
     # Snapshot completion values before update for MST/TT daily progress logging.
     old_total, old_completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
+    old_start_day = _as_local_date(task.start_date)
+    old_due_day = _as_local_date(task.due_date)
 
     # Track if status was explicitly set in payload to prevent auto-status from overriding it
     status_was_explicitly_set = payload.status is not None
+    start_date_set = _payload_has_field(payload, "start_date")
+    due_date_set = _payload_has_field(payload, "due_date")
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
@@ -1610,23 +1713,13 @@ async def update_task(
 
     if payload.title is not None:
         task.title = payload.title
-    description_set = False
-    internal_notes_set = False
-    if hasattr(payload, "model_fields_set"):
-        description_set = "description" in payload.model_fields_set  # type: ignore[attr-defined]
-        internal_notes_set = "internal_notes" in payload.model_fields_set  # type: ignore[attr-defined]
-    elif hasattr(payload, "__fields_set__"):
-        description_set = "description" in payload.__fields_set__  # type: ignore[attr-defined]
-        internal_notes_set = "internal_notes" in payload.__fields_set__  # type: ignore[attr-defined]
+    description_set = _payload_has_field(payload, "description")
+    internal_notes_set = _payload_has_field(payload, "internal_notes")
     if description_set:
         task.description = payload.description
     if internal_notes_set:
         task.internal_notes = payload.internal_notes
-    dependency_set = False
-    if hasattr(payload, "model_fields_set"):
-        dependency_set = "dependency_task_id" in payload.model_fields_set  # type: ignore[attr-defined]
-    elif hasattr(payload, "__fields_set__"):
-        dependency_set = "dependency_task_id" in payload.__fields_set__  # type: ignore[attr-defined]
+    dependency_set = _payload_has_field(payload, "dependency_task_id")
 
     if dependency_set:
         ensure_manager_or_admin(user)
@@ -1654,11 +1747,7 @@ async def update_task(
         ensure_department_access(user, payload.department_id)
         task.department_id = payload.department_id
 
-    confirmation_set = False
-    if hasattr(payload, "model_fields_set"):
-        confirmation_set = "confirmation_assignee_id" in payload.model_fields_set  # type: ignore[attr-defined]
-    elif hasattr(payload, "__fields_set__"):
-        confirmation_set = "confirmation_assignee_id" in payload.__fields_set__  # type: ignore[attr-defined]
+    confirmation_set = _payload_has_field(payload, "confirmation_assignee_id")
     if confirmation_set:
         if payload.confirmation_assignee_id is not None:
             confirmation_user = (
@@ -1799,11 +1888,7 @@ async def update_task(
     
     if payload.is_personal is not None:
         task.is_personal = payload.is_personal
-    fast_task_order_set = False
-    if hasattr(payload, "model_fields_set"):
-        fast_task_order_set = "fast_task_order" in payload.model_fields_set  # type: ignore[attr-defined]
-    elif hasattr(payload, "__fields_set__"):
-        fast_task_order_set = "fast_task_order" in payload.__fields_set__  # type: ignore[attr-defined]
+    fast_task_order_set = _payload_has_field(payload, "fast_task_order")
     if fast_task_order_set:
         if not is_fast_task_model(task):
             raise HTTPException(
@@ -1812,16 +1897,8 @@ async def update_task(
             )
         task.fast_task_order = payload.fast_task_order
     # Optional: update alignment users if provided
-    alignment_set = False
-    if hasattr(payload, "model_fields_set"):
-        alignment_set = "alignment_user_ids" in payload.model_fields_set  # type: ignore[attr-defined]
-    elif hasattr(payload, "__fields_set__"):
-        alignment_set = "alignment_user_ids" in payload.__fields_set__  # type: ignore[attr-defined]
-    finish_period_set = False
-    if hasattr(payload, "model_fields_set"):
-        finish_period_set = "finish_period" in payload.model_fields_set  # type: ignore[attr-defined]
-    elif hasattr(payload, "__fields_set__"):
-        finish_period_set = "finish_period" in payload.__fields_set__  # type: ignore[attr-defined]
+    alignment_set = _payload_has_field(payload, "alignment_user_ids")
+    finish_period_set = _payload_has_field(payload, "finish_period")
     if alignment_set:
         await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
         if payload.alignment_user_ids:
@@ -1843,13 +1920,48 @@ async def update_task(
         task.progress_percentage = payload.progress_percentage
     if payload.daily_products is not None:
         task.daily_products = payload.daily_products
-    if payload.start_date is not None:
+    if start_date_set:
         task.start_date = payload.start_date
-    if payload.due_date is not None:
+    if due_date_set:
         # If due_date is being changed (postponed), preserve the original planned date once.
-        if task.due_date is not None and payload.due_date != task.due_date and task.original_due_date is None:
+        if (
+            task.due_date is not None
+            and payload.due_date is not None
+            and payload.due_date != task.due_date
+            and task.original_due_date is None
+        ):
             task.original_due_date = task.due_date
         task.due_date = payload.due_date
+    if start_date_set or due_date_set:
+        new_start_day = _as_local_date(task.start_date)
+        progress_days: set[date] = set()
+        if old_start_day is not None and new_start_day is not None:
+            progress_days = set(
+                (
+                    await db.execute(
+                        select(TaskDailyProgress.day_date)
+                        .where(TaskDailyProgress.task_id == task.id)
+                        .where(TaskDailyProgress.day_date >= old_start_day)
+                        .where(TaskDailyProgress.day_date < new_start_day)
+                    )
+                ).scalars().all()
+            )
+        days_to_hide = _planner_replan_exclusion_days(
+            old_start=old_start_day,
+            old_end=old_due_day,
+            new_start=new_start_day,
+            progress_days=progress_days,
+            today=datetime.now(timezone.utc).date(),
+        )
+        if days_to_hide:
+            planner_user_ids = await _task_assignee_ids_for_planner(db, task)
+            await _add_task_planner_exclusions(
+                db,
+                task_id=task.id,
+                user_ids=planner_user_ids,
+                day_dates=days_to_hide,
+                created_by=user.id,
+            )
     if payload.completed_at is not None:
         task.completed_at = payload.completed_at
     if payload.is_deadline_important is not None:
@@ -2001,9 +2113,9 @@ async def update_task(
             shared_values["department_id"] = task.department_id
         if confirmation_set:
             shared_values["confirmation_assignee_id"] = task.confirmation_assignee_id
-        if payload.due_date is not None:
+        if due_date_set:
             shared_values["due_date"] = task.due_date
-        if payload.start_date is not None:
+        if start_date_set:
             shared_values["start_date"] = task.start_date
         if payload.is_deadline_important is not None:
             shared_values["is_deadline_important"] = task.is_deadline_important
