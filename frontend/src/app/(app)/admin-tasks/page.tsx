@@ -291,6 +291,16 @@ function initials(src: string) {
     .join("")
 }
 
+type AllTasksAssigneeBadge = { id: string; userId: string; value: string; label: string }
+
+function mergeAllTasksAssigneeBadges(a: AllTasksAssigneeBadge[], b: AllTasksAssigneeBadge[]): AllTasksAssigneeBadge[] {
+  const map = new Map<string, AllTasksAssigneeBadge>()
+  for (const item of [...a, ...b]) {
+    if (!map.has(item.userId)) map.set(item.userId, item)
+  }
+  return Array.from(map.values()).sort((x, y) => x.label.localeCompare(y.label))
+}
+
 function dayKey(date: Date) {
   return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime()
 }
@@ -1547,31 +1557,63 @@ export default function AdminTasksPage() {
     },
     [departmentMap, userMap]
   )
+  const systemTaskByTemplateId = React.useMemo(() => {
+    const map = new Map<string, SystemTaskOut>()
+    for (const task of systemTasks) {
+      map.set(task.template_id, task)
+    }
+    return map
+  }, [systemTasks])
+
   const taskAssigneeBadges = React.useCallback(
-    (task: Task) => {
-      const ids = new Set<string>()
-      if (task.assigned_to) ids.add(task.assigned_to)
-      if (task.assignees) {
-        for (const assignee of task.assignees) {
-          if (assignee.id) ids.add(assignee.id)
+    (task: Task): AllTasksAssigneeBadge[] => {
+      const seen = new Set<string>()
+      const orderedIds: string[] = []
+      const pushId = (id: string | null | undefined) => {
+        if (!id || seen.has(id)) return
+        seen.add(id)
+        orderedIds.push(id)
+      }
+      pushId(task.assigned_to)
+      for (const assignee of task.assignees || []) {
+        pushId(assignee.id)
+      }
+
+      // ALL TASKS "BZ ME" column: show task executors only, never alignment / "BZ me" managers (e.g. GA).
+      const alignmentExclude = new Set<string>()
+      for (const id of task.alignment_user_ids || []) {
+        if (id) alignmentExclude.add(id)
+      }
+      if (task.system_template_origin_id) {
+        const tmpl = systemTaskByTemplateId.get(task.system_template_origin_id)
+        for (const id of tmpl?.alignment_user_ids || []) {
+          if (id) alignmentExclude.add(id)
         }
       }
-      if (!ids.size) return []
-      const labels = Array.from(ids)
+
+      const filteredIds = orderedIds.filter((userId) => !alignmentExclude.has(userId))
+      if (!filteredIds.length) return []
+
+      return filteredIds
         .map((userId) => {
           const userFromMap = userMap.get(userId)
-          if (userFromMap) return userFromMap.full_name || userFromMap.username || ""
-          const assigneeFromArray = task.assignees?.find((a) => a.id === userId)
-          return assigneeFromArray?.full_name || assigneeFromArray?.username || ""
+          const label =
+            (userFromMap ? userFromMap.full_name || userFromMap.username : "") ||
+            task.assignees?.find((a) => a.id === userId)?.full_name ||
+            task.assignees?.find((a) => a.id === userId)?.username ||
+            ""
+          const trimmed = label.trim()
+          if (!trimmed) return null
+          return {
+            id: `${task.id}-${userId}`,
+            userId,
+            value: initials(trimmed),
+            label: trimmed,
+          }
         })
-        .filter(Boolean)
-      return labels.map((label, index) => ({
-        id: `${task.id}-${index}`,
-        value: initials(label),
-        label,
-      }))
+        .filter((b): b is AllTasksAssigneeBadge => b !== null)
     },
-    [userMap]
+    [userMap, systemTaskByTemplateId]
   )
   const systemAssigneeBadges = React.useCallback(
     (task: SystemTaskOut) => {
@@ -1669,20 +1711,12 @@ export default function AdminTasksPage() {
     return map
   }, [tasks])
 
-  const systemTaskByTemplateId = React.useMemo(() => {
-    const map = new Map<string, SystemTaskOut>()
-    for (const task of systemTasks) {
-      map.set(task.template_id, task)
-    }
-    return map
-  }, [systemTasks])
-
   const allTasksTableRows = React.useMemo(() => {
     const rows: Array<{
       id: string
       ll: "SYS" | "FT"
       nll: string
-      assigned: { id: string; value: string; label: string }[]
+      assigned: AllTasksAssigneeBadge[]
       startDateIso: string
       startDateLabel: string
       dateIso: string
@@ -1702,7 +1736,9 @@ export default function AdminTasksPage() {
       isLateSystemTask?: boolean
       lateDays?: number
       isGaneAssigned?: boolean
+      isGaneRealAssignee?: boolean
       isBzOnly?: boolean
+      systemTemplateOriginId?: string | null
     }> = []
 
     if (!ganeUserId) return rows
@@ -1718,10 +1754,10 @@ export default function AdminTasksPage() {
       const hasTemplateAlignment = Boolean(
         isSystemTask && ganeUserId && systemTemplate?.alignment_user_ids?.includes(ganeUserId)
       )
-      const isAssigned =
+      const isRealAssignee =
         task.assigned_to === ganeUserId ||
-        task.assignees?.some((assignee) => assignee.id === ganeUserId) ||
-        hasTaskAlignment
+        Boolean(task.assignees?.some((assignee) => assignee.id === ganeUserId))
+      const isAssigned = isRealAssignee || hasTaskAlignment
       const needsGaneConfirmation =
         task.status === "WAITING_CONFIRMATION" && task.confirmation_assignee_id === ganeUserId
 
@@ -1735,7 +1771,14 @@ export default function AdminTasksPage() {
           ? Math.max(task.late_days ?? 0, dayDiffInclusive(dueDateIso, todayIso))
           : 0
       const isLateSystemTask = Boolean(isSystemTask && (isAssigned || hasTemplateAlignment) && computedLateDays > 0)
-      if (!isAssigned && !needsGaneConfirmation && !hasGaneBzToday) continue
+      // Keep system tasks on the list when due on/before today if Gane is alignment-only — otherwise overdue
+      // rows disappear after the due day (hasGaneBzToday only matched dateIso === today).
+      const alignmentSystemStillOpen =
+        isSystemTask &&
+        statusValue !== "DONE" &&
+        Boolean(dueDateIso && dueDateIso <= todayIso) &&
+        (hasTemplateAlignment || hasTaskAlignment)
+      if (!isAssigned && !needsGaneConfirmation && !hasGaneBzToday && !alignmentSystemStillOpen) continue
 
       rows.push({
         id: `task:${task.id}`,
@@ -1761,7 +1804,9 @@ export default function AdminTasksPage() {
         isLateSystemTask,
         lateDays: computedLateDays,
         isGaneAssigned: isAssigned,
+        isGaneRealAssignee: isRealAssignee,
         isBzOnly: !isAssigned && !needsGaneConfirmation && hasGaneBzToday,
+        systemTemplateOriginId: task.system_template_origin_id ?? null,
       })
     }
 
@@ -1783,12 +1828,14 @@ export default function AdminTasksPage() {
       }
       dedupedRows.set(dedupeKey, {
         ...existing,
-        assigned: existing.assigned.length >= row.assigned.length ? existing.assigned : row.assigned,
+        assigned: mergeAllTasksAssigneeBadges(existing.assigned, row.assigned),
+        systemTemplateOriginId: existing.systemTemplateOriginId || row.systemTemplateOriginId,
         needsGaneConfirmation: Boolean(existing.needsGaneConfirmation || row.needsGaneConfirmation),
         showInSystemTasksSection: Boolean(existing.showInSystemTasksSection || row.showInSystemTasksSection),
         isLateSystemTask: Boolean(existing.isLateSystemTask || row.isLateSystemTask),
         lateDays: Math.max(existing.lateDays ?? 0, row.lateDays ?? 0) || undefined,
         isGaneAssigned: Boolean(existing.isGaneAssigned || row.isGaneAssigned),
+        isGaneRealAssignee: Boolean(existing.isGaneRealAssignee || row.isGaneRealAssignee),
         isBzOnly: Boolean(existing.isBzOnly && row.isBzOnly),
       })
     }
@@ -1810,7 +1857,22 @@ export default function AdminTasksPage() {
       return a.title.localeCompare(b.title)
     })
 
-    return orderedRows
+    // Match Common View BZ: merge assignees across all instances of the same system template on the same day.
+    return orderedRows.map((row) => {
+      if (row.ll !== "SYS" || !row.systemTemplateOriginId || !row.dateIso) return row
+      const byUser = new Map<string, AllTasksAssigneeBadge>()
+      for (const t of tasks) {
+        if (t.is_active === false) continue
+        if (t.system_template_origin_id !== row.systemTemplateOriginId) continue
+        if (getTaskDateIso(t) !== row.dateIso) continue
+        for (const b of taskAssigneeBadges(t)) {
+          if (!byUser.has(b.userId)) byUser.set(b.userId, b)
+        }
+      }
+      const merged = Array.from(byUser.values()).sort((a, b) => a.label.localeCompare(b.label))
+      if (!merged.length) return row
+      return { ...row, assigned: merged }
+    })
   }, [
     tasks,
     ganeUserId,
@@ -1823,7 +1885,7 @@ export default function AdminTasksPage() {
   const filteredAllTasksRows = React.useMemo(() => {
     if (!allTasksDateFrom && !allTasksDateTo) return allTasksTableRows
     return allTasksTableRows.filter((row) => {
-      if (row.isLateSystemTask && isIsoWithinInclusiveRange(todayIso, allTasksDateFrom, allTasksDateTo)) {
+      if (row.ll === "SYS" && row.status !== "DONE" && row.dateIso && row.dateIso < todayIso) {
         return true
       }
       return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
@@ -3850,13 +3912,13 @@ export default function AdminTasksPage() {
       return null
     }
 
-    const renderAssignedBadges = (badges: { id: string; value: string; label: string }[]) => {
+    const renderAssignedBadges = (badges: AllTasksAssigneeBadge[]) => {
       if (!badges.length) return <span className="text-slate-500">-</span>
       return (
-        <div className="flex items-center gap-1">
+        <div className="flex flex-wrap items-center gap-1">
           {badges.map((item) => (
             <div
-              key={item.id}
+              key={item.userId}
               className="h-6 w-6 rounded-full bg-slate-100 text-[9px] font-semibold text-slate-600 flex items-center justify-center"
               title={item.label}
             >
@@ -3878,6 +3940,7 @@ export default function AdminTasksPage() {
         "AM/PM",
         "TITLE",
         "KOHA BZ",
+        "BZ ME",
         "STATUS",
         "PRIORITY",
         "KOMENT",
@@ -3906,9 +3969,11 @@ export default function AdminTasksPage() {
                             ? "min-w-[160px] sm:min-w-[220px]"
                             : label === "KOHA BZ"
                               ? "hidden w-[70px] sm:table-cell"
-                              : label === "STATUS"
-                                ? "w-[86px]"
-                                : label === "PRIORITY"
+                              : label === "BZ ME"
+                                ? "min-w-[56px] max-w-[100px] px-1"
+                                : label === "STATUS"
+                                  ? "w-[86px]"
+                                  : label === "PRIORITY"
                                   ? "w-[70px]"
                                   : label === "KOMENT"
                                     ? "min-w-[120px]"
@@ -3936,9 +4001,12 @@ export default function AdminTasksPage() {
               const previousValue = row.comment ?? ""
               const commentValue = commentKey ? (allTasksReportCommentEdits[commentKey] ?? previousValue) : ""
               const isSaving = commentKey ? Boolean(savingAllTasksReportComments[commentKey]) : false
-              const canMarkDone = statusValue !== "DONE" && !row.isBzOnly
-              const actionLabel =
-                row.needsGaneConfirmation && statusValue === "WAITING_CONFIRMATION" ? "Confirm" : "Done"
+              const isConfirmAction = Boolean(row.needsGaneConfirmation && statusValue === "WAITING_CONFIRMATION")
+              const canMarkDone =
+                statusValue !== "DONE" &&
+                !row.isBzOnly &&
+                (row.isGaneRealAssignee || isConfirmAction)
+              const actionLabel = isConfirmAction ? "Confirm" : "Done"
               const rowTask = tasks.find((task) => task.id === row.taskId) || null
               return (
                 <TableRow key={row.id}>
@@ -3973,6 +4041,9 @@ export default function AdminTasksPage() {
                   </TableCell>
                   <TableCell className="hidden w-[70px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0 sm:table-cell">
                     {row.kohaBz}
+                  </TableCell>
+                  <TableCell className="min-w-[56px] max-w-[100px] border-r border-slate-200 px-1 py-1 align-middle last:border-r-0">
+                    {renderAssignedBadges(row.assigned)}
                   </TableCell>
                   <TableCell className={`w-[86px] border-r border-slate-200 px-1.5 py-1 align-middle uppercase last:border-r-0 ${statusClass}`}>
                     {statusLabel}
@@ -4010,11 +4081,13 @@ export default function AdminTasksPage() {
                         >
                           {isUpdating ? "Updating..." : actionLabel}
                         </Button>
-                      ) : row.isBzOnly && statusValue !== "DONE" ? (
-                        <span className="text-[10px] text-amber-700">You&apos;re not assigned</span>
-                      ) : (
+                      ) : statusValue === "DONE" ? (
                         <span className="text-xs text-emerald-700">Done</span>
-                      )}
+                      ) : row.isBzOnly ? (
+                        <span className="text-[10px] text-amber-700">You&apos;re not assigned</span>
+                      ) : !row.isGaneRealAssignee ? (
+                        <span className="text-[10px] text-slate-500">You&apos;re not assigned</span>
+                      ) : null}
                       {rowTask ? (
                         <Button
                           variant="outline"
