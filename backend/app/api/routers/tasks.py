@@ -911,12 +911,6 @@ async def create_task(
         if ga_note.project_id is not None and ga_note.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note project mismatch")
 
-        if payload.due_date is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Due date is required for GA/KA note tasks",
-            )
-
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
     # Allow cross-department for projects, GA notes, or fast tasks (tasks without project_id)

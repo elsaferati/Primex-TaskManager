@@ -488,7 +488,7 @@ type CommonType =
   | "det_ga"
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
-type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string }
+type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
 type LeaveItem = {
   entryId?: string
   person: string
@@ -501,7 +501,7 @@ type LeaveItem = {
   isAllUsers?: boolean
   userId?: string
 }
-type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[]; userId?: string }
 type OneHItem = {
   title: string
   person: string
@@ -510,8 +510,9 @@ type OneHItem = {
   assignees?: string[]
   departmentId?: string
   isDone?: boolean
+  userId?: string
 }
-type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[] }
+type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[]; userId?: string }
 type ExternalItem = {
   title: string
   date: string
@@ -538,6 +539,7 @@ type R1Item = {
   assignees?: string[]
   departmentId?: string
   isDone?: boolean
+  userId?: string
 }
 type ProblemItem = {
   entryId?: string
@@ -1147,26 +1149,40 @@ export default function AdminTasksPage() {
             date: parsed.everyday ? payload.week_start : item.date,
           }
         })
+        const normalizedAbsent = payload.items.absent.map((item: any) => ({
+          ...item,
+          userId: item.userId || item.user_id || undefined,
+        }))
+        const normalizedBlocked = payload.items.blocked.map((item: any) => ({
+          ...item,
+          userId: item.userId || item.user_id || undefined,
+        }))
+        const normalizedPersonal = payload.items.personal.map((item: any) => ({
+          ...item,
+          userId: item.userId || item.user_id || undefined,
+        }))
         const normalizedOneH = payload.items.oneH.map((item: any) => ({
           ...item,
           departmentId: item.departmentId || item.department_id || undefined,
           isDone: Boolean(item.isDone),
+          userId: item.userId || item.user_id || undefined,
         }))
         const normalizedR1 = payload.items.r1.map((item: any) => ({
           ...item,
           departmentId: item.departmentId || item.department_id || undefined,
           isDone: Boolean(item.isDone),
+          userId: item.userId || item.user_id || undefined,
         }))
         if (!mounted) return
         setCommonUsers(payload.users || [])
         setCommonDepartments(payload.departments || [])
         setCommonData({
           late: payload.items.late,
-          absent: payload.items.absent,
+          absent: normalizedAbsent,
           leave: payload.items.leave,
-          blocked: payload.items.blocked,
+          blocked: normalizedBlocked,
           oneH: normalizedOneH,
-          personal: payload.items.personal,
+          personal: normalizedPersonal,
           external: payload.items.external,
           internal: payload.items.internal,
           r1: normalizedR1,
@@ -3095,6 +3111,59 @@ export default function AdminTasksPage() {
       }
     }
 
+    // Build hidden-users-per-date map for full-day PV/Feste or full-day Mungese.
+    // A Mungese is considered full-day when its time range covers the whole work
+    // day (from <= 08:00 and to >= 16:30); this also matches the backend default
+    // of 08:00-23:00 used when no explicit range is stored.
+    const hiddenUsersByDate = new Map<string, Set<string>>()
+    const addHidden = (dateStr: string, uid: string | undefined | null) => {
+      if (!uid) return
+      let set = hiddenUsersByDate.get(dateStr)
+      if (!set) {
+        set = new Set<string>()
+        hiddenUsersByDate.set(dateStr, set)
+      }
+      set.add(uid)
+    }
+    for (const lv of commonData.leave) {
+      if (!lv.fullDay || !lv.userId) continue
+      for (const d of datesToUse) {
+        if (d >= lv.startDate && d <= lv.endDate) {
+          addHidden(d, lv.userId)
+        }
+      }
+    }
+    for (const ab of commonData.absent) {
+      if (!ab.userId) continue
+      if (ab.from <= "08:00" && ab.to >= "16:30") {
+        addHidden(ab.date, ab.userId)
+      }
+    }
+
+    // Resolve user display names (full_name / username / email) to user IDs so
+    // we can hide items that only carry a person name (problems, feedback, and
+    // the assignee/owner lists on priority/meetings/bz).
+    const nameToUserId = new Map<string, string>()
+    for (const u of commonUsers) {
+      if (!u.id) continue
+      if (u.full_name) nameToUserId.set(u.full_name.trim().toLowerCase(), u.id)
+      if (u.username) nameToUserId.set(u.username.trim().toLowerCase(), u.id)
+      if (u.email) nameToUserId.set(u.email.trim().toLowerCase(), u.id)
+    }
+    const resolveUserId = (name: string | undefined | null): string | null => {
+      if (!name) return null
+      return nameToUserId.get(name.trim().toLowerCase()) || null
+    }
+    const isUserHiddenOn = (dateStr: string, uid: string | null | undefined): boolean => {
+      if (!uid) return false
+      const set = hiddenUsersByDate.get(dateStr)
+      return !!set && set.has(uid)
+    }
+    const isNameHiddenOn = (dateStr: string, name: string | undefined | null): boolean => {
+      const uid = resolveUserId(name)
+      return isUserHiddenOn(dateStr, uid)
+    }
+
     const inSelectedDates = (dateStr: string) => datesToUse.includes(dateStr)
     const late = commonData.late.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
     const absent = commonData.absent.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -3103,22 +3172,68 @@ export default function AdminTasksPage() {
       if (!visibleDates.length) return false
       return visibleDates.some((d) => !fullyCoveredDates.has(d))
     })
-    const blocked = commonData.blocked.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const oneH = commonData.oneH.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const personal = commonData.personal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const external = commonData.external.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const internal = commonData.internal.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const r1 = commonData.r1.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const problems = commonData.problems.filter(
-      (x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    )
-    const feedback = commonData.feedback.filter(
-      (x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    )
-    const bz = commonData.bz.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const blocked = commonData.blocked
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => !isUserHiddenOn(x.date, x.userId))
+    const oneH = commonData.oneH
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => !isUserHiddenOn(x.date, x.userId))
+    const personal = commonData.personal
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => !isUserHiddenOn(x.date, x.userId))
+    const r1 = commonData.r1
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => !isUserHiddenOn(x.date, x.userId))
+    const external = commonData.external
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .flatMap((x) => {
+        const hiddenSet = hiddenUsersByDate.get(x.date)
+        if (!hiddenSet || hiddenSet.size === 0) return [x]
+        const ownerHidden = isNameHiddenOn(x.date, x.owner)
+        const filteredAssignees = (x.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
+        if (ownerHidden && filteredAssignees.length === 0) return []
+        if (filteredAssignees.length === (x.assignees?.length || 0)) return [x]
+        return [{ ...x, assignees: filteredAssignees }]
+      })
+    const internal = commonData.internal
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .flatMap((x) => {
+        const hiddenSet = hiddenUsersByDate.get(x.date)
+        if (!hiddenSet || hiddenSet.size === 0) return [x]
+        const ownerHidden = isNameHiddenOn(x.date, x.owner)
+        const filteredAssignees = (x.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
+        if (ownerHidden && filteredAssignees.length === 0) return []
+        if (filteredAssignees.length === (x.assignees?.length || 0)) return [x]
+        return [{ ...x, assignees: filteredAssignees }]
+      })
+    const problems = commonData.problems
+      .filter((x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date)))
+      .filter((x) => x.everyday || !isNameHiddenOn(x.date, x.person))
+    const feedback = commonData.feedback
+      .filter((x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date)))
+      .filter((x) => x.everyday || !isNameHiddenOn(x.date, x.person))
+    const bz = commonData.bz
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .flatMap((x) => {
+        const hiddenSet = hiddenUsersByDate.get(x.date)
+        if (!hiddenSet || hiddenSet.size === 0) return [x]
+        const filteredAssignees = (x.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
+        if (filteredAssignees.length === 0) return []
+        if (filteredAssignees.length === (x.assignees?.length || 0)) return [x]
+        return [{ ...x, assignees: filteredAssignees }]
+      })
     const priority = commonData.priority.filter((p) => inSelectedDates(p.date))
 
-    const filteredPriority = priority.filter((p) => !fullyCoveredDates.has(p.date))
+    const filteredPriority = priority
+      .filter((p) => !fullyCoveredDates.has(p.date))
+      .flatMap((p) => {
+        const hiddenSet = hiddenUsersByDate.get(p.date)
+        if (!hiddenSet || hiddenSet.size === 0) return [p]
+        const filteredAssignees = (p.assignees || []).filter((n) => !isNameHiddenOn(p.date, n))
+        if (filteredAssignees.length === 0) return []
+        if (filteredAssignees.length === (p.assignees?.length || 0)) return [p]
+        return [{ ...p, assignees: filteredAssignees }]
+      })
 
     return {
       late,
@@ -3135,6 +3250,7 @@ export default function AdminTasksPage() {
       bz,
       priority: filteredPriority,
       fullyCoveredDates,
+      hiddenUsersByDate,
     }
   }, [commonData, commonUsers, commonWeekISOs])
 

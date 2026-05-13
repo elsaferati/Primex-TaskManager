@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
-from app.api.access import ensure_department_access
+from app.api.access import ensure_department_access, ensure_task_editor
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.ga_note import GaNote
@@ -19,7 +19,14 @@ from app.models.ga_note_attachment import GaNoteAttachment
 from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, TaskStatus, UserRole
 from app.models.project import Project
 from app.models.task import Task
-from app.schemas.ga_note import GaNoteAttachmentOut, GaNoteCreate, GaNoteOut, GaNoteUpdate
+from app.schemas.ga_note import (
+    GaNoteAttachmentOut,
+    GaNoteCreate,
+    GaNoteOut,
+    GaNoteTaskDeadlineUpdate,
+    GaNoteUpdate,
+)
+from app.services.audit import add_audit_log
 from app.config import settings
 
 
@@ -29,6 +36,12 @@ router = APIRouter()
 class MarkWaitingDoneResponse(BaseModel):
     updated_count: int
     skipped_count: int
+
+
+class GaNoteTaskDeadlineResponse(BaseModel):
+    updated_count: int
+    due_date: datetime | None = None
+    is_deadline_important: bool | None = None
 
 
 def _ga_note_task_title(content: str | None) -> str:
@@ -301,6 +314,116 @@ async def update_ga_note(
     await db.commit()
     await db.refresh(note)
     return _note_out(note)
+
+
+@router.patch("/{note_id}/task-deadline", response_model=GaNoteTaskDeadlineResponse)
+async def update_ga_note_task_deadline(
+    note_id: uuid.UUID,
+    payload: GaNoteTaskDeadlineUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> GaNoteTaskDeadlineResponse:
+    """Set or clear the deadline on every task created from this GA/KA note.
+
+    Per-user task copies created from a GA note are not linked by
+    fast_task_group_id, so we use the shared ga_note_origin_id as the grouping
+    key. The same due_date (and is_deadline_important) is applied to every
+    active linked task so all assignees stay in sync.
+    """
+    note = await _get_note_or_404(note_id, db)
+    await _ensure_note_access(note, user, db)
+
+    linked_tasks = (
+        await db.execute(
+            select(Task)
+            .where(Task.ga_note_origin_id == note_id)
+            .where(Task.is_active.is_(True))
+        )
+    ).scalars().all()
+
+    if not linked_tasks:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No active tasks found for this GA/KA note",
+        )
+
+    # Permission: allow if the user can edit ANY of the linked tasks (admin,
+    # manager, the original task creator, or any assignee). This matches the
+    # behavior of PATCH /tasks/{id} but applied across the per-user copies.
+    can_edit = False
+    forbidden_error: HTTPException | None = None
+    for task in linked_tasks:
+        try:
+            ensure_task_editor(user, task)
+            can_edit = True
+            break
+        except HTTPException as exc:
+            forbidden_error = exc
+            continue
+    if not can_edit:
+        raise forbidden_error or HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
+        )
+
+    new_due_date = None if payload.clear else payload.due_date
+    update_due = payload.clear or payload.due_date is not None
+    update_important = payload.is_deadline_important is not None
+
+    if not update_due and not update_important:
+        return GaNoteTaskDeadlineResponse(
+            updated_count=0,
+            due_date=linked_tasks[0].due_date,
+            is_deadline_important=linked_tasks[0].is_deadline_important,
+        )
+
+    updated_count = 0
+    for task in linked_tasks:
+        before = {
+            "due_date": task.due_date.isoformat() if task.due_date else None,
+            "is_deadline_important": task.is_deadline_important,
+        }
+        changed = False
+
+        if update_due:
+            if (
+                task.due_date is not None
+                and new_due_date is not None
+                and new_due_date != task.due_date
+                and task.original_due_date is None
+            ):
+                task.original_due_date = task.due_date
+            if task.due_date != new_due_date:
+                task.due_date = new_due_date
+                changed = True
+
+        if update_important and task.is_deadline_important != payload.is_deadline_important:
+            task.is_deadline_important = bool(payload.is_deadline_important)
+            changed = True
+
+        if changed:
+            updated_count += 1
+            after = {
+                "due_date": task.due_date.isoformat() if task.due_date else None,
+                "is_deadline_important": task.is_deadline_important,
+            }
+            add_audit_log(
+                db=db,
+                actor_user_id=user.id,
+                entity_type="task",
+                entity_id=task.id,
+                action="ga_note_deadline_update",
+                before=before,
+                after=after,
+            )
+
+    await db.commit()
+
+    sample = linked_tasks[0]
+    return GaNoteTaskDeadlineResponse(
+        updated_count=updated_count,
+        due_date=sample.due_date,
+        is_deadline_important=sample.is_deadline_important,
+    )
 
 
 @router.post("/{note_id}/mark-waiting-done", response_model=MarkWaitingDoneResponse)

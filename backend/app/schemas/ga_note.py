@@ -67,3 +67,9 @@ class GaNoteUpdate(BaseModel):
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
 
+
+class GaNoteTaskDeadlineUpdate(BaseModel):
+    due_date: datetime | None = None
+    is_deadline_important: bool | None = None
+    clear: bool = False
+

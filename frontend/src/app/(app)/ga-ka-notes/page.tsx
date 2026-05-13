@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Bold, Check, Clock, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
+import { Bold, Calendar as CalendarIcon, Check, Clock, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -87,6 +87,7 @@ type NoteTaskInfo = {
   dueDate?: string | null
   startDate?: string | null
   finishPeriod?: TaskFinishPeriod | null
+  isDeadlineImportant?: boolean | null
 }
 
 const pad2 = (value: number) => String(value).padStart(2, "0")
@@ -809,6 +810,10 @@ export default function GaKaNotesPage() {
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
   const [editAddedRanges, setEditAddedRanges] = React.useState<TextMarkRange[]>([])
   const [editDescription, setEditDescription] = React.useState("")
+  const [editTaskDeadline, setEditTaskDeadline] = React.useState("")
+  const [editTaskDeadlineImportant, setEditTaskDeadlineImportant] = React.useState(false)
+  const [editTaskInitialDeadline, setEditTaskInitialDeadline] = React.useState("")
+  const [editTaskInitialDeadlineImportant, setEditTaskInitialDeadlineImportant] = React.useState(false)
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
@@ -1056,6 +1061,8 @@ export default function GaKaNotesPage() {
         dueDate: existing?.dueDate ?? t.due_date ?? null,
         startDate: existing?.startDate ?? t.start_date ?? null,
         finishPeriod: existing?.finishPeriod ?? t.finish_period ?? null,
+        isDeadlineImportant:
+          existing?.isDeadlineImportant ?? (t.is_deadline_important ?? null),
       })
     }
     setNoteTaskInfo(map)
@@ -1412,6 +1419,12 @@ export default function GaKaNotesPage() {
     setEditAddedRanges(parsedContent.addedRanges)
     const taskInfo = noteTaskInfo.get(note.id)
     setEditDescription(taskInfo?.description || "")
+    const isoDeadline = taskDateKey(taskInfo?.dueDate ?? null) || ""
+    const importantInitial = Boolean(taskInfo?.isDeadlineImportant)
+    setEditTaskDeadline(isoDeadline)
+    setEditTaskInitialDeadline(isoDeadline)
+    setEditTaskDeadlineImportant(importantInitial)
+    setEditTaskInitialDeadlineImportant(importantInitial)
   }
 
   const handleEditContentChange = (nextContent: string) => {
@@ -1658,12 +1671,49 @@ export default function GaKaNotesPage() {
             }
             toast.error(errorMessage)
           }
+
+          const deadlineChanged =
+            editTaskDeadline !== editTaskInitialDeadline ||
+            editTaskDeadlineImportant !== editTaskInitialDeadlineImportant
+          if (deadlineChanged) {
+            const nextIsoDeadline = editTaskDeadline
+              ? new Date(editTaskDeadline).toISOString()
+              : null
+            const deadlineRes = await apiFetch(`/ga-notes/${editNoteId}/task-deadline`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                due_date: nextIsoDeadline,
+                is_deadline_important: editTaskDeadlineImportant,
+                clear: nextIsoDeadline === null,
+              }),
+            })
+            if (deadlineRes?.ok) {
+              applyDeadlineUpdateToInfo(editNoteId, nextIsoDeadline, editTaskDeadlineImportant)
+              void loadNoteTasks()
+            } else {
+              let errorMessage = "Note updated, but task deadline could not be updated"
+              try {
+                const errorData = (await deadlineRes.json()) as { detail?: string }
+                if (errorData?.detail) {
+                  errorMessage = `Note updated, but task deadline could not be updated: ${errorData.detail}`
+                }
+              } catch {
+                // Keep the generic fallback message.
+              }
+              toast.error(errorMessage)
+            }
+          }
         }
         
         toast.success("Note updated")
         setEditNoteId(null)
         setEditDoneRanges([])
         setEditAddedRanges([])
+        setEditTaskDeadline("")
+        setEditTaskInitialDeadline("")
+        setEditTaskDeadlineImportant(false)
+        setEditTaskInitialDeadlineImportant(false)
       } else {
         let errorMessage = "Failed to update note"
         try {
@@ -1741,10 +1791,6 @@ export default function GaKaNotesPage() {
           : []
     if (effectiveDepartments.length === 0) {
       toast.error("Select at least one department before creating a task")
-      return
-    }
-    if (!taskDueDate) {
-      toast.error("Due date is required")
       return
     }
     const primaryDepartmentId = effectiveDepartments[0]
@@ -1880,6 +1926,7 @@ export default function GaKaNotesPage() {
           dueDate: createdTask.due_date ?? null,
           startDate: createdTask.start_date ?? null,
           finishPeriod: createdTask.finish_period ?? null,
+          isDeadlineImportant: createdTask.is_deadline_important ?? null,
         })
         return next
       })
@@ -1936,6 +1983,24 @@ export default function GaKaNotesPage() {
     setNextWeekAssigneeIds([])
     setNextWeekFinishPeriod("AM")
   }, [])
+
+  const applyDeadlineUpdateToInfo = React.useCallback(
+    (noteId: string, isoDateValue: string | null, important: boolean) => {
+      setNoteTaskInfo((prev) => {
+        const next = new Map(prev)
+        const existing = next.get(noteId)
+        if (existing) {
+          next.set(noteId, {
+            ...existing,
+            dueDate: isoDateValue,
+            isDeadlineImportant: important,
+          })
+        }
+        return next
+      })
+    },
+    []
+  )
 
   const sendNoteToNextWeek = React.useCallback(
     async (note: GaNote) => {
@@ -3964,7 +4029,7 @@ export default function GaKaNotesPage() {
                   <Input type="date" value={taskStartDate} onChange={(e) => setTaskStartDate(e.target.value)} />
                 </div>
                 <div className="space-y-2">
-                  <Label>Due date</Label>
+                  <Label>Due date (optional)</Label>
                   <Input type="date" value={taskDueDate} onChange={(e) => setTaskDueDate(e.target.value)} />
                 </div>
               </div>
@@ -4134,6 +4199,10 @@ export default function GaKaNotesPage() {
           setEditDoneRanges([])
           setEditAddedRanges([])
           setEditDescription("")
+          setEditTaskDeadline("")
+          setEditTaskInitialDeadline("")
+          setEditTaskDeadlineImportant(false)
+          setEditTaskInitialDeadlineImportant(false)
         }
       }}>
         <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
@@ -4190,12 +4259,66 @@ export default function GaKaNotesPage() {
                 <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
               </div>
             ) : null}
+            {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
+              <div className="space-y-2 rounded-md border border-slate-200 p-3">
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <Label className="flex items-center gap-1">
+                    <CalendarIcon className="h-4 w-4 text-emerald-600" />
+                    Deadline
+                  </Label>
+                  <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
+                    Applies to all assignees
+                  </span>
+                </div>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  <Input
+                    type="date"
+                    value={editTaskDeadline}
+                    onChange={(e) => setEditTaskDeadline(e.target.value)}
+                    disabled={savingEdit}
+                  />
+                  <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                    <Checkbox
+                      checked={editTaskDeadlineImportant}
+                      onCheckedChange={(checked) =>
+                        setEditTaskDeadlineImportant(checked === true)
+                      }
+                      disabled={savingEdit}
+                    />
+                    <span className="text-sm font-medium">Deadline important</span>
+                  </label>
+                </div>
+                {editTaskDeadline ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="h-7 px-2 text-[11px] border-rose-200 text-rose-700 hover:bg-rose-50"
+                    disabled={savingEdit}
+                    onClick={() => {
+                      setEditTaskDeadline("")
+                      setEditTaskDeadlineImportant(false)
+                    }}
+                  >
+                    Clear deadline
+                  </Button>
+                ) : (
+                  <p className="text-xs text-muted-foreground">
+                    No deadline set. Pick a date above to add one for every assignee.
+                  </p>
+                )}
+              </div>
+            ) : null}
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => {
                 setEditNoteId(null)
                 setEditDoneRanges([])
                 setEditAddedRanges([])
                 setEditDescription("")
+                setEditTaskDeadline("")
+                setEditTaskInitialDeadline("")
+                setEditTaskDeadlineImportant(false)
+                setEditTaskInitialDeadlineImportant(false)
               }}>
                 Cancel
               </Button>

@@ -595,6 +595,9 @@ async def get_common_view(
                         "from": from_time,
                         "to": to_time,
                         "note": note or None,
+                        "userId": str(e.assigned_to_user_id or e.created_by_user_id)
+                        if (e.assigned_to_user_id or e.created_by_user_id)
+                        else None,
                     }
                 )
             elif e.category == CommonCategory.annual_leave:

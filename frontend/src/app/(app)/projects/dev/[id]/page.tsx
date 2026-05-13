@@ -255,6 +255,7 @@ export default function DevelopmentProjectPage() {
   const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
     FINISH_PERIOD_NONE_VALUE
   )
+  const [editDeadlineImportant, setEditDeadlineImportant] = React.useState(false)
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [creating, setCreating] = React.useState(false)
   const [updatingTaskId, setUpdatingTaskId] = React.useState<string | null>(null)
@@ -703,6 +704,7 @@ export default function DevelopmentProjectPage() {
     setEditStartDate(toDateInput(task.start_date))
     setEditDueDate(toDateInput(task.due_date))
     setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+    setEditDeadlineImportant(Boolean(task.is_deadline_important))
     setEditOpen(true)
   }
 
@@ -742,6 +744,7 @@ export default function DevelopmentProjectPage() {
         start_date: editStartDate ? new Date(editStartDate).toISOString() : null,
         due_date: editDueDate || null,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
+        is_deadline_important: editDeadlineImportant,
       }
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
@@ -2158,6 +2161,13 @@ export default function DevelopmentProjectPage() {
                           </Select>
                         </div>
                       </div>
+                      <label className="flex items-center gap-3 rounded-md border border-sky-200 px-3 py-2">
+                        <Checkbox
+                          checked={editDeadlineImportant}
+                          onCheckedChange={(checked) => setEditDeadlineImportant(checked === true)}
+                        />
+                        <span className="text-sm font-medium text-slate-700">Deadline important</span>
+                      </label>
                       <div className="flex justify-end gap-2">
                         <Button variant="outline" onClick={() => setEditOpen(false)} disabled={savingEdit}>
                           Cancel
