@@ -2157,6 +2157,8 @@ async def export_open_tasks_xlsx(
             continue
         if normalized_filter == "ga" and not task.ga_note_origin_id:
             continue
+        if normalized_filter == "plan" and not task.plan_note_origin_id:
+            continue
         if normalized_filter == "project" and not task.project_id:
             continue
         if normalized_filter == "fast" and not (not task.project_id and not task.system_template_origin_id):
@@ -2170,6 +2172,7 @@ async def export_open_tasks_xlsx(
                     task.description or "",
                     task.status or "",
                     source,
+                    "next week plan note" if task.plan_note_origin_id else "",
                     assignee_label(task),
                     project.title if project else "",
                     note.content if note else "",
@@ -2203,6 +2206,7 @@ async def export_open_tasks_xlsx(
         "NR",
         "GROUP",
         "SOURCE",
+        "PX JAV",
         "DEP",
         "ASSIGNEE",
         "AM/PM",
@@ -2251,6 +2255,7 @@ async def export_open_tasks_xlsx(
             idx,
             group,
             _open_task_source_label(task),
+            "Yes" if task.plan_note_origin_id else "",
             _department_short(_display_department_name(department.name if department else "")) if department else "",
             assignee_label(task),
             task.finish_period or "",
@@ -2275,17 +2280,18 @@ async def export_open_tasks_xlsx(
         1: 5,
         2: 20,
         3: 10,
-        4: 9,
-        5: 24,
-        6: 8,
-        7: 12,
+        4: 18,
+        5: 9,
+        6: 24,
+        7: 8,
         8: 12,
-        9: 15,
-        10: 10,
-        11: 44,
-        12: 34,
-        13: 44,
+        9: 12,
+        10: 15,
+        11: 10,
+        12: 44,
+        13: 34,
         14: 44,
+        15: 44,
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)

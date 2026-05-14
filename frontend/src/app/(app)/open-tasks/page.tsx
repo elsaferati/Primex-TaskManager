@@ -13,13 +13,13 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
-import { formatDepartmentName } from "@/lib/department-name"
+import { departmentTableTag, formatDepartmentName } from "@/lib/department-name"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
 
-type PlanningInboxFilter = "all" | "unplanned" | "this_week" | "next_week" | "ga" | "project" | "fast"
+type PlanningInboxFilter = "all" | "unplanned" | "this_week" | "next_week" | "ga" | "plan" | "project" | "fast"
 type PlannerTaskDialogMode = "plan" | "edit"
 
 const ALL_VALUE = "__all__"
@@ -72,6 +72,25 @@ function statusLabel(value?: string | null) {
   if (normalized === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (normalized === "DONE") return "Done"
   return "To Do"
+}
+
+function compactPlanGroupLabel(label: string) {
+  if (label === "Unplanned") return "None"
+  if (label === "Planned This Week") return "This wk"
+  if (label === "Planned Next Week") return "Next wk"
+  if (label === "This Week + Next Week") return "Both"
+  return label
+}
+
+function initialsFromDisplayName(name: string) {
+  const t = name.trim()
+  if (!t) return "?"
+  const parts = t.split(/\s+/).filter(Boolean)
+  if (parts.length === 1) {
+    const w = parts[0]
+    return (w.length >= 2 ? w[0] + w[1] : w[0]).toUpperCase()
+  }
+  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
 }
 
 export default function OpenTasksPage() {
@@ -176,6 +195,21 @@ export default function OpenTasksPage() {
     [taskAssigneeIds, userById]
   )
 
+  const assigneeInitialsLabel = React.useCallback(
+    (task: Task) => {
+      const ids = taskAssigneeIds(task)
+      if (!ids.length) return "—"
+      return ids
+        .map((id) => {
+          const u = userById.get(id)
+          const name = u?.full_name || u?.username || id
+          return initialsFromDisplayName(String(name))
+        })
+        .join(", ")
+    },
+    [taskAssigneeIds, userById]
+  )
+
   const sourceLabel = React.useCallback((task: Task) => {
     if (task.system_template_origin_id) return "System"
     if (task.project_id) return "Project"
@@ -202,6 +236,7 @@ export default function OpenTasksPage() {
       const plannedThisWeek = isTaskPlannedForWeek(task, thisWeekStart, thisWeekEnd)
       const plannedNextWeek = isTaskPlannedForWeek(task, nextWeekStart, nextWeekEnd)
       const isGa = Boolean(task.ga_note_origin_id)
+      const isPlan = Boolean(task.plan_note_origin_id)
       const isFast = isFastPlannerTask(task)
       const ids = taskAssigneeIds(task)
 
@@ -210,18 +245,25 @@ export default function OpenTasksPage() {
       if (filter === "this_week" && !plannedThisWeek) return false
       if (filter === "next_week" && !plannedNextWeek) return false
       if (filter === "ga" && !isGa) return false
+      if (filter === "plan" && !isPlan) return false
       if (filter === "project" && !task.project_id) return false
       if (filter === "fast" && !isFast) return false
       if (query) {
         const note = task.ga_note_origin_id ? noteById.get(task.ga_note_origin_id) : null
+        const dept = task.department_id ? departmentById.get(task.department_id) : null
         const haystack = [
+          statusLabel(task.status),
           task.title,
           task.description,
           task.status,
           sourceLabel(task),
+          task.plan_note_origin_id ? "next week plan note px jav" : "",
           assigneeLabel(task),
+          assigneeInitialsLabel(task),
           note?.content,
           project ? resolveProjectTitle(project) : "",
+          dept ? departmentTableTag(dept) : "",
+          dept ? formatDepartmentName(dept.name) : "",
         ]
           .filter(Boolean)
           .join(" ")
@@ -230,7 +272,7 @@ export default function OpenTasksPage() {
       }
       return true
     })
-  }, [assigneeLabel, filter, nextWeekEnd, nextWeekStart, noteById, projectById, search, sourceLabel, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, userId])
+  }, [assigneeInitialsLabel, assigneeLabel, departmentById, filter, nextWeekEnd, nextWeekStart, noteById, projectById, search, sourceLabel, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, userId])
 
   const unplannedTasks = filteredTasks.filter(
     (task) => !isTaskPlannedForWeek(task, thisWeekStart, thisWeekEnd) && !isTaskPlannedForWeek(task, nextWeekStart, nextWeekEnd)
@@ -415,6 +457,7 @@ export default function OpenTasksPage() {
                 <SelectItem value="this_week">Planned this week</SelectItem>
                 <SelectItem value="next_week">Planned next week</SelectItem>
                 <SelectItem value="ga">GA/KA</SelectItem>
+                <SelectItem value="plan">Plan note</SelectItem>
                 <SelectItem value="project">Project</SelectItem>
                 <SelectItem value="fast">Fast task</SelectItem>
               </SelectContent>
@@ -459,19 +502,39 @@ export default function OpenTasksPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <Table>
+              <Table className="w-full min-w-0 table-fixed border-collapse text-sm">
+                <colgroup>
+                  <col style={{ width: "2%" }} />
+                  <col style={{ width: "6%" }} />
+                  <col style={{ width: "34%" }} />
+                  <col style={{ width: "7%" }} />
+                  <col style={{ width: "4%" }} />
+                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "5%" }} />
+                  <col style={{ width: "4%" }} />
+                  <col style={{ width: "9%" }} />
+                  <col style={{ width: "9%" }} />
+                  <col style={{ width: "10%" }} />
+                </colgroup>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-16">#</TableHead>
-                    <TableHead className="w-48">Group / Plan status</TableHead>
-                    <TableHead>Task title</TableHead>
-                    <TableHead className="w-24">Source</TableHead>
-                    <TableHead className="w-36">Status</TableHead>
-                    <TableHead className="w-48">Assignees</TableHead>
-                    <TableHead className="w-40">Department</TableHead>
-                    <TableHead className="w-32">Due date</TableHead>
-                    <TableHead className="w-32">Date created</TableHead>
-                    <TableHead className="w-44">Actions</TableHead>
+                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium">#</TableHead>
+                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium" title="Group / plan status">
+                      Group
+                    </TableHead>
+                    <TableHead className="h-auto min-w-0 px-1 py-1.5 text-xs font-medium">Task</TableHead>
+                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium">Source</TableHead>
+                    <TableHead className="h-auto px-0.5 py-1.5 text-center text-xs font-medium" title="Notes for next week plan">
+                      PX JAV
+                    </TableHead>
+                    <TableHead className="h-auto whitespace-normal px-1 py-1.5 text-xs font-medium leading-tight">Status</TableHead>
+                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium">Who</TableHead>
+                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium" title="Department">
+                      Dep
+                    </TableHead>
+                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium leading-tight">Due date</TableHead>
+                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium leading-tight">Date created</TableHead>
+                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium">Act</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -481,59 +544,72 @@ export default function OpenTasksPage() {
                       const dueLabel = task.due_date ? formatDateDMY(task.due_date) : "-"
 
                       return (
-                        <TableRow key={task.id}>
-                          <TableCell className="font-medium text-slate-600">{index + 1}</TableCell>
-                          <TableCell>
+                        <TableRow key={task.id} className="align-middle">
+                          <TableCell className="px-1 py-1.5 align-middle text-xs font-medium text-slate-600">{index + 1}</TableCell>
+                          <TableCell className="px-1 py-1.5 align-middle">
                             <span
                               className={
                                 planned
-                                  ? "inline-flex rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs font-semibold uppercase text-emerald-700"
-                                  : "inline-flex rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-semibold uppercase text-amber-700"
+                                  ? "inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-1 py-0 text-[10px] font-semibold uppercase leading-tight text-emerald-800"
+                                  : "inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-1 py-0 text-[10px] font-semibold uppercase leading-tight text-amber-800"
                               }
+                              title={planLabel}
                             >
-                              {planLabel}
+                              {compactPlanGroupLabel(planLabel)}
                             </span>
                           </TableCell>
-                          <TableCell className="max-w-0">
-                            <div className="whitespace-normal break-words font-medium text-slate-900">{task.title}</div>
+                          <TableCell className="min-w-0 whitespace-normal px-1 py-1.5 align-middle">
+                            <div className="break-words text-xs font-medium leading-snug text-slate-900">{task.title}</div>
                           </TableCell>
-                          <TableCell className="whitespace-normal text-slate-700">
-                            {sourceLabel(task)}
+                          <TableCell className="px-1 py-1.5 align-middle text-xs text-slate-700">{sourceLabel(task)}</TableCell>
+                          <TableCell className="whitespace-normal px-0.5 py-1.5 text-center align-middle text-slate-700">
+                            {task.plan_note_origin_id ? (
+                              <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-1 py-0 text-[9px] font-semibold uppercase text-indigo-700">
+                                Y
+                              </span>
+                            ) : (
+                              <span className="text-xs text-slate-400">—</span>
+                            )}
                           </TableCell>
-                          <TableCell className="whitespace-normal text-slate-700">
+                          <TableCell className="min-w-0 whitespace-normal px-1 py-1.5 align-middle text-[11px] leading-snug text-slate-700">
                             {statusLabel(task.status)}
                           </TableCell>
-                          <TableCell className="whitespace-normal text-slate-700">
-                            {assigneeLabel(task)}
+                          <TableCell className="px-1 py-1.5 align-middle text-xs text-slate-700" title={assigneeLabel(task)}>
+                            {assigneeInitialsLabel(task)}
                           </TableCell>
-                          <TableCell className="whitespace-normal text-slate-700">
-                            {department ? formatDepartmentName(department.name) : "-"}
+                          <TableCell className="px-1 py-1.5 align-middle text-xs text-slate-700" title={department ? formatDepartmentName(department.name) : undefined}>
+                            {departmentTableTag(department)}
                           </TableCell>
-                          <TableCell className="text-slate-700">
-                            {dueLabel}
-                          </TableCell>
-                          <TableCell className="text-slate-700">
+                          <TableCell className="whitespace-normal px-1 py-1.5 align-middle tabular-nums text-[11px] leading-tight text-slate-700">{dueLabel}</TableCell>
+                          <TableCell className="whitespace-normal px-1 py-1.5 align-middle tabular-nums text-[11px] leading-tight text-slate-700">
                             {formatDateDMY(task.created_at)}
                           </TableCell>
-                          <TableCell>
-                            <div className="flex flex-col items-start gap-2">
-                              <Button size="sm" className="h-7 w-full justify-start px-2 text-xs" onClick={() => openDialog(task, planned ? "edit" : "plan")}>
-                                {planned ? "Edit" : "Plan next week"}
+                          <TableCell className="min-w-0 whitespace-normal px-1 py-1.5 align-middle">
+                            <div className="flex max-w-[10.5rem] flex-row flex-wrap items-center gap-0.5">
+                              <Button size="sm" className="h-6 min-h-0 shrink-0 px-1.5 py-0 text-[10px] leading-tight" onClick={() => openDialog(task, planned ? "edit" : "plan")}>
+                                {planned ? "Edit" : "Plan"}
                               </Button>
                               {planned ? (
                                 <Button
                                   size="sm"
                                   variant="outline"
-                                  className="h-7 w-full justify-start px-2 text-xs"
+                                  className="h-6 min-h-0 shrink-0 px-1.5 py-0 text-[10px] leading-tight"
                                   disabled={clearingId === task.id}
                                   onClick={() => void removeFromPlan(task)}
                                 >
-                                  {clearingId === task.id ? "Removing..." : "Remove from plan"}
+                                  {clearingId === task.id ? "…" : "Clear"}
                                 </Button>
                               ) : null}
                               {task.ga_note_origin_id ? (
-                                <Button asChild size="sm" variant="outline" className="h-7 w-full justify-start px-2 text-xs">
-                                  <Link href={`/ga-ka-notes${task.department_id ? `?department_id=${task.department_id}` : ""}`}>Open source note</Link>
+                                <Button asChild size="sm" variant="outline" className="h-6 min-h-0 shrink-0 px-1 py-0 text-[10px] leading-tight">
+                                  <Link href={`/ga-ka-notes${task.department_id ? `?department_id=${task.department_id}` : ""}`}>GA</Link>
+                                </Button>
+                              ) : null}
+                              {task.plan_note_origin_id ? (
+                                <Button asChild size="sm" variant="outline" className="h-6 min-h-0 shrink-0 px-1 py-0 text-[10px] leading-tight">
+                                  <Link href={`/next-week-plan${task.department_id ? `?department_id=${task.department_id}` : ""}`} title="Next week plan note">
+                                    PX
+                                  </Link>
                                 </Button>
                               ) : null}
                             </div>
@@ -543,7 +619,7 @@ export default function OpenTasksPage() {
                     })
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={10} className="py-8 text-center text-sm text-slate-500">
+                      <TableCell colSpan={11} className="py-8 text-center text-sm text-slate-500">
                         No open tasks match the current filters.
                       </TableCell>
                     </TableRow>
