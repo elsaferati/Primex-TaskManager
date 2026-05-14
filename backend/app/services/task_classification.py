@@ -37,6 +37,7 @@ def is_fast_task_fields(
     dependency_task_id: Any | None,
     system_template_origin_id: Any | None,
     ga_note_origin_id: Any | None,
+    plan_note_origin_id: Any | None = None,
 ) -> bool:
     """
     "Fast task" matches the planner's definition:
@@ -63,4 +64,5 @@ def is_fast_task(task) -> bool:
         dependency_task_id=getattr(task, "dependency_task_id", None),
         system_template_origin_id=getattr(task, "system_template_origin_id", None),
         ga_note_origin_id=getattr(task, "ga_note_origin_id", None),
+        plan_note_origin_id=getattr(task, "plan_note_origin_id", None),
     )

@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Bold, Calendar as CalendarIcon, Check, Clock, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Mic, Square, Trash2, Upload } from "lucide-react"
+import { Bold, Calendar as CalendarIcon, Check, Clock, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Trash2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -21,9 +21,7 @@ import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
-import { useCloudDictation } from "@/lib/useCloudDictation"
-import { useSpeechDictation } from "@/lib/useSpeechDictation"
-import type { Department, GaNote, GaNoteAttachment, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { Department, PlanNote, PlanNoteAttachment, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -71,7 +69,7 @@ const ADDED_MARK_END = "[[/added]]"
 const NOTE_MARK_TOKEN_RE = /\[\[(done|added)\]\]|\[\[\/(done|added)\]\]/g
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
-type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
+type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed"
 type ContentFilter = "all" | "emails"
 type TextMarkRange = { start: number; end: number }
 type DoneMarkRange = TextMarkRange
@@ -115,16 +113,64 @@ function taskDateKey(value?: string | null) {
   return toISODate(date)
 }
 
-function weekdayShort(value?: string | null) {
-  const key = taskDateKey(value)
-  if (!key) return null
-  const [year, month, day] = key.split("-").map(Number)
-  return new Date(year, month - 1, day).toLocaleDateString("en-US", { weekday: "short" })
+const PLANNED_HORIZON_NONE = "__none__" as const
+
+type PlannedHorizonOption =
+  | typeof PLANNED_HORIZON_NONE
+  | "next_week"
+  | "next_2_weeks"
+  | "next_3_weeks"
+  | "next_4_weeks"
+  | "next_month"
+  | "next_2_months"
+
+function plannedHorizonToIso(option: PlannedHorizonOption, today = new Date()): string | null {
+  if (option === PLANNED_HORIZON_NONE) return null
+  if (option === "next_month") {
+    const d = new Date(today.getFullYear(), today.getMonth() + 1, 15)
+    return toISODate(d)
+  }
+  if (option === "next_2_months") {
+    const d = new Date(today.getFullYear(), today.getMonth() + 2, 15)
+    return toISODate(d)
+  }
+  const thisMon = mondayISO(today)
+  const weekIndex =
+    option === "next_week"
+      ? 1
+      : option === "next_2_weeks"
+        ? 2
+        : option === "next_3_weeks"
+          ? 3
+          : 4
+  return shiftIsoDateByDays(thisMon, 7 * weekIndex + 2)
 }
 
-function isDateInsideRange(value: string | null | undefined, start: string, end: string) {
-  const key = taskDateKey(value)
-  return Boolean(key && key >= start && key <= end)
+function matchStoredDateToPlannedHorizon(iso: string | null | undefined, today = new Date()): PlannedHorizonOption {
+  if (!iso) return PLANNED_HORIZON_NONE
+  const key = taskDateKey(iso)
+  if (!key) return PLANNED_HORIZON_NONE
+  const [y, m, d] = key.split("-").map(Number)
+  const t = new Date(y, m - 1, d)
+  const startNextMonth = new Date(today.getFullYear(), today.getMonth() + 1, 1)
+  const endNextMonth = new Date(today.getFullYear(), today.getMonth() + 2, 0)
+  if (t >= startNextMonth && t <= endNextMonth) {
+    return "next_month"
+  }
+  const startTwoMonthsAhead = new Date(today.getFullYear(), today.getMonth() + 2, 1)
+  const endTwoMonthsAhead = new Date(today.getFullYear(), today.getMonth() + 3, 0)
+  if (t >= startTwoMonthsAhead && t <= endTwoMonthsAhead) {
+    return "next_2_months"
+  }
+  const thisMon = mondayISO(today)
+  for (let n = 1; n <= 4; n++) {
+    const wStart = shiftIsoDateByDays(thisMon, 7 * n)
+    const wEnd = shiftIsoDateByDays(wStart, 4)
+    if (key >= wStart && key <= wEnd) {
+      return n === 1 ? "next_week" : n === 2 ? "next_2_weeks" : n === 3 ? "next_3_weeks" : "next_4_weeks"
+    }
+  }
+  return PLANNED_HORIZON_NONE
 }
 
 function parseMarkedNoteContent(content?: string | null): {
@@ -680,6 +726,15 @@ function formatDateParts(value?: string | null) {
   return { date: `${day}.${month}`, time: `${hoursStr}:${minutes} ${ampm}` }
 }
 
+/** e.g. 12.03.2026 — calendar day in Europe-style dots */
+function formatCalendarDateDots(value?: string | null) {
+  if (!value) return "—"
+  const key = taskDateKey(value)
+  if (!key) return "—"
+  const [y, mo, d] = key.split("-").map(Number)
+  return `${pad2(d)}.${pad2(mo)}.${y}`
+}
+
 function formatFileSize(bytes: number) {
   if (!Number.isFinite(bytes)) return "-"
   if (bytes < 1024) return `${bytes} B`
@@ -721,7 +776,7 @@ function noteToTaskTitle(content: string) {
     .map((line) => line.trim().replace(/[ \t\f\v]+/g, " "))
     .filter(Boolean)
     .join("\n")
-  if (!cleaned) return "GA/KA note task"
+  if (!cleaned) return "Plan note task"
   return cleaned
 }
 
@@ -752,11 +807,11 @@ function isDevelopmentDepartment(dept?: Department | null) {
   return name === "DEVELOPMENT" || code === "DEV"
 }
 
-export default function GaKaNotesPage() {
+export default function NextWeekPlanPage() {
   const { user, apiFetch } = useAuth()
   const confirm = useConfirm()
   const searchParams = useSearchParams()
-  const [notes, setNotes] = React.useState<GaNote[]>([])
+  const [notes, setNotes] = React.useState<PlanNote[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
@@ -767,6 +822,7 @@ export default function GaKaNotesPage() {
   const [departmentId, setDepartmentId] = React.useState(urlDepartmentId || "ALL")
   const [projectId, setProjectId] = React.useState(urlProjectId || "NONE")
   const [content, setContent] = React.useState("")
+  const [plannedHorizonNewNote, setPlannedHorizonNewNote] = React.useState<PlannedHorizonOption>(PLANNED_HORIZON_NONE)
   const [noteType] = React.useState<NoteType>("GA")
   const [priority] = React.useState<NotePriority>("NONE")
   const [loading, setLoading] = React.useState(false)
@@ -779,12 +835,10 @@ export default function GaKaNotesPage() {
   const [deletingAttachmentIds, setDeletingAttachmentIds] = React.useState<string[]>([])
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
   const [creatingTask, setCreatingTask] = React.useState(false)
-  const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("week")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
   const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const deferredSearchQuery = React.useDeferredValue(searchQuery)
-  const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [showLegend, setShowLegend] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
@@ -808,6 +862,7 @@ export default function GaKaNotesPage() {
   const [editTaskDeadlineImportant, setEditTaskDeadlineImportant] = React.useState(false)
   const [editTaskInitialDeadline, setEditTaskInitialDeadline] = React.useState("")
   const [editTaskInitialDeadlineImportant, setEditTaskInitialDeadlineImportant] = React.useState(false)
+  const [editPlannedHorizon, setEditPlannedHorizon] = React.useState<PlannedHorizonOption>(PLANNED_HORIZON_NONE)
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
@@ -824,75 +879,6 @@ export default function GaKaNotesPage() {
   const [internalMeetingTaskStartsAt, setInternalMeetingTaskStartsAt] = React.useState("")
   const [creatingInternalMeetingFromTask, setCreatingInternalMeetingFromTask] = React.useState(false)
   const internalMeetingDepartmentIdRef = React.useRef<string | null>(null)
-  const [voiceLanguage, setVoiceLanguage] = React.useState<"en" | "sq">("en")
-  const speechLang = voiceLanguage === "sq" ? "sq-AL" : "en-US"
-  const cloudLang = voiceLanguage === "sq" ? "sq" : "en"
-
-  const {
-    isSupported: isVoiceSupported,
-    isListening: isVoiceListening,
-    interimText: voiceInterimText,
-    stop: stopVoice,
-    toggle: toggleVoice,
-  } = useSpeechDictation({
-    lang: speechLang,
-    onFinalText: (text) => {
-      const finalText = text.trim()
-      if (!finalText) return
-      setContent((prev) => {
-        const base = prev ?? ""
-        const needsSeparator = base.length > 0 && !/\s$/.test(base)
-        const separator = needsSeparator ? "\n" : ""
-        return `${base}${separator}${finalText}`
-      })
-    },
-  })
-
-  const {
-    isSupported: isCloudSupported,
-    isRecording: isCloudRecording,
-    isTranscribing: isCloudTranscribing,
-    stop: stopCloud,
-    toggle: toggleCloud,
-  } = useCloudDictation({
-    apiFetch,
-    lang: cloudLang,
-    onFinalText: (text) => {
-      const finalText = text.trim()
-      if (!finalText) return
-      setContent((prev) => {
-        const base = prev ?? ""
-        const needsSeparator = base.length > 0 && !/\s$/.test(base)
-        const separator = needsSeparator ? "\n" : ""
-        return `${base}${separator}${finalText}`
-      })
-    },
-  })
-
-  const voiceMode = isVoiceSupported ? "browser" : isCloudSupported ? "cloud" : "none"
-
-  React.useEffect(() => {
-    if (posting && isVoiceListening) stopVoice()
-    if (posting && isCloudRecording) stopCloud()
-  }, [isCloudRecording, isVoiceListening, posting, stopCloud, stopVoice])
-
-  React.useEffect(() => {
-    if (voiceMode === "browser" && isCloudRecording) stopCloud()
-    if (voiceMode === "cloud" && isVoiceListening) stopVoice()
-  }, [isCloudRecording, isVoiceListening, stopCloud, stopVoice, voiceMode])
-
-  const handleVoiceToggle = () => {
-    if (voiceMode === "browser") {
-      toggleVoice()
-      return
-    }
-    if (voiceMode === "cloud") {
-      toggleCloud()
-      return
-    }
-    toast.error("Voice dictation not supported in this browser")
-  }
-
 
   const loadDepartments = React.useCallback(async () => {
     const res = await apiFetch("/departments")
@@ -928,7 +914,7 @@ export default function GaKaNotesPage() {
     if (!user) return
     setLoading(true)
     try {
-      let url = "/ga-notes"
+      let url = "/plan-notes"
       const params = new URLSearchParams()
       if (projectId !== "NONE") {
         params.set("project_id", projectId)
@@ -938,9 +924,9 @@ export default function GaKaNotesPage() {
       url += params.toString() ? `?${params}` : ""
       const res = await apiFetch(url)
       if (res?.ok) {
-        setNotes((await res.json()) as GaNote[])
+        setNotes((await res.json()) as PlanNote[])
       } else {
-        toast.error("Could not load GA/KA notes")
+        toast.error("Could not load plan notes")
       }
     } finally {
       setLoading(false)
@@ -994,7 +980,7 @@ export default function GaKaNotesPage() {
       const params = new URLSearchParams()
       params.set("include_done", "true")
       params.set("include_all_departments", "true")
-      chunk.forEach((id) => params.append("ga_note_origin_ids", id))
+      chunk.forEach((id) => params.append("plan_note_origin_ids", id))
       const res = await apiFetch(`/tasks?${params.toString()}`)
       if (!res?.ok) return
       const chunkData = (await res.json()) as Task[]
@@ -1022,7 +1008,7 @@ export default function GaKaNotesPage() {
       return result
     }
     for (const t of data) {
-      if (!t.ga_note_origin_id) continue
+      if (!t.plan_note_origin_id) continue
       let assignees: TaskAssignee[] = []
       if (t.assignees && t.assignees.length > 0) {
         // Use TaskAssignee directly from API - it has all the info we need for display
@@ -1042,8 +1028,8 @@ export default function GaKaNotesPage() {
           }]
         }
       }
-      const existing = map.get(t.ga_note_origin_id)
-      map.set(t.ga_note_origin_id, {
+      const existing = map.get(t.plan_note_origin_id)
+      map.set(t.plan_note_origin_id, {
         assignees: mergeAssignees(existing?.assignees ?? [], assignees),
         description: existing?.description ?? t.description ?? null,
         taskId: existing?.taskId ?? t.id,
@@ -1120,7 +1106,7 @@ export default function GaKaNotesPage() {
   }, [])
 
   const openInternalMeetingFromNoteTask = React.useCallback(
-    (note: GaNote, taskInfo?: NoteTaskInfo | null) => {
+    (note: PlanNote, taskInfo?: NoteTaskInfo | null) => {
       const parsed = parseMarkedNoteContent(note.content)
       const cleanTitle = (parsed.text || "").trim().replace(/\s+/g, " ")
       const title = cleanTitle.length > 255 ? `${cleanTitle.slice(0, 252)}...` : cleanTitle
@@ -1194,13 +1180,13 @@ export default function GaKaNotesPage() {
     }
 
     const encodedNoteId = encodeURIComponent(noteId)
-    let res = await apiFetch(`/ga-notes/${encodedNoteId}/attachments`, {
+    let res = await apiFetch(`/plan-notes/${encodedNoteId}/attachments`, {
       method: "POST",
       body: buildFormData(false),
     })
 
     if (res?.status === 404) {
-      res = await apiFetch("/ga-notes/attachments", {
+      res = await apiFetch("/plan-notes/attachments", {
         method: "POST",
         body: buildFormData(true),
       })
@@ -1210,10 +1196,10 @@ export default function GaKaNotesPage() {
       const errorText = await res.text()
       throw new Error(errorText || "upload_failed")
     }
-    return (await res.json()) as GaNoteAttachment[]
+    return (await res.json()) as PlanNoteAttachment[]
   }
 
-  const mergeNoteAttachments = React.useCallback((noteId: string, attachments: GaNoteAttachment[]) => {
+  const mergeNoteAttachments = React.useCallback((noteId: string, attachments: PlanNoteAttachment[]) => {
     if (attachments.length === 0) return
     setNotes((prev) =>
       prev.map((note) => {
@@ -1249,9 +1235,9 @@ export default function GaKaNotesPage() {
     }
   }, [])
 
-  const downloadAttachment = async (attachment: GaNoteAttachment) => {
+  const downloadAttachment = async (attachment: PlanNoteAttachment) => {
     try {
-      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}`)
+      const res = await apiFetch(`/plan-notes/attachments/${attachment.id}`)
       if (!res?.ok) {
         toast.error("Failed to download file")
         return
@@ -1270,9 +1256,9 @@ export default function GaKaNotesPage() {
     }
   }
 
-  const openAttachmentPreview = async (attachment: GaNoteAttachment) => {
+  const openAttachmentPreview = async (attachment: PlanNoteAttachment) => {
     try {
-      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}`)
+      const res = await apiFetch(`/plan-notes/attachments/${attachment.id}`)
       if (!res?.ok) {
         toast.error("Failed to open file")
         return
@@ -1289,7 +1275,7 @@ export default function GaKaNotesPage() {
     }
   }
 
-  const deleteAttachmentFromDialog = async (noteId: string, attachment: GaNoteAttachment) => {
+  const deleteAttachmentFromDialog = async (noteId: string, attachment: PlanNoteAttachment) => {
     const confirmed = await confirm({
       title: "Delete attachment",
       description: `Delete "${attachment.original_filename}"?`,
@@ -1300,7 +1286,7 @@ export default function GaKaNotesPage() {
 
     setDeletingAttachmentIds((prev) => (prev.includes(attachment.id) ? prev : [...prev, attachment.id]))
     try {
-      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}`, {
+      const res = await apiFetch(`/plan-notes/attachments/${attachment.id}`, {
         method: "DELETE",
       })
       if (!res?.ok) {
@@ -1314,14 +1300,6 @@ export default function GaKaNotesPage() {
     } finally {
       setDeletingAttachmentIds((prev) => prev.filter((id) => id !== attachment.id))
     }
-  }
-
-  const handleVoiceLanguageChange = (value: string) => {
-    if (value !== "en" && value !== "sq") return
-    if (value === voiceLanguage) return
-    if (isVoiceListening) stopVoice()
-    if (isCloudRecording) stopCloud()
-    setVoiceLanguage(value)
   }
 
   React.useEffect(() => {
@@ -1363,7 +1341,7 @@ export default function GaKaNotesPage() {
     
     setPosting(true)
     try {
-      const res = await apiFetch("/ga-notes", {
+      const res = await apiFetch("/plan-notes", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1372,6 +1350,7 @@ export default function GaKaNotesPage() {
           priority: priority === "NONE" ? null : priority,
           department_id: finalDepartmentId,
           project_id: finalProjectId,
+          planned_for_date: plannedHorizonToIso(plannedHorizonNewNote),
         }),
       })
       if (!res?.ok) {
@@ -1387,9 +1366,10 @@ export default function GaKaNotesPage() {
         toast.error(errorMessage)
         return
       }
-      const created = (await res.json()) as GaNote
+      const created = (await res.json()) as PlanNote
       setNotes((prev) => [created, ...prev])
       setContent("")
+      setPlannedHorizonNewNote(PLANNED_HORIZON_NONE)
       if (selectedFiles.length > 0) {
         try {
           const attachments = await uploadNoteAttachments(created.id, selectedFiles)
@@ -1405,7 +1385,7 @@ export default function GaKaNotesPage() {
     }
   }
 
-  const openEditNote = (note: GaNote) => {
+  const openEditNote = (note: PlanNote) => {
     const parsedContent = parseMarkedNoteContent(note.content)
     setEditNoteId(note.id)
     setEditContent(parsedContent.text)
@@ -1419,6 +1399,7 @@ export default function GaKaNotesPage() {
     setEditTaskInitialDeadline(isoDeadline)
     setEditTaskDeadlineImportant(importantInitial)
     setEditTaskInitialDeadlineImportant(importantInitial)
+    setEditPlannedHorizon(matchStoredDateToPlannedHorizon(note.planned_for_date ? String(note.planned_for_date) : null))
   }
 
   const handleEditContentChange = (nextContent: string) => {
@@ -1486,35 +1467,6 @@ export default function GaKaNotesPage() {
     )
   }, [applyTextEditToTextarea, editContent])
 
-  const markSelectedEditTextDone = () => {
-    const textarea = editTextareaRef.current
-    if (!textarea) return
-
-    const value = textarea.value
-    let start = textarea.selectionStart
-    let end = textarea.selectionEnd
-
-    if (start === end) {
-      start = value.lastIndexOf("\n", start - 1) + 1
-      const nextLineBreak = value.indexOf("\n", end)
-      end = nextLineBreak === -1 ? value.length : nextLineBreak
-    }
-
-    const selected = value.slice(start, end)
-    if (!selected.trim()) {
-      toast.error("Select the text or place cursor on the line to mark done")
-      return
-    }
-
-    const nextRanges = toggleDoneRange(editDoneRanges, { start, end })
-
-    setEditDoneRanges(nextRanges)
-    window.setTimeout(() => {
-      textarea.focus()
-      textarea.setSelectionRange(start, end)
-    }, 0)
-  }
-
   const getNoteSelectionRange = (noteId: string) => {
     const container = document.getElementById(`ga-note-content-${noteId}`)
     const selection = window.getSelection()
@@ -1533,7 +1485,7 @@ export default function GaKaNotesPage() {
     return end > start ? { start, end } : null
   }
 
-  const markSelectedNoteTextDone = async (note: GaNote) => {
+  const markSelectedNoteTextDone = async (note: PlanNote) => {
     const parsedContent = parseMarkedNoteContent(note.content)
     const selectionRange = getNoteSelectionRange(note.id)
     if (!selectionRange) {
@@ -1551,7 +1503,7 @@ export default function GaKaNotesPage() {
 
     setMarkingSelectedNoteId(note.id)
     try {
-      const res = await apiFetch(`/ga-notes/${note.id}`, {
+      const res = await apiFetch(`/plan-notes/${note.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1562,7 +1514,7 @@ export default function GaKaNotesPage() {
         toast.error("Failed to mark selected text done")
         return
       }
-      const updated = (await res.json()) as GaNote
+      const updated = (await res.json()) as PlanNote
       setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)))
     } catch (error) {
       console.error("Failed to mark selected note text done:", error)
@@ -1582,13 +1534,16 @@ export default function GaKaNotesPage() {
     setSavingEdit(true)
     try {
       // Update the note
-      const res = await apiFetch(`/ga-notes/${editNoteId}`, {
+      const res = await apiFetch(`/plan-notes/${editNoteId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim() }),
+        body: JSON.stringify({
+          content: serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim(),
+          planned_for_date: plannedHorizonToIso(editPlannedHorizon),
+        }),
       })
       if (res?.ok) {
-        const updated = (await res.json()) as GaNote
+        const updated = (await res.json()) as PlanNote
         setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)))
         
         // Update the task description if a task exists
@@ -1625,7 +1580,7 @@ export default function GaKaNotesPage() {
                 return result
               }
               for (const t of tasksData) {
-                if (!t.ga_note_origin_id) continue
+                if (!t.plan_note_origin_id) continue
                 let assignees: TaskAssignee[] = t.assignees ?? []
                 if (assignees.length === 0 && t.assigned_to) {
                   const fallback = userMapById.get(t.assigned_to)
@@ -1639,8 +1594,8 @@ export default function GaKaNotesPage() {
                     }]
                   }
                 }
-                const existing = map.get(t.ga_note_origin_id)
-                map.set(t.ga_note_origin_id, {
+                const existing = map.get(t.plan_note_origin_id)
+                map.set(t.plan_note_origin_id, {
                   assignees: mergeAssignees(existing?.assignees ?? [], assignees),
                   description: existing?.description ?? t.description ?? null,
                   taskId: existing?.taskId ?? t.id,
@@ -1673,7 +1628,7 @@ export default function GaKaNotesPage() {
             const nextIsoDeadline = editTaskDeadline
               ? new Date(editTaskDeadline).toISOString()
               : null
-            const deadlineRes = await apiFetch(`/ga-notes/${editNoteId}/task-deadline`, {
+            const deadlineRes = await apiFetch(`/plan-notes/${editNoteId}/task-deadline`, {
               method: "PATCH",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({
@@ -1725,7 +1680,7 @@ export default function GaKaNotesPage() {
     }
   }
 
-  const openTaskDialog = (note: GaNote) => {
+  const openTaskDialog = (note: PlanNote) => {
     const hasProject = Boolean(note.project_id)
     const noteDepartment = note.department_id ? departments.find((d) => d.id === note.department_id) || null : null
     const noteProject = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
@@ -1760,7 +1715,7 @@ export default function GaKaNotesPage() {
     return TASK_TYPE_OPTIONS_NO_PROJECT
   }, [taskProjectId])
 
-  const createTaskFromNote = async (note: GaNote) => {
+  const createTaskFromNote = async (note: PlanNote) => {
     if (note.is_converted_to_task) return
     const hasProject = Boolean(note.project_id)
     const noteDepartment = note.department_id ? departments.find((d) => d.id === note.department_id) || null : null
@@ -1851,7 +1806,7 @@ export default function GaKaNotesPage() {
           is_deadline_important: taskDeadlineImportant,
           assigned_to: taskAssigneeIds[0] ?? null,
           assignees: taskAssigneeIds,
-          ga_note_origin_id: note.id,
+          plan_note_origin_id: note.id,
           department_id: primaryDepartmentId,
           project_id: taskProjectId !== "NONE" ? taskProjectId : null,
           is_bllok: isBllok,
@@ -1865,13 +1820,13 @@ export default function GaKaNotesPage() {
         return
       }
       const createdTask = (await taskRes.json()) as Task
-      const patchRes = await apiFetch(`/ga-notes/${note.id}`, {
+      const patchRes = await apiFetch(`/plan-notes/${note.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ is_converted_to_task: true }),
       })
       if (patchRes.ok) {
-        const updated = (await patchRes.json()) as GaNote
+        const updated = (await patchRes.json()) as PlanNote
         setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)))
       } else {
         setNotes((prev) =>
@@ -1931,23 +1886,30 @@ export default function GaKaNotesPage() {
     }
   }
 
-  const nextWeekStart = React.useMemo(() => shiftIsoDateByDays(mondayISO(), 7), [])
-  const nextWeekEnd = React.useMemo(() => shiftIsoDateByDays(nextWeekStart, 4), [nextWeekStart])
-
-  const notePlannedNextWeekLabel = React.useCallback(
-    (taskInfo?: NoteTaskInfo | null) => {
-      if (!taskInfo?.dueDate || !isDateInsideRange(taskInfo.dueDate, nextWeekStart, nextWeekEnd)) return null
-      const day = weekdayShort(taskInfo.dueDate)
-      const period = taskInfo.finishPeriod ? ` ${taskInfo.finishPeriod}` : ""
-      const assignee =
-        taskInfo.assignees[0]?.full_name ||
-        taskInfo.assignees[0]?.username ||
-        taskInfo.assignees[0]?.email ||
-        "Unassigned"
-      return `Already planned: ${day || "Next week"}${period} / ${assignee}`
-    },
-    [nextWeekEnd, nextWeekStart]
-  )
+  const formatPlannedHorizonDisplay = React.useCallback((note: PlanNote, taskInfo?: NoteTaskInfo | null) => {
+    const primaryIso = taskInfo?.dueDate ?? note.planned_for_date ?? null
+    if (!primaryIso) return "—"
+    const key = taskDateKey(primaryIso)
+    if (!key) return "—"
+    const matched = matchStoredDateToPlannedHorizon(primaryIso)
+    const horizonByOption: Record<Exclude<PlannedHorizonOption, typeof PLANNED_HORIZON_NONE>, string> = {
+      next_week: "Next week",
+      next_2_weeks: "Next 2 weeks",
+      next_3_weeks: "Next 3 weeks",
+      next_4_weeks: "Next 4 weeks",
+      next_month: "Next month",
+      next_2_months: "Next 2 months",
+    }
+    if (matched !== PLANNED_HORIZON_NONE) {
+      return horizonByOption[matched]
+    }
+    const thisMon = mondayISO()
+    const nextWkEnd = shiftIsoDateByDays(shiftIsoDateByDays(thisMon, 7), 4)
+    if (key > nextWkEnd) {
+      return "Later"
+    }
+    return "—"
+  }, [])
 
   const applyDeadlineUpdateToInfo = React.useCallback(
     (noteId: string, isoDateValue: string | null, important: boolean) => {
@@ -1968,13 +1930,13 @@ export default function GaKaNotesPage() {
   )
 
   const closeNote = async (id: string) => {
-    const res = await apiFetch(`/ga-notes/${id}`, {
+    const res = await apiFetch(`/plan-notes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status: "CLOSED" }),
     })
     if (res?.ok) {
-      const updated = (await res.json()) as GaNote
+      const updated = (await res.json()) as PlanNote
       setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)))
     } else {
       toast.error("Failed to update note")
@@ -1982,13 +1944,13 @@ export default function GaKaNotesPage() {
   }
 
   const markNoteDiscussed = async (id: string) => {
-    const res = await apiFetch(`/ga-notes/${id}`, {
+    const res = await apiFetch(`/plan-notes/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_discussed: true }),
     })
     if (res?.ok) {
-      const updated = (await res.json()) as GaNote
+      const updated = (await res.json()) as PlanNote
       setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)))
     } else {
       toast.error("Failed to mark note discussed")
@@ -1998,7 +1960,7 @@ export default function GaKaNotesPage() {
   const markWaitingTasksDone = async (noteId: string) => {
     setMarkingDoneNoteId(noteId)
     try {
-      const res = await apiFetch(`/ga-notes/${noteId}/mark-waiting-done`, {
+      const res = await apiFetch(`/plan-notes/${noteId}/mark-waiting-done`, {
         method: "POST",
       })
       if (!res?.ok) {
@@ -2021,45 +1983,7 @@ export default function GaKaNotesPage() {
   }
 
   const exportDailyReport = async () => {
-    if (!user?.id) return
-    setExportingDailyReport(true)
-    try {
-      const qs = new URLSearchParams()
-      if (departmentId !== "ALL") {
-        qs.set("department_id", departmentId)
-      }
-      if (projectId !== "NONE") {
-        qs.set("project_id", projectId)
-      }
-      // Note: You'll need to create a backend endpoint /exports/ga-notes.xlsx
-      // For now, using a placeholder - adjust the endpoint as needed
-      const res = await apiFetch(`/exports/ga-notes.xlsx?${qs.toString()}`)
-      if (!res.ok) {
-        toast.error("Failed to export report")
-        return
-      }
-      const blob = await res.blob()
-      const url = URL.createObjectURL(blob)
-      const link = document.createElement("a")
-      link.href = url
-      const disposition = res.headers.get("Content-Disposition")
-      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
-      if (match?.[1]) {
-        link.download = match[1]
-      } else {
-        const today = new Date().toISOString().split('T')[0]
-        link.download = `ga_notes_export_${today}.xlsx`
-      }
-      document.body.appendChild(link)
-      link.click()
-      link.remove()
-      URL.revokeObjectURL(url)
-    } catch (error) {
-      console.error("Failed to export report", error)
-      toast.error("Failed to export report")
-    } finally {
-      setExportingDailyReport(false)
-    }
+    toast.info("Excel export for this view is not available yet.")
   }
 
   // Project list is used only in the task creation dialog (filtered separately).
@@ -2100,11 +2024,10 @@ export default function GaKaNotesPage() {
   }, [availablePriorityOptions, taskDialogNoteId, taskPriority])
   const visibleNotes = React.useMemo(() => {
     const now = Date.now()
-    const weekAgo = now - 7 * 24 * 60 * 60 * 1000
     const closedCutoff = now - 30 * 24 * 60 * 60 * 1000
     const normalizedSearchQuery = deferredSearchQuery.trim().toLowerCase()
 
-    const withinRange = (note: GaNote) => {
+    const withinRange = (note: PlanNote) => {
       const isClosed = note.status === "CLOSED"
       if (isClosed) {
         if (!note.completed_at) return true
@@ -2112,31 +2035,22 @@ export default function GaKaNotesPage() {
         if (Number.isNaN(completed)) return true
         return completed >= closedCutoff
       }
-      if (rangeFilter === "all") return true
-      const created = note.created_at ? new Date(note.created_at).getTime() : 0
-      return created >= weekAgo
+      return true
     }
-    const matchesTaskStatusFilter = (note: GaNote) => {
+    const matchesTaskStatusFilter = (note: PlanNote) => {
       if (taskStatusFilter === "all") return true
       if (taskStatusFilter === "open") return note.status !== "CLOSED"
       if (taskStatusFilter === "closed") return note.status === "CLOSED"
       const hasTask = note.is_converted_to_task === true || noteTaskInfo.has(note.id)
       if (taskStatusFilter === "notes") return !hasTask && note.status !== "CLOSED"
       if (taskStatusFilter === "tasks") return hasTask
-      const taskInfo = noteTaskInfo.get(note.id)
-      if (!taskInfo) return false
-      const aggregatedStatus =
-        taskInfo && (taskInfo.taskStatuses?.length ?? 0) > 1
-          ? aggregateTaskStatus(taskInfo.taskStatuses)
-          : normalizeTaskStatus(taskInfo?.taskStatus)
-      if (aggregatedStatus === "UNKNOWN") return false
-      return aggregatedStatus === taskStatusFilter
+      return true
     }
-    const matchesContentFilter = (note: GaNote) => {
+    const matchesContentFilter = (note: PlanNote) => {
       if (contentFilter === "all") return true
       return EMAIL_MARKER_RE.test(note.content || "")
     }
-    const matchesSearchQuery = (note: GaNote) => {
+    const matchesSearchQuery = (note: PlanNote) => {
       if (!normalizedSearchQuery) return true
 
       const taskInfo = noteTaskInfo.get(note.id)
@@ -2173,40 +2087,23 @@ export default function GaKaNotesPage() {
 
       return searchHaystack.includes(normalizedSearchQuery)
     }
-    const taskDoneBucket = (note: GaNote) => {
-      const taskInfo = noteTaskInfo.get(note.id)
-      if (!taskInfo) return 0
-      const aggregatedStatus =
-        taskInfo && (taskInfo.taskStatuses?.length ?? 0) > 1
-          ? aggregateTaskStatus(taskInfo.taskStatuses)
-          : normalizeTaskStatus(taskInfo?.taskStatus)
-      return aggregatedStatus === "DONE" ? 1 : 0
-    }
     const sorted = [...notes]
       .filter(withinRange)
       .filter(matchesTaskStatusFilter)
       .filter(matchesContentFilter)
       .filter(matchesSearchQuery)
       .sort((a, b) => {
-        // First, sort by status: open notes first, closed notes last
         const aIsClosed = a.status === "CLOSED"
         const bIsClosed = b.status === "CLOSED"
         if (aIsClosed !== bIsClosed) {
-          return aIsClosed ? 1 : -1 // Closed notes go to the end
+          return aIsClosed ? 1 : -1
         }
-        // Then, move DONE tasks after non-done tasks
-        const aBucket = taskDoneBucket(a)
-        const bBucket = taskDoneBucket(b)
-        if (aBucket !== bBucket) {
-          return aBucket - bBucket
-        }
-        // Then sort by creation date (newest first) within each group
         const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
         const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
         return bCreated - aCreated
       })
     return sorted
-  }, [notes, rangeFilter, taskStatusFilter, contentFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
+  }, [notes, taskStatusFilter, contentFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
 
   const attachmentDialogItems = React.useMemo(() => {
     if (!attachmentsDialogNoteId) return []
@@ -2264,15 +2161,14 @@ export default function GaKaNotesPage() {
 
   const departmentMap = React.useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments])
   const projectMap = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
-  const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
 
   return (
     <div className="space-y-6">
       <div className="rounded-2xl border bg-gradient-to-r from-amber-50 via-indigo-50 to-cyan-50 p-6 shadow-sm">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <div className="text-xs font-semibold tracking-[0.18em] text-primary/80 uppercase">Notes for all</div>
-            <div className="text-2xl font-semibold leading-tight mt-1 text-slate-900">GA/KA Notes</div>
+            <div className="text-xs font-semibold tracking-[0.18em] text-primary/80 uppercase">Weekly planning</div>
+            <div className="text-2xl font-semibold leading-tight mt-1 text-slate-900">Notes for next week plan</div>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <Badge variant="secondary" className="px-3 py-1 rounded-full shadow-sm bg-emerald-100 text-emerald-800">
@@ -2288,58 +2184,6 @@ export default function GaKaNotesPage() {
       <Card>
         <CardHeader>
           <CardTitle className="text-sm">New Note</CardTitle>
-          <CardAction>
-            <div className="flex items-center gap-2">
-              <Select value={voiceLanguage} onValueChange={handleVoiceLanguageChange}>
-                <SelectTrigger className="h-8 w-[130px] text-xs">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="en">English</SelectItem>
-                  <SelectItem value="sq">Albanian</SelectItem>
-                </SelectContent>
-              </Select>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="h-8 gap-2"
-                onClick={handleVoiceToggle}
-                disabled={voiceMode === "none" || (voiceMode === "cloud" && isCloudTranscribing)}
-                title={
-                  voiceMode === "browser"
-                    ? isVoiceListening
-                      ? "Stop voice dictation"
-                      : "Start voice dictation"
-                    : voiceMode === "cloud"
-                      ? isCloudRecording
-                        ? "Stop cloud dictation"
-                        : "Start cloud dictation"
-                      : "Voice dictation not supported"
-                }
-              >
-                {voiceMode === "cloud" ? (
-                  isCloudRecording ? <Square className="h-4 w-4" /> : <Mic className="h-4 w-4" />
-                ) : isVoiceListening ? (
-                  <Square className="h-4 w-4" />
-                ) : (
-                  <Mic className="h-4 w-4" />
-                )}
-                {voiceMode === "cloud"
-                  ? isCloudRecording
-                    ? "Stop"
-                    : isCloudTranscribing
-                      ? "Transcribing"
-                      : "Voice"
-                  : isVoiceListening
-                    ? "Stop"
-                    : "Voice"}
-              </Button>
-              {voiceMode === "cloud" ? (
-                <span className="text-[11px] text-slate-500">Cloud fallback</span>
-              ) : null}
-            </div>
-          </CardAction>
         </CardHeader>
         <CardContent className="space-y-3">
           <div className="space-y-2">
@@ -2366,22 +2210,26 @@ export default function GaKaNotesPage() {
               className="md:min-h-[220px] min-h-[170px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
             />
-            {isVoiceListening ? (
-              <div className="text-xs text-muted-foreground">
-                <span className="font-medium text-slate-700">Listening...</span>
-                {voiceInterimText ? <span className="ml-2">{voiceInterimText}</span> : null}
-              </div>
-            ) : null}
-            {isCloudRecording ? (
-              <div className="text-xs text-muted-foreground">
-                <span className="font-medium text-slate-700">Recording...</span>
-              </div>
-            ) : null}
-            {isCloudTranscribing ? (
-              <div className="text-xs text-muted-foreground">
-                <span className="font-medium text-slate-700">Transcribing...</span>
-              </div>
-            ) : null}
+            <div className="flex flex-wrap items-center gap-2">
+              <Label className="text-xs whitespace-nowrap">Planned for</Label>
+              <Select
+                value={plannedHorizonNewNote}
+                onValueChange={(value) => setPlannedHorizonNewNote(value as PlannedHorizonOption)}
+              >
+                <SelectTrigger className="h-9 w-[min(100%,240px)] max-w-[260px]">
+                  <SelectValue placeholder="Optional" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={PLANNED_HORIZON_NONE}>No date</SelectItem>
+                  <SelectItem value="next_week">Next week</SelectItem>
+                  <SelectItem value="next_2_weeks">Next 2 weeks</SelectItem>
+                  <SelectItem value="next_3_weeks">Next 3 weeks</SelectItem>
+                  <SelectItem value="next_4_weeks">Next 4 weeks</SelectItem>
+                  <SelectItem value="next_month">Next month</SelectItem>
+                  <SelectItem value="next_2_months">Next 2 months</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
           <div className="space-y-2">
             <Label>Attachments</Label>
@@ -2461,26 +2309,12 @@ export default function GaKaNotesPage() {
                       <TableCell className="p-1">
                         <div className="w-4 h-4 rounded-sm border border-slate-300 bg-pink-200" />
                       </TableCell>
-                      <TableCell className="text-sm font-semibold">Task: To do</TableCell>
+                      <TableCell className="text-sm font-semibold">Me task të krijuar</TableCell>
                       <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
                     </TableRow>
                     <TableRow className="h-8">
                       <TableCell className="p-1">
-                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-amber-200" />
-                      </TableCell>
-                      <TableCell className="text-sm font-semibold">Task: In progress</TableCell>
-                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
-                    </TableRow>
-                    <TableRow className="h-8">
-                      <TableCell className="p-1">
-                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-emerald-200" />
-                      </TableCell>
-                      <TableCell className="text-sm font-semibold">Task: Done</TableCell>
-                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
-                    </TableRow>
-                    <TableRow className="h-8">
-                      <TableCell className="p-1">
-                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-slate-200" />
+                        <div className="w-4 h-4 rounded-sm border border-slate-400 bg-slate-300 opacity-70" />
                       </TableCell>
                       <TableCell className="text-sm font-semibold">Mbyllur</TableCell>
                       <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
@@ -2536,17 +2370,6 @@ export default function GaKaNotesPage() {
           ) : null}
           <div className="flex flex-wrap items-center gap-3">
             <div className="space-y-1">
-              <Select value={rangeFilter} onValueChange={(v) => setRangeFilter(v as "week" | "all")}>
-                <SelectTrigger className="h-9 w-[160px]">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="week">This week (default)</SelectItem>
-                  <SelectItem value="all">All</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-1">
               <Select
                 value={taskStatusFilter}
                 onValueChange={(v) => setTaskStatusFilter(v as TaskStatusFilter)}
@@ -2556,7 +2379,7 @@ export default function GaKaNotesPage() {
                 </SelectTrigger>
                 <SelectContent>
                   <SelectItem value="all">All Tasks/Notes</SelectItem>
-                  <SelectItem value="tasks">Tasks</SelectItem>
+                  <SelectItem value="open">Open</SelectItem>
                   <SelectItem
                     value="notes"
                     className="bg-sky-100 text-sky-900 focus:bg-sky-200 focus:text-sky-900"
@@ -2564,34 +2387,16 @@ export default function GaKaNotesPage() {
                     Notes
                   </SelectItem>
                   <SelectItem
+                    value="tasks"
+                    className="bg-pink-100 text-pink-900 focus:bg-pink-200 focus:text-pink-900"
+                  >
+                    Tasks
+                  </SelectItem>
+                  <SelectItem
                     value="closed"
                     className="bg-slate-200 text-slate-800 focus:bg-slate-300 focus:text-slate-900"
                   >
                     Closed
-                  </SelectItem>
-                  <SelectItem
-                    value="TODO"
-                    className="bg-pink-100 text-pink-900 focus:bg-pink-200 focus:text-pink-900"
-                  >
-                    To do
-                  </SelectItem>
-                  <SelectItem
-                    value="IN_PROGRESS"
-                    className="bg-yellow-100 text-amber-900 focus:bg-amber-200 focus:text-amber-900"
-                  >
-                    In progress
-                  </SelectItem>
-                  <SelectItem
-                    value="WAITING_CONFIRMATION"
-                    className="bg-amber-50 text-blue-900 focus:bg-blue-200 focus:text-blue-900"
-                  >
-                    Waiting Confirmation
-                  </SelectItem>
-                  <SelectItem
-                    value="DONE"
-                    className="bg-emerald-100 text-emerald-900 focus:bg-emerald-200 focus:text-emerald-900"
-                  >
-                    Done
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -2698,8 +2503,8 @@ export default function GaKaNotesPage() {
                     cell.style.width = 'auto'
                     cell.style.minWidth = 'auto'
                   } else {
-                    cell.style.width = '600px'
-                    cell.style.maxWidth = '600px'
+                    cell.style.width = '720px'
+                    cell.style.maxWidth = '720px'
                     cell.style.whiteSpace = 'normal'
                     cell.style.wordWrap = 'break-word'
                   }
@@ -2754,8 +2559,8 @@ export default function GaKaNotesPage() {
                         }
                         /* SHENIMI column (2nd column) - set width and wrap */
                         th:nth-child(2), td:nth-child(2) {
-                          width: 350px;
-                          max-width: 350px;
+                          width: 450px;
+                          max-width: 450px;
                           white-space: normal;
                           word-wrap: break-word;
                         }
@@ -2857,10 +2662,9 @@ export default function GaKaNotesPage() {
             <Button
               variant="outline"
               className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-              disabled={exportingDailyReport}
               onClick={() => void exportDailyReport()}
             >
-              {exportingDailyReport ? "Exporting..." : "Export Excel"}
+              Export Excel
             </Button>
           </div>
           {loading ? (
@@ -2869,19 +2673,19 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1230px] sm:min-w-[1420px]">
-                <table className="w-full table-fixed caption-bottom text-sm min-w-[1230px] sm:min-w-[1420px]">
+              <div className="w-full min-w-[1312px] sm:min-w-[1512px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1312px] sm:min-w-[1512px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
-                      <th className="min-w-[340px] w-[340px] max-w-[340px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
-                      <th className="hidden sm:table-cell min-w-[220px] w-[220px] max-w-[220px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
+                      <th className="min-w-[440px] w-[440px] max-w-[440px] sm:min-w-[420px] sm:w-[420px] sm:max-w-[420px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
-                      <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
+                      <th className="w-[112px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Task due or planned date">PLAN</th>
+                      <th className="min-w-[128px] w-[128px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Linked task start date">START</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DET</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>INT</th>
                       <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
@@ -2890,16 +2694,6 @@ export default function GaKaNotesPage() {
                   </thead>
                   <tbody>
                   {visibleNotes.map((note, idx) => {
-                    const creator = note.created_by ? userMap.get(note.created_by) : null
-                    const creatorLabel =
-                      creator?.full_name || creator?.username || "Unknown user"
-                    const creatorInitials = getInitials(creatorLabel)
-                    const creatorBadgeClasses =
-                      creatorInitials === "GA"
-                        ? "bg-rose-100 text-rose-800 border border-rose-200"
-                        : creatorInitials === "KA"
-                          ? "bg-blue-100 text-blue-800 border border-blue-200"
-                          : "bg-slate-200 text-slate-700"
                     const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
                     const noteProject = note.project_id ? projectMap.get(note.project_id) : null
                     const taskInfo = noteTaskInfo.get(note.id)
@@ -2937,7 +2731,6 @@ export default function GaKaNotesPage() {
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
                         : normalizeTaskStatus(taskInfo?.taskStatus)
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
-                    const plannedNextWeekLabel = notePlannedNextWeekLabel(taskInfo)
                     const taskTypeLabels = taskInfo?.taskTypeLabels ?? []
                     const canAddAttachments = !isClosed && aggregatedStatus !== "DONE"
                     const editDisabled = isClosed
@@ -2949,15 +2742,7 @@ export default function GaKaNotesPage() {
                     const shenimiCellClass = isClosed
                       ? "bg-slate-300 opacity-70"
                       : hasTask
-                        ? aggregatedStatus === "TODO"
-                          ? "bg-pink-200"
-                          : aggregatedStatus === "IN_PROGRESS"
-                            ? "bg-yellow-200"
-                            : aggregatedStatus === "DONE"
-                              ? "bg-emerald-200"
-                              : aggregatedStatus === "WAITING_CONFIRMATION"
-                                ? "bg-amber-50"
-                                : "bg-slate-100"
+                        ? "bg-pink-200"
                         : "bg-sky-200"
 
                     // Only show department if:
@@ -2974,39 +2759,46 @@ export default function GaKaNotesPage() {
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
                         <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
-                        <td className={`min-w-[340px] w-[340px] max-w-[340px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] whitespace-pre-wrap break-words border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
+                        <td className={`min-w-[440px] w-[440px] max-w-[440px] sm:min-w-[420px] sm:w-[420px] sm:max-w-[420px] whitespace-pre-wrap break-words border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
                             <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0 flex flex-wrap items-center gap-1">
-                                {showMobileDeptBadge || assignees.length > 0 ? (
-                                  <span className="sm:hidden inline-flex items-center gap-1 mr-1">
-                                    {showMobileDeptBadge ? (
-                                      <Badge className="text-[9px] px-1 py-0 bg-amber-50 text-amber-700 border border-amber-200">
-                                        {mobileDeptAbbrev}
-                                      </Badge>
-                                    ) : null}
-                                    {assignees.length > 0 ? (
-                                      <span className="inline-flex items-center gap-1">
-                                        {assignees.map((assignee, assigneeIdx) => {
-                                          const assigneeLabel = assignee.full_name || assignee.username || "Unknown"
-                                          const assigneeInitials = getInitials(assigneeLabel)
-                                          return (
-                                            <span
-                                              key={assigneeIdx}
-                                              className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold bg-slate-200 text-slate-700"
-                                              title={assigneeLabel}
-                                            >
-                                              {assigneeInitials}
-                                            </span>
-                                          )
-                                        })}
-                                      </span>
-                                    ) : null}
+                              <div className="min-w-0 flex-1 flex flex-col gap-1">
+                                <div className="flex flex-wrap items-center gap-1">
+                                  {showMobileDeptBadge || assignees.length > 0 ? (
+                                    <span className="sm:hidden inline-flex items-center gap-1 mr-1">
+                                      {showMobileDeptBadge ? (
+                                        <Badge className="text-[9px] px-1 py-0 bg-amber-50 text-amber-700 border border-amber-200">
+                                          {mobileDeptAbbrev}
+                                        </Badge>
+                                      ) : null}
+                                      {assignees.length > 0 ? (
+                                        <span className="inline-flex items-center gap-1">
+                                          {assignees.map((assignee, assigneeIdx) => {
+                                            const assigneeLabel = assignee.full_name || assignee.username || "Unknown"
+                                            const assigneeInitials = getInitials(assigneeLabel)
+                                            return (
+                                              <span
+                                                key={assigneeIdx}
+                                                className="flex h-4 w-4 items-center justify-center rounded-full text-[9px] font-semibold bg-slate-200 text-slate-700"
+                                                title={assigneeLabel}
+                                              >
+                                                {assigneeInitials}
+                                              </span>
+                                            )
+                                          })}
+                                        </span>
+                                      ) : null}
+                                    </span>
+                                  ) : null}
+                                  <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
+                                    {renderMarkedNoteContent(note.content)}
                                   </span>
+                                </div>
+                                {taskInfo?.description ? (
+                                  <div className="border-t border-slate-200/80 pt-1 text-[11px] text-slate-600 line-clamp-4 whitespace-pre-wrap break-words">
+                                    {taskInfo.description}
+                                  </div>
                                 ) : null}
-                                <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
-                                  {renderMarkedNoteContent(note.content)}
-                                </span>
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
                                 {!editDisabled ? (
@@ -3029,7 +2821,7 @@ export default function GaKaNotesPage() {
                                     size="icon"
                                     disabled={!canAddAttachments}
                                     aria-disabled={!canAddAttachments}
-                                    className={`h-7 w-7 shrink-0 sm:hidden ${!canAddAttachments ? "opacity-50 cursor-not-allowed" : ""}`}
+                                    className={`h-7 w-7 shrink-0 ${!canAddAttachments ? "opacity-50 cursor-not-allowed" : ""}`}
                                     title={
                                       canAddAttachments
                                         ? attachments.length > 0
@@ -3054,7 +2846,7 @@ export default function GaKaNotesPage() {
                                   size="icon"
                                   disabled={editDisabled}
                                   aria-disabled={editDisabled}
-                                  className={`h-7 w-7 shrink-0 sm:hidden ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                                  className={`h-7 w-7 shrink-0 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
                                   aria-label={editDisabledTitle}
                                   title={editDisabledTitle}
                                   onClick={() => !editDisabled && openEditNote(note)}
@@ -3066,7 +2858,7 @@ export default function GaKaNotesPage() {
                                     variant="outline"
                                     size="icon"
                                     disabled={markingDoneNoteId === note.id}
-                                    className="h-7 w-7 shrink-0 sm:hidden border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
+                                    className="h-7 w-7 shrink-0 border-emerald-200 text-emerald-700 hover:bg-emerald-50 disabled:opacity-60"
                                     aria-label="Mark done"
                                     title="Mark done"
                                     onClick={() => void markWaitingTasksDone(note.id)}
@@ -3078,7 +2870,7 @@ export default function GaKaNotesPage() {
                                   <Button
                                     variant="outline"
                                     size="icon"
-                                    className="h-7 w-7 shrink-0 sm:hidden"
+                                    className="h-7 w-7 shrink-0"
                                     title="Create task"
                                     aria-label="Create task"
                                     onClick={() => openTaskDialog(note)}
@@ -3142,80 +2934,6 @@ export default function GaKaNotesPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="hidden sm:table-cell border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[220px] w-[220px] max-w-[220px]" style={{ verticalAlign: 'bottom' }}>
-                          {taskInfo?.description || attachments.length > 0 ? (
-                            <div className="space-y-2">
-                              {canAddAttachments || attachments.length > 0 ? (
-                                <div className="flex justify-end">
-                                  <Button
-                                    variant="outline"
-                                    size="sm"
-                                    disabled={!canAddAttachments}
-                                    aria-disabled={!canAddAttachments}
-                                    className={`h-6 text-[10px] ${!canAddAttachments ? "opacity-50 cursor-not-allowed" : ""}`}
-                                    title={canAddAttachments ? undefined : "Attachments disabled for done tasks and closed notes"}
-                                    onClick={() => canAddAttachments && openAttachmentsForNote(note.id)}
-                                  >
-                                    {attachments.length > 0 ? "Manage files" : "Add files"}
-                                  </Button>
-                                </div>
-                              ) : null}
-                              {taskInfo?.description ? (
-                                <div>{taskInfo.description}</div>
-                              ) : null}
-                              {attachments.length > 0 ? (
-                                <div className="space-y-1">
-                                  {attachments.map((attachment) => (
-                                    <div key={attachment.id} className="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 py-1">
-                                      <div className="flex flex-col">
-                                        <span className="text-xs font-medium text-slate-700">
-                                          {attachment.original_filename}
-                                        </span>
-                                        <span className="text-[10px] text-slate-500">
-                                          {formatFileSize(attachment.size_bytes)}
-                                        </span>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        {(attachment.content_type || "").startsWith("image/") ? (
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-6 text-[10px]"
-                                            onClick={() => void openAttachmentPreview(attachment)}
-                                          >
-                                            View
-                                          </Button>
-                                        ) : null}
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-6 text-[10px]"
-                                          onClick={() => void downloadAttachment(attachment)}
-                                        >
-                                          Download
-                                        </Button>
-                                      </div>
-                                    </div>
-                                  ))}
-                                </div>
-                              ) : null}
-                            </div>
-                          ) : (
-                            <div className="flex justify-end">
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                disabled={!canAddAttachments}
-                                aria-disabled={!canAddAttachments}
-                                className={`h-6 text-[10px] ${!canAddAttachments ? "opacity-50 cursor-not-allowed" : ""}`}
-                                title={canAddAttachments ? undefined : "Attachments disabled for done tasks and closed notes"}
-                                onClick={() => canAddAttachments && openAttachmentsForNote(note.id)}
-                              >
-                                Add files
-                              </Button>
-                            </div>
-                          )}
-                        </td>
                         <td className="border border-slate-600 p-1 align-middle whitespace-nowrap min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {note.is_discussed ? (
@@ -3245,16 +2963,6 @@ export default function GaKaNotesPage() {
                               </div>
                             )
                           })()}
-                        </td>
-                        <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
-                          <div className="flex items-center gap-2 text-xs">
-                            <div
-                              className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${creatorBadgeClasses}`}
-                              title={creatorLabel}
-                            >
-                              {creatorInitials}
-                            </div>
-                          </div>
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           {!note.is_converted_to_task ? (
@@ -3299,11 +3007,25 @@ export default function GaKaNotesPage() {
                             </Badge>
                           ) : null}
                         </td>
+                        <td className="border border-slate-600 p-2 align-middle text-[10px] text-center leading-tight max-w-[120px]" style={{ verticalAlign: 'bottom' }}>
+                          {formatPlannedHorizonDisplay(note, taskInfo)}
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle w-[128px]" style={{ verticalAlign: 'bottom' }}>
+                          {hasTask && taskInfo?.startDate ? (
+                            <div className="flex items-center justify-center text-center">
+                              <div className="text-[15px] font-bold leading-tight text-slate-900 tabular-nums">
+                                {formatCalendarDateDots(taskInfo.startDate)}
+                              </div>
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-400">—</span>
+                          )}
+                        </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {hasTask ? (
-                              <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center text-center">
-                                {plannedNextWeekLabel || "Task Created"}
+                              <Badge variant="outline" className="text-xs font-semibold px-2 py-0.5 bg-purple-50 text-purple-800 border-purple-200 h-7 flex items-center text-center">
+                                Task Created
                               </Badge>
                             ) : canCreateTask ? (
                               <Button
@@ -3841,6 +3563,7 @@ export default function GaKaNotesPage() {
           setEditTaskInitialDeadline("")
           setEditTaskDeadlineImportant(false)
           setEditTaskInitialDeadlineImportant(false)
+          setEditPlannedHorizon(PLANNED_HORIZON_NONE)
         }
       }}>
         <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
@@ -3864,15 +3587,6 @@ export default function GaKaNotesPage() {
                     <ListOrdered className="h-4 w-4" />
                     Numbers
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="h-8"
-                    onClick={markSelectedEditTextDone}
-                  >
-                    Mark / undo selected done
-                  </Button>
                 </div>
               </div>
               <Textarea
@@ -3881,15 +3595,36 @@ export default function GaKaNotesPage() {
                 onChange={(e) => handleEditContentChange(e.target.value)}
                 className="min-h-[180px] max-h-[42vh] resize-y overflow-y-auto text-sm leading-normal"
               />
-              <p className="text-xs text-muted-foreground">
-                Select text and click mark done to toggle it, or place the cursor on a line to toggle the whole line.
-              </p>
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Preview</Label>
                 <div className="min-h-[120px] max-h-[32vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-normal">
                   {renderNoteContentWithRanges(editContent, editDoneRanges, editAddedRanges)}
                 </div>
               </div>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs">Planned for (optional)</Label>
+              <Select
+                value={editPlannedHorizon}
+                onValueChange={(value) => setEditPlannedHorizon(value as PlannedHorizonOption)}
+                disabled={savingEdit}
+              >
+                <SelectTrigger className="max-w-[260px]">
+                  <SelectValue placeholder="No date" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={PLANNED_HORIZON_NONE}>No date</SelectItem>
+                  <SelectItem value="next_week">Next week</SelectItem>
+                  <SelectItem value="next_2_weeks">Next 2 weeks</SelectItem>
+                  <SelectItem value="next_3_weeks">Next 3 weeks</SelectItem>
+                  <SelectItem value="next_4_weeks">Next 4 weeks</SelectItem>
+                  <SelectItem value="next_month">Next month</SelectItem>
+                  <SelectItem value="next_2_months">Next 2 months</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-muted-foreground">
+                Shown in the PLAN column until a linked task has a due date.
+              </p>
             </div>
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
               <div className="space-y-2">

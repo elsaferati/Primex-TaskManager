@@ -19,6 +19,7 @@ import {
   ClipboardCheck,
   Hexagon,
   StickyNote,
+  CalendarClock,
   Briefcase,
   DollarSign,
   Clock3,
@@ -57,6 +58,11 @@ const items: NavItem[] = [
     href: "/ga-ka-notes",
     label: "GA/KA Notes",
     icon: StickyNote,
+  },
+  {
+    href: "/next-week-plan",
+    label: "Notes for next week plan",
+    icon: CalendarClock,
   },
   {
     href: "/waiting-confirmation-ga",

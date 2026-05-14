@@ -19,6 +19,7 @@ from app.db import get_db
 from app.models.enums import NotificationType, ProjectPhaseStatus, ProjectType, TaskPriority, TaskStatus, UserRole
 from app.models.department import Department
 from app.models.ga_note import GaNote
+from app.models.plan_note import PlanNote
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
@@ -436,6 +437,7 @@ def _task_to_out(
         assignees=assignees,
         created_by=task.created_by,
         ga_note_origin_id=task.ga_note_origin_id,
+        plan_note_origin_id=task.plan_note_origin_id,
         system_template_origin_id=task.system_template_origin_id,
         origin_run_at=task.origin_run_at,
         system_task_slot_id=task.system_task_slot_id,
@@ -588,6 +590,7 @@ async def list_tasks(
     assigned_to: uuid.UUID | None = None,
     created_by: uuid.UUID | None = None,
     ga_note_origin_ids: list[uuid.UUID] | None = Query(None),
+    plan_note_origin_ids: list[uuid.UUID] | None = Query(None),
     due_from: datetime | None = None,
     due_to: datetime | None = None,
     window_from: datetime | None = None,
@@ -646,6 +649,8 @@ async def list_tasks(
         stmt = stmt.where(Task.created_by == created_by)
     if ga_note_origin_ids:
         stmt = stmt.where(Task.ga_note_origin_id.in_(ga_note_origin_ids))
+    if plan_note_origin_ids:
+        stmt = stmt.where(Task.plan_note_origin_id.in_(plan_note_origin_ids))
     if due_from:
         stmt = stmt.where(Task.due_date >= due_from)
     if due_to:
@@ -835,6 +840,12 @@ async def create_task(
     user=Depends(get_current_user),
 ) -> TaskOut:
     # ensures_manager_or_admin(user) - Removed to allow all department members to create tasks
+    if payload.ga_note_origin_id is not None and payload.plan_note_origin_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Cannot set both ga_note_origin_id and plan_note_origin_id",
+        )
+
     department_id = payload.department_id
     dependency_task_id = payload.dependency_task_id
     is_fast = is_fast_task_fields(
@@ -843,6 +854,7 @@ async def create_task(
         dependency_task_id=dependency_task_id,
         system_template_origin_id=None,
         ga_note_origin_id=payload.ga_note_origin_id,
+        plan_note_origin_id=payload.plan_note_origin_id,
     )
     project = None
     if payload.project_id is not None:
@@ -851,7 +863,7 @@ async def create_task(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project department mismatch")
 
     # Allow GA managers (department code GA) to create tasks for any department (for fast tasks etc.)
-    if department_id is not None and payload.ga_note_origin_id is None:
+    if department_id is not None and payload.ga_note_origin_id is None and payload.plan_note_origin_id is None:
         ga_manager_cross = (
             user.role == UserRole.MANAGER
             and getattr(user, "department", None) is not None
@@ -911,10 +923,50 @@ async def create_task(
         if ga_note.project_id is not None and ga_note.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note project mismatch")
 
+    if payload.plan_note_origin_id is not None:
+        plan_note = (
+            await db.execute(select(PlanNote).where(PlanNote.id == payload.plan_note_origin_id))
+        ).scalar_one_or_none()
+        if plan_note is None:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan note not found")
+        plan_note_department = None
+        if plan_note.department_id is not None:
+            plan_note_department = (
+                await db.execute(select(Department).where(Department.id == plan_note.department_id))
+            ).scalar_one_or_none()
+        is_dev_plan_note = False
+        if plan_note_department is not None:
+            dept_name = (plan_note_department.name or "").strip().upper()
+            dept_code = (plan_note_department.code or "").strip().upper()
+            if dept_name == "DEVELOPMENT" or dept_code == "DEV":
+                is_dev_plan_note = True
+        if plan_note.project_id is not None:
+            plan_project = (
+                await db.execute(select(Project).where(Project.id == plan_note.project_id))
+            ).scalar_one_or_none()
+            if plan_project is not None and plan_project.department_id is not None:
+                plan_project_department = (
+                    await db.execute(select(Department).where(Department.id == plan_project.department_id))
+                ).scalar_one_or_none()
+                if plan_project_department is not None:
+                    code = (plan_project_department.code or "").upper()
+                    if code in ("PCM", "GDS") and not is_dev_plan_note:
+                        raise HTTPException(
+                            status_code=status.HTTP_400_BAD_REQUEST,
+                            detail="Tasks for PCM/GDS projects must be created manually",
+                        )
+        if plan_note.project_id is not None and plan_note.project_id != payload.project_id:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan note project mismatch")
+
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
-    # Allow cross-department for projects, GA notes, or fast tasks (tasks without project_id)
-    allow_cross_department = project is not None or payload.ga_note_origin_id is not None or payload.project_id is None
+    # Allow cross-department for projects, GA notes, plan notes, or fast tasks (tasks without project_id)
+    allow_cross_department = (
+        project is not None
+        or payload.ga_note_origin_id is not None
+        or payload.plan_note_origin_id is not None
+        or payload.project_id is None
+    )
     if payload.assignees is not None:
         seen: set[uuid.UUID] = set()
         assignee_ids = [uid for uid in payload.assignees if not (uid in seen or seen.add(uid))]
@@ -936,7 +988,7 @@ async def create_task(
     }
 
     status_value = payload.status or TaskStatus.TODO
-    if payload.ga_note_origin_id is not None:
+    if payload.ga_note_origin_id is not None or payload.plan_note_origin_id is not None:
         status_value = _normalize_ga_note_task_status(status_value)
     confirmation_assignee_id = payload.confirmation_assignee_id
     if confirmation_assignee_id is not None:
@@ -1010,6 +1062,7 @@ async def create_task(
                     confirmation_assignee_id=confirmation_assignee_id,
                     created_by=user.id,
                     ga_note_origin_id=payload.ga_note_origin_id,
+                    plan_note_origin_id=payload.plan_note_origin_id,
                     fast_task_group_id=None,
                     status=status_value,
                     priority=priority_value,
@@ -1149,6 +1202,7 @@ async def create_task(
                             confirmation_assignee_id=confirmation_assignee_id,
                             created_by=user.id,
                             ga_note_origin_id=payload.ga_note_origin_id,
+                            plan_note_origin_id=payload.plan_note_origin_id,
                             fast_task_group_id=None,
                             status=status_value,
                             priority=priority_value,
@@ -1239,9 +1293,9 @@ async def create_task(
                     dto.alignment_user_ids = payload.alignment_user_ids
                     return dto
 
-    # GA note standalone multi-assignee: create per-user copies (no fast_task_group_id).
+    # GA / plan note standalone multi-assignee: create per-user copies (no fast_task_group_id).
     if (
-        payload.ga_note_origin_id is not None
+        (payload.ga_note_origin_id is not None or payload.plan_note_origin_id is not None)
         and payload.project_id is None
         and is_fast
         and assignee_ids is not None
@@ -1268,6 +1322,7 @@ async def create_task(
                 confirmation_assignee_id=confirmation_assignee_id,
                 created_by=user.id,
                 ga_note_origin_id=payload.ga_note_origin_id,
+                plan_note_origin_id=payload.plan_note_origin_id,
                 fast_task_group_id=None,
                 status=status_value,
                 priority=priority_value,
@@ -1366,6 +1421,7 @@ async def create_task(
                 confirmation_assignee_id=confirmation_assignee_id,
                 created_by=user.id,
                 ga_note_origin_id=payload.ga_note_origin_id,
+                plan_note_origin_id=payload.plan_note_origin_id,
                 fast_task_group_id=fast_task_group_id,
                 status=status_value,
                 priority=priority_value,
@@ -1456,6 +1512,7 @@ async def create_task(
         confirmation_assignee_id=confirmation_assignee_id,
         created_by=user.id,
         ga_note_origin_id=payload.ga_note_origin_id,
+        plan_note_origin_id=payload.plan_note_origin_id,
         fast_task_group_id=fast_task_group_id,
         status=status_value,
         priority=priority_value,
@@ -1630,7 +1687,7 @@ async def update_task(
     if not can_edit:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
-    if task.ga_note_origin_id is not None:
+    if task.ga_note_origin_id is not None or task.plan_note_origin_id is not None:
         normalized_status = _normalize_ga_note_task_status(task.status)
         current_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status).strip()
         if current_status != normalized_status.value:
@@ -1696,7 +1753,9 @@ async def update_task(
     assignee_users: list[User] = []
     # Allow cross-department for projects, GA notes, or fast tasks (tasks without project_id)
     # This matches the logic in create_task endpoint
-    allow_cross_department = task.project_id is not None or task.ga_note_origin_id is not None or task.project_id is None
+    allow_cross_department = (
+        task.project_id is not None or task.ga_note_origin_id is not None or task.plan_note_origin_id is not None or task.project_id is None
+    )
 
     # Fast tasks are stored as per-user copies tied by fast_task_group_id.
     # For older rows, initialize the group id lazily on first update.
@@ -1978,7 +2037,7 @@ async def update_task(
         final_is_1h_report = payload.is_1h_report if payload.is_1h_report is not None else task.is_1h_report
         final_is_personal = payload.is_personal if payload.is_personal is not None else task.is_personal
         
-        # Count how many type flags are set (GA type uses ga_note_origin_id, not a boolean flag)
+        # Count how many type flags are set (GA type uses ga_note_origin_id, plan uses plan_note_origin_id)
         active_flags_count = sum([
             final_is_bllok,
             final_is_r1,
@@ -2195,6 +2254,7 @@ async def update_task(
                         confirmation_assignee_id=task.confirmation_assignee_id,
                         created_by=task.created_by,
                         ga_note_origin_id=task.ga_note_origin_id,
+                        plan_note_origin_id=task.plan_note_origin_id,
                         system_template_origin_id=task.system_template_origin_id,
                         fast_task_group_id=task.fast_task_group_id,
                         status=TaskStatus.TODO,

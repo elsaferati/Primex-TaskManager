@@ -10,6 +10,8 @@ from app.models.external_platform_link import ExternalPlatformLink
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.ga_note_attachment import GaNoteAttachment
+from app.models.plan_note import PlanNote
+from app.models.plan_note_attachment import PlanNoteAttachment
 from app.models.ga_time_slot_entry import GaTimeSlotEntry
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.holiday import Holiday
@@ -59,6 +61,8 @@ __all__ = [
     "FeedbackLog",
     "GaNote",
     "GaNoteAttachment",
+    "PlanNote",
+    "PlanNoteAttachment",
     "GaTimeSlotEntry",
     "GaTimeSlotTemplate",
     "Holiday",

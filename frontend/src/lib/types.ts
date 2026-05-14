@@ -236,6 +236,7 @@ export interface Task {
   assignees?: TaskAssignee[] | null
   created_by?: string | null
   ga_note_origin_id?: string | null
+  plan_note_origin_id?: string | null
   system_template_origin_id?: string | null
   origin_run_at?: string | null
   system_task_slot_id?: string | null
@@ -402,6 +403,37 @@ export interface GaNote {
   created_at: string
   updated_at: string
   attachments?: GaNoteAttachment[]
+}
+
+export interface PlanNote {
+  id: string
+  content: string
+  created_by?: string | null
+  note_type?: "GA" | "KA"
+  status?: "OPEN" | "CLOSED"
+  priority?: "NORMAL" | "HIGH" | null
+  start_date: string
+  due_date?: string | null
+  completed_at?: string | null
+  is_converted_to_task: boolean
+  is_discussed?: boolean
+  project_id?: string | null
+  department_id?: string | null
+  planned_for_date?: string | null
+  created_at: string
+  updated_at: string
+  attachments?: PlanNoteAttachment[]
+}
+
+export interface PlanNoteAttachment {
+  id: string
+  note_id: string
+  original_filename: string
+  stored_filename: string
+  content_type?: string | null
+  size_bytes: number
+  created_by?: string | null
+  created_at: string
 }
 
 export interface GaNoteAttachment {

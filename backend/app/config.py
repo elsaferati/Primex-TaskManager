@@ -55,6 +55,7 @@ class Settings(BaseSettings):
     FRONTEND_URL: str = "http://localhost:3000"
 
     GA_NOTES_UPLOAD_DIR: str = "uploads/ga-notes"
+    PLAN_NOTES_UPLOAD_DIR: str = "uploads/plan_notes"
     GA_NOTES_MAX_FILES: int = 20
     GA_NOTES_MAX_FILE_MB: int = 25
 
