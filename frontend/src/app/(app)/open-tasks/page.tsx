@@ -9,9 +9,10 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
-import { useConfirm } from "@/components/providers/confirm-dialog-provider"
+import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { departmentTableTag, formatDepartmentName } from "@/lib/department-name"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
@@ -19,11 +20,26 @@ import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
 
-type PlanningInboxFilter = "all" | "unplanned" | "this_week" | "next_week" | "ga" | "plan" | "project" | "fast"
+type PlanningInboxFilter =
+  | "all"
+  | "overdue"
+  | "this_week"
+  | "next_week"
+  | "future"
+  | "no_date"
+  | "todo"
+  | "in_progress"
+  | "ga"
+  | "plan"
+  | "project"
+  | "fast"
 type PlannerTaskDialogMode = "plan" | "edit"
+type OpenTaskEditType = "normal" | "high" | "hourly" | "r1" | "personal" | "blocked"
+type OpenTaskDateBucket = "overdue" | "this_week" | "next_week" | "future" | "no_date"
 
 const ALL_VALUE = "__all__"
 const NONE_VALUE = "__none__"
+const PROJECT_NONE_VALUE = "__no_project__"
 
 const pad2 = (value: number) => String(value).padStart(2, "0")
 const toISODate = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`
@@ -50,12 +66,19 @@ function taskDateKey(value?: string | null) {
   return toISODate(date)
 }
 
-function isTaskPlannedForWeek(task: Task, weekStart: string, weekEnd: string) {
+function taskDateBucket(
+  task: Task,
+  thisWeekStart: string,
+  thisWeekEnd: string,
+  nextWeekStart: string,
+  nextWeekEnd: string
+): OpenTaskDateBucket {
   const due = taskDateKey(task.due_date)
-  if (!due) return false
-  const startCandidate = taskDateKey(task.start_date)
-  const start = startCandidate && startCandidate <= due ? startCandidate : due
-  return start <= weekEnd && due >= weekStart
+  if (!due) return "no_date"
+  if (due < thisWeekStart) return "overdue"
+  if (due >= thisWeekStart && due <= thisWeekEnd) return "this_week"
+  if (due >= nextWeekStart && due <= nextWeekEnd) return "next_week"
+  return "future"
 }
 
 function isFastPlannerTask(task: Task) {
@@ -74,12 +97,52 @@ function statusLabel(value?: string | null) {
   return "To Do"
 }
 
-function compactPlanGroupLabel(label: string) {
-  if (label === "Unplanned") return "None"
-  if (label === "Planned This Week") return "This wk"
-  if (label === "Planned Next Week") return "Next wk"
-  if (label === "This Week + Next Week") return "Both"
-  return label
+function bucketLabel(bucket: OpenTaskDateBucket) {
+  if (bucket === "overdue") return "Overdue"
+  if (bucket === "this_week") return "This Week"
+  if (bucket === "next_week") return "Next Week"
+  if (bucket === "future") return "Future"
+  return "No Date"
+}
+
+function bucketBadgeClass(bucket: OpenTaskDateBucket) {
+  if (bucket === "overdue") {
+    return "inline-flex max-w-full whitespace-normal break-words rounded-full border border-red-200 bg-red-50 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-tight text-red-800"
+  }
+  if (bucket === "no_date") {
+    return "inline-flex max-w-full whitespace-normal break-words rounded-full border border-amber-200 bg-amber-50 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-tight text-amber-800"
+  }
+  if (bucket === "future") {
+    return "inline-flex max-w-full whitespace-normal break-words rounded-full border border-blue-200 bg-blue-50 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-tight text-blue-800"
+  }
+  return "inline-flex max-w-full whitespace-normal break-words rounded-full border border-emerald-200 bg-emerald-50 px-1.5 py-0.5 text-[11px] font-semibold uppercase leading-tight text-emerald-800"
+}
+
+const TASK_STATUS_OPTIONS = [
+  { value: "TODO", label: "To Do" },
+  { value: "IN_PROGRESS", label: "In Progress" },
+  { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
+  { value: "DONE", label: "Done" },
+] as const
+
+const TASK_TYPE_OPTIONS: Array<{ value: OpenTaskEditType; label: string }> = [
+  { value: "normal", label: "Normal" },
+  { value: "high", label: "High" },
+  { value: "hourly", label: "1H" },
+  { value: "r1", label: "R1" },
+  { value: "personal", label: "Personal" },
+  { value: "blocked", label: "BLLOK" },
+]
+
+const FINISH_PERIOD_OPTIONS = ["AM", "PM"] as const
+
+function taskEditType(task: Task): OpenTaskEditType {
+  if (task.is_bllok) return "blocked"
+  if (task.is_1h_report) return "hourly"
+  if (task.is_r1) return "r1"
+  if (task.is_personal) return "personal"
+  if (task.priority === "HIGH") return "high"
+  return "normal"
 }
 
 function initialsFromDisplayName(name: string) {
@@ -95,7 +158,6 @@ function initialsFromDisplayName(name: string) {
 
 export default function OpenTasksPage() {
   const { apiFetch, user } = useAuth()
-  const confirm = useConfirm()
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
@@ -109,12 +171,18 @@ export default function OpenTasksPage() {
   const [dialogOpen, setDialogOpen] = React.useState(false)
   const [dialogMode, setDialogMode] = React.useState<PlannerTaskDialogMode>("plan")
   const [selectedTask, setSelectedTask] = React.useState<Task | null>(null)
+  const [taskTitle, setTaskTitle] = React.useState("")
+  const [taskDescription, setTaskDescription] = React.useState("")
+  const [taskType, setTaskType] = React.useState<OpenTaskEditType>("normal")
+  const [taskStatus, setTaskStatus] = React.useState("TODO")
+  const [taskDepartmentId, setTaskDepartmentId] = React.useState(ALL_VALUE)
+  const [taskProjectId, setTaskProjectId] = React.useState(PROJECT_NONE_VALUE)
+  const [deadlineImportant, setDeadlineImportant] = React.useState(false)
   const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
   const [finishPeriod, setFinishPeriod] = React.useState<"AM" | "PM" | typeof NONE_VALUE>("AM")
   const [assigneeIds, setAssigneeIds] = React.useState<string[]>([])
   const [saving, setSaving] = React.useState(false)
-  const [clearingId, setClearingId] = React.useState<string | null>(null)
   const [exportingExcel, setExportingExcel] = React.useState(false)
 
   const thisWeekStart = React.useMemo(() => mondayISO(), [])
@@ -227,23 +295,43 @@ export default function OpenTasksPage() {
       .sort((a, b) => a.name.localeCompare(b.name))
   }, [departmentId, users])
 
+  const dialogProjectOptions = React.useMemo(() => {
+    const scoped = taskDepartmentId !== ALL_VALUE
+      ? projects.filter((project) => project.department_id === taskDepartmentId)
+      : projects
+    return scoped
+      .filter((project) => !project.is_template)
+      .map((project) => ({ id: project.id, name: resolveProjectTitle(project) || project.title || project.name || "Untitled project" }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [projects, taskDepartmentId])
+
+  const dialogAssigneeOptions = React.useMemo(() => {
+    const scoped = taskDepartmentId !== ALL_VALUE ? users.filter((item) => item.department_id === taskDepartmentId) : users
+    return scoped
+      .map((item) => ({ id: item.id, name: item.full_name || item.username || item.id }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+  }, [taskDepartmentId, users])
+
   const filteredTasks = React.useMemo(() => {
     const query = search.trim().toLowerCase()
     return tasks.filter((task) => {
       const project = task.project_id ? projectById.get(task.project_id) : null
       if (project?.is_template) return false
 
-      const plannedThisWeek = isTaskPlannedForWeek(task, thisWeekStart, thisWeekEnd)
-      const plannedNextWeek = isTaskPlannedForWeek(task, nextWeekStart, nextWeekEnd)
+      const dateBucket = taskDateBucket(task, thisWeekStart, thisWeekEnd, nextWeekStart, nextWeekEnd)
       const isGa = Boolean(task.ga_note_origin_id)
       const isPlan = Boolean(task.plan_note_origin_id)
       const isFast = isFastPlannerTask(task)
       const ids = taskAssigneeIds(task)
 
       if (userId !== ALL_VALUE && !ids.includes(userId)) return false
-      if (filter === "unplanned" && (plannedThisWeek || plannedNextWeek)) return false
-      if (filter === "this_week" && !plannedThisWeek) return false
-      if (filter === "next_week" && !plannedNextWeek) return false
+      if (filter === "overdue" && dateBucket !== "overdue") return false
+      if (filter === "this_week" && dateBucket !== "this_week") return false
+      if (filter === "next_week" && dateBucket !== "next_week") return false
+      if (filter === "future" && dateBucket !== "future") return false
+      if (filter === "no_date" && dateBucket !== "no_date") return false
+      if (filter === "todo" && (task.status || "TODO").toUpperCase() !== "TODO") return false
+      if (filter === "in_progress" && (task.status || "").toUpperCase() !== "IN_PROGRESS") return false
       if (filter === "ga" && !isGa) return false
       if (filter === "plan" && !isPlan) return false
       if (filter === "project" && !task.project_id) return false
@@ -274,30 +362,29 @@ export default function OpenTasksPage() {
     })
   }, [assigneeInitialsLabel, assigneeLabel, departmentById, filter, nextWeekEnd, nextWeekStart, noteById, projectById, search, sourceLabel, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, userId])
 
-  const unplannedTasks = filteredTasks.filter(
-    (task) => !isTaskPlannedForWeek(task, thisWeekStart, thisWeekEnd) && !isTaskPlannedForWeek(task, nextWeekStart, nextWeekEnd)
-  )
-  const thisWeekTasks = filteredTasks.filter((task) => isTaskPlannedForWeek(task, thisWeekStart, thisWeekEnd))
-  const nextWeekTasks = filteredTasks.filter((task) => isTaskPlannedForWeek(task, nextWeekStart, nextWeekEnd))
+  const bucketCounts = React.useMemo(() => {
+    const counts: Record<OpenTaskDateBucket, number> = {
+      overdue: 0,
+      this_week: 0,
+      next_week: 0,
+      future: 0,
+      no_date: 0,
+    }
+    for (const task of filteredTasks) {
+      counts[taskDateBucket(task, thisWeekStart, thisWeekEnd, nextWeekStart, nextWeekEnd)] += 1
+    }
+    return counts
+  }, [filteredTasks, nextWeekEnd, nextWeekStart, thisWeekEnd, thisWeekStart])
+
   const tableRows = React.useMemo(
     () =>
       filteredTasks.map((task) => {
-        const plannedThisWeek = isTaskPlannedForWeek(task, thisWeekStart, thisWeekEnd)
-        const plannedNextWeek = isTaskPlannedForWeek(task, nextWeekStart, nextWeekEnd)
-
-        let planLabel = "Unplanned"
-        if (plannedThisWeek && plannedNextWeek) {
-          planLabel = "This Week + Next Week"
-        } else if (plannedThisWeek) {
-          planLabel = "Planned This Week"
-        } else if (plannedNextWeek) {
-          planLabel = "Planned Next Week"
-        }
+        const dateBucket = taskDateBucket(task, thisWeekStart, thisWeekEnd, nextWeekStart, nextWeekEnd)
 
         return {
           task,
-          planLabel,
-          planned: plannedThisWeek || plannedNextWeek,
+          dateBucket,
+          planned: dateBucket !== "no_date",
         }
       }),
     [filteredTasks, nextWeekEnd, nextWeekStart, thisWeekEnd, thisWeekStart]
@@ -306,9 +393,16 @@ export default function OpenTasksPage() {
   const openDialog = (task: Task, mode: PlannerTaskDialogMode) => {
     setSelectedTask(task)
     setDialogMode(mode)
-    setStartDate(toDateInputValue(task.start_date) || nextWeekStart)
-    setDueDate(toDateInputValue(task.due_date) || nextWeekStart)
-    setFinishPeriod((task.finish_period as "AM" | "PM" | null) || "AM")
+    setTaskTitle(task.title || "")
+    setTaskDescription(task.description || "")
+    setTaskType(taskEditType(task))
+    setTaskStatus(task.status || "TODO")
+    setTaskDepartmentId(task.department_id || ALL_VALUE)
+    setTaskProjectId(task.project_id || PROJECT_NONE_VALUE)
+    setDeadlineImportant(Boolean(task.is_deadline_important))
+    setStartDate(toDateInputValue(task.start_date))
+    setDueDate(toDateInputValue(task.due_date))
+    setFinishPeriod((task.finish_period as "AM" | "PM" | null) || NONE_VALUE)
     setAssigneeIds(taskAssigneeIds(task))
     setDialogOpen(true)
   }
@@ -359,12 +453,17 @@ export default function OpenTasksPage() {
 
   const saveTask = async () => {
     if (!selectedTask) return
-    if (!dueDate) {
-      toast.error("Due date is required.")
+    const nextTitle = taskTitle.trim()
+    if (nextTitle.length < 2) {
+      toast.error("Title must be at least 2 characters.")
       return
     }
-    if (startDate && startDate > dueDate) {
+    if (startDate && dueDate && startDate > dueDate) {
       toast.error("Start date cannot be after due date.")
+      return
+    }
+    if (taskStatus === "WAITING_CONFIRMATION" && !selectedTask.confirmation_assignee_id) {
+      toast.error("This task needs a confirmation assignee before it can use Waiting Confirmation.")
       return
     }
     setSaving(true)
@@ -373,9 +472,20 @@ export default function OpenTasksPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          title: nextTitle,
+          description: taskDescription,
+          status: taskStatus,
+          priority: taskType === "high" ? "HIGH" : "NORMAL",
+          is_bllok: taskType === "blocked",
+          is_1h_report: taskType === "hourly",
+          is_r1: taskType === "r1",
+          is_personal: taskType === "personal",
+          department_id: taskDepartmentId === ALL_VALUE ? null : taskDepartmentId,
+          project_id: taskProjectId === PROJECT_NONE_VALUE ? null : taskProjectId,
           start_date: startDate ? new Date(startDate).toISOString() : null,
-          due_date: new Date(dueDate).toISOString(),
+          due_date: dueDate ? new Date(dueDate).toISOString() : null,
           finish_period: finishPeriod === NONE_VALUE ? null : finishPeriod,
+          is_deadline_important: deadlineImportant,
           assigned_to: assigneeIds[0] ?? null,
           assignees: assigneeIds,
         }),
@@ -395,44 +505,13 @@ export default function OpenTasksPage() {
     }
   }
 
-  const removeFromPlan = async (task: Task) => {
-    const confirmed = await confirm({
-      title: "Remove from plan",
-      description: task.project_id
-        ? "This clears the task start/due dates, which may affect project deadline display. Continue?"
-        : "This clears the task start/due dates so it leaves the weekly planner.",
-      confirmLabel: "Remove from plan",
-      variant: "destructive",
-    })
-    if (!confirmed) return
-
-    setClearingId(task.id)
-    try {
-      const res = await apiFetch(`/tasks/${task.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ start_date: null, due_date: null, finish_period: null }),
-      })
-      if (!res.ok) {
-        toast.error("Failed to remove task from plan.")
-        return
-      }
-      const updated = (await res.json()) as Task
-      setTasks((prev) => prev.map((item) => (item.id === updated.id ? updated : item)))
-      toast.success("Task removed from plan.")
-      void loadTasks()
-    } finally {
-      setClearingId(null)
-    }
-  }
-
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-semibold">Open Tasks</h1>
           <p className="text-sm text-slate-500">
-            Open tasks grouped by plan: this week {formatDate(thisWeekStart)} - {formatDate(thisWeekEnd)}, next week {formatDate(nextWeekStart)} - {formatDate(nextWeekEnd)}.
+            Open tasks grouped by due date: this week {formatDate(thisWeekStart)} - {formatDate(thisWeekEnd)}, next week {formatDate(nextWeekStart)} - {formatDate(nextWeekEnd)}.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -453,9 +532,13 @@ export default function OpenTasksPage() {
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="all">All open</SelectItem>
-                <SelectItem value="unplanned">Unplanned</SelectItem>
-                <SelectItem value="this_week">Planned this week</SelectItem>
-                <SelectItem value="next_week">Planned next week</SelectItem>
+                <SelectItem value="overdue">Overdue</SelectItem>
+                <SelectItem value="this_week">Due this week</SelectItem>
+                <SelectItem value="next_week">Due next week</SelectItem>
+                <SelectItem value="future">Future</SelectItem>
+                <SelectItem value="no_date">No date</SelectItem>
+                <SelectItem value="todo">To Do</SelectItem>
+                <SelectItem value="in_progress">In Progress</SelectItem>
                 <SelectItem value="ga">GA/KA</SelectItem>
                 <SelectItem value="plan">Plan note</SelectItem>
                 <SelectItem value="project">Project</SelectItem>
@@ -488,10 +571,12 @@ export default function OpenTasksPage() {
         <div className="text-sm text-slate-500">Loading open tasks...</div>
       ) : (
         <>
-          <div className="grid gap-3 md:grid-cols-3">
-            <Card><CardContent className="pt-6 text-center"><div className="text-2xl font-semibold text-amber-700">{unplannedTasks.length}</div><div className="text-xs text-slate-500">Unplanned</div></CardContent></Card>
-            <Card><CardContent className="pt-6 text-center"><div className="text-2xl font-semibold text-emerald-800">{thisWeekTasks.length}</div><div className="text-xs text-slate-500">Planned This Week</div></CardContent></Card>
-            <Card><CardContent className="pt-6 text-center"><div className="text-2xl font-semibold text-blue-800">{nextWeekTasks.length}</div><div className="text-xs text-slate-500">Planned Next Week</div></CardContent></Card>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
+            <Card><CardContent className="pt-6 text-center"><div className="text-2xl font-semibold text-red-700">{bucketCounts.overdue}</div><div className="text-xs text-slate-500">Overdue</div></CardContent></Card>
+            <Card><CardContent className="pt-6 text-center"><div className="text-2xl font-semibold text-emerald-800">{bucketCounts.this_week}</div><div className="text-xs text-slate-500">This Week</div></CardContent></Card>
+            <Card><CardContent className="pt-6 text-center"><div className="text-2xl font-semibold text-emerald-800">{bucketCounts.next_week}</div><div className="text-xs text-slate-500">Next Week</div></CardContent></Card>
+            <Card><CardContent className="pt-6 text-center"><div className="text-2xl font-semibold text-blue-800">{bucketCounts.future}</div><div className="text-xs text-slate-500">Future</div></CardContent></Card>
+            <Card><CardContent className="pt-6 text-center"><div className="text-2xl font-semibold text-amber-700">{bucketCounts.no_date}</div><div className="text-xs text-slate-500">No Date</div></CardContent></Card>
           </div>
 
           <Card>
@@ -502,116 +587,89 @@ export default function OpenTasksPage() {
               </div>
             </CardHeader>
             <CardContent>
-              <Table className="w-full min-w-0 table-fixed border-collapse text-sm">
+              <Table className="w-full min-w-[1180px] table-fixed border-collapse text-[15px] [&_td]:border-r [&_td]:border-slate-200 [&_td:last-child]:border-r-0 [&_th]:border-r [&_th]:border-slate-200 [&_th:last-child]:border-r-0">
                 <colgroup>
-                  <col style={{ width: "2%" }} />
-                  <col style={{ width: "6%" }} />
-                  <col style={{ width: "34%" }} />
-                  <col style={{ width: "7%" }} />
-                  <col style={{ width: "4%" }} />
-                  <col style={{ width: "10%" }} />
-                  <col style={{ width: "5%" }} />
-                  <col style={{ width: "4%" }} />
-                  <col style={{ width: "9%" }} />
-                  <col style={{ width: "9%" }} />
-                  <col style={{ width: "10%" }} />
+                  <col style={{ width: "32px" }} />
+                  <col style={{ width: "128px" }} />
+                  <col />
+                  <col style={{ width: "72px" }} />
+                  <col style={{ width: "54px" }} />
+                  <col style={{ width: "88px" }} />
+                  <col style={{ width: "56px" }} />
+                  <col style={{ width: "52px" }} />
+                  <col style={{ width: "86px" }} />
+                  <col style={{ width: "96px" }} />
+                  <col style={{ width: "104px" }} />
                 </colgroup>
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium">#</TableHead>
-                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium" title="Group / plan status">
+                    <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold">#</TableHead>
+                    <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold" title="Group / plan status">
                       Group
                     </TableHead>
-                    <TableHead className="h-auto min-w-0 px-1 py-1.5 text-xs font-medium">Task</TableHead>
-                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium">Source</TableHead>
-                    <TableHead className="h-auto px-0.5 py-1.5 text-center text-xs font-medium" title="Notes for next week plan">
+                    <TableHead className="h-auto min-w-0 px-1.5 py-2 text-[13px] font-semibold">Task</TableHead>
+                    <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold">Source</TableHead>
+                    <TableHead className="h-auto px-1 py-2 text-center text-[13px] font-semibold" title="Notes for next week plan">
                       PX JAV
                     </TableHead>
-                    <TableHead className="h-auto whitespace-normal px-1 py-1.5 text-xs font-medium leading-tight">Status</TableHead>
-                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium">Who</TableHead>
-                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium" title="Department">
+                    <TableHead className="h-auto whitespace-normal px-1.5 py-2 text-[13px] font-semibold leading-tight">Status</TableHead>
+                    <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold">Who</TableHead>
+                    <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold" title="Department">
                       Dep
                     </TableHead>
-                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium leading-tight">Due date</TableHead>
-                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium leading-tight">Date created</TableHead>
-                    <TableHead className="h-auto px-1 py-1.5 text-xs font-medium">Act</TableHead>
+                    <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold leading-tight">Due date</TableHead>
+                    <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold leading-tight">Date created</TableHead>
+                    <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold">Act</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {tableRows.length ? (
-                    tableRows.map(({ task, planLabel, planned }, index) => {
+                    tableRows.map(({ task, dateBucket, planned }, index) => {
                       const department = task.department_id ? departmentById.get(task.department_id) : null
                       const dueLabel = task.due_date ? formatDateDMY(task.due_date) : "-"
 
                       return (
                         <TableRow key={task.id} className="align-middle">
-                          <TableCell className="px-1 py-1.5 align-middle text-xs font-medium text-slate-600">{index + 1}</TableCell>
-                          <TableCell className="px-1 py-1.5 align-middle">
+                          <TableCell className="px-1.5 py-2 align-middle text-[13px] font-medium text-slate-600">{index + 1}</TableCell>
+                          <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle">
                             <span
-                              className={
-                                planned
-                                  ? "inline-flex max-w-full rounded-full border border-emerald-200 bg-emerald-50 px-1 py-0 text-[10px] font-semibold uppercase leading-tight text-emerald-800"
-                                  : "inline-flex max-w-full rounded-full border border-amber-200 bg-amber-50 px-1 py-0 text-[10px] font-semibold uppercase leading-tight text-amber-800"
-                              }
-                              title={planLabel}
+                              className={bucketBadgeClass(dateBucket)}
+                              title={bucketLabel(dateBucket)}
                             >
-                              {compactPlanGroupLabel(planLabel)}
+                              {bucketLabel(dateBucket)}
                             </span>
                           </TableCell>
-                          <TableCell className="min-w-0 whitespace-normal px-1 py-1.5 align-middle">
-                            <div className="break-words text-xs font-medium leading-snug text-slate-900">{task.title}</div>
+                          <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle">
+                            <div className="break-words text-sm font-medium leading-snug text-slate-900">{task.title}</div>
                           </TableCell>
-                          <TableCell className="px-1 py-1.5 align-middle text-xs text-slate-700">{sourceLabel(task)}</TableCell>
-                          <TableCell className="whitespace-normal px-0.5 py-1.5 text-center align-middle text-slate-700">
+                          <TableCell className="px-1.5 py-2 align-middle text-[13px] uppercase text-slate-700">{sourceLabel(task)}</TableCell>
+                          <TableCell className="whitespace-normal px-1 py-2 text-center align-middle text-slate-700">
                             {task.plan_note_origin_id ? (
-                              <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-1 py-0 text-[9px] font-semibold uppercase text-indigo-700">
+                              <span className="inline-flex rounded-full border border-indigo-200 bg-indigo-50 px-1.5 py-0 text-[11px] font-semibold uppercase text-indigo-700">
                                 Y
                               </span>
                             ) : (
                               <span className="text-xs text-slate-400">—</span>
                             )}
                           </TableCell>
-                          <TableCell className="min-w-0 whitespace-normal px-1 py-1.5 align-middle text-[11px] leading-snug text-slate-700">
+                          <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle text-[13px] uppercase leading-snug text-slate-700">
                             {statusLabel(task.status)}
                           </TableCell>
-                          <TableCell className="px-1 py-1.5 align-middle text-xs text-slate-700" title={assigneeLabel(task)}>
+                          <TableCell className="px-1.5 py-2 align-middle text-[13px] text-slate-700" title={assigneeLabel(task)}>
                             {assigneeInitialsLabel(task)}
                           </TableCell>
-                          <TableCell className="px-1 py-1.5 align-middle text-xs text-slate-700" title={department ? formatDepartmentName(department.name) : undefined}>
+                          <TableCell className="px-1.5 py-2 align-middle text-[13px] uppercase text-slate-700" title={department ? formatDepartmentName(department.name) : undefined}>
                             {departmentTableTag(department)}
                           </TableCell>
-                          <TableCell className="whitespace-normal px-1 py-1.5 align-middle tabular-nums text-[11px] leading-tight text-slate-700">{dueLabel}</TableCell>
-                          <TableCell className="whitespace-normal px-1 py-1.5 align-middle tabular-nums text-[11px] leading-tight text-slate-700">
+                          <TableCell className="whitespace-normal px-1.5 py-2 align-middle tabular-nums text-[13px] leading-tight text-slate-700">{dueLabel}</TableCell>
+                          <TableCell className="whitespace-normal px-1.5 py-2 align-middle tabular-nums text-[13px] leading-tight text-slate-700">
                             {formatDateDMY(task.created_at)}
                           </TableCell>
-                          <TableCell className="min-w-0 whitespace-normal px-1 py-1.5 align-middle">
+                          <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle">
                             <div className="flex max-w-[10.5rem] flex-row flex-wrap items-center gap-0.5">
-                              <Button size="sm" className="h-6 min-h-0 shrink-0 px-1.5 py-0 text-[10px] leading-tight" onClick={() => openDialog(task, planned ? "edit" : "plan")}>
+                              <Button size="sm" className="h-6 min-h-0 shrink-0 px-1.5 py-0 text-[11px] leading-tight" onClick={() => openDialog(task, planned ? "edit" : "plan")}>
                                 {planned ? "Edit" : "Plan"}
                               </Button>
-                              {planned ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  className="h-6 min-h-0 shrink-0 px-1.5 py-0 text-[10px] leading-tight"
-                                  disabled={clearingId === task.id}
-                                  onClick={() => void removeFromPlan(task)}
-                                >
-                                  {clearingId === task.id ? "…" : "Clear"}
-                                </Button>
-                              ) : null}
-                              {task.ga_note_origin_id ? (
-                                <Button asChild size="sm" variant="outline" className="h-6 min-h-0 shrink-0 px-1 py-0 text-[10px] leading-tight">
-                                  <Link href={`/ga-ka-notes${task.department_id ? `?department_id=${task.department_id}` : ""}`}>GA</Link>
-                                </Button>
-                              ) : null}
-                              {task.plan_note_origin_id ? (
-                                <Button asChild size="sm" variant="outline" className="h-6 min-h-0 shrink-0 px-1 py-0 text-[10px] leading-tight">
-                                  <Link href={`/next-week-plan${task.department_id ? `?department_id=${task.department_id}` : ""}`} title="Next week plan note">
-                                    PX
-                                  </Link>
-                                </Button>
-                              ) : null}
                             </div>
                           </TableCell>
                         </TableRow>
@@ -632,15 +690,65 @@ export default function OpenTasksPage() {
       )}
 
       <Dialog open={dialogOpen} onOpenChange={(open) => (!saving ? setDialogOpen(open) : undefined)}>
-        <DialogContent className="sm:max-w-[520px]">
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-3xl">
           <DialogHeader>
-            <DialogTitle>{dialogMode === "plan" ? "Plan task" : "Edit task planning"}</DialogTitle>
+            <DialogTitle>{dialogMode === "plan" ? "Plan task" : "Edit task"}</DialogTitle>
           </DialogHeader>
           {selectedTask ? (
             <div className="space-y-4">
-              <div className="rounded-md border bg-slate-50 p-3">
-                <div className="text-xs font-semibold uppercase text-slate-500">{sourceLabel(selectedTask)}</div>
-                <div className="mt-1 text-sm font-semibold">{selectedTask.title}</div>
+              <div className="space-y-2">
+                <Label>Title</Label>
+                <Textarea
+                  value={taskTitle}
+                  disabled={saving}
+                  onChange={(event) => setTaskTitle(event.target.value)}
+                  className="min-h-[72px]"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label>Description</Label>
+                <Textarea
+                  value={taskDescription}
+                  disabled={saving}
+                  onChange={(event) => setTaskDescription(event.target.value)}
+                  className="min-h-[72px]"
+                />
+              </div>
+              <div className="grid gap-3 md:grid-cols-3">
+                <div className="space-y-2">
+                  <Label>Type</Label>
+                  <Select value={taskType} disabled={saving} onValueChange={(value) => setTaskType(value as OpenTaskEditType)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {TASK_TYPE_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Status</Label>
+                  <Select value={taskStatus} disabled={saving} onValueChange={setTaskStatus}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {TASK_STATUS_OPTIONS.map((option) => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Finish by</Label>
+                  <Select value={finishPeriod} disabled={saving} onValueChange={(value) => setFinishPeriod(value as "AM" | "PM" | typeof NONE_VALUE)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={NONE_VALUE}>None / all day</SelectItem>
+                      {FINISH_PERIOD_OPTIONS.map((value) => (
+                        <SelectItem key={value} value={value}>{value}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
@@ -652,16 +760,56 @@ export default function OpenTasksPage() {
                   <Input type="date" value={dueDate} disabled={saving} onChange={(event) => setDueDate(normalizeDueDateInput(event.target.value))} />
                 </div>
               </div>
-              <div className="space-y-2">
-                <Label>Finish by</Label>
-                <Select value={finishPeriod} disabled={saving} onValueChange={(value) => setFinishPeriod(value as "AM" | "PM" | typeof NONE_VALUE)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="AM">AM</SelectItem>
-                    <SelectItem value="PM">PM</SelectItem>
-                    <SelectItem value={NONE_VALUE}>None / all day</SelectItem>
-                  </SelectContent>
-                </Select>
+              <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                <Checkbox
+                  checked={deadlineImportant}
+                  disabled={saving}
+                  onCheckedChange={(checked) => setDeadlineImportant(checked === true)}
+                />
+                <span className="text-sm font-medium">Deadline important</span>
+              </label>
+              <div className="grid gap-3 md:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Department</Label>
+                  <Select
+                    value={taskDepartmentId}
+                    disabled={saving}
+                    onValueChange={(value) => {
+                      setTaskDepartmentId(value)
+                      setTaskProjectId(PROJECT_NONE_VALUE)
+                    }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={ALL_VALUE}>No department</SelectItem>
+                      {departments.map((department) => (
+                        <SelectItem key={department.id} value={department.id}>
+                          {formatDepartmentName(department.name)}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Project</Label>
+                  <Select
+                    value={taskProjectId}
+                    disabled={saving}
+                    onValueChange={(value) => {
+                      setTaskProjectId(value)
+                      const project = projects.find((item) => item.id === value)
+                      if (project?.department_id) setTaskDepartmentId(project.department_id)
+                    }}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={PROJECT_NONE_VALUE}>No project</SelectItem>
+                      {dialogProjectOptions.map((project) => (
+                        <SelectItem key={project.id} value={project.id}>{project.name}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
               </div>
               <div className="space-y-2">
                 <Label>Assignees</Label>
@@ -676,14 +824,16 @@ export default function OpenTasksPage() {
                       )
                     }) : <span className="text-xs text-slate-500">No assignees selected.</span>}
                   </div>
-                  <Select value="__picker__" disabled={saving || userOptions.length === 0} onValueChange={(value) => {
+                  <Select value="__picker__" disabled={saving || dialogAssigneeOptions.length === 0} onValueChange={(value) => {
                     if (value === "__picker__") return
                     setAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                    const person = users.find((item) => item.id === value)
+                    if (person?.department_id && taskDepartmentId === ALL_VALUE) setTaskDepartmentId(person.department_id)
                   }}>
                     <SelectTrigger><SelectValue placeholder="Add assignee" /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="__picker__" disabled>Add assignee</SelectItem>
-                      {userOptions.filter((option) => !assigneeIds.includes(option.id)).map((option) => (
+                      {dialogAssigneeOptions.filter((option) => !assigneeIds.includes(option.id)).map((option) => (
                         <SelectItem key={option.id} value={option.id}>{option.name}</SelectItem>
                       ))}
                     </SelectContent>
@@ -692,7 +842,7 @@ export default function OpenTasksPage() {
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" disabled={saving} onClick={() => setDialogOpen(false)}>Cancel</Button>
-                <Button disabled={saving} onClick={() => void saveTask()}>{saving ? "Saving..." : "Save planning"}</Button>
+                <Button disabled={saving} onClick={() => void saveTask()}>{saving ? "Saving..." : "Save task"}</Button>
               </div>
             </div>
           ) : null}

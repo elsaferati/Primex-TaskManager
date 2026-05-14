@@ -93,38 +93,12 @@ type NoteTaskInfo = {
 const pad2 = (value: number) => String(value).padStart(2, "0")
 const toISODate = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`
 
-function mondayISO(today = new Date()) {
-  const d = new Date(today)
-  const day = (d.getDay() + 6) % 7
-  d.setDate(d.getDate() - day)
-  return toISODate(d)
-}
-
-function shiftIsoDateByDays(iso: string, days: number) {
-  const [year, month, day] = iso.split("-").map(Number)
-  const date = new Date(year, month - 1, day)
-  date.setDate(date.getDate() + days)
-  return toISODate(date)
-}
-
 function taskDateKey(value?: string | null) {
   if (!value) return null
   if (/^\d{4}-\d{2}-\d{2}/.test(value)) return value.slice(0, 10)
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
   return toISODate(date)
-}
-
-function weekdayShort(value?: string | null) {
-  const key = taskDateKey(value)
-  if (!key) return null
-  const [year, month, day] = key.split("-").map(Number)
-  return new Date(year, month - 1, day).toLocaleDateString("en-US", { weekday: "short" })
-}
-
-function isDateInsideRange(value: string | null | undefined, start: string, end: string) {
-  const key = taskDateKey(value)
-  return Boolean(key && key >= start && key <= end)
 }
 
 function parseMarkedNoteContent(content?: string | null): {
@@ -1931,24 +1905,6 @@ export default function GaKaNotesPage() {
     }
   }
 
-  const nextWeekStart = React.useMemo(() => shiftIsoDateByDays(mondayISO(), 7), [])
-  const nextWeekEnd = React.useMemo(() => shiftIsoDateByDays(nextWeekStart, 4), [nextWeekStart])
-
-  const notePlannedNextWeekLabel = React.useCallback(
-    (taskInfo?: NoteTaskInfo | null) => {
-      if (!taskInfo?.dueDate || !isDateInsideRange(taskInfo.dueDate, nextWeekStart, nextWeekEnd)) return null
-      const day = weekdayShort(taskInfo.dueDate)
-      const period = taskInfo.finishPeriod ? ` ${taskInfo.finishPeriod}` : ""
-      const assignee =
-        taskInfo.assignees[0]?.full_name ||
-        taskInfo.assignees[0]?.username ||
-        taskInfo.assignees[0]?.email ||
-        "Unassigned"
-      return `Already planned: ${day || "Next week"}${period} / ${assignee}`
-    },
-    [nextWeekEnd, nextWeekStart]
-  )
-
   const applyDeadlineUpdateToInfo = React.useCallback(
     (noteId: string, isoDateValue: string | null, important: boolean) => {
       setNoteTaskInfo((prev) => {
@@ -2937,7 +2893,6 @@ export default function GaKaNotesPage() {
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
                         : normalizeTaskStatus(taskInfo?.taskStatus)
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
-                    const plannedNextWeekLabel = notePlannedNextWeekLabel(taskInfo)
                     const taskTypeLabels = taskInfo?.taskTypeLabels ?? []
                     const canAddAttachments = !isClosed && aggregatedStatus !== "DONE"
                     const editDisabled = isClosed
@@ -3303,7 +3258,7 @@ export default function GaKaNotesPage() {
                           <div className="flex justify-center">
                             {hasTask ? (
                               <Badge variant="outline" className="text-[10px] px-1.5 py-0 bg-purple-50 text-purple-700 border-purple-200 h-7 flex items-center text-center">
-                                {plannedNextWeekLabel || "Task Created"}
+                                Task Created
                               </Badge>
                             ) : canCreateTask ? (
                               <Button

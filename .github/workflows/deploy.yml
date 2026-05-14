@@ -141,8 +141,11 @@ jobs:
           if ($LASTEXITCODE -ne 0) { Write-Error "NPM Install Failed"; exit 1 }
 
           Write-Host "2. Stopping Existing Frontend Process..."
-          $pm2Delete = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 delete frontend" -NoNewWindow -Wait -PassThru
-          if ($pm2Delete.ExitCode -ne 0) {
+          $pm2Describe = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 describe frontend > NUL 2>&1" -NoNewWindow -Wait -PassThru
+          if ($pm2Describe.ExitCode -eq 0) {
+            $pm2Delete = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 delete frontend" -NoNewWindow -Wait -PassThru
+            if ($pm2Delete.ExitCode -ne 0) { Write-Error "PM2 frontend delete failed"; exit 1 }
+          } else {
             Write-Host "PM2 frontend process did not exist yet. Continuing with clean start."
           }
 

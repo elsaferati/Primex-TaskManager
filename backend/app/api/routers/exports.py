@@ -2024,21 +2024,17 @@ def _task_date_key(value: datetime | date | None) -> date | None:
     return value
 
 
-def _open_task_overlaps_week(task: Task, week_start: date, week_end: date) -> bool:
+def _open_task_due_bucket(task: Task, this_week_start: date, this_week_end: date, next_week_start: date, next_week_end: date) -> str:
     due = _task_date_key(task.due_date)
     if due is None:
-        return False
-    start_candidate = _task_date_key(task.start_date)
-    start = start_candidate if start_candidate is not None and start_candidate <= due else due
-    return start <= week_end and due >= week_start
-
-
-def _open_task_group(task: Task, this_week_start: date, this_week_end: date, next_week_start: date, next_week_end: date) -> str:
-    if _open_task_overlaps_week(task, this_week_start, this_week_end):
-        return "PLANNED THIS WEEK"
-    if _open_task_overlaps_week(task, next_week_start, next_week_end):
-        return "PLANNED NEXT WEEK"
-    return "UNPLANNED"
+        return "NO DATE"
+    if due < this_week_start:
+        return "OVERDUE"
+    if this_week_start <= due <= this_week_end:
+        return "THIS WEEK"
+    if next_week_start <= due <= next_week_end:
+        return "NEXT WEEK"
+    return "FUTURE"
 
 
 @router.get("/open-tasks.xlsx")
@@ -2144,16 +2140,24 @@ async def export_open_tasks_xlsx(
     normalized_search = (search or "").strip().lower()
     filtered_tasks: list[Task] = []
     for task in tasks:
-        planned_this_week = _open_task_overlaps_week(task, monday, this_week_end)
-        planned_next_week = _open_task_overlaps_week(task, next_week_start, next_week_end)
+        due_bucket = _open_task_due_bucket(task, monday, this_week_end, next_week_start, next_week_end)
         source = _open_task_source_label(task)
         if user_id and user_id not in assignee_ids_for(task):
             continue
-        if normalized_filter == "unplanned" and (planned_this_week or planned_next_week):
+        if normalized_filter == "overdue" and due_bucket != "OVERDUE":
             continue
-        if normalized_filter == "this_week" and not planned_this_week:
+        if normalized_filter == "this_week" and due_bucket != "THIS WEEK":
             continue
-        if normalized_filter == "next_week" and not planned_next_week:
+        if normalized_filter == "next_week" and due_bucket != "NEXT WEEK":
+            continue
+        if normalized_filter == "future" and due_bucket != "FUTURE":
+            continue
+        if normalized_filter in {"no_date", "unplanned"} and due_bucket != "NO DATE":
+            continue
+        task_status = (task.status or TaskStatusEnum.TODO.value).upper()
+        if normalized_filter == "todo" and task_status != TaskStatusEnum.TODO.value:
+            continue
+        if normalized_filter == "in_progress" and task_status != TaskStatusEnum.IN_PROGRESS.value:
             continue
         if normalized_filter == "ga" and not task.ga_note_origin_id:
             continue
@@ -2182,17 +2186,10 @@ async def export_open_tasks_xlsx(
                 continue
         filtered_tasks.append(task)
 
-    group_order = {"UNPLANNED": 0, "PLANNED THIS WEEK": 1, "PLANNED NEXT WEEK": 2}
+    group_order = {"OVERDUE": 0, "THIS WEEK": 1, "NEXT WEEK": 2, "FUTURE": 3, "NO DATE": 4}
     export_rows: list[tuple[str, Task]] = []
     for task in filtered_tasks:
-        planned_this_week = _open_task_overlaps_week(task, monday, this_week_end)
-        planned_next_week = _open_task_overlaps_week(task, next_week_start, next_week_end)
-        if not planned_this_week and not planned_next_week:
-            export_rows.append(("UNPLANNED", task))
-        if planned_this_week:
-            export_rows.append(("PLANNED THIS WEEK", task))
-        if planned_next_week:
-            export_rows.append(("PLANNED NEXT WEEK", task))
+        export_rows.append((_open_task_due_bucket(task, monday, this_week_end, next_week_start, next_week_end), task))
 
     export_rows.sort(
         key=lambda item: (
@@ -2226,7 +2223,7 @@ async def export_open_tasks_xlsx(
     last_col = len(headers)
 
     title = (
-        f"OPEN TASKS - THIS WEEK {_format_excel_date(monday)} - {_format_excel_date(this_week_end)} / "
+        f"OPEN TASKS BY DUE DATE - THIS WEEK {_format_excel_date(monday)} - {_format_excel_date(this_week_end)} / "
         f"NEXT WEEK {_format_excel_date(next_week_start)} - {_format_excel_date(next_week_end)}"
     )
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
