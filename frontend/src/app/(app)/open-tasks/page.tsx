@@ -695,7 +695,7 @@ export default function OpenTasksPage() {
                     </TableHead>
                     <TableHead className="h-auto min-w-0 px-1.5 py-2 text-[13px] font-semibold">Task</TableHead>
                     <TableHead className="h-auto px-1.5 py-2 text-[13px] font-semibold">Source</TableHead>
-                    <TableHead className="h-auto px-1 py-2 text-center text-[13px] font-semibold" title="Notes for next week plan">
+                    <TableHead className="h-auto px-1 py-2 text-center text-[13px] font-semibold" title="PX JAV">
                       PX JAV
                     </TableHead>
                     <TableHead className="h-auto whitespace-normal px-1.5 py-2 text-[13px] font-semibold leading-tight">Status</TableHead>
