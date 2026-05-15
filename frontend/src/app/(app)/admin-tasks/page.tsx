@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
+import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { Pencil } from "lucide-react"
 import type {
   DailyReportResponse,
@@ -698,8 +699,10 @@ const commonViewInitials = (name: string) => {
 }
 
 const stripInitialsPrefix = (value: string) => value
+const renderCommonMarkedTitle = (value: string) => renderMarkedNoteContent(stripInitialsPrefix(value), stripInitialsPrefix(value))
+const plainCommonMarkedTitle = (value: string) => getPlainMarkedText(stripInitialsPrefix(value))
 const normalizeCommonGaTitle = (value?: string | null) =>
-  stripInitialsPrefix(value || "")
+  plainCommonMarkedTitle(value || "")
     .trim()
     .replace(/\s+/g, " ")
     .toLowerCase()
@@ -721,7 +724,7 @@ const mergeTaskEntriesByVisibleTitle = <
 ) => {
   const merged = new Map<string, T>()
   entries.forEach((entry) => {
-    const visibleTitle = stripInitialsPrefix(entry.title).trim()
+    const visibleTitle = plainCommonMarkedTitle(entry.title).trim()
     const key = visibleTitle.toLowerCase()
     const existing = merged.get(key)
     if (!existing) {
@@ -3661,7 +3664,7 @@ export default function AdminTasksPage() {
         const bzEntries = commonGaRowsByDay[iso]?.bz || []
         return bzEntries.map((e: BzItem, idx: number) => {
           const bzLabel = e.bzWithLabel ? ` - ${e.bzWithLabel}` : ""
-          return `${idx + 1}. ${stripInitialsPrefix(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
+          return `${idx + 1}. ${plainCommonMarkedTitle(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
         })
       }
 
@@ -3671,7 +3674,7 @@ export default function AdminTasksPage() {
         if (rowId === "det_ga") {
           const combined = commonGaRowsByDay[iso]?.detGa || []
           if (!combined.length) return []
-          return combined.map((entry, idx) => `${idx + 1}. ${entry.title}`)
+          return combined.map((entry, idx) => `${idx + 1}. ${plainCommonMarkedTitle(entry.title)}`)
         }
 
         const entries =
@@ -3727,7 +3730,7 @@ export default function AdminTasksPage() {
         }
         if (rowId === "blocked") {
           return entries.map((e: BlockedItem, idx: number) =>
-            `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+            `${idx + 1}. ${plainCommonMarkedTitle(e.title)}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "problem" || rowId === "feedback") {
@@ -3739,22 +3742,22 @@ export default function AdminTasksPage() {
         }
         if (rowId === "oneH" || rowId === "r1") {
           return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) =>
-            `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+            `${idx + 1}. ${plainCommonMarkedTitle(e.title)}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "personal") {
           return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) =>
-            `${idx + 1}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+            `${idx + 1}. ${plainCommonMarkedTitle(e.title)}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "external") {
           return entries.map((e: ExternalItem, idx: number) =>
-            `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
+            `${idx + 1}. ${plainCommonMarkedTitle(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "internal") {
           return entries.map((e: InternalItem, idx: number) =>
-            `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
+            `${idx + 1}. ${plainCommonMarkedTitle(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "priority") {
@@ -3782,7 +3785,7 @@ export default function AdminTasksPage() {
         if (!combined.length) return null
         return combined.map((entry, idx) => (
           <div key={`${entry.kind}-${entry.templateId || entry.taskId || idx}`} className="week-table-entry">
-            <span>{idx + 1}. {entry.title}</span>
+            <span>{idx + 1}. {renderCommonMarkedTitle(entry.title)}</span>
           </div>
         ))
       }
@@ -3793,7 +3796,7 @@ export default function AdminTasksPage() {
         return bzEntries.map((e: BzItem, idx: number) => (
           <div key={`bz-${e.templateId || e.taskId || idx}`} className="week-table-entry">
             <span>
-              {idx + 1}. {stripInitialsPrefix(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}
+              {idx + 1}. {renderCommonMarkedTitle(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}
               {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
             </span>
             {e.assignees && e.assignees.length ? (
@@ -3897,7 +3900,7 @@ export default function AdminTasksPage() {
       if (rowId === "blocked") {
         return entries.map((e: BlockedItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+            <span>{idx + 1}. {renderCommonMarkedTitle(e.title)}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3929,7 +3932,7 @@ export default function AdminTasksPage() {
       if (rowId === "oneH" || rowId === "r1") {
         return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+            <span>{idx + 1}. {renderCommonMarkedTitle(e.title)}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3943,7 +3946,7 @@ export default function AdminTasksPage() {
       if (rowId === "personal") {
         return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {stripInitialsPrefix(e.title)}</span>
+            <span>{idx + 1}. {renderCommonMarkedTitle(e.title)}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3957,7 +3960,7 @@ export default function AdminTasksPage() {
       if (rowId === "external") {
         return entries.map((e: ExternalItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+            <span>{idx + 1}. {renderCommonMarkedTitle(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3971,7 +3974,7 @@ export default function AdminTasksPage() {
       if (rowId === "internal") {
         return entries.map((e: InternalItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+            <span>{idx + 1}. {renderCommonMarkedTitle(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -4144,7 +4147,7 @@ export default function AdminTasksPage() {
                   <TableCell className="w-[54px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0">{row.period || "-"}</TableCell>
                   <TableCell
                     className="min-w-[160px] border-r border-slate-200 px-1.5 py-1 align-middle whitespace-normal break-words font-medium text-slate-800 last:border-r-0 sm:min-w-[220px]"
-                    title={row.title}
+                    title={plainCommonMarkedTitle(row.title)}
                   >
                     <div className="flex items-start gap-1.5 sm:block">
                       {row.kohaBz !== "-" ? (
@@ -4152,7 +4155,7 @@ export default function AdminTasksPage() {
                           {row.kohaBz}
                         </span>
                       ) : null}
-                      <span>{row.title}</span>
+                      <span>{renderCommonMarkedTitle(row.title)}</span>
                     </div>
                   </TableCell>
                   <TableCell className="hidden w-[70px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0 sm:table-cell">
@@ -4210,7 +4213,7 @@ export default function AdminTasksPage() {
                           size="icon"
                           className="h-5 w-5 border-slate-200 text-slate-500 hover:border-blue-200 hover:text-blue-600"
                           title={row.isFastTask ? "Edit task dates" : "Edit due date"}
-                          aria-label={`Edit ${row.title}`}
+                          aria-label={`Edit ${plainCommonMarkedTitle(row.title)}`}
                           onClick={() => startEditTask(rowTask)}
                         >
                           <Pencil className="h-3 w-3" />

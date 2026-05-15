@@ -7,6 +7,14 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -20,19 +28,9 @@ import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
 
-type PlanningInboxFilter =
-  | "all"
-  | "overdue"
-  | "this_week"
-  | "next_week"
-  | "future"
-  | "no_date"
-  | "todo"
-  | "in_progress"
-  | "ga"
-  | "plan"
-  | "project"
-  | "fast"
+type OpenTaskDateFilter = "all" | OpenTaskDateBucket
+type OpenTaskStatusFilter = "all" | "todo" | "in_progress"
+type OpenTaskTypeFilter = "project" | "system" | "personal" | "hourly" | "normal" | "high" | "r1" | "blocked" | "plan" | "fast"
 type PlannerTaskDialogMode = "plan" | "edit"
 type OpenTaskEditType = "normal" | "high" | "hourly" | "r1" | "personal" | "blocked"
 type OpenTaskDateBucket = "overdue" | "this_week" | "next_week" | "future" | "no_date"
@@ -134,6 +132,34 @@ const TASK_TYPE_OPTIONS: Array<{ value: OpenTaskEditType; label: string }> = [
   { value: "blocked", label: "BLLOK" },
 ]
 
+const OPEN_TASK_DATE_FILTER_OPTIONS: Array<{ value: OpenTaskDateFilter; label: string }> = [
+  { value: "all", label: "All open" },
+  { value: "overdue", label: "Overdue" },
+  { value: "this_week", label: "Due this week" },
+  { value: "next_week", label: "Due next week" },
+  { value: "future", label: "Future" },
+  { value: "no_date", label: "No date" },
+]
+
+const OPEN_TASK_STATUS_FILTER_OPTIONS: Array<{ value: OpenTaskStatusFilter; label: string }> = [
+  { value: "all", label: "All statuses" },
+  { value: "todo", label: "To Do" },
+  { value: "in_progress", label: "In Progress" },
+]
+
+const OPEN_TASK_TYPE_FILTER_OPTIONS: Array<{ value: OpenTaskTypeFilter; label: string }> = [
+  { value: "project", label: "Project" },
+  { value: "system", label: "System" },
+  { value: "personal", label: "P" },
+  { value: "hourly", label: "1H" },
+  { value: "normal", label: "Normal" },
+  { value: "high", label: "High" },
+  { value: "r1", label: "R1" },
+  { value: "blocked", label: "BLLOK" },
+  { value: "plan", label: "Plan note" },
+  { value: "fast", label: "Fast task" },
+]
+
 const FINISH_PERIOD_OPTIONS = ["AM", "PM"] as const
 
 function taskEditType(task: Task): OpenTaskEditType {
@@ -143,6 +169,39 @@ function taskEditType(task: Task): OpenTaskEditType {
   if (task.is_personal) return "personal"
   if (task.priority === "HIGH") return "high"
   return "normal"
+}
+
+function taskMatchesTypeFilter(task: Task, value: OpenTaskTypeFilter) {
+  if (value === "project") return Boolean(task.project_id)
+  if (value === "system") return Boolean(task.system_template_origin_id)
+  if (value === "plan") return Boolean(task.plan_note_origin_id)
+  if (value === "fast") return isFastPlannerTask(task)
+  if (value === "personal") return Boolean(task.is_personal)
+  if (value === "hourly") return Boolean(task.is_1h_report)
+  if (value === "high") return task.priority === "HIGH"
+  if (value === "r1") return Boolean(task.is_r1)
+  if (value === "blocked") return Boolean(task.is_bllok)
+  return taskEditType(task) === "normal"
+}
+
+function renderHighlightedAddedText(value: string) {
+  const parts: React.ReactNode[] = []
+  const markerPattern = /\[\[added\]\]([\s\S]*?)\[\[\/added\]\]/gi
+  let lastIndex = 0
+  let match: RegExpExecArray | null
+
+  while ((match = markerPattern.exec(value)) !== null) {
+    if (match.index > lastIndex) parts.push(value.slice(lastIndex, match.index))
+    parts.push(
+      <span key={`${match.index}-${markerPattern.lastIndex}`} className="rounded-sm bg-blue-100 px-0.5 text-blue-900">
+        {match[1]}
+      </span>
+    )
+    lastIndex = markerPattern.lastIndex
+  }
+
+  if (lastIndex < value.length) parts.push(value.slice(lastIndex))
+  return parts.length ? parts : value
 }
 
 function initialsFromDisplayName(name: string) {
@@ -164,7 +223,9 @@ export default function OpenTasksPage() {
   const [tasks, setTasks] = React.useState<Task[]>([])
   const [notes, setNotes] = React.useState<GaNote[]>([])
   const [departmentId, setDepartmentId] = React.useState(ALL_VALUE)
-  const [filter, setFilter] = React.useState<PlanningInboxFilter>("all")
+  const [dateFilter, setDateFilter] = React.useState<OpenTaskDateFilter>("all")
+  const [statusFilter, setStatusFilter] = React.useState<OpenTaskStatusFilter>("all")
+  const [typeFilters, setTypeFilters] = React.useState<OpenTaskTypeFilter[]>([])
   const [userId, setUserId] = React.useState(ALL_VALUE)
   const [search, setSearch] = React.useState("")
   const [loading, setLoading] = React.useState(true)
@@ -319,23 +380,13 @@ export default function OpenTasksPage() {
       if (project?.is_template) return false
 
       const dateBucket = taskDateBucket(task, thisWeekStart, thisWeekEnd, nextWeekStart, nextWeekEnd)
-      const isGa = Boolean(task.ga_note_origin_id)
-      const isPlan = Boolean(task.plan_note_origin_id)
-      const isFast = isFastPlannerTask(task)
       const ids = taskAssigneeIds(task)
 
       if (userId !== ALL_VALUE && !ids.includes(userId)) return false
-      if (filter === "overdue" && dateBucket !== "overdue") return false
-      if (filter === "this_week" && dateBucket !== "this_week") return false
-      if (filter === "next_week" && dateBucket !== "next_week") return false
-      if (filter === "future" && dateBucket !== "future") return false
-      if (filter === "no_date" && dateBucket !== "no_date") return false
-      if (filter === "todo" && (task.status || "TODO").toUpperCase() !== "TODO") return false
-      if (filter === "in_progress" && (task.status || "").toUpperCase() !== "IN_PROGRESS") return false
-      if (filter === "ga" && !isGa) return false
-      if (filter === "plan" && !isPlan) return false
-      if (filter === "project" && !task.project_id) return false
-      if (filter === "fast" && !isFast) return false
+      if (dateFilter !== "all" && dateBucket !== dateFilter) return false
+      if (statusFilter === "todo" && (task.status || "TODO").toUpperCase() !== "TODO") return false
+      if (statusFilter === "in_progress" && (task.status || "").toUpperCase() !== "IN_PROGRESS") return false
+      if (typeFilters.length && !typeFilters.some((value) => taskMatchesTypeFilter(task, value))) return false
       if (query) {
         const note = task.ga_note_origin_id ? noteById.get(task.ga_note_origin_id) : null
         const dept = task.department_id ? departmentById.get(task.department_id) : null
@@ -360,7 +411,7 @@ export default function OpenTasksPage() {
       }
       return true
     })
-  }, [assigneeInitialsLabel, assigneeLabel, departmentById, filter, nextWeekEnd, nextWeekStart, noteById, projectById, search, sourceLabel, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, userId])
+  }, [assigneeInitialsLabel, assigneeLabel, dateFilter, departmentById, nextWeekEnd, nextWeekStart, noteById, projectById, search, sourceLabel, statusFilter, taskAssigneeIds, tasks, thisWeekEnd, thisWeekStart, typeFilters, userId])
 
   const bucketCounts = React.useMemo(() => {
     const counts: Record<OpenTaskDateBucket, number> = {
@@ -419,7 +470,9 @@ export default function OpenTasksPage() {
     try {
       const qs = new URLSearchParams()
       qs.set("this_week_start", thisWeekStart)
-      qs.set("filter", filter)
+      qs.set("filter", dateFilter)
+      if (statusFilter !== "all") qs.set("status_filter", statusFilter)
+      for (const value of typeFilters) qs.append("type_filter", value)
       if (departmentId !== ALL_VALUE) qs.set("department_id", departmentId)
       if (userId !== ALL_VALUE) qs.set("user_id", userId)
       if (search.trim()) qs.set("search", search.trim())
@@ -505,6 +558,14 @@ export default function OpenTasksPage() {
     }
   }
 
+  const toggleTypeFilter = (value: OpenTaskTypeFilter) => {
+    setTypeFilters((prev) => (prev.includes(value) ? prev.filter((item) => item !== value) : [...prev, value]))
+  }
+
+  const selectedTypeFilterLabel = typeFilters.length
+    ? OPEN_TASK_TYPE_FILTER_OPTIONS.filter((option) => typeFilters.includes(option.value)).map((option) => option.label).join(", ")
+    : "All types"
+
   return (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
@@ -526,25 +587,50 @@ export default function OpenTasksPage() {
 
       <Card>
         <CardContent className="pt-6">
-          <div className="grid gap-3 md:grid-cols-4">
+          <div className="grid gap-3 md:grid-cols-3 xl:grid-cols-6">
             <Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Search open tasks..." />
-            <Select value={filter} onValueChange={(value) => setFilter(value as PlanningInboxFilter)}>
+            <Select value={dateFilter} onValueChange={(value) => setDateFilter(value as OpenTaskDateFilter)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">All open</SelectItem>
-                <SelectItem value="overdue">Overdue</SelectItem>
-                <SelectItem value="this_week">Due this week</SelectItem>
-                <SelectItem value="next_week">Due next week</SelectItem>
-                <SelectItem value="future">Future</SelectItem>
-                <SelectItem value="no_date">No date</SelectItem>
-                <SelectItem value="todo">To Do</SelectItem>
-                <SelectItem value="in_progress">In Progress</SelectItem>
-                <SelectItem value="ga">GA/KA</SelectItem>
-                <SelectItem value="plan">Plan note</SelectItem>
-                <SelectItem value="project">Project</SelectItem>
-                <SelectItem value="fast">Fast task</SelectItem>
+                {OPEN_TASK_DATE_FILTER_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
+            <Select value={statusFilter} onValueChange={(value) => setStatusFilter(value as OpenTaskStatusFilter)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {OPEN_TASK_STATUS_FILTER_OPTIONS.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button
+                  type="button"
+                  variant="outline"
+                  className="min-w-0 justify-start overflow-hidden text-ellipsis whitespace-nowrap font-normal"
+                  title={selectedTypeFilterLabel}
+                >
+                  {selectedTypeFilterLabel}
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" className="w-56">
+                <DropdownMenuItem onSelect={() => setTypeFilters([])}>All types</DropdownMenuItem>
+                <DropdownMenuSeparator />
+                {OPEN_TASK_TYPE_FILTER_OPTIONS.map((option) => (
+                  <DropdownMenuCheckboxItem
+                    key={option.value}
+                    checked={typeFilters.includes(option.value)}
+                    onCheckedChange={() => toggleTypeFilter(option.value)}
+                    onSelect={(event) => event.preventDefault()}
+                  >
+                    {option.label}
+                  </DropdownMenuCheckboxItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             <Select value={departmentId} onValueChange={setDepartmentId} disabled={user?.role === "STAFF"}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
@@ -640,7 +726,9 @@ export default function OpenTasksPage() {
                             </span>
                           </TableCell>
                           <TableCell className="min-w-0 whitespace-normal px-1.5 py-2 align-middle">
-                            <div className="break-words text-sm font-medium leading-snug text-slate-900">{task.title}</div>
+                            <div className="break-words text-sm font-medium leading-snug text-slate-900">
+                              {renderHighlightedAddedText(task.title)}
+                            </div>
                           </TableCell>
                           <TableCell className="px-1.5 py-2 align-middle text-[13px] uppercase text-slate-700">{sourceLabel(task)}</TableCell>
                           <TableCell className="whitespace-normal px-1 py-2 text-center align-middle text-slate-700">
