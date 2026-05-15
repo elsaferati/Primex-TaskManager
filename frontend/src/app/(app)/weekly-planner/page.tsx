@@ -3436,42 +3436,6 @@ export default function WeeklyPlannerPage() {
     return "To Do"
   }
 
-  const renderWeeklyNotesBlock = (personCount: number) => (
-    <div className="mt-4">
-      <table className="w-full border border-slate-300 text-xs">
-        <colgroup>
-          <col className="w-[180px]" />
-          <col />
-        </colgroup>
-        <tbody>
-          {[
-            "KOMENT",
-            "ANKESA / KERKESA / PROPOZIME",
-          ].map((label) => (
-            <tr key={label}>
-              <td className="border border-slate-300 px-2 py-2 font-semibold uppercase text-slate-700 align-top">
-                {label}
-              </td>
-              <td className="border border-slate-300 px-2 py-2">
-                <div
-                  className="grid min-h-16"
-                  style={{ gridTemplateColumns: `repeat(${Math.max(1, personCount)}, minmax(0, 1fr))` }}
-                >
-                  {Array.from({ length: Math.max(1, personCount) }).map((_, index) => (
-                    <div
-                      key={`${label}-${index}`}
-                      className={index === 0 ? "min-h-16" : "min-h-16 border-l border-slate-300"}
-                    />
-                  ))}
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
-
   const renderPlanningTaskCard = (task: Task) => {
     const planned = isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)
     const note = task.ga_note_origin_id ? planningNoteById.get(task.ga_note_origin_id) : null
@@ -4974,7 +4938,7 @@ export default function WeeklyPlannerPage() {
                                 <>
                                   {/* Other Departments: PRJK, FT order (original) */}
                                   {/* AM PRJK Row */}
-                                  <TableRow className={dayIndex > 0 ? "border-t-3 border-gray-500" : undefined}>
+                                  <TableRow className={dayIndex > 0 ? "border-t-3 border-gray-500 border-b-0" : "border-b-0"}>
                                     <TableCell
                                       className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
                                       rowSpan={rowSpan}
@@ -5009,7 +4973,7 @@ export default function WeeklyPlannerPage() {
                                   </TableRow>
 
                                   {/* AM FT Row */}
-                                  <TableRow className="border-t border-border">
+                                  <TableRow className="border-t border-t-slate-200/60">
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">AM</div>
                                     </TableCell>
@@ -5034,7 +4998,7 @@ export default function WeeklyPlannerPage() {
                                   </TableRow>
 
                                   {/* PM PRJK Row */}
-                                  <TableRow className="border-t-2 border-border">
+                                  <TableRow className="border-t-2 border-t-gray-500 border-b-0">
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">PM</div>
                                     </TableCell>
@@ -5060,7 +5024,7 @@ export default function WeeklyPlannerPage() {
                                   </TableRow>
 
                                   {/* PM FT Row */}
-                                  <TableRow className="border-t border-border">
+                                  <TableRow className="border-t border-t-slate-200/60">
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">PM</div>
                                     </TableCell>
@@ -5093,7 +5057,6 @@ export default function WeeklyPlannerPage() {
                       </DndContext>
                     )
                   })()}
-                  {renderWeeklyNotesBlock(getOrderedUsersForDept(dept).length)}
                 </CardContent>
               </Card>
             ))}
