@@ -2168,7 +2168,7 @@ export default function NextWeekPlanPage() {
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <div className="text-xs font-semibold tracking-[0.18em] text-primary/80 uppercase">Weekly planning</div>
-            <div className="text-2xl font-semibold leading-tight mt-1 text-slate-900">Notes for next week plan</div>
+            <div className="text-2xl font-semibold leading-tight mt-1 text-slate-900">PX JAV</div>
           </div>
           <div className="flex items-center gap-2 text-sm">
             <Badge variant="secondary" className="px-3 py-1 rounded-full shadow-sm bg-emerald-100 text-emerald-800">
