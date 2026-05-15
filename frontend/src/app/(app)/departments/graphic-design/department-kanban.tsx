@@ -996,6 +996,7 @@ export default function DepartmentKanban() {
   )
   const [allRange, setAllRange] = React.useState<AllRange>("today")
   const [allDateInput, setAllDateInput] = React.useState(() => todayInputValue())
+  const [showAllDoneTasks, setShowAllDoneTasks] = React.useState(false)
   const [selectedUserId, setSelectedUserId] = React.useState<string>("__all__")
   const [fastTaskDateInput, setFastTaskDateInput] = React.useState(() => todayInputValue())
   const [showAllFastTasks, setShowAllFastTasks] = React.useState(false)
@@ -1743,6 +1744,7 @@ export default function DepartmentKanban() {
         return "today"
     }
   }, [allRange, selectedAllDate])
+  const allRangeDoneToggleApplies = allRange === "next-week" || allRange === "all"
   const matchesTaskAllRange = React.useCallback(
     (task: Task) => {
       switch (allRange) {
@@ -1753,7 +1755,7 @@ export default function DepartmentKanban() {
         case "next-week":
           return isTaskOverlappingNextWeek(task)
         case "all":
-          return taskStatusValue(task) !== "DONE"
+          return showAllDoneTasks || taskStatusValue(task) !== "DONE"
         case "date":
           return isTaskActiveForDate(task, selectedAllDate)
         default:
@@ -1768,6 +1770,7 @@ export default function DepartmentKanban() {
       isTaskOverlappingWeek,
       pastSevenDaysStart,
       selectedAllDate,
+      showAllDoneTasks,
       todayDate,
     ]
   )
@@ -2155,8 +2158,9 @@ export default function DepartmentKanban() {
     return visibleSystemCreatedTasks.filter((task) => {
       const matchesRange = matchesTaskAllRange(task)
       const completedInRange = isTaskCompletedInAllRange(task)
+      const isDone = taskStatusValue(task) === "DONE"
       if (!matchesRange && !completedInRange) return false
-      if (allRange === "all" && taskStatusValue(task) === "DONE") return false
+      if (allRangeDoneToggleApplies && isDone && !showAllDoneTasks) return false
       if (selectedUserId !== "__all__") {
         return isTaskOwnedByViewUser(task, selectedUserId)
       }
@@ -2164,10 +2168,12 @@ export default function DepartmentKanban() {
     })
   }, [
     allRange,
+    allRangeDoneToggleApplies,
     isTaskCompletedInAllRange,
     isTaskOwnedByViewUser,
     matchesTaskAllRange,
     selectedUserId,
+    showAllDoneTasks,
     visibleSystemCreatedTasks,
   ])
   const todayProjectTasks = React.useMemo(() => {
@@ -2175,8 +2181,9 @@ export default function DepartmentKanban() {
       const matchesRange = matchesTaskAllRange(task)
       const completedToday = isTaskCompletedInAllRange(task)
       const isOverdue = overdueTaskIds.has(task.id)
+      const isDone = taskStatusValue(task) === "DONE"
       if (!matchesRange && !completedToday && !isOverdue) return false
-      if (allRange === "all" && taskStatusValue(task) === "DONE") return false
+      if (allRangeDoneToggleApplies && isDone && !showAllDoneTasks) return false
       if (selectedUserId !== "__all__") {
         return isTaskOwnedByViewUser(task, selectedUserId)
       }
@@ -2184,12 +2191,14 @@ export default function DepartmentKanban() {
     })
   }, [
     allRange,
+    allRangeDoneToggleApplies,
     isTaskCompletedInAllRange,
     matchesTaskAllRange,
     projectTasks,
     selectedUserId,
     isTaskOwnedByViewUser,
     overdueTaskIds,
+    showAllDoneTasks,
   ])
   const waitingProjectTasksForMeta = React.useMemo(() => {
     if (!isMineView || !user?.id) return []
@@ -2259,8 +2268,9 @@ export default function DepartmentKanban() {
       const matchesRange = matchesTaskAllRange(task)
       const completedToday = isTaskCompletedInAllRange(task)
       const isOverdue = overdueTaskIds.has(task.id)
+      const isDone = taskStatusValue(task) === "DONE"
       if (!matchesRange && !completedToday && !isOverdue) return false
-      if (allRange === "all" && taskStatusValue(task) === "DONE") return false
+      if (allRangeDoneToggleApplies && isDone && !showAllDoneTasks) return false
       if (selectedUserId !== "__all__") {
         return isTaskOwnedByViewUser(task, selectedUserId)
       }
@@ -2268,12 +2278,14 @@ export default function DepartmentKanban() {
     })
   }, [
     allRange,
+    allRangeDoneToggleApplies,
     isTaskCompletedInAllRange,
     matchesTaskAllRange,
     visibleNoProjectTasks,
     selectedUserId,
     isTaskOwnedByViewUser,
     overdueTaskIds,
+    showAllDoneTasks,
   ])
   const selectedDateNoProjectTasks = React.useMemo(() => {
     if (showAllFastTasks) {
@@ -5564,6 +5576,15 @@ export default function DepartmentKanban() {
                     <div className="rounded-xl border border-slate-200 bg-white px-4 py-2 text-xs font-semibold text-slate-600 shadow-sm">
                       {formatToday()}
                     </div>
+                    {allRangeDoneToggleApplies ? (
+                      <Button
+                        variant={showAllDoneTasks ? "default" : "outline"}
+                        className="h-9 rounded-xl border-slate-300 px-3 text-sm shadow-sm"
+                        onClick={() => setShowAllDoneTasks((prev) => !prev)}
+                      >
+                        {showAllDoneTasks ? "Hide done" : "See done"}
+                      </Button>
+                    ) : null}
                     {viewMode === "department" && departmentUsers.length ? (
                       <>
                         <Select value={selectedUserId} onValueChange={setSelectedUserId}>
