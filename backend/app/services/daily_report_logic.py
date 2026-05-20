@@ -111,17 +111,11 @@ def planned_range_for_daily_report(task, dept_code: str | None) -> tuple[date | 
         return None, None
 
     start = _as_utc_date(getattr(task, "start_date", None))
-    normalized = normalize_dept_code(dept_code)
     is_project_task = getattr(task, "project_id", None) is not None
 
     if is_project_task:
-        if normalized in {"PCM", "GDS"}:
-            return due, due
-        if normalized == "DEV":
-            if start is not None and start <= due:
-                return start, due
-            return due, due
-        # Unknown department: preserve legacy behavior (range when valid, else due-only).
+        # Department kanban "Today" views treat project tasks as active from
+        # start_date through due_date. Keep report/export inclusion aligned.
         if start is not None and start <= due:
             return start, due
         return due, due

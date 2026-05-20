@@ -3257,6 +3257,7 @@ export default function DepartmentKanban() {
       const qs = new URLSearchParams({
         day: todayIso,
         department_id: department.id,
+        all_today: "true",
       })
       if (selectedUserId && selectedUserId !== "__all__") {
         qs.set("user_id", selectedUserId)

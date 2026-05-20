@@ -102,21 +102,21 @@ class TestDailyReportLogic(unittest.TestCase):
         )
         self.assertEqual(planned_range_for_daily_report(task, "DEV"), (date(2026, 2, 1), date(2026, 2, 5)))
 
-    def test_planned_range_pcm_project_due_only(self) -> None:
+    def test_planned_range_pcm_project_uses_start_to_due(self) -> None:
         task = SimpleNamespace(
             project_id=uuid.uuid4(),
             start_date=datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc),
             due_date=datetime(2026, 2, 5, 0, 0, tzinfo=timezone.utc),
         )
-        self.assertEqual(planned_range_for_daily_report(task, "PCM"), (date(2026, 2, 5), date(2026, 2, 5)))
+        self.assertEqual(planned_range_for_daily_report(task, "PCM"), (date(2026, 2, 1), date(2026, 2, 5)))
 
-    def test_planned_range_gd_project_due_only(self) -> None:
+    def test_planned_range_gd_project_uses_start_to_due(self) -> None:
         task = SimpleNamespace(
             project_id=uuid.uuid4(),
             start_date=datetime(2026, 2, 1, 0, 0, tzinfo=timezone.utc),
             due_date=datetime(2026, 2, 5, 0, 0, tzinfo=timezone.utc),
         )
-        self.assertEqual(planned_range_for_daily_report(task, "GD"), (date(2026, 2, 5), date(2026, 2, 5)))
+        self.assertEqual(planned_range_for_daily_report(task, "GD"), (date(2026, 2, 1), date(2026, 2, 5)))
 
     def test_planned_range_fast_task_uses_start_to_due(self) -> None:
         task = SimpleNamespace(

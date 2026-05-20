@@ -173,7 +173,7 @@ def _strip_html(value: str | None) -> str:
     if not value:
         return ""
     text = re.sub(r"<[^>]+>", "", value)
-    text = re.sub(r"\[\[/?added\]\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[\[/?(?:added|done)\]\]", "", text, flags=re.IGNORECASE)
     return text.strip()
 
 
@@ -184,7 +184,7 @@ def _strip_html_keep_breaks(value: str | None) -> str:
     text = re.sub(r"(?i)</p\s*>", "\n", text)
     text = re.sub(r"(?i)</div\s*>", "\n", text)
     text = re.sub(r"<[^>]+>", "", text)
-    text = re.sub(r"\[\[/?added\]\]", "", text, flags=re.IGNORECASE)
+    text = re.sub(r"\[\[/?(?:added|done)\]\]", "", text, flags=re.IGNORECASE)
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     return text.strip()
 
@@ -3019,7 +3019,6 @@ async def _daily_report_rows_for_user(
         .where(Task.is_active.is_(True))
         .where(Task.system_template_origin_id.is_(None))
         .where(Task.due_date.is_not(None))
-        .where(or_(Task.completed_at.is_(None), and_(Task.completed_at >= day_start, Task.completed_at < day_end)))
         .outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id)
         .where(
             or_(
@@ -3081,33 +3080,25 @@ async def _daily_report_rows_for_user(
         if planned_start is None or planned_end is None:
             continue
 
-        is_project_task = task.project_id is not None
-        if is_project_task:
-            # Match the UI daily report view:
-            # project tasks show only when due date is today/past (or completed today).
-            due_day = _as_utc_date(task.due_date)
-            if due_day is None:
-                continue
-            planned_start, planned_end = due_day, due_day
-
         planned_range_by_task_id[task.id] = (planned_start, planned_end)
 
         if completed_on_day(task.completed_at, day):
             tasks_today.append(task)
             continue
 
+        is_project_task = task.project_id is not None
+        is_done = task.completed_at is not None or task.status == TaskStatusEnum.DONE
         if is_project_task:
-            if planned_end <= day:
-                if planned_end == day:
-                    tasks_today.append(task)
-                else:
-                    tasks_overdue.append(task)
+            if planned_start <= day <= planned_end:
+                tasks_today.append(task)
+            elif planned_end < day and not is_done:
+                tasks_overdue.append(task)
             continue
 
         # Fast tasks: show once their range has started.
         if planned_start <= day <= planned_end:
             tasks_today.append(task)
-        elif planned_end < day:
+        elif planned_end < day and not is_done:
             tasks_overdue.append(task)
 
     daily_tasks = tasks_today + tasks_overdue
@@ -3137,6 +3128,22 @@ async def _daily_report_rows_for_user(
             .where(Task.origin_run_at.is_not(None))
             .where(local_occurrence_date == day)
             .order_by(SystemTaskTemplate.title)
+        )
+    ).all()
+
+    system_acted_today_rows = (
+        await db.execute(
+            select(Task, SystemTaskTemplate, local_occurrence_date.label("occurrence_date"))
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .where(Task.assigned_to == user_id)
+            .where(Task.system_template_origin_id.is_not(None))
+            .where(Task.origin_run_at.is_not(None))
+            .where(local_occurrence_date < day)
+            .where(Task.status.in_(done_like_statuses))
+            .where(Task.completed_at.is_not(None))
+            .where(Task.completed_at >= day_start)
+            .where(Task.completed_at < day_end)
+            .order_by(Task.completed_at.desc(), SystemTaskTemplate.title)
         )
     ).all()
 
@@ -3173,7 +3180,11 @@ async def _daily_report_rows_for_user(
         )
     ).all()
 
-    template_ids = list({tmpl.id for _, tmpl, _ in system_today_rows} | {tmpl.id for _, tmpl, _ in system_overdue_rows})
+    template_ids = list(
+        {tmpl.id for _, tmpl, _ in system_today_rows}
+        | {tmpl.id for _, tmpl, _ in system_acted_today_rows}
+        | {tmpl.id for _, tmpl, _ in system_overdue_rows}
+    )
     roles_map, alignment_users_map = await _alignment_maps_for_templates(db, template_ids)
     alignment_user_ids = {uid for ids in alignment_users_map.values() for uid in ids}
     alignment_user_map: dict[uuid.UUID, str] = {}
@@ -3185,6 +3196,7 @@ async def _daily_report_rows_for_user(
 
     dept_ids = {t.department_id for t in daily_tasks if t.department_id}
     dept_ids |= {tmpl.department_id for _, tmpl, _ in system_today_rows if tmpl.department_id}
+    dept_ids |= {tmpl.department_id for _, tmpl, _ in system_acted_today_rows if tmpl.department_id}
     dept_ids |= {tmpl.department_id for _, tmpl, _ in system_overdue_rows if tmpl.department_id}
     department_map: dict[uuid.UUID, Department] = {}
     if dept_ids:
@@ -3249,6 +3261,10 @@ async def _daily_report_rows_for_user(
             return 4
         return 5
 
+    def date_cell(value: date | datetime | None) -> str:
+        day_value = _as_utc_date(value)
+        return _format_excel_date(day_value) if day_value else "-"
+
     for task in daily_tasks:
         base_dt = task.due_date or task.start_date or task.created_at
         planned_start, planned_end = planned_range_by_task_id.get(task.id, (None, None))
@@ -3273,11 +3289,13 @@ async def _daily_report_rows_for_user(
                         _fast_subtype_short(task),
                         period,
                         department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
-                        task.title or "-",
-                        task.description or "",
+                        _strip_html(task.title) or "-",
+                        _strip_html_keep_breaks(task.description),
                         (status or "").upper(),
                         "-",
                         "-",
+                        date_cell(task.start_date or planned_start),
+                        date_cell(task.due_date or planned_end),
                         tyo,
                         comment,
                     ],
@@ -3299,17 +3317,19 @@ async def _daily_report_rows_for_user(
                     "-",
                     period,
                     department_label(task.department_id, None, bool(getattr(task, "ga_note_origin_id", None))),
-                    f"{project_label} - {task.title or '-'}",
-                    task.description or "",
+                    f"{project_label} - {_strip_html(task.title) or '-'}",
+                    _strip_html_keep_breaks(task.description),
                     (status or "").upper(),
                     "-",
                     "-",
+                    date_cell(task.start_date or planned_start),
+                    date_cell(task.due_date or planned_end),
                     tyo,
                     comment,
                 ]
             )
 
-    all_system_task_ids = [task.id for task, _, _ in (system_today_rows + system_overdue_rows)]
+    all_system_task_ids = [task.id for task, _, _ in (system_today_rows + system_acted_today_rows + system_overdue_rows)]
     system_comment_map = await _user_comments_for_tasks(db, all_system_task_ids, user_id)
 
     def _system_task_status(task: Task) -> str:
@@ -3326,6 +3346,8 @@ async def _daily_report_rows_for_user(
         tyo = _tyo_label(base_date, acted_date, day)
         period = _resolve_period(task.finish_period or tmpl.finish_period, _as_utc_date(task.due_date) or occurrence_day)
         bz, koha_bz = alignment_values(tmpl)
+        start_day = _as_utc_date(task.start_date) or _as_utc_date(task.origin_run_at) or occurrence_day
+        due_day = _as_utc_date(task.due_date) or occurrence_day
         container.append(
             [
                 "",
@@ -3333,11 +3355,13 @@ async def _daily_report_rows_for_user(
                 _system_frequency_short_label(tmpl.frequency),
                 period,
                 department_label(tmpl.department_id, tmpl.scope, False),
-                task.title or tmpl.title or "-",
+                _strip_html(task.title or tmpl.title) or "-",
                 _strip_html_keep_breaks(task.description or tmpl.description),
                 _format_system_status(_system_task_status(task)).upper(),
                 bz,
                 koha_bz,
+                date_cell(start_day),
+                date_cell(due_day),
                 tyo,
                 system_comment_map.get(task.id) or "",
             ]
@@ -3347,7 +3371,12 @@ async def _daily_report_rows_for_user(
         target = system_pm_rows if _resolve_period(tmpl.finish_period, occurrence_day) == "PM" else system_am_rows
         add_system_row(target, task, tmpl, occurrence_day)
 
-    for task, tmpl, occurrence_day in system_today_rows:
+    merged_system_today_rows = sorted(
+        system_today_rows + system_acted_today_rows,
+        key=lambda row: ((row[1].title or "").lower(), row[2]),
+    )
+
+    for task, tmpl, occurrence_day in merged_system_today_rows:
         target = system_pm_rows if _resolve_period(tmpl.finish_period, occurrence_day) == "PM" else system_am_rows
         add_system_row(target, task, tmpl, occurrence_day)
 
@@ -3388,6 +3417,7 @@ async def export_daily_report_xlsx(
     department_id: uuid.UUID | None = None,
     user_id: uuid.UUID | None = None,
     all_users: bool = False,
+    all_today: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -3436,15 +3466,31 @@ async def export_daily_report_xlsx(
         for row in member_rows:
             rows.append(row + [member_label])
 
-    # Sort by LL (index 1), NLL (index 2), and T/Y/O (index 9)
+    # Sort by LL (index 1), NLL (index 2), and T/Y/O.
     if all_users:
         rows.sort(key=lambda r: (
             r[1] if len(r) > 1 else "",  # LL (typeLabel)
             r[2] if len(r) > 2 else "",  # NLL (subtype)
-            r[9] if len(r) > 9 else "",  # T/Y/O (tyo)
+            r[12] if len(r) > 12 else "",  # T/Y/O (tyo)
         ))
 
-    headers = ["NR", "LL", "NLL", "AM/PM", "DEP", "TITULLI", "PERSHKRIMI", "STS", "BZ", "KOHA BZ", "T/Y/O", "KOMENT", "USER"]
+    headers = [
+        "NR",
+        "LL",
+        "NLL",
+        "AM/PM",
+        "DEP",
+        "TITULLI",
+        "PERSHKRIMI",
+        "STS",
+        "BZ",
+        "KOHA BZ",
+        "START DATE",
+        "DUE DATE",
+        "T/Y/O",
+        "KOMENT",
+        "USER",
+    ]
 
     wb = Workbook()
     ws = wb.active
@@ -3463,7 +3509,8 @@ async def export_daily_report_xlsx(
     user_row = 3
     header_row = 5
 
-    title_text = "ALL TODAY REPORT" if all_users else "DAILY TASK REPORT"
+    is_all_today_report = all_users or all_today
+    title_text = "ALL TODAY REPORT" if is_all_today_report else "DAILY TASK REPORT"
     ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=len(headers))
     title_cell = ws.cell(row=title_row, column=1, value=title_text)
     title_cell.font = Font(bold=True, size=16)
@@ -3502,6 +3549,8 @@ async def export_daily_report_xlsx(
         "STS": 10,
         "BZ": 8,
         "KOHA BZ": 10,
+        "START DATE": 12,
+        "DUE DATE": 12,
         "T/Y/O": 6,
         "KOMENT": 22,
         "USER": 6,
@@ -3528,7 +3577,7 @@ async def export_daily_report_xlsx(
             cell.alignment = Alignment(
                 horizontal="left",
                 vertical="bottom",
-                wrap_text=col_idx in {6, 7, 13},
+                wrap_text=col_idx in {6, 7, 15},
             )
             if col_idx == 1:
                 cell.font = Font(bold=True)
@@ -3651,7 +3700,8 @@ async def export_daily_report_xlsx(
     date_label = day.strftime("%d_%m_%y")
     user_initials = _initials(user.full_name or user.username or "")
     initials_label = (user_initials or "USER").upper()
-    filename = f"DAILY_REPORT_{date_label}_{initials_label}.xlsx"
+    filename_prefix = "ALL_TODAY_REPORT" if is_all_today_report else "DAILY_REPORT"
+    filename = f"{filename_prefix}_{date_label}_{initials_label}.xlsx"
     return StreamingResponse(
         bio,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
