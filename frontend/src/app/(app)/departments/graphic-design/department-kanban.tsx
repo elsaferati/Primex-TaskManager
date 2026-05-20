@@ -3254,11 +3254,15 @@ export default function DepartmentKanban() {
     if (!department?.id) return
     setExportingDailyReport(true)
     try {
+      const exportDay = allRange === "date" ? formatDateInput(selectedAllDate) : todayIso
       const qs = new URLSearchParams({
-        day: todayIso,
+        day: exportDay,
         department_id: department.id,
         all_today: "true",
       })
+      if (allRange === "all") {
+        qs.set("all_open", "true")
+      }
       if (selectedUserId && selectedUserId !== "__all__") {
         qs.set("user_id", selectedUserId)
       } else {

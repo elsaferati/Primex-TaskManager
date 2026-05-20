@@ -2993,6 +2993,7 @@ async def _daily_report_rows_for_user(
     department_id: uuid.UUID | None,
     user_id: uuid.UUID,
     include_cross_department_assigned: bool = False,
+    all_open: bool = False,
 ) -> list[list[str]]:
     dept_code: str | None = None
     if department_id is not None:
@@ -3082,12 +3083,17 @@ async def _daily_report_rows_for_user(
 
         planned_range_by_task_id[task.id] = (planned_start, planned_end)
 
+        is_done = task.completed_at is not None or task.status == TaskStatusEnum.DONE
+        if all_open:
+            if not is_done:
+                tasks_today.append(task)
+            continue
+
         if completed_on_day(task.completed_at, day):
             tasks_today.append(task)
             continue
 
         is_project_task = task.project_id is not None
-        is_done = task.completed_at is not None or task.status == TaskStatusEnum.DONE
         if is_project_task:
             if planned_start <= day <= planned_end:
                 tasks_today.append(task)
@@ -3418,6 +3424,7 @@ async def export_daily_report_xlsx(
     user_id: uuid.UUID | None = None,
     all_users: bool = False,
     all_today: bool = False,
+    all_open: bool = False,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ):
@@ -3461,6 +3468,7 @@ async def export_daily_report_xlsx(
             department_id=department_id,
             user_id=member.id,
             include_cross_department_assigned=not all_users,
+            all_open=all_open,
         )
         member_label = _initials(member.full_name or member.username or "") or "-"
         for row in member_rows:
@@ -3510,7 +3518,7 @@ async def export_daily_report_xlsx(
     header_row = 5
 
     is_all_today_report = all_users or all_today
-    title_text = "ALL TODAY REPORT" if is_all_today_report else "DAILY TASK REPORT"
+    title_text = "ALL OPEN TASKS REPORT" if all_open else ("ALL TODAY REPORT" if is_all_today_report else "DAILY TASK REPORT")
     ws.merge_cells(start_row=title_row, start_column=1, end_row=title_row, end_column=len(headers))
     title_cell = ws.cell(row=title_row, column=1, value=title_text)
     title_cell.font = Font(bold=True, size=16)
