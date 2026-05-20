@@ -7,12 +7,19 @@ on:
 jobs:
   deploy:
     runs-on: self-hosted
+    env:
+      PM2_HOME: C:\pm2-system
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
         with:
           clean: false
           fetch-depth: 0
+
+      - name: Configure Server Tooling
+        shell: powershell
+        run: |
+          "C:\npm-global" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Force Sync with GitHub
         shell: cmd
@@ -77,6 +84,7 @@ jobs:
           echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend/.env
           echo APP_TIMEZONE=Europe/Budapest >> backend/.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
+          echo FRONTEND_URL=https://primeflow.primexeu.com >> backend/.env
 
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}
