@@ -5272,7 +5272,7 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     <h2 className="text-xl font-medium tracking-tight text-slate-900 dark:text-white">Active Projects</h2>
-                    {user?.role === "ADMIN" && (
+                    {(user?.role === "ADMIN" || user?.role === "MANAGER") && (
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <Checkbox
                           checked={showTemplates}
@@ -5483,7 +5483,7 @@ export default function DepartmentKanban() {
                                   }}
                                   title="Delete project"
                                 >
-                                  {deletingProjectId === project.id ? "â€¦" : "Ã—"}
+                                  {deletingProjectId === project.id ? "..." : "x"}
                                 </button>
                               ) : null}
                               <div className="text-[10px] font-medium text-slate-400 uppercase tracking-wider">Tasks</div>
@@ -8033,13 +8033,13 @@ export default function DepartmentKanban() {
                               </div>
                               <div>
                                 <div className="font-medium text-slate-900 dark:text-white flex items-center gap-2">{meeting.title}</div>
-                                <div className="flex items-center gap-2 mt-0.5">{meeting.platform && <span className="text-xs text-slate-500">{meeting.platform}</span>}{project && <><span className="text-[8px] text-slate-300">â€¢</span><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">{formatProjectTitleWithProducts(project)}</span></>}</div>
+                                <div className="flex items-center gap-2 mt-0.5">{meeting.platform && <span className="text-xs text-slate-500">{meeting.platform}</span>}{project && <><span className="text-[8px] text-slate-300">*</span><span className="rounded-md bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600 dark:bg-slate-800 dark:text-slate-400">{formatProjectTitleWithProducts(project)}</span></>}</div>
                               </div>
                             </div>
                             {!isReadOnly && (
                               <div className="flex opacity-0 transition-opacity group-hover:opacity-100">
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-900" onClick={() => { setEditingMeetingId(meeting.id); setEditMeetingTitle(meeting.title); setEditMeetingPlatform(meeting.platform || ""); setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at)); setEditMeetingProjectId(meeting.project_id || "__none__"); }}>âœŽ</Button>
-                                <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-400 hover:text-rose-600" onClick={() => void deleteMeeting(meeting.id)}>âœ•</Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-slate-400 hover:text-slate-900" title="Edit meeting" onClick={() => { setEditingMeetingId(meeting.id); setEditMeetingTitle(meeting.title); setEditMeetingPlatform(meeting.platform || ""); setEditMeetingStartsAt(toMeetingInputValue(meeting.starts_at)); setEditMeetingProjectId(meeting.project_id || "__none__"); }}>E</Button>
+                                <Button size="icon" variant="ghost" className="h-8 w-8 text-rose-400 hover:text-rose-600" title="Delete meeting" onClick={() => void deleteMeeting(meeting.id)}>x</Button>
                               </div>
                             )}
                           </div>

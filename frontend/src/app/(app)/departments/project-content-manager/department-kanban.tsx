@@ -1173,7 +1173,7 @@ function reportPriorityLabel(priority?: TaskPriority | string | null) {
 
 function truncateDescription(value: string, limit = 120) {
   if (value.length <= limit) return { text: value, truncated: false }
-  return { text: `${value.slice(0, limit).trim()}â€¦`, truncated: true }
+  return { text: `${value.slice(0, limit).trim()}...`, truncated: true }
 }
 
 function normalizeTaskTitle(value: string) {
@@ -5945,7 +5945,7 @@ export default function DepartmentKanban() {
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div className="flex items-center gap-3">
                   <div className="text-lg font-semibold">Active Projects</div>
-                  {user?.role === "ADMIN" && (
+                  {(user?.role === "ADMIN" || user?.role === "MANAGER") && (
                     <label className="flex items-center gap-2 text-sm cursor-pointer">
                       <Checkbox
                         checked={showTemplates}
@@ -6179,7 +6179,7 @@ export default function DepartmentKanban() {
                             <span className={isCurrent ? "text-rose-600 dark:text-rose-400 font-semibold" : ""}>
                               {PHASE_LABELS[p] || p}
                             </span>
-                            {idx < projectPhases.length - 1 ? " â†’ " : ""}
+                            {idx < projectPhases.length - 1 ? " -> " : ""}
                           </span>
                         )
                       })}
@@ -6230,7 +6230,7 @@ export default function DepartmentKanban() {
                           href={`/projects/pcm/${project.id}`}
                           className="text-xs font-semibold text-rose-600 transition-colors hover:text-rose-700 hover:underline dark:text-rose-400 dark:hover:text-rose-300"
                         >
-                          View details â†’
+                          View details {"->"}
                         </Link>
                       </div>
                     </div>
@@ -8209,7 +8209,9 @@ export default function DepartmentKanban() {
               ))}
             </div>
           </div>
-        ) : null}`r`n`r`n        {activeTab === "internal-notes" ? (
+        ) : null}
+
+        {activeTab === "internal-notes" ? (
           <div className="space-y-3 sm:space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="text-lg font-semibold">Internal Notes</div>
@@ -8812,9 +8814,9 @@ export default function DepartmentKanban() {
               <div className="rounded-xl border border-red-200 bg-red-50/60 p-4">
                 <div className="text-xs font-semibold uppercase tracking-wide text-red-700 mb-2">Remember</div>
                 <div className="text-xs text-red-800 space-y-1">
-                  <div>â€¢ Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
-                  <div>â€¢ Keep it short and simple (typically 2-6 characters)</div>
-                  <div>â€¢ Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
+                  <div>* Use shortcuts/abbreviations (e.g., "ABC" instead of "ABC Company")</div>
+                  <div>* Keep it short and simple (typically 2-6 characters)</div>
+                  <div>* Avoid company suffixes like "Company", "Inc", "LLC", etc.</div>
                 </div>
               </div>
               <div className="text-sm text-slate-700">Are you sure you want to use this as the project title?</div>

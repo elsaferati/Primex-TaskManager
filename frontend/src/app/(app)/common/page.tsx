@@ -7,7 +7,7 @@ import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
-import { renderMarkedNoteContent } from "@/lib/note-markup"
+import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
@@ -336,6 +336,11 @@ const initials = (name: string) => {
 const stripInitialsPrefix = (value: string) => {
   return value
 }
+const commonPrintTitleLine = (value: string) =>
+  getPlainMarkedText(stripInitialsPrefix(value))
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) || ""
 const normalizeTitle = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase()
 const mergePersonalItems = (items: PersonalItem[]): PersonalItem[] => {
   const merged = new Map<string, PersonalItem>()
@@ -3338,30 +3343,30 @@ export default function CommonViewPage() {
       }
       if (rowId === "blocked") {
         return (entries as BlockedItem[]).map(
-          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
       if (rowId === "oneH" || rowId === "r1") {
         return (entries as (OneHItem | R1Item)[]).map(
           (e: OneHItem | R1Item) =>
-            `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+            `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
       if (rowId === "personal") {
         return (entries as PersonalItem[]).map(
-          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${stripInitialsPrefix(e.title)}${assigneesSuffix(e)}`
+          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
       if (rowId === "external") {
-        return (entries as ExternalItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
+        return (entries as ExternalItem[]).map((e, idx: number) => `${idx + 1}. ${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`)
       }
       if (rowId === "internal") {
-        return (entries as InternalItem[]).map((e, idx: number) => `${idx + 1}. ${stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`)
+        return (entries as InternalItem[]).map((e, idx: number) => `${idx + 1}. ${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`)
       }
       if (rowId === "bz") {
         return (entries as BzItem[]).map((e, idx: number) => {
           const bzLabel = e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""
-          return `${idx + 1}. ${stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
+          return `${idx + 1}. ${commonPrintTitleLine(`${formatTimeLabel(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
         })
       }
       if (rowId === "priority") {
@@ -9598,7 +9603,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
+                                  {commonPrintTitleLine(e.title)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -9657,7 +9662,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
+                                  {commonPrintTitleLine(e.title)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -9688,7 +9693,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {renderMarkedNoteContent(stripInitialsPrefix(e.title), stripInitialsPrefix(e.title))}
+                                  {commonPrintTitleLine(e.title)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -9703,7 +9708,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "external") {
                         return entries.map((e: ExternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+                            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -9716,7 +9721,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "internal") {
                         return entries.map((e: InternalItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>{idx + 1}. {stripInitialsPrefix(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+                            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (
                                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -9730,7 +9735,7 @@ export default function CommonViewPage() {
                         return entries.map((e: BzItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
                             <span>
-                              {idx + 1}. {stripInitialsPrefix(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
+                              {idx + 1}. {commonPrintTitleLine(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
                               {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
                             </span>
                             {e.assignees && e.assignees.length ? (
@@ -10035,7 +10040,7 @@ export default function CommonViewPage() {
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
-                                      <span>{renderMarkedNoteContent(stripInitialsPrefix(cell.title), stripInitialsPrefix(cell.title))}</span>
+                                      <span>{commonPrintTitleLine(cell.title)}</span>
                                     </div>
                                   </div>
                                   {cell.note ? (

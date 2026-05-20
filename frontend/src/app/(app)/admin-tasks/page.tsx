@@ -701,6 +701,11 @@ const commonViewInitials = (name: string) => {
 const stripInitialsPrefix = (value: string) => value
 const renderCommonMarkedTitle = (value: string) => renderMarkedNoteContent(stripInitialsPrefix(value), stripInitialsPrefix(value))
 const plainCommonMarkedTitle = (value: string) => getPlainMarkedText(stripInitialsPrefix(value))
+const commonPrintTitleLine = (value: string) =>
+  plainCommonMarkedTitle(value)
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean) || ""
 const normalizeCommonGaTitle = (value?: string | null) =>
   plainCommonMarkedTitle(value || "")
     .trim()
@@ -3412,7 +3417,6 @@ export default function AdminTasksPage() {
       { id: "external", label: "TAK EXT" },
       { id: "internal", label: "TAK INT" },
       { id: "bz", label: "BZ GA" },
-      { id: "det_ga", label: "DET GA" },
       { id: "oneH", label: "1H" },
       { id: "r1", label: "R1=1H" },
       { id: "personal", label: "P:" },
@@ -3664,7 +3668,7 @@ export default function AdminTasksPage() {
         const bzEntries = commonGaRowsByDay[iso]?.bz || []
         return bzEntries.map((e: BzItem, idx: number) => {
           const bzLabel = e.bzWithLabel ? ` - ${e.bzWithLabel}` : ""
-          return `${idx + 1}. ${plainCommonMarkedTitle(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
+          return `${idx + 1}. ${commonPrintTitleLine(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}${bzLabel}${assigneesSuffix(e)}`
         })
       }
 
@@ -3674,7 +3678,7 @@ export default function AdminTasksPage() {
         if (rowId === "det_ga") {
           const combined = commonGaRowsByDay[iso]?.detGa || []
           if (!combined.length) return []
-          return combined.map((entry, idx) => `${idx + 1}. ${plainCommonMarkedTitle(entry.title)}`)
+          return combined.map((entry, idx) => `${idx + 1}. ${commonPrintTitleLine(entry.title)}`)
         }
 
         const entries =
@@ -3730,7 +3734,7 @@ export default function AdminTasksPage() {
         }
         if (rowId === "blocked") {
           return entries.map((e: BlockedItem, idx: number) =>
-            `${idx + 1}. ${plainCommonMarkedTitle(e.title)}${assigneesSuffix(e)}`
+            `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "problem" || rowId === "feedback") {
@@ -3742,22 +3746,22 @@ export default function AdminTasksPage() {
         }
         if (rowId === "oneH" || rowId === "r1") {
           return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) =>
-            `${idx + 1}. ${plainCommonMarkedTitle(e.title)}${assigneesSuffix(e)}`
+            `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "personal") {
           return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) =>
-            `${idx + 1}. ${plainCommonMarkedTitle(e.title)}${assigneesSuffix(e)}`
+            `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "external") {
           return entries.map((e: ExternalItem, idx: number) =>
-            `${idx + 1}. ${plainCommonMarkedTitle(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
+            `${idx + 1}. ${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "internal") {
           return entries.map((e: InternalItem, idx: number) =>
-            `${idx + 1}. ${plainCommonMarkedTitle(`${e.title} ${formatTimeLabel(e.time)}`.trim())}${assigneesSuffix(e)}`
+            `${idx + 1}. ${`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}${assigneesSuffix(e)}`
           )
         }
         if (rowId === "priority") {
@@ -3785,7 +3789,7 @@ export default function AdminTasksPage() {
         if (!combined.length) return null
         return combined.map((entry, idx) => (
           <div key={`${entry.kind}-${entry.templateId || entry.taskId || idx}`} className="week-table-entry">
-            <span>{idx + 1}. {renderCommonMarkedTitle(entry.title)}</span>
+            <span>{idx + 1}. {commonPrintTitleLine(entry.title)}</span>
           </div>
         ))
       }
@@ -3796,7 +3800,7 @@ export default function AdminTasksPage() {
         return bzEntries.map((e: BzItem, idx: number) => (
           <div key={`bz-${e.templateId || e.taskId || idx}`} className="week-table-entry">
             <span>
-              {idx + 1}. {renderCommonMarkedTitle(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}
+              {idx + 1}. {commonPrintTitleLine(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}
               {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
             </span>
             {e.assignees && e.assignees.length ? (
@@ -3900,7 +3904,7 @@ export default function AdminTasksPage() {
       if (rowId === "blocked") {
         return entries.map((e: BlockedItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {renderCommonMarkedTitle(e.title)}</span>
+            <span>{idx + 1}. {commonPrintTitleLine(e.title)}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3932,7 +3936,7 @@ export default function AdminTasksPage() {
       if (rowId === "oneH" || rowId === "r1") {
         return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {renderCommonMarkedTitle(e.title)}</span>
+            <span>{idx + 1}. {commonPrintTitleLine(e.title)}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3946,7 +3950,7 @@ export default function AdminTasksPage() {
       if (rowId === "personal") {
         return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {renderCommonMarkedTitle(e.title)}</span>
+            <span>{idx + 1}. {commonPrintTitleLine(e.title)}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3960,7 +3964,7 @@ export default function AdminTasksPage() {
       if (rowId === "external") {
         return entries.map((e: ExternalItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {renderCommonMarkedTitle(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3974,7 +3978,7 @@ export default function AdminTasksPage() {
       if (rowId === "internal") {
         return entries.map((e: InternalItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {renderCommonMarkedTitle(`${e.title} ${formatTimeLabel(e.time)}`.trim())}</span>
+            <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
