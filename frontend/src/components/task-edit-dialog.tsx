@@ -82,14 +82,17 @@ export function TaskEditDialog({
   open,
   onOpenChange,
   onUpdated,
+  showDescriptionField = false,
 }: {
   task: Task | null
   open: boolean
   onOpenChange: (open: boolean) => void
   onUpdated: (task: Task) => void | Promise<void>
+  showDescriptionField?: boolean
 }) {
   const { apiFetch } = useAuth()
   const [title, setTitle] = React.useState("")
+  const [description, setDescription] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<TaskStatusValue>("TODO")
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskTypeValue>("N")
   const [projectTaskType, setProjectTaskType] = React.useState<ProjectTaskTypeValue>("NORMAL")
@@ -99,6 +102,7 @@ export function TaskEditDialog({
   React.useEffect(() => {
     if (!task) return
     setTitle(task.title || "")
+    setDescription(task.description || "")
     setStatusValue((task.status as TaskStatusValue | undefined) || "TODO")
     setFastTaskType(getCurrentFastTaskType(task))
     setProjectTaskType(getCurrentProjectTaskType(task))
@@ -141,6 +145,7 @@ export function TaskEditDialog({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           title: nextTitle,
+          ...(showDescriptionField ? { description: description.trim() || null } : {}),
           status: statusValue,
           due_date: dueDate || null,
           ...(isFastTask(task) && fastTaskType !== currentFastTaskType
@@ -184,7 +189,19 @@ export function TaskEditDialog({
     } finally {
       setSaving(false)
     }
-  }, [apiFetch, dueDate, fastTaskType, onOpenChange, onUpdated, projectTaskType, statusValue, task, title])
+  }, [
+    apiFetch,
+    description,
+    dueDate,
+    fastTaskType,
+    onOpenChange,
+    onUpdated,
+    projectTaskType,
+    showDescriptionField,
+    statusValue,
+    task,
+    title,
+  ])
 
   if (!task) return null
 
@@ -211,6 +228,21 @@ export function TaskEditDialog({
               disabled={saving}
             />
           </div>
+
+          {showDescriptionField ? (
+            <div className="space-y-2">
+              <Label htmlFor="task-edit-description">Description</Label>
+              <Textarea
+                id="task-edit-description"
+                value={description}
+                onChange={(event) => setDescription(event.target.value)}
+                autoResize
+                rows={4}
+                className="min-h-[112px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere]"
+                disabled={saving}
+              />
+            </div>
+          ) : null}
 
           {isFastTask(task) ? (
             <div className="space-y-2">

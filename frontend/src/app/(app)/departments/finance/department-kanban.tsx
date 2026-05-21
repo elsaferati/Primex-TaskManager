@@ -7,6 +7,7 @@ import { TaskEditDialog } from "@/components/task-edit-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -226,6 +227,7 @@ export default function DepartmentKanban() {
   const [updatingTaskIds, setUpdatingTaskIds] = React.useState<Record<string, boolean>>({})
   const [exportingExcel, setExportingExcel] = React.useState(false)
   const [editingTask, setEditingTask] = React.useState<Task | null>(null)
+  const [viewingDescriptionTask, setViewingDescriptionTask] = React.useState<Task | null>(null)
   const todayIso = React.useMemo(() => toDateInputValue(new Date()), [])
 
   const loadData = React.useCallback(async () => {
@@ -644,6 +646,13 @@ export default function DepartmentKanban() {
                         </TableCell>
                         <TableCell>
                           <div className="flex gap-2">
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => setViewingDescriptionTask(row.task)}
+                            >
+                              Description
+                            </Button>
                             {row.canEdit ? (
                               <Button size="sm" variant="outline" onClick={() => setEditingTask(row.task)}>
                                 Edit
@@ -694,7 +703,38 @@ export default function DepartmentKanban() {
           if (!open) setEditingTask(null)
         }}
         onUpdated={handleTaskUpdated}
+        showDescriptionField
       />
+
+      <Dialog
+        open={Boolean(viewingDescriptionTask)}
+        onOpenChange={(open) => {
+          if (!open) setViewingDescriptionTask(null)
+        }}
+      >
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>{viewingDescriptionTask?.title || "Task Description"}</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label>Description</Label>
+            {viewingDescriptionTask?.description && viewingDescriptionTask.description.trim().length > 0 ? (
+              <div className="max-h-[60vh] overflow-auto rounded-md border border-slate-200 bg-slate-50 p-3 text-sm whitespace-pre-wrap [overflow-wrap:anywhere]">
+                {viewingDescriptionTask.description}
+              </div>
+            ) : (
+              <div className="rounded-md border border-dashed border-slate-200 p-3 text-sm text-slate-500">
+                No description.
+              </div>
+            )}
+          </div>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setViewingDescriptionTask(null)}>
+              Close
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

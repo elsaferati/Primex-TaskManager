@@ -7,7 +7,7 @@ import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
-import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
+import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
@@ -341,6 +341,64 @@ const commonPrintTitleLine = (value: string) =>
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean) || ""
+
+const getCommonTitleMarkClass = (isDone: boolean, isAdded: boolean) => {
+  if (isDone && isAdded) {
+    return "rounded bg-blue-100 px-1 text-emerald-900 ring-1 ring-blue-300 line-through decoration-emerald-700 decoration-2"
+  }
+  if (isAdded) return "rounded bg-blue-200 px-1 text-blue-950 ring-1 ring-blue-300"
+  if (isDone) return "rounded bg-emerald-100 px-1 text-emerald-800 line-through decoration-emerald-700 decoration-2"
+  return ""
+}
+
+const renderCommonMarkedTitleLine = (value: string) => {
+  const parsed = parseMarkedNoteContent(stripInitialsPrefix(value))
+  const lineMatch = parsed.text.match(/[^\r\n]+/g)?.find((line) => line.trim())
+  if (!lineMatch) return ""
+
+  const rawStart = parsed.text.indexOf(lineMatch)
+  const leadingTrim = lineMatch.length - lineMatch.trimStart().length
+  const trailingTrim = lineMatch.length - lineMatch.trimEnd().length
+  const start = rawStart + leadingTrim
+  const end = rawStart + lineMatch.length - trailingTrim
+  const boundaries = new Set([start, end])
+
+  parsed.doneRanges.forEach((range) => {
+    if (range.end > start && range.start < end) {
+      boundaries.add(Math.max(start, range.start))
+      boundaries.add(Math.min(end, range.end))
+    }
+  })
+  parsed.addedRanges.forEach((range) => {
+    if (range.end > start && range.start < end) {
+      boundaries.add(Math.max(start, range.start))
+      boundaries.add(Math.min(end, range.end))
+    }
+  })
+
+  const orderedBoundaries = Array.from(boundaries).sort((a, b) => a - b)
+  const parts: React.ReactNode[] = []
+  for (let idx = 0; idx < orderedBoundaries.length - 1; idx += 1) {
+    const partStart = orderedBoundaries[idx]
+    const partEnd = orderedBoundaries[idx + 1]
+    const segment = parsed.text.slice(partStart, partEnd)
+    if (!segment) continue
+    const isDone = parsed.doneRanges.some((range) => range.start <= partStart && range.end >= partEnd)
+    const isAdded = parsed.addedRanges.some((range) => range.start <= partStart && range.end >= partEnd)
+    const className = getCommonTitleMarkClass(isDone, isAdded)
+    parts.push(
+      className ? (
+        <span key={`title-mark-${idx}-${partStart}`} className={className}>
+          {segment}
+        </span>
+      ) : (
+        segment
+      )
+    )
+  }
+
+  return parts.length ? parts : commonPrintTitleLine(value)
+}
 const normalizeTitle = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase()
 const mergePersonalItems = (items: PersonalItem[]): PersonalItem[] => {
   const merged = new Map<string, PersonalItem>()
@@ -770,6 +828,7 @@ export default function CommonViewPage() {
   const [formError, setFormError] = React.useState("")
   const [openInfoId, setOpenInfoId] = React.useState<CommonType | null>(null)
   const [openSwimlaneNoteId, setOpenSwimlaneNoteId] = React.useState<string | null>(null)
+  const [openSwimlaneTitleIds, setOpenSwimlaneTitleIds] = React.useState<Set<string>>(() => new Set())
   const infoPopoverRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingAutoSelectEnabled, setMeetingAutoSelectEnabled] = React.useState(true)
@@ -6401,10 +6460,41 @@ export default function CommonViewPage() {
           white-space: pre-wrap;
           line-height: 1.35;
         }
-        .swimlane-note-toggle {
+        .swimlane-title-toggle {
           position: absolute;
           top: 8px;
           right: 34px;
+          width: 24px;
+          height: 24px;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          background: #ffffff;
+          color: #334155;
+          font-size: 11px;
+          font-weight: 800;
+          line-height: 1;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          padding: 0;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+          z-index: 3;
+        }
+        .swimlane-title-toggle:hover {
+          background: #f8fafc;
+          border-color: #94a3b8;
+          color: #0f172a;
+        }
+        .swimlane-title-toggle[aria-expanded="true"] {
+          background: #334155;
+          border-color: #334155;
+          color: #ffffff;
+        }
+        .swimlane-note-toggle {
+          position: absolute;
+          top: 8px;
+          right: 62px;
           width: 24px;
           height: 24px;
           border: 1px solid #bfdbfe;
@@ -6990,6 +7080,7 @@ export default function CommonViewPage() {
           color: #ffffff;
         }
         .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle,
+        .swimlane-cell.deadline-important:not(.done) .swimlane-title-toggle,
         .swimlane-cell.deadline-important:not(.done) .swimlane-delete,
         .swimlane-cell.deadline-important:not(.done) .fast-task-order-btn {
           background: rgba(255, 255, 255, 0.12);
@@ -6997,18 +7088,24 @@ export default function CommonViewPage() {
           color: #ffffff;
         }
         .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle:hover,
+        .swimlane-cell.deadline-important:not(.done) .swimlane-title-toggle:hover,
         .swimlane-cell.deadline-important:not(.done) .swimlane-delete:hover,
         .swimlane-cell.deadline-important:not(.done) .fast-task-order-btn:hover {
           background: rgba(255, 255, 255, 0.2);
           border-color: rgba(255, 255, 255, 0.5);
           color: #ffffff;
         }
+        .swimlane-cell.deadline-important:not(.done) .swimlane-title-toggle[aria-expanded="true"] {
+          background: #ffffff;
+          border-color: #ffffff;
+          color: #b91c1c;
+        }
         .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle[aria-expanded="true"] {
           background: #ffffff;
           border-color: #ffffff;
           color: #b91c1c;
         }
-        
+
         /* Modern Toolbar */
         .common-toolbar { 
           background: white; 
@@ -9941,6 +10038,8 @@ export default function CommonViewPage() {
                             }
                             const noteKey = cell.entryId || `${row.id}-${index}`
                             const isNoteOpen = openSwimlaneNoteId === noteKey
+                            const titleKey = cell.taskId || cell.entryId || `${row.id}-${index}`
+                            const isTitleOpen = openSwimlaneTitleIds.has(titleKey)
                             return (
                               <div
                                 key={`${row.id}-${index}`}
@@ -10040,9 +10139,35 @@ export default function CommonViewPage() {
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
-                                      <span>{commonPrintTitleLine(cell.title)}</span>
+                                      <span className={["swimlane-title-text", isTitleOpen ? "expanded" : ""].filter(Boolean).join(" ")}>
+                                        {isTitleOpen
+                                          ? renderMarkedNoteContent(stripInitialsPrefix(cell.title), cell.title)
+                                          : renderCommonMarkedTitleLine(cell.title)}
+                                      </span>
                                     </div>
                                   </div>
+                                  {!cell.placeholder ? (
+                                    <button
+                                      type="button"
+                                      className="swimlane-title-toggle"
+                                      onClick={() =>
+                                        setOpenSwimlaneTitleIds((prev) => {
+                                          const next = new Set(prev)
+                                          if (next.has(titleKey)) {
+                                            next.delete(titleKey)
+                                          } else {
+                                            next.add(titleKey)
+                                          }
+                                          return next
+                                        })
+                                      }
+                                      aria-expanded={isTitleOpen}
+                                      aria-label={isTitleOpen ? "Hide full title" : "Show full title"}
+                                      title={isTitleOpen ? "Hide full title" : "Show full title"}
+                                    >
+                                      {isTitleOpen ? "-" : "+"}
+                                    </button>
+                                  ) : null}
                                   {cell.note ? (
                                     <button
                                       type="button"
