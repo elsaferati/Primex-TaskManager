@@ -399,6 +399,7 @@ const renderCommonMarkedTitleLine = (value: string) => {
 
   return parts.length ? parts : commonPrintTitleLine(value)
 }
+
 const normalizeTitle = (t: string) => t.replace(/\s+/g, " ").trim().toLowerCase()
 const mergePersonalItems = (items: PersonalItem[]): PersonalItem[] => {
   const merged = new Map<string, PersonalItem>()
@@ -828,7 +829,9 @@ export default function CommonViewPage() {
   const [formError, setFormError] = React.useState("")
   const [openInfoId, setOpenInfoId] = React.useState<CommonType | null>(null)
   const [openSwimlaneNoteId, setOpenSwimlaneNoteId] = React.useState<string | null>(null)
-  const [openSwimlaneTitleIds, setOpenSwimlaneTitleIds] = React.useState<Set<string>>(() => new Set())
+  const [openSwimlaneTitleRows, setOpenSwimlaneTitleRows] = React.useState<Set<CommonType>>(
+    () => new Set(["oneH", "r1", "personal"])
+  )
   const infoPopoverRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingAutoSelectEnabled, setMeetingAutoSelectEnabled] = React.useState(true)
@@ -4533,6 +4536,18 @@ export default function CommonViewPage() {
     setOpenInfoId((prev) => (prev === rowId ? null : rowId))
   }
 
+  const toggleSwimlaneTitleRow = (rowId: CommonType) => {
+    setOpenSwimlaneTitleRows((prev) => {
+      const next = new Set(prev)
+      if (next.has(rowId)) {
+        next.delete(rowId)
+      } else {
+        next.add(rowId)
+      }
+      return next
+    })
+  }
+
   React.useEffect(() => {
     if (!openInfoId) return
     const handlePointerDown = (event: MouseEvent) => {
@@ -6194,6 +6209,14 @@ export default function CommonViewPage() {
           min-width: 0;
           white-space: pre-line;
         }
+        .swimlane-label-wrap {
+          position: relative;
+          display: inline-flex;
+          flex-direction: column;
+          align-items: flex-start;
+          gap: 4px;
+          min-width: 0;
+        }
         .swimlane-label-sub {
           display: block;
           width: 100%;
@@ -6269,6 +6292,47 @@ export default function CommonViewPage() {
         }
         .swimlane-info-btn:hover {
           color: #0f172a;
+        }
+        .swimlane-info-wrap {
+          position: relative;
+          display: inline-flex;
+        }
+        .swimlane-info-btn-under-label {
+          width: 18px;
+          height: 18px;
+          border: 1px solid rgba(15, 23, 42, 0.16);
+          border-radius: 999px;
+          background: rgba(255, 255, 255, 0.72);
+          color: #475569;
+          font-size: 10px;
+          padding: 0;
+        }
+        .swimlane-title-row-toggle {
+          width: 20px;
+          height: 20px;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          background: #ffffff;
+          color: #334155;
+          font-size: 10px;
+          font-weight: 800;
+          line-height: 1;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          padding: 0;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+        }
+        .swimlane-title-row-toggle:hover {
+          background: #f8fafc;
+          border-color: #94a3b8;
+          color: #0f172a;
+        }
+        .swimlane-title-row-toggle[aria-expanded="true"] {
+          background: #2563eb;
+          border-color: #2563eb;
+          color: #ffffff;
         }
         .swimlane-info-popover {
           position: absolute;
@@ -9959,6 +10023,26 @@ export default function CommonViewPage() {
                     >
                       {(() => {
                         const headerSubtext = swimlaneHeaderSubtext[row.id]
+                        const hasTitleToggle = row.id === "oneH" || row.id === "r1" || row.id === "personal"
+                        const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
+                        const infoButton = (
+                          <span className="swimlane-info-wrap">
+                            <button
+                              type="button"
+                              className="swimlane-info-btn swimlane-info-btn-under-label"
+                              onClick={() => toggleInfo(row.id)}
+                              aria-label="Info"
+                              title="Info"
+                            >
+                              i
+                            </button>
+                            {openInfoId === row.id ? (
+                              <div className="swimlane-info-popover" ref={infoPopoverRef}>
+                                {swimlaneInfoText[row.id] || "Info Not Set"}
+                              </div>
+                            ) : null}
+                          </span>
+                        )
                         const badges = (
                           <span className="swimlane-badges">
                             {row.headerBreakdown?.length ? (
@@ -9983,19 +10067,17 @@ export default function CommonViewPage() {
                             ) : (
                               <span className={row.badgeClass}>{row.countLabel ?? row.count}</span>
                             )}
-                            <button
-                              type="button"
-                              className="swimlane-info-btn"
-                              onClick={() => toggleInfo(row.id)}
-                              aria-label="Info"
-                              title="Info"
-                            >
-                              +
-                            </button>
-                            {openInfoId === row.id ? (
-                              <div className="swimlane-info-popover" ref={infoPopoverRef}>
-                                {swimlaneInfoText[row.id] || "Info Not Set"}
-                              </div>
+                            {hasTitleToggle ? (
+                              <button
+                                type="button"
+                                className="swimlane-title-row-toggle"
+                                onClick={() => toggleSwimlaneTitleRow(row.id)}
+                                aria-expanded={isTitleRowOpen}
+                                aria-label={isTitleRowOpen ? `Hide ${row.label} full titles` : `Show ${row.label} full titles`}
+                                title={isTitleRowOpen ? `Hide ${row.label} full titles` : `Show ${row.label} full titles`}
+                              >
+                                +
+                              </button>
                             ) : null}
                           </span>
                         )
@@ -10004,7 +10086,10 @@ export default function CommonViewPage() {
                           return (
                             <>
                               <div className="swimlane-header-row">
-                                <span className="swimlane-label">{row.label}</span>
+                                <span className="swimlane-label-wrap">
+                                  <span className="swimlane-label">{row.label}</span>
+                                  {infoButton}
+                                </span>
                                 {badges}
                               </div>
                               <span className="swimlane-label-sub">{headerSubtext}</span>
@@ -10014,7 +10099,10 @@ export default function CommonViewPage() {
 
                         return (
                           <>
-                            <span className="swimlane-label">{row.label}</span>
+                            <span className="swimlane-label-wrap">
+                              <span className="swimlane-label">{row.label}</span>
+                              {infoButton}
+                            </span>
                             {badges}
                           </>
                         )
@@ -10038,8 +10126,7 @@ export default function CommonViewPage() {
                             }
                             const noteKey = cell.entryId || `${row.id}-${index}`
                             const isNoteOpen = openSwimlaneNoteId === noteKey
-                            const titleKey = cell.taskId || cell.entryId || `${row.id}-${index}`
-                            const isTitleOpen = openSwimlaneTitleIds.has(titleKey)
+                            const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
                             return (
                               <div
                                 key={`${row.id}-${index}`}
@@ -10139,35 +10226,13 @@ export default function CommonViewPage() {
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
-                                      <span className={["swimlane-title-text", isTitleOpen ? "expanded" : ""].filter(Boolean).join(" ")}>
-                                        {isTitleOpen
+                                      <span className={["swimlane-title-text", isTitleRowOpen ? "expanded" : ""].filter(Boolean).join(" ")}>
+                                        {isTitleRowOpen
                                           ? renderMarkedNoteContent(stripInitialsPrefix(cell.title), cell.title)
                                           : renderCommonMarkedTitleLine(cell.title)}
                                       </span>
                                     </div>
                                   </div>
-                                  {!cell.placeholder ? (
-                                    <button
-                                      type="button"
-                                      className="swimlane-title-toggle"
-                                      onClick={() =>
-                                        setOpenSwimlaneTitleIds((prev) => {
-                                          const next = new Set(prev)
-                                          if (next.has(titleKey)) {
-                                            next.delete(titleKey)
-                                          } else {
-                                            next.add(titleKey)
-                                          }
-                                          return next
-                                        })
-                                      }
-                                      aria-expanded={isTitleOpen}
-                                      aria-label={isTitleOpen ? "Hide full title" : "Show full title"}
-                                      title={isTitleOpen ? "Hide full title" : "Show full title"}
-                                    >
-                                      {isTitleOpen ? "-" : "+"}
-                                    </button>
-                                  ) : null}
                                   {cell.note ? (
                                     <button
                                       type="button"
