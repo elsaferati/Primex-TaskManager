@@ -6518,7 +6518,7 @@ export default function DepartmentKanban() {
                                       08:00
                                     </span>
                                   ) : null}
-                                  <span>
+                                  <span className="whitespace-pre-wrap break-words">
                                     {(() => {
                                       const hasMarks = typeof row.title === "string" && row.title.includes("[[")
                                       const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
@@ -8948,7 +8948,7 @@ export default function DepartmentKanban() {
                                     08:00
                                   </span>
                                 ) : null}
-                                <span>
+                                <span className="whitespace-pre-wrap break-words">
                                   {(() => {
                                     const hasMarks = typeof row.title === "string" && row.title.includes("[[")
                                     const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
@@ -9048,7 +9048,7 @@ export default function DepartmentKanban() {
                                   08:00
                                 </span>
                               ) : null}
-                              <span>
+                              <span className="whitespace-pre-wrap break-words">
                                 {(() => {
                                   const hasMarks = typeof row.title === "string" && row.title.includes("[[")
                                   const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
