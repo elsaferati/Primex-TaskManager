@@ -27,6 +27,7 @@ class ChecklistItem(Base):
     keyword: Mapped[str | None] = mapped_column(Text, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     category: Mapped[str | None] = mapped_column(Text, nullable=True)
+    original: Mapped[str | None] = mapped_column(Text, nullable=True)
     day: Mapped[str | None] = mapped_column(Text, nullable=True)
     owner: Mapped[str | None] = mapped_column(Text, nullable=True)
     time: Mapped[str | None] = mapped_column(Text, nullable=True)

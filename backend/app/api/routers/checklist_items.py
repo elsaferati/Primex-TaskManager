@@ -1269,6 +1269,7 @@ async def _ensure_gd_mst_section_from_template(
                 keyword=template_item.keyword,
                 description=template_item.description,
                 category=template_item.category,
+                original=template_item.original,
                 owner=template_item.owner,
                 comment=template_item.comment,
                 title=title,
@@ -1300,6 +1301,7 @@ def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
         keyword=item.keyword,
         description=item.description,
         category=item.category,
+        original=item.original,
         day=item.day,
         owner=item.owner,
         time=item.time,
@@ -1392,6 +1394,7 @@ class ChecklistItemCreateWithProject(BaseModel):
     keyword: str | None = None
     description: str | None = None
     category: str | None = None
+    original: str | None = None
     day: str | None = None
     owner: str | None = None
     time: str | None = None
@@ -1427,6 +1430,7 @@ async def create_checklist_item(
         keyword=payload.keyword,
         description=payload.description,
         category=payload.category,
+        original=payload.original,
         day=payload.day,
         owner=payload.owner,
         time=payload.time,
@@ -1609,6 +1613,7 @@ async def create_checklist_item(
         keyword=create_payload.keyword,
         description=create_payload.description,
         category=create_payload.category,
+        original=create_payload.original,
         day=create_payload.day,
         owner=create_payload.owner,
         time=create_payload.time,
@@ -1815,6 +1820,8 @@ async def update_checklist_item(
         item.description = payload.description
     if payload.category is not None:
         item.category = payload.category
+    if payload.original is not None:
+        item.original = payload.original
     if payload.day is not None:
         item.day = payload.day
     if payload.owner is not None:

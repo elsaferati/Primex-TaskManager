@@ -2757,6 +2757,7 @@ async def export_checklist_xlsx(
     path: str | None = None,
     format: str | None = None,
     title: str | None = None,
+    include_original: bool = True,
     exclude_path: list[str] | None = Query(None),
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
@@ -2797,8 +2798,13 @@ async def export_checklist_xlsx(
         await db.execute(items_stmt.order_by(ChecklistItem.position, ChecklistItem.id))
     ).scalars().all()
 
+    include_mst_original = include_original and checklist.group_key != "TT_PRODUCT_CHECKLIST_TEMPLATE"
+
     if format == "mst":
-        headers = ["NR", "PATH", "DETYRAT", "KEYWORDS", "PERSHKRIMI", "KATEGORIA", "CHECK", "INCL", "KOMENT"]
+        headers = ["NR", "PATH", "DETYRAT", "KEYWORDS", "PERSHKRIMI", "KATEGORIA"]
+        if include_mst_original:
+            headers.append("ORIGJINAL")
+        headers.extend(["CHECK", "INCL", "KOMENT"])
     else:
         headers = ["NR", "TASK", "COMMENT", "CHECK", "TIME", "KOMENT"]
         if include_ko2:
@@ -2884,6 +2890,7 @@ async def export_checklist_xlsx(
             "KEYWORDS": 20,
             "PERSHKRIMI": 36,
             "KATEGORIA": 16,
+            "ORIGJINAL": 16,
             "CHECK": 8,
             "INCL": 10,
             "KOMENT": 24,
@@ -2913,10 +2920,14 @@ async def export_checklist_xlsx(
                 item.keyword or "",
                 item.description or "",
                 item.category or "",
+            ]
+            if include_mst_original:
+                row_values.append(item.original or "")
+            row_values.extend([
                 "yes" if item.is_checked else "",
                 incl_value,
                 item.comment or "",
-            ]
+            ])
         else:
             row_values = [
                 idx,

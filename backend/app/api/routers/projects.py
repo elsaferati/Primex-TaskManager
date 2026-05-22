@@ -440,6 +440,7 @@ async def _copy_project_template_data(
                 keyword=template_item.keyword,
                 description=template_item.description,
                 category=template_item.category,
+                original=template_item.original,
                 day=template_item.day,
                 owner=template_item.owner,
                 time=template_item.time,

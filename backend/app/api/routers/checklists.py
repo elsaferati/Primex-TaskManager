@@ -44,6 +44,7 @@ def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
         keyword=item.keyword,
         description=item.description,
         category=item.category,
+        original=item.original,
         day=item.day,
         owner=item.owner,
         time=item.time,

@@ -98,7 +98,8 @@ async function initializeMstChecklistItems(
   existingItems: ChecklistItem[],
   templateRows: MstChecklistRow[],
   apiFetch: (url: string, options?: RequestInit) => Promise<Response>,
-  allowDelete = false
+  allowDelete = false,
+  includeOriginal = true
 ) {
   // Create a map of existing items by path + title for quick lookup
   // Also detect and remove duplicates
@@ -169,6 +170,7 @@ async function initializeMstChecklistItems(
       keyword: row.keywords,
       description: row.pershkrimi,
       category: row.kategoria,
+      original: row.original,
       owner: row.incl,
       position: index + 1,
     })),
@@ -179,6 +181,7 @@ async function initializeMstChecklistItems(
       keyword: FINALIZATION_PATH,
       description: entry.question,
       category: FINALIZATION_PATH,
+      original: "",
     })),
     ...planningItemsToCreate.map((question) => ({
       type: "planning" as const,
@@ -187,6 +190,7 @@ async function initializeMstChecklistItems(
       keyword: "PLANNING",
       description: question,
       category: "PLANNING",
+      original: "",
     })),
   ]
 
@@ -204,6 +208,7 @@ async function initializeMstChecklistItems(
           keyword: item.keyword,
           description: item.description,
           category: item.category,
+          ...(includeOriginal ? { original: item.original || null } : {}),
           owner: "owner" in item ? item.owner : undefined,
           is_checked: false,
           position: "position" in item ? item.position : undefined,
@@ -295,6 +300,7 @@ type MstChecklistRow = {
   pershkrimi: string
   shembull?: string
   kategoria: string
+  original?: string
   incl: string
 }
 
@@ -306,6 +312,7 @@ function normalizeMstChecklistRows(rows: MstChecklistRow[]): MstChecklistRow[] {
     pershkrimi: row.pershkrimi || "",
     shembull: row.shembull || "",
     kategoria: row.kategoria || "",
+    original: row.original || "",
     incl: row.incl || "DV, DM",
   }))
 }
@@ -324,6 +331,7 @@ function checklistItemsToMstTemplateRows(items: ChecklistItem[]): MstChecklistRo
         keywords: item.keyword || "",
         pershkrimi: item.description || "",
         kategoria: item.category || "",
+        original: item.original || "",
         incl: item.owner || "DV, DM",
       }))
   )
@@ -1240,6 +1248,7 @@ export default function PcmProjectPage() {
     keywords: "",
     pershkrimi: "",
     kategoria: "",
+    original: "",
     incl: "DV, DM",
   })
   const [newMstChecklistRow, setNewMstChecklistRow] = React.useState({
@@ -1249,6 +1258,7 @@ export default function PcmProjectPage() {
     keywords: "",
     pershkrimi: "",
     kategoria: "",
+    original: "",
     incl: "DV, DM",
   })
   const [savingMstChecklistRow, setSavingMstChecklistRow] = React.useState(false)
@@ -1447,7 +1457,7 @@ export default function PcmProjectPage() {
                 : isTtProject
                   ? DEFAULT_TT_PRODUCT_TEMPLATE_ROWS
                   : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
-              await initializeMstChecklistItems(p.id, items, templateRows, apiFetch)
+              await initializeMstChecklistItems(p.id, items, templateRows, apiFetch, false, !isTtProject)
               const reloadRes = await apiFetch(`/checklist-items?project_id=${p.id}`)
               if (reloadRes.ok) {
                 setChecklistItems((await reloadRes.json()) as ChecklistItem[])
@@ -1494,6 +1504,10 @@ export default function PcmProjectPage() {
   const productChecklistLabel = isTtProject ? "TT" : "MST"
   const productTemplateGroupKey = isTtProject ? TT_PRODUCT_TEMPLATE_GROUP_KEY : MST_PRODUCT_TEMPLATE_GROUP_KEY
   const defaultProductTemplateRows = isTtProject ? DEFAULT_TT_PRODUCT_TEMPLATE_ROWS : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
+  const showMstOriginalColumn = !isTtProject
+  const mstChecklistGridClass = showMstOriginalColumn
+    ? "grid-cols-[repeat(16,minmax(0,1fr))]"
+    : "grid-cols-[repeat(15,minmax(0,1fr))]"
   const isMstTemplateEditor = React.useMemo(
     () => Boolean(project?.is_template && isMstLike && (user?.role === "ADMIN" || user?.role === "MANAGER")),
     [isMstLike, project?.is_template, user?.role]
@@ -1584,6 +1598,7 @@ export default function PcmProjectPage() {
             keyword: row.keywords,
             description: row.pershkrimi,
             category: row.kategoria,
+            ...(showMstOriginalColumn ? { original: row.original || null } : {}),
             owner: row.incl,
             is_checked: false,
             position: index + 1,
@@ -1601,7 +1616,7 @@ export default function PcmProjectPage() {
     } finally {
       setInitializingMstTemplate(false)
     }
-  }, [apiFetch, defaultProductTemplateRows, loadMstTemplateChecklist, productChecklistLabel, productTemplateGroupKey, user?.role])
+  }, [apiFetch, defaultProductTemplateRows, loadMstTemplateChecklist, productChecklistLabel, productTemplateGroupKey, showMstOriginalColumn, user?.role])
 
   // Initialize MST checklist checked state and comments from database
   React.useEffect(() => {
@@ -2485,6 +2500,9 @@ export default function PcmProjectPage() {
       const params = new URLSearchParams()
       params.set("checklist_id", checklistId)
       params.set("format", "mst")
+      if (!showMstOriginalColumn) {
+        params.set("include_original", "false")
+      }
       Array.from(MST_EXCLUDED_PATHS).forEach((value) => {
         params.append("exclude_path", value)
       })
@@ -5846,6 +5864,7 @@ export default function PcmProjectPage() {
           keywords: item.keyword || "",
           pershkrimi: item.description || "",
           kategoria: item.category || "",
+          original: item.original || "",
           incl: item.owner || templateRow?.incl || "",
         }
       })
@@ -5954,6 +5973,7 @@ export default function PcmProjectPage() {
       keywords: string
       pershkrimi: string
       kategoria: string
+      original: string
       incl: string
     }) => {
       setEditingMstChecklistKey(row.key)
@@ -5964,6 +5984,7 @@ export default function PcmProjectPage() {
         keywords: row.keywords,
         pershkrimi: row.pershkrimi,
         kategoria: row.kategoria,
+        original: row.original,
         incl: row.incl || "DV, DM",
       })
     }
@@ -5977,6 +5998,7 @@ export default function PcmProjectPage() {
         keywords: "",
         pershkrimi: "",
         kategoria: "",
+        original: "",
         incl: "DV, DM",
       })
     }
@@ -6006,6 +6028,7 @@ export default function PcmProjectPage() {
           keyword: editingMstChecklistRow.keywords.trim() || null,
           description: editingMstChecklistRow.pershkrimi.trim() || null,
           category: editingMstChecklistRow.kategoria.trim() || null,
+          ...(showMstOriginalColumn ? { original: editingMstChecklistRow.original.trim() } : {}),
           owner: editingMstChecklistRow.incl.trim() || "DV, DM",
           position,
         }
@@ -6124,6 +6147,7 @@ export default function PcmProjectPage() {
             keyword: newMstChecklistRow.keywords.trim() || null,
             description: newMstChecklistRow.pershkrimi.trim() || null,
             category: newMstChecklistRow.kategoria.trim() || null,
+            ...(showMstOriginalColumn ? { original: newMstChecklistRow.original.trim() } : {}),
             owner: newMstChecklistRow.incl.trim() || "DV, DM",
             is_checked: false,
             position: position ?? (maxPosition + 1),
@@ -6148,6 +6172,7 @@ export default function PcmProjectPage() {
           keywords: "",
           pershkrimi: "",
           kategoria: "",
+          original: "",
           incl: "DV, DM",
         })
         toast.success("Checklist row added")
@@ -7423,20 +7448,21 @@ export default function PcmProjectPage() {
                         container.scrollLeft = mstChecklistDragRef.current.startScrollLeft - walk
                       }}
                     >
-                      <div className="min-w-[1200px]">
-                        <div className="grid grid-cols-[repeat(15,minmax(0,1fr))] gap-3 text-xs font-semibold text-muted-foreground border-b pb-2">
+                      <div className={showMstOriginalColumn ? "min-w-[1280px]" : "min-w-[1200px]"}>
+                        <div className={`grid ${mstChecklistGridClass} gap-3 text-xs font-semibold text-muted-foreground border-b pb-2`}>
                           <div className="col-span-1">NO</div>
                           <div className="col-span-2">PATH</div>
                           <div className="col-span-2">DETYRAT</div>
                           <div className="col-span-2">KEYWORDS</div>
                           <div className="col-span-2">PERSHKRIMI</div>
                           <div className="col-span-1">KATEGORIA</div>
+                          {showMstOriginalColumn ? <div className="col-span-1">ORIGJINAL</div> : null}
                           <div className="col-span-1">CHECK</div>
                           <div className="col-span-1">INCL</div>
                           <div className="col-span-2">KOMENT</div>
                           <div className="col-span-1 text-right">ACTIONS</div>
                         </div>
-                        <div className="grid grid-cols-[repeat(15,minmax(0,1fr))] gap-3 py-3 text-sm items-center border-b">
+                        <div className={`grid ${mstChecklistGridClass} gap-3 py-3 text-sm items-center border-b`}>
                           <div className="col-span-1">
                             <Input
                               value={newMstChecklistRow.number}
@@ -7485,6 +7511,16 @@ export default function PcmProjectPage() {
                               className="h-8 text-xs"
                             />
                           </div>
+                          {showMstOriginalColumn ? (
+                            <div className="col-span-1">
+                              <Input
+                                value={newMstChecklistRow.original}
+                                onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, original: e.target.value }))}
+                                placeholder="Origjinal"
+                                className="h-8 text-xs"
+                              />
+                            </div>
+                          ) : null}
                           <div className="col-span-1" />
                           <div className="col-span-1">
                             <Input
@@ -7532,7 +7568,7 @@ export default function PcmProjectPage() {
                             const isEditing = editingMstChecklistKey === key
 
                             return (
-                              <div key={rowKey} className="grid grid-cols-[repeat(15,minmax(0,1fr))] gap-3 py-3 text-sm items-center">
+                              <div key={rowKey} className={`grid ${mstChecklistGridClass} gap-3 py-3 text-sm items-center`}>
                                 <div className="col-span-1 text-xs text-slate-500">
                                   {isEditing ? (
                                     <Input
@@ -7704,6 +7740,21 @@ export default function PcmProjectPage() {
                                     </div>
                                   )}
                                 </div>
+                                {showMstOriginalColumn ? (
+                                  <div className="col-span-1" title={row.original}>
+                                    {isEditing ? (
+                                      <Input
+                                        value={editingMstChecklistRow.original}
+                                        onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, original: e.target.value }))}
+                                        className="h-8 text-xs"
+                                      />
+                                    ) : (
+                                      <div className="flex items-start gap-1">
+                                        <span className="flex-1 whitespace-normal break-words">{row.original}</span>
+                                      </div>
+                                    )}
+                                  </div>
+                                ) : null}
                                 <div className="col-span-1 flex justify-center">
                                   {isMstTemplateEditor ? (
                                     <span className="text-xs text-slate-400">-</span>

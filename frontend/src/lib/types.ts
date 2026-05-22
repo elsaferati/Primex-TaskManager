@@ -344,6 +344,7 @@ export interface ChecklistItem {
   keyword?: string | null
   description?: string | null
   category?: string | null
+  original?: string | null
   day?: string | null
   owner?: string | null
   time?: string | null
