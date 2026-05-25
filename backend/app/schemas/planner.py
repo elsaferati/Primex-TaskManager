@@ -50,6 +50,7 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     is_1h_report: bool = False
     is_r1: bool = False
     is_personal: bool = False
+    is_deadline_important: bool = False
     ga_note_origin_id: uuid.UUID | None = None
 
 
@@ -81,6 +82,7 @@ class WeeklyTableTaskEntry(BaseModel):
     is_1h_report: bool = False
     is_r1: bool = False
     is_personal: bool = False
+    is_deadline_important: bool = False
     ga_note_origin_id: uuid.UUID | None = None
 
 

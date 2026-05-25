@@ -27,6 +27,8 @@ type CommonType =
   | "priority"
   | "bz"
 
+const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH", "r1", "personal"]
+
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
 type LeaveItem = {
@@ -830,7 +832,7 @@ export default function CommonViewPage() {
   const [openInfoId, setOpenInfoId] = React.useState<CommonType | null>(null)
   const [openSwimlaneNoteId, setOpenSwimlaneNoteId] = React.useState<string | null>(null)
   const [openSwimlaneTitleRows, setOpenSwimlaneTitleRows] = React.useState<Set<CommonType>>(
-    () => new Set(["oneH", "r1", "personal"])
+    () => new Set(DEFAULT_OPEN_SWIMLANE_TITLE_ROWS)
   )
   const infoPopoverRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
@@ -3073,6 +3075,7 @@ export default function CommonViewPage() {
     }
     setSelectedDates(new Set(getWeekdays(weekStartDate).map(toISODate)))
     setMultiMode(true)
+    resetSwimlaneTitleRowsOpen()
   }
 
   const selectToday = () => {
@@ -3083,6 +3086,7 @@ export default function CommonViewPage() {
     }
     setSelectedDates(new Set([toISODate(today)]))
     setMultiMode(false)
+    resetSwimlaneTitleRowsOpen()
   }
 
   const resetWeekTablePrintFit = React.useCallback(() => {
@@ -3551,6 +3555,7 @@ export default function CommonViewPage() {
       const filtered = Array.from(prev).filter((d) => weekISO.includes(d))
       return filtered.length ? new Set(filtered) : new Set([weekISO[0]])
     })
+    resetSwimlaneTitleRowsOpen()
   }
 
   const openModal = () => {
@@ -4546,6 +4551,10 @@ export default function CommonViewPage() {
       }
       return next
     })
+  }
+
+  const resetSwimlaneTitleRowsOpen = () => {
+    setOpenSwimlaneTitleRows(new Set(DEFAULT_OPEN_SWIMLANE_TITLE_ROWS))
   }
 
   React.useEffect(() => {
@@ -6146,6 +6155,7 @@ export default function CommonViewPage() {
           border-right: 1px solid var(--swim-border);
         }
         .swimlane-header {
+          position: relative;
           width: 150px;
           padding: 10px 10px;
           display: grid;
@@ -6161,6 +6171,7 @@ export default function CommonViewPage() {
           font-size: 12px;
           word-break: break-word;
           background: #f8f9fa;
+          z-index: 5;
         }
         .swimlane-header-stacked {
           grid-template-columns: 1fr auto;
@@ -6296,6 +6307,7 @@ export default function CommonViewPage() {
         .swimlane-info-wrap {
           position: relative;
           display: inline-flex;
+          z-index: 60;
         }
         .swimlane-info-btn-under-label {
           width: 18px;
@@ -6336,21 +6348,22 @@ export default function CommonViewPage() {
         }
         .swimlane-info-popover {
           position: absolute;
-          top: calc(100% + 6px);
-          right: 0;
+          top: 50%;
+          left: calc(100% + 8px);
+          transform: translateY(-50%);
           background: #ffffff;
           border: 1px solid #cbd5e1;
-          border-radius: 0;
-          padding: 6px 8px;
-          font-size: 10px;
+          border-radius: 6px;
+          padding: 8px 10px;
+          font-size: 11px;
           font-weight: 700;
           color: #0f172a;
           white-space: normal;
           min-width: 180px;
           max-width: 260px;
           word-break: break-word;
-          line-height: 1.3;
-          z-index: 20;
+          line-height: 1.35;
+          z-index: 50;
           box-shadow: 0 4px 10px rgba(15, 23, 42, 0.12);
         }
         .swimlane-content-shell {

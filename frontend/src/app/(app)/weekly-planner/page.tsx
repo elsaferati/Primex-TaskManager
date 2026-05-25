@@ -61,6 +61,7 @@ type WeeklyTableProjectTaskEntry = {
   is_1h_report: boolean
   is_r1: boolean
   is_personal: boolean
+  is_deadline_important?: boolean
   ga_note_origin_id: string | null
 }
 
@@ -89,6 +90,7 @@ type WeeklyTableTaskEntry = {
   is_1h_report: boolean
   is_r1: boolean
   is_personal: boolean
+  is_deadline_important?: boolean
   ga_note_origin_id: string | null
 }
 
@@ -1550,8 +1552,12 @@ export default function WeeklyPlannerPage() {
       completedAt?: string | null,
       dayDate?: string | null,
       dailyStatus?: string | null,
-      createdAt?: string | null
+      createdAt?: string | null,
+      isDeadlineImportant?: boolean
     ) => {
+      if (isDeadlineImportant) {
+        return "border-red-800 bg-red-600 text-white"
+      }
       const statusValue = getStatusValueForDay(status, completedAt, dayDate, dailyStatus)
       const isNew = isTaskNewForWeek(createdAt, data?.week_start)
       if (isNew) {
@@ -2109,6 +2115,7 @@ export default function WeeklyPlannerPage() {
             .task-status-done { background-color: #C4FDC4; }
             .task-status-new-open { background-color: #dbeafe; border-color: #1d4ed8; }
             .task-status-new-done { background-color: #6ee7b7; border-color: #059669; }
+            .task-status-deadline { background-color: #dc2626; border-color: #991b1b; color: #ffffff; }
             .badge {
               display: inline-block;
               padding: 0.5px 2px;
@@ -2536,9 +2543,10 @@ export default function WeeklyPlannerPage() {
     }
 
     const getPrintTaskStatusClass = (
-      task: Pick<WeeklyTableTaskEntry, "status" | "completed_at" | "daily_status" | "created_at">,
+      task: Pick<WeeklyTableTaskEntry, "status" | "completed_at" | "daily_status" | "created_at" | "is_deadline_important">,
       dayIso: string
     ) => {
+      if (task.is_deadline_important) return "task-status-deadline"
       const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
       const isNew = isTaskNewForWeek(task.created_at, data.week_start)
       if (isNew) {
@@ -4537,18 +4545,22 @@ export default function WeeklyPlannerPage() {
                                               const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                               const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                                               const displayTitle = getPlannerTaskDisplayTitle(task)
+                                              const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
                                               return (
                                                 <div
                                                   key={task.task_id}
                                                 className={[
                                                   "text-[11px] flex items-center gap-1 rounded border pl-1.5 pr-0.5 py-0.5 group/task",
-                                                  getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at),
+                                                  getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
                                                 ].join(" ")}
                                               >
                                                   <button
                                                     type="button"
                                                     onClick={() => openChecklistForTask(task.task_id, displayTitle)}
-                                                    className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
+                                                    className={[
+                                                      "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                                      titleColorClass,
+                                                    ].join(" ")}
                                                     title={`${taskNumber}. ${displayTitle}`}
                                                   >
                                                     {taskNumber}. {displayTitle}
@@ -4614,15 +4626,16 @@ export default function WeeklyPlannerPage() {
                                         const statusBadge = getTaskStatusBadge(task)
                                         const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                         const displayTitle = getPlannerTaskDisplayTitle(task)
+                                        const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
                                         return (
                                           <div
                                             key={task.task_id || idx}
                                           className={[
                                             "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task",
-                                            getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at),
+                                            getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
                                           ].join(" ")}
                                         >
-                                            <span className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-slate-900" title={`${idx + 1}. ${displayTitle}`}>
+                                            <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")} title={`${idx + 1}. ${displayTitle}`}>
                                               {idx + 1}. {displayTitle}
                                             </span>
                                           <div className="flex shrink-0 items-center gap-1">
@@ -4670,25 +4683,29 @@ export default function WeeklyPlannerPage() {
                                     const statusBadge = getFastTaskBadge(task)
                                     const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                     const displayTitle = getPlannerTaskDisplayTitle(task)
+                                    const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
                                     return (
                                       <div
                                         key={task.task_id || idx}
                                           className={[
                                             "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task",
-                                            getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at),
+                                            getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
                                           ].join(" ")}
                                         >
                                         {task.task_id ? (
                                           <button
                                             type="button"
                                             onClick={() => openFastTaskDescription(task.task_id!, displayTitle)}
-                                            className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left text-slate-900 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded"
+                                            className={[
+                                              "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                              titleColorClass,
+                                            ].join(" ")}
                                             title={`${idx + 1}. ${displayTitle}`}
                                           >
                                             {idx + 1}. {displayTitle}
                                           </button>
                                         ) : (
-                                          <span className="min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-slate-900" title={`${idx + 1}. ${displayTitle}`}>
+                                          <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")} title={`${idx + 1}. ${displayTitle}`}>
                                             {idx + 1}. {displayTitle}
                                           </span>
                                         )}

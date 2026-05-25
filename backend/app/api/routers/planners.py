@@ -2667,6 +2667,7 @@ async def weekly_table_planner(
                             is_1h_report=False,
                             is_r1=False,
                             is_personal=False,
+                            is_deadline_important=system_task.is_deadline_important,
                             ga_note_origin_id=None,
                         )
                         
@@ -2716,6 +2717,7 @@ async def weekly_table_planner(
                             is_1h_report=task.is_1h_report,
                             is_r1=task.is_r1,
                             is_personal=task.is_personal,
+                            is_deadline_important=task.is_deadline_important,
                             ga_note_origin_id=task.ga_note_origin_id,
                         )
                         if is_both:
@@ -2821,6 +2823,7 @@ async def weekly_table_planner(
                                 is_1h_report=t.is_1h_report,
                                 is_r1=t.is_r1,
                                 is_personal=t.is_personal,
+                                is_deadline_important=t.is_deadline_important,
                                 ga_note_origin_id=t.ga_note_origin_id,
                             )
                         )
@@ -2882,6 +2885,7 @@ async def weekly_table_planner(
                                 is_1h_report=t.is_1h_report,
                                 is_r1=t.is_r1,
                                 is_personal=t.is_personal,
+                                is_deadline_important=t.is_deadline_important,
                                 ga_note_origin_id=t.ga_note_origin_id,
                             )
                         )

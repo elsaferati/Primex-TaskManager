@@ -82,6 +82,7 @@ type SnapshotTaskEntry = {
   is_1h_report: boolean
   is_r1: boolean
   is_personal: boolean
+  is_deadline_important?: boolean
   ga_note_origin_id: string | null
 }
 
@@ -321,8 +322,12 @@ const getTaskCardClassesForDay = (
   dayDate?: string | null,
   dailyStatus?: string | null,
   createdAt?: string | null,
-  weekStart?: string | null
+  weekStart?: string | null,
+  isDeadlineImportant?: boolean
 ) => {
+  if (isDeadlineImportant) {
+    return "border-red-800 bg-red-600 text-white"
+  }
   const statusValue = getStatusValueForDay(status, completedAt, dayDate, dailyStatus)
   const isNew = isTaskNewForWeek(createdAt, weekStart)
   if (isNew) {
@@ -577,6 +582,7 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                         {project.tasks.map((task, taskIndex) => {
                           const statusBadge = getTaskStatusBadge(task)
                           const isNew = isTaskNewForWeek(task.created_at, snapshot.payload.week_start)
+                          const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
                           return (
                             <div
                               key={`${project.project_id}-${task.task_id || taskIndex}`}
@@ -588,11 +594,12 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                                   dayDate,
                                   task.daily_status,
                                   task.created_at,
-                                  snapshot.payload.week_start
+                                  snapshot.payload.week_start,
+                                  task.is_deadline_important
                                 ),
                               ].join(" ")}
                             >
-                              <span className="truncate whitespace-nowrap font-semibold text-slate-900">
+                              <span className={["truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
                                 {projectIndex + 1}.{taskIndex + 1}. {task.task_title || task.title || "-"}
                               </span>
                               <div className="flex items-center gap-1">
@@ -631,6 +638,7 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                     {systemTasksList.map((task, idx) => {
                       const statusBadge = getTaskStatusBadge(task)
                       const isNew = isTaskNewForWeek(task.created_at, snapshot.payload.week_start)
+                      const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
                       return (
                         <div
                           key={`${task.task_id || task.title || "system"}-${idx}`}
@@ -642,11 +650,12 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                               dayDate,
                               task.daily_status,
                               task.created_at,
-                              snapshot.payload.week_start
+                              snapshot.payload.week_start,
+                              task.is_deadline_important
                             ),
                           ].join(" ")}
                         >
-                          <span className="truncate whitespace-nowrap font-semibold text-slate-900">
+                          <span className={["truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
                             {idx + 1}. {task.title || task.task_title || "-"}
                           </span>
                           <div className="flex items-center gap-1">
@@ -677,6 +686,7 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                     {fastTasksList.map((task, idx) => {
                       const statusBadge = getFastTaskBadge(task)
                       const isNew = isTaskNewForWeek(task.created_at, snapshot.payload.week_start)
+                      const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
                       return (
                         <div
                           key={`${task.task_id || task.title || "fast"}-${idx}`}
@@ -688,11 +698,12 @@ function SnapshotDepartmentTable({ snapshot }: { snapshot: SnapshotData }) {
                               dayDate,
                               task.daily_status,
                               task.created_at,
-                              snapshot.payload.week_start
+                              snapshot.payload.week_start,
+                              task.is_deadline_important
                             ),
                           ].join(" ")}
                         >
-                          <span className="truncate whitespace-nowrap font-semibold text-slate-900">
+                          <span className={["truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")}>
                             {idx + 1}. {task.title || task.task_title || "-"}
                           </span>
                           <div className="flex items-center gap-1">
@@ -1244,9 +1255,10 @@ export function WeeklyPlannerSnapshotsView({
 
     const getTaskDisplayTitle = (task: SnapshotTaskEntry) => task.task_title || task.title || "-"
     const getPrintTaskStatusClass = (
-      task: Pick<SnapshotTaskEntry, "status" | "completed_at" | "daily_status" | "created_at">,
+      task: Pick<SnapshotTaskEntry, "status" | "completed_at" | "daily_status" | "created_at" | "is_deadline_important">,
       dayIso: string
     ) => {
+      if (task.is_deadline_important) return "task-status-deadline"
       const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
       const isNew = isTaskNewForWeek(task.created_at, activeSnapshot.payload.week_start)
       if (isNew) {
@@ -1716,6 +1728,7 @@ export function WeeklyPlannerSnapshotsView({
             .task-status-done { background-color: #C4FDC4; }
             .task-status-new-open { background-color: #dbeafe; border-color: #1d4ed8; }
             .task-status-new-done { background-color: #6ee7b7; border-color: #059669; }
+            .task-status-deadline { background-color: #dc2626; border-color: #991b1b; color: #ffffff; }
             .badge {
               display: inline-block;
               padding: 0.5px 2px;
