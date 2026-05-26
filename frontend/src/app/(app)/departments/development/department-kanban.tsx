@@ -5,7 +5,7 @@ import Link from "next/link"
 import { usePathname, useSearchParams } from "next/navigation"
 
 import { toast } from "sonner"
-import { Check, Pencil, Printer, RotateCcw, Trash2 } from "lucide-react"
+import { Check, GripVertical, Pencil, Printer, RotateCcw, Trash2 } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -6786,24 +6786,24 @@ export default function DepartmentKanban() {
                   onMouseUp={handleDailyReportMouseEnd}
                   onMouseLeave={handleDailyReportMouseEnd}
                 >
-                  <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
+                  <table className="min-w-[980px] w-full table-fixed border border-slate-200 text-[11px] daily-report-table">
                     <colgroup>
-                      <col className="w-[24px]" />
-                      <col className="w-[28px]" />
                       <col className="w-[32px]" />
-                      <col className="w-[24px]" />
-                      <col className="w-[64px]" />
-                      <col className="w-[150px]" />
                       <col className="w-[48px]" />
+                      <col className="w-[92px]" />
                       <col className="w-[64px]" />
-                      <col className="w-[48px]" />
-                      <col className="w-[32px]" />
-                      <col className="w-[140px]" />
+                      <col className="w-[64px]" />
+                      <col className="w-[260px]" />
+                      <col className="w-[120px]" />
+                      <col className="w-[84px]" />
+                      <col className="w-[96px]" />
+                      <col className="w-[72px]" />
+                      <col className="w-[180px]" />
                     </colgroup>
                     <thead className="sticky top-0 z-10 bg-slate-50">
                       <tr>
-                        <th className="sticky left-0 z-40 border border-slate-200 bg-slate-50 px-1 py-2 text-center text-xs uppercase">#</th>
-                        <th className="sticky left-[24px] z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                        <th className="border border-slate-200 bg-slate-50 px-1 py-2 text-center text-xs uppercase" aria-label="Move row" />
+                        <th className="border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
                           Nr
                         </th>
                         <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LLOJI</th>
@@ -6850,11 +6850,11 @@ export default function DepartmentKanban() {
                                 handleDailyReportRowDrop(rowId)
                               }}
                             >
-                              <td className="sticky left-0 z-30 border border-slate-200 bg-white px-1 py-2 align-top text-center">
+                              <td className="border border-slate-200 bg-white px-1 py-2 align-top">
                                 <button
                                   type="button"
                                   draggable
-                                  className="inline-flex h-5 w-5 cursor-grab items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
+                                  className="inline-flex h-5 w-5 shrink-0 cursor-grab items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
                                   aria-label="Move row"
                                   title="Tap to select, then tap another row to move"
                                   onMouseDown={(event) => event.stopPropagation()}
@@ -6873,10 +6873,10 @@ export default function DepartmentKanban() {
                                     setOverDailyReportRowId(null)
                                   }}
                                 >
-                                  ::
+                                  <GripVertical className="h-3.5 w-3.5" aria-hidden="true" />
                                 </button>
                               </td>
-                              <td className="sticky left-[24px] z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
+                              <td className="border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
                                 {index + 1}
                               </td>
                               <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
@@ -7005,7 +7005,7 @@ export default function DepartmentKanban() {
                         })
                       ) : (
                         <tr>
-                          <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={12}>
+                          <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={11}>
                             No data available.
                           </td>
                         </tr>
