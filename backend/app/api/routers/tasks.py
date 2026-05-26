@@ -161,7 +161,30 @@ def _task_moved_days(task: Task) -> int | None:
 
 
 def _task_planned_date(task: Task) -> datetime | None:
+    if task.completed_at is not None and _enum_value(task.status) == TaskStatus.DONE.value:
+        return task.due_date
     return task.original_due_date or task.due_date
+
+
+def _sync_due_date_to_done_day(task: Task) -> None:
+    if task.completed_at is None or _enum_value(task.status) != TaskStatus.DONE.value:
+        return
+    next_due_date = _due_date_on_done_day(task.due_date, task.completed_at)
+    if (
+        task.due_date is not None
+        and next_due_date != task.due_date
+        and task.original_due_date is None
+    ):
+        task.original_due_date = task.due_date
+    task.due_date = next_due_date
+
+
+def _due_date_on_done_day(due_date: datetime | None, completed_at: datetime) -> datetime:
+    completed_day = _as_local_date(completed_at)
+    due_day = _as_local_date(due_date)
+    if completed_day is not None and due_day != completed_day:
+        return completed_at
+    return due_date or completed_at
 
 
 def _extract_total_and_completed(daily_products: int | None, internal_notes: str | None) -> tuple[int | None, int]:
@@ -1019,6 +1042,12 @@ async def create_task(
 
     start_date_value = payload.start_date or datetime.now(timezone.utc)
     due_date_value = payload.due_date
+    original_due_date_value = None
+    if completed_at is not None and _enum_value(status_value) == TaskStatus.DONE.value:
+        original_due_date_value = due_date_value
+        due_date_value = _due_date_on_done_day(due_date_value, completed_at)
+        if original_due_date_value == due_date_value:
+            original_due_date_value = None
     if payload.fast_task_order is not None and not is_fast:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -1072,6 +1101,7 @@ async def create_task(
                     daily_products=payload.daily_products,
                     start_date=start_date_value,
                     due_date=due_date_value,
+                    original_due_date=original_due_date_value,
                     completed_at=completed_at,
                     is_deadline_important=payload.is_deadline_important or False,
                     is_bllok=payload.is_bllok or False,
@@ -1212,6 +1242,7 @@ async def create_task(
                             daily_products=payload.daily_products,
                             start_date=start_date_value,
                             due_date=due_date_value,
+                            original_due_date=original_due_date_value,
                             completed_at=completed_at,
                             is_deadline_important=payload.is_deadline_important or False,
                             is_bllok=payload.is_bllok or False,
@@ -1332,6 +1363,7 @@ async def create_task(
                 daily_products=payload.daily_products,
                 start_date=start_date_value,
                 due_date=due_date_value,
+                original_due_date=original_due_date_value,
                 completed_at=completed_at,
                 is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
@@ -1431,6 +1463,7 @@ async def create_task(
                 daily_products=payload.daily_products,
                 start_date=start_date_value,
                 due_date=due_date_value,
+                original_due_date=original_due_date_value,
                 completed_at=completed_at,
                 is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
@@ -1522,6 +1555,7 @@ async def create_task(
         daily_products=payload.daily_products,
         start_date=start_date_value,
         due_date=due_date_value,
+        original_due_date=original_due_date_value,
         completed_at=completed_at,
         is_deadline_important=payload.is_deadline_important or False,
         is_bllok=payload.is_bllok or False,
@@ -2017,6 +2051,7 @@ async def update_task(
             )
     if payload.completed_at is not None:
         task.completed_at = payload.completed_at
+    _sync_due_date_to_done_day(task)
     if payload.is_deadline_important is not None:
         task.is_deadline_important = payload.is_deadline_important
     if payload.is_bllok is not None:
@@ -2070,6 +2105,7 @@ async def update_task(
                 task.status = auto_status
                 if task.status == TaskStatus.DONE:
                     task.completed_at = task.completed_at or datetime.now(timezone.utc)
+                    _sync_due_date_to_done_day(task)
                 else:
                     task.completed_at = None
 

@@ -2868,6 +2868,7 @@ export default function DepartmentKanban() {
       systemTemplateId?: string
       systemOccurrenceDate?: string
       systemStatus?: string
+      sortDate?: string | null
     }> = []
     const systemAmRows: typeof rows = []
     const systemPmRows: typeof rows = []
@@ -2995,6 +2996,7 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         userInitials: printInitials,
         taskId: task.id,
+        sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
       })
     }
 
@@ -3031,6 +3033,7 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         userInitials: printInitials,
         taskId: task.id,
+        sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
       })
     }
 
@@ -3060,6 +3063,7 @@ export default function DepartmentKanban() {
           comment: task.user_comment ?? null,
           userInitials: printInitials,
           taskId: task.id,
+          sortDate: task.due_date || task.start_date || task.planned_for || task.created_at,
         },
       })
       fastIndex += 1
@@ -3096,6 +3100,7 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         userInitials: printInitials,
         taskId: task.id,
+        sortDate: task.due_date || task.start_date || task.created_at,
       })
     }
 
@@ -3118,6 +3123,28 @@ export default function DepartmentKanban() {
       if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
       return 0
     }
+    const importantDeadlineRank = (row: (typeof rows)[number]) => {
+      const rowDate = row.sortDate ? toDate(row.sortDate) : null
+      if (rowDate && dayKey(rowDate) === dayKey(todayDate)) {
+        if (titleHasEightAmIndicator(row.title)) return 0
+        if (row.period === "PM") return 2
+        return 1
+      }
+      return 3
+    }
+    const importantDeadlineSort = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+      const rankA = importantDeadlineRank(a)
+      const rankB = importantDeadlineRank(b)
+      if (rankA !== rankB) return rankA - rankB
+      const dateA = a.sortDate ? toDate(a.sortDate) : null
+      const dateB = b.sortDate ? toDate(b.sortDate) : null
+      const dateDiff = (dateA ? dayKey(dateA) : Number.MAX_SAFE_INTEGER) - (dateB ? dayKey(dateB) : Number.MAX_SAFE_INTEGER)
+      if (dateDiff !== 0) return dateDiff
+      const eightAmDiff = Number(titleHasEightAmIndicator(b.title)) - Number(titleHasEightAmIndicator(a.title))
+      if (eightAmDiff !== 0) return eightAmDiff
+      const periodDiff = (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
+      return periodDiff
+    }
 
     const sortedFastRows = fastRows
       .sort((a, b) => a.order - b.order || a.index - b.index)
@@ -3130,12 +3157,14 @@ export default function DepartmentKanban() {
     return rows
       .map((row, index) => ({ row, index }))
       .sort((a, b) => {
-        const importantDiff =
-          Number(deadlineImportantTaskIds.has(b.row.taskId || "")) -
-          Number(deadlineImportantTaskIds.has(a.row.taskId || ""))
+        const aImportant = deadlineImportantTaskIds.has(a.row.taskId || "")
+        const bImportant = deadlineImportantTaskIds.has(b.row.taskId || "")
+        const importantDiff = Number(bImportant) - Number(aImportant)
         if (importantDiff !== 0) return importantDiff
-        const eightAmDiff = Number(titleHasEightAmIndicator(b.row.title)) - Number(titleHasEightAmIndicator(a.row.title))
-        if (eightAmDiff !== 0) return eightAmDiff
+        if (aImportant && bImportant) {
+          const deadlineDiff = importantDeadlineSort(a.row, b.row)
+          if (deadlineDiff !== 0) return deadlineDiff
+        }
         const statusDiff =
           statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
         return statusDiff !== 0 ? statusDiff : a.index - b.index
@@ -3279,6 +3308,7 @@ export default function DepartmentKanban() {
       systemTemplateId?: string
       systemOccurrenceDate?: string
       systemStatus?: string
+      sortDate?: string | null
     }> => {
       const rows: ReturnType<typeof convertDailyReportToRows> = []
       const systemAmRows: typeof rows = []
@@ -3386,6 +3416,7 @@ export default function DepartmentKanban() {
           comment: task.user_comment ?? null,
           userInitials: rowUserInitials,
           taskId: task.id,
+          sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
         })
       }
 
@@ -3425,6 +3456,7 @@ export default function DepartmentKanban() {
             comment: task.user_comment ?? null,
             userInitials: rowUserInitials,
             taskId: task.id,
+            sortDate: task.due_date || task.start_date || task.created_at,
           })
         } else {
           fastRows.push({
@@ -3450,6 +3482,7 @@ export default function DepartmentKanban() {
               comment: task.user_comment ?? null,
               userInitials: rowUserInitials,
               taskId: task.id,
+              sortDate: task.due_date || task.start_date || task.created_at,
             },
           })
           fastIndex += 1
@@ -3475,6 +3508,27 @@ export default function DepartmentKanban() {
         if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
         return 0
       }
+      const importantDeadlineRank = (row: (typeof rows)[number]) => {
+        const rowDate = row.sortDate ? toDate(row.sortDate) : null
+        if (rowDate && dayKey(rowDate) === dayKey(todayDate)) {
+          if (titleHasEightAmIndicator(row.title)) return 0
+          if (row.period === "PM") return 2
+          return 1
+        }
+        return 3
+      }
+      const importantDeadlineSort = (a: (typeof rows)[number], b: (typeof rows)[number]) => {
+        const rankA = importantDeadlineRank(a)
+        const rankB = importantDeadlineRank(b)
+        if (rankA !== rankB) return rankA - rankB
+        const dateA = a.sortDate ? toDate(a.sortDate) : null
+        const dateB = b.sortDate ? toDate(b.sortDate) : null
+        const dateDiff = (dateA ? dayKey(dateA) : Number.MAX_SAFE_INTEGER) - (dateB ? dayKey(dateB) : Number.MAX_SAFE_INTEGER)
+        if (dateDiff !== 0) return dateDiff
+        const eightAmDiff = Number(titleHasEightAmIndicator(b.title)) - Number(titleHasEightAmIndicator(a.title))
+        if (eightAmDiff !== 0) return eightAmDiff
+        return (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
+      }
 
       const sortedFastRows = fastRows
         .sort((a, b) => a.order - b.order || sortByTyo(a.row, b.row) || a.index - b.index)
@@ -3487,13 +3541,21 @@ export default function DepartmentKanban() {
       return rows
         .map((row, index) => ({ row, index }))
         .sort((a, b) => {
+          const aImportant = deadlineImportantTaskIds.has(a.row.taskId || "")
+          const bImportant = deadlineImportantTaskIds.has(b.row.taskId || "")
+          const importantDiff = Number(bImportant) - Number(aImportant)
+          if (importantDiff !== 0) return importantDiff
+          if (aImportant && bImportant) {
+            const deadlineDiff = importantDeadlineSort(a.row, b.row)
+            if (deadlineDiff !== 0) return deadlineDiff
+          }
           const statusDiff =
             statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
           return statusDiff !== 0 ? statusDiff : a.index - b.index
         })
         .map((entry) => entry.row)
     },
-    [departmentCode, projects, systemTemplateById, todayDate, userMap]
+    [deadlineImportantTaskIds, departmentCode, projects, systemTemplateById, todayDate, userMap]
   )
 
   const weekProjectTasks = React.useMemo(() => {
@@ -9819,6 +9881,7 @@ export default function DepartmentKanban() {
                   period: string
                   department: string
                   title: string
+                  projectTitle?: string | null
                   description: string
                   status: string
                   bz: string
@@ -9829,6 +9892,7 @@ export default function DepartmentKanban() {
                   systemTemplateId?: string
                   systemOccurrenceDate?: string
                   systemStatus?: string
+                  sortDate?: string | null
                   userName: string
                   userInitials: string
                 }> = []
@@ -9878,13 +9942,36 @@ export default function DepartmentKanban() {
                   if (row.typeLabel === "PRJK") return 2
                   return 4
                 }
-                const sortedRows = [...allRows].sort((a, b) => {
-                  const importantDiff =
-                    Number(deadlineImportantTaskIds.has(b.taskId || "")) -
-                    Number(deadlineImportantTaskIds.has(a.taskId || ""))
-                  if (importantDiff !== 0) return importantDiff
+                const importantDeadlineRank = (row: (typeof allRows)[number]) => {
+                  const rowDate = row.sortDate ? toDate(row.sortDate) : null
+                  if (rowDate && dayKey(rowDate) === dayKey(todayDate)) {
+                    if (titleHasEightAmIndicator(row.title)) return 0
+                    if (row.period === "PM") return 2
+                    return 1
+                  }
+                  return 3
+                }
+                const importantDeadlineSort = (a: (typeof allRows)[number], b: (typeof allRows)[number]) => {
+                  const rankA = importantDeadlineRank(a)
+                  const rankB = importantDeadlineRank(b)
+                  if (rankA !== rankB) return rankA - rankB
+                  const dateA = a.sortDate ? toDate(a.sortDate) : null
+                  const dateB = b.sortDate ? toDate(b.sortDate) : null
+                  const dateDiff = (dateA ? dayKey(dateA) : Number.MAX_SAFE_INTEGER) - (dateB ? dayKey(dateB) : Number.MAX_SAFE_INTEGER)
+                  if (dateDiff !== 0) return dateDiff
                   const eightAmDiff = Number(titleHasEightAmIndicator(b.title)) - Number(titleHasEightAmIndicator(a.title))
                   if (eightAmDiff !== 0) return eightAmDiff
+                  return (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
+                }
+                const sortedRows = [...allRows].sort((a, b) => {
+                  const aImportant = deadlineImportantTaskIds.has(a.taskId || "")
+                  const bImportant = deadlineImportantTaskIds.has(b.taskId || "")
+                  const importantDiff = Number(bImportant) - Number(aImportant)
+                  if (importantDiff !== 0) return importantDiff
+                  if (aImportant && bImportant) {
+                    const deadlineDiff = importantDeadlineSort(a, b)
+                    if (deadlineDiff !== 0) return deadlineDiff
+                  }
                   const typeDiff = typeOrder(a) - typeOrder(b)
                   if (typeDiff !== 0) return typeDiff
                   if (a.typeLabel === "FT" && b.typeLabel === "FT") {

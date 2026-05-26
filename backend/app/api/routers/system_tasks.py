@@ -495,6 +495,21 @@ def _app_local_today() -> date:
         return datetime.now(timezone.utc).date()
 
 
+def _local_date(value: datetime | None, tzinfo) -> date | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.date()
+    return value.astimezone(tzinfo).date()
+
+
+def _sync_system_task_due_date_to_done_day(task: Task, completed_at: datetime, tzinfo) -> None:
+    if _local_date(task.due_date, tzinfo) != _local_date(completed_at, tzinfo):
+        if task.due_date is not None and task.original_due_date is None:
+            task.original_due_date = task.due_date
+        task.due_date = completed_at
+
+
 @router.get("", response_model=list[SystemTaskOut])
 async def list_system_tasks(
     department_id: uuid.UUID | None = None,
@@ -960,6 +975,8 @@ async def set_system_task_occurrence_status(
     if payload.status == "DONE":
         task.status = TaskStatus.DONE
         task.completed_at = now
+        task_tz, _ = _template_zoneinfo(tmpl)
+        _sync_system_task_due_date_to_done_day(task, now, task_tz)
     elif payload.status in ("NOT_DONE", "SKIPPED"):
         task.status = TaskStatus.NOT_DONE
         task.completed_at = now
