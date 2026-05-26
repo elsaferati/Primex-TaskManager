@@ -1297,6 +1297,7 @@ export default function DepartmentKanban() {
   }
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [dailyReportManualOrder, setDailyReportManualOrder] = React.useState<string[]>([])
+  const [showFullDailyReportTable, setShowFullDailyReportTable] = React.useState(false)
   const [dailyReportPeriodFilter, setDailyReportPeriodFilter] = React.useState<"all" | "am_side" | "pm_side">("all")
   const [dailyReportStatusFilter, setDailyReportStatusFilter] = React.useState<string[]>([])
   const [dragDailyReportRowId, setDragDailyReportRowId] = React.useState<string | null>(null)
@@ -6435,6 +6436,13 @@ export default function DepartmentKanban() {
                     <Button
                       variant="outline"
                       className="h-8 rounded-lg border-slate-300 bg-white px-3 text-xs text-slate-900 shadow-sm hover:bg-slate-50"
+                      onClick={() => setShowFullDailyReportTable((prev) => !prev)}
+                    >
+                      {showFullDailyReportTable ? "Compact table" : "Show full table"}
+                    </Button>
+                    <Button
+                      variant="outline"
+                      className="h-8 rounded-lg border-slate-300 bg-white px-3 text-xs text-slate-900 shadow-sm hover:bg-slate-50"
                       onClick={exportDailyReport}
                       disabled={exportingDailyReport}
                     >
@@ -6504,7 +6512,7 @@ export default function DepartmentKanban() {
                 </div>
                 <div
                   ref={dailyReportScrollRef}
-                  className={`mt-3 max-h-[320px] overflow-x-auto overflow-y-auto ${isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
+                  className={`mt-3 ${showFullDailyReportTable ? "max-h-none overflow-x-auto overflow-y-visible" : "max-h-[320px] overflow-x-auto overflow-y-auto"} ${isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
                     }`}
                   onMouseDown={handleDailyReportMouseDown}
                   onMouseMove={handleDailyReportMouseMove}
@@ -6552,13 +6560,19 @@ export default function DepartmentKanban() {
                           const isDeadlineImportant = row.taskId ? deadlineImportantTaskIds.has(row.taskId) : false
                           const hasEightAmIndicator = titleHasEightAmIndicator(row.title)
                           return (
-                            <tr
-                              key={rowId}
-                              className={[
-                                overDailyReportRowId === rowId ? "bg-blue-50/60" : "",
-                                isDeadlineImportant ? "bg-red-100/90" : "",
-                              ].join(" ")}
-                              onDragOver={(event) => {
+                          <tr
+                            key={rowId}
+                            className={[
+                              dragDailyReportRowId === rowId ? "ring-2 ring-blue-300" : "",
+                              overDailyReportRowId === rowId ? "bg-blue-50/60" : "",
+                              isDeadlineImportant ? "bg-red-100/90" : "",
+                            ].join(" ")}
+                            onClick={() => {
+                              if (dragDailyReportRowId && dragDailyReportRowId !== rowId) {
+                                handleDailyReportRowDrop(rowId)
+                              }
+                            }}
+                            onDragOver={(event) => {
                                 event.preventDefault()
                                 if (dragDailyReportRowId && dragDailyReportRowId !== rowId) {
                                   setOverDailyReportRowId(rowId)
@@ -6574,10 +6588,15 @@ export default function DepartmentKanban() {
                                   type="button"
                                   draggable
                                   className="inline-flex h-5 w-5 cursor-grab items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600 active:cursor-grabbing"
-                                  aria-label="Move row"
-                                  title="Move row"
-                                  onMouseDown={(event) => event.stopPropagation()}
-                                  onDragStart={(event) => {
+                                aria-label="Move row"
+                                title="Tap to select, then tap another row to move"
+                                onMouseDown={(event) => event.stopPropagation()}
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  setDragDailyReportRowId((prev) => (prev === rowId ? null : rowId))
+                                  setOverDailyReportRowId(null)
+                                }}
+                                onDragStart={(event) => {
                                     setDragDailyReportRowId(rowId)
                                     event.dataTransfer.effectAllowed = "move"
                                     event.dataTransfer.setData("text/plain", rowId)
