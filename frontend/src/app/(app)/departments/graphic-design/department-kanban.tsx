@@ -5826,8 +5826,8 @@ export default function DepartmentKanban() {
                         </colgroup>
                         <thead className="sticky top-0 z-10 bg-slate-50">
                           <tr>
-                            <th className="border border-slate-200 px-1 py-2 text-center text-xs uppercase">#</th>
-                            <th className="sticky left-0 z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
+                            <th className="sticky left-0 z-40 border border-slate-200 bg-slate-50 px-1 py-2 text-center text-xs uppercase">#</th>
+                            <th className="sticky left-[24px] z-30 border border-slate-200 bg-slate-50 px-2 py-2 text-left text-xs uppercase whitespace-normal">
                               Nr
                             </th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LLOJI</th>
@@ -5874,7 +5874,7 @@ export default function DepartmentKanban() {
                                     handleDailyReportRowDrop(rowId)
                                   }}
                                 >
-                                  <td className="border border-slate-200 px-1 py-2 align-top text-center">
+                                  <td className="sticky left-0 z-30 border border-slate-200 bg-white px-1 py-2 align-top text-center">
                                     <button
                                       type="button"
                                       draggable
@@ -5900,7 +5900,7 @@ export default function DepartmentKanban() {
                                       ::
                                     </button>
                                   </td>
-                                  <td className="sticky left-0 z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
+                                  <td className="sticky left-[24px] z-20 border border-slate-200 bg-white px-2 py-2 align-top font-semibold">
                                     {index + 1}
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
