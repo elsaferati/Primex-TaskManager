@@ -60,7 +60,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "3"
+COMMON_VIEW_CACHE_VERSION = "4"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -771,6 +771,7 @@ async def get_common_view(
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
+                            "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                         }
@@ -790,6 +791,7 @@ async def get_common_view(
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
+                            "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                         }
@@ -809,6 +811,7 @@ async def get_common_view(
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
+                            "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                         }
@@ -828,6 +831,7 @@ async def get_common_view(
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
+                            "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                         }

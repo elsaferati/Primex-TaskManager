@@ -20,6 +20,7 @@ import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
+import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
 import { Pencil } from "lucide-react"
 import type {
   DailyReportResponse,
@@ -408,6 +409,15 @@ function resolvePeriod(finishPeriod?: TaskFinishPeriod | null, dateValue?: strin
   return "AM/PM"
 }
 
+function getFinishPeriodIndicatorLabel(finishPeriod?: string | null) {
+  const normalized = (finishPeriod || "").trim().toUpperCase()
+  return normalized === "AM" || normalized === "PM" ? normalized : ""
+}
+
+function getCommonTaskPeriodLabel(finishPeriod?: string | null) {
+  return getFinishPeriodIndicatorLabel(finishPeriod) || "AM/PM"
+}
+
 function noProjectTypeLabel(task: Task) {
   if (task.is_bllok) return "BLLOK"
   if (task.is_1h_report) return "1H"
@@ -502,7 +512,7 @@ type LeaveItem = {
   isAllUsers?: boolean
   userId?: string
 }
-type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[]; userId?: string }
+type BlockedItem = { title: string; person: string; date: string; note?: string; assignees?: string[]; userId?: string; taskId?: string; finishPeriod?: string | null }
 type OneHItem = {
   title: string
   person: string
@@ -512,8 +522,10 @@ type OneHItem = {
   departmentId?: string
   isDone?: boolean
   userId?: string
+  taskId?: string
+  finishPeriod?: string | null
 }
-type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[]; userId?: string }
+type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[]; userId?: string; taskId?: string; finishPeriod?: string | null }
 type ExternalItem = {
   title: string
   date: string
@@ -541,6 +553,8 @@ type R1Item = {
   departmentId?: string
   isDone?: boolean
   userId?: string
+  taskId?: string
+  finishPeriod?: string | null
 }
 type ProblemItem = {
   entryId?: string
@@ -1163,20 +1177,28 @@ export default function AdminTasksPage() {
         }))
         const normalizedBlocked = payload.items.blocked.map((item: any) => ({
           ...item,
+          taskId: item.taskId || item.task_id || undefined,
+          finishPeriod: item.finishPeriod || item.finish_period || null,
           userId: item.userId || item.user_id || undefined,
         }))
         const normalizedPersonal = payload.items.personal.map((item: any) => ({
           ...item,
+          taskId: item.taskId || item.task_id || undefined,
+          finishPeriod: item.finishPeriod || item.finish_period || null,
           userId: item.userId || item.user_id || undefined,
         }))
         const normalizedOneH = payload.items.oneH.map((item: any) => ({
           ...item,
+          taskId: item.taskId || item.task_id || undefined,
+          finishPeriod: item.finishPeriod || item.finish_period || null,
           departmentId: item.departmentId || item.department_id || undefined,
           isDone: Boolean(item.isDone),
           userId: item.userId || item.user_id || undefined,
         }))
         const normalizedR1 = payload.items.r1.map((item: any) => ({
           ...item,
+          taskId: item.taskId || item.task_id || undefined,
+          finishPeriod: item.finishPeriod || item.finish_period || null,
           departmentId: item.departmentId || item.department_id || undefined,
           isDone: Boolean(item.isDone),
           userId: item.userId || item.user_id || undefined,
@@ -3781,6 +3803,43 @@ export default function AdminTasksPage() {
         rows,
       }
     }, [commonGaRowsByDay, commonWeekISOs, tableDataByDay, weekTableRows, weekTitleRange])
+
+    const repeatedTaskFirstDateByRow = React.useMemo(() => {
+      const entriesForRepeatCheck = (rowId: CommonType, iso: string): Array<{ taskId?: string | null; task_id?: string | null }> => {
+        if (rowId === "det_ga") return commonGaRowsByDay[iso]?.detGa || []
+        if (rowId === "bz") return commonGaRowsByDay[iso]?.bz || []
+
+        const dayData = tableDataByDay?.[iso]
+        if (!dayData) return []
+        if (rowId === "blocked") return dayData.blocked
+        if (rowId === "oneH") return dayData.oneH
+        if (rowId === "r1") return dayData.r1
+        if (rowId === "personal") return dayData.personal
+        return []
+      }
+
+      const firstDateByRow = new Map<CommonType, Map<string, string>>()
+      for (const row of weekTableRows) {
+        const rowId = row.id as CommonType
+        firstDateByRow.set(
+          rowId,
+          buildRepeatedTaskFirstDateMap(commonWeekISOs, (iso) => entriesForRepeatCheck(rowId, iso))
+        )
+      }
+      return firstDateByRow
+    }, [commonGaRowsByDay, commonWeekISOs, tableDataByDay, weekTableRows])
+
+    const repeatedTaskClassName = (
+      rowId: CommonType,
+      entry: { taskId?: string | null; task_id?: string | null },
+      dateIso: string
+    ) => {
+      const firstDateByTaskId = repeatedTaskFirstDateByRow.get(rowId)
+      return firstDateByTaskId && isRepeatedTaskInstance(entry, dateIso, firstDateByTaskId)
+        ? "repeat-task-muted"
+        : ""
+    }
+
     const renderCellContent = (rowId: CommonType, iso: string) => {
       const dayData = tableDataByDay?.[iso]
       if (!dayData) return null
@@ -3788,7 +3847,10 @@ export default function AdminTasksPage() {
         const combined = commonGaRowsByDay[iso]?.detGa || []
         if (!combined.length) return null
         return combined.map((entry, idx) => (
-          <div key={`${entry.kind}-${entry.templateId || entry.taskId || idx}`} className="week-table-entry">
+          <div
+            key={`${entry.kind}-${entry.templateId || entry.taskId || idx}`}
+            className={["week-table-entry", repeatedTaskClassName(rowId, entry, iso)].filter(Boolean).join(" ")}
+          >
             <span>{idx + 1}. {commonPrintTitleLine(entry.title)}</span>
           </div>
         ))
@@ -3798,7 +3860,10 @@ export default function AdminTasksPage() {
         if (!bzEntries.length) return null
 
         return bzEntries.map((e: BzItem, idx: number) => (
-          <div key={`bz-${e.templateId || e.taskId || idx}`} className="week-table-entry">
+          <div
+            key={`bz-${e.templateId || e.taskId || idx}`}
+            className={["week-table-entry", repeatedTaskClassName("bz", e, iso)].filter(Boolean).join(" ")}
+          >
             <span>
               {idx + 1}. {commonPrintTitleLine(`${formatBzTimeDisplay(e.time)} ${e.title}`.trim())}
               {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
@@ -3903,8 +3968,13 @@ export default function AdminTasksPage() {
       }
       if (rowId === "blocked") {
         return entries.map((e: BlockedItem, idx: number) => (
-          <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {commonPrintTitleLine(e.title)}</span>
+          <div
+            key={idx}
+            className={["week-table-entry", repeatedTaskClassName(rowId, e, iso)].filter(Boolean).join(" ")}
+          >
+            <span>
+              {idx + 1}. <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span> {commonPrintTitleLine(e.title)}
+            </span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3918,7 +3988,7 @@ export default function AdminTasksPage() {
       if (rowId === "problem" || rowId === "feedback") {
         return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
           <div key={idx} className="week-table-entry">
-            <span>
+            <span className={rowId === "feedback" ? "feedback-print-clamp" : undefined}>
               {idx + 1}. {e.title}
               {` - ${e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)}`}
               {e.note ? ` - ${e.note}` : ""}
@@ -3935,8 +4005,13 @@ export default function AdminTasksPage() {
       }
       if (rowId === "oneH" || rowId === "r1") {
         return mergeTaskEntriesByVisibleTitle(entries as (OneHItem | R1Item)[]).map((e: any, idx: number) => (
-          <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {commonPrintTitleLine(e.title)}</span>
+          <div
+            key={idx}
+            className={["week-table-entry", repeatedTaskClassName(rowId, e, iso)].filter(Boolean).join(" ")}
+          >
+            <span>
+              {idx + 1}. <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span> {commonPrintTitleLine(e.title)}
+            </span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -3949,8 +4024,13 @@ export default function AdminTasksPage() {
       }
       if (rowId === "personal") {
         return mergeTaskEntriesByVisibleTitle(entries as PersonalItem[]).map((e: PersonalItem, idx: number) => (
-          <div key={idx} className="week-table-entry">
-            <span>{idx + 1}. {commonPrintTitleLine(e.title)}</span>
+          <div
+            key={idx}
+            className={["week-table-entry", repeatedTaskClassName(rowId, e, iso)].filter(Boolean).join(" ")}
+          >
+            <span>
+              {idx + 1}. <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span> {commonPrintTitleLine(e.title)}
+            </span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
                 <span key={`${e.title}-${name}`} className="week-table-avatar" title={name}>
@@ -5377,6 +5457,32 @@ export default function AdminTasksPage() {
           font-size: 9px;
           border: 1px solid #cbd5e1;
         }
+        .admin-week-table .period-indicator {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          height: 18px;
+          padding: 0 6px;
+          border-radius: 999px;
+          background: #e0f2fe;
+          border: 1px solid #bae6fd;
+          color: #0369a1;
+          font-weight: 700;
+          font-size: 9px;
+          line-height: 1;
+          white-space: nowrap;
+        }
+        .admin-week-table .week-table-entry.repeat-task-muted {
+          color: #9ca3af;
+        }
+        .admin-week-table .week-table-entry.repeat-task-muted .week-table-avatar {
+          color: #9ca3af;
+        }
+        .admin-week-table .week-table-entry.repeat-task-muted .time-indicator {
+          background: #f3f4f6;
+          border-color: #d1d5db;
+          color: #9ca3af;
+        }
         .admin-week-table .week-table-empty {
           color: #adb5bd;
           font-style: italic;
@@ -5597,6 +5703,15 @@ export default function AdminTasksPage() {
           .admin-week-table .week-table-cell,
           .admin-week-table .week-table-entry span {
             white-space: normal;
+          }
+          .admin-week-table .week-table-row.feedback .feedback-print-clamp {
+            display: -webkit-box !important;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: normal !important;
+            line-height: 1.15;
           }
           .admin-week-table .week-table-date-header,
           .admin-week-table .week-table-subheader {

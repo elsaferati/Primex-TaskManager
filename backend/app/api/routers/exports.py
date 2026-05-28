@@ -67,6 +67,7 @@ router = APIRouter()
 class AllTasksReportRowIn(BaseModel):
     typeLabel: str = Field(default="-")
     subtype: str = Field(default="-")
+    frequency: str | None = None
     dateLabel: str | None = None
     bzMe: str | None = None
     period: str = Field(default="-")
@@ -780,6 +781,60 @@ def _create_rich_text_cell(lines: list[tuple[str, str, str]]) -> CellRichText | 
             rich_text_parts.append(TextBlock(text=f": {rest_part}", font=InlineFont()))
 
     return CellRichText(rich_text_parts)
+
+
+CHECKLIST_INLINE_STYLE_TOKEN_RE = re.compile(r"\[\[(\/?)(b|red)\]\]")
+
+
+def _parse_checklist_inline_style(value: str | None) -> list[tuple[str, bool, bool]]:
+    if not value:
+        return []
+
+    segments: list[tuple[str, bool, bool]] = []
+    bold_depth = 0
+    red_depth = 0
+    last_index = 0
+
+    for match in CHECKLIST_INLINE_STYLE_TOKEN_RE.finditer(value):
+        text = value[last_index:match.start()]
+        if text:
+            segments.append((text, bold_depth > 0, red_depth > 0))
+
+        is_closing = match.group(1) == "/"
+        token = match.group(2)
+        if token == "b":
+            bold_depth = max(0, bold_depth + (-1 if is_closing else 1))
+        elif token == "red":
+            red_depth = max(0, red_depth + (-1 if is_closing else 1))
+        last_index = match.end()
+
+    rest = value[last_index:]
+    if rest:
+        segments.append((rest, bold_depth > 0, red_depth > 0))
+    return segments
+
+
+def _strip_checklist_inline_style(value: str | None) -> str:
+    if not value:
+        return ""
+    return CHECKLIST_INLINE_STYLE_TOKEN_RE.sub("", value)
+
+
+def _checklist_inline_rich_text(value: str | None) -> CellRichText | str:
+    if not value:
+        return ""
+
+    if not CHECKLIST_INLINE_STYLE_TOKEN_RE.search(value):
+        return value
+
+    rich_text_parts: list[TextBlock] = []
+    for text, is_bold, is_red in _parse_checklist_inline_style(value):
+        if not text:
+            continue
+        rich_text_parts.append(
+            TextBlock(text=text, font=InlineFont(b=is_bold, color="FF0000" if is_red else None))
+        )
+    return CellRichText(rich_text_parts) if rich_text_parts else _strip_checklist_inline_style(value)
 
 
 def _planner_item_rich_text(item: dict[str, str | None]) -> CellRichText | str:
@@ -1977,6 +2032,7 @@ async def export_all_tasks_report_xlsx(
 ):
     ensure_reports_access(user)
 
+    show_frequency_column = any((r.frequency or "").strip() for r in (payload.rows or []))
     headers = [
         "NR",
         "LL",
@@ -1987,6 +2043,7 @@ async def export_all_tasks_report_xlsx(
         "DEP",
         "AM/PM",
         "TITULLI",
+        *(["F"] if show_frequency_column else []),
         "PERSHKRIMI",
         "REGJ/PATH/CHECKLISTA/TRAINING/GROUP",
         "STATUS",
@@ -2032,6 +2089,7 @@ async def export_all_tasks_report_xlsx(
             (r.department or "-"),
             (r.period or "-"),
             (r.title or "-"),
+            *([(r.frequency or "-")] if show_frequency_column else []),
             (r.description or ""),
             (r.details or ""),
             (r.status or "-"),
@@ -2047,23 +2105,24 @@ async def export_all_tasks_report_xlsx(
     last_row = data_row - 1
 
     # Column widths (close to print layout)
-    widths = {
-        1: 5,   # NR
-        2: 6,   # LL
-        3: 7,   # NLL
-        4: 12,  # DITA
-        5: 14,  # BZ ME
-        6: 12,  # KOHA BZ
-        7: 8,   # DEP
-        8: 7,   # AM/PM
-        9: 42,  # TITULLI
-        10: 46, # PERSHKRIMI
-        11: 46, # REGJ/PATH/CHECKLISTA/TRAINING/GROUP
-        12: 14, # STATUS
-        13: 10, # USER
+    width_by_header = {
+        "NR": 5,
+        "LL": 6,
+        "NLL": 7,
+        "DITA": 12,
+        "BZ ME": 14,
+        "KOHA BZ": 12,
+        "DEP": 8,
+        "AM/PM": 7,
+        "TITULLI": 42,
+        "F": 4,
+        "PERSHKRIMI": 46,
+        "REGJ/PATH/CHECKLISTA/TRAINING/GROUP": 46,
+        "STATUS": 14,
+        "USER": 10,
     }
     for col_idx in range(1, last_col + 1):
-        ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width_by_header.get(headers[col_idx - 1], 16)
 
     # Filters, freeze, repeated header row
     if last_row >= header_row:
@@ -3350,6 +3409,7 @@ async def export_checklist_xlsx(
         ws.column_dimensions[ws.cell(row=header_row, column=col_idx).column_letter].width = width
 
     data_row = header_row + 1
+    mst_inline_style_headers = {"PATH", "DETYRAT", "KEYWORDS", "PERSHKRIMI", "KATEGORIA", "ORIGJINAL", "INCL"}
     for idx, item in enumerate(items, start=1):
         if format == "mst":
             incl_value = assignee_initials.get(item.id) or (item.owner or "")
@@ -3380,7 +3440,13 @@ async def export_checklist_xlsx(
             if include_ko2:
                 row_values.append("yes" if str(item.time or "").lower() in {"1", "true", "yes"} else "")
         for col_idx, value in enumerate(row_values, start=1):
-            cell = ws.cell(row=data_row, column=col_idx, value=value)
+            header = headers[col_idx - 1] if col_idx - 1 < len(headers) else ""
+            cell_value = (
+                _checklist_inline_rich_text(value)
+                if format == "mst" and header in mst_inline_style_headers
+                else value
+            )
+            cell = ws.cell(row=data_row, column=col_idx, value=cell_value)
             cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True)
             if col_idx == 1:
                 cell.font = Font(bold=True)

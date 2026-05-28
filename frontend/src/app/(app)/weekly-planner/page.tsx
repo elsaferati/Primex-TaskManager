@@ -1555,10 +1555,13 @@ export default function WeeklyPlannerPage() {
       createdAt?: string | null,
       isDeadlineImportant?: boolean
     ) => {
+      const statusValue = getStatusValueForDay(status, completedAt, dayDate, dailyStatus)
       if (isDeadlineImportant) {
+        if (statusValue === "DONE") {
+          return getStatusCardClasses("DONE")
+        }
         return "border-red-800 bg-red-600 text-white"
       }
-      const statusValue = getStatusValueForDay(status, completedAt, dayDate, dailyStatus)
       const isNew = isTaskNewForWeek(createdAt, data?.week_start)
       if (isNew) {
         if (statusValue === "DONE") {
@@ -1584,7 +1587,16 @@ export default function WeeklyPlannerPage() {
     is_personal?: boolean
     ga_note_origin_id?: string | null
     fast_task_type?: string | null
+    is_deadline_important?: boolean
+    status?: string | null
+    completed_at?: string | null
+    daily_status?: string | null
+    day_date?: string | null
   }): { label: string; className: string } => {
+    const statusValue = getStatusValueForDay(task.status, task.completed_at, task.day_date, task.daily_status)
+    if (task.is_deadline_important && task.day_date && statusValue === "DONE") {
+      return { label: "DL", className: "border-red-200 bg-red-50 text-red-700" }
+    }
     if (task.is_bllok) {
       return { label: "BLL", className: "border-red-200 bg-red-50 text-red-700" }
     }
@@ -1598,7 +1610,7 @@ export default function WeeklyPlannerPage() {
       return { label: "P:", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
     }
     return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
-  }, [])
+  }, [getStatusValueForDay])
 
   const formatTaskProducts = React.useCallback((
     task: WeeklyTableProjectTaskEntry,
@@ -1660,6 +1672,11 @@ export default function WeeklyPlannerPage() {
     is_personal?: boolean
     ga_note_origin_id?: string | null
     fast_task_type?: string | null
+    is_deadline_important?: boolean
+    status?: string | null
+    completed_at?: string | null
+    daily_status?: string | null
+    day_date?: string | null
   }): { label: string; className: string } => {
     const badge = getTaskStatusBadge(task)
     if (badge) return badge
@@ -2131,6 +2148,7 @@ export default function WeeklyPlannerPage() {
             .badge-ga { background-color: #dbeafe; color: #1e40af; }
             .badge-p { background-color: #d1fae5; color: #065f46; }
             .badge-n { background-color: #f1f5f9; color: #475569; }
+            .badge-dl { background-color: #fee2e2; color: #991b1b; }
             .badge-new {
               background-color: #dbeafe;
               color: #1e40af;
@@ -2539,6 +2557,7 @@ export default function WeeklyPlannerPage() {
       if (label === "GA") return "badge-ga"
       if (label === "P:") return "badge-p"
       if (label === "N") return "badge-n"
+      if (label === "DL") return "badge-dl"
       return ""
     }
 
@@ -2546,8 +2565,11 @@ export default function WeeklyPlannerPage() {
       task: Pick<WeeklyTableTaskEntry, "status" | "completed_at" | "daily_status" | "created_at" | "is_deadline_important">,
       dayIso: string
     ) => {
-      if (task.is_deadline_important) return "task-status-deadline"
       const statusValue = getStatusValueForDay(task.status, task.completed_at, dayIso, task.daily_status)
+      if (task.is_deadline_important) {
+        if (statusValue === "DONE") return "task-status-done"
+        return "task-status-deadline"
+      }
       const isNew = isTaskNewForWeek(task.created_at, data.week_start)
       if (isNew) {
         if (statusValue === "DONE") return "task-status-new-done"
@@ -2635,7 +2657,7 @@ export default function WeeklyPlannerPage() {
             fastTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
               html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
-              const badge = getFastTaskBadge(task)
+              const badge = getFastTaskBadge({ ...task, day_date: dayIso })
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
               }
@@ -2692,7 +2714,7 @@ export default function WeeklyPlannerPage() {
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
                 }
-                const badge = getTaskStatusBadge(task)
+                const badge = getTaskStatusBadge({ ...task, day_date: dayIso })
                 if (badge) {
                   html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
                 }
@@ -2730,7 +2752,7 @@ export default function WeeklyPlannerPage() {
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
             html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
-            const badge = getFastTaskBadge(task)
+            const badge = getFastTaskBadge({ ...task, day_date: dayIso })
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
             }
@@ -2798,7 +2820,7 @@ export default function WeeklyPlannerPage() {
             fastTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
               html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
-              const badge = getFastTaskBadge(task)
+              const badge = getFastTaskBadge({ ...task, day_date: dayIso })
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
               }
@@ -2848,7 +2870,7 @@ export default function WeeklyPlannerPage() {
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
                 }
-                const badge = getTaskStatusBadge(task)
+                const badge = getTaskStatusBadge({ ...task, day_date: dayIso })
                 if (badge) {
                   html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
                 }
@@ -2886,7 +2908,7 @@ export default function WeeklyPlannerPage() {
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
             html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
-            const badge = getFastTaskBadge(task)
+            const badge = getFastTaskBadge({ ...task, day_date: dayIso })
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
             }
@@ -4541,11 +4563,12 @@ export default function WeeklyPlannerPage() {
                                         {project.tasks && project.tasks.length > 0 && (
                                           <div className="mt-1 space-y-0.5">
                                           {project.tasks.map((task, taskIndex) => {
-                                              const statusBadge = getTaskStatusBadge(task)
+                                              const statusBadge = getTaskStatusBadge({ ...task, day_date: dayDate })
                                               const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                               const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                                               const displayTitle = getPlannerTaskDisplayTitle(task)
-                                              const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
+                                              const taskStatusValue = getStatusValueForDay(task.status, task.completed_at, dayDate, task.daily_status)
+                                              const titleColorClass = task.is_deadline_important && taskStatusValue !== "DONE" ? "text-white" : "text-slate-900"
                                               return (
                                                 <div
                                                   key={task.task_id}
@@ -4623,10 +4646,11 @@ export default function WeeklyPlannerPage() {
                                   <div className="space-y-1">
                                     <div className="text-[11px] font-semibold text-slate-900 mb-1">System Tasks</div>
                                       {systemTasksList.map((task, idx) => {
-                                        const statusBadge = getTaskStatusBadge(task)
+                                        const statusBadge = getTaskStatusBadge({ ...task, day_date: dayDate })
                                         const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                         const displayTitle = getPlannerTaskDisplayTitle(task)
-                                        const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
+                                        const taskStatusValue = getStatusValueForDay(task.status, task.completed_at, dayDate, task.daily_status)
+                                        const titleColorClass = task.is_deadline_important && taskStatusValue !== "DONE" ? "text-white" : "text-slate-900"
                                         return (
                                           <div
                                             key={task.task_id || idx}
@@ -4680,10 +4704,11 @@ export default function WeeklyPlannerPage() {
                                 {fastTasksList.length > 0 && (
                                   <div className="space-y-1">
                                   {fastTasksList.map((task, idx) => {
-                                    const statusBadge = getFastTaskBadge(task)
+                                    const statusBadge = getFastTaskBadge({ ...task, day_date: dayDate })
                                     const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                     const displayTitle = getPlannerTaskDisplayTitle(task)
-                                    const titleColorClass = task.is_deadline_important ? "text-white" : "text-slate-900"
+                                    const taskStatusValue = getStatusValueForDay(task.status, task.completed_at, dayDate, task.daily_status)
+                                    const titleColorClass = task.is_deadline_important && taskStatusValue !== "DONE" ? "text-white" : "text-slate-900"
                                     return (
                                       <div
                                         key={task.task_id || idx}

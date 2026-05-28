@@ -1146,6 +1146,7 @@ export default function DepartmentKanban() {
   const [allTodayEditConfirmationAssigneeId, setAllTodayEditConfirmationAssigneeId] = React.useState("")
   const [allTodayEditStartDate, setAllTodayEditStartDate] = React.useState("")
   const [allTodayEditDueDate, setAllTodayEditDueDate] = React.useState("")
+  const [allTodayEditFinishPeriod, setAllTodayEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [allTodayEditDeadlineImportant, setAllTodayEditDeadlineImportant] = React.useState(false)
   const [allTodayUpdating, setAllTodayUpdating] = React.useState(false)
   const [markingWaitingTaskId, setMarkingWaitingTaskId] = React.useState<string | null>(null)
@@ -4746,6 +4747,7 @@ export default function DepartmentKanban() {
     setAllTodayEditConfirmationAssigneeId(task.confirmation_assignee_id || "")
     setAllTodayEditStartDate(toDateInputValue(task.start_date))
     setAllTodayEditDueDate(toDateInputValue(task.due_date))
+    setAllTodayEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setAllTodayEditDeadlineImportant(Boolean(task.is_deadline_important))
   }
 
@@ -4758,6 +4760,7 @@ export default function DepartmentKanban() {
     setAllTodayEditConfirmationAssigneeId("")
     setAllTodayEditStartDate("")
     setAllTodayEditDueDate("")
+    setAllTodayEditFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setAllTodayEditDeadlineImportant(false)
   }
 
@@ -4804,6 +4807,7 @@ export default function DepartmentKanban() {
           status: allTodayEditStatus,
           start_date: startDateValue,
           due_date: dueDateValue,
+          finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
           is_deadline_important: allTodayEditDeadlineImportant,
           ...(isWaitingConfirmation(allTodayEditStatus)
             ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
@@ -6614,14 +6618,17 @@ export default function DepartmentKanban() {
                         <Textarea
                           value={allTodayEditTitle}
                           onChange={(e) => setAllTodayEditTitle(e.target.value)}
-                          autoResize
                           rows={3}
-                          className="min-h-[88px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere] border-slate-200 focus:border-slate-400 rounded-xl"
+                          className="h-24 min-h-24 max-h-24 resize-none overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] border-slate-200 focus:border-slate-400 rounded-xl"
                         />
                       </div>
                     <div className="space-y-2">
                       <Label className="text-slate-700">Description</Label>
-                      <BoldOnlyEditor value={allTodayEditDescription} onChange={setAllTodayEditDescription} />
+                      <BoldOnlyEditor
+                        value={allTodayEditDescription}
+                        onChange={setAllTodayEditDescription}
+                        editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto"
+                      />
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
@@ -6682,36 +6689,57 @@ export default function DepartmentKanban() {
                       </div>
                     ) : null}
                     <div className="grid gap-4 md:grid-cols-2">
-                          <div className="space-y-2">
-                            <Label className="text-slate-700">Start date</Label>
-                            <Input
-                              type="date"
-                              value={allTodayEditStartDate}
-                              onChange={(e) => setAllTodayEditStartDate(normalizeDueDateInput(e.target.value))}
-                              className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
-                            />
-                          </div>
-                          <div className="space-y-2">
-                            <Label className="text-slate-700">Due date (optional)</Label>
-                            <Input
-                              type="date"
-                              value={allTodayEditDueDate}
-                              onChange={(e) => setAllTodayEditDueDate(normalizeDueDateInput(e.target.value))}
-                              className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
-                            />
-                          </div>
-                        </div>
-                        <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
-                          <Checkbox
-                            checked={allTodayEditDeadlineImportant}
-                            onCheckedChange={(checked) => setAllTodayEditDeadlineImportant(checked === true)}
-                          />
-                          <span className="text-sm font-medium text-slate-700">Deadline important</span>
-                        </label>
-                        <div className="flex justify-end gap-2">
-                          <Button variant="outline" onClick={cancelAllTodayTaskEdit} className="rounded-xl border-slate-200">
-                            Cancel
-                          </Button>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Finish by (optional)</Label>
+                        <Select
+                          value={allTodayEditFinishPeriod}
+                          onValueChange={(value) =>
+                            setAllTodayEditFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                          }
+                        >
+                          <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                            <SelectValue placeholder="Select period" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                            {FINISH_PERIOD_OPTIONS.map((value) => (
+                              <SelectItem key={value} value={value}>
+                                {value}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Start date</Label>
+                        <Input
+                          type="date"
+                          value={allTodayEditStartDate}
+                          onChange={(e) => setAllTodayEditStartDate(normalizeDueDateInput(e.target.value))}
+                          className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-slate-700">Due date (optional)</Label>
+                        <Input
+                          type="date"
+                          value={allTodayEditDueDate}
+                          onChange={(e) => setAllTodayEditDueDate(normalizeDueDateInput(e.target.value))}
+                          className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
+                        />
+                      </div>
+                    </div>
+                    <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
+                      <Checkbox
+                        checked={allTodayEditDeadlineImportant}
+                        onCheckedChange={(checked) => setAllTodayEditDeadlineImportant(checked === true)}
+                      />
+                      <span className="text-sm font-medium text-slate-700">Deadline important</span>
+                    </label>
+                    <div className="flex justify-end gap-2">
+                      <Button variant="outline" onClick={cancelAllTodayTaskEdit} className="rounded-xl border-slate-200">
+                        Cancel
+                      </Button>
                       <Button
                         disabled={
                           !allTodayEditTitle.trim() ||
@@ -6723,12 +6751,12 @@ export default function DepartmentKanban() {
                         onClick={() => void updateAllTodayTask()}
                         className="bg-blue-500 hover:bg-blue-600 text-white border-0 shadow-sm rounded-xl"
                       >
-                            {allTodayUpdating ? "Updating..." : "Update"}
-                          </Button>
-                        </div>
-                      </div>
-                    </DialogContent>
-                  </Dialog>
+                        {allTodayUpdating ? "Updating..." : "Update"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
 
                 </div>
               </div>

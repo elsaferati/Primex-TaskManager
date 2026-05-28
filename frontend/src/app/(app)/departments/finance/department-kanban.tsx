@@ -15,7 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, toDateInputValue } from "@/lib/dates"
 import { renderMarkedNoteContent } from "@/lib/note-markup"
-import type { Department, Task, User } from "@/lib/types"
+import type { Department, SystemTaskOut, Task, User } from "@/lib/types"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 
 const ALL_USERS_VALUE = "__all__"
@@ -33,6 +33,10 @@ type RowView = {
   typeLabel: string
   assigneeIds: string[]
   assigneeLabel: string
+  assigneeInitials: string
+  systemFrequency: string
+  systemFrequencyLabel: string
+  systemFrequencyDisplayLabel: string
   startDateIso: string
   dueDateIso: string
   priority: string
@@ -46,6 +50,7 @@ type RowView = {
 type FinanceExportRow = {
   typeLabel: string
   subtype: string
+  frequency: string
   dateLabel: string
   bzMe: string
   kohaBz: string
@@ -138,6 +143,39 @@ function financeTaskTypeLabel(task: Task) {
   return fastReportSubtypeShort(task)
 }
 
+function systemFrequencyShortLabel(frequency?: string | null) {
+  const normalized = (frequency || "").toUpperCase()
+  if (normalized === "DAILY") return "D"
+  if (normalized === "WEEKLY") return "W"
+  if (normalized === "MONTHLY") return "M"
+  if (normalized === "YEARLY") return "Y"
+  if (normalized === "3_MONTHS") return "3M"
+  if (normalized === "6_MONTHS") return "6M"
+  return normalized ? normalized.slice(0, 1) : ""
+}
+
+function systemFrequencyTitle(frequency?: string | null) {
+  const normalized = (frequency || "").toUpperCase()
+  if (normalized === "DAILY") return "Daily"
+  if (normalized === "WEEKLY") return "Weekly"
+  if (normalized === "MONTHLY") return "Monthly"
+  if (normalized === "YEARLY") return "Yearly"
+  if (normalized === "3_MONTHS") return "Every 3 months"
+  if (normalized === "6_MONTHS") return "Every 6 months"
+  return normalized || ""
+}
+
+function systemFrequencyDisplayLabel(frequency?: string | null) {
+  const normalized = (frequency || "").toUpperCase()
+  if (normalized === "DAILY") return "Daily"
+  if (normalized === "WEEKLY") return "Weekly"
+  if (normalized === "MONTHLY") return "Monthly"
+  if (normalized === "YEARLY") return "Yearly"
+  if (normalized === "3_MONTHS") return "3M"
+  if (normalized === "6_MONTHS") return "6M"
+  return normalized || ""
+}
+
 function isoOrEmpty(value?: string | null) {
   return toDateInputValue(value || null)
 }
@@ -166,6 +204,7 @@ function taskAssigneeInfo(task: Task, usersById: Map<string, User>) {
   return {
     ids,
     label: labels.length ? labels.join(", ") : "Unassigned",
+    initials: labels.length ? labels.map(initials).filter(Boolean).join(", ") : "-",
   }
 }
 
@@ -174,6 +213,11 @@ function isOpenStatus(status: string) {
 }
 
 function rowMatchesToday(row: RowView, todayIso: string) {
+  if (row.startDateIso && row.dueDateIso) {
+    const start = row.startDateIso <= row.dueDateIso ? row.startDateIso : row.dueDateIso
+    const end = row.startDateIso <= row.dueDateIso ? row.dueDateIso : row.startDateIso
+    return start <= todayIso && todayIso <= end
+  }
   return [row.startDateIso, row.dueDateIso].filter(Boolean).includes(todayIso)
 }
 
@@ -228,6 +272,7 @@ export default function DepartmentKanban() {
   const [exportingExcel, setExportingExcel] = React.useState(false)
   const [editingTask, setEditingTask] = React.useState<Task | null>(null)
   const [viewingDescriptionTask, setViewingDescriptionTask] = React.useState<Task | null>(null)
+  const [systemTaskFrequencyByTemplateId, setSystemTaskFrequencyByTemplateId] = React.useState<Record<string, string>>({})
   const todayIso = React.useMemo(() => toDateInputValue(new Date()), [])
 
   const loadData = React.useCallback(async () => {
@@ -250,15 +295,21 @@ export default function DepartmentKanban() {
         throw new Error("Finance department was not found.")
       }
 
-      const tasksRes = await apiFetch(
-        `/tasks?department_id=${encodeURIComponent(financeDepartment.id)}&include_done=true&include_all_done=true`
-      )
+      const [tasksRes, systemTasksRes] = await Promise.all([
+        apiFetch(`/tasks?department_id=${encodeURIComponent(financeDepartment.id)}&include_done=true&include_all_done=true`),
+        apiFetch(`/system-tasks?department_id=${encodeURIComponent(financeDepartment.id)}`),
+      ])
 
       if (!tasksRes.ok) {
         throw new Error("Unable to load Finance tasks.")
       }
 
       const nextTasks = (await tasksRes.json()) as Task[]
+      const systemTasks = systemTasksRes.ok ? ((await systemTasksRes.json()) as SystemTaskOut[]) : []
+      const nextSystemTaskFrequencyByTemplateId = systemTasks.reduce<Record<string, string>>((acc, item) => {
+        if (item.template_id && item.frequency) acc[item.template_id] = item.frequency
+        return acc
+      }, {})
       const financeUsers = nextUsers.filter(
         (entry) => entry.is_active && entry.department_id === financeDepartment.id
       )
@@ -266,6 +317,7 @@ export default function DepartmentKanban() {
       setDepartment(financeDepartment)
       setUsers(nextUsers)
       setTasks(nextTasks)
+      setSystemTaskFrequencyByTemplateId(nextSystemTaskFrequencyByTemplateId)
       setSelectedUserId((prev) => {
         if (prev !== ALL_USERS_VALUE && nextUsers.some((entry) => entry.id === prev)) return prev
         if (financeUsers.length === 1) return financeUsers[0]!.id
@@ -299,6 +351,9 @@ export default function DepartmentKanban() {
         const isManagerView = user?.role === "ADMIN" || user?.role === "MANAGER"
         const isAssignedToCurrentUser = Boolean(user?.id && assigneeInfo.ids.includes(user.id))
         const canEdit = Boolean((isManagerView || isAssignedToCurrentUser) && statusValue !== "DONE")
+        const systemFrequency = task.system_template_origin_id
+          ? systemTaskFrequencyByTemplateId[task.system_template_origin_id] || ""
+          : ""
 
         return {
           task,
@@ -307,6 +362,10 @@ export default function DepartmentKanban() {
           typeLabel: financeTaskTypeLabel(task),
           assigneeIds: assigneeInfo.ids,
           assigneeLabel: assigneeInfo.label,
+          assigneeInitials: assigneeInfo.initials,
+          systemFrequency,
+          systemFrequencyLabel: systemFrequencyShortLabel(systemFrequency),
+          systemFrequencyDisplayLabel: systemFrequencyDisplayLabel(systemFrequency),
           startDateIso: isoOrEmpty(task.start_date),
           dueDateIso: isoOrEmpty(task.due_date),
           priority: task.priority || "NORMAL",
@@ -331,7 +390,7 @@ export default function DepartmentKanban() {
 
         return a.title.localeCompare(b.title)
       })
-  }, [tasks, user?.id, user?.role, usersById])
+  }, [systemTaskFrequencyByTemplateId, tasks, user?.id, user?.role, usersById])
 
   const selectableUsers = React.useMemo(() => {
     const ids = new Set<string>()
@@ -409,6 +468,7 @@ export default function DepartmentKanban() {
       return {
         typeLabel: task.system_template_origin_id ? "SYS" : task.project_id ? "PRJK" : "FT",
         subtype: task.system_template_origin_id ? "SYS" : task.project_id ? "-" : fastReportSubtypeShort(task),
+        frequency: row.systemFrequencyLabel,
         dateLabel: row.dueDateIso ? formatDateDMY(row.dueDateIso) : row.startDateIso ? formatDateDMY(row.startDateIso) : "-",
         bzMe: alignmentInitials,
         kohaBz: "-",
@@ -601,8 +661,9 @@ export default function DepartmentKanban() {
                   <TableRow className="bg-slate-50">
                     <TableHead>NR</TableHead>
                     <TableHead>Title</TableHead>
+                    <TableHead className="w-20 min-w-20 px-1 text-center" title="Frequency">Frequency</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead>Assignee</TableHead>
+                    <TableHead className="w-12 min-w-12 px-1 text-center" title="Assignee">Asg</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
                     <TableHead>Priority</TableHead>
@@ -621,10 +682,22 @@ export default function DepartmentKanban() {
                             ? renderMarkedNoteContent(row.title, row.title)
                             : row.title}
                         </TableCell>
+                        <TableCell className="w-20 min-w-20 px-1 text-center">
+                          {row.systemFrequencyDisplayLabel ? (
+                            <span
+                              className="inline-flex h-5 items-center justify-center rounded-full border border-slate-200 px-2 text-[10px] font-semibold text-slate-600"
+                              title={systemFrequencyTitle(row.systemFrequency)}
+                            >
+                              {row.systemFrequencyDisplayLabel}
+                            </span>
+                          ) : null}
+                        </TableCell>
                         <TableCell>
                           <Badge variant="outline">{row.typeLabel}</Badge>
                         </TableCell>
-                        <TableCell>{row.assigneeLabel}</TableCell>
+                        <TableCell className="w-12 min-w-12 px-1 text-center" title={row.assigneeLabel}>
+                          <span className="text-xs font-semibold text-slate-700">{row.assigneeInitials}</span>
+                        </TableCell>
                         <TableCell>{formatDateDMY(row.startDateIso)}</TableCell>
                         <TableCell>{formatDateDMY(row.dueDateIso)}</TableCell>
                         <TableCell>
@@ -676,7 +749,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <TableRow>
-                      <TableCell colSpan={10} className="py-8 text-center text-sm text-slate-500">
+                      <TableCell colSpan={11} className="py-8 text-center text-sm text-slate-500">
                         No Finance tasks match the selected filters.
                       </TableCell>
                     </TableRow>

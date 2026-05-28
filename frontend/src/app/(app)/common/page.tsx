@@ -9,6 +9,7 @@ import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
+import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
 import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
 type CommonType =
@@ -48,6 +49,7 @@ type FastTaskItemMeta = {
   taskId?: string
   userId?: string
   fastTaskOrder?: number | null
+  finishPeriod?: "AM" | "PM" | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
 }
@@ -123,6 +125,7 @@ type BzItem = {
   time: string
   assignees?: string[]
   bzWithLabel?: string
+  taskId?: string
 }
 
 type CommonBucket =
@@ -236,6 +239,7 @@ type SwimlaneCell = {
   taskId?: string
   userId?: string
   fastTaskOrder?: number | null
+  finishPeriod?: "AM" | "PM" | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
 }
@@ -483,6 +487,13 @@ const getDeadlineIndicatorLabel = (dueDate?: string | null) => {
 }
 
 const hasEightAmIndicator = (title?: string | null) => /\b0?8:00\b/.test(title || "")
+const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
+  const normalized = (finishPeriod || "").trim().toUpperCase()
+  return normalized === "AM" || normalized === "PM" ? normalized : ""
+}
+
+const getCommonTaskPeriodLabel = (finishPeriod?: string | null) =>
+  getFinishPeriodIndicatorLabel(finishPeriod) || "AM/PM"
 
 export default function CommonViewPage() {
   const { apiFetch, user, loading: authLoading } = useAuth()
@@ -1647,6 +1658,7 @@ export default function CommonViewPage() {
             typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
+          finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           status,
@@ -1663,6 +1675,7 @@ export default function CommonViewPage() {
             typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
+          finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           departmentId: item.departmentId || item.department_id || undefined,
@@ -1680,6 +1693,7 @@ export default function CommonViewPage() {
             typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
+          finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           departmentId: item.departmentId || item.department_id || undefined,
@@ -1697,6 +1711,7 @@ export default function CommonViewPage() {
             typeof (item.fastTaskOrder ?? item.fast_task_order) === "number"
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
+          finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           departmentId: item.departmentId || item.department_id || undefined,
@@ -2271,6 +2286,7 @@ export default function CommonViewPage() {
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
+                  finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                 })
@@ -2288,6 +2304,7 @@ export default function CommonViewPage() {
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
+                  finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                 })
@@ -2305,6 +2322,7 @@ export default function CommonViewPage() {
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
+                  finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                 })
@@ -2322,6 +2340,7 @@ export default function CommonViewPage() {
                   status: normalizedTaskStatus,
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
+                  finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                 })
@@ -4730,6 +4749,7 @@ export default function CommonViewPage() {
       taskId: x.taskId,
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
+      finishPeriod: x.finishPeriod,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -4748,6 +4768,7 @@ export default function CommonViewPage() {
       taskId: x.taskId,
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
+      finishPeriod: x.finishPeriod,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -4766,6 +4787,7 @@ export default function CommonViewPage() {
       taskId: x.taskId,
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
+      finishPeriod: x.finishPeriod,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -4814,6 +4836,7 @@ export default function CommonViewPage() {
       taskId: x.taskId,
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
+      finishPeriod: x.finishPeriod,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -6945,6 +6968,23 @@ export default function CommonViewPage() {
           flex: 0 0 auto;
           white-space: nowrap;
         }
+        .period-indicator {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 0;
+          height: 20px;
+          padding: 0 7px;
+          border-radius: 999px;
+          background: #e0f2fe;
+          border: 1px solid #bae6fd;
+          color: #0369a1;
+          font-weight: 700;
+          font-size: 10px;
+          line-height: 1;
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
         .fast-task-order-controls {
           display: inline-flex;
           align-items: center;
@@ -7000,6 +7040,28 @@ export default function CommonViewPage() {
         .week-table-entry.deadline-important:not(.task-state-done) {
           background: linear-gradient(90deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.98));
           border-color: #fca5a5;
+        }
+        .week-table-entry.repeat-task-muted,
+        .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted,
+        .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-done,
+        .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-in-progress,
+        .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-waiting,
+        .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-todo {
+          color: #9ca3af;
+        }
+        .week-table-entry.repeat-task-muted.deadline-important:not(.task-state-done) {
+          color: #9ca3af;
+        }
+        .week-table-entry.repeat-task-muted .week-table-avatar,
+        .week-table-entry.repeat-task-muted .fast-task-order-badge,
+        .week-table-entry.repeat-task-muted .deadline-indicator,
+        .week-table-entry.repeat-task-muted .period-indicator {
+          color: #9ca3af;
+        }
+        .week-table-entry.repeat-task-muted .time-indicator {
+          background: #f3f4f6;
+          border-color: #d1d5db;
+          color: #9ca3af;
         }
         .form-error {
           color: #b91c1c;
@@ -7063,6 +7125,15 @@ export default function CommonViewPage() {
             padding: 0;
             line-height: 1;
             align-self: center;
+          }
+          .week-table-row.feedback .feedback-print-clamp {
+            display: -webkit-box !important;
+            -webkit-box-orient: vertical;
+            -webkit-line-clamp: 2;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: normal !important;
+            line-height: 1.15;
           }
           .week-table-entry {
             border: 1px solid #94a3b8 !important;
@@ -7180,7 +7251,8 @@ export default function CommonViewPage() {
         .swimlane-cell.deadline-important:not(.done) .swimlane-avatar,
         .swimlane-cell.deadline-important:not(.done) .fast-task-order-badge,
         .swimlane-cell.deadline-important:not(.done) .deadline-indicator,
-        .swimlane-cell.deadline-important:not(.done) .time-indicator {
+        .swimlane-cell.deadline-important:not(.done) .time-indicator,
+        .swimlane-cell.deadline-important:not(.done) .period-indicator {
           background: rgba(255, 255, 255, 0.12);
           border-color: rgba(255, 255, 255, 0.38);
           color: #ffffff;
@@ -9659,6 +9731,12 @@ export default function CommonViewPage() {
                       else if (row.id === "feedback") dayEntries[iso] = dayData?.feedback || []
                       else if (row.id === "priority") dayEntries[iso] = dayData?.priority || []
                     })
+                    const repeatedTaskFirstDateById = buildRepeatedTaskFirstDateMap(
+                      weekISOs,
+                      (dateIso) => dayEntries[dateIso] || []
+                    )
+                    const repeatedTaskClassName = (entry: { taskId?: string | null; task_id?: string | null }, dateIso: string) =>
+                      isRepeatedTaskInstance(entry, dateIso, repeatedTaskFirstDateById) ? "repeat-task-muted" : ""
 
                     const getWeekRowClass = (rowId: string) => {
                       if (rowId === "late") return "delay"
@@ -9803,11 +9881,13 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               e.isDeadlineImportant ? "deadline-important" : "",
+                              repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                                <span>
+                                  <span>
                                   <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
                                   ) : null}
@@ -9829,7 +9909,7 @@ export default function CommonViewPage() {
                       } else if (row.id === "problem" || row.id === "feedback") {
                         return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
                           <div key={idx} className="week-table-entry">
-                            <span>
+                            <span className={row.id === "feedback" ? "feedback-print-clamp" : undefined}>
                               {idx + 1}. {e.title}
                               {` - ${e.createdDate ? formatDateHuman(e.createdDate) : formatDateHuman(e.date)}`}
                               {e.note ? ` - ${e.note}` : ""}
@@ -9862,11 +9942,13 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               e.isDeadlineImportant ? "deadline-important" : "",
+                              repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                                <span>
+                                  <span>
                                   <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
                                   ) : null}
@@ -9893,11 +9975,13 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               e.isDeadlineImportant ? "deadline-important" : "",
+                              repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
-                                <span>
+                                  <span>
                                   <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
                                   ) : null}
@@ -9944,7 +10028,13 @@ export default function CommonViewPage() {
                         ))
                       } else if (row.id === "bz") {
                         return entries.map((e: BzItem, idx: number) => (
-                          <div key={idx} className="week-table-entry">
+                          <div
+                            key={idx}
+                            className={[
+                              "week-table-entry",
+                              repeatedTaskClassName(e, iso),
+                            ].filter(Boolean).join(" ")}
+                          >
                             <span>
                               {idx + 1}. {commonPrintTitleLine(`${formatTimeLabel(e.time)} ${e.title}`.trim())}
                               {e.bzWithLabel ? ` - BZ: ${e.bzWithLabel}` : ""}
@@ -10236,6 +10326,11 @@ export default function CommonViewPage() {
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
                                           <span className="fast-task-order-badge">{cell.number}</span>
                                         ) : null}
+                                        {isFastTaskRowId(row.id) ? (
+                                          <span className="period-indicator" title={`${getCommonTaskPeriodLabel(cell.finishPeriod)} task`}>
+                                            {getCommonTaskPeriodLabel(cell.finishPeriod)}
+                                          </span>
+                                        ) : null}
                                         {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
                                           <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>
                                             {getDeadlineIndicatorLabel(cell.dueDate)}
@@ -10259,6 +10354,11 @@ export default function CommonViewPage() {
                                         ))}
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
                                           <span className="fast-task-order-badge">{cell.number}</span>
+                                        ) : null}
+                                        {isFastTaskRowId(row.id) ? (
+                                          <span className="period-indicator" title={`${getCommonTaskPeriodLabel(cell.finishPeriod)} task`}>
+                                            {getCommonTaskPeriodLabel(cell.finishPeriod)}
+                                          </span>
                                         ) : null}
                                         {isFastTaskRowId(row.id) && cell.isDeadlineImportant ? (
                                           <span className="deadline-indicator" title={cell.dueDate ? `Deadline ${formatDateHuman(cell.dueDate)}` : "Deadline important"}>

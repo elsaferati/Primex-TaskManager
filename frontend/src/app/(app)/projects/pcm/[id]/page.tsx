@@ -17,8 +17,10 @@ import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
+import { ChecklistInlineStyleEditor } from "@/components/checklist-inline-style-editor"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { renderChecklistInlineStyle, stripChecklistInlineStyleTokens } from "@/lib/checklist-inline-style"
 import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { ChecklistItem, ChecklistWithItems, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
@@ -1506,8 +1508,8 @@ export default function PcmProjectPage() {
   const defaultProductTemplateRows = isTtProject ? DEFAULT_TT_PRODUCT_TEMPLATE_ROWS : DEFAULT_MST_PRODUCT_TEMPLATE_ROWS
   const showMstOriginalColumn = !isTtProject
   const mstChecklistGridClass = showMstOriginalColumn
-    ? "grid-cols-[repeat(16,minmax(0,1fr))]"
-    : "grid-cols-[repeat(15,minmax(0,1fr))]"
+    ? "grid-cols-[42px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1.35fr)_minmax(0,1.35fr)_minmax(0,1.25fr)_minmax(0,1.25fr)_minmax(0,0.65fr)_minmax(0,0.75fr)_minmax(0,1fr)_minmax(0,1fr)_72px]"
+    : "grid-cols-[42px_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_minmax(0,0.8fr)_minmax(0,0.8fr)_minmax(0,1.4fr)_minmax(0,1.4fr)_minmax(0,1.25fr)_minmax(0,0.65fr)_minmax(0,0.75fr)_minmax(0,1fr)_minmax(0,1fr)_72px]"
   const isMstTemplateEditor = React.useMemo(
     () => Boolean(project?.is_template && isMstLike && (user?.role === "ADMIN" || user?.role === "MANAGER")),
     [isMstLike, project?.is_template, user?.role]
@@ -6006,7 +6008,7 @@ export default function PcmProjectPage() {
     const saveMstChecklistRow = async (row: { key: string; item: ChecklistItem }) => {
       const path = editingMstChecklistRow.path.trim()
       const title = editingMstChecklistRow.detyrat.trim()
-      if (!path || !title) {
+      if (!path || !stripChecklistInlineStyleTokens(title).trim()) {
         toast.error("Path and detyrat are required.")
         return
       }
@@ -6113,7 +6115,7 @@ export default function PcmProjectPage() {
     const addMstChecklistRow = async () => {
       const path = newMstChecklistRow.path.trim()
       const title = newMstChecklistRow.detyrat.trim()
-      if (!path || !title) {
+      if (!path || !stripChecklistInlineStyleTokens(title).trim()) {
         toast.error("Path and detyrat are required.")
         return
       }
@@ -7480,54 +7482,48 @@ export default function PcmProjectPage() {
                             />
                           </div>
                           <div className="col-span-2">
-                            <Input
+                            <ChecklistInlineStyleEditor
                               value={newMstChecklistRow.detyrat}
-                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, detyrat: e.target.value }))}
+                              onChange={(value) => setNewMstChecklistRow((prev) => ({ ...prev, detyrat: value }))}
                               placeholder="Detyrat"
-                              className="h-8 text-xs"
                             />
                           </div>
                           <div className="col-span-2">
-                            <Input
+                            <ChecklistInlineStyleEditor
                               value={newMstChecklistRow.keywords}
-                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, keywords: e.target.value }))}
+                              onChange={(value) => setNewMstChecklistRow((prev) => ({ ...prev, keywords: value }))}
                               placeholder="Keywords"
-                              className="h-8 text-xs"
                             />
                           </div>
                           <div className="col-span-2">
-                            <Input
+                            <ChecklistInlineStyleEditor
                               value={newMstChecklistRow.pershkrimi}
-                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, pershkrimi: e.target.value }))}
+                              onChange={(value) => setNewMstChecklistRow((prev) => ({ ...prev, pershkrimi: value }))}
                               placeholder="Pershkrimi"
-                              className="h-8 text-xs"
                             />
                           </div>
                           <div className="col-span-1">
-                            <Input
+                            <ChecklistInlineStyleEditor
                               value={newMstChecklistRow.kategoria}
-                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, kategoria: e.target.value }))}
+                              onChange={(value) => setNewMstChecklistRow((prev) => ({ ...prev, kategoria: value }))}
                               placeholder="Kategoria"
-                              className="h-8 text-xs"
                             />
                           </div>
                           {showMstOriginalColumn ? (
                             <div className="col-span-1">
-                              <Input
+                              <ChecklistInlineStyleEditor
                                 value={newMstChecklistRow.original}
-                                onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, original: e.target.value }))}
+                                onChange={(value) => setNewMstChecklistRow((prev) => ({ ...prev, original: value }))}
                                 placeholder="Origjinal"
-                                className="h-8 text-xs"
                               />
                             </div>
                           ) : null}
                           <div className="col-span-1" />
                           <div className="col-span-1">
-                            <Input
+                            <ChecklistInlineStyleEditor
                               value={newMstChecklistRow.incl}
-                              onChange={(e) => setNewMstChecklistRow((prev) => ({ ...prev, incl: e.target.value }))}
+                              onChange={(value) => setNewMstChecklistRow((prev) => ({ ...prev, incl: value }))}
                               placeholder="Incl"
-                              className="h-8 text-xs"
                             />
                           </div>
                           <div className="col-span-2" />
@@ -7539,7 +7535,7 @@ export default function PcmProjectPage() {
                               disabled={
                                 savingMstChecklistRow ||
                                 !newMstChecklistRow.path.trim() ||
-                                !newMstChecklistRow.detyrat.trim() ||
+                                !stripChecklistInlineStyleTokens(newMstChecklistRow.detyrat).trim() ||
                                 (isMstTemplateEditor && !mstTemplateChecklist)
                               }
                             >
@@ -7581,7 +7577,7 @@ export default function PcmProjectPage() {
                                     index + 1
                                   )}
                                 </div>
-                                <div className="col-span-2" title={row.path}>
+                                <div className="col-span-2" title={stripChecklistInlineStyleTokens(row.path)}>
                                   {isEditing ? (
                                     <Input
                                       value={editingMstChecklistRow.path}
@@ -7605,7 +7601,7 @@ export default function PcmProjectPage() {
                                       }}
                                     >
                                       <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
-                                        {row.path}
+                                        {renderChecklistInlineStyle(row.path, "")}
                                       </span>
                                       {row.path && row.path.length > 20 && (
                                         <Button
@@ -7621,17 +7617,16 @@ export default function PcmProjectPage() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="col-span-2 min-w-0 font-semibold" title={row.detyrat}>
+                                <div className="col-span-2 min-w-0 font-semibold" title={stripChecklistInlineStyleTokens(row.detyrat)}>
                                   {isEditing ? (
-                                    <Input
+                                    <ChecklistInlineStyleEditor
                                       value={editingMstChecklistRow.detyrat}
-                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, detyrat: e.target.value }))}
-                                      className="h-8 text-xs"
+                                      onChange={(value) => setEditingMstChecklistRow((prev) => ({ ...prev, detyrat: value }))}
                                     />
                                   ) : (
                                     <div className="flex items-center gap-1 min-w-0">
                                       <span className="flex-1 whitespace-normal break-words max-h-10 overflow-hidden text-ellipsis">
-                                        {row.detyrat}
+                                        {renderChecklistInlineStyle(row.detyrat, "")}
                                       </span>
                                       {row.detyrat && row.detyrat.length > 20 && (
                                         <Button
@@ -7647,12 +7642,11 @@ export default function PcmProjectPage() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="col-span-2 min-w-0" title={row.keywords}>
+                                <div className="col-span-2 min-w-0" title={stripChecklistInlineStyleTokens(row.keywords)}>
                                   {isEditing ? (
-                                    <Input
+                                    <ChecklistInlineStyleEditor
                                       value={editingMstChecklistRow.keywords}
-                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, keywords: e.target.value }))}
-                                      className="h-8 text-xs"
+                                      onChange={(value) => setEditingMstChecklistRow((prev) => ({ ...prev, keywords: value }))}
                                     />
                                   ) : (
                                     <div
@@ -7671,7 +7665,7 @@ export default function PcmProjectPage() {
                                       }}
                                     >
                                       <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
-                                        {row.keywords}
+                                        {renderChecklistInlineStyle(row.keywords, "")}
                                       </span>
                                       {row.keywords && row.keywords.length > 20 && (
                                         <Button
@@ -7687,12 +7681,11 @@ export default function PcmProjectPage() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="col-span-2" title={row.pershkrimi}>
+                                <div className="col-span-2" title={stripChecklistInlineStyleTokens(row.pershkrimi)}>
                                   {isEditing ? (
-                                    <Input
+                                    <ChecklistInlineStyleEditor
                                       value={editingMstChecklistRow.pershkrimi}
-                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, pershkrimi: e.target.value }))}
-                                      className="h-8 text-xs"
+                                      onChange={(value) => setEditingMstChecklistRow((prev) => ({ ...prev, pershkrimi: value }))}
                                     />
                                   ) : (
                                     <div
@@ -7711,7 +7704,7 @@ export default function PcmProjectPage() {
                                       }}
                                     >
                                       <span className="flex-1 break-words max-h-10 overflow-hidden text-ellipsis">
-                                        {row.pershkrimi}
+                                        {renderChecklistInlineStyle(row.pershkrimi, "")}
                                       </span>
                                       {row.pershkrimi && row.pershkrimi.length > 20 && (
                                         <Button
@@ -7727,30 +7720,28 @@ export default function PcmProjectPage() {
                                     </div>
                                   )}
                                 </div>
-                                <div className="col-span-1" title={row.kategoria}>
+                                <div className="col-span-1" title={stripChecklistInlineStyleTokens(row.kategoria)}>
                                   {isEditing ? (
-                                    <Input
+                                    <ChecklistInlineStyleEditor
                                       value={editingMstChecklistRow.kategoria}
-                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, kategoria: e.target.value }))}
-                                      className="h-8 text-xs"
+                                      onChange={(value) => setEditingMstChecklistRow((prev) => ({ ...prev, kategoria: value }))}
                                     />
                                   ) : (
                                     <div className="flex items-start gap-1">
-                                      <span className="flex-1 whitespace-normal break-words">{row.kategoria}</span>
+                                      <span className="flex-1 whitespace-normal break-words">{renderChecklistInlineStyle(row.kategoria, "")}</span>
                                     </div>
                                   )}
                                 </div>
                                 {showMstOriginalColumn ? (
-                                  <div className="col-span-1" title={row.original}>
+                                  <div className="col-span-1" title={stripChecklistInlineStyleTokens(row.original)}>
                                     {isEditing ? (
-                                      <Input
+                                      <ChecklistInlineStyleEditor
                                         value={editingMstChecklistRow.original}
-                                        onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, original: e.target.value }))}
-                                        className="h-8 text-xs"
+                                        onChange={(value) => setEditingMstChecklistRow((prev) => ({ ...prev, original: value }))}
                                       />
                                     ) : (
                                       <div className="flex items-start gap-1">
-                                        <span className="flex-1 whitespace-normal break-words">{row.original}</span>
+                                        <span className="flex-1 whitespace-normal break-words">{renderChecklistInlineStyle(row.original, "")}</span>
                                       </div>
                                     )}
                                   </div>
@@ -7765,15 +7756,14 @@ export default function PcmProjectPage() {
                                     />
                                   )}
                                 </div>
-                                <div className="col-span-1 truncate" title={assigneeInitials}>
+                                <div className="col-span-1 truncate" title={stripChecklistInlineStyleTokens(assigneeInitials)}>
                                   {isEditing ? (
-                                    <Input
+                                    <ChecklistInlineStyleEditor
                                       value={editingMstChecklistRow.incl}
-                                      onChange={(e) => setEditingMstChecklistRow((prev) => ({ ...prev, incl: e.target.value }))}
-                                      className="h-8 text-xs"
+                                      onChange={(value) => setEditingMstChecklistRow((prev) => ({ ...prev, incl: value }))}
                                     />
                                   ) : (
-                                    assigneeInitials
+                                    renderChecklistInlineStyle(assigneeInitials, "-")
                                   )}
                                 </div>
                                 <div className="col-span-2 pr-3">
@@ -7858,13 +7848,15 @@ export default function PcmProjectPage() {
                             </DialogHeader>
                             <div className="mt-4">
                               <div className="rounded-lg border bg-slate-50 p-4">
-                                <p className="whitespace-pre-wrap text-sm">{viewingChecklistField?.value || ""}</p>
+                                <p className="whitespace-pre-wrap text-sm">
+                                  {renderChecklistInlineStyle(viewingChecklistField?.value || "", "")}
+                                </p>
                               </div>
                               <div className="mt-4 flex justify-end">
                                 <Button
                                   variant="outline"
                                   onClick={() => {
-                                    const value = viewingChecklistField?.value || ""
+                                    const value = stripChecklistInlineStyleTokens(viewingChecklistField?.value || "")
                                     if (!value) return
                                     void navigator.clipboard.writeText(value)
                                     toast.success("Copied to clipboard")

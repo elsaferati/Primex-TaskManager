@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
-import type { Task } from "@/lib/types"
+import type { Task, TaskFinishPeriod } from "@/lib/types"
 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
@@ -43,6 +43,10 @@ const PROJECT_TASK_TYPES = [
   { value: "PERSONAL", label: "P: (Personal)" },
   { value: "BLLOK", label: "BLLOK" },
 ] as const
+
+const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
+const FINISH_PERIOD_NONE_VALUE = "__none__"
+const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 
 type TaskStatusValue = typeof TASK_STATUS_OPTIONS[number]["value"]
 type FastTaskTypeValue = typeof FAST_TASK_TYPES[number]["value"]
@@ -97,6 +101,7 @@ export function TaskEditDialog({
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskTypeValue>("N")
   const [projectTaskType, setProjectTaskType] = React.useState<ProjectTaskTypeValue>("NORMAL")
   const [dueDate, setDueDate] = React.useState("")
+  const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [saving, setSaving] = React.useState(false)
 
   React.useEffect(() => {
@@ -107,6 +112,7 @@ export function TaskEditDialog({
     setFastTaskType(getCurrentFastTaskType(task))
     setProjectTaskType(getCurrentProjectTaskType(task))
     setDueDate(toDateInputValue(task.due_date))
+    setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }, [task])
 
   const statusOptions = React.useMemo(() => {
@@ -148,6 +154,7 @@ export function TaskEditDialog({
           ...(showDescriptionField ? { description: description.trim() || null } : {}),
           status: statusValue,
           due_date: dueDate || null,
+          finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
           ...(isFastTask(task) && fastTaskType !== currentFastTaskType
             ? {
                 is_bllok: fastTaskType === "BLL",
@@ -194,6 +201,7 @@ export function TaskEditDialog({
     description,
     dueDate,
     fastTaskType,
+    finishPeriod,
     onOpenChange,
     onUpdated,
     projectTaskType,
@@ -207,7 +215,7 @@ export function TaskEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => (!saving ? onOpenChange(nextOpen) : undefined)}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden sm:max-w-md">
         <DialogHeader>
           <DialogTitle>Edit task</DialogTitle>
           <DialogDescription>
@@ -215,7 +223,7 @@ export function TaskEditDialog({
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4">
+        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
           <div className="space-y-2">
             <Label htmlFor="task-edit-title">Title</Label>
             <Textarea
@@ -236,9 +244,8 @@ export function TaskEditDialog({
                 id="task-edit-description"
                 value={description}
                 onChange={(event) => setDescription(event.target.value)}
-                autoResize
                 rows={4}
-                className="min-h-[112px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere]"
+                className="h-36 min-h-36 max-h-36 resize-none overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]"
                 disabled={saving}
               />
             </div>
@@ -306,9 +313,29 @@ export function TaskEditDialog({
               disabled={saving}
             />
           </div>
+
+          <div className="space-y-2">
+            <Label>Finish by (optional)</Label>
+            <Select
+              value={finishPeriod}
+              onValueChange={(value) => setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}
+            >
+              <SelectTrigger disabled={saving}>
+                <SelectValue placeholder="Select period" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                {FINISH_PERIOD_OPTIONS.map((value) => (
+                  <SelectItem key={value} value={value}>
+                    {value}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="shrink-0 border-t bg-background pt-4">
           <Button type="button" variant="outline" onClick={closeDialog} disabled={saving}>
             Cancel
           </Button>
