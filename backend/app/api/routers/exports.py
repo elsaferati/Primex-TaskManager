@@ -349,6 +349,149 @@ def _safe_sheet_title(label: str | None, fallback: str = "MEETING") -> str:
     return (value or fallback)[:31]
 
 
+def _meeting_template_columns(checklist: Checklist) -> list[dict[str, str]]:
+    raw_columns = checklist.columns or []
+    columns: list[dict[str, str]] = []
+    for col in raw_columns:
+        if not isinstance(col, dict):
+            continue
+        key = str(col.get("key") or "").strip()
+        if not key:
+            continue
+        label = str(col.get("label") or "").strip()
+        columns.append({"key": key, "label": label})
+    if columns:
+        return columns
+    return [
+        {"key": "nr", "label": "NR"},
+        {"key": "topic", "label": "M1 PIKAT"},
+        {"key": "check", "label": ""},
+        {"key": "owner", "label": "WHO"},
+        {"key": "time", "label": "WHEN"},
+    ]
+
+
+def _unique_sheet_title(wb: Workbook, title: str, fallback: str = "MEETING") -> str:
+    base = _safe_sheet_title(title, fallback=fallback)
+    existing = set(wb.sheetnames)
+    if base not in existing:
+        return base
+    suffix = 2
+    while True:
+        suffix_text = f" {suffix}"
+        candidate = f"{base[:31 - len(suffix_text)]}{suffix_text}"
+        if candidate not in existing:
+            return candidate
+        suffix += 1
+
+
+def _write_meeting_template_sheet(ws, checklist: Checklist, items: list[ChecklistItem]) -> None:
+    columns = _meeting_template_columns(checklist)
+    title_base = checklist.title or "MEETING"
+    title = f"MEETING {title_base}".upper()
+    last_col = len(columns)
+
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title)
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+    ws.row_dimensions[2].height = 10
+    ws.row_dimensions[3].height = 10
+
+    header_row = 4
+    data_start_row = header_row + 1
+    data_row = data_start_row
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    for col_idx, col in enumerate(columns, start=1):
+        cell = ws.cell(row=header_row, column=col_idx, value=col.get("label", ""))
+        cell.font = Font(bold=True)
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        cell.number_format = "@"
+
+    for row_index, item in enumerate(items):
+        for col_idx, col in enumerate(columns, start=1):
+            key = col.get("key")
+            value = ""
+            if key == "nr":
+                value = str(item.position) if item.position is not None else ""
+            elif key == "day":
+                value = item.day or ""
+            elif key == "topic":
+                value = item.title or ""
+            elif key == "check":
+                value = "\u2713" if item.is_checked else ""
+            elif key == "owner":
+                value = item.owner or (checklist.default_owner or "" if row_index == 0 else "")
+            elif key == "time":
+                value = item.time or (checklist.default_time or "" if row_index == 0 else "")
+            cell = ws.cell(row=data_row, column=col_idx, value=value or "")
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            if key == "nr":
+                cell.font = Font(bold=True)
+        data_row += 1
+
+    last_row = data_row - 1
+
+    width_by_key = {
+        "nr": 5,
+        "day": 10,
+        "topic": 52,
+        "check": 8,
+        "owner": 16,
+        "time": 12,
+    }
+    for col_idx, col in enumerate(columns, start=1):
+        key = col.get("key")
+        width = width_by_key.get(key, 24)
+        ws.column_dimensions[get_column_letter(col_idx)].width = width
+
+    if last_row >= header_row:
+        ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+
+    ws.freeze_panes = "A5"
+    ws.print_title_rows = f"{header_row}:{header_row}"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    if last_row >= header_row:
+        for r_idx in range(header_row, last_row + 1):
+            for c_idx in range(1, last_col + 1):
+                is_header = r_idx == header_row
+                is_first_col = c_idx == 1
+                is_last_col = c_idx == last_col
+                is_last_row = r_idx == last_row
+                left = thick if is_first_col else thin
+                right = thick if is_last_col else thin
+                top = thick if is_header else thin
+                bottom = thick if is_last_row else thin
+                if is_header:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=thick, right=thick, top=thick, bottom=thick)
+                else:
+                    ws.cell(row=r_idx, column=c_idx).border = Border(left=left, right=right, top=top, bottom=bottom)
+
+    for r in range(data_start_row, last_row + 1):
+        max_lines = 1
+        for c in range(1, last_col + 1):
+            value = ws.cell(row=r, column=c).value
+            lines = str(value).count("\n") + 1 if value else 1
+            max_lines = max(max_lines, lines)
+        ws.row_dimensions[r].height = max(18, min(240, 14 * max_lines))
+
+
 def _fast_task_badge(task) -> str:
     if getattr(task, "is_bllok", False):
         return "BLL"
@@ -2655,6 +2798,303 @@ async def export_meeting_template_xlsx(
             lines = str(value).count("\n") + 1 if value else 1
             max_lines = max(max_lines, lines)
         ws.row_dimensions[r].height = max(18, min(240, 14 * max_lines))
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    initials_value = (_initials_compact(user.full_name or user.username or "") or "USER").upper()
+    filename_title = _safe_filename_spaces(title)
+    filename = f"{filename_title} {filename_date}_EF ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/meeting-templates.xlsx")
+async def export_meeting_templates_xlsx(
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+
+    checklists = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.group_key.in_(("board", "staff")))
+            .options(selectinload(Checklist.items))
+            .order_by(Checklist.group_key, Checklist.position, Checklist.created_at)
+        )
+    ).scalars().all()
+    if not checklists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No meeting templates found")
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "All Meetings"
+
+    max_col = max(len(_meeting_template_columns(checklist)) for checklist in checklists)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=max_col)
+    title_cell = ws.cell(row=1, column=1, value="MEETING ALL")
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    section_fill = PatternFill(start_color="EAF2F8", end_color="EAF2F8", fill_type="solid")
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+    width_by_key = {
+        "nr": 5,
+        "day": 10,
+        "topic": 52,
+        "check": 8,
+        "owner": 16,
+        "time": 12,
+    }
+    for checklist in checklists:
+        for col_idx, col in enumerate(_meeting_template_columns(checklist), start=1):
+            width = width_by_key.get(col.get("key"), 24)
+            letter = get_column_letter(col_idx)
+            if (ws.column_dimensions[letter].width or 0) < width:
+                ws.column_dimensions[letter].width = width
+
+    row_idx = 3
+    for checklist in checklists:
+        columns = _meeting_template_columns(checklist)
+        last_col = len(columns)
+        group_label = {"board": "BORD/GA", "staff": "STAFF/GA"}.get(checklist.group_key or "", checklist.group_key or "")
+        section_title = checklist.title or "MEETING"
+        if group_label:
+            section_title = f"{section_title} ({group_label})"
+
+        ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=last_col)
+        cell = ws.cell(row=row_idx, column=1, value=section_title.upper())
+        cell.font = Font(bold=True, size=12)
+        cell.fill = section_fill
+        cell.alignment = Alignment(horizontal="left", vertical="center", readingOrder=1)
+        for col_idx in range(1, last_col + 1):
+            ws.cell(row=row_idx, column=col_idx).border = Border(left=thick if col_idx == 1 else thin, right=thick if col_idx == last_col else thin, top=thick, bottom=thin)
+        row_idx += 1
+
+        header_row = row_idx
+        for col_idx, col in enumerate(columns, start=1):
+            cell = ws.cell(row=header_row, column=col_idx, value=col.get("label", ""))
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            cell.number_format = "@"
+            cell.border = Border(left=thick if col_idx == 1 else thin, right=thick if col_idx == last_col else thin, top=thin, bottom=thick)
+        row_idx += 1
+
+        items = sorted(checklist.items, key=lambda item: (item.position if item.position is not None else 0, str(item.id)))
+        for item_index, item in enumerate(items):
+            data_row = row_idx
+            for col_idx, col in enumerate(columns, start=1):
+                key = col.get("key")
+                value = ""
+                if key == "nr":
+                    value = str(item.position) if item.position is not None else ""
+                elif key == "day":
+                    value = item.day or ""
+                elif key == "topic":
+                    value = item.title or ""
+                elif key == "check":
+                    value = "\u2713" if item.is_checked else ""
+                elif key == "owner":
+                    value = item.owner or (checklist.default_owner or "" if item_index == 0 else "")
+                elif key == "time":
+                    value = item.time or (checklist.default_time or "" if item_index == 0 else "")
+                cell = ws.cell(row=data_row, column=col_idx, value=value or "")
+                cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+                if key == "nr":
+                    cell.font = Font(bold=True)
+                cell.border = Border(
+                    left=thick if col_idx == 1 else thin,
+                    right=thick if col_idx == last_col else thin,
+                    top=thin,
+                    bottom=thin,
+                )
+            row_idx += 1
+
+        if items:
+            for col_idx in range(1, last_col + 1):
+                existing = ws.cell(row=row_idx - 1, column=col_idx).border
+                ws.cell(row=row_idx - 1, column=col_idx).border = Border(
+                    left=existing.left,
+                    right=existing.right,
+                    top=existing.top,
+                    bottom=thick,
+                )
+        row_idx += 2
+
+    ws.freeze_panes = "A4"
+    ws.print_title_rows = "1:1"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+
+    user_initials_compact = _initials_compact(user.full_name or user.username or "") or "____"
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials_compact}"
+
+    bio = io.BytesIO()
+    wb.save(bio)
+    bio.seek(0)
+
+    today = datetime.now(timezone.utc).date()
+    filename_date = f"{today.day:02d}_{today.month:02d}_{str(today.year)[-2:]}"
+    initials_value = (_initials_compact(user.full_name or user.username or "") or "USER").upper()
+    filename = f"MEETING ALL {filename_date}_EF ({initials_value}).xlsx"
+
+    return StreamingResponse(
+        bio,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
+    )
+
+
+@router.get("/department-internal-meetings.xlsx")
+async def export_department_internal_meetings_xlsx(
+    group_key: str = Query(..., min_length=1),
+    title: str = "Internal Meetings",
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    ensure_reports_access(user)
+
+    checklists = (
+        await db.execute(
+            select(Checklist)
+            .where(Checklist.group_key == group_key)
+            .options(selectinload(Checklist.items))
+            .order_by(Checklist.position, Checklist.created_at)
+        )
+    ).scalars().all()
+    if not checklists:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal meetings checklist not found")
+
+    slot_specs = [
+        ("M1", "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)"),
+        ("M2", "M2 PER ZHVILLIM (11:45-12:00 MAX)"),
+        ("M3", "M3 (ME TRELLO) PER ZHVILLIM (15:45-16:00 MAX)"),
+        ("TESTIMI_I_AGENT", "TESTIMI I AGENT"),
+    ]
+    all_items = [
+        item
+        for checklist in checklists
+        for item in checklist.items
+        if item.item_type == ChecklistItemType.CHECKBOX
+    ]
+
+    wb = Workbook()
+    ws = wb.active
+    ws.title = "Internal Meetings"
+
+    headers = ["NR", "ITEM", "CHECK"]
+    last_col = len(headers)
+    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
+    title_cell = ws.cell(row=1, column=1, value=title.upper())
+    title_cell.font = Font(bold=True, size=16)
+    title_cell.alignment = Alignment(horizontal="center", vertical="center", readingOrder=1)
+    ws.row_dimensions[1].height = 24
+
+    header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
+    section_fill = PatternFill(start_color="EAF2F8", end_color="EAF2F8", fill_type="solid")
+    thin = Side(style="thin", color="000000")
+    thick = Side(style="medium", color="000000")
+
+    ws.column_dimensions["A"].width = 6
+    ws.column_dimensions["B"].width = 90
+    ws.column_dimensions["C"].width = 10
+
+    row_idx = 3
+    for slot_key, slot_label in slot_specs:
+        slot_items = sorted(
+            [item for item in all_items if (item.day or "M1") == slot_key],
+            key=lambda item: (item.position if item.position is not None else 0, str(item.id)),
+        )
+
+        ws.merge_cells(start_row=row_idx, start_column=1, end_row=row_idx, end_column=last_col)
+        section_cell = ws.cell(row=row_idx, column=1, value=slot_label)
+        section_cell.font = Font(bold=True, size=12)
+        section_cell.fill = section_fill
+        section_cell.alignment = Alignment(horizontal="left", vertical="center", readingOrder=1)
+        for col_idx in range(1, last_col + 1):
+            ws.cell(row=row_idx, column=col_idx).border = Border(
+                left=thick if col_idx == 1 else thin,
+                right=thick if col_idx == last_col else thin,
+                top=thick,
+                bottom=thin,
+            )
+        row_idx += 1
+
+        header_row = row_idx
+        for col_idx, header in enumerate(headers, start=1):
+            cell = ws.cell(row=header_row, column=col_idx, value=header)
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="left", vertical="center", wrap_text=True, readingOrder=1)
+            cell.border = Border(
+                left=thick if col_idx == 1 else thin,
+                right=thick if col_idx == last_col else thin,
+                top=thin,
+                bottom=thick,
+            )
+        row_idx += 1
+
+        rows = slot_items or [None]
+        for item_index, item in enumerate(rows, start=1):
+            values = (
+                [item_index, item.title or "", "\u2713" if item.is_checked else ""]
+                if item is not None
+                else ["", "No checklist items", ""]
+            )
+            for col_idx, value in enumerate(values, start=1):
+                cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True, readingOrder=1)
+                if col_idx == 1:
+                    cell.font = Font(bold=True)
+                cell.border = Border(
+                    left=thick if col_idx == 1 else thin,
+                    right=thick if col_idx == last_col else thin,
+                    top=thin,
+                    bottom=thick if item_index == len(rows) else thin,
+                )
+            row_idx += 1
+        row_idx += 2
+
+    ws.freeze_panes = "A3"
+    ws.print_title_rows = "1:1"
+    ws.page_setup.orientation = "landscape"
+    ws.page_setup.paperSize = 9
+    ws.page_setup.fitToPage = True
+    ws.page_setup.fitToWidth = 1
+    ws.page_setup.fitToHeight = 0
+    ws.page_margins.left = 0.1
+    ws.page_margins.right = 0.1
+    ws.page_margins.top = 0.36
+    ws.page_margins.bottom = 0.51
+    ws.page_margins.header = 0.15
+    ws.page_margins.footer = 0.2
+    user_initials_compact = _initials_compact(user.full_name or user.username or "") or "____"
+    ws.oddHeader.right.text = "&D &T"
+    ws.oddFooter.center.text = "Page &P / &N"
+    ws.oddFooter.right.text = f"PUNOI: {user_initials_compact}"
 
     bio = io.BytesIO()
     wb.save(bio)

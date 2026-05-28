@@ -1091,6 +1091,7 @@ export default function CommonViewPage() {
   const [meetingTitleDraft, setMeetingTitleDraft] = React.useState("")
   const [savingMeetingTitle, setSavingMeetingTitle] = React.useState(false)
   const [exportingExcel, setExportingExcel] = React.useState(false)
+  const [exportingAllMeetingTemplatesExcel, setExportingAllMeetingTemplatesExcel] = React.useState(false)
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
@@ -3543,6 +3544,34 @@ export default function CommonViewPage() {
       toast.error("Failed to export Excel.")
     } finally {
       setExportingMeetingExcel(false)
+    }
+  }
+
+  const handleExportAllMeetingTemplatesExcel = async () => {
+    if (exportingAllMeetingTemplatesExcel) return
+    setExportingAllMeetingTemplatesExcel(true)
+    try {
+      const res = await apiFetch(`/exports/meeting-templates.xlsx`)
+      if (!res?.ok) {
+        const detail = await res.text()
+        toast.error(detail || "Failed to export all meetings.")
+        return
+      }
+      const blob = await res.blob()
+      const url = window.URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const filename = parseFilenameFromDisposition(res.headers.get("content-disposition"))
+      link.download = filename || "MEETING_ALL.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      window.URL.revokeObjectURL(url)
+    } catch (err) {
+      console.error("Failed to export all meeting checklists", err)
+      toast.error("Failed to export all meetings.")
+    } finally {
+      setExportingAllMeetingTemplatesExcel(false)
     }
   }
 
@@ -7974,6 +8003,14 @@ export default function CommonViewPage() {
                 disabled={!activeMeeting || exportingMeetingExcel}
               >
                 {exportingMeetingExcel ? "Exporting..." : "Export Excel"}
+              </button>
+              <button
+                className="btn-surface"
+                type="button"
+                onClick={handleExportAllMeetingTemplatesExcel}
+                disabled={!meetingTemplates.length || exportingAllMeetingTemplatesExcel}
+              >
+                {exportingAllMeetingTemplatesExcel ? "Exporting..." : "Export All Excel"}
               </button>
               <button className="btn-surface" type="button" onClick={() => setMeetingPanelOpen(false)}>
                 Close

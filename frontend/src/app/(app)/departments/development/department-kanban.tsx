@@ -1151,6 +1151,7 @@ export default function DepartmentKanban() {
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
   const [savingDailyReportComments, setSavingDailyReportComments] = React.useState<Record<string, boolean>>({})
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
+  const [exportingInternalMeetings, setExportingInternalMeetings] = React.useState(false)
   const [taskChecklists, setTaskChecklists] = React.useState<Record<string, TaskChecklist | null>>({})
   const [taskChecklistLoading, setTaskChecklistLoading] = React.useState<Record<string, boolean>>({})
   const [taskChecklistOpen, setTaskChecklistOpen] = React.useState<Record<string, boolean>>({})
@@ -4872,6 +4873,40 @@ export default function DepartmentKanban() {
       toast.error("Failed to export report")
     } finally {
       setExportingDailyReport(false)
+    }
+  }
+
+  const exportInternalMeetings = async () => {
+    if (exportingInternalMeetings) return
+    setExportingInternalMeetings(true)
+    try {
+      const qs = new URLSearchParams({
+        group_key: INTERNAL_MEETING_GROUP_KEY,
+        title: "Development Internal Meetings",
+      })
+      const res = await apiFetch(`/exports/department-internal-meetings.xlsx?${qs.toString()}`)
+      if (!res.ok) {
+        const detail = await res.text().catch(() => "")
+        toast.error(detail || "Failed to export internal meetings")
+        return
+      }
+
+      const blob = await res.blob()
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      const disposition = res.headers.get("Content-Disposition")
+      const match = disposition?.match(/filename=\"?([^\";]+)\"?/i)
+      link.download = match?.[1] || "DEVELOPMENT_INTERNAL_MEETINGS.xlsx"
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+    } catch (error) {
+      console.error("Failed to export internal meetings", error)
+      toast.error("Failed to export internal meetings")
+    } finally {
+      setExportingInternalMeetings(false)
     }
   }
 
@@ -9645,7 +9680,18 @@ export default function DepartmentKanban() {
               </Card>
 
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
-                <div className="text-sm font-semibold">Internal Meetings</div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="text-sm font-semibold">Internal Meetings</div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void exportInternalMeetings()}
+                    disabled={exportingInternalMeetings || !internalMeetingItems.length}
+                  >
+                    {exportingInternalMeetings ? "Exporting..." : "Export Excel"}
+                  </Button>
+                </div>
                 {todayInternalMeetings.length ? (
                   <div className="rounded-md border border-slate-200">
                     <Table>
