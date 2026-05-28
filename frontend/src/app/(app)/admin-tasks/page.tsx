@@ -295,6 +295,28 @@ function initials(src: string) {
 
 type AllTasksAssigneeBadge = { id: string; userId: string; value: string; label: string }
 
+function systemFrequencyTitle(frequency?: string | null) {
+  const normalized = (frequency || "").toUpperCase()
+  if (normalized === "DAILY") return "Daily"
+  if (normalized === "WEEKLY") return "Weekly"
+  if (normalized === "MONTHLY") return "Monthly"
+  if (normalized === "YEARLY") return "Yearly"
+  if (normalized === "3_MONTHS") return "Every 3 months"
+  if (normalized === "6_MONTHS") return "Every 6 months"
+  return normalized || ""
+}
+
+function systemFrequencyDisplayLabel(frequency?: string | null) {
+  const normalized = (frequency || "").toUpperCase()
+  if (normalized === "DAILY") return "Daily"
+  if (normalized === "WEEKLY") return "Weekly"
+  if (normalized === "MONTHLY") return "Monthly"
+  if (normalized === "YEARLY") return "Yearly"
+  if (normalized === "3_MONTHS") return "3M"
+  if (normalized === "6_MONTHS") return "6M"
+  return normalized || ""
+}
+
 function mergeAllTasksAssigneeBadges(a: AllTasksAssigneeBadge[], b: AllTasksAssigneeBadge[]): AllTasksAssigneeBadge[] {
   const map = new Map<string, AllTasksAssigneeBadge>()
   for (const item of [...a, ...b]) {
@@ -1769,6 +1791,8 @@ export default function AdminTasksPage() {
       dateLabel: string
       period: string
       title: string
+      systemFrequency: string
+      systemFrequencyDisplayLabel: string
       bz: string
       kohaBz: string
       status: string
@@ -1811,6 +1835,7 @@ export default function AdminTasksPage() {
       const dueDateIso = getTaskDateIso(task)
       const dateIso = dueDateIso || startDateIso
       const statusValue = task.status || (task.completed_at ? "DONE" : "TODO")
+      const systemFrequency = isSystemTask ? systemTemplate?.frequency || "" : ""
       const hasGaneBzToday = (hasTaskAlignment || hasTemplateAlignment) && dateIso === todayIso
       const computedLateDays =
         statusValue !== "DONE" && dueDateIso && dueDateIso < todayIso
@@ -1837,6 +1862,8 @@ export default function AdminTasksPage() {
         dateLabel: dateIso ? formatDateDayMonth(dateIso) : "-",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         title: task.title || "-",
+        systemFrequency,
+        systemFrequencyDisplayLabel: systemFrequencyDisplayLabel(systemFrequency),
         bz: hasTaskAlignment || hasTemplateAlignment ? "GA" : "-",
         kohaBz: hasTemplateAlignment ? formatTimeLabel(systemTemplate?.alignment_time || "") || "TPL" : "-",
         status: statusValue,
@@ -1875,6 +1902,8 @@ export default function AdminTasksPage() {
       dedupedRows.set(dedupeKey, {
         ...existing,
         assigned: mergeAllTasksAssigneeBadges(existing.assigned, row.assigned),
+        systemFrequency: existing.systemFrequency || row.systemFrequency,
+        systemFrequencyDisplayLabel: existing.systemFrequencyDisplayLabel || row.systemFrequencyDisplayLabel,
         systemTemplateOriginId: existing.systemTemplateOriginId || row.systemTemplateOriginId,
         needsGaneConfirmation: Boolean(existing.needsGaneConfirmation || row.needsGaneConfirmation),
         showInSystemTasksSection: Boolean(existing.showInSystemTasksSection || row.showInSystemTasksSection),
@@ -1964,6 +1993,7 @@ export default function AdminTasksPage() {
     const rows: Array<{
       typeLabel: string
       subtype: string
+      frequency: string
       period: string
       department: string
       title: string
@@ -2719,6 +2749,7 @@ export default function AdminTasksPage() {
       rows.push({
         typeLabel: isProject ? "PRJK" : "FT",
         subtype: isProject ? "-" : fastReportSubtypeShort(task),
+        frequency: "",
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         department: assigneeDepartments || resolveDepartmentLabel(task.department_id, null, Boolean(task.ga_note_origin_id)),
         title: task.title || "-",
@@ -2781,6 +2812,7 @@ export default function AdminTasksPage() {
       rows.push({
         typeLabel: "SYS",
         subtype: systemSubtype,
+        frequency: systemSubtype,
         period: systemTask.finish_period || "AM",
         department:
           assigneeDepartments || resolveDepartmentLabel(systemTask.department_id, systemTask.scope || null, false),
@@ -2854,6 +2886,7 @@ export default function AdminTasksPage() {
         return {
           typeLabel: row.typeLabel,
           subtype: row.subtype,
+          frequency: row.frequency || "",
           dateLabel: row.ditaLabel,
           bzMe: row.bzMe,
           kohaBz: row.kohaBz,
@@ -4142,6 +4175,7 @@ export default function AdminTasksPage() {
         "DATE",
         "AM/PM",
         "TITLE",
+        "FREQUENCY",
         "KOHA BZ",
         "BZ ME",
         "STATUS",
@@ -4150,9 +4184,9 @@ export default function AdminTasksPage() {
         "ACTIONS",
       ]
       return (
-      <Table
+          <Table
         containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-        className="min-w-[760px] text-[10px] sm:min-w-[940px]"
+        className="min-w-[820px] text-[10px] sm:min-w-[1020px]"
       >
         <TableHeader>
           <TableRow className="bg-slate-50">
@@ -4170,19 +4204,21 @@ export default function AdminTasksPage() {
                           ? "w-[54px]"
                           : label === "TITLE"
                             ? "min-w-[160px] sm:min-w-[220px]"
-                            : label === "KOHA BZ"
-                              ? "hidden w-[70px] sm:table-cell"
-                              : label === "BZ ME"
-                                ? "min-w-[56px] max-w-[100px] px-1"
-                                : label === "STATUS"
-                                  ? "w-[86px]"
-                                  : label === "PRIORITY"
-                                  ? "w-[70px]"
-                                  : label === "KOMENT"
-                                    ? "min-w-[120px]"
-                                    : label === "ACTIONS"
-                                      ? "w-[82px]"
-                                      : ""
+                            : label === "FREQUENCY"
+                              ? "w-[76px] px-1 text-center"
+                              : label === "KOHA BZ"
+                                ? "hidden w-[70px] sm:table-cell"
+                                : label === "BZ ME"
+                                  ? "min-w-[56px] max-w-[100px] px-1"
+                                  : label === "STATUS"
+                                    ? "w-[86px]"
+                                    : label === "PRIORITY"
+                                    ? "w-[70px]"
+                                    : label === "KOMENT"
+                                      ? "min-w-[120px]"
+                                      : label === "ACTIONS"
+                                        ? "w-[82px]"
+                                        : ""
                 }`}
               >
                 {label}
@@ -4241,6 +4277,16 @@ export default function AdminTasksPage() {
                       ) : null}
                       <span>{renderCommonMarkedTitle(row.title)}</span>
                     </div>
+                  </TableCell>
+                  <TableCell className="w-[76px] border-r border-slate-200 px-1 py-1 text-center align-middle last:border-r-0">
+                    {row.systemFrequencyDisplayLabel ? (
+                      <span
+                        className="inline-flex h-5 items-center justify-center rounded-full border border-slate-200 px-2 text-[10px] font-semibold text-slate-600"
+                        title={systemFrequencyTitle(row.systemFrequency)}
+                      >
+                        {row.systemFrequencyDisplayLabel}
+                      </span>
+                    ) : null}
                   </TableCell>
                   <TableCell className="hidden w-[70px] border-r border-slate-200 px-1.5 py-1 align-middle last:border-r-0 sm:table-cell">
                     {row.kohaBz}
