@@ -42,6 +42,7 @@ class SystemTaskTemplate(Base):
     interval: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
     apply_from: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     duration_days: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
+    trigger_type: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
 
     priority: Mapped[str | None] = mapped_column(
         String(50), nullable=True, server_default="NORMAL"

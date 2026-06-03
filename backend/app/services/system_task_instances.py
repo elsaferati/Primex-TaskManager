@@ -252,6 +252,7 @@ async def generate_system_task_instances(
             .join(SystemTaskTemplate, SystemTaskTemplateAssigneeSlot.template_id == SystemTaskTemplate.id)
             .where(SystemTaskTemplateAssigneeSlot.is_active.is_(True))
             .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplate.trigger_type.is_(None))
             .with_for_update(skip_locked=True)
         )
     ).all()
@@ -355,7 +356,11 @@ async def ensure_due_today_instances_best_effort(
 
 async def ensure_slots_initialized(db: AsyncSession) -> None:
     templates = (
-        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True)))
+        await db.execute(
+            select(SystemTaskTemplate)
+            .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplate.trigger_type.is_(None))
+        )
     ).scalars().all()
     if not templates:
         return

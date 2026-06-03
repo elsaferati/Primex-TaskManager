@@ -13,6 +13,10 @@ from app.models.meeting import Meeting, MeetingParticipant
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.meeting import MeetingCreate, MeetingOut, MeetingUpdate
+from app.services.meeting_system_tasks import (
+    deactivate_external_meeting_system_tasks,
+    reconcile_external_meeting_system_tasks_for_meeting,
+)
 
 
 router = APIRouter()
@@ -130,6 +134,9 @@ async def create_meeting(
     for user_id in participant_ids:
         participant = MeetingParticipant(meeting_id=meeting.id, user_id=user_id)
         db.add(participant)
+
+    await db.flush()
+    await reconcile_external_meeting_system_tasks_for_meeting(db, meeting)
     
     await db.commit()
     await db.refresh(meeting)
@@ -231,6 +238,9 @@ async def update_meeting(
             participant = MeetingParticipant(meeting_id=meeting.id, user_id=user_id)
             db.add(participant)
 
+    await db.flush()
+    await reconcile_external_meeting_system_tasks_for_meeting(db, meeting)
+
     await db.commit()
     await db.refresh(meeting)
     
@@ -269,6 +279,7 @@ async def delete_meeting(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     # Only admins can delete external meetings
     ensure_admin(user)
+    await deactivate_external_meeting_system_tasks(db, meeting.id)
     await db.delete(meeting)
     await db.commit()
     return {"ok": True}

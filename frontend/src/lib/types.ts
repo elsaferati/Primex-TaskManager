@@ -240,6 +240,9 @@ export interface Task {
   system_template_origin_id?: string | null
   origin_run_at?: string | null
   system_task_slot_id?: string | null
+  meeting_origin_id?: string | null
+  meeting_occurrence_date?: string | null
+  meeting_system_task_kind?: string | null
   status?: string
   priority?: string
   finish_period?: TaskFinishPeriod | null

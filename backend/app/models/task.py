@@ -1,9 +1,9 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -50,6 +50,11 @@ class Task(Base):
         nullable=True,
         index=True,
     )
+    meeting_origin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("meetings.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    meeting_occurrence_date: Mapped[date | None] = mapped_column(Date, nullable=True)
+    meeting_system_task_kind: Mapped[str | None] = mapped_column(String(50), nullable=True, index=True)
     # Groups per-user copies of a single "logical" standalone task.
     # Used for multi-assignee standalone tasks (e.g. fast tasks and GA/KA note tasks without a project).
     fast_task_group_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), index=True)
@@ -92,4 +97,3 @@ class Task(Base):
     )
 
     assignees = relationship("TaskAssignee", backref="task", lazy="selectin", passive_deletes=True)
-
