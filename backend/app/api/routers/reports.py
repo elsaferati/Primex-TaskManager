@@ -207,6 +207,33 @@ def _planned_range_for_task(t: Task) -> tuple[date | None, date | None]:
     return due, due
 
 
+def _has_0800_marker(title: str | None) -> bool:
+    return bool(re.search(r"\b0?8:00\b", title or ""))
+
+
+def _finish_period_rank(value: str | None) -> int:
+    normalized = (value or "").strip().upper()
+    if normalized in {"", "AM", "AM/PM"}:
+        return 0
+    if normalized == "PM":
+        return 1
+    return 2
+
+
+def _daily_task_sort_key(item: DailyReportTaskItem) -> tuple[int, int, int, datetime, datetime, str]:
+    task = item.task
+    due_date = task.due_date or datetime.max.replace(tzinfo=timezone.utc)
+    created_at = task.created_at or datetime.max.replace(tzinfo=timezone.utc)
+    return (
+        0 if task.is_deadline_important else 1,
+        0 if _has_0800_marker(task.title) else 1,
+        _finish_period_rank(task.finish_period),
+        due_date,
+        created_at,
+        task.title.lower(),
+    )
+
+
 def _infer_department_code(name: str | None) -> str | None:
     if not name:
         return None
@@ -524,6 +551,9 @@ async def daily_report(
                 late_days=late_days,
             )
         )
+
+    tasks_today.sort(key=_daily_task_sort_key)
+    tasks_overdue.sort(key=_daily_task_sort_key)
 
     return DailyReportResponse(
         day=day,

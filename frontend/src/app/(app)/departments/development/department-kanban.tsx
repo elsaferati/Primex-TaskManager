@@ -3148,9 +3148,16 @@ export default function DepartmentKanban() {
       const periodDiff = (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
       return periodDiff
     }
+    const periodRank = (row: (typeof rows)[number]) => (row.period === "PM" ? 1 : 0)
 
     const sortedFastRows = fastRows
-      .sort((a, b) => a.order - b.order || a.index - b.index)
+      .sort(
+        (a, b) =>
+          a.order - b.order ||
+          Number(titleHasEightAmIndicator(b.row.title)) - Number(titleHasEightAmIndicator(a.row.title)) ||
+          periodRank(a.row) - periodRank(b.row) ||
+          a.index - b.index
+      )
       .map((entry) => entry.row)
     rows.push(...doneLast(sortedFastRows))
     rows.push(...doneLast(systemAmRows))
@@ -3168,6 +3175,11 @@ export default function DepartmentKanban() {
           const deadlineDiff = importantDeadlineSort(a.row, b.row)
           if (deadlineDiff !== 0) return deadlineDiff
         }
+        const eightAmDiff =
+          Number(titleHasEightAmIndicator(b.row.title)) - Number(titleHasEightAmIndicator(a.row.title))
+        if (eightAmDiff !== 0) return eightAmDiff
+        const periodDiff = periodRank(a.row) - periodRank(b.row)
+        if (periodDiff !== 0) return periodDiff
         const statusDiff =
           statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
         return statusDiff !== 0 ? statusDiff : a.index - b.index
@@ -3532,9 +3544,17 @@ export default function DepartmentKanban() {
         if (eightAmDiff !== 0) return eightAmDiff
         return (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
       }
+      const periodRank = (row: (typeof rows)[number]) => (row.period === "PM" ? 1 : 0)
 
       const sortedFastRows = fastRows
-        .sort((a, b) => a.order - b.order || sortByTyo(a.row, b.row) || a.index - b.index)
+        .sort(
+          (a, b) =>
+            a.order - b.order ||
+            Number(titleHasEightAmIndicator(b.row.title)) - Number(titleHasEightAmIndicator(a.row.title)) ||
+            periodRank(a.row) - periodRank(b.row) ||
+            sortByTyo(a.row, b.row) ||
+            a.index - b.index
+        )
         .map((entry) => entry.row)
       rows.push(...doneLast(sortedFastRows))
       rows.push(...doneLast(systemAmRows.sort(sortByTyo)))
@@ -3552,6 +3572,11 @@ export default function DepartmentKanban() {
             const deadlineDiff = importantDeadlineSort(a.row, b.row)
             if (deadlineDiff !== 0) return deadlineDiff
           }
+          const eightAmDiff =
+            Number(titleHasEightAmIndicator(b.row.title)) - Number(titleHasEightAmIndicator(a.row.title))
+          if (eightAmDiff !== 0) return eightAmDiff
+          const periodDiff = periodRank(a.row) - periodRank(b.row)
+          if (periodDiff !== 0) return periodDiff
           const statusDiff =
             statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
           return statusDiff !== 0 ? statusDiff : a.index - b.index
@@ -10070,6 +10095,10 @@ export default function DepartmentKanban() {
                   if (a.typeLabel === "FT" && b.typeLabel === "FT") {
                     const subtypeDiff = fastSubtypeOrder(a.subtype) - fastSubtypeOrder(b.subtype)
                     if (subtypeDiff !== 0) return subtypeDiff
+                    const eightAmDiff = Number(titleHasEightAmIndicator(b.title)) - Number(titleHasEightAmIndicator(a.title))
+                    if (eightAmDiff !== 0) return eightAmDiff
+                    const periodDiff = (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
+                    if (periodDiff !== 0) return periodDiff
                     const tyoDiff = sortByTyo(a, b)
                     if (tyoDiff !== 0) return tyoDiff
                     return a.title.localeCompare(b.title) || a.userInitials.localeCompare(b.userInitials)

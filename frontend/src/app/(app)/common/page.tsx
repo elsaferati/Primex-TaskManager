@@ -52,6 +52,9 @@ type FastTaskItemMeta = {
   finishPeriod?: "AM" | "PM" | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
+  startDate?: string | null
+  completedAt?: string | null
+  dateIsToday?: boolean
 }
 type BlockedItem = {
   title: string
@@ -242,6 +245,9 @@ type SwimlaneCell = {
   finishPeriod?: "AM" | "PM" | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
+  startDate?: string | null
+  completedAt?: string | null
+  dateIsToday?: boolean
 }
 type SwimlaneRow = {
   id: CommonType
@@ -666,6 +672,27 @@ export default function CommonViewPage() {
     const temp = new Date()
     temp.setHours(parsed.hours, parsed.minutes, 0, 0)
     return formatTime(temp)
+  }
+  const formatFastTaskDateLabel = (
+    date: string,
+    isDone?: boolean,
+    completedAt?: string | null,
+    startDate?: string | null
+  ) => {
+    if (isDone && completedAt) {
+      const completed = new Date(completedAt)
+      if (!Number.isNaN(completed.getTime())) {
+        return `${formatDateHuman(toISODate(completed))} ${formatTime(completed)}`
+      }
+    }
+    const dateLabel = formatDateHuman(date)
+    if (!isDone && startDate) {
+      const start = parseDateOnly(startDate)
+      if (start) {
+        return formatDateHuman(toISODate(start))
+      }
+    }
+    return dateLabel
   }
   const computeNextOccurrenceDate = (params: {
     recurrenceType: "weekly" | "monthly" | "yearly"
@@ -1661,6 +1688,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
+          startDate: item.startDate || item.start_date || null,
+          completedAt: item.completedAt || item.completed_at || null,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -1678,6 +1707,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
+          startDate: item.startDate || item.start_date || null,
+          completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -1696,6 +1727,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
+          startDate: item.startDate || item.start_date || null,
+          completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -1714,6 +1747,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
+          startDate: item.startDate || item.start_date || null,
+          completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -2289,6 +2324,8 @@ export default function CommonViewPage() {
                   finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  completedAt: t.completed_at || null,
                 })
               }
               if (t.is_1h_report) {
@@ -2307,6 +2344,8 @@ export default function CommonViewPage() {
                   finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  completedAt: t.completed_at || null,
                 })
               }
               if (t.is_personal) {
@@ -2325,6 +2364,8 @@ export default function CommonViewPage() {
                   finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  completedAt: t.completed_at || null,
                 })
               }
               if (t.is_r1) {
@@ -2343,6 +2384,8 @@ export default function CommonViewPage() {
                   finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  completedAt: t.completed_at || null,
                 })
               }
             }
@@ -2732,7 +2775,7 @@ export default function CommonViewPage() {
           }),
         })
         if (!res.ok) {
-          let detail = "Failed to reorder fast tasks."
+          let detail = "Failed to reorder tasks."
           try {
             const data = (await res.json()) as { detail?: string }
             if (data?.detail) detail = data.detail
@@ -2747,8 +2790,8 @@ export default function CommonViewPage() {
           new Map(nextPeers.map((item, index) => [item.taskId as string, index + 1]))
         )
       } catch (err) {
-        console.error("Failed to reorder fast tasks", err)
-        toast.error("Failed to reorder fast tasks.")
+        console.error("Failed to reorder tasks", err)
+        toast.error("Failed to reorder tasks.")
       } finally {
         setReorderingTaskId((current) => (current === entry.taskId ? null : current))
       }
@@ -3289,6 +3332,11 @@ export default function CommonViewPage() {
   const todayIso = toISODate(today)
   const thisWeekMonday = getMonday(today)
   const thisWeekMondayIso = toISODate(thisWeekMonday)
+  const isOpenTaskStartingToday = (isDone?: boolean, startDate?: string | null) => {
+    if (isDone || !startDate) return false
+    const start = parseDateOnly(startDate)
+    return Boolean(start && toISODate(start) === todayIso)
+  }
 
   const buildCommonViewExportPayload = () => {
     const exportISOsBase = allDaysSelected ? weekISOs : weekISOs.filter((iso) => selectedDates.has(iso))
@@ -4740,8 +4788,8 @@ export default function CommonViewPage() {
     const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
       accentClass: "swimlane-accent blocked",
       status: x.status,
       isDone: x.isDone,
@@ -4753,14 +4801,17 @@ export default function CommonViewPage() {
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
+      startDate: x.startDate,
+      completedAt: x.completedAt,
+      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
     }))
 
     const oneHSource = includeOneH ? sortTasksByOrder(filtered.oneH, isMultiDate) : []
     const oneHItems: SwimlaneCell[] = oneHSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
       accentClass: "swimlane-accent oneh",
       status: x.status,
       isDone: x.isDone,
@@ -4772,14 +4823,17 @@ export default function CommonViewPage() {
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
+      startDate: x.startDate,
+      completedAt: x.completedAt,
+      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
     }))
 
     const personalSource = sortTasksByOrder(filtered.personal, isMultiDate)
     const personalItems: SwimlaneCell[] = personalSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
       accentClass: "swimlane-accent personal",
       status: x.status,
       isDone: x.isDone,
@@ -4791,6 +4845,9 @@ export default function CommonViewPage() {
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
+      startDate: x.startDate,
+      completedAt: x.completedAt,
+      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
     }))
 
     const externalSource = isMultiDate
@@ -4827,8 +4884,8 @@ export default function CommonViewPage() {
     const r1Items: SwimlaneCell[] = r1Source.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.owner ? [x.owner] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
       accentClass: "swimlane-accent r1",
       status: x.status,
       isDone: x.isDone,
@@ -4840,6 +4897,9 @@ export default function CommonViewPage() {
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
+      startDate: x.startDate,
+      completedAt: x.completedAt,
+      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
     }))
 
     const problemSource = isMultiDate
@@ -6653,8 +6713,22 @@ export default function CommonViewPage() {
         }
         .swimlane-date {
           font-size: 12px;
-          color: var(--swim-muted);
+          color: #334155;
+          font-weight: 700;
           line-height: 1.2;
+          align-self: flex-start;
+        }
+        .swimlane-date.today {
+          display: inline-flex;
+          align-items: center;
+          width: fit-content;
+          border: 1px solid #60a5fa;
+          border-radius: 4px;
+          background: #dbeafe;
+          color: #1d4ed8;
+          font-weight: 800;
+          padding: 2px 6px;
+          box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
         }
         .swimlane-subtitle {
           font-size: 12px;
@@ -10416,7 +10490,9 @@ export default function CommonViewPage() {
                                           </div>
                                         ) : null}
                                         {showDate ? (
-                                          <div className="swimlane-date">{cell.dateLabel}</div>
+                                          <div className={["swimlane-date", cell.dateIsToday ? "today" : ""].filter(Boolean).join(" ")}>
+                                            {cell.dateLabel}
+                                          </div>
                                         ) : null}
                                         {isNoteOpen && cell.note ? (
                                           <div className="swimlane-note">

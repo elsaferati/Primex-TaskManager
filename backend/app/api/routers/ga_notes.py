@@ -201,7 +201,10 @@ async def list_ga_notes(
     # Filter out closed notes that were closed more than 30 days ago
     closed_cutoff = datetime.utcnow() - timedelta(days=30)
 
-    stmt = select(GaNote).options(selectinload(GaNote.attachments)).order_by(GaNote.created_at.desc())
+    stmt = select(GaNote).options(selectinload(GaNote.attachments)).order_by(
+        GaNote.updated_at.desc(),
+        GaNote.created_at.desc(),
+    )
 
     # Include all open notes; include closed notes only if recently closed
     stmt = stmt.where(

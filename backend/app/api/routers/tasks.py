@@ -594,6 +594,16 @@ class FastTaskOrderUpdate(BaseModel):
     ordered_task_ids: list[uuid.UUID]
 
 
+def _is_common_view_orderable_task(task: Task) -> bool:
+    return bool(
+        is_fast_task_model(task)
+        or task.is_bllok
+        or task.is_1h_report
+        or task.is_personal
+        or task.is_r1
+    )
+
+
 def _can_complete_waiting_confirmation(
     *,
     user_role: UserRole,
@@ -803,8 +813,8 @@ async def update_fast_task_order(
         ensure_task_editor(user, task)
         if task.department_id is not None:
             ensure_department_access(user, task.department_id)
-        if not is_fast_task_model(task):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only fast tasks can be reordered")
+        if not _is_common_view_orderable_task(task):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Common View tasks can be reordered")
         assignee_ids = assignee_map.get(task.id, set())
         if task.assigned_to is not None:
             assignee_ids.add(task.assigned_to)

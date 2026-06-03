@@ -1199,6 +1199,32 @@ def _fast_subtype_short(task: Task) -> str:
     return base
 
 
+def _has_0800_marker(title: str | None) -> bool:
+    return bool(re.search(r"\b0?8:00\b", title or ""))
+
+
+def _finish_period_rank(value: str | None) -> int:
+    normalized = (value or "").strip().upper()
+    if normalized in {"", "AM", "AM/PM"}:
+        return 0
+    if normalized == "PM":
+        return 1
+    return 2
+
+
+def _task_export_order_key(task: Task) -> tuple[int, int, int, datetime, datetime, str]:
+    due_date = task.due_date or datetime.max.replace(tzinfo=timezone.utc)
+    created_at = task.created_at or datetime.max.replace(tzinfo=timezone.utc)
+    return (
+        0 if getattr(task, "is_deadline_important", False) else 1,
+        0 if _has_0800_marker(task.title) else 1,
+        _finish_period_rank(task.finish_period),
+        due_date,
+        created_at,
+        (task.title or "").lower(),
+    )
+
+
 def _system_frequency_short_label(freq: str | None) -> str:
     if not freq:
         return "-"
@@ -1742,9 +1768,24 @@ async def export_fast_tasks_xlsx(
         (Task.is_personal.is_(True), 4),
         else_=5,
     )
+    deadline_key = case((Task.is_deadline_important.is_(True), 0), else_=1)
+    marker_0800_key = case((or_(Task.title.ilike("%08:00%"), Task.title.ilike("%8:00%")), 0), else_=1)
+    period_key = case((func.upper(func.trim(func.coalesce(Task.finish_period, ""))) == "PM", 1), else_=0)
 
     if not (not is_admin and user.department_id is None):
-        rows = (await db.execute(stmt.order_by(sort_key.asc(), Task.created_at.desc()))).all()
+        rows = (
+            await db.execute(
+                stmt.order_by(
+                    sort_key.asc(),
+                    deadline_key.asc(),
+                    marker_0800_key.asc(),
+                    period_key.asc(),
+                    Task.due_date.asc().nulls_last(),
+                    Task.created_at.asc().nulls_last(),
+                    Task.title.asc().nulls_last(),
+                )
+            )
+        ).all()
 
     headers = [
         "NR",
@@ -1988,8 +2029,23 @@ async def preview_fast_tasks(
         (Task.is_personal.is_(True), 4),
         else_=5,
     )
+    deadline_key = case((Task.is_deadline_important.is_(True), 0), else_=1)
+    marker_0800_key = case((or_(Task.title.ilike("%08:00%"), Task.title.ilike("%8:00%")), 0), else_=1)
+    period_key = case((func.upper(func.trim(func.coalesce(Task.finish_period, ""))) == "PM", 1), else_=0)
 
-    rows_raw = (await db.execute(stmt.order_by(sort_key.asc(), Task.created_at.desc()))).all()
+    rows_raw = (
+        await db.execute(
+            stmt.order_by(
+                sort_key.asc(),
+                deadline_key.asc(),
+                marker_0800_key.asc(),
+                period_key.asc(),
+                Task.due_date.asc().nulls_last(),
+                Task.created_at.asc().nulls_last(),
+                Task.title.asc().nulls_last(),
+            )
+        )
+    ).all()
     rows: list[list[str]] = []
     for idx, (task, department, assigned, created) in enumerate(rows_raw, start=1):
         values = [
@@ -3764,7 +3820,7 @@ async def _daily_report_rows_for_user(
         return bz, koha_bz
 
     rows: list[list[str]] = []
-    fast_rows: list[tuple[int, int, list[str]]] = []
+    fast_rows: list[tuple[int, tuple[int, int, int, datetime, datetime, str], int, list[str]]] = []
     project_rows: list[list[str]] = []
     system_am_rows: list[list[str]] = []
     system_pm_rows: list[list[str]] = []
@@ -3805,6 +3861,7 @@ async def _daily_report_rows_for_user(
             fast_rows.append(
                 (
                     fast_type_order(task),
+                    _task_export_order_key(task),
                     fast_index,
                     [
                         "",
@@ -3903,8 +3960,8 @@ async def _daily_report_rows_for_user(
         target = system_pm_rows if _resolve_period(tmpl.finish_period, occurrence_day) == "PM" else system_am_rows
         add_system_row(target, task, tmpl, occurrence_day)
 
-    fast_rows.sort(key=lambda item: (item[0], item[1]))
-    rows.extend([row for _, __, row in fast_rows])
+    fast_rows.sort(key=lambda item: (item[0], item[1], item[2]))
+    rows.extend([row for _, __, ___, row in fast_rows])
     rows.extend(system_am_rows)
     rows.extend(project_rows)
     rows.extend(system_pm_rows)
@@ -3991,11 +4048,12 @@ async def export_daily_report_xlsx(
         for row in member_rows:
             rows.append(row + [member_label])
 
-    # Sort by LL (index 1), NLL (index 2), and T/Y/O.
+    # Sort by LL, NLL, AM/PM, and T/Y/O when combining users.
     if all_users:
         rows.sort(key=lambda r: (
             r[1] if len(r) > 1 else "",  # LL (typeLabel)
             r[2] if len(r) > 2 else "",  # NLL (subtype)
+            _finish_period_rank(r[3] if len(r) > 3 else ""),  # AM/PM
             r[12] if len(r) > 12 else "",  # T/Y/O (tyo)
         ))
 
