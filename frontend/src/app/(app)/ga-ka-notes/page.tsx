@@ -668,25 +668,6 @@ function getEditedTimestamp(updatedAt?: string | null, createdAt?: string | null
   return updated
 }
 
-function getLastEditedTimestamp(note: GaNote, taskInfo?: NoteTaskInfo | null) {
-  const timestamps = [
-    getEditedTimestamp(note.updated_at, note.created_at),
-    getEditedTimestamp(taskInfo?.taskUpdatedAt, taskInfo?.taskCreatedAt),
-  ].filter((value): value is number => value !== null)
-
-  if (timestamps.length > 0) return Math.max(...timestamps)
-
-  return 0
-}
-
-function getNoteActivityTimestamp(note: GaNote, taskInfo?: NoteTaskInfo | null) {
-  const edited = getLastEditedTimestamp(note, taskInfo)
-  if (edited > 0) return edited
-
-  const created = note.created_at ? new Date(note.created_at).getTime() : Number.NaN
-  return Number.isFinite(created) ? created : 0
-}
-
 function getLastEditedValue(note: GaNote, taskInfo?: NoteTaskInfo | null) {
   const noteUpdated = getEditedTimestamp(note.updated_at, note.created_at)
   const taskUpdated = getEditedTimestamp(taskInfo?.taskUpdatedAt, taskInfo?.taskCreatedAt)
@@ -2217,8 +2198,10 @@ export default function GaKaNotesPage() {
         if (aBucket !== bBucket) {
           return aBucket - bBucket
         }
-        // Keep the original newest-first order, but use edit time as the row's latest activity.
-        return getNoteActivityTimestamp(b, noteTaskInfo.get(b.id)) - getNoteActivityTimestamp(a, noteTaskInfo.get(a.id))
+        // Keep newest-created notes first; edits should not change row order.
+        const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
+        const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
+        return bCreated - aCreated
       })
     return sorted
   }, [notes, rangeFilter, taskStatusFilter, contentFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])

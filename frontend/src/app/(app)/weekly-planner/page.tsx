@@ -354,6 +354,7 @@ export default function WeeklyPlannerPage() {
   const [plannerTaskAssigneeIds, setPlannerTaskAssigneeIds] = React.useState<string[]>([])
   const [plannerTaskSaving, setPlannerTaskSaving] = React.useState(false)
   const [plannerTaskClearingId, setPlannerTaskClearingId] = React.useState<string | null>(null)
+  const [isSavingToday, setIsSavingToday] = React.useState(false)
   const canDeleteProjects = user?.role === "ADMIN"
   const canSaveSnapshots = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canReorderUsers = user?.role === "ADMIN" || user?.role === "MANAGER"
@@ -361,6 +362,8 @@ export default function WeeklyPlannerPage() {
   const canSaveThisWeekFinal = selectedWeek === "this"
   const canSaveNextWeekPlanned = selectedWeek === "next"
   const canCompareLastFridayPlan = selectedWeek === "this"
+  const canSaveToday = selectedWeek === "this" && departmentId !== ALL_DEPARTMENTS_VALUE
+  const canSaveDepartmentToday = selectedWeek === "this"
   const sensors = useSensors(
     useSensor(PointerSensor, {
       activationConstraint: { distance: 8 },
@@ -3106,6 +3109,43 @@ export default function WeeklyPlannerPage() {
     }
   }
 
+  const saveTodayProgress = async (targetDepartmentId = departmentId) => {
+    const hasDepartment = Boolean(targetDepartmentId && targetDepartmentId !== ALL_DEPARTMENTS_VALUE)
+    if (!data || selectedWeek !== "this" || !hasDepartment || isSavingToday) {
+      if (!hasDepartment) {
+        toast.error("Select a specific department before saving today.")
+      } else if (selectedWeek !== "this") {
+        toast.error('Switch Week to "This Week" before saving today.')
+      }
+      return
+    }
+
+    setIsSavingToday(true)
+    try {
+      const res = await apiFetch("/planners/weekly-table/save-day", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          department_id: targetDepartmentId,
+          week_start: data.week_start,
+        }),
+      })
+      if (!res.ok) {
+        const message = await res.text().catch(() => "Failed to save today")
+        toast.error(message || "Failed to save today")
+        return
+      }
+      const payload = await res.json()
+      toast.success(`Saved today (${payload.saved_count ?? 0} tasks)`)
+      await loadPlanner()
+    } catch (error) {
+      console.error("Failed to save today", error)
+      toast.error("Failed to save today")
+    } finally {
+      setIsSavingToday(false)
+    }
+  }
+
   const openPlanVsActualCompare = async () => {
     if (!data) return
     if (!canCompareLastFridayPlan) {
@@ -3575,6 +3615,13 @@ export default function WeeklyPlannerPage() {
               <Plus className="mr-2 h-4 w-4" />
               Add Task
             </Button>
+            <Button
+              variant="outline"
+              onClick={() => void saveTodayProgress()}
+              disabled={isSavingToday || !canSaveToday}
+            >
+              {isSavingToday ? "Saving today..." : "Save Today"}
+            </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
                 <Button variant="outline" className="gap-2">
@@ -3583,6 +3630,18 @@ export default function WeeklyPlannerPage() {
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-64">
+                <DropdownMenuLabel>Daily Progress</DropdownMenuLabel>
+                <DropdownMenuItem
+                  onSelect={() => void saveTodayProgress()}
+                  disabled={isSavingToday || !canSaveToday}
+                >
+                  {isSavingToday
+                    ? "Saving today..."
+                    : canSaveToday
+                      ? "Save Today"
+                      : 'Save Today [This Week + Department]'}
+                </DropdownMenuItem>
+                <DropdownMenuSeparator />
                 {canSaveSnapshots ? (
                   <>
                     <DropdownMenuLabel>Snapshots</DropdownMenuLabel>
@@ -4427,8 +4486,16 @@ export default function WeeklyPlannerPage() {
             })()}
             {data.departments.map((dept) => (
               <Card key={dept.department_id}>
-                <CardHeader>
+                <CardHeader className="flex flex-row items-center justify-between gap-3">
                   <CardTitle>{formatDepartmentName(dept.department_name)}</CardTitle>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void saveTodayProgress(dept.department_id)}
+                    disabled={isSavingToday || !canSaveDepartmentToday}
+                  >
+                    {isSavingToday ? "Saving..." : "Save Today"}
+                  </Button>
                 </CardHeader>
                 <CardContent>
                   {(() => {

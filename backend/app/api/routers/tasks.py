@@ -1594,6 +1594,7 @@ async def create_task(
                 old_completed=0,
                 new_completed=completed,
                 total=total,
+                finish_period=_enum_value(task.finish_period),
             )
 
     # Optional: store alignment users for this task (fast-task alignment).
@@ -1795,6 +1796,8 @@ async def update_task(
     status_was_explicitly_set = payload.status is not None
     start_date_set = _payload_has_field(payload, "start_date")
     due_date_set = _payload_has_field(payload, "due_date")
+    finish_period_set = _payload_has_field(payload, "finish_period")
+    progress_finish_period = _enum_value(payload.finish_period) if finish_period_set else _enum_value(task.finish_period)
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
@@ -1981,10 +1984,13 @@ async def update_task(
                     total_value=total or 0,
                     completed_delta=0,
                     daily_status=task.status.value,
+                    finish_period=progress_finish_period,
                 )
             )
         else:
             existing_progress.daily_status = task.status.value
+            if existing_progress.finish_period is None:
+                existing_progress.finish_period = progress_finish_period
     
     if payload.is_personal is not None:
         task.is_personal = payload.is_personal
@@ -1998,7 +2004,6 @@ async def update_task(
         task.fast_task_order = payload.fast_task_order
     # Optional: update alignment users if provided
     alignment_set = _payload_has_field(payload, "alignment_user_ids")
-    finish_period_set = _payload_has_field(payload, "finish_period")
     if alignment_set:
         await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
         if payload.alignment_user_ids:
@@ -2168,6 +2173,7 @@ async def update_task(
                         old_completed=old_completed,
                         new_completed=completed,
                         total=total,
+                        finish_period=progress_finish_period,
                         explicit_status=explicit_status_for_today,
                     )
 

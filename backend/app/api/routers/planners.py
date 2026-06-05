@@ -48,6 +48,8 @@ from app.schemas.planner import (
     WeeklyPlannerDay,
     WeeklyPlannerLegendEntryOut,
     WeeklyPlannerLegendEntryUpdate,
+    WeeklyPlannerSaveDayRequest,
+    WeeklyPlannerSaveDayResponse,
     WeeklyPlannerUserOrderUpdate,
     WeeklyPlannerProject,
     WeeklyPlannerResponse,
@@ -2073,6 +2075,7 @@ async def weekly_table_planner(
 
     # Prefetch per-day status history for all tasks so we can paint each day cell independently.
     daily_status_by_task_day: dict[tuple[uuid.UUID, date], TaskStatus] = {}
+    daily_finish_period_by_task_day: dict[tuple[uuid.UUID, date], str | None] = {}
     prior_status_by_task: dict[uuid.UUID, TaskStatus] = {}
     if week_task_ids:
         in_week_rows = (
@@ -2081,17 +2084,19 @@ async def weekly_table_planner(
                     TaskDailyProgress.task_id,
                     TaskDailyProgress.day_date,
                     TaskDailyProgress.daily_status,
+                    TaskDailyProgress.finish_period,
                 )
                 .where(TaskDailyProgress.task_id.in_(week_task_ids))
                 .where(TaskDailyProgress.day_date >= working_days[0])
                 .where(TaskDailyProgress.day_date <= working_days[-1])
             )
         ).all()
-        for task_id_row, day_date_row, daily_status_row in in_week_rows:
+        for task_id_row, day_date_row, daily_status_row, finish_period_row in in_week_rows:
             try:
                 daily_status_by_task_day[(task_id_row, day_date_row)] = TaskStatus(daily_status_row)
             except Exception:
                 daily_status_by_task_day[(task_id_row, day_date_row)] = TaskStatus.TODO
+            daily_finish_period_by_task_day[(task_id_row, day_date_row)] = finish_period_row
 
         pre_week_subq = (
             select(
@@ -2136,6 +2141,12 @@ async def weekly_table_planner(
             except Exception:
                 return TaskStatus.TODO
         return None
+
+    def _finish_period_for_task_day(task: Task, day_date: date) -> str | None:
+        key = (task.id, day_date)
+        if key in daily_finish_period_by_task_day:
+            return daily_finish_period_by_task_day[key]
+        return task.finish_period
 
     # Prefetch per-day progress statuses for MST/TT tasks so we can paint each day cell independently.
     mst_tt_task_ids: set[uuid.UUID] = set()
@@ -2682,7 +2693,7 @@ async def weekly_table_planner(
                 for task in user_tasks:
                     # Handle finish_period: None or empty means both AM and PM
                     # Check if finish_period is None, empty string, or not a valid AM/PM value
-                    finish_period_value = task.finish_period
+                    finish_period_value = _finish_period_for_task_day(task, day_date)
                     
                     # Normalize the finish_period value
                     finish_period_upper = None
@@ -2711,7 +2722,7 @@ async def weekly_table_planner(
                             created_at=task.created_at,
                             completed_at=task.completed_at,
                             daily_products=task.daily_products,
-                            finish_period=task.finish_period,
+                            finish_period=finish_period_value,
                             fast_task_type=get_fast_task_type(task),
                             is_bllok=task.is_bllok,
                             is_1h_report=task.is_1h_report,
@@ -2818,7 +2829,7 @@ async def weekly_table_planner(
                                 weekly_planned_products=weekly_planned_products,
                                 day_total_products=day_total_products,
                                 day_done_products=day_done_products,
-                                finish_period=t.finish_period,
+                                finish_period=_finish_period_for_task_day(t, day_date),
                                 is_bllok=t.is_bllok,
                                 is_1h_report=t.is_1h_report,
                                 is_r1=t.is_r1,
@@ -2880,7 +2891,7 @@ async def weekly_table_planner(
                                 weekly_planned_products=weekly_planned_products,
                                 day_total_products=day_total_products,
                                 day_done_products=day_done_products,
-                                finish_period=t.finish_period,
+                                finish_period=_finish_period_for_task_day(t, day_date),
                                 is_bllok=t.is_bllok,
                                 is_1h_report=t.is_1h_report,
                                 is_r1=t.is_r1,
@@ -2936,6 +2947,164 @@ async def weekly_table_planner(
         week_end=week_end,
         departments=departments_data,
         saved_plan_id=saved_plan_id,
+    )
+
+
+@router.post("/weekly-table/save-day", response_model=WeeklyPlannerSaveDayResponse)
+async def save_weekly_table_day(
+    payload: WeeklyPlannerSaveDayRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> WeeklyPlannerSaveDayResponse:
+    ensure_department_access(user, payload.department_id)
+
+    day_date = payload.day_date or _today_app_date()
+    week_start_date = _week_start(payload.week_start or day_date)
+    working_days = _get_next_5_working_days(week_start_date)
+    if day_date not in working_days:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Day is not in the selected work week")
+
+    weekly_table = await weekly_table_planner(
+        week_start=week_start_date,
+        department_id=payload.department_id,
+        is_this_week=False,
+        db=db,
+        user=user,
+    )
+    department = next(
+        (dept for dept in weekly_table.departments if dept.department_id == payload.department_id),
+        None,
+    )
+    if department is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department planner data not found")
+
+    day_payload = next((day for day in department.days if day.date == day_date), None)
+    if day_payload is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Day planner data not found")
+
+    rows_by_task: dict[uuid.UUID, dict] = {}
+
+    def normalize_entry_status(value: TaskStatus | str | None) -> str | None:
+        if value is None:
+            return None
+        if isinstance(value, TaskStatus):
+            return value.value
+        return _normalize_task_status(str(value))
+
+    def add_task(
+        *,
+        task_id: uuid.UUID | None,
+        status_value: TaskStatus | str | None,
+        daily_status_value: TaskStatus | str | None,
+        finish_period: str | None,
+        slot: str,
+        completed_value: int | None = None,
+        total_value: int | None = None,
+    ) -> None:
+        if task_id is None:
+            return
+        row = rows_by_task.setdefault(
+            task_id,
+            {
+                "status": None,
+                "daily_status": None,
+                "finish_period": finish_period,
+                "slots": set(),
+                "completed_value": 0,
+                "total_value": 0,
+            },
+        )
+        row["status"] = _pick_stronger_status(row.get("status"), normalize_entry_status(status_value))
+        row["daily_status"] = _pick_stronger_status(row.get("daily_status"), normalize_entry_status(daily_status_value))
+        row["slots"].add(slot)
+        if finish_period is None:
+            row["finish_period"] = None
+        elif row.get("finish_period") is None and len(row["slots"]) > 1:
+            row["finish_period"] = None
+        elif row.get("finish_period") is None:
+            row["finish_period"] = finish_period
+        elif row["finish_period"] != finish_period:
+            row["finish_period"] = None
+        row["completed_value"] = max(int(row.get("completed_value") or 0), int(completed_value or 0))
+        row["total_value"] = max(int(row.get("total_value") or 0), int(total_value or 0))
+
+    for user_day in day_payload.users:
+        for slot, project_bucket in (("AM", user_day.am_projects), ("PM", user_day.pm_projects)):
+            for project in project_bucket:
+                for task in project.tasks:
+                    add_task(
+                        task_id=task.task_id,
+                        status_value=task.status,
+                        daily_status_value=task.daily_status,
+                        finish_period=task.finish_period,
+                        slot=slot,
+                        completed_value=task.day_done_products if task.day_done_products is not None else task.completed_products,
+                        total_value=task.day_total_products if task.day_total_products is not None else task.total_products,
+                    )
+        for slot, task_buckets in (
+            ("AM", (user_day.am_system_tasks, user_day.am_fast_tasks)),
+            ("PM", (user_day.pm_system_tasks, user_day.pm_fast_tasks)),
+        ):
+            for task_bucket in task_buckets:
+                for task in task_bucket:
+                    add_task(
+                        task_id=task.task_id,
+                        status_value=task.status,
+                        daily_status_value=task.daily_status,
+                        finish_period=task.finish_period,
+                        slot=slot,
+                        completed_value=task.daily_products,
+                        total_value=task.daily_products,
+                    )
+
+    if not rows_by_task:
+        return WeeklyPlannerSaveDayResponse(
+            department_id=payload.department_id,
+            day_date=day_date,
+            saved_count=0,
+        )
+
+    existing_rows = (
+        await db.execute(
+            select(TaskDailyProgress)
+            .where(TaskDailyProgress.task_id.in_(list(rows_by_task.keys())))
+            .where(TaskDailyProgress.day_date == day_date)
+        )
+    ).scalars().all()
+    existing_by_task = {row.task_id: row for row in existing_rows}
+
+    for task_id, row in rows_by_task.items():
+        daily_status = row.get("daily_status") or row.get("status") or TaskStatus.TODO
+        daily_status_value = normalize_entry_status(daily_status) or TaskStatus.TODO.value
+        finish_period = row.get("finish_period")
+        if finish_period is not None:
+            normalized_finish_period = str(finish_period).strip().upper()
+            finish_period = normalized_finish_period if normalized_finish_period in {"AM", "PM"} else None
+
+        existing = existing_by_task.get(task_id)
+        if existing is None:
+            db.add(
+                TaskDailyProgress(
+                    task_id=task_id,
+                    day_date=day_date,
+                    completed_value=max(0, int(row.get("completed_value") or 0)),
+                    total_value=max(0, int(row.get("total_value") or 0)),
+                    completed_delta=0,
+                    daily_status=daily_status_value,
+                    finish_period=finish_period,
+                )
+            )
+        else:
+            existing.completed_value = max(0, int(row.get("completed_value") or 0))
+            existing.total_value = max(0, int(row.get("total_value") or 0))
+            existing.daily_status = daily_status_value
+            existing.finish_period = finish_period
+
+    await db.commit()
+    return WeeklyPlannerSaveDayResponse(
+        department_id=payload.department_id,
+        day_date=day_date,
+        saved_count=len(rows_by_task),
     )
 
 

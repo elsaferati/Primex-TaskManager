@@ -28,6 +28,8 @@ class TaskDailyProgress(Base):
 
     # Per-day derived status: TODO / IN_PROGRESS / DONE (matches TaskStatus values).
     daily_status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="TODO")
+    # Per-day AM/PM slot snapshot. Null means the task was planned for both slots.
+    finish_period: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -35,4 +37,3 @@ class TaskDailyProgress(Base):
     __table_args__ = (
         UniqueConstraint("task_id", "day_date", name="uq_task_daily_progress_task_id_day_date"),
     )
-

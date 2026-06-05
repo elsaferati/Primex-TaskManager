@@ -33,6 +33,7 @@ async def upsert_task_daily_progress(
     old_completed: int,
     new_completed: int,
     total: int,
+    finish_period: str | None = None,
     explicit_status: TaskStatus | None = None,
 ) -> None:
     # Use explicit_status if provided, otherwise derive from products
@@ -62,6 +63,7 @@ async def upsert_task_daily_progress(
                 total_value=max(0, total),
                 completed_delta=max(0, delta_positive),
                 daily_status=status.value,
+                finish_period=finish_period,
             )
         )
         return
@@ -77,3 +79,4 @@ async def upsert_task_daily_progress(
     elif existing.daily_status == TaskStatus.TODO.value:
         # Only auto-update if current status is TODO (no explicit status set)
         existing.daily_status = status.value
+    existing.finish_period = finish_period

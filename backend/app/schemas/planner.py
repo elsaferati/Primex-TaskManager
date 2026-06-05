@@ -119,6 +119,18 @@ class WeeklyTableResponse(BaseModel):
     saved_plan_id: uuid.UUID | None = None
 
 
+class WeeklyPlannerSaveDayRequest(BaseModel):
+    department_id: uuid.UUID
+    week_start: date | None = None
+    day_date: date | None = None
+
+
+class WeeklyPlannerSaveDayResponse(BaseModel):
+    department_id: uuid.UUID
+    day_date: date
+    saved_count: int
+
+
 class MonthlyPlannerSummary(BaseModel):
     month_completed: int
     previous_month_completed: int

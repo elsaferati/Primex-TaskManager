@@ -263,6 +263,7 @@ type SwimlaneRow = {
 
 type MeetingColumnKey = "nr" | "day" | "topic" | "check" | "owner" | "time"
 type MeetingColumn = { key: MeetingColumnKey; label: string; width?: string }
+type MeetingCheckStatus = "none" | "check" | "x" | "o"
 type MeetingRow = {
   id: string
   nr: number
@@ -271,6 +272,8 @@ type MeetingRow = {
   owner?: string
   time?: string
   isChecked?: boolean
+  checkStatus?: MeetingCheckStatus
+  comment?: string
 }
 type MeetingTemplate = {
   id: string
@@ -300,13 +303,14 @@ type MeetingChecklist = {
     day?: string | null
     owner?: string | null
     time?: string | null
+    comment?: string | null
     is_checked?: boolean | null
   }[]
 }
 
 const DEFAULT_MEETING_COLUMNS: MeetingColumn[] = [
   { key: "nr", label: "NR", width: "52px" },
-  { key: "topic", label: "M1 PIKAT" },
+  { key: "topic", label: "M1 PIKAT", width: "860px" },
   { key: "check", label: "", width: "48px" },
   { key: "owner", label: "WHO", width: "90px" },
   { key: "time", label: "WHEN", width: "90px" },
@@ -317,6 +321,23 @@ const ALL_USERS_LABEL = "All users"
 const ALL_USERS_INITIALS = "ALL"
 const ALL_USERS_MARKER = "[ALL_USERS]"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
+const MEETING_CHECK_STATUS_RE = /\[MEETING_CHECK_STATUS:(CHECK|X|O)\]/i
+
+const getMeetingCheckStatus = (isChecked?: boolean | null, comment?: string | null): MeetingCheckStatus => {
+  const match = (comment || "").match(MEETING_CHECK_STATUS_RE)
+  const markerValue = match?.[1]?.toUpperCase()
+  if (markerValue === "X") return "x"
+  if (markerValue === "O") return "o"
+  if (markerValue === "CHECK") return "check"
+  return isChecked ? "check" : "none"
+}
+
+const buildMeetingCheckComment = (status: MeetingCheckStatus, comment?: string | null) => {
+  const cleaned = (comment || "").replace(MEETING_CHECK_STATUS_RE, "").trim()
+  if (status === "none" || status === "check") return cleaned
+  const marker = status === "x" ? "[MEETING_CHECK_STATUS:X]" : "[MEETING_CHECK_STATUS:O]"
+  return cleaned ? `${cleaned}\n${marker}` : marker
+}
 
 const parseFeedbackNote = (note: string | null | undefined) => {
   const raw = note || ""
@@ -1124,6 +1145,7 @@ export default function CommonViewPage() {
     owner: "",
     time: "",
   })
+  const [movingMeetingRowId, setMovingMeetingRowId] = React.useState<string | null>(null)
   const [isSavingEntry, setIsSavingEntry] = React.useState(false)
   const [editingMeetingTitle, setEditingMeetingTitle] = React.useState(false)
   const [meetingTitleDraft, setMeetingTitleDraft] = React.useState("")
@@ -1472,6 +1494,8 @@ export default function CommonViewPage() {
               owner: item.owner || undefined,
               time: item.time || undefined,
               isChecked: item.is_checked ?? false,
+              checkStatus: getMeetingCheckStatus(item.is_checked, item.comment),
+              comment: item.comment || undefined,
             }))
           return {
             id: checklist.id,
@@ -5177,41 +5201,45 @@ export default function CommonViewPage() {
     node.scrollBy({ left: delta, behavior: "smooth" })
   }, [])
 
-  const updateMeetingChecked = React.useCallback((meetingId: string, itemId: string, nextChecked: boolean) => {
+  const updateMeetingCheckStatus = React.useCallback((meetingId: string, itemId: string, nextStatus: MeetingCheckStatus) => {
     setMeetingTemplates((prev) =>
       prev.map((meeting) => {
         if (meeting.id !== meetingId) return meeting
         return {
           ...meeting,
           rows: meeting.rows.map((row) =>
-            row.id === itemId ? { ...row, isChecked: nextChecked } : row
+            row.id === itemId ? { ...row, isChecked: nextStatus === "check", checkStatus: nextStatus } : row
           ),
         }
       })
     )
   }, [])
 
-  const toggleMeetingItem = React.useCallback(
-    async (meetingId: string, itemId: string, nextChecked: boolean) => {
-      const currentChecked =
+  const changeMeetingCheckStatus = React.useCallback(
+    async (meetingId: string, itemId: string, nextStatus: MeetingCheckStatus) => {
+      const currentRow =
         meetingTemplates
           .find((meeting) => meeting.id === meetingId)
-          ?.rows.find((row) => row.id === itemId)?.isChecked ?? false
-      updateMeetingChecked(meetingId, itemId, nextChecked)
+          ?.rows.find((row) => row.id === itemId)
+      const currentStatus = currentRow?.checkStatus ?? (currentRow?.isChecked ? "check" : "none")
+      updateMeetingCheckStatus(meetingId, itemId, nextStatus)
       try {
         const res = await apiFetch(`/checklist-items/${itemId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ is_checked: nextChecked }),
+          body: JSON.stringify({
+            is_checked: nextStatus === "check",
+            comment: buildMeetingCheckComment(nextStatus, currentRow?.comment),
+          }),
         })
         if (!res.ok) {
-          updateMeetingChecked(meetingId, itemId, currentChecked)
+          updateMeetingCheckStatus(meetingId, itemId, currentStatus)
         }
-      } catch (err) {
-        updateMeetingChecked(meetingId, itemId, currentChecked)
+      } catch {
+        updateMeetingCheckStatus(meetingId, itemId, currentStatus)
       }
     },
-    [apiFetch, meetingTemplates, updateMeetingChecked]
+    [apiFetch, meetingTemplates, updateMeetingCheckStatus]
   )
 
   const startEditMeetingRow = React.useCallback((row: MeetingRow) => {
@@ -5317,50 +5345,53 @@ export default function CommonViewPage() {
     [apiFetch, editDraft, meetingTemplates]
   )
 
-  const resequenceMeetingRows = React.useCallback(
-    async (meetingId: string, rowsOverride?: MeetingRow[]) => {
+  const moveMeetingRow = React.useCallback(
+    async (meetingId: string, rowId: string, direction: "up" | "down") => {
       const meeting = meetingTemplates.find((template) => template.id === meetingId)
-      const rows = rowsOverride || meeting?.rows || []
-      if (!rows.length) return
-      const sortedRows = rows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
-      const resequencedRows = sortedRows.map((row, index) => ({
-        ...row,
-        nr: index + 1,
-      }))
-      const updates = resequencedRows
-        .map((row) => ({ row, nextNr: row.nr }))
-        .filter(({ row, nextNr }) => (rows.find((r) => r.id === row.id)?.nr ?? 0) !== nextNr)
-      if (!updates.length) return
+      if (!meeting || movingMeetingRowId) return
+      const sortedRows = meeting.rows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+      const currentIndex = sortedRows.findIndex((row) => row.id === rowId)
+      if (currentIndex < 0) return
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+      if (targetIndex < 0 || targetIndex >= sortedRows.length) return
 
+      const nextRows = sortedRows.slice()
+      const currentRow = nextRows[currentIndex]
+      nextRows[currentIndex] = nextRows[targetIndex]
+      nextRows[targetIndex] = currentRow
+
+      setMovingMeetingRowId(rowId)
       setMeetingTemplates((prev) =>
-        prev.map((template) => {
-          if (template.id !== meetingId) return template
-          if (rowsOverride) {
-            return { ...template, rows: resequencedRows }
-          }
-          const updatedRows = template.rows.map((row) => {
-            const next = updates.find((entry) => entry.row.id === row.id)
-            return next ? { ...row, nr: next.nextNr } : row
-          })
-          return { ...template, rows: updatedRows }
-        })
+        prev.map((template) =>
+          template.id === meetingId
+            ? {
+                ...template,
+                rows: nextRows.map((row, index) => ({ ...row, nr: index + 1 })),
+              }
+            : template
+        )
       )
 
       try {
-        await Promise.all(
-          updates.map(({ row, nextNr }) =>
-            apiFetch(`/checklist-items/${row.id}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ position: nextNr }),
-            })
-          )
-        )
+        const res = await apiFetch(`/checklist-items/${rowId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ position: sortedRows[targetIndex].nr }),
+        })
+        if (!res.ok) {
+          throw new Error(`Failed to reorder meeting point (${res.status})`)
+        }
       } catch (err) {
-        console.error("Failed to resequence meeting items", err)
+        console.error("Failed to reorder meeting point", err)
+        toast.error("Failed to reorder meeting point.")
+        setMeetingTemplates((prev) =>
+          prev.map((template) => (template.id === meetingId ? { ...template, rows: meeting.rows } : template))
+        )
+      } finally {
+        setMovingMeetingRowId((current) => (current === rowId ? null : current))
       }
     },
-    [apiFetch, meetingTemplates]
+    [apiFetch, meetingTemplates, movingMeetingRowId]
   )
 
   const deleteMeetingRow = React.useCallback(
@@ -5398,9 +5429,14 @@ export default function CommonViewPage() {
           )
           return
         }
-        const remainingRows = previousRows.filter((row) => row.id !== rowId)
-        await resequenceMeetingRows(meetingId, remainingRows)
-      } catch (err) {
+        const remainingRows = previousRows
+          .filter((row) => row.id !== rowId)
+          .sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+          .map((row, index) => ({ ...row, nr: index + 1 }))
+        setMeetingTemplates((prev) =>
+          prev.map((meeting) => (meeting.id === meetingId ? { ...meeting, rows: remainingRows } : meeting))
+        )
+      } catch {
         setMeetingTemplates((prev) =>
           prev.map((meeting) => {
             if (meeting.id !== meetingId) return meeting
@@ -5412,7 +5448,7 @@ export default function CommonViewPage() {
         )
       }
     },
-    [apiFetch, confirm, meetingTemplates, resequenceMeetingRows]
+    [apiFetch, confirm, meetingTemplates]
   )
 
   const addMeetingRow = React.useCallback(
@@ -5423,8 +5459,10 @@ export default function CommonViewPage() {
       if (!meeting) return
       const parsedNr = Number(addDraft.nr)
       const requestedNr = Number.isFinite(parsedNr) && parsedNr > 0 ? Math.floor(parsedNr) : null
+      const sortedRows = meeting.rows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+      const insertIndex = requestedNr === null ? sortedRows.length : Math.min(requestedNr - 1, sortedRows.length)
       const nextPosition =
-        requestedNr || Math.max(0, ...meeting.rows.map((row) => row.nr || 0)) + 1
+        requestedNr === null ? Math.max(0, ...meeting.rows.map((row) => row.nr || 0)) + 1 : insertIndex + 1
       const payload = {
         checklist_id: meetingId,
         item_type: "CHECKBOX",
@@ -5451,13 +5489,15 @@ export default function CommonViewPage() {
           owner: created.owner || undefined,
           time: created.time || undefined,
           isChecked: created.is_checked ?? false,
+          checkStatus: getMeetingCheckStatus(created.is_checked, created.comment),
+          comment: created.comment || undefined,
         }
         const baseRows = meeting?.rows || []
-        const nextRows = requestedNr
-          ? baseRows.map((row) =>
-              row.nr >= requestedNr ? { ...row, nr: row.nr + 1 } : row
-            ).concat(createdRow)
-          : baseRows.concat(createdRow)
+        const orderedBaseRows = baseRows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+        const nextRows = orderedBaseRows
+          .slice(0, insertIndex)
+          .concat(createdRow, orderedBaseRows.slice(insertIndex))
+          .map((row, index) => ({ ...row, nr: index + 1 }))
         setMeetingTemplates((prev) =>
           prev.map((template) => {
             if (template.id !== meetingId) return template
@@ -5468,12 +5508,11 @@ export default function CommonViewPage() {
           })
         )
         setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
-        await resequenceMeetingRows(meetingId, nextRows)
       } catch (err) {
         console.error("Failed to add meeting item", err)
       }
     },
-    [addDraft, apiFetch, meetingTemplates, resequenceMeetingRows]
+    [addDraft, apiFetch, meetingTemplates]
   )
 
   return (
@@ -6093,6 +6132,7 @@ export default function CommonViewPage() {
         }
         .meeting-table {
           width: 100%;
+          table-layout: fixed;
           border-collapse: collapse;
           font-size: 12px;
         }
@@ -6185,14 +6225,62 @@ export default function CommonViewPage() {
           color: #0f172a;
           white-space: nowrap;
         }
+        .meeting-table td.meeting-topic-cell {
+          width: 860px;
+          min-width: 860px;
+          max-width: 860px;
+          white-space: normal !important;
+          overflow-wrap: anywhere;
+          word-break: normal;
+          line-height: 1.45;
+        }
+        .meeting-topic-text {
+          display: block;
+          width: 100%;
+          max-width: 100%;
+          white-space: normal;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          line-height: 1.45;
+        }
+        .meeting-topic-header {
+          width: 860px;
+          min-width: 860px;
+          max-width: 860px;
+        }
+        .meeting-topic-cell .input {
+          white-space: normal;
+        }
         .meeting-check-cell {
           text-align: center;
           vertical-align: middle;
         }
-        .meeting-check-cell input {
-          accent-color: #64748b;
-          width: 16px;
-          height: 16px;
+        .meeting-check-select {
+          width: 42px;
+          height: 30px;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          background: #ffffff;
+          color: #334155;
+          font-size: 14px;
+          font-weight: 800;
+          text-align: center;
+          cursor: pointer;
+        }
+        .meeting-check-select.status-check {
+          border-color: #86efac;
+          background: #f0fdf4;
+          color: #15803d;
+        }
+        .meeting-check-select.status-x {
+          border-color: #fecaca;
+          background: #fef2f2;
+          color: #b91c1c;
+        }
+        .meeting-check-select.status-o {
+          border-color: #bfdbfe;
+          background: #eff6ff;
+          color: #1d4ed8;
         }
         .btn-icon {
           width: 28px;
@@ -6210,6 +6298,15 @@ export default function CommonViewPage() {
           background: #f1f5f9;
           color: #334155;
         }
+        .btn-icon:disabled {
+          cursor: not-allowed;
+          opacity: 0.45;
+          transform: none;
+        }
+        .btn-icon:disabled:hover {
+          background: #ffffff;
+          color: #475569;
+        }
         .btn-icon.danger {
           color: #b91c1c;
           border-color: #fecaca;
@@ -6218,6 +6315,12 @@ export default function CommonViewPage() {
         .btn-icon.danger:hover {
           background: #ffe4e6;
           color: #991b1b;
+        }
+        .meeting-row-actions {
+          display: flex;
+          flex-wrap: nowrap;
+          gap: 6px;
+          align-items: center;
         }
         .meeting-owner-cell {
           text-align: center;
@@ -8355,11 +8458,15 @@ export default function CommonViewPage() {
                   <thead>
                     <tr>
                       {activeMeeting.columns.map((col) => (
-                        <th key={col.key} style={col.width ? { width: col.width } : undefined}>
+                        <th
+                          key={col.key}
+                          className={col.key === "topic" ? "meeting-topic-header" : undefined}
+                          style={col.width ? { width: col.width } : undefined}
+                        >
                           {col.label}
                         </th>
                       ))}
-                      {canEditMeetingTemplates ? <th style={{ width: "120px" }}>Actions</th> : null}
+                      {canEditMeetingTemplates ? <th style={{ width: "160px" }}>Actions</th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -8396,31 +8503,47 @@ export default function CommonViewPage() {
                           }
 
                           if (col.key === "check") {
+                            const checkStatus = row.checkStatus ?? (row.isChecked ? "check" : "none")
                             return (
                               <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} className="meeting-check-cell">
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Mark ${row.topic}`}
-                                  checked={Boolean(row.isChecked)}
-                                  onChange={(e) => toggleMeetingItem(activeMeeting.id, row.id, e.target.checked)}
-                                />
+                                <select
+                                  className={`meeting-check-select status-${checkStatus}`}
+                                  aria-label={`Set status for ${row.topic}`}
+                                  value={checkStatus}
+                                  onChange={(e) =>
+                                    void changeMeetingCheckStatus(
+                                      activeMeeting.id,
+                                      row.id,
+                                      e.target.value as MeetingCheckStatus
+                                    )
+                                  }
+                                >
+                                  <option value="none"></option>
+                                  <option value="check">{"\u2713"}</option>
+                                  <option value="x">X</option>
+                                  <option value="o">O</option>
+                                </select>
                               </td>
                             )
                           }
 
                           if (col.key === "topic") {
                             return (
-                              <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
+                              <td
+                                key={`${activeMeeting.id}-${row.nr}-${col.key}`}
+                                className="meeting-topic-cell"
+                                style={col.width ? { width: col.width } : undefined}
+                              >
                                 {isEditing ? (
                                   <input
                                     className="input"
                                     type="text"
                                     value={editDraft.topic}
-                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, topic: e.target.value.toUpperCase() }))}
+                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, topic: e.target.value }))}
                                     style={{ textTransform: "uppercase" }}
                                   />
                                 ) : (
-                                  value
+                                  <span className="meeting-topic-text">{value}</span>
                                 )}
                               </td>
                             )
@@ -8495,7 +8618,43 @@ export default function CommonViewPage() {
                                 </button>
                               </div>
                             ) : (
-                              <div style={{ display: "flex", gap: "6px" }}>
+                              <div className="meeting-row-actions">
+                                <button
+                                  className="btn-icon"
+                                  type="button"
+                                  onClick={() => void moveMeetingRow(activeMeeting.id, row.id, "up")}
+                                  aria-label="Move row up"
+                                  title="Move up"
+                                  disabled={rowIndex === 0 || Boolean(movingMeetingRowId)}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path
+                                      d="M6 15l6-6 6 6"
+                                      stroke="currentColor"
+                                      strokeWidth="1.8"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                                <button
+                                  className="btn-icon"
+                                  type="button"
+                                  onClick={() => void moveMeetingRow(activeMeeting.id, row.id, "down")}
+                                  aria-label="Move row down"
+                                  title="Move down"
+                                  disabled={rowIndex === activeMeeting.rows.length - 1 || Boolean(movingMeetingRowId)}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path
+                                      d="M6 9l6 6 6-6"
+                                      stroke="currentColor"
+                                      strokeWidth="1.8"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
                                 <button className="btn-icon" type="button" onClick={() => startEditMeetingRow(row)} aria-label="Edit row">
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                     <path
@@ -8559,7 +8718,7 @@ export default function CommonViewPage() {
                       type="text"
                       placeholder="Topic"
                       value={addDraft.topic}
-                      onChange={(e) => setAddDraft((prev) => ({ ...prev, topic: e.target.value.toUpperCase() }))}
+                      onChange={(e) => setAddDraft((prev) => ({ ...prev, topic: e.target.value }))}
                       style={{ textTransform: "uppercase" }}
                     />
                     <button className="btn-primary" type="button" onClick={() => addMeetingRow(activeMeeting.id)}>
