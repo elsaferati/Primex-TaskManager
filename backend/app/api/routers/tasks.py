@@ -1742,6 +1742,8 @@ async def update_task(
     can_edit = False
     if user.role in (UserRole.ADMIN, UserRole.MANAGER):
         can_edit = True
+    elif task.ga_note_origin_id is not None:
+        can_edit = True
     elif task.created_by and task.created_by == user.id:
         can_edit = True
     elif is_assigned_to_task:

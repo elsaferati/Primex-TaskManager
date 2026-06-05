@@ -7241,20 +7241,21 @@ export default function CommonViewPage() {
         .week-table-avatars {
           display: flex;
           flex-wrap: wrap;
-          gap: 4px;
+          gap: 5px;
           margin-top: 2px;
         }
         .week-table-avatar {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 20px;
-          height: 20px;
+          width: 24px;
+          height: 24px;
           border-radius: 999px;
           background: #e2e8f0;
           color: #0f172a;
-          font-weight: 700;
-          font-size: 9px;
+          font-weight: 800;
+          font-size: 11px;
+          line-height: 1;
           border: 1px solid #cbd5e1;
         }
         .week-table-empty {
@@ -7396,7 +7397,7 @@ export default function CommonViewPage() {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 1px;
+            gap: 2px;
             margin-top: 0;
             line-height: 1;
           }
@@ -7406,14 +7407,15 @@ export default function CommonViewPage() {
             justify-content: center;
             flex: 0 0 auto !important;
             min-width: 0;
-            height: 8px;
-            padding: 0 1px;
-            border-radius: 2px;
-            font-size: 6px;
-            line-height: 8px;
-            font-weight: 700;
+            min-height: 16px;
+            height: 16px;
+            padding: 0 4px;
+            border-radius: 4px;
+            font-size: 10px;
+            line-height: 16px;
+            font-weight: 800;
             white-space: nowrap;
-            border-width: 0.8px;
+            border-width: 1px;
             align-self: center;
             vertical-align: middle;
           }

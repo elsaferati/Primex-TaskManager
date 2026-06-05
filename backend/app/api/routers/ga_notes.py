@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
 
-from app.api.access import ensure_department_access, ensure_task_editor
+from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.ga_note import GaNote
@@ -102,12 +102,7 @@ def _ga_note_upload_base_dir() -> Path:
 
 
 async def _ensure_note_access(note: GaNote, user, db: AsyncSession) -> None:
-    if note.project_id is not None:
-        project = (await db.execute(select(Project).where(Project.id == note.project_id))).scalar_one_or_none()
-        if project and project.department_id is not None:
-            ensure_department_access(user, project.department_id)
-    elif note.department_id is not None:
-        ensure_department_access(user, note.department_id)
+    return
 
 
 async def _get_note_or_404(note_id: uuid.UUID, db: AsyncSession) -> GaNote:
@@ -348,24 +343,6 @@ async def update_ga_note_task_deadline(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="No active tasks found for this GA/KA note",
-        )
-
-    # Permission: allow if the user can edit ANY of the linked tasks (admin,
-    # manager, the original task creator, or any assignee). This matches the
-    # behavior of PATCH /tasks/{id} but applied across the per-user copies.
-    can_edit = False
-    forbidden_error: HTTPException | None = None
-    for task in linked_tasks:
-        try:
-            ensure_task_editor(user, task)
-            can_edit = True
-            break
-        except HTTPException as exc:
-            forbidden_error = exc
-            continue
-    if not can_edit:
-        raise forbidden_error or HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden"
         )
 
     new_due_date = None if payload.clear else payload.due_date
