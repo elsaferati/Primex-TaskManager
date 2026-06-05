@@ -29,6 +29,7 @@ type CommonType =
   | "bz"
 
 const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH", "r1", "personal"]
+const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH", "r1", "personal", "feedback"]
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
@@ -148,6 +149,21 @@ type CommonBucket =
   | "bz"
 type FastTaskRowId = "blocked" | "oneH" | "personal" | "r1"
 type FastTaskEntry = BlockedItem | OneHItem | PersonalItem | R1Item
+type CommonWeekTableEntry =
+  | LateItem
+  | AbsentItem
+  | LeaveItem
+  | ExternalHolidayItem
+  | BlockedItem
+  | OneHItem
+  | PersonalItem
+  | ExternalItem
+  | InternalItem
+  | BzItem
+  | R1Item
+  | ProblemItem
+  | FeedbackItem
+  | PriorityItem
 type CommonViewCounts = Record<CommonBucket, number>
 type CommonViewGuardrails = {
   max_items_per_bucket: number
@@ -6752,6 +6768,18 @@ export default function CommonViewPage() {
           white-space: pre-wrap;
           line-height: 1.35;
         }
+        .swimlane-title-text.collapsed {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          white-space: normal;
+          word-break: break-word;
+        }
+        .swimlane-title-text.expanded {
+          display: inline;
+          white-space: pre-wrap;
+        }
         .swimlane-title-toggle {
           position: absolute;
           top: 8px;
@@ -7076,6 +7104,25 @@ export default function CommonViewPage() {
           white-space: pre-wrap;
           line-height: 1.35;
         }
+        .week-table-merged-cell {
+          background: #ffffff;
+        }
+        .week-table-feedback-summary {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 3px;
+        }
+        .feedback-print-summary-line {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .feedback-print-date {
+          color: #64748b;
+          font-weight: 700;
+        }
+        .week-table-feedback-summary .week-table-delete {
+          display: none !important;
+        }
         .week-table-delete {
           border: 1px solid #cbd5e1;
           background: #ffffff;
@@ -7311,6 +7358,23 @@ export default function CommonViewPage() {
             text-overflow: ellipsis;
             white-space: normal !important;
             line-height: 1.15;
+          }
+          .week-table-feedback-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1px 3px;
+          }
+          .week-table-merged-cell {
+            padding: 1px 3px !important;
+          }
+          .feedback-print-summary-line {
+            display: block;
+            white-space: nowrap !important;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1;
+          }
+          .feedback-print-date {
+            color: #475569 !important;
           }
           .week-table-entry {
             border: 1px solid #94a3b8 !important;
@@ -9946,7 +10010,7 @@ export default function CommonViewPage() {
                   .map((row, rowIndex) => {
                     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
                     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
-                    let dayEntries: Record<string, any[]> = {}
+                    const dayEntries: Record<string, CommonWeekTableEntry[]> = {}
                     weekISOs.forEach((iso) => {
                       const dayData = tableDataByDay?.[iso]
                       if (row.id === "late") dayEntries[iso] = dayData?.late || []
@@ -10330,8 +10394,74 @@ export default function CommonViewPage() {
                       }
                       return null
                     }
+
+                    const getFeedbackWeekSummary = () => {
+                      const seen = new Set<string>()
+                      const items: Array<{ entry: FeedbackItem; iso: string }> = []
+                      weekISOs.forEach((iso) => {
+                        const feedbackEntries = (dayEntries[iso] || []) as FeedbackItem[]
+                        feedbackEntries.forEach((entry) => {
+                          const key = entry.everyday
+                            ? entry.entryId || `${normalizeTitle(entry.title)}|${normalizeTitle(entry.note || "")}|${entry.person}`
+                            : `${iso}|${entry.entryId || normalizeTitle(entry.title)}|${normalizeTitle(entry.note || "")}|${entry.person}`
+                          if (seen.has(key)) return
+                          seen.add(key)
+                          items.push({ entry, iso })
+                        })
+                      })
+                      return items
+                    }
                     
                     const rowLabel = row.label.toUpperCase()
+                    if (row.id === "feedback") {
+                      const feedbackSummary = getFeedbackWeekSummary()
+                      return (
+                        <tr key={row.id} className={`week-table-row ${weekRowClass} week-table-row-merged`}>
+                          <td className="week-table-number">{rowIndex + 1}</td>
+                          <td className="week-table-label">{rowLabel}</td>
+                          <td colSpan={weekISOs.length} className="week-table-cell week-table-merged-cell">
+                            {feedbackSummary.length ? (
+                              <div className="week-table-entries week-table-feedback-summary">
+                                {feedbackSummary.map(({ entry, iso }, idx) => {
+                                  const dateLabel = entry.everyday
+                                    ? "All week"
+                                    : `${getDayCode(fromISODate(iso))} ${formatDateHuman(iso)}`
+                                  return (
+                                    <div key={`${entry.entryId || entry.title}-${iso}-${idx}`} className="week-table-entry">
+                                      <span className="feedback-print-summary-line">
+                                        {idx + 1}. {commonPrintTitleLine(entry.title)}
+                                        <span className="feedback-print-date"> - {dateLabel}</span>
+                                        {entry.note ? ` - ${commonPrintTitleLine(entry.note)}` : ""}
+                                      </span>
+                                      <div className="week-table-avatars">
+                                        {entryAssignees(entry).map((name: string) => (
+                                          <span key={`${entry.title}-${name}`} className="week-table-avatar" title={name}>
+                                            {initials(name)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                      {canDeleteCommon && entry.entryId ? (
+                                        <button
+                                          type="button"
+                                          className="week-table-delete week-table-delete-red"
+                                          onClick={() => deleteCommonEntry(entry.entryId!)}
+                                          aria-label="Delete entry"
+                                          title="Delete"
+                                        >
+                                          Ã—
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            ) : (
+                              <span className="week-table-empty">â€”</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    }
                     
                     return (
                       <tr key={row.id} className={`week-table-row ${weekRowClass}`}>
@@ -10396,7 +10526,7 @@ export default function CommonViewPage() {
                     >
                       {(() => {
                         const headerSubtext = swimlaneHeaderSubtext[row.id]
-                        const hasTitleToggle = row.id === "oneH" || row.id === "r1" || row.id === "personal"
+                        const hasTitleToggle = TITLE_EXPANDABLE_SWIMLANE_ROWS.includes(row.id)
                         const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
                         const infoButton = (
                           <span className="swimlane-info-wrap">
@@ -10500,6 +10630,7 @@ export default function CommonViewPage() {
                             const noteKey = cell.entryId || `${row.id}-${index}`
                             const isNoteOpen = openSwimlaneNoteId === noteKey
                             const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
+                            const isTitleExpandable = TITLE_EXPANDABLE_SWIMLANE_ROWS.includes(row.id)
                             return (
                               <div
                                 key={`${row.id}-${index}`}
@@ -10609,7 +10740,13 @@ export default function CommonViewPage() {
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
-                                      <span className={["swimlane-title-text", isTitleRowOpen ? "expanded" : ""].filter(Boolean).join(" ")}>
+                                      <span
+                                        className={[
+                                          "swimlane-title-text",
+                                          isTitleExpandable && !isTitleRowOpen ? "collapsed" : "",
+                                          isTitleRowOpen ? "expanded" : "",
+                                        ].filter(Boolean).join(" ")}
+                                      >
                                         {isTitleRowOpen
                                           ? renderMarkedNoteContent(stripInitialsPrefix(cell.title), cell.title)
                                           : renderCommonMarkedTitleLine(cell.title)}
