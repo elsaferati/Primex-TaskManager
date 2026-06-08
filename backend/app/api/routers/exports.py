@@ -1205,20 +1205,25 @@ def _has_0800_marker(title: str | None) -> bool:
 
 def _finish_period_rank(value: str | None) -> int:
     normalized = (value or "").strip().upper()
-    if normalized in {"", "AM", "AM/PM"}:
+    if normalized == "AM":
         return 0
-    if normalized == "PM":
+    if normalized in {"", "AM/PM"}:
         return 1
-    return 2
+    if normalized == "PM":
+        return 2
+    return 3
 
 
-def _task_export_order_key(task: Task) -> tuple[int, int, int, datetime, datetime, str]:
+def _task_export_order_key(task: Task) -> tuple[int, int, int, int, datetime, datetime, str]:
     due_date = task.due_date or datetime.max.replace(tzinfo=timezone.utc)
     created_at = task.created_at or datetime.max.replace(tzinfo=timezone.utc)
+    status_value = str(getattr(task.status, "value", task.status) or "").strip().upper()
+    is_done = bool(task.completed_at) or status_value == "DONE"
     return (
-        0 if getattr(task, "is_deadline_important", False) else 1,
-        0 if _has_0800_marker(task.title) else 1,
+        1 if is_done else 0,
         _finish_period_rank(task.finish_period),
+        0 if _has_0800_marker(task.title) else 1,
+        0 if getattr(task, "is_deadline_important", False) else 1,
         due_date,
         created_at,
         (task.title or "").lower(),
@@ -3820,7 +3825,7 @@ async def _daily_report_rows_for_user(
         return bz, koha_bz
 
     rows: list[list[str]] = []
-    fast_rows: list[tuple[int, tuple[int, int, int, datetime, datetime, str], int, list[str]]] = []
+    fast_rows: list[tuple[int, tuple[int, int, int, int, datetime, datetime, str], int, list[str]]] = []
     project_rows: list[list[str]] = []
     system_am_rows: list[list[str]] = []
     system_pm_rows: list[list[str]] = []
@@ -3843,6 +3848,12 @@ async def _daily_report_rows_for_user(
     def date_cell(value: date | datetime | None) -> str:
         day_value = _as_utc_date(value)
         return _format_excel_date(day_value) if day_value else "-"
+
+    def row_is_done(row: list[str]) -> bool:
+        return len(row) > 7 and (row[7] or "").strip().upper() == "DONE"
+
+    def done_last(report_rows: list[list[str]]) -> list[list[str]]:
+        return [row for row in report_rows if not row_is_done(row)] + [row for row in report_rows if row_is_done(row)]
 
     for task in daily_tasks:
         base_dt = task.due_date or task.start_date or task.created_at
@@ -3965,7 +3976,7 @@ async def _daily_report_rows_for_user(
     rows.extend(system_am_rows)
     rows.extend(project_rows)
     rows.extend(system_pm_rows)
-    return rows
+    return done_last(rows)
 
 
 async def _daily_ga_table_for_user(
@@ -4051,6 +4062,7 @@ async def export_daily_report_xlsx(
     # Sort by LL, NLL, AM/PM, and T/Y/O when combining users.
     if all_users:
         rows.sort(key=lambda r: (
+            1 if len(r) > 7 and (r[7] or "").strip().upper() == "DONE" else 0,
             r[1] if len(r) > 1 else "",  # LL (typeLabel)
             r[2] if len(r) > 2 else "",  # NLL (subtype)
             _finish_period_rank(r[3] if len(r) > 3 else ""),  # AM/PM

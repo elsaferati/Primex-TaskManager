@@ -11,6 +11,7 @@ from app.services.meeting_system_tasks import (
     EXTERNAL_MEETING_TASK_DESCRIPTION,
     EXTERNAL_MEETING_TASK_KIND,
     EXTERNAL_MEETING_TASK_TITLE,
+    external_meeting_task_title,
     is_one_time_external_meeting,
     meeting_occurrence_date,
     meeting_task_start_at,
@@ -61,7 +62,19 @@ class TestMeetingSystemTasks(unittest.TestCase):
                 "2026-06-03 08:00",
             )
 
-    def test_fixed_task_copy_is_independent_from_meeting_title(self) -> None:
+    def test_external_meeting_task_title_includes_meeting_title_and_time(self) -> None:
+        with patch("app.services.meeting_system_tasks.settings.APP_TIMEZONE", "Europe/Budapest"):
+            meeting = SimpleNamespace(
+                title="Client demo",
+                starts_at=datetime(2026, 6, 3, 12, 30, tzinfo=timezone.utc),
+            )
+
+            self.assertEqual(
+                external_meeting_task_title(meeting),
+                "TESTIMI I AGENTAVE PARA TAK - Client demo 14:30",
+            )
+
+    def test_external_meeting_task_config(self) -> None:
         self.assertEqual(EXTERNAL_MEETING_TASK_KIND, "external_meeting_prepare")
         self.assertEqual(
             EXTERNAL_MEETING_ASSIGNEE_NAMES,

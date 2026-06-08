@@ -719,7 +719,7 @@ export default function CommonViewPage() {
     if (isDone && completedAt) {
       const completed = new Date(completedAt)
       if (!Number.isNaN(completed.getTime())) {
-        return `${formatDateHuman(toISODate(completed))} ${formatTime(completed)}`
+        return formatTime(completed)
       }
     }
     const dateLabel = formatDateHuman(date)
@@ -7253,7 +7253,7 @@ export default function CommonViewPage() {
           border-radius: 999px;
           background: #e2e8f0;
           color: #0f172a;
-          font-weight: 800;
+          font-weight: 600;
           font-size: 11px;
           line-height: 1;
           border: 1px solid #cbd5e1;
@@ -7413,7 +7413,7 @@ export default function CommonViewPage() {
             border-radius: 4px;
             font-size: 10px;
             line-height: 16px;
-            font-weight: 800;
+            font-weight: 600;
             white-space: nowrap;
             border-width: 1px;
             align-self: center;

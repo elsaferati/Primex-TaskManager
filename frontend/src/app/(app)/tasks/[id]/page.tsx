@@ -304,6 +304,7 @@ export default function TaskDetailsPage() {
   const canAssign =
     user?.role === "ADMIN" ||
     user?.role === "MANAGER" ||
+    Boolean(task?.ga_note_origin_id) ||
     (task && user?.department_id && task.department_id === user.department_id)
 
   const save = async () => {

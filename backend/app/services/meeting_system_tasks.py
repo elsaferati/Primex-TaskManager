@@ -69,6 +69,19 @@ def meeting_task_start_at(occurrence_date: date) -> datetime:
     return local_dt.astimezone(timezone.utc)
 
 
+def external_meeting_task_title(meeting: Meeting | object) -> str:
+    meeting_title = (getattr(meeting, "title", None) or "").strip()
+    starts_at = getattr(meeting, "starts_at", None)
+    time_label = ""
+    if starts_at is not None:
+        if starts_at.tzinfo is None:
+            starts_at = starts_at.replace(tzinfo=timezone.utc)
+        time_label = starts_at.astimezone(_app_tz()).strftime("%H:%M")
+
+    details = " ".join(part for part in (meeting_title, time_label) if part)
+    return f"{EXTERNAL_MEETING_TASK_TITLE} - {details}" if details else EXTERNAL_MEETING_TASK_TITLE
+
+
 def _local_day_bounds_utc(day: date) -> tuple[datetime, datetime]:
     local_start = datetime.combine(day, time.min, tzinfo=_app_tz())
     local_end = local_start + timedelta(days=1)
@@ -203,6 +216,7 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
         return 0
 
     task_start_at = meeting_task_start_at(occurrence_date)
+    task_title = external_meeting_task_title(meeting)
     template = await ensure_external_meeting_trigger_template(db)
     department_map = await _user_department_map(db, participant_ids)
     created_or_reactivated = 0
@@ -237,7 +251,7 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
                 or existing.meeting_occurrence_date != occurrence_date
                 or existing.origin_run_at != task_start_at
             )
-            existing.title = EXTERNAL_MEETING_TASK_TITLE
+            existing.title = task_title
             existing.description = EXTERNAL_MEETING_TASK_DESCRIPTION
             existing.department_id = department_map.get(user_id) or meeting.department_id
             existing.assigned_to = user_id
@@ -265,7 +279,7 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
         task_insert = pg_insert(Task).values(
             {
                 "id": task_id,
-                "title": EXTERNAL_MEETING_TASK_TITLE,
+                "title": task_title,
                 "description": EXTERNAL_MEETING_TASK_DESCRIPTION,
                 "internal_notes": None,
                 "department_id": department_map.get(user_id) or meeting.department_id,
