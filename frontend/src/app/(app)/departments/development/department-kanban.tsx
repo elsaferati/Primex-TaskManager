@@ -3167,6 +3167,8 @@ export default function DepartmentKanban() {
     return rows
       .map((row, index) => ({ row, index }))
       .sort((a, b) => {
+        const doneDiff = Number(isRowDone(a.row)) - Number(isRowDone(b.row))
+        if (doneDiff !== 0) return doneDiff
         const aImportant = deadlineImportantTaskIds.has(a.row.taskId || "")
         const bImportant = deadlineImportantTaskIds.has(b.row.taskId || "")
         const importantDiff = Number(bImportant) - Number(aImportant)
@@ -3223,7 +3225,10 @@ export default function DepartmentKanban() {
       if (used.has(entry.id)) continue
       ordered.push(entry.row)
     }
-    return ordered
+    return [
+      ...ordered.filter((row) => row.statusKey !== "DONE" && row.status?.toUpperCase() !== "DONE"),
+      ...ordered.filter((row) => row.statusKey === "DONE" || row.status?.toUpperCase() === "DONE"),
+    ]
   }, [dailyReportManualOrder, dailyUserReportRows])
 
   const dailyReportAvailableStatuses = React.useMemo(() => {
@@ -3564,6 +3569,8 @@ export default function DepartmentKanban() {
       return rows
         .map((row, index) => ({ row, index }))
         .sort((a, b) => {
+          const doneDiff = Number(isRowDone(a.row)) - Number(isRowDone(b.row))
+          if (doneDiff !== 0) return doneDiff
           const aImportant = deadlineImportantTaskIds.has(a.row.taskId || "")
           const bImportant = deadlineImportantTaskIds.has(b.row.taskId || "")
           const importantDiff = Number(bImportant) - Number(aImportant)
@@ -10082,6 +10089,10 @@ export default function DepartmentKanban() {
                   return (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
                 }
                 const sortedRows = [...allRows].sort((a, b) => {
+                  const doneDiff =
+                    Number(a.statusKey === "DONE" || a.status?.toUpperCase() === "DONE") -
+                    Number(b.statusKey === "DONE" || b.status?.toUpperCase() === "DONE")
+                  if (doneDiff !== 0) return doneDiff
                   const aImportant = deadlineImportantTaskIds.has(a.taskId || "")
                   const bImportant = deadlineImportantTaskIds.has(b.taskId || "")
                   const importantDiff = Number(bImportant) - Number(aImportant)
