@@ -17,7 +17,7 @@ pm2 save
 pm2 status
 ```
 
-After deployment, verify backend-only planner routes with an API request before testing them from the UI. The deploy should ensure the current backend process owns the API port.
+After deployment, verify backend-only planner routes with an API request before testing them from the UI. The deploy should ensure the current backend process owns both API ports used by the environment.
 
 ## Required Runtime Environment
 
