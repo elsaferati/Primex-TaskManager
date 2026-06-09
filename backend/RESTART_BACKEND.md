@@ -17,6 +17,8 @@ pm2 save
 pm2 status
 ```
 
+After deployment, verify backend-only planner routes with an API request before testing them from the UI.
+
 ## Required Runtime Environment
 
 - `REDIS_ENABLED=true`
