@@ -51,6 +51,7 @@ from app.schemas.planner import (
     WeeklyPlannerSaveDayRequest,
     WeeklyPlannerSaveDayResponse,
     WeeklyPlannerUserOrderUpdate,
+    WeeklyPlannerUserVisibilityUpdate,
     WeeklyPlannerProject,
     WeeklyPlannerResponse,
     WeeklyTableDay,
@@ -2467,7 +2468,13 @@ async def weekly_table_planner(
 
     for dept in departments:
         # Show only users from this specific department (exclude users with no department)
-        dept_users = [u for u in all_users if u.department_id is not None and u.department_id == dept.id]
+        dept_users = [
+            u
+            for u in all_users
+            if u.department_id is not None
+            and u.department_id == dept.id
+            and not u.weekly_planner_hidden
+        ]
         dept_users = sorted(dept_users, key=_weekly_user_sort_key)
         # Show tasks that belong to users in this department (regardless of task.department_id)
         dept_user_ids = {u.id for u in dept_users}
@@ -2978,11 +2985,10 @@ async def save_weekly_table_day(
     if department is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department planner data not found")
 
-    day_payload = next((day for day in department.days if day.date == day_date), None)
-    if day_payload is None:
+    target_days = [working_day for working_day in working_days if working_day <= day_date]
+    day_payloads = [day for day in department.days if day.date in set(target_days)]
+    if not day_payloads:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Day planner data not found")
-
-    rows_by_task: dict[uuid.UUID, dict] = {}
 
     def normalize_entry_status(value: TaskStatus | str | None) -> str | None:
         if value is None:
@@ -2992,6 +2998,7 @@ async def save_weekly_table_day(
         return _normalize_task_status(str(value))
 
     def add_task(
+        rows_by_task: dict[uuid.UUID, dict],
         *,
         task_id: uuid.UUID | None,
         status_value: TaskStatus | str | None,
@@ -3028,83 +3035,90 @@ async def save_weekly_table_day(
         row["completed_value"] = max(int(row.get("completed_value") or 0), int(completed_value or 0))
         row["total_value"] = max(int(row.get("total_value") or 0), int(total_value or 0))
 
-    for user_day in day_payload.users:
-        for slot, project_bucket in (("AM", user_day.am_projects), ("PM", user_day.pm_projects)):
-            for project in project_bucket:
-                for task in project.tasks:
-                    add_task(
-                        task_id=task.task_id,
-                        status_value=task.status,
-                        daily_status_value=task.daily_status,
-                        finish_period=task.finish_period,
-                        slot=slot,
-                        completed_value=task.day_done_products if task.day_done_products is not None else task.completed_products,
-                        total_value=task.day_total_products if task.day_total_products is not None else task.total_products,
-                    )
-        for slot, task_buckets in (
-            ("AM", (user_day.am_system_tasks, user_day.am_fast_tasks)),
-            ("PM", (user_day.pm_system_tasks, user_day.pm_fast_tasks)),
-        ):
-            for task_bucket in task_buckets:
-                for task in task_bucket:
-                    add_task(
-                        task_id=task.task_id,
-                        status_value=task.status,
-                        daily_status_value=task.daily_status,
-                        finish_period=task.finish_period,
-                        slot=slot,
-                        completed_value=task.daily_products,
-                        total_value=task.daily_products,
-                    )
+    def collect_day_rows(day_payload: WeeklyTableDay) -> dict[uuid.UUID, dict]:
+        rows_by_task: dict[uuid.UUID, dict] = {}
+        for user_day in day_payload.users:
+            if user_day.user_id != user.id:
+                continue
+            for slot, project_bucket in (("AM", user_day.am_projects), ("PM", user_day.pm_projects)):
+                for project in project_bucket:
+                    for task in project.tasks:
+                        add_task(
+                            rows_by_task,
+                            task_id=task.task_id,
+                            status_value=task.status,
+                            daily_status_value=task.daily_status,
+                            finish_period=task.finish_period,
+                            slot=slot,
+                            completed_value=task.day_done_products if task.day_done_products is not None else task.completed_products,
+                            total_value=task.day_total_products if task.day_total_products is not None else task.total_products,
+                        )
+            for slot, task_buckets in (
+                ("AM", (user_day.am_system_tasks, user_day.am_fast_tasks)),
+                ("PM", (user_day.pm_system_tasks, user_day.pm_fast_tasks)),
+            ):
+                for task_bucket in task_buckets:
+                    for task in task_bucket:
+                        add_task(
+                            rows_by_task,
+                            task_id=task.task_id,
+                            status_value=task.status,
+                            daily_status_value=task.daily_status,
+                            finish_period=task.finish_period,
+                            slot=slot,
+                            completed_value=task.daily_products,
+                            total_value=task.daily_products,
+                        )
+        return rows_by_task
 
-    if not rows_by_task:
-        return WeeklyPlannerSaveDayResponse(
-            department_id=payload.department_id,
-            day_date=day_date,
-            saved_count=0,
-        )
+    saved_count = 0
+    for day_payload in day_payloads:
+        rows_by_task = collect_day_rows(day_payload)
+        if not rows_by_task:
+            continue
 
-    existing_rows = (
-        await db.execute(
-            select(TaskDailyProgress)
-            .where(TaskDailyProgress.task_id.in_(list(rows_by_task.keys())))
-            .where(TaskDailyProgress.day_date == day_date)
-        )
-    ).scalars().all()
-    existing_by_task = {row.task_id: row for row in existing_rows}
-
-    for task_id, row in rows_by_task.items():
-        daily_status = row.get("daily_status") or row.get("status") or TaskStatus.TODO
-        daily_status_value = normalize_entry_status(daily_status) or TaskStatus.TODO.value
-        finish_period = row.get("finish_period")
-        if finish_period is not None:
-            normalized_finish_period = str(finish_period).strip().upper()
-            finish_period = normalized_finish_period if normalized_finish_period in {"AM", "PM"} else None
-
-        existing = existing_by_task.get(task_id)
-        if existing is None:
-            db.add(
-                TaskDailyProgress(
-                    task_id=task_id,
-                    day_date=day_date,
-                    completed_value=max(0, int(row.get("completed_value") or 0)),
-                    total_value=max(0, int(row.get("total_value") or 0)),
-                    completed_delta=0,
-                    daily_status=daily_status_value,
-                    finish_period=finish_period,
-                )
+        existing_rows = (
+            await db.execute(
+                select(TaskDailyProgress)
+                .where(TaskDailyProgress.task_id.in_(list(rows_by_task.keys())))
+                .where(TaskDailyProgress.day_date == day_payload.date)
             )
-        else:
-            existing.completed_value = max(0, int(row.get("completed_value") or 0))
-            existing.total_value = max(0, int(row.get("total_value") or 0))
-            existing.daily_status = daily_status_value
-            existing.finish_period = finish_period
+        ).scalars().all()
+        existing_by_task = {row.task_id: row for row in existing_rows}
+
+        for task_id, row in rows_by_task.items():
+            daily_status = row.get("daily_status") or row.get("status") or TaskStatus.TODO
+            daily_status_value = normalize_entry_status(daily_status) or TaskStatus.TODO.value
+            finish_period = row.get("finish_period")
+            if finish_period is not None:
+                normalized_finish_period = str(finish_period).strip().upper()
+                finish_period = normalized_finish_period if normalized_finish_period in {"AM", "PM"} else None
+
+            existing = existing_by_task.get(task_id)
+            if existing is None:
+                db.add(
+                    TaskDailyProgress(
+                        task_id=task_id,
+                        day_date=day_payload.date,
+                        completed_value=max(0, int(row.get("completed_value") or 0)),
+                        total_value=max(0, int(row.get("total_value") or 0)),
+                        completed_delta=0,
+                        daily_status=daily_status_value,
+                        finish_period=finish_period,
+                    )
+                )
+            else:
+                existing.completed_value = max(0, int(row.get("completed_value") or 0))
+                existing.total_value = max(0, int(row.get("total_value") or 0))
+                existing.daily_status = daily_status_value
+                existing.finish_period = finish_period
+            saved_count += 1
 
     await db.commit()
     return WeeklyPlannerSaveDayResponse(
         department_id=payload.department_id,
         day_date=day_date,
-        saved_count=len(rows_by_task),
+        saved_count=saved_count,
     )
 
 
@@ -3158,6 +3172,31 @@ async def update_weekly_table_user_order(
     for index, user_id in enumerate(ordered_unique_ids, start=1):
         dept_user_map[user_id].weekly_planner_sort_order = index
 
+    await db.commit()
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.patch("/weekly-table/user-visibility")
+async def update_weekly_table_user_visibility(
+    payload: WeeklyPlannerUserVisibilityUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> Response:
+    ensure_manager_or_admin(user)
+    ensure_department_access(user, payload.department_id)
+
+    target = (
+        await db.execute(
+            select(User)
+            .where(User.id == payload.user_id)
+            .where(User.department_id == payload.department_id)
+            .where(User.is_active.is_(True))
+        )
+    ).scalar_one_or_none()
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Active department user not found")
+
+    target.weekly_planner_hidden = payload.hidden
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 

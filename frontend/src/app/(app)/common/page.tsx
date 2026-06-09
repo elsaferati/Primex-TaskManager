@@ -236,8 +236,9 @@ const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
 const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
   const normalized = normalizeCommonTaskStatus(status, isDone)
 
-  if (normalized === "DONE") return 2
-  if (normalized === "WAITING_CONFIRMATION") return 1
+  if (normalized === "DONE") return 3
+  if (normalized === "WAITING_CONFIRMATION") return 2
+  if (normalized === "IN_PROGRESS") return 1
   return 0
 }
 
@@ -1116,6 +1117,7 @@ export default function CommonViewPage() {
   const [showEditWeekendDays, setShowEditWeekendDays] = React.useState(false)
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
   const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
+  const [externalMeetingCreateAgentTestTask, setExternalMeetingCreateAgentTestTask] = React.useState(false)
   const [showInternalWeekendDays, setShowInternalWeekendDays] = React.useState(false)
   const [creatingInternalMeeting, setCreatingInternalMeeting] = React.useState(false)
   const [editingInternalMeetingId, setEditingInternalMeetingId] = React.useState<string | null>(null)
@@ -1452,6 +1454,14 @@ export default function CommonViewPage() {
   }, [externalMeetingsOpen])
 
   const canCreateExternalMeeting = Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId)
+  const canSelectExternalMeetingAgentTestTask =
+    externalMeetingRecurrenceType === "none" && Boolean(externalMeetingStartsAt)
+
+  React.useEffect(() => {
+    if (!canSelectExternalMeetingAgentTestTask) {
+      setExternalMeetingCreateAgentTestTask(false)
+    }
+  }, [canSelectExternalMeetingAgentTestTask])
   const canCreateInternalMeeting = Boolean(internalMeetingTitle.trim()) && Boolean(internalMeetingDepartmentId)
 
   const reloadMeetingTemplates = React.useCallback(async () => {
@@ -3953,6 +3963,11 @@ export default function CommonViewPage() {
       console.error("Department is required to create a meeting.")
       return
     }
+    const shouldCreateAgentTestTask = externalMeetingCreateAgentTestTask
+    if (shouldCreateAgentTestTask && (externalMeetingRecurrenceType !== "none" || !externalMeetingStartsAt)) {
+      toast.error("Testimi i agentave task is available only for one-time meetings with a start date.")
+      return
+    }
     setCreatingExternalMeeting(true)
     try {
       let startsAt: string | null = null
@@ -4025,10 +4040,26 @@ export default function CommonViewPage() {
         return
       }
       const created = (await res.json()) as Meeting
-      setExternalMeetings((prev) => [created, ...prev])
+      let meetingForList = created
+      if (shouldCreateAgentTestTask) {
+        const taskRes = await apiFetch(`/meetings/${created.id}/agent-test-task`, {
+          method: "POST",
+        })
+        if (!taskRes?.ok) {
+          const detail = await taskRes
+            .json()
+            .then((body) => (typeof body?.detail === "string" ? body.detail : null))
+            .catch(() => null)
+          toast.error(detail || "Meeting created, but failed to create Testimi i agentave task.")
+        } else {
+          meetingForList = (await taskRes.json()) as Meeting
+          toast.success("Meeting and Testimi i agentave task created.")
+        }
+      }
+      setExternalMeetings((prev) => [meetingForList, ...prev])
       COMMON_VIEW_CACHE.clear()
       const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
-      const mapped = mapMeetingToCommonItem(created, "external", ownerName)
+      const mapped = mapMeetingToCommonItem(meetingForList, "external", ownerName)
       if (mapped) {
         setCommonData((prev) => ({
           ...prev,
@@ -4044,6 +4075,7 @@ export default function CommonViewPage() {
       setExternalMeetingRecurrenceDaysOfMonth([])
       setExternalMeetingRecurrenceMonth("1")
       setExternalMeetingRecurrenceDay("1")
+      setExternalMeetingCreateAgentTestTask(false)
       // Reset checklist after successful creation
       if (externalMeetingChecklist?.items) {
         const resetMap = new Map<string, boolean>()
@@ -4066,6 +4098,7 @@ export default function CommonViewPage() {
     externalMeetingRecurrenceDaysOfMonth,
     externalMeetingRecurrenceMonth,
     externalMeetingRecurrenceDay,
+    externalMeetingCreateAgentTestTask,
     externalMeetingDepartmentId,
     user?.department_id,
     user?.email,
@@ -4289,6 +4322,7 @@ export default function CommonViewPage() {
     },
     [isAdmin, apiFetch, commonDepartmentId, confirm, syncCommonMeetingBucket]
   )
+
 
   const submitInternalMeeting = React.useCallback(async () => {
     if (!internalMeetingTitle.trim()) return
@@ -9197,6 +9231,29 @@ export default function CommonViewPage() {
                     </>
                   )}
                 </div>
+                <button
+                  className="btn-surface"
+                  type="button"
+                  disabled={!canSelectExternalMeetingAgentTestTask || creatingExternalMeeting}
+                  onClick={() => setExternalMeetingCreateAgentTestTask((prev) => !prev)}
+                  title={
+                    canSelectExternalMeetingAgentTestTask
+                      ? "Toggle Testimi i agentave task creation for this meeting"
+                      : "Available only for one-time meetings with a start date"
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "16px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    padding: "8px 12px",
+                    backgroundColor: externalMeetingCreateAgentTestTask ? "#dcfce7" : "#ffffff",
+                    borderColor: externalMeetingCreateAgentTestTask ? "#16a34a" : "#cbd5e1",
+                    color: externalMeetingCreateAgentTestTask ? "#166534" : "#334155",
+                  }}
+                >
+                  {externalMeetingCreateAgentTestTask ? "Test task will be created" : "Create test task"}
+                </button>
                 <div className="external-meeting-row" style={{ marginTop: "16px" }}>
                   <button
                     className="btn-primary"
@@ -9444,7 +9501,7 @@ export default function CommonViewPage() {
                                 </div>
                               </div>
                               {canEditExternalMeeting(meeting) ? (
-                                <div style={{ display: "flex", gap: "6px", marginLeft: "12px" }}>
+                                <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                                   <button
                                     className="btn-surface"
                                     type="button"

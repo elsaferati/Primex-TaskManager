@@ -19,7 +19,7 @@ import { ChevronDown, Plus, X, Printer, GripVertical, Download } from "lucide-re
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
-import { fetchUsersLookupCached } from "@/lib/users-cache"
+import { fetchUsersLookupCached, invalidateUsersLookupCache } from "@/lib/users-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import {
@@ -29,6 +29,9 @@ import {
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubContent,
+  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -309,6 +312,7 @@ export default function WeeklyPlannerPage() {
   const [orderDirtyByDept, setOrderDirtyByDept] = React.useState<Record<string, boolean>>({})
   const [isOrderingUsers, setIsOrderingUsers] = React.useState(false)
   const [isSavingUserOrder, setIsSavingUserOrder] = React.useState(false)
+  const [savingUserVisibilityId, setSavingUserVisibilityId] = React.useState<string | null>(null)
 
   const [isExporting, setIsExporting] = React.useState(false)
   const [savingSnapshotMode, setSavingSnapshotMode] = React.useState<"THIS_WEEK_FINAL" | "NEXT_WEEK_PLANNED" | null>(null)
@@ -359,6 +363,7 @@ export default function WeeklyPlannerPage() {
   const canSaveSnapshots = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canReorderUsers = user?.role === "ADMIN" || user?.role === "MANAGER"
   const canEditUserOrder = canReorderUsers && departmentId !== ALL_DEPARTMENTS_VALUE
+  const canManageUserVisibility = canReorderUsers && departmentId !== ALL_DEPARTMENTS_VALUE
   const canSaveThisWeekFinal = selectedWeek === "this"
   const canSaveNextWeekPlanned = selectedWeek === "next"
   const canCompareLastFridayPlan = selectedWeek === "this"
@@ -611,6 +616,23 @@ export default function WeeklyPlannerPage() {
     return orderedUsersByDept[dept.department_id] || buildDepartmentUsers(dept)
   }, [orderedUsersByDept])
 
+  const selectedDepartmentUsers = React.useMemo(() => {
+    if (departmentId === ALL_DEPARTMENTS_VALUE) return []
+    return users
+      .filter((entry) => entry.department_id === departmentId)
+      .sort((a, b) => (a.full_name || a.username || "").localeCompare(b.full_name || b.username || ""))
+  }, [departmentId, users])
+
+  const visiblePlannerUsers = React.useMemo(
+    () => selectedDepartmentUsers.filter((entry) => !entry.weekly_planner_hidden),
+    [selectedDepartmentUsers]
+  )
+
+  const hiddenPlannerUsers = React.useMemo(
+    () => selectedDepartmentUsers.filter((entry) => entry.weekly_planner_hidden),
+    [selectedDepartmentUsers]
+  )
+
   const handleUserOrderDragEnd = React.useCallback((deptId: string, event: DragEndEvent) => {
     const { active, over } = event
     if (!over || active.id === over.id) return
@@ -773,6 +795,43 @@ export default function WeeklyPlannerPage() {
     }
   }, [apiFetch, buildCurrentWeekParams])
 
+  const toggleWeeklyPlannerUserVisibility = React.useCallback(
+    async (targetUser: UserLookup, hidden: boolean) => {
+      if (!canManageUserVisibility || departmentId === ALL_DEPARTMENTS_VALUE) return
+      setSavingUserVisibilityId(targetUser.id)
+      try {
+        const res = await apiFetch("/planners/weekly-table/user-visibility", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            department_id: departmentId,
+            user_id: targetUser.id,
+            hidden,
+          }),
+        })
+        if (!res.ok) {
+          const message = await res.text().catch(() => "Failed to update user visibility")
+          toast.error(message || "Failed to update user visibility")
+          return
+        }
+        setUsers((prev) =>
+          prev.map((entry) =>
+            entry.id === targetUser.id ? { ...entry, weekly_planner_hidden: hidden } : entry
+          )
+        )
+        invalidateUsersLookupCache()
+        toast.success(hidden ? "User hidden from weekly plan." : "User shown in weekly plan.")
+        void loadPlanner()
+      } catch (err) {
+        console.error("Failed to update weekly planner user visibility", err)
+        toast.error("Failed to update user visibility")
+      } finally {
+        setSavingUserVisibilityId(null)
+      }
+    },
+    [apiFetch, canManageUserVisibility, departmentId, loadPlanner]
+  )
+
   const loadPlanningInbox = React.useCallback(async () => {
     setPlanningInboxLoading(true)
     try {
@@ -908,8 +967,8 @@ export default function WeeklyPlannerPage() {
 
   const availableUsers = React.useMemo(() => {
     const filtered = manualTaskDepartmentId
-      ? users.filter((u) => u.department_id === manualTaskDepartmentId)
-      : users
+      ? users.filter((u) => u.department_id === manualTaskDepartmentId && !u.weekly_planner_hidden)
+      : users.filter((u) => !u.weekly_planner_hidden)
     return filtered
       .map((u) => ({
         id: u.id,
@@ -1012,7 +1071,9 @@ export default function WeeklyPlannerPage() {
 
   const planningUserOptions = React.useMemo(() => {
     const scopedUsers =
-      departmentId !== ALL_DEPARTMENTS_VALUE ? users.filter((u) => u.department_id === departmentId) : users
+      departmentId !== ALL_DEPARTMENTS_VALUE
+        ? users.filter((u) => u.department_id === departmentId && !u.weekly_planner_hidden)
+        : users.filter((u) => !u.weekly_planner_hidden)
     return scopedUsers
       .map((u) => ({ id: u.id, name: u.full_name || u.username || u.id }))
       .sort((a, b) => a.name.localeCompare(b.name))
@@ -3136,7 +3197,7 @@ export default function WeeklyPlannerPage() {
         return
       }
       const payload = await res.json()
-      toast.success(`Saved today (${payload.saved_count ?? 0} tasks)`)
+      toast.success(`Saved my week through today (${payload.saved_count ?? 0} task/day rows)`)
       await loadPlanner()
     } catch (error) {
       console.error("Failed to save today", error)
@@ -3620,7 +3681,7 @@ export default function WeeklyPlannerPage() {
               onClick={() => void saveTodayProgress()}
               disabled={isSavingToday || !canSaveToday}
             >
-              {isSavingToday ? "Saving today..." : "Save Today"}
+              {isSavingToday ? "Saving my week so far..." : "Save My Week So Far"}
             </Button>
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
@@ -3636,10 +3697,10 @@ export default function WeeklyPlannerPage() {
                   disabled={isSavingToday || !canSaveToday}
                 >
                   {isSavingToday
-                    ? "Saving today..."
+                    ? "Saving my week so far..."
                     : canSaveToday
-                      ? "Save Today"
-                      : 'Save Today [This Week + Department]'}
+                      ? "Save My Week So Far"
+                      : 'Save My Week So Far [This Week + Department]'}
                 </DropdownMenuItem>
                 <DropdownMenuSeparator />
                 {canSaveSnapshots ? (
@@ -3695,6 +3756,52 @@ export default function WeeklyPlannerPage() {
                     >
                       {isSavingUserOrder ? "Saving..." : "Save Order"}
                     </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                  </>
+                ) : null}
+                {canManageUserVisibility ? (
+                  <>
+                    <DropdownMenuLabel>User Visibility</DropdownMenuLabel>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>Hide user</DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="max-h-80 min-w-56 overflow-y-auto">
+                        {visiblePlannerUsers.length ? (
+                          visiblePlannerUsers.map((entry) => (
+                            <DropdownMenuItem
+                              key={`hide-${entry.id}`}
+                              onSelect={() => void toggleWeeklyPlannerUserVisibility(entry, true)}
+                              disabled={savingUserVisibilityId === entry.id}
+                            >
+                              {savingUserVisibilityId === entry.id
+                                ? "Saving..."
+                                : entry.full_name || entry.username || "User"}
+                            </DropdownMenuItem>
+                          ))
+                        ) : (
+                          <DropdownMenuItem disabled>No visible users</DropdownMenuItem>
+                        )}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
+                    <DropdownMenuSub>
+                      <DropdownMenuSubTrigger>Unhide user</DropdownMenuSubTrigger>
+                      <DropdownMenuSubContent className="max-h-80 min-w-56 overflow-y-auto">
+                        {hiddenPlannerUsers.length ? (
+                          hiddenPlannerUsers.map((entry) => (
+                            <DropdownMenuItem
+                              key={`show-${entry.id}`}
+                              onSelect={() => void toggleWeeklyPlannerUserVisibility(entry, false)}
+                              disabled={savingUserVisibilityId === entry.id}
+                            >
+                              {savingUserVisibilityId === entry.id
+                                ? "Saving..."
+                                : entry.full_name || entry.username || "User"}
+                            </DropdownMenuItem>
+                          ))
+                        ) : (
+                          <DropdownMenuItem disabled>No hidden users</DropdownMenuItem>
+                        )}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuSub>
                     <DropdownMenuSeparator />
                   </>
                 ) : null}
@@ -4494,7 +4601,7 @@ export default function WeeklyPlannerPage() {
                     onClick={() => void saveTodayProgress(dept.department_id)}
                     disabled={isSavingToday || !canSaveDepartmentToday}
                   >
-                    {isSavingToday ? "Saving..." : "Save Today"}
+                    {isSavingToday ? "Saving..." : "Save My Week So Far"}
                   </Button>
                 </CardHeader>
                 <CardContent>

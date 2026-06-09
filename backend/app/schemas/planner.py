@@ -170,3 +170,10 @@ class WeeklyPlannerUserOrderUpdate(BaseModel):
     """Update weekly planner user ordering for a department."""
     department_id: uuid.UUID
     ordered_user_ids: list[uuid.UUID]
+
+
+class WeeklyPlannerUserVisibilityUpdate(BaseModel):
+    """Hide/unhide one user from weekly planner tables."""
+    department_id: uuid.UUID
+    user_id: uuid.UUID
+    hidden: bool

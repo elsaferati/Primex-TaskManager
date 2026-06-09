@@ -1,4 +1,5 @@
 import {
+  clearDepartmentBootstrapCache,
   getDepartmentBootstrapCache,
   setDepartmentBootstrapCache,
 } from "./department-bootstrap-cache"
@@ -16,4 +17,8 @@ export async function fetchUsersLookupCached(apiFetch: ApiFetch): Promise<unknow
   const data = (await res.json()) as unknown[]
   setDepartmentBootstrapCache(USERS_LOOKUP_CACHE_KEY, data, TTL_MS)
   return data
+}
+
+export function invalidateUsersLookupCache() {
+  clearDepartmentBootstrapCache(USERS_LOOKUP_CACHE_KEY)
 }

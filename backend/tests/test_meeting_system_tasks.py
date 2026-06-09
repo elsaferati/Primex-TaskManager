@@ -22,17 +22,29 @@ class TestMeetingSystemTasks(unittest.TestCase):
     def test_one_time_external_meeting_qualifies(self) -> None:
         meeting = SimpleNamespace(
             meeting_type="external",
+            external_agent_test_task_requested=True,
             recurrence_type=None,
             starts_at=datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc),
         )
 
         self.assertTrue(is_one_time_external_meeting(meeting))
 
+    def test_external_meeting_without_agent_test_request_does_not_qualify(self) -> None:
+        meeting = SimpleNamespace(
+            meeting_type="external",
+            external_agent_test_task_requested=False,
+            recurrence_type=None,
+            starts_at=datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertFalse(is_one_time_external_meeting(meeting))
+
     def test_recurring_external_meetings_do_not_qualify(self) -> None:
         for recurrence_type in ("weekly", "monthly", "yearly"):
             with self.subTest(recurrence_type=recurrence_type):
                 meeting = SimpleNamespace(
                     meeting_type="external",
+                    external_agent_test_task_requested=True,
                     recurrence_type=recurrence_type,
                     starts_at=datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc),
                 )
@@ -42,6 +54,7 @@ class TestMeetingSystemTasks(unittest.TestCase):
     def test_internal_meeting_does_not_qualify(self) -> None:
         meeting = SimpleNamespace(
             meeting_type="internal",
+            external_agent_test_task_requested=True,
             recurrence_type=None,
             starts_at=datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc),
         )

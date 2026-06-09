@@ -761,6 +761,17 @@ function getDailyReportRowId(
   return `misc:${row.typeLabel || "na"}:${row.title || "untitled"}:${fallbackIndex}`
 }
 
+function getDailyReportTitlePreview(title?: string | null) {
+  const raw = title || "-"
+  return raw.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || raw
+}
+
+function hasDailyReportTitleDetails(title?: string | null) {
+  const raw = (title || "").trim()
+  if (!raw) return false
+  return getDailyReportTitlePreview(raw) !== raw
+}
+
 function taskStatusValue(task: Task): Task["status"] {
   if (task.status === "DONE" || task.completed_at) return "DONE"
   if (task.status === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
@@ -1013,6 +1024,7 @@ export default function DepartmentKanban() {
   const [systemDate, setSystemDate] = React.useState(() => new Date())
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [dailyReportManualOrder, setDailyReportManualOrder] = React.useState<string[]>([])
+  const [expandedDailyReportTitleIds, setExpandedDailyReportTitleIds] = React.useState<Record<string, boolean>>({})
   const [showFullDailyReportTable, setShowFullDailyReportTable] = React.useState(false)
   const [dailyReportPeriodFilter, setDailyReportPeriodFilter] = React.useState<"all" | "am_side" | "pm_side">("all")
   const [dailyReportStatusFilter, setDailyReportStatusFilter] = React.useState<string[]>([])
@@ -2757,6 +2769,7 @@ export default function DepartmentKanban() {
       return (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
     }
     const periodRank = (row: (typeof rows)[number]) => (row.period === "PM" ? 1 : 0)
+    const typeRank = (row: (typeof rows)[number]) => (row.typeLabel === "SYS" ? 0 : 1)
 
     const sortedFastRows = fastRows
       .sort(
@@ -2777,6 +2790,10 @@ export default function DepartmentKanban() {
       .sort((a, b) => {
         const doneDiff = Number(isRowDone(a.row)) - Number(isRowDone(b.row))
         if (doneDiff !== 0) return doneDiff
+        const periodDiff = periodRank(a.row) - periodRank(b.row)
+        if (periodDiff !== 0) return periodDiff
+        const typeDiff = typeRank(a.row) - typeRank(b.row)
+        if (typeDiff !== 0) return typeDiff
         const aImportant = deadlineImportantTaskIds.has(a.row.taskId || "")
         const bImportant = deadlineImportantTaskIds.has(b.row.taskId || "")
         const importantDiff = Number(bImportant) - Number(aImportant)
@@ -2788,8 +2805,6 @@ export default function DepartmentKanban() {
         const eightAmDiff =
           Number(titleHasEightAmIndicator(b.row.title)) - Number(titleHasEightAmIndicator(a.row.title))
         if (eightAmDiff !== 0) return eightAmDiff
-        const periodDiff = periodRank(a.row) - periodRank(b.row)
-        if (periodDiff !== 0) return periodDiff
         const statusDiff =
           statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
         return statusDiff !== 0 ? statusDiff : a.index - b.index
@@ -3151,6 +3166,7 @@ export default function DepartmentKanban() {
         return (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
       }
       const periodRank = (row: (typeof rows)[number]) => (row.period === "PM" ? 1 : 0)
+      const typeRank = (row: (typeof rows)[number]) => (row.typeLabel === "SYS" ? 0 : 1)
 
       const sortedFastRows = fastRows
         .sort(
@@ -3172,6 +3188,10 @@ export default function DepartmentKanban() {
         .sort((a, b) => {
           const doneDiff = Number(isRowDone(a.row)) - Number(isRowDone(b.row))
           if (doneDiff !== 0) return doneDiff
+          const periodDiff = periodRank(a.row) - periodRank(b.row)
+          if (periodDiff !== 0) return periodDiff
+          const typeDiff = typeRank(a.row) - typeRank(b.row)
+          if (typeDiff !== 0) return typeDiff
           const aImportant = deadlineImportantTaskIds.has(a.row.taskId || "")
           const bImportant = deadlineImportantTaskIds.has(b.row.taskId || "")
           const importantDiff = Number(bImportant) - Number(aImportant)
@@ -3183,8 +3203,6 @@ export default function DepartmentKanban() {
           const eightAmDiff =
             Number(titleHasEightAmIndicator(b.row.title)) - Number(titleHasEightAmIndicator(a.row.title))
           if (eightAmDiff !== 0) return eightAmDiff
-          const periodDiff = periodRank(a.row) - periodRank(b.row)
-          if (periodDiff !== 0) return periodDiff
           const statusDiff =
             statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
           return statusDiff !== 0 ? statusDiff : a.index - b.index
@@ -5846,18 +5864,18 @@ export default function DepartmentKanban() {
                       onMouseUp={handleDailyReportMouseEnd}
                       onMouseLeave={handleDailyReportMouseEnd}
                     >
-                      <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
+                      <table className="min-w-[1100px] w-full table-fixed border border-slate-200 text-[11px] daily-report-table">
                         <colgroup>
                           <col className="w-[24px]" />
-                          <col className="w-[28px]" />
                           <col className="w-[32px]" />
-                          <col className="w-[24px]" />
+                          <col className="w-[76px]" />
+                          <col className="w-[44px]" />
+                          <col className="w-[52px]" />
+                          <col />
+                          <col className="w-[92px]" />
                           <col className="w-[64px]" />
-                          <col className="w-[150px]" />
-                          <col className="w-[48px]" />
-                          <col className="w-[64px]" />
-                          <col className="w-[48px]" />
-                          <col className="w-[32px]" />
+                          <col className="w-[88px]" />
+                          <col className="w-[72px]" />
                           <col className="w-[140px]" />
                         </colgroup>
                         <thead className="sticky top-0 z-10 bg-slate-50">
@@ -5867,11 +5885,11 @@ export default function DepartmentKanban() {
                               Nr
                             </th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">LLOJI</th>
-                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">NENLLOJI</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">NLL</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-nowrap">AM/PM</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
-                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BARAZIMI</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-nowrap">T/Y/O</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
@@ -5886,6 +5904,9 @@ export default function DepartmentKanban() {
                               const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
                               const isDeadlineImportant = row.taskId ? deadlineImportantTaskIds.has(row.taskId) : false
                               const hasEightAmIndicator = titleHasEightAmIndicator(row.title)
+                              const isTitleExpanded = Boolean(expandedDailyReportTitleIds[rowId])
+                              const canExpandTitle = hasDailyReportTitleDetails(row.title)
+                              const visibleTitle = isTitleExpanded ? row.title : getDailyReportTitlePreview(row.title)
                               return (
                             <tr
                               key={rowId}
@@ -5956,8 +5977,8 @@ export default function DepartmentKanban() {
                                       ) : null}
                                       <span className="whitespace-pre-wrap break-words">
                                         {(() => {
-                                          const hasMarks = typeof row.title === "string" && row.title.includes("[[")
-                                          const renderedTitle = hasMarks ? renderMarkedNoteContent(row.title, row.title) : row.title
+                                          const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
+                                          const renderedTitle = hasMarks ? renderMarkedNoteContent(visibleTitle, visibleTitle) : visibleTitle
                                           if (row.typeLabel === "PRJK" && row.projectTitle) {
                                             return (
                                               <>
@@ -5969,6 +5990,18 @@ export default function DepartmentKanban() {
                                           return renderedTitle
                                         })()}
                                       </span>
+                                      {canExpandTitle ? (
+                                        <button
+                                          type="button"
+                                          className="ml-auto inline-flex rounded border border-slate-300 bg-white px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-600 hover:bg-slate-50"
+                                          onClick={(event) => {
+                                            event.stopPropagation()
+                                            setExpandedDailyReportTitleIds((prev) => ({ ...prev, [rowId]: !prev[rowId] }))
+                                          }}
+                                        >
+                                          {isTitleExpanded ? "-" : "+"}
+                                        </button>
+                                      ) : null}
                                     </div>
                                   </td>
                                   <td
@@ -8334,6 +8367,10 @@ export default function DepartmentKanban() {
                     Number(a.statusKey === "DONE" || a.status?.toUpperCase() === "DONE") -
                     Number(b.statusKey === "DONE" || b.status?.toUpperCase() === "DONE")
                   if (doneDiff !== 0) return doneDiff
+                  const periodDiff = (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
+                  if (periodDiff !== 0) return periodDiff
+                  const typeDiff = (a.typeLabel === "SYS" ? 0 : 1) - (b.typeLabel === "SYS" ? 0 : 1)
+                  if (typeDiff !== 0) return typeDiff
                   const aImportant = deadlineImportantTaskIds.has(a.taskId || "")
                   const bImportant = deadlineImportantTaskIds.has(b.taskId || "")
                   const importantDiff = Number(bImportant) - Number(aImportant)
@@ -8342,15 +8379,13 @@ export default function DepartmentKanban() {
                     const deadlineDiff = importantDeadlineSort(a, b)
                     if (deadlineDiff !== 0) return deadlineDiff
                   }
-                  const typeDiff = typeOrder(a) - typeOrder(b)
-                  if (typeDiff !== 0) return typeDiff
+                  const typeOrderDiff = typeOrder(a) - typeOrder(b)
+                  if (typeOrderDiff !== 0) return typeOrderDiff
                   if (a.typeLabel === "FT" && b.typeLabel === "FT") {
                     const subtypeDiff = fastSubtypeOrder(a.subtype) - fastSubtypeOrder(b.subtype)
                     if (subtypeDiff !== 0) return subtypeDiff
                     const eightAmDiff = Number(titleHasEightAmIndicator(b.title)) - Number(titleHasEightAmIndicator(a.title))
                     if (eightAmDiff !== 0) return eightAmDiff
-                    const periodDiff = (a.period === "PM" ? 1 : 0) - (b.period === "PM" ? 1 : 0)
-                    if (periodDiff !== 0) return periodDiff
                     const tyoDiff = sortByTyo(a, b)
                     if (tyoDiff !== 0) return tyoDiff
                     return a.title.localeCompare(b.title) || a.userInitials.localeCompare(b.userInitials)
@@ -8390,7 +8425,7 @@ export default function DepartmentKanban() {
                         </th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
-                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BARAZIMI</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
                           T/Y/O
@@ -8489,14 +8524,14 @@ export default function DepartmentKanban() {
                   <tr className="bg-slate-100">
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal print-nr-cell">NUMRI</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">LLOJI</th>
-                    <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NENLLOJI</th>
+                    <th className="border border-slate-900 px-2 py-2 pr-3 text-left text-xs uppercase whitespace-normal">NLL</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">
                       <span className="block">AM/</span>
                       <span className="block">PM</span>
                     </th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
-                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BARAZIMI</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Koment</th>

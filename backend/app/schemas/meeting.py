@@ -16,6 +16,7 @@ class MeetingOut(BaseModel):
     recurrence_type: str | None = None
     recurrence_days_of_week: list[int] | None = None
     recurrence_days_of_month: list[int] | None = None
+    external_agent_test_task_requested: bool = False
     department_id: uuid.UUID
     project_id: uuid.UUID | None = None
     created_by: uuid.UUID | None = None

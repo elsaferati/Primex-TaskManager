@@ -50,6 +50,7 @@ def is_one_time_external_meeting(meeting: Meeting | object) -> bool:
     recurrence_type = (getattr(meeting, "recurrence_type", None) or "").strip().lower()
     return (
         (getattr(meeting, "meeting_type", None) or "external") == "external"
+        and bool(getattr(meeting, "external_agent_test_task_requested", False))
         and recurrence_type in ("", "none")
         and getattr(meeting, "starts_at", None) is not None
     )
@@ -369,6 +370,7 @@ async def reconcile_external_meeting_system_tasks(
             .where(Meeting.starts_at >= start_utc)
             .where(Meeting.starts_at < end_utc)
             .where(Meeting.meeting_type == "external")
+            .where(Meeting.external_agent_test_task_requested.is_(True))
             .where(or_(Meeting.recurrence_type.is_(None), Meeting.recurrence_type == "", Meeting.recurrence_type == "none"))
         )
     ).scalars().all()

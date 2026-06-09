@@ -2147,9 +2147,18 @@ export default function AdminTasksPage() {
       if (rankA === 0) return tyoNumber(b.tyo) - tyoNumber(a.tyo)
       return 0
     }
+    const isDoneRow = (row: (typeof rows)[number]) => row.status.trim().toUpperCase() === "DONE"
+    const typeRank = (row: (typeof rows)[number]) => (row.typeLabel === "SYS" ? 0 : 1)
+    const periodRank = (row: (typeof rows)[number]) => (row.period === "PM" ? 1 : 0)
     const orderedRows = rows
       .map((row, index) => ({ row, index }))
       .sort((a, b) => {
+        const doneDiff = Number(isDoneRow(a.row)) - Number(isDoneRow(b.row))
+        if (doneDiff !== 0) return doneDiff
+        const periodDiff = periodRank(a.row) - periodRank(b.row)
+        if (periodDiff !== 0) return periodDiff
+        const typeDiff = typeRank(a.row) - typeRank(b.row)
+        if (typeDiff !== 0) return typeDiff
         const aIsProject = a.row.typeLabel === "PRJK"
         const bIsProject = b.row.typeLabel === "PRJK"
         if (aIsProject && bIsProject) {
