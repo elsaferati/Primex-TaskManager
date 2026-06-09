@@ -105,11 +105,13 @@ jobs:
           call pm2 stop celery_worker
           call pm2 stop celery_beat
 
-          REM Restart or start backend API process using the real PM2 app name.
+          REM Stop legacy backend process names so the current checkout owns the API port.
           set REDIS_ENABLED=false
           set REDIS_URL=redis://127.0.0.1:6379/0
           set APP_TIMEZONE=Europe/Budapest
-          call pm2 restart backend --update-env || call pm2 start ecosystem.config.cjs --only backend --update-env
+          call pm2 delete backend-api || ver > NUL
+          call pm2 delete backend || ver > NUL
+          call pm2 start ecosystem.config.cjs --only backend --update-env
           call pm2 describe backend | findstr /I "status"
           echo PM2 backend restart/start completed.
 
