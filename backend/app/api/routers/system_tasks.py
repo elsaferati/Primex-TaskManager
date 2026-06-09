@@ -54,6 +54,10 @@ from app.services.system_task_schedule import (
 from app.services.system_task_instances import (
     ensure_slots_initialized,
 )
+from app.services.meeting_system_tasks import (
+    EXTERNAL_MEETING_TASK_KIND,
+    EXTERNAL_MEETING_TRIGGER_TYPE,
+)
 
 
 router = APIRouter()
@@ -510,6 +514,47 @@ def _sync_system_task_due_date_to_done_day(task: Task, completed_at: datetime, t
         task.due_date = completed_at
 
 
+async def _meeting_system_task_rows(
+    db: AsyncSession,
+    *,
+    base_date: date,
+    assigned_to: uuid.UUID | None,
+    department_id: uuid.UUID | None,
+    only_active: bool,
+    include_overdue: bool,
+) -> list[tuple[SystemTaskTemplate, Task, date]]:
+    template = (
+        await db.execute(
+            select(SystemTaskTemplate).where(SystemTaskTemplate.trigger_type == EXTERNAL_MEETING_TRIGGER_TYPE)
+        )
+    ).scalar_one_or_none()
+    if template is None:
+        return []
+
+    stmt = (
+        select(Task)
+        .options(noload(Task.assignees))
+        .where(Task.system_template_origin_id == template.id)
+        .where(Task.meeting_system_task_kind == EXTERNAL_MEETING_TASK_KIND)
+        .where(Task.meeting_occurrence_date.is_not(None))
+    )
+    if include_overdue:
+        stmt = stmt.where(or_(Task.meeting_occurrence_date == base_date, and_(Task.meeting_occurrence_date < base_date, Task.status != TaskStatus.DONE)))
+    else:
+        stmt = stmt.where(Task.meeting_occurrence_date == base_date)
+    if assigned_to is not None:
+        stmt = stmt.where(Task.assigned_to == assigned_to)
+    if department_id is not None:
+        stmt = stmt.where(Task.department_id == department_id)
+    if only_active:
+        stmt = stmt.where(Task.is_active.is_(True))
+    tasks = (await db.execute(stmt.order_by(Task.created_at.desc().nullslast()))).scalars().all()
+    return [
+        (template, task, task.meeting_occurrence_date or base_date)
+        for task in tasks
+    ]
+
+
 @router.get("", response_model=list[SystemTaskOut])
 async def list_system_tasks(
     department_id: uuid.UUID | None = None,
@@ -521,7 +566,11 @@ async def list_system_tasks(
     user=Depends(get_current_user),
 ) -> list[SystemTaskOut]:
     local_today = _app_local_today()
-    template_stmt = select(SystemTaskTemplate).order_by(SystemTaskTemplate.created_at.desc())
+    template_stmt = (
+        select(SystemTaskTemplate)
+        .where(SystemTaskTemplate.trigger_type.is_(None))
+        .order_by(SystemTaskTemplate.created_at.desc())
+    )
 
     if department_id is not None:
         # Allow all users to view system tasks from any department (for department kanban views)
@@ -538,15 +587,11 @@ async def list_system_tasks(
     # No filtering needed - everyone can see all system tasks
 
     all_templates = (await db.execute(template_stmt)).scalars().all()
-    if not all_templates:
-        return []
 
     base_date = occurrence_date or date.today()
     templates = all_templates
     if occurrence_date is not None:
         templates = [tmpl for tmpl in templates if matches_template_date(tmpl, base_date)]
-        if not templates and not include_overdue:
-            return []
 
     template_ids = [t.id for t in templates]
     all_template_ids = [t.id for t in all_templates]
@@ -666,6 +711,23 @@ async def list_system_tasks(
             rows.append((template, task, task_date))
             existing_task_ids.add(task.id)
 
+    meeting_rows = await _meeting_system_task_rows(
+        db,
+        base_date=base_date,
+        assigned_to=assigned_to,
+        department_id=department_id,
+        only_active=only_active,
+        include_overdue=include_overdue and occurrence_date is not None,
+    )
+    if meeting_rows:
+        existing_task_ids = {task.id for _, task, _ in rows if task is not None}
+        for template, task, task_date in meeting_rows:
+            if task.id in existing_task_ids:
+                continue
+            rows.append((template, task, task_date))
+            filtered_tasks.append(task)
+            existing_task_ids.add(task.id)
+
     if not rows and assigned_to is not None:
         return []
 
@@ -730,7 +792,12 @@ async def list_system_tasks(
     # Group tasks by template_id to collect all departments (for Department View)
     template_tasks_map: dict[uuid.UUID, list[tuple[Task, SystemTaskTemplate]]] = {}
 
-    for template, task, _ in rows:
+    meeting_result_rows: list[tuple[SystemTaskTemplate, Task, date | None]] = []
+    for template, task, row_date in rows:
+        if getattr(template, "trigger_type", None) == EXTERNAL_MEETING_TRIGGER_TYPE:
+            if task is not None:
+                meeting_result_rows.append((template, task, row_date))
+            continue
         if template.id not in template_tasks_map:
             template_tasks_map[template.id] = []
         template_tasks_map[template.id].append((task, template))
@@ -770,6 +837,22 @@ async def list_system_tasks(
         task_out.department_ids = department_ids if department_ids else None
         result.append(task_out)
 
+    for template, task, row_date in meeting_result_rows:
+        task_assignees = assignee_map.get(task.id, [])
+        task_out = _task_row_to_out(
+            task,
+            template,
+            task_assignees,
+            user_comment_map.get(task.id),
+            roles_map.get(template.id),
+            alignment_users_map.get(template.id),
+            occurrence_date=row_date or task.meeting_occurrence_date or occurrence_date_map.get(template.id),
+            next_occurrence_date_value=None,
+            effective_occurrence_date=row_date or task.meeting_occurrence_date,
+        )
+        task_out.department_ids = [task.department_id] if task.department_id else None
+        result.append(task_out)
+
     rendered_template_ids = {item.template_id for item in result if item.template_id is not None}
     missing_templates = [tmpl for tmpl in templates if tmpl.id not in rendered_template_ids]
     for template in missing_templates:
@@ -795,7 +878,13 @@ async def list_system_task_templates(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[SystemTaskTemplateOut]:
-    templates = (await db.execute(select(SystemTaskTemplate).order_by(SystemTaskTemplate.created_at.desc()))).scalars().all()
+    templates = (
+        await db.execute(
+            select(SystemTaskTemplate)
+            .where(SystemTaskTemplate.trigger_type.is_(None))
+            .order_by(SystemTaskTemplate.created_at.desc())
+        )
+    ).scalars().all()
     if not templates:
         return []
 

@@ -32,6 +32,9 @@ class TaskOut(BaseModel):
     system_template_origin_id: uuid.UUID | None = None
     origin_run_at: datetime | None = None
     system_task_slot_id: uuid.UUID | None = None
+    meeting_origin_id: uuid.UUID | None = None
+    meeting_occurrence_date: date | None = None
+    meeting_system_task_kind: str | None = None
     status: TaskStatus
     priority: TaskPriority
     finish_period: TaskFinishPeriod | None = None
@@ -120,4 +123,3 @@ class TaskUpdate(BaseModel):
     is_personal: bool | None = None
     fast_task_order: int | None = Field(default=None, ge=1)
     alignment_user_ids: list[uuid.UUID] | None = None
-

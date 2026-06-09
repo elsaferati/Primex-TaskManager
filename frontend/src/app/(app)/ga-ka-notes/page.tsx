@@ -88,6 +88,8 @@ type NoteTaskInfo = {
   startDate?: string | null
   finishPeriod?: TaskFinishPeriod | null
   isDeadlineImportant?: boolean | null
+  taskCreatedAt?: string | null
+  taskUpdatedAt?: string | null
 }
 
 const pad2 = (value: number) => String(value).padStart(2, "0")
@@ -643,6 +645,7 @@ function aggregateTaskStatus(statuses: Array<string | null | undefined>): Normal
 function formatDateParts(value?: string | null) {
   if (!value) return { date: "-", time: "" }
   const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return { date: "-", time: "" }
   const day = date.getDate().toString().padStart(2, "0")
   const month = (date.getMonth() + 1).toString().padStart(2, "0")
   let hours = date.getHours()
@@ -652,6 +655,28 @@ function formatDateParts(value?: string | null) {
   hours = hours ? hours : 12 // the hour '0' should be '12'
   const hoursStr = hours.toString().padStart(2, "0")
   return { date: `${day}.${month}`, time: `${hoursStr}:${minutes} ${ampm}` }
+}
+
+function getEditedTimestamp(updatedAt?: string | null, createdAt?: string | null) {
+  const updated = updatedAt ? new Date(updatedAt).getTime() : Number.NaN
+  const created = createdAt ? new Date(createdAt).getTime() : Number.NaN
+
+  if (!Number.isFinite(updated) || !Number.isFinite(created) || updated <= created) {
+    return null
+  }
+
+  return updated
+}
+
+function getLastEditedValue(note: GaNote, taskInfo?: NoteTaskInfo | null) {
+  const noteUpdated = getEditedTimestamp(note.updated_at, note.created_at)
+  const taskUpdated = getEditedTimestamp(taskInfo?.taskUpdatedAt, taskInfo?.taskCreatedAt)
+
+  if (taskUpdated !== null && (noteUpdated === null || taskUpdated > noteUpdated)) {
+    return taskInfo?.taskUpdatedAt ?? null
+  }
+
+  return noteUpdated !== null ? note.updated_at : null
 }
 
 function formatFileSize(bytes: number) {
@@ -1031,6 +1056,11 @@ export default function GaKaNotesPage() {
         finishPeriod: existing?.finishPeriod ?? t.finish_period ?? null,
         isDeadlineImportant:
           existing?.isDeadlineImportant ?? (t.is_deadline_important ?? null),
+        taskCreatedAt: existing?.taskCreatedAt ?? t.created_at,
+        taskUpdatedAt:
+          existing?.taskUpdatedAt && new Date(existing.taskUpdatedAt).getTime() > new Date(t.updated_at).getTime()
+            ? existing.taskUpdatedAt
+            : t.updated_at,
       })
     }
     setNoteTaskInfo(map)
@@ -1623,6 +1653,16 @@ export default function GaKaNotesPage() {
                   taskStatus: existing?.taskStatus ?? t.status ?? null,
                   taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
                   taskTypeLabels: mergeTaskTypeLabels(existing?.taskTypeLabels, getTaskTypeLabels(t)),
+                  dueDate: existing?.dueDate ?? t.due_date ?? null,
+                  startDate: existing?.startDate ?? t.start_date ?? null,
+                  finishPeriod: existing?.finishPeriod ?? t.finish_period ?? null,
+                  isDeadlineImportant:
+                    existing?.isDeadlineImportant ?? (t.is_deadline_important ?? null),
+                  taskCreatedAt: existing?.taskCreatedAt ?? t.created_at,
+                  taskUpdatedAt:
+                    existing?.taskUpdatedAt && new Date(existing.taskUpdatedAt).getTime() > new Date(t.updated_at).getTime()
+                      ? existing.taskUpdatedAt
+                      : t.updated_at,
                 })
               }
               setNoteTaskInfo(map)
@@ -1895,6 +1935,8 @@ export default function GaKaNotesPage() {
           startDate: createdTask.start_date ?? null,
           finishPeriod: createdTask.finish_period ?? null,
           isDeadlineImportant: createdTask.is_deadline_important ?? null,
+          taskCreatedAt: createdTask.created_at ?? null,
+          taskUpdatedAt: createdTask.updated_at ?? null,
         })
         return next
       })
@@ -2156,7 +2198,7 @@ export default function GaKaNotesPage() {
         if (aBucket !== bBucket) {
           return aBucket - bBucket
         }
-        // Then sort by creation date (newest first) within each group
+        // Keep newest-created notes first; edits should not change row order.
         const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
         const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
         return bCreated - aCreated
@@ -2825,8 +2867,8 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1230px] sm:min-w-[1420px]">
-                <table className="w-full table-fixed caption-bottom text-sm min-w-[1230px] sm:min-w-[1420px]">
+              <div className="w-full min-w-[1326px] sm:min-w-[1516px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1326px] sm:min-w-[1516px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
@@ -2834,6 +2876,7 @@ export default function GaKaNotesPage() {
                       <th className="hidden sm:table-cell min-w-[220px] w-[220px] max-w-[220px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
+                      <th className="w-[106px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDITUAR</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
@@ -2888,6 +2931,7 @@ export default function GaKaNotesPage() {
                       Number.isFinite(createdAt) &&
                       Number.isFinite(updatedAt) &&
                       updatedAt > createdAt
+                    const lastEditedValue = getLastEditedValue(note, taskInfo)
                     const aggregatedStatus =
                       taskInfo && (taskInfo.taskStatuses?.length ?? 0) > 1
                         ? aggregateTaskStatus(taskInfo.taskStatuses)
@@ -3044,10 +3088,12 @@ export default function GaKaNotesPage() {
                               </div>
                             </div>
                             <div className="text-[11px] text-slate-600 sm:hidden">
-                              {(() => {
-                                const parts = formatDateParts(note.created_at)
-                                return parts.time ? `${parts.date}, ${parts.time}` : parts.date
-                              })()}
+                              {lastEditedValue
+                                ? (() => {
+                                    const parts = formatDateParts(lastEditedValue)
+                                    return parts.time ? `${parts.date}, ${parts.time}` : parts.date
+                                  })()
+                                : null}
                             </div>
                             <div className="flex items-center gap-2">
                               {note.priority ? (
@@ -3200,6 +3246,19 @@ export default function GaKaNotesPage() {
                               </div>
                             )
                           })()}
+                        </td>
+                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap w-[106px]" style={{ verticalAlign: 'bottom' }}>
+                          {lastEditedValue ? (
+                            (() => {
+                              const parts = formatDateParts(lastEditedValue)
+                              return (
+                                <div className="leading-tight">
+                                  <div>{parts.date}</div>
+                                  {parts.time ? <div>{parts.time}</div> : null}
+                                </div>
+                              )
+                            })()
+                          ) : null}
                         </td>
                         <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex items-center gap-2 text-xs">

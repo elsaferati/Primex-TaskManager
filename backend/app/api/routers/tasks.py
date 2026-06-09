@@ -424,6 +424,54 @@ async def _add_task_planner_exclusions(
             )
 
 
+def _task_planner_days(task: Task) -> list[date]:
+    due_day = _as_local_date(task.due_date)
+    if due_day is None:
+        return []
+    start_day = _as_local_date(task.start_date)
+    if start_day is None or start_day > due_day:
+        start_day = due_day
+    return _iter_workdays(start_day, due_day)
+
+
+def _planner_slots_for_finish_period(finish_period: object | None) -> set[str]:
+    normalized = (str(finish_period).strip().upper() if finish_period else "")
+    if normalized in ("AM", "PM"):
+        return {normalized, "ALL"}
+    return {"AM", "PM", "ALL"}
+
+
+async def _clear_task_planner_exclusions_for_current_plan(
+    db: AsyncSession,
+    *,
+    task: Task,
+    user_ids: list[uuid.UUID],
+) -> None:
+    day_dates = _task_planner_days(task)
+    if not user_ids or not day_dates:
+        return
+
+    slots_to_clear = sorted(_planner_slots_for_finish_period(task.finish_period))
+    await db.execute(
+        delete(TaskPlannerExclusion).where(
+            TaskPlannerExclusion.task_id == task.id,
+            TaskPlannerExclusion.user_id.in_(user_ids),
+            TaskPlannerExclusion.day_date.in_(day_dates),
+            TaskPlannerExclusion.time_slot.in_(slots_to_clear),
+        )
+    )
+
+    if task.project_id is not None:
+        await db.execute(
+            delete(ProjectPlannerExclusion).where(
+                ProjectPlannerExclusion.project_id == task.project_id,
+                ProjectPlannerExclusion.user_id.in_(user_ids),
+                ProjectPlannerExclusion.day_date.in_(day_dates),
+                ProjectPlannerExclusion.time_slot.in_(slots_to_clear),
+            )
+        )
+
+
 async def _user_comments_for_tasks(
     db: AsyncSession, task_ids: list[uuid.UUID], user_id: uuid.UUID
 ) -> dict[uuid.UUID, str | None]:
@@ -464,6 +512,9 @@ def _task_to_out(
         system_template_origin_id=task.system_template_origin_id,
         origin_run_at=task.origin_run_at,
         system_task_slot_id=task.system_task_slot_id,
+        meeting_origin_id=task.meeting_origin_id,
+        meeting_occurrence_date=task.meeting_occurrence_date,
+        meeting_system_task_kind=task.meeting_system_task_kind,
         status=status_override or task.status,
         priority=task.priority,
         finish_period=task.finish_period,
@@ -589,6 +640,16 @@ async def _is_user_assigned_to_task(db: AsyncSession, task: Task, user_id: uuid.
 class FastTaskOrderUpdate(BaseModel):
     user_id: uuid.UUID
     ordered_task_ids: list[uuid.UUID]
+
+
+def _is_common_view_orderable_task(task: Task) -> bool:
+    return bool(
+        is_fast_task_model(task)
+        or task.is_bllok
+        or task.is_1h_report
+        or task.is_personal
+        or task.is_r1
+    )
 
 
 def _can_complete_waiting_confirmation(
@@ -800,8 +861,8 @@ async def update_fast_task_order(
         ensure_task_editor(user, task)
         if task.department_id is not None:
             ensure_department_access(user, task.department_id)
-        if not is_fast_task_model(task):
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only fast tasks can be reordered")
+        if not _is_common_view_orderable_task(task):
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Common View tasks can be reordered")
         assignee_ids = assignee_map.get(task.id, set())
         if task.assigned_to is not None:
             assignee_ids.add(task.assigned_to)
@@ -1128,21 +1189,11 @@ async def create_task(
                         [{"task_id": t.id, "user_id": uid} for uid in ids],
                     )
 
-                planned_day = _as_local_date(t.due_date)
-                if planned_day is not None:
-                    finish_period = (str(t.finish_period).strip().upper() if t.finish_period else "")
-                    if finish_period in ("AM", "PM"):
-                        slots_to_clear = {finish_period, "ALL"}
-                    else:
-                        slots_to_clear = {"AM", "PM", "ALL"}
-                    await db.execute(
-                        delete(ProjectPlannerExclusion).where(
-                            ProjectPlannerExclusion.project_id == t.project_id,
-                            ProjectPlannerExclusion.user_id == assignee_id,
-                            ProjectPlannerExclusion.day_date == planned_day,
-                            ProjectPlannerExclusion.time_slot.in_(sorted(slots_to_clear)),
-                        )
-                    )
+                await _clear_task_planner_exclusions_for_current_plan(
+                    db,
+                    task=t,
+                    user_ids=[assignee_id],
+                )
 
                 created_tasks.append(t)
                 created_notifications.append(
@@ -1266,21 +1317,11 @@ async def create_task(
                             )
 
                         # Clear weekly planner exclusions so the task is visible for this assignee.
-                        planned_day = _as_local_date(t.due_date)
-                        if planned_day is not None:
-                            finish_period = (str(t.finish_period).strip().upper() if t.finish_period else "")
-                            if finish_period in ("AM", "PM"):
-                                slots_to_clear = {finish_period, "ALL"}
-                            else:
-                                slots_to_clear = {"AM", "PM", "ALL"}
-                            await db.execute(
-                                delete(ProjectPlannerExclusion).where(
-                                    ProjectPlannerExclusion.project_id == t.project_id,
-                                    ProjectPlannerExclusion.user_id == assignee_id,
-                                    ProjectPlannerExclusion.day_date == planned_day,
-                                    ProjectPlannerExclusion.time_slot.in_(sorted(slots_to_clear)),
-                                )
-                            )
+                        await _clear_task_planner_exclusions_for_current_plan(
+                            db,
+                            task=t,
+                            user_ids=[assignee_id],
+                        )
 
                         created_tasks.append(t)
                         created_notifications.append(
@@ -1581,6 +1622,7 @@ async def create_task(
                 old_completed=0,
                 new_completed=completed,
                 total=total,
+                finish_period=_enum_value(task.finish_period),
             )
 
     # Optional: store alignment users for this task (fast-task alignment).
@@ -1601,22 +1643,11 @@ async def create_task(
     # If this is a project task, and the project was previously removed from the weekly planner
     # for this user/day/slot, auto-clear that exclusion so the newly created task is visible.
     if task.project_id is not None and assignee_ids:
-        planned_day = _as_local_date(task.due_date)
-        if planned_day is not None:
-            finish_period = (str(task.finish_period).strip().upper() if task.finish_period else "")
-            if finish_period in ("AM", "PM"):
-                slots_to_clear = {finish_period, "ALL"}
-            else:
-                # Unknown/empty -> shows in both slots in weekly table, so clear both + ALL.
-                slots_to_clear = {"AM", "PM", "ALL"}
-            await db.execute(
-                delete(ProjectPlannerExclusion).where(
-                    ProjectPlannerExclusion.project_id == task.project_id,
-                    ProjectPlannerExclusion.user_id.in_(assignee_ids),
-                    ProjectPlannerExclusion.day_date == planned_day,
-                    ProjectPlannerExclusion.time_slot.in_(sorted(slots_to_clear)),
-                )
-            )
+        await _clear_task_planner_exclusions_for_current_plan(
+            db,
+            task=task,
+            user_ids=assignee_ids,
+        )
 
     add_audit_log(
         db=db,
@@ -1711,6 +1742,8 @@ async def update_task(
     can_edit = False
     if user.role in (UserRole.ADMIN, UserRole.MANAGER):
         can_edit = True
+    elif task.ga_note_origin_id is not None:
+        can_edit = True
     elif task.created_by and task.created_by == user.id:
         can_edit = True
     elif is_assigned_to_task:
@@ -1782,6 +1815,8 @@ async def update_task(
     status_was_explicitly_set = payload.status is not None
     start_date_set = _payload_has_field(payload, "start_date")
     due_date_set = _payload_has_field(payload, "due_date")
+    finish_period_set = _payload_has_field(payload, "finish_period")
+    progress_finish_period = _enum_value(payload.finish_period) if finish_period_set else _enum_value(task.finish_period)
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
@@ -1968,10 +2003,13 @@ async def update_task(
                     total_value=total or 0,
                     completed_delta=0,
                     daily_status=task.status.value,
+                    finish_period=progress_finish_period,
                 )
             )
         else:
             existing_progress.daily_status = task.status.value
+            if existing_progress.finish_period is None:
+                existing_progress.finish_period = progress_finish_period
     
     if payload.is_personal is not None:
         task.is_personal = payload.is_personal
@@ -1985,7 +2023,6 @@ async def update_task(
         task.fast_task_order = payload.fast_task_order
     # Optional: update alignment users if provided
     alignment_set = _payload_has_field(payload, "alignment_user_ids")
-    finish_period_set = _payload_has_field(payload, "finish_period")
     if alignment_set:
         await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
         if payload.alignment_user_ids:
@@ -2049,6 +2086,24 @@ async def update_task(
                 day_dates=days_to_hide,
                 created_by=user.id,
             )
+    if (
+        payload.assignees is not None
+        or payload.assigned_to is not None
+        or payload.project_id is not None
+        or start_date_set
+        or due_date_set
+        or finish_period_set
+    ):
+        planner_user_ids = (
+            fast_group_desired_assignee_ids
+            if fast_group_desired_assignee_ids is not None
+            else await _task_assignee_ids_for_planner(db, task)
+        )
+        await _clear_task_planner_exclusions_for_current_plan(
+            db,
+            task=task,
+            user_ids=planner_user_ids,
+        )
     if payload.completed_at is not None:
         task.completed_at = payload.completed_at
     _sync_due_date_to_done_day(task)
@@ -2155,6 +2210,7 @@ async def update_task(
                         old_completed=old_completed,
                         new_completed=completed,
                         total=total,
+                        finish_period=progress_finish_period,
                         explicit_status=explicit_status_for_today,
                     )
 

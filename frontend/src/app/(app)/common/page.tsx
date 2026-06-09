@@ -29,6 +29,7 @@ type CommonType =
   | "bz"
 
 const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH", "r1", "personal"]
+const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH", "r1", "personal", "feedback"]
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
@@ -52,6 +53,9 @@ type FastTaskItemMeta = {
   finishPeriod?: "AM" | "PM" | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
+  startDate?: string | null
+  completedAt?: string | null
+  dateIsToday?: boolean
 }
 type BlockedItem = {
   title: string
@@ -145,6 +149,21 @@ type CommonBucket =
   | "bz"
 type FastTaskRowId = "blocked" | "oneH" | "personal" | "r1"
 type FastTaskEntry = BlockedItem | OneHItem | PersonalItem | R1Item
+type CommonWeekTableEntry =
+  | LateItem
+  | AbsentItem
+  | LeaveItem
+  | ExternalHolidayItem
+  | BlockedItem
+  | OneHItem
+  | PersonalItem
+  | ExternalItem
+  | InternalItem
+  | BzItem
+  | R1Item
+  | ProblemItem
+  | FeedbackItem
+  | PriorityItem
 type CommonViewCounts = Record<CommonBucket, number>
 type CommonViewGuardrails = {
   max_items_per_bucket: number
@@ -217,8 +236,9 @@ const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
 const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
   const normalized = normalizeCommonTaskStatus(status, isDone)
 
-  if (normalized === "DONE") return 2
-  if (normalized === "WAITING_CONFIRMATION") return 1
+  if (normalized === "DONE") return 3
+  if (normalized === "WAITING_CONFIRMATION") return 2
+  if (normalized === "IN_PROGRESS") return 1
   return 0
 }
 
@@ -242,6 +262,9 @@ type SwimlaneCell = {
   finishPeriod?: "AM" | "PM" | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
+  startDate?: string | null
+  completedAt?: string | null
+  dateIsToday?: boolean
 }
 type SwimlaneRow = {
   id: CommonType
@@ -257,6 +280,7 @@ type SwimlaneRow = {
 
 type MeetingColumnKey = "nr" | "day" | "topic" | "check" | "owner" | "time"
 type MeetingColumn = { key: MeetingColumnKey; label: string; width?: string }
+type MeetingCheckStatus = "none" | "check" | "x" | "o"
 type MeetingRow = {
   id: string
   nr: number
@@ -265,6 +289,8 @@ type MeetingRow = {
   owner?: string
   time?: string
   isChecked?: boolean
+  checkStatus?: MeetingCheckStatus
+  comment?: string
 }
 type MeetingTemplate = {
   id: string
@@ -294,13 +320,14 @@ type MeetingChecklist = {
     day?: string | null
     owner?: string | null
     time?: string | null
+    comment?: string | null
     is_checked?: boolean | null
   }[]
 }
 
 const DEFAULT_MEETING_COLUMNS: MeetingColumn[] = [
   { key: "nr", label: "NR", width: "52px" },
-  { key: "topic", label: "M1 PIKAT" },
+  { key: "topic", label: "M1 PIKAT", width: "860px" },
   { key: "check", label: "", width: "48px" },
   { key: "owner", label: "WHO", width: "90px" },
   { key: "time", label: "WHEN", width: "90px" },
@@ -311,6 +338,23 @@ const ALL_USERS_LABEL = "All users"
 const ALL_USERS_INITIALS = "ALL"
 const ALL_USERS_MARKER = "[ALL_USERS]"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
+const MEETING_CHECK_STATUS_RE = /\[MEETING_CHECK_STATUS:(CHECK|X|O)\]/i
+
+const getMeetingCheckStatus = (isChecked?: boolean | null, comment?: string | null): MeetingCheckStatus => {
+  const match = (comment || "").match(MEETING_CHECK_STATUS_RE)
+  const markerValue = match?.[1]?.toUpperCase()
+  if (markerValue === "X") return "x"
+  if (markerValue === "O") return "o"
+  if (markerValue === "CHECK") return "check"
+  return isChecked ? "check" : "none"
+}
+
+const buildMeetingCheckComment = (status: MeetingCheckStatus, comment?: string | null) => {
+  const cleaned = (comment || "").replace(MEETING_CHECK_STATUS_RE, "").trim()
+  if (status === "none" || status === "check") return cleaned
+  const marker = status === "x" ? "[MEETING_CHECK_STATUS:X]" : "[MEETING_CHECK_STATUS:O]"
+  return cleaned ? `${cleaned}\n${marker}` : marker
+}
 
 const parseFeedbackNote = (note: string | null | undefined) => {
   const raw = note || ""
@@ -666,6 +710,27 @@ export default function CommonViewPage() {
     const temp = new Date()
     temp.setHours(parsed.hours, parsed.minutes, 0, 0)
     return formatTime(temp)
+  }
+  const formatFastTaskDateLabel = (
+    date: string,
+    isDone?: boolean,
+    completedAt?: string | null,
+    startDate?: string | null
+  ) => {
+    if (isDone && completedAt) {
+      const completed = new Date(completedAt)
+      if (!Number.isNaN(completed.getTime())) {
+        return formatTime(completed)
+      }
+    }
+    const dateLabel = formatDateHuman(date)
+    if (!isDone && startDate) {
+      const start = parseDateOnly(startDate)
+      if (start) {
+        return formatDateHuman(toISODate(start))
+      }
+    }
+    return dateLabel
   }
   const computeNextOccurrenceDate = (params: {
     recurrenceType: "weekly" | "monthly" | "yearly"
@@ -1052,6 +1117,7 @@ export default function CommonViewPage() {
   const [showEditWeekendDays, setShowEditWeekendDays] = React.useState(false)
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
   const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
+  const [externalMeetingCreateAgentTestTask, setExternalMeetingCreateAgentTestTask] = React.useState(false)
   const [showInternalWeekendDays, setShowInternalWeekendDays] = React.useState(false)
   const [creatingInternalMeeting, setCreatingInternalMeeting] = React.useState(false)
   const [editingInternalMeetingId, setEditingInternalMeetingId] = React.useState<string | null>(null)
@@ -1097,6 +1163,7 @@ export default function CommonViewPage() {
     owner: "",
     time: "",
   })
+  const [movingMeetingRowId, setMovingMeetingRowId] = React.useState<string | null>(null)
   const [isSavingEntry, setIsSavingEntry] = React.useState(false)
   const [editingMeetingTitle, setEditingMeetingTitle] = React.useState(false)
   const [meetingTitleDraft, setMeetingTitleDraft] = React.useState("")
@@ -1387,6 +1454,14 @@ export default function CommonViewPage() {
   }, [externalMeetingsOpen])
 
   const canCreateExternalMeeting = Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId)
+  const canSelectExternalMeetingAgentTestTask =
+    externalMeetingRecurrenceType === "none" && Boolean(externalMeetingStartsAt)
+
+  React.useEffect(() => {
+    if (!canSelectExternalMeetingAgentTestTask) {
+      setExternalMeetingCreateAgentTestTask(false)
+    }
+  }, [canSelectExternalMeetingAgentTestTask])
   const canCreateInternalMeeting = Boolean(internalMeetingTitle.trim()) && Boolean(internalMeetingDepartmentId)
 
   const reloadMeetingTemplates = React.useCallback(async () => {
@@ -1445,6 +1520,8 @@ export default function CommonViewPage() {
               owner: item.owner || undefined,
               time: item.time || undefined,
               isChecked: item.is_checked ?? false,
+              checkStatus: getMeetingCheckStatus(item.is_checked, item.comment),
+              comment: item.comment || undefined,
             }))
           return {
             id: checklist.id,
@@ -1661,6 +1738,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
+          startDate: item.startDate || item.start_date || null,
+          completedAt: item.completedAt || item.completed_at || null,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }
@@ -1678,6 +1757,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
+          startDate: item.startDate || item.start_date || null,
+          completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -1696,6 +1777,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
+          startDate: item.startDate || item.start_date || null,
+          completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -1714,6 +1797,8 @@ export default function CommonViewPage() {
           finishPeriod: item.finishPeriod || item.finish_period || null,
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
+          startDate: item.startDate || item.start_date || null,
+          completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -2289,6 +2374,8 @@ export default function CommonViewPage() {
                   finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  completedAt: t.completed_at || null,
                 })
               }
               if (t.is_1h_report) {
@@ -2307,6 +2394,8 @@ export default function CommonViewPage() {
                   finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  completedAt: t.completed_at || null,
                 })
               }
               if (t.is_personal) {
@@ -2325,6 +2414,8 @@ export default function CommonViewPage() {
                   finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  completedAt: t.completed_at || null,
                 })
               }
               if (t.is_r1) {
@@ -2343,6 +2434,8 @@ export default function CommonViewPage() {
                   finishPeriod: t.finish_period || null,
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
+                  startDate: t.start_date || null,
+                  completedAt: t.completed_at || null,
                 })
               }
             }
@@ -2732,7 +2825,7 @@ export default function CommonViewPage() {
           }),
         })
         if (!res.ok) {
-          let detail = "Failed to reorder fast tasks."
+          let detail = "Failed to reorder tasks."
           try {
             const data = (await res.json()) as { detail?: string }
             if (data?.detail) detail = data.detail
@@ -2747,8 +2840,8 @@ export default function CommonViewPage() {
           new Map(nextPeers.map((item, index) => [item.taskId as string, index + 1]))
         )
       } catch (err) {
-        console.error("Failed to reorder fast tasks", err)
-        toast.error("Failed to reorder fast tasks.")
+        console.error("Failed to reorder tasks", err)
+        toast.error("Failed to reorder tasks.")
       } finally {
         setReorderingTaskId((current) => (current === entry.taskId ? null : current))
       }
@@ -3289,6 +3382,11 @@ export default function CommonViewPage() {
   const todayIso = toISODate(today)
   const thisWeekMonday = getMonday(today)
   const thisWeekMondayIso = toISODate(thisWeekMonday)
+  const isOpenTaskStartingToday = (isDone?: boolean, startDate?: string | null) => {
+    if (isDone || !startDate) return false
+    const start = parseDateOnly(startDate)
+    return Boolean(start && toISODate(start) === todayIso)
+  }
 
   const buildCommonViewExportPayload = () => {
     const exportISOsBase = allDaysSelected ? weekISOs : weekISOs.filter((iso) => selectedDates.has(iso))
@@ -3865,6 +3963,11 @@ export default function CommonViewPage() {
       console.error("Department is required to create a meeting.")
       return
     }
+    const shouldCreateAgentTestTask = externalMeetingCreateAgentTestTask
+    if (shouldCreateAgentTestTask && (externalMeetingRecurrenceType !== "none" || !externalMeetingStartsAt)) {
+      toast.error("Testimi i agentave task is available only for one-time meetings with a start date.")
+      return
+    }
     setCreatingExternalMeeting(true)
     try {
       let startsAt: string | null = null
@@ -3937,10 +4040,26 @@ export default function CommonViewPage() {
         return
       }
       const created = (await res.json()) as Meeting
-      setExternalMeetings((prev) => [created, ...prev])
+      let meetingForList = created
+      if (shouldCreateAgentTestTask) {
+        const taskRes = await apiFetch(`/meetings/${created.id}/agent-test-task`, {
+          method: "POST",
+        })
+        if (!taskRes?.ok) {
+          const detail = await taskRes
+            .json()
+            .then((body) => (typeof body?.detail === "string" ? body.detail : null))
+            .catch(() => null)
+          toast.error(detail || "Meeting created, but failed to create Testimi i agentave task.")
+        } else {
+          meetingForList = (await taskRes.json()) as Meeting
+          toast.success("Meeting and Testimi i agentave task created.")
+        }
+      }
+      setExternalMeetings((prev) => [meetingForList, ...prev])
       COMMON_VIEW_CACHE.clear()
       const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
-      const mapped = mapMeetingToCommonItem(created, "external", ownerName)
+      const mapped = mapMeetingToCommonItem(meetingForList, "external", ownerName)
       if (mapped) {
         setCommonData((prev) => ({
           ...prev,
@@ -3956,6 +4075,7 @@ export default function CommonViewPage() {
       setExternalMeetingRecurrenceDaysOfMonth([])
       setExternalMeetingRecurrenceMonth("1")
       setExternalMeetingRecurrenceDay("1")
+      setExternalMeetingCreateAgentTestTask(false)
       // Reset checklist after successful creation
       if (externalMeetingChecklist?.items) {
         const resetMap = new Map<string, boolean>()
@@ -3978,6 +4098,7 @@ export default function CommonViewPage() {
     externalMeetingRecurrenceDaysOfMonth,
     externalMeetingRecurrenceMonth,
     externalMeetingRecurrenceDay,
+    externalMeetingCreateAgentTestTask,
     externalMeetingDepartmentId,
     user?.department_id,
     user?.email,
@@ -4201,6 +4322,7 @@ export default function CommonViewPage() {
     },
     [isAdmin, apiFetch, commonDepartmentId, confirm, syncCommonMeetingBucket]
   )
+
 
   const submitInternalMeeting = React.useCallback(async () => {
     if (!internalMeetingTitle.trim()) return
@@ -4740,8 +4862,8 @@ export default function CommonViewPage() {
     const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
       accentClass: "swimlane-accent blocked",
       status: x.status,
       isDone: x.isDone,
@@ -4753,14 +4875,17 @@ export default function CommonViewPage() {
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
+      startDate: x.startDate,
+      completedAt: x.completedAt,
+      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
     }))
 
     const oneHSource = includeOneH ? sortTasksByOrder(filtered.oneH, isMultiDate) : []
     const oneHItems: SwimlaneCell[] = oneHSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
       accentClass: "swimlane-accent oneh",
       status: x.status,
       isDone: x.isDone,
@@ -4772,14 +4897,17 @@ export default function CommonViewPage() {
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
+      startDate: x.startDate,
+      completedAt: x.completedAt,
+      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
     }))
 
     const personalSource = sortTasksByOrder(filtered.personal, isMultiDate)
     const personalItems: SwimlaneCell[] = personalSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
       accentClass: "swimlane-accent personal",
       status: x.status,
       isDone: x.isDone,
@@ -4791,6 +4919,9 @@ export default function CommonViewPage() {
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
+      startDate: x.startDate,
+      completedAt: x.completedAt,
+      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
     }))
 
     const externalSource = isMultiDate
@@ -4827,8 +4958,8 @@ export default function CommonViewPage() {
     const r1Items: SwimlaneCell[] = r1Source.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.owner ? [x.owner] : []),
-      subtitle: `${formatDateHuman(x.date)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatDateHuman(x.date),
+      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
       accentClass: "swimlane-accent r1",
       status: x.status,
       isDone: x.isDone,
@@ -4840,6 +4971,9 @@ export default function CommonViewPage() {
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
+      startDate: x.startDate,
+      completedAt: x.completedAt,
+      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
     }))
 
     const problemSource = isMultiDate
@@ -5117,41 +5251,45 @@ export default function CommonViewPage() {
     node.scrollBy({ left: delta, behavior: "smooth" })
   }, [])
 
-  const updateMeetingChecked = React.useCallback((meetingId: string, itemId: string, nextChecked: boolean) => {
+  const updateMeetingCheckStatus = React.useCallback((meetingId: string, itemId: string, nextStatus: MeetingCheckStatus) => {
     setMeetingTemplates((prev) =>
       prev.map((meeting) => {
         if (meeting.id !== meetingId) return meeting
         return {
           ...meeting,
           rows: meeting.rows.map((row) =>
-            row.id === itemId ? { ...row, isChecked: nextChecked } : row
+            row.id === itemId ? { ...row, isChecked: nextStatus === "check", checkStatus: nextStatus } : row
           ),
         }
       })
     )
   }, [])
 
-  const toggleMeetingItem = React.useCallback(
-    async (meetingId: string, itemId: string, nextChecked: boolean) => {
-      const currentChecked =
+  const changeMeetingCheckStatus = React.useCallback(
+    async (meetingId: string, itemId: string, nextStatus: MeetingCheckStatus) => {
+      const currentRow =
         meetingTemplates
           .find((meeting) => meeting.id === meetingId)
-          ?.rows.find((row) => row.id === itemId)?.isChecked ?? false
-      updateMeetingChecked(meetingId, itemId, nextChecked)
+          ?.rows.find((row) => row.id === itemId)
+      const currentStatus = currentRow?.checkStatus ?? (currentRow?.isChecked ? "check" : "none")
+      updateMeetingCheckStatus(meetingId, itemId, nextStatus)
       try {
         const res = await apiFetch(`/checklist-items/${itemId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ is_checked: nextChecked }),
+          body: JSON.stringify({
+            is_checked: nextStatus === "check",
+            comment: buildMeetingCheckComment(nextStatus, currentRow?.comment),
+          }),
         })
         if (!res.ok) {
-          updateMeetingChecked(meetingId, itemId, currentChecked)
+          updateMeetingCheckStatus(meetingId, itemId, currentStatus)
         }
-      } catch (err) {
-        updateMeetingChecked(meetingId, itemId, currentChecked)
+      } catch {
+        updateMeetingCheckStatus(meetingId, itemId, currentStatus)
       }
     },
-    [apiFetch, meetingTemplates, updateMeetingChecked]
+    [apiFetch, meetingTemplates, updateMeetingCheckStatus]
   )
 
   const startEditMeetingRow = React.useCallback((row: MeetingRow) => {
@@ -5257,50 +5395,53 @@ export default function CommonViewPage() {
     [apiFetch, editDraft, meetingTemplates]
   )
 
-  const resequenceMeetingRows = React.useCallback(
-    async (meetingId: string, rowsOverride?: MeetingRow[]) => {
+  const moveMeetingRow = React.useCallback(
+    async (meetingId: string, rowId: string, direction: "up" | "down") => {
       const meeting = meetingTemplates.find((template) => template.id === meetingId)
-      const rows = rowsOverride || meeting?.rows || []
-      if (!rows.length) return
-      const sortedRows = rows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
-      const resequencedRows = sortedRows.map((row, index) => ({
-        ...row,
-        nr: index + 1,
-      }))
-      const updates = resequencedRows
-        .map((row) => ({ row, nextNr: row.nr }))
-        .filter(({ row, nextNr }) => (rows.find((r) => r.id === row.id)?.nr ?? 0) !== nextNr)
-      if (!updates.length) return
+      if (!meeting || movingMeetingRowId) return
+      const sortedRows = meeting.rows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+      const currentIndex = sortedRows.findIndex((row) => row.id === rowId)
+      if (currentIndex < 0) return
+      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
+      if (targetIndex < 0 || targetIndex >= sortedRows.length) return
 
+      const nextRows = sortedRows.slice()
+      const currentRow = nextRows[currentIndex]
+      nextRows[currentIndex] = nextRows[targetIndex]
+      nextRows[targetIndex] = currentRow
+
+      setMovingMeetingRowId(rowId)
       setMeetingTemplates((prev) =>
-        prev.map((template) => {
-          if (template.id !== meetingId) return template
-          if (rowsOverride) {
-            return { ...template, rows: resequencedRows }
-          }
-          const updatedRows = template.rows.map((row) => {
-            const next = updates.find((entry) => entry.row.id === row.id)
-            return next ? { ...row, nr: next.nextNr } : row
-          })
-          return { ...template, rows: updatedRows }
-        })
+        prev.map((template) =>
+          template.id === meetingId
+            ? {
+                ...template,
+                rows: nextRows.map((row, index) => ({ ...row, nr: index + 1 })),
+              }
+            : template
+        )
       )
 
       try {
-        await Promise.all(
-          updates.map(({ row, nextNr }) =>
-            apiFetch(`/checklist-items/${row.id}`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ position: nextNr }),
-            })
-          )
-        )
+        const res = await apiFetch(`/checklist-items/${rowId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ position: sortedRows[targetIndex].nr }),
+        })
+        if (!res.ok) {
+          throw new Error(`Failed to reorder meeting point (${res.status})`)
+        }
       } catch (err) {
-        console.error("Failed to resequence meeting items", err)
+        console.error("Failed to reorder meeting point", err)
+        toast.error("Failed to reorder meeting point.")
+        setMeetingTemplates((prev) =>
+          prev.map((template) => (template.id === meetingId ? { ...template, rows: meeting.rows } : template))
+        )
+      } finally {
+        setMovingMeetingRowId((current) => (current === rowId ? null : current))
       }
     },
-    [apiFetch, meetingTemplates]
+    [apiFetch, meetingTemplates, movingMeetingRowId]
   )
 
   const deleteMeetingRow = React.useCallback(
@@ -5338,9 +5479,14 @@ export default function CommonViewPage() {
           )
           return
         }
-        const remainingRows = previousRows.filter((row) => row.id !== rowId)
-        await resequenceMeetingRows(meetingId, remainingRows)
-      } catch (err) {
+        const remainingRows = previousRows
+          .filter((row) => row.id !== rowId)
+          .sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+          .map((row, index) => ({ ...row, nr: index + 1 }))
+        setMeetingTemplates((prev) =>
+          prev.map((meeting) => (meeting.id === meetingId ? { ...meeting, rows: remainingRows } : meeting))
+        )
+      } catch {
         setMeetingTemplates((prev) =>
           prev.map((meeting) => {
             if (meeting.id !== meetingId) return meeting
@@ -5352,7 +5498,7 @@ export default function CommonViewPage() {
         )
       }
     },
-    [apiFetch, confirm, meetingTemplates, resequenceMeetingRows]
+    [apiFetch, confirm, meetingTemplates]
   )
 
   const addMeetingRow = React.useCallback(
@@ -5363,8 +5509,10 @@ export default function CommonViewPage() {
       if (!meeting) return
       const parsedNr = Number(addDraft.nr)
       const requestedNr = Number.isFinite(parsedNr) && parsedNr > 0 ? Math.floor(parsedNr) : null
+      const sortedRows = meeting.rows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+      const insertIndex = requestedNr === null ? sortedRows.length : Math.min(requestedNr - 1, sortedRows.length)
       const nextPosition =
-        requestedNr || Math.max(0, ...meeting.rows.map((row) => row.nr || 0)) + 1
+        requestedNr === null ? Math.max(0, ...meeting.rows.map((row) => row.nr || 0)) + 1 : insertIndex + 1
       const payload = {
         checklist_id: meetingId,
         item_type: "CHECKBOX",
@@ -5391,13 +5539,15 @@ export default function CommonViewPage() {
           owner: created.owner || undefined,
           time: created.time || undefined,
           isChecked: created.is_checked ?? false,
+          checkStatus: getMeetingCheckStatus(created.is_checked, created.comment),
+          comment: created.comment || undefined,
         }
         const baseRows = meeting?.rows || []
-        const nextRows = requestedNr
-          ? baseRows.map((row) =>
-              row.nr >= requestedNr ? { ...row, nr: row.nr + 1 } : row
-            ).concat(createdRow)
-          : baseRows.concat(createdRow)
+        const orderedBaseRows = baseRows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+        const nextRows = orderedBaseRows
+          .slice(0, insertIndex)
+          .concat(createdRow, orderedBaseRows.slice(insertIndex))
+          .map((row, index) => ({ ...row, nr: index + 1 }))
         setMeetingTemplates((prev) =>
           prev.map((template) => {
             if (template.id !== meetingId) return template
@@ -5408,12 +5558,11 @@ export default function CommonViewPage() {
           })
         )
         setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
-        await resequenceMeetingRows(meetingId, nextRows)
       } catch (err) {
         console.error("Failed to add meeting item", err)
       }
     },
-    [addDraft, apiFetch, meetingTemplates, resequenceMeetingRows]
+    [addDraft, apiFetch, meetingTemplates]
   )
 
   return (
@@ -6033,6 +6182,7 @@ export default function CommonViewPage() {
         }
         .meeting-table {
           width: 100%;
+          table-layout: fixed;
           border-collapse: collapse;
           font-size: 12px;
         }
@@ -6125,14 +6275,62 @@ export default function CommonViewPage() {
           color: #0f172a;
           white-space: nowrap;
         }
+        .meeting-table td.meeting-topic-cell {
+          width: 860px;
+          min-width: 860px;
+          max-width: 860px;
+          white-space: normal !important;
+          overflow-wrap: anywhere;
+          word-break: normal;
+          line-height: 1.45;
+        }
+        .meeting-topic-text {
+          display: block;
+          width: 100%;
+          max-width: 100%;
+          white-space: normal;
+          overflow-wrap: anywhere;
+          word-break: break-word;
+          line-height: 1.45;
+        }
+        .meeting-topic-header {
+          width: 860px;
+          min-width: 860px;
+          max-width: 860px;
+        }
+        .meeting-topic-cell .input {
+          white-space: normal;
+        }
         .meeting-check-cell {
           text-align: center;
           vertical-align: middle;
         }
-        .meeting-check-cell input {
-          accent-color: #64748b;
-          width: 16px;
-          height: 16px;
+        .meeting-check-select {
+          width: 42px;
+          height: 30px;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          background: #ffffff;
+          color: #334155;
+          font-size: 14px;
+          font-weight: 800;
+          text-align: center;
+          cursor: pointer;
+        }
+        .meeting-check-select.status-check {
+          border-color: #86efac;
+          background: #f0fdf4;
+          color: #15803d;
+        }
+        .meeting-check-select.status-x {
+          border-color: #fecaca;
+          background: #fef2f2;
+          color: #b91c1c;
+        }
+        .meeting-check-select.status-o {
+          border-color: #bfdbfe;
+          background: #eff6ff;
+          color: #1d4ed8;
         }
         .btn-icon {
           width: 28px;
@@ -6150,6 +6348,15 @@ export default function CommonViewPage() {
           background: #f1f5f9;
           color: #334155;
         }
+        .btn-icon:disabled {
+          cursor: not-allowed;
+          opacity: 0.45;
+          transform: none;
+        }
+        .btn-icon:disabled:hover {
+          background: #ffffff;
+          color: #475569;
+        }
         .btn-icon.danger {
           color: #b91c1c;
           border-color: #fecaca;
@@ -6158,6 +6365,12 @@ export default function CommonViewPage() {
         .btn-icon.danger:hover {
           background: #ffe4e6;
           color: #991b1b;
+        }
+        .meeting-row-actions {
+          display: flex;
+          flex-wrap: nowrap;
+          gap: 6px;
+          align-items: center;
         }
         .meeting-owner-cell {
           text-align: center;
@@ -6589,6 +6802,18 @@ export default function CommonViewPage() {
           white-space: pre-wrap;
           line-height: 1.35;
         }
+        .swimlane-title-text.collapsed {
+          display: -webkit-box;
+          -webkit-line-clamp: 2;
+          -webkit-box-orient: vertical;
+          overflow: hidden;
+          white-space: normal;
+          word-break: break-word;
+        }
+        .swimlane-title-text.expanded {
+          display: inline;
+          white-space: pre-wrap;
+        }
         .swimlane-title-toggle {
           position: absolute;
           top: 8px;
@@ -6653,8 +6878,22 @@ export default function CommonViewPage() {
         }
         .swimlane-date {
           font-size: 12px;
-          color: var(--swim-muted);
+          color: #334155;
+          font-weight: 700;
           line-height: 1.2;
+          align-self: flex-start;
+        }
+        .swimlane-date.today {
+          display: inline-flex;
+          align-items: center;
+          width: fit-content;
+          border: 1px solid #60a5fa;
+          border-radius: 4px;
+          background: #dbeafe;
+          color: #1d4ed8;
+          font-weight: 800;
+          padding: 2px 6px;
+          box-shadow: 0 1px 2px rgba(37, 99, 235, 0.18);
         }
         .swimlane-subtitle {
           font-size: 12px;
@@ -6899,6 +7138,25 @@ export default function CommonViewPage() {
           white-space: pre-wrap;
           line-height: 1.35;
         }
+        .week-table-merged-cell {
+          background: #ffffff;
+        }
+        .week-table-feedback-summary {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 3px;
+        }
+        .feedback-print-summary-line {
+          flex: 1 1 auto;
+          min-width: 0;
+        }
+        .feedback-print-date {
+          color: #64748b;
+          font-weight: 700;
+        }
+        .week-table-feedback-summary .week-table-delete {
+          display: none !important;
+        }
         .week-table-delete {
           border: 1px solid #cbd5e1;
           background: #ffffff;
@@ -7017,20 +7275,21 @@ export default function CommonViewPage() {
         .week-table-avatars {
           display: flex;
           flex-wrap: wrap;
-          gap: 4px;
+          gap: 5px;
           margin-top: 2px;
         }
         .week-table-avatar {
           display: inline-flex;
           align-items: center;
           justify-content: center;
-          width: 20px;
-          height: 20px;
+          width: 24px;
+          height: 24px;
           border-radius: 999px;
           background: #e2e8f0;
           color: #0f172a;
-          font-weight: 700;
-          font-size: 9px;
+          font-weight: 600;
+          font-size: 11px;
+          line-height: 1;
           border: 1px solid #cbd5e1;
         }
         .week-table-empty {
@@ -7135,6 +7394,23 @@ export default function CommonViewPage() {
             white-space: normal !important;
             line-height: 1.15;
           }
+          .week-table-feedback-summary {
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1px 3px;
+          }
+          .week-table-merged-cell {
+            padding: 1px 3px !important;
+          }
+          .feedback-print-summary-line {
+            display: block;
+            white-space: nowrap !important;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            line-height: 1;
+          }
+          .feedback-print-date {
+            color: #475569 !important;
+          }
           .week-table-entry {
             border: 1px solid #94a3b8 !important;
             -webkit-print-color-adjust: exact;
@@ -7155,7 +7431,7 @@ export default function CommonViewPage() {
             display: inline-flex;
             align-items: center;
             justify-content: center;
-            gap: 1px;
+            gap: 2px;
             margin-top: 0;
             line-height: 1;
           }
@@ -7165,14 +7441,15 @@ export default function CommonViewPage() {
             justify-content: center;
             flex: 0 0 auto !important;
             min-width: 0;
-            height: 8px;
-            padding: 0 1px;
-            border-radius: 2px;
-            font-size: 6px;
-            line-height: 8px;
-            font-weight: 700;
+            min-height: 16px;
+            height: 16px;
+            padding: 0 4px;
+            border-radius: 4px;
+            font-size: 10px;
+            line-height: 16px;
+            font-weight: 600;
             white-space: nowrap;
-            border-width: 0.8px;
+            border-width: 1px;
             align-self: center;
             vertical-align: middle;
           }
@@ -8281,11 +8558,15 @@ export default function CommonViewPage() {
                   <thead>
                     <tr>
                       {activeMeeting.columns.map((col) => (
-                        <th key={col.key} style={col.width ? { width: col.width } : undefined}>
+                        <th
+                          key={col.key}
+                          className={col.key === "topic" ? "meeting-topic-header" : undefined}
+                          style={col.width ? { width: col.width } : undefined}
+                        >
                           {col.label}
                         </th>
                       ))}
-                      {canEditMeetingTemplates ? <th style={{ width: "120px" }}>Actions</th> : null}
+                      {canEditMeetingTemplates ? <th style={{ width: "160px" }}>Actions</th> : null}
                     </tr>
                   </thead>
                   <tbody>
@@ -8322,31 +8603,47 @@ export default function CommonViewPage() {
                           }
 
                           if (col.key === "check") {
+                            const checkStatus = row.checkStatus ?? (row.isChecked ? "check" : "none")
                             return (
                               <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} className="meeting-check-cell">
-                                <input
-                                  type="checkbox"
-                                  aria-label={`Mark ${row.topic}`}
-                                  checked={Boolean(row.isChecked)}
-                                  onChange={(e) => toggleMeetingItem(activeMeeting.id, row.id, e.target.checked)}
-                                />
+                                <select
+                                  className={`meeting-check-select status-${checkStatus}`}
+                                  aria-label={`Set status for ${row.topic}`}
+                                  value={checkStatus}
+                                  onChange={(e) =>
+                                    void changeMeetingCheckStatus(
+                                      activeMeeting.id,
+                                      row.id,
+                                      e.target.value as MeetingCheckStatus
+                                    )
+                                  }
+                                >
+                                  <option value="none"></option>
+                                  <option value="check">{"\u2713"}</option>
+                                  <option value="x">X</option>
+                                  <option value="o">O</option>
+                                </select>
                               </td>
                             )
                           }
 
                           if (col.key === "topic") {
                             return (
-                              <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
+                              <td
+                                key={`${activeMeeting.id}-${row.nr}-${col.key}`}
+                                className="meeting-topic-cell"
+                                style={col.width ? { width: col.width } : undefined}
+                              >
                                 {isEditing ? (
                                   <input
                                     className="input"
                                     type="text"
                                     value={editDraft.topic}
-                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, topic: e.target.value.toUpperCase() }))}
+                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, topic: e.target.value }))}
                                     style={{ textTransform: "uppercase" }}
                                   />
                                 ) : (
-                                  value
+                                  <span className="meeting-topic-text">{value}</span>
                                 )}
                               </td>
                             )
@@ -8421,7 +8718,43 @@ export default function CommonViewPage() {
                                 </button>
                               </div>
                             ) : (
-                              <div style={{ display: "flex", gap: "6px" }}>
+                              <div className="meeting-row-actions">
+                                <button
+                                  className="btn-icon"
+                                  type="button"
+                                  onClick={() => void moveMeetingRow(activeMeeting.id, row.id, "up")}
+                                  aria-label="Move row up"
+                                  title="Move up"
+                                  disabled={rowIndex === 0 || Boolean(movingMeetingRowId)}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path
+                                      d="M6 15l6-6 6 6"
+                                      stroke="currentColor"
+                                      strokeWidth="1.8"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
+                                <button
+                                  className="btn-icon"
+                                  type="button"
+                                  onClick={() => void moveMeetingRow(activeMeeting.id, row.id, "down")}
+                                  aria-label="Move row down"
+                                  title="Move down"
+                                  disabled={rowIndex === activeMeeting.rows.length - 1 || Boolean(movingMeetingRowId)}
+                                >
+                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                                    <path
+                                      d="M6 9l6 6 6-6"
+                                      stroke="currentColor"
+                                      strokeWidth="1.8"
+                                      strokeLinecap="round"
+                                      strokeLinejoin="round"
+                                    />
+                                  </svg>
+                                </button>
                                 <button className="btn-icon" type="button" onClick={() => startEditMeetingRow(row)} aria-label="Edit row">
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                     <path
@@ -8485,7 +8818,7 @@ export default function CommonViewPage() {
                       type="text"
                       placeholder="Topic"
                       value={addDraft.topic}
-                      onChange={(e) => setAddDraft((prev) => ({ ...prev, topic: e.target.value.toUpperCase() }))}
+                      onChange={(e) => setAddDraft((prev) => ({ ...prev, topic: e.target.value }))}
                       style={{ textTransform: "uppercase" }}
                     />
                     <button className="btn-primary" type="button" onClick={() => addMeetingRow(activeMeeting.id)}>
@@ -8898,6 +9231,29 @@ export default function CommonViewPage() {
                     </>
                   )}
                 </div>
+                <button
+                  className="btn-surface"
+                  type="button"
+                  disabled={!canSelectExternalMeetingAgentTestTask || creatingExternalMeeting}
+                  onClick={() => setExternalMeetingCreateAgentTestTask((prev) => !prev)}
+                  title={
+                    canSelectExternalMeetingAgentTestTask
+                      ? "Toggle Testimi i agentave task creation for this meeting"
+                      : "Available only for one-time meetings with a start date"
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "16px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    padding: "8px 12px",
+                    backgroundColor: externalMeetingCreateAgentTestTask ? "#dcfce7" : "#ffffff",
+                    borderColor: externalMeetingCreateAgentTestTask ? "#16a34a" : "#cbd5e1",
+                    color: externalMeetingCreateAgentTestTask ? "#166534" : "#334155",
+                  }}
+                >
+                  {externalMeetingCreateAgentTestTask ? "Test task will be created" : "Create test task"}
+                </button>
                 <div className="external-meeting-row" style={{ marginTop: "16px" }}>
                   <button
                     className="btn-primary"
@@ -9145,7 +9501,7 @@ export default function CommonViewPage() {
                                 </div>
                               </div>
                               {canEditExternalMeeting(meeting) ? (
-                                <div style={{ display: "flex", gap: "6px", marginLeft: "12px" }}>
+                                <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                                   <button
                                     className="btn-surface"
                                     type="button"
@@ -9713,7 +10069,7 @@ export default function CommonViewPage() {
                   .map((row, rowIndex) => {
                     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
                     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
-                    let dayEntries: Record<string, any[]> = {}
+                    const dayEntries: Record<string, CommonWeekTableEntry[]> = {}
                     weekISOs.forEach((iso) => {
                       const dayData = tableDataByDay?.[iso]
                       if (row.id === "late") dayEntries[iso] = dayData?.late || []
@@ -10097,8 +10453,74 @@ export default function CommonViewPage() {
                       }
                       return null
                     }
+
+                    const getFeedbackWeekSummary = () => {
+                      const seen = new Set<string>()
+                      const items: Array<{ entry: FeedbackItem; iso: string }> = []
+                      weekISOs.forEach((iso) => {
+                        const feedbackEntries = (dayEntries[iso] || []) as FeedbackItem[]
+                        feedbackEntries.forEach((entry) => {
+                          const key = entry.everyday
+                            ? entry.entryId || `${normalizeTitle(entry.title)}|${normalizeTitle(entry.note || "")}|${entry.person}`
+                            : `${iso}|${entry.entryId || normalizeTitle(entry.title)}|${normalizeTitle(entry.note || "")}|${entry.person}`
+                          if (seen.has(key)) return
+                          seen.add(key)
+                          items.push({ entry, iso })
+                        })
+                      })
+                      return items
+                    }
                     
                     const rowLabel = row.label.toUpperCase()
+                    if (row.id === "feedback") {
+                      const feedbackSummary = getFeedbackWeekSummary()
+                      return (
+                        <tr key={row.id} className={`week-table-row ${weekRowClass} week-table-row-merged`}>
+                          <td className="week-table-number">{rowIndex + 1}</td>
+                          <td className="week-table-label">{rowLabel}</td>
+                          <td colSpan={weekISOs.length} className="week-table-cell week-table-merged-cell">
+                            {feedbackSummary.length ? (
+                              <div className="week-table-entries week-table-feedback-summary">
+                                {feedbackSummary.map(({ entry, iso }, idx) => {
+                                  const dateLabel = entry.everyday
+                                    ? "All week"
+                                    : `${getDayCode(fromISODate(iso))} ${formatDateHuman(iso)}`
+                                  return (
+                                    <div key={`${entry.entryId || entry.title}-${iso}-${idx}`} className="week-table-entry">
+                                      <span className="feedback-print-summary-line">
+                                        {idx + 1}. {commonPrintTitleLine(entry.title)}
+                                        <span className="feedback-print-date"> - {dateLabel}</span>
+                                        {entry.note ? ` - ${commonPrintTitleLine(entry.note)}` : ""}
+                                      </span>
+                                      <div className="week-table-avatars">
+                                        {entryAssignees(entry).map((name: string) => (
+                                          <span key={`${entry.title}-${name}`} className="week-table-avatar" title={name}>
+                                            {initials(name)}
+                                          </span>
+                                        ))}
+                                      </div>
+                                      {canDeleteCommon && entry.entryId ? (
+                                        <button
+                                          type="button"
+                                          className="week-table-delete week-table-delete-red"
+                                          onClick={() => deleteCommonEntry(entry.entryId!)}
+                                          aria-label="Delete entry"
+                                          title="Delete"
+                                        >
+                                          Ã—
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  )
+                                })}
+                              </div>
+                            ) : (
+                              <span className="week-table-empty">â€”</span>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    }
                     
                     return (
                       <tr key={row.id} className={`week-table-row ${weekRowClass}`}>
@@ -10163,7 +10585,7 @@ export default function CommonViewPage() {
                     >
                       {(() => {
                         const headerSubtext = swimlaneHeaderSubtext[row.id]
-                        const hasTitleToggle = row.id === "oneH" || row.id === "r1" || row.id === "personal"
+                        const hasTitleToggle = TITLE_EXPANDABLE_SWIMLANE_ROWS.includes(row.id)
                         const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
                         const infoButton = (
                           <span className="swimlane-info-wrap">
@@ -10267,6 +10689,7 @@ export default function CommonViewPage() {
                             const noteKey = cell.entryId || `${row.id}-${index}`
                             const isNoteOpen = openSwimlaneNoteId === noteKey
                             const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
+                            const isTitleExpandable = TITLE_EXPANDABLE_SWIMLANE_ROWS.includes(row.id)
                             return (
                               <div
                                 key={`${row.id}-${index}`}
@@ -10376,7 +10799,13 @@ export default function CommonViewPage() {
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
-                                      <span className={["swimlane-title-text", isTitleRowOpen ? "expanded" : ""].filter(Boolean).join(" ")}>
+                                      <span
+                                        className={[
+                                          "swimlane-title-text",
+                                          isTitleExpandable && !isTitleRowOpen ? "collapsed" : "",
+                                          isTitleRowOpen ? "expanded" : "",
+                                        ].filter(Boolean).join(" ")}
+                                      >
                                         {isTitleRowOpen
                                           ? renderMarkedNoteContent(stripInitialsPrefix(cell.title), cell.title)
                                           : renderCommonMarkedTitleLine(cell.title)}
@@ -10416,7 +10845,9 @@ export default function CommonViewPage() {
                                           </div>
                                         ) : null}
                                         {showDate ? (
-                                          <div className="swimlane-date">{cell.dateLabel}</div>
+                                          <div className={["swimlane-date", cell.dateIsToday ? "today" : ""].filter(Boolean).join(" ")}>
+                                            {cell.dateLabel}
+                                          </div>
                                         ) : null}
                                         {isNoteOpen && cell.note ? (
                                           <div className="swimlane-note">

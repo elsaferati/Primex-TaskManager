@@ -157,6 +157,7 @@ export interface User {
   department_id?: string | null
   is_active: boolean
   weekly_planner_sort_order?: number | null
+  weekly_planner_hidden?: boolean
 }
 
 export interface UserLookup {
@@ -167,6 +168,7 @@ export interface UserLookup {
   department_id?: string | null
   is_active: boolean
   weekly_planner_sort_order?: number | null
+  weekly_planner_hidden?: boolean
 }
 
 export interface Department {
@@ -240,6 +242,9 @@ export interface Task {
   system_template_origin_id?: string | null
   origin_run_at?: string | null
   system_task_slot_id?: string | null
+  meeting_origin_id?: string | null
+  meeting_occurrence_date?: string | null
+  meeting_system_task_kind?: string | null
   status?: string
   priority?: string
   finish_period?: TaskFinishPeriod | null
@@ -540,6 +545,7 @@ export interface Meeting {
   recurrence_type?: string | null // "none", "weekly", "monthly"
   recurrence_days_of_week?: number[] | null
   recurrence_days_of_month?: number[] | null
+  external_agent_test_task_requested?: boolean
   department_id: string
   project_id?: string | null
   created_by?: string | null

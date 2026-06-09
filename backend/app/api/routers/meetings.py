@@ -13,6 +13,10 @@ from app.models.meeting import Meeting, MeetingParticipant
 from app.models.project import Project
 from app.models.user import User
 from app.schemas.meeting import MeetingCreate, MeetingOut, MeetingUpdate
+from app.services.meeting_system_tasks import (
+    deactivate_external_meeting_system_tasks,
+    reconcile_external_meeting_system_tasks_for_meeting,
+)
 
 
 router = APIRouter()
@@ -72,6 +76,7 @@ async def list_meetings(
             recurrence_type=m.recurrence_type,
             recurrence_days_of_week=m.recurrence_days_of_week,
             recurrence_days_of_month=m.recurrence_days_of_month,
+            external_agent_test_task_requested=m.external_agent_test_task_requested,
             department_id=m.department_id,
             project_id=m.project_id,
             created_by=m.created_by,
@@ -130,7 +135,8 @@ async def create_meeting(
     for user_id in participant_ids:
         participant = MeetingParticipant(meeting_id=meeting.id, user_id=user_id)
         db.add(participant)
-    
+
+    await db.flush()
     await db.commit()
     await db.refresh(meeting)
     
@@ -149,6 +155,7 @@ async def create_meeting(
         recurrence_type=meeting.recurrence_type,
         recurrence_days_of_week=meeting.recurrence_days_of_week,
         recurrence_days_of_month=meeting.recurrence_days_of_month,
+        external_agent_test_task_requested=meeting.external_agent_test_task_requested,
         department_id=meeting.department_id,
         project_id=meeting.project_id,
         created_by=meeting.created_by,
@@ -231,6 +238,9 @@ async def update_meeting(
             participant = MeetingParticipant(meeting_id=meeting.id, user_id=user_id)
             db.add(participant)
 
+    await db.flush()
+    await reconcile_external_meeting_system_tasks_for_meeting(db, meeting)
+
     await db.commit()
     await db.refresh(meeting)
     
@@ -249,6 +259,55 @@ async def update_meeting(
         recurrence_type=meeting.recurrence_type,
         recurrence_days_of_week=meeting.recurrence_days_of_week,
         recurrence_days_of_month=meeting.recurrence_days_of_month,
+        external_agent_test_task_requested=meeting.external_agent_test_task_requested,
+        department_id=meeting.department_id,
+        project_id=meeting.project_id,
+        created_by=meeting.created_by,
+        created_at=meeting.created_at,
+        updated_at=meeting.updated_at,
+        participant_ids=participant_ids_list,
+    )
+
+
+@router.post("/{meeting_id}/agent-test-task", response_model=MeetingOut)
+async def create_agent_test_task_for_meeting(
+    meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> MeetingOut:
+    meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    ensure_department_access(user, meeting.department_id)
+    if meeting.meeting_type != "external":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent test task is only available for external meetings")
+
+    meeting.external_agent_test_task_requested = True
+    await db.flush()
+    created = await reconcile_external_meeting_system_tasks_for_meeting(db, meeting)
+    if created == 0 and meeting.starts_at is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting start date is required")
+    if created == 0 and (meeting.recurrence_type or "").strip().lower() not in ("", "none"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent test task is only available for one-time meetings")
+
+    await db.commit()
+    await db.refresh(meeting)
+
+    participants_stmt = select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
+    participants = (await db.execute(participants_stmt)).scalars().all()
+    participant_ids_list = [p.user_id for p in participants]
+
+    return MeetingOut(
+        id=meeting.id,
+        title=meeting.title,
+        platform=meeting.platform,
+        starts_at=meeting.starts_at,
+        meeting_url=meeting.meeting_url,
+        meeting_type=meeting.meeting_type,
+        recurrence_type=meeting.recurrence_type,
+        recurrence_days_of_week=meeting.recurrence_days_of_week,
+        recurrence_days_of_month=meeting.recurrence_days_of_month,
+        external_agent_test_task_requested=meeting.external_agent_test_task_requested,
         department_id=meeting.department_id,
         project_id=meeting.project_id,
         created_by=meeting.created_by,
@@ -269,6 +328,7 @@ async def delete_meeting(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
     # Only admins can delete external meetings
     ensure_admin(user)
+    await deactivate_external_meeting_system_tasks(db, meeting.id)
     await db.delete(meeting)
     await db.commit()
     return {"ok": True}

@@ -60,7 +60,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "4"
+COMMON_VIEW_CACHE_VERSION = "5"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -774,6 +774,8 @@ async def get_common_view(
                             "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
+                            "start_date": t.start_date.isoformat() if t.start_date else None,
+                            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
                         }
                     )
                 if t.is_1h_report:
@@ -794,6 +796,8 @@ async def get_common_view(
                             "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
+                            "start_date": t.start_date.isoformat() if t.start_date else None,
+                            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
                         }
                     )
                 if t.is_personal:
@@ -814,6 +818,8 @@ async def get_common_view(
                             "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
+                            "start_date": t.start_date.isoformat() if t.start_date else None,
+                            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
                         }
                     )
                 if t.is_r1:
@@ -834,6 +840,8 @@ async def get_common_view(
                             "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
+                            "start_date": t.start_date.isoformat() if t.start_date else None,
+                            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
                         }
                     )
 
