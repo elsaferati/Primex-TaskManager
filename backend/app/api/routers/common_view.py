@@ -958,6 +958,7 @@ async def get_common_view(
                                 "platform": meeting.platform or "TBD",
                                 "owner": owner_name,
                                 "department": department_name,
+                                "recurrence_type": meeting.recurrence_type or "none",
                             }
                         )
             else:
@@ -978,6 +979,7 @@ async def get_common_view(
                         "platform": meeting.platform or "TBD",
                         "owner": owner_name,
                         "department": department_name,
+                        "recurrence_type": meeting.recurrence_type or "none",
                     }
                 )
 
