@@ -666,6 +666,44 @@ def _can_complete_waiting_confirmation(
     return actor_is_assignee
 
 
+async def _clear_ga_note_conversion_if_no_active_tasks(
+    db: AsyncSession,
+    *,
+    note_id: uuid.UUID | None,
+    deleting_task_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None = None,
+) -> None:
+    if note_id is None:
+        return
+
+    remaining_active_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Task)
+            .where(Task.ga_note_origin_id == note_id)
+            .where(Task.id != deleting_task_id)
+            .where(Task.is_active.is_(True))
+        )
+    ).scalar_one()
+    if remaining_active_count > 0:
+        return
+
+    note = (await db.execute(select(GaNote).where(GaNote.id == note_id))).scalar_one_or_none()
+    if note is None or not note.is_converted_to_task:
+        return
+
+    note.is_converted_to_task = False
+    add_audit_log(
+        db=db,
+        actor_user_id=actor_user_id,
+        entity_type="ga_note",
+        entity_id=note.id,
+        action="task_conversion_cleared",
+        before={"is_converted_to_task": True},
+        after={"is_converted_to_task": False},
+    )
+
+
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
     department_id: uuid.UUID | None = None,
@@ -2623,6 +2661,12 @@ async def delete_task(
 
     # Fast task groups: delete only this assignee copy, but remove the row entirely.
     if task.fast_task_group_id is not None and is_fast_task_model(task):
+        await _clear_ga_note_conversion_if_no_active_tasks(
+            db,
+            note_id=task.ga_note_origin_id,
+            deleting_task_id=task.id,
+            actor_user_id=user.id,
+        )
         await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
         await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
         await db.execute(delete(TaskUserComment).where(TaskUserComment.task_id == task.id))
@@ -2634,6 +2678,12 @@ async def delete_task(
 
     # Explicitly delete related records to avoid SQLAlchemy relationship synchronization issues
     # Since TaskAssignee has a composite primary key, SQLAlchemy can't "blank out" the foreign key
+    await _clear_ga_note_conversion_if_no_active_tasks(
+        db,
+        note_id=task.ga_note_origin_id,
+        deleting_task_id=task.id,
+        actor_user_id=user.id,
+    )
     await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
     await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
     await db.execute(delete(TaskUserComment).where(TaskUserComment.task_id == task.id))

@@ -100,6 +100,7 @@ export function TaskEditDialog({
   const [statusValue, setStatusValue] = React.useState<TaskStatusValue>("TODO")
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskTypeValue>("N")
   const [projectTaskType, setProjectTaskType] = React.useState<ProjectTaskTypeValue>("NORMAL")
+  const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [saving, setSaving] = React.useState(false)
@@ -111,6 +112,7 @@ export function TaskEditDialog({
     setStatusValue((task.status as TaskStatusValue | undefined) || "TODO")
     setFastTaskType(getCurrentFastTaskType(task))
     setProjectTaskType(getCurrentProjectTaskType(task))
+    setStartDate(toDateInputValue(task.start_date))
     setDueDate(toDateInputValue(task.due_date))
     setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
   }, [task])
@@ -153,6 +155,7 @@ export function TaskEditDialog({
           title: nextTitle,
           ...(showDescriptionField ? { description: description.trim() || null } : {}),
           status: statusValue,
+          start_date: startDate || null,
           due_date: dueDate || null,
           finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
           ...(isFastTask(task) && fastTaskType !== currentFastTaskType
@@ -206,6 +209,7 @@ export function TaskEditDialog({
     onUpdated,
     projectTaskType,
     showDescriptionField,
+    startDate,
     statusValue,
     task,
     title,
@@ -219,7 +223,7 @@ export function TaskEditDialog({
         <DialogHeader>
           <DialogTitle>Edit task</DialogTitle>
           <DialogDescription>
-            Update the title, type, status, and due date without leaving this table.
+            Update the title, type, status, start date, and due date without leaving this table.
           </DialogDescription>
         </DialogHeader>
 
@@ -301,6 +305,17 @@ export function TaskEditDialog({
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="task-edit-start-date">Start date</Label>
+            <Input
+              id="task-edit-start-date"
+              type="date"
+              value={startDate}
+              onChange={(event) => setStartDate(normalizeDueDateInput(event.target.value))}
+              disabled={saving}
+            />
           </div>
 
           <div className="space-y-2">

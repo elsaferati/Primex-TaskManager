@@ -853,6 +853,8 @@ export default function NextWeekPlanPage() {
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
   const [noteTaskInfo, setNoteTaskInfo] = React.useState<Map<string, NoteTaskInfo>>(new Map())
+  const [savingCommentIds, setSavingCommentIds] = React.useState<Record<string, boolean>>({})
+  const [savingNextWeekIds, setSavingNextWeekIds] = React.useState<Record<string, boolean>>({})
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
   const [editContent, setEditContent] = React.useState("")
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
@@ -1052,6 +1054,88 @@ export default function NextWeekPlanPage() {
   React.useEffect(() => {
     void loadNoteTasks()
   }, [loadNoteTasks])
+
+  const updateNoteCommentDraft = React.useCallback((noteId: string, comment: string) => {
+    setNotes((prev) => prev.map((note) => (note.id === noteId ? { ...note, comment } : note)))
+  }, [])
+
+  const saveNoteComment = React.useCallback(
+    async (noteId: string, comment: string, previousComment = "") => {
+      const trimmed = comment.trim()
+
+      setSavingCommentIds((prev) => ({ ...prev, [noteId]: true }))
+      try {
+        const res = await apiFetch(`/plan-notes/${noteId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comment: trimmed || null }),
+        })
+        if (!res?.ok) {
+          let message = "Failed to save comment"
+          try {
+            const payload = (await res.json()) as { detail?: string }
+            if (payload?.detail) message = payload.detail
+          } catch {
+            // Keep fallback message.
+          }
+          throw new Error(message)
+        }
+
+        const updated = (await res.json()) as PlanNote
+        setNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
+      } catch (error) {
+        updateNoteCommentDraft(noteId, previousComment)
+        toast.error(error instanceof Error ? error.message : "Failed to save comment")
+      } finally {
+        setSavingCommentIds((prev) => {
+          const next = { ...prev }
+          delete next[noteId]
+          return next
+        })
+      }
+    },
+    [apiFetch, updateNoteCommentDraft]
+  )
+
+  const toggleNoteNextWeek = React.useCallback(
+    async (noteId: string, checked: boolean) => {
+      const previousValue = Boolean(notes.find((note) => note.id === noteId)?.next_week)
+      setNotes((prev) => prev.map((note) => (note.id === noteId ? { ...note, next_week: checked } : note)))
+      setSavingNextWeekIds((prev) => ({ ...prev, [noteId]: true }))
+      try {
+        const res = await apiFetch(`/plan-notes/${noteId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ next_week: checked }),
+        })
+        if (!res?.ok) {
+          let message = "Failed to save next week"
+          try {
+            const payload = (await res.json()) as { detail?: string }
+            if (payload?.detail) message = payload.detail
+          } catch {
+            // Keep fallback message.
+          }
+          throw new Error(message)
+        }
+
+        const updated = (await res.json()) as PlanNote
+        setNotes((prev) => prev.map((note) => (note.id === updated.id ? updated : note)))
+      } catch (error) {
+        setNotes((prev) =>
+          prev.map((note) => (note.id === noteId ? { ...note, next_week: previousValue } : note))
+        )
+        toast.error(error instanceof Error ? error.message : "Failed to save next week")
+      } finally {
+        setSavingNextWeekIds((prev) => {
+          const next = { ...prev }
+          delete next[noteId]
+          return next
+        })
+      }
+    },
+    [apiFetch, notes]
+  )
 
 
 
@@ -2066,6 +2150,7 @@ export default function NextWeekPlanPage() {
 
       const searchHaystack = [
         parseMarkedNoteContent(note.content).text,
+        note.comment,
         taskInfo?.description,
         note.note_type,
         note.status,
@@ -2471,6 +2556,20 @@ export default function NextWeekPlanPage() {
                     el.removeAttribute(attr.name)
                   })
                 })
+
+                clonedTable.querySelectorAll('input, textarea').forEach((el) => {
+                  const field = el as HTMLInputElement | HTMLTextAreaElement
+                  const span = document.createElement('span')
+                  span.textContent = field.value
+                  field.parentNode?.replaceChild(span, field)
+                })
+
+                clonedTable.querySelectorAll('[role="checkbox"]').forEach((el) => {
+                  const checked = el.getAttribute('aria-checked') === 'true' || el.getAttribute('data-state') === 'checked'
+                  const span = document.createElement('span')
+                  span.textContent = checked ? 'YES' : 'NO'
+                  el.parentNode?.replaceChild(span, el)
+                })
                 
                 // Extract text content from badges and buttons, replace with plain text
                 clonedTable.querySelectorAll('[class*="Badge"], button').forEach((el) => {
@@ -2673,8 +2772,8 @@ export default function NextWeekPlanPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1312px] sm:min-w-[1512px]">
-                <table className="w-full table-fixed caption-bottom text-sm min-w-[1312px] sm:min-w-[1512px]">
+              <div className="w-full min-w-[1350px] sm:min-w-[1550px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1350px] sm:min-w-[1550px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
@@ -2683,11 +2782,12 @@ export default function NextWeekPlanPage() {
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
-                      <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
-                      <th className="w-[112px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Task due or planned date">PLAN</th>
-                      <th className="min-w-[128px] w-[128px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Linked task start date">START</th>
+                      <th className="w-[62px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
+                      <th className="min-w-[76px] w-[76px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Linked task start date">START</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DET</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>INT</th>
+                      <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal leading-tight text-xs" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>JAV TJT?</th>
+                      <th className="min-w-[180px] w-[180px] max-w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KOMENT</th>
                       <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
@@ -2755,6 +2855,9 @@ export default function NextWeekPlanPage() {
                     const mobileDeptAbbrev = displayDepartment ? abbreviateDepartmentName(displayDepartment.name) : null
                     const showMobileDeptBadge =
                       mobileDeptAbbrev === "DEV" || mobileDeptAbbrev === "GDS" || mobileDeptAbbrev === "PCM"
+                    const commentValue = note.comment ?? ""
+                    const isSavingComment = Boolean(savingCommentIds[note.id])
+                    const isSavingNextWeek = Boolean(savingNextWeekIds[note.id])
 
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
@@ -3000,20 +3103,17 @@ export default function NextWeekPlanPage() {
                             </Badge>
                           ) : null}
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle whitespace-nowrap w-[90px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-1 align-middle whitespace-nowrap w-[62px]" style={{ verticalAlign: 'bottom' }}>
                           {displayProject ? (
                             <Badge variant="outline" className="text-[10px] bg-indigo-50 text-indigo-700 border-indigo-200 whitespace-normal text-left">
                               {displayProject.title || displayProject.name || "Project"}
                             </Badge>
                           ) : null}
                         </td>
-                        <td className="border border-slate-600 p-2 align-middle text-[10px] text-center leading-tight max-w-[120px]" style={{ verticalAlign: 'bottom' }}>
-                          {formatPlannedHorizonDisplay(note, taskInfo)}
-                        </td>
-                        <td className="border border-slate-600 p-2 align-middle w-[128px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="border border-slate-600 p-1 align-middle w-[76px]" style={{ verticalAlign: 'bottom' }}>
                           {hasTask && taskInfo?.startDate ? (
                             <div className="flex items-center justify-center text-center">
-                              <div className="text-[15px] font-bold leading-tight text-slate-900 tabular-nums">
+                              <div className="text-[12px] font-bold leading-tight text-slate-900 tabular-nums">
                                 {formatCalendarDateDots(taskInfo.startDate)}
                               </div>
                             </div>
@@ -3063,6 +3163,44 @@ export default function NextWeekPlanPage() {
                               <span className="text-xs text-slate-400">-</span>
                             )}
                           </div>
+                        </td>
+                        <td className="border border-slate-600 p-1 align-middle min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            <Checkbox
+                              checked={Boolean(note.next_week)}
+                              disabled={isSavingNextWeek}
+                              aria-label="Javen tjeter"
+                              onCheckedChange={(value) => {
+                                void toggleNoteNextWeek(note.id, value === true)
+                              }}
+                            />
+                          </div>
+                        </td>
+                        <td className="border border-slate-600 p-1 align-middle min-w-[180px] w-[180px] max-w-[180px]" style={{ verticalAlign: 'bottom' }}>
+                          <Textarea
+                            value={commentValue}
+                            placeholder="Koment"
+                            aria-label="Koment"
+                            rows={3}
+                            className="min-h-[72px] w-full resize-none rounded-sm border-slate-300 bg-white px-2 py-1.5 text-xs leading-snug whitespace-pre-wrap"
+                            disabled={isSavingComment}
+                            onFocus={(event) => {
+                              event.currentTarget.dataset.previousValue = commentValue
+                            }}
+                            onChange={(event) => updateNoteCommentDraft(note.id, event.target.value)}
+                            onBlur={(event) => {
+                              const previousValue = event.currentTarget.dataset.previousValue ?? ""
+                              const nextValue = event.currentTarget.value
+                              if (nextValue.trim() !== previousValue.trim()) {
+                                void saveNoteComment(note.id, nextValue, previousValue)
+                              }
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                                event.currentTarget.blur()
+                              }
+                            }}
+                          />
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[80px] w-[80px] max-w-[80px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">

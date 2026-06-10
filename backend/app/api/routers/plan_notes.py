@@ -76,6 +76,7 @@ def _note_out(note: PlanNote) -> PlanNoteOut:
     return PlanNoteOut(
         id=note.id,
         content=note.content,
+        comment=note.comment,
         created_by=note.created_by,
         note_type=note.note_type,
         status=note.status,
@@ -85,6 +86,7 @@ def _note_out(note: PlanNote) -> PlanNoteOut:
         completed_at=note.completed_at,
         is_converted_to_task=note.is_converted_to_task,
         is_discussed=note.is_discussed,
+        next_week=note.next_week,
         project_id=note.project_id,
         department_id=note.department_id,
         planned_for_date=note.planned_for_date,
@@ -248,6 +250,7 @@ async def create_plan_note(
 
     note = PlanNote(
         content=payload.content,
+        comment=payload.comment,
         created_by=payload.created_by or user.id,
         note_type=payload.note_type or GaNoteType.GA,
         status=payload.status or GaNoteStatus.OPEN,
@@ -257,6 +260,7 @@ async def create_plan_note(
         completed_at=payload.completed_at,
         is_converted_to_task=payload.is_converted_to_task or False,
         is_discussed=payload.is_discussed or False,
+        next_week=payload.next_week or False,
         project_id=payload.project_id,
         department_id=department_id,
         planned_for_date=payload.planned_for_date,
@@ -284,6 +288,9 @@ async def update_plan_note(
 
     if "content" in update_data:
         note.content = update_data["content"]
+    if "comment" in update_data:
+        comment = update_data["comment"]
+        note.comment = comment.strip() if comment else None
     if "status" in update_data:
         note.status = update_data["status"]
         if update_data["status"] == GaNoteStatus.CLOSED:
@@ -294,6 +301,8 @@ async def update_plan_note(
         note.is_converted_to_task = update_data["is_converted_to_task"]
     if "is_discussed" in update_data:
         note.is_discussed = update_data["is_discussed"]
+    if "next_week" in update_data:
+        note.next_week = bool(update_data["next_week"])
     if "planned_for_date" in update_data:
         note.planned_for_date = update_data["planned_for_date"]
 

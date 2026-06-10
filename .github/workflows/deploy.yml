@@ -105,11 +105,13 @@ jobs:
           call pm2 stop celery_worker
           call pm2 stop celery_beat
 
-          REM Restart or start backend API process using the real PM2 app name.
+          REM Stop legacy backend process names so the current checkout owns the API port.
           set REDIS_ENABLED=false
           set REDIS_URL=redis://127.0.0.1:6379/0
           set APP_TIMEZONE=Europe/Budapest
-          call pm2 restart backend --update-env || call pm2 start ecosystem.config.cjs --only backend --update-env
+          call pm2 delete backend-api || ver > NUL
+          call pm2 delete backend || ver > NUL
+          call pm2 start ecosystem.config.cjs --only backend --update-env
           call pm2 describe backend | findstr /I "status"
           echo PM2 backend restart/start completed.
 
@@ -137,6 +139,59 @@ jobs:
             exit 1
           }
           Write-Host "Backend health check: OK ($uri)"
+
+      - name: Replace Public API Backend
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          Set-Location backend
+
+          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+          $port = 8080
+          $processName = "backend-api-flow"
+
+          Write-Host "Replacing public API backend on port $port..."
+          cmd /c "pm2 delete $processName" | Out-Host
+
+          $connections = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+          foreach ($connection in $connections) {
+            $owningProcessId = $connection.OwningProcess
+            if (-not $owningProcessId) { continue }
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $owningProcessId" -ErrorAction SilentlyContinue
+            $commandLine = $process.CommandLine
+            if ($commandLine -and $commandLine -match "uvicorn|app\.main:app|python") {
+              Write-Host "Stopping stale API process $owningProcessId on port $port"
+              Stop-Process -Id $owningProcessId -Force
+            } else {
+              Write-Host "Port $port is owned by process $owningProcessId and was not stopped: $commandLine"
+            }
+          }
+
+          $env:REDIS_ENABLED = "false"
+          $env:REDIS_URL = "redis://127.0.0.1:6379/0"
+          $env:APP_TIMEZONE = "Europe/Budapest"
+          cmd /c "pm2 start `"$python`" --name $processName --cwd `"$PWD`" -- -m uvicorn app.main:app --host 0.0.0.0 --port $port"
+          if ($LASTEXITCODE -ne 0) { Write-Error "PM2 public API start failed"; exit 1 }
+
+          $ok = $false
+          $uri = "http://127.0.0.1:$port/health"
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+              Write-Host "Public API health check attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
+              if ($resp.StatusCode -eq 200) {
+                $ok = $true
+                break
+              }
+            } catch {
+              Write-Host "Public API health check attempt $($i + 1)/20: no response yet"
+              Start-Sleep -Seconds 2
+            }
+          }
+          if (-not $ok) {
+            Write-Error "Public API backend did not become ready on port $port."
+            exit 1
+          }
 
       - name: Update Frontend
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
