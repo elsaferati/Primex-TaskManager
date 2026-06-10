@@ -404,6 +404,7 @@ export interface GaNote {
   completed_at?: string | null
   is_converted_to_task: boolean
   is_discussed?: boolean
+  next_week?: boolean
   project_id?: string | null
   department_id?: string | null
   created_at: string
@@ -414,6 +415,7 @@ export interface GaNote {
 export interface PlanNote {
   id: string
   content: string
+  comment?: string | null
   created_by?: string | null
   note_type?: "GA" | "KA"
   status?: "OPEN" | "CLOSED"

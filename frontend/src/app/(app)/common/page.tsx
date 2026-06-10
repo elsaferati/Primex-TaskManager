@@ -921,6 +921,7 @@ export default function CommonViewPage() {
   const [meetingTemplateNote, setMeetingTemplateNote] = React.useState("")
   const [meetingTemplateDefaultOwner, setMeetingTemplateDefaultOwner] = React.useState("")
   const [meetingTemplateDefaultTime, setMeetingTemplateDefaultTime] = React.useState("")
+  const [meetingTemplateTopicLabel, setMeetingTemplateTopicLabel] = React.useState("")
   const [creatingMeetingTemplate, setCreatingMeetingTemplate] = React.useState(false)
   const [meetingTemplateError, setMeetingTemplateError] = React.useState("")
   const [showMeetingTemplateForm, setShowMeetingTemplateForm] = React.useState(false)
@@ -1151,6 +1152,7 @@ export default function CommonViewPage() {
   const [externalChecklistImageError, setExternalChecklistImageError] = React.useState(false)
   const [editingRowId, setEditingRowId] = React.useState<string | null>(null)
   const [editDraft, setEditDraft] = React.useState({
+    nr: "",
     day: "",
     topic: "",
     owner: "",
@@ -1163,11 +1165,13 @@ export default function CommonViewPage() {
     owner: "",
     time: "",
   })
-  const [movingMeetingRowId, setMovingMeetingRowId] = React.useState<string | null>(null)
   const [isSavingEntry, setIsSavingEntry] = React.useState(false)
   const [editingMeetingTitle, setEditingMeetingTitle] = React.useState(false)
   const [meetingTitleDraft, setMeetingTitleDraft] = React.useState("")
   const [savingMeetingTitle, setSavingMeetingTitle] = React.useState(false)
+  const [editingMeetingTopicColumn, setEditingMeetingTopicColumn] = React.useState(false)
+  const [meetingTopicColumnDraft, setMeetingTopicColumnDraft] = React.useState("")
+  const [savingMeetingTopicColumn, setSavingMeetingTopicColumn] = React.useState(false)
   const [exportingExcel, setExportingExcel] = React.useState(false)
   const [exportingAllMeetingTemplatesExcel, setExportingAllMeetingTemplatesExcel] = React.useState(false)
 
@@ -1206,6 +1210,55 @@ export default function CommonViewPage() {
     setEditingMeetingTitle(false)
     setMeetingTitleDraft("")
   }, [])
+
+  const startEditMeetingTopicColumn = React.useCallback(() => {
+    if (!activeMeeting) return
+    const topicColumn = activeMeeting.columns.find((col) => col.key === "topic")
+    setMeetingTopicColumnDraft(topicColumn?.label || "M1 PIKAT")
+    setEditingMeetingTopicColumn(true)
+  }, [activeMeeting])
+
+  const cancelEditMeetingTopicColumn = React.useCallback(() => {
+    setEditingMeetingTopicColumn(false)
+    setMeetingTopicColumnDraft("")
+  }, [])
+
+  const saveMeetingTopicColumn = React.useCallback(async () => {
+    if (!activeMeeting || !meetingTopicColumnDraft.trim()) return
+    const previousColumns = activeMeeting.columns
+    const nextColumns = previousColumns.map((col) =>
+      col.key === "topic" ? { ...col, label: meetingTopicColumnDraft.trim() } : col
+    )
+    setSavingMeetingTopicColumn(true)
+    setMeetingTemplates((prev) =>
+      prev.map((meeting) => (meeting.id === activeMeeting.id ? { ...meeting, columns: nextColumns } : meeting))
+    )
+    try {
+      const res = await apiFetch(`/checklists/${activeMeeting.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columns: nextColumns }),
+      })
+      if (!res.ok) {
+        setMeetingTemplates((prev) =>
+          prev.map((meeting) =>
+            meeting.id === activeMeeting.id ? { ...meeting, columns: previousColumns } : meeting
+          )
+        )
+        toast.error("Failed to update column name.")
+        return
+      }
+      setEditingMeetingTopicColumn(false)
+      setMeetingTopicColumnDraft("")
+    } catch {
+      setMeetingTemplates((prev) =>
+        prev.map((meeting) => (meeting.id === activeMeeting.id ? { ...meeting, columns: previousColumns } : meeting))
+      )
+      toast.error("Failed to update column name.")
+    } finally {
+      setSavingMeetingTopicColumn(false)
+    }
+  }, [activeMeeting, apiFetch, meetingTopicColumnDraft])
 
   const saveMeetingTitle = React.useCallback(async () => {
     if (!activeMeeting || !meetingTitleDraft.trim()) return
@@ -1562,6 +1615,10 @@ export default function CommonViewPage() {
       const baseColumns = (activeMeeting?.columns?.length ? activeMeeting.columns : DEFAULT_MEETING_COLUMNS).map(
         (col) => ({ ...col })
       )
+      const topicLabel = meetingTemplateTopicLabel.trim()
+      const columns = topicLabel
+        ? baseColumns.map((col) => (col.key === "topic" ? { ...col, label: topicLabel } : col))
+        : baseColumns
       const maxPosition = meetingTemplates.reduce(
         (max, template) => Math.max(max, template.position ?? -1),
         -1
@@ -1572,7 +1629,7 @@ export default function CommonViewPage() {
         default_owner: meetingTemplateDefaultOwner.trim() || null,
         default_time: meetingTemplateDefaultTime.trim() || null,
         group_key: meetingTemplateGroup,
-        columns: baseColumns,
+        columns,
         position: maxPosition + 1,
       }
       const res = await apiFetch("/checklists", {
@@ -1599,6 +1656,7 @@ export default function CommonViewPage() {
       setMeetingTemplateNote("")
       setMeetingTemplateDefaultOwner("")
       setMeetingTemplateDefaultTime("")
+      setMeetingTemplateTopicLabel("")
     } catch (err) {
       console.error("Failed to create meeting checklist", err)
       setMeetingTemplateError("Failed to create meeting checklist. Please try again.")
@@ -1613,6 +1671,7 @@ export default function CommonViewPage() {
     meetingTemplateDefaultTime,
     meetingTemplateGroup,
     meetingTemplateNote,
+    meetingTemplateTopicLabel,
     meetingTemplateTitle,
     meetingTemplates,
     reloadMeetingTemplates,
@@ -1680,8 +1739,10 @@ export default function CommonViewPage() {
 
   React.useEffect(() => {
     setEditingRowId(null)
-    setEditDraft({ day: "", topic: "", owner: "", time: "" })
+    setEditDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
     setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
+    setEditingMeetingTopicColumn(false)
+    setMeetingTopicColumnDraft("")
   }, [activeMeetingId])
 
   React.useEffect(() => {
@@ -5295,6 +5356,7 @@ export default function CommonViewPage() {
   const startEditMeetingRow = React.useCallback((row: MeetingRow) => {
     setEditingRowId(row.id)
     setEditDraft({
+      nr: String(row.nr || ""),
       day: row.day || "",
       topic: row.topic || "",
       owner: row.owner || "",
@@ -5304,37 +5366,46 @@ export default function CommonViewPage() {
 
   const cancelEditMeetingRow = React.useCallback(() => {
     setEditingRowId(null)
-    setEditDraft({ day: "", topic: "", owner: "", time: "" })
+    setEditDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
   }, [])
 
   const saveMeetingRow = React.useCallback(
     async (meetingId: string, rowId: string) => {
+      const meeting = meetingTemplates.find((template) => template.id === meetingId)
+      const previousRows = meeting?.rows || []
+      const previous = previousRows.find((row) => row.id === rowId)
+      if (!meeting || !previous) return
+      const parsedNr = Number(editDraft.nr)
+      if (!Number.isFinite(parsedNr) || parsedNr < 1) {
+        toast.error("Enter a valid row number.")
+        return
+      }
+      const nextNr = Math.min(Math.floor(parsedNr), previousRows.length)
       const payload = {
+        position: nextNr,
         title: editDraft.topic.trim().toUpperCase(),
         day: editDraft.day.trim() || null,
         owner: editDraft.owner.trim() || null,
         time: editDraft.time.trim() || null,
       }
       if (!payload.title) return
-      const previous = meetingTemplates
-        .find((meeting) => meeting.id === meetingId)
-        ?.rows.find((row) => row.id === rowId)
+      const updatedRow: MeetingRow = {
+        ...previous,
+        day: payload.day ?? undefined,
+        topic: payload.title,
+        owner: payload.owner ?? undefined,
+        time: payload.time ?? undefined,
+      }
+      const orderedRows = previousRows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
+      const withoutCurrent = orderedRows.filter((row) => row.id !== rowId)
+      withoutCurrent.splice(nextNr - 1, 0, updatedRow)
+      const nextRows = withoutCurrent.map((row, index) => ({ ...row, nr: index + 1 }))
       setMeetingTemplates((prev) =>
         prev.map((meeting) => {
           if (meeting.id !== meetingId) return meeting
           return {
             ...meeting,
-            rows: meeting.rows.map((row) =>
-              row.id === rowId
-                ? {
-                    ...row,
-                    day: payload.day ?? undefined,
-                    topic: payload.title,
-                    owner: payload.owner ?? undefined,
-                    time: payload.time ?? undefined,
-                  }
-                : row
-            ),
+            rows: nextRows,
           }
         })
       )
@@ -5346,102 +5417,17 @@ export default function CommonViewPage() {
           body: JSON.stringify(payload),
         })
         if (!res.ok) {
-          if (previous) {
-            setMeetingTemplates((prev) =>
-              prev.map((meeting) => {
-                if (meeting.id !== meetingId) return meeting
-                return {
-                  ...meeting,
-                  rows: meeting.rows.map((row) =>
-                    row.id === rowId
-                      ? {
-                          ...row,
-                          day: previous.day,
-                          topic: previous.topic,
-                          owner: previous.owner,
-                          time: previous.time,
-                        }
-                      : row
-                  ),
-                }
-              })
-            )
-          }
-        }
-      } catch (err) {
-        if (previous) {
           setMeetingTemplates((prev) =>
-            prev.map((meeting) => {
-              if (meeting.id !== meetingId) return meeting
-              return {
-                ...meeting,
-                rows: meeting.rows.map((row) =>
-                  row.id === rowId
-                    ? {
-                        ...row,
-                        day: previous.day,
-                        topic: previous.topic,
-                        owner: previous.owner,
-                        time: previous.time,
-                      }
-                    : row
-                ),
-              }
-            })
+            prev.map((meeting) => (meeting.id === meetingId ? { ...meeting, rows: previousRows } : meeting))
           )
         }
+      } catch {
+        setMeetingTemplates((prev) =>
+          prev.map((meeting) => (meeting.id === meetingId ? { ...meeting, rows: previousRows } : meeting))
+        )
       }
     },
     [apiFetch, editDraft, meetingTemplates]
-  )
-
-  const moveMeetingRow = React.useCallback(
-    async (meetingId: string, rowId: string, direction: "up" | "down") => {
-      const meeting = meetingTemplates.find((template) => template.id === meetingId)
-      if (!meeting || movingMeetingRowId) return
-      const sortedRows = meeting.rows.slice().sort((a, b) => a.nr - b.nr || a.id.localeCompare(b.id))
-      const currentIndex = sortedRows.findIndex((row) => row.id === rowId)
-      if (currentIndex < 0) return
-      const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1
-      if (targetIndex < 0 || targetIndex >= sortedRows.length) return
-
-      const nextRows = sortedRows.slice()
-      const currentRow = nextRows[currentIndex]
-      nextRows[currentIndex] = nextRows[targetIndex]
-      nextRows[targetIndex] = currentRow
-
-      setMovingMeetingRowId(rowId)
-      setMeetingTemplates((prev) =>
-        prev.map((template) =>
-          template.id === meetingId
-            ? {
-                ...template,
-                rows: nextRows.map((row, index) => ({ ...row, nr: index + 1 })),
-              }
-            : template
-        )
-      )
-
-      try {
-        const res = await apiFetch(`/checklist-items/${rowId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ position: sortedRows[targetIndex].nr }),
-        })
-        if (!res.ok) {
-          throw new Error(`Failed to reorder meeting point (${res.status})`)
-        }
-      } catch (err) {
-        console.error("Failed to reorder meeting point", err)
-        toast.error("Failed to reorder meeting point.")
-        setMeetingTemplates((prev) =>
-          prev.map((template) => (template.id === meetingId ? { ...template, rows: meeting.rows } : template))
-        )
-      } finally {
-        setMovingMeetingRowId((current) => (current === rowId ? null : current))
-      }
-    },
-    [apiFetch, meetingTemplates, movingMeetingRowId]
   )
 
   const deleteMeetingRow = React.useCallback(
@@ -6297,6 +6283,19 @@ export default function CommonViewPage() {
           width: 860px;
           min-width: 860px;
           max-width: 860px;
+        }
+        .meeting-header-edit-button {
+          border: 0;
+          background: transparent;
+          color: inherit;
+          font: inherit;
+          font-weight: inherit;
+          padding: 0;
+          cursor: pointer;
+          text-align: left;
+        }
+        .meeting-header-edit-button:hover {
+          color: #2563eb;
         }
         .meeting-topic-cell .input {
           white-space: normal;
@@ -8424,6 +8423,7 @@ export default function CommonViewPage() {
                         onClick={() => {
                           setShowMeetingTemplateForm(false)
                           setMeetingTemplateError("")
+                          setMeetingTemplateTopicLabel("")
                         }}
                       >
                         Cancel
@@ -8481,6 +8481,19 @@ export default function CommonViewPage() {
                         placeholder="Optional"
                         value={meetingTemplateDefaultTime}
                         onChange={(e) => setMeetingTemplateDefaultTime(e.target.value)}
+                      />
+                    </div>
+                    <div className="meeting-create-field">
+                      <label htmlFor="meeting-create-topic-label">Topic column</label>
+                      <input
+                        id="meeting-create-topic-label"
+                        className="input"
+                        type="text"
+                        placeholder={
+                          activeMeeting?.columns.find((col) => col.key === "topic")?.label || "M1 PIKAT"
+                        }
+                        value={meetingTemplateTopicLabel}
+                        onChange={(e) => setMeetingTemplateTopicLabel(e.target.value)}
                       />
                     </div>
                     <div className="meeting-create-field meeting-create-note">
@@ -8563,7 +8576,52 @@ export default function CommonViewPage() {
                           className={col.key === "topic" ? "meeting-topic-header" : undefined}
                           style={col.width ? { width: col.width } : undefined}
                         >
-                          {col.label}
+                          {col.key === "topic" && canEditMeetingTemplates ? (
+                            editingMeetingTopicColumn ? (
+                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+                                <input
+                                  className="input"
+                                  type="text"
+                                  value={meetingTopicColumnDraft}
+                                  onChange={(e) => setMeetingTopicColumnDraft(e.target.value)}
+                                  onKeyDown={(e) => {
+                                    if (e.key === "Enter") void saveMeetingTopicColumn()
+                                    if (e.key === "Escape") cancelEditMeetingTopicColumn()
+                                  }}
+                                  style={{ height: "28px", maxWidth: "220px" }}
+                                />
+                                <button
+                                  className="btn-primary"
+                                  type="button"
+                                  onClick={() => void saveMeetingTopicColumn()}
+                                  disabled={savingMeetingTopicColumn || !meetingTopicColumnDraft.trim()}
+                                  style={{ padding: "4px 8px" }}
+                                >
+                                  Save
+                                </button>
+                                <button
+                                  className="btn-outline"
+                                  type="button"
+                                  onClick={cancelEditMeetingTopicColumn}
+                                  disabled={savingMeetingTopicColumn}
+                                  style={{ padding: "4px 8px" }}
+                                >
+                                  Cancel
+                                </button>
+                              </div>
+                            ) : (
+                              <button
+                                type="button"
+                                className="meeting-header-edit-button"
+                                onClick={startEditMeetingTopicColumn}
+                                title="Click to edit"
+                              >
+                                {col.label}
+                              </button>
+                            )
+                          ) : (
+                            col.label
+                          )}
                         </th>
                       ))}
                       {canEditMeetingTemplates ? <th style={{ width: "160px" }}>Actions</th> : null}
@@ -8623,6 +8681,25 @@ export default function CommonViewPage() {
                                   <option value="x">X</option>
                                   <option value="o">O</option>
                                 </select>
+                              </td>
+                            )
+                          }
+
+                          if (col.key === "nr") {
+                            return (
+                              <td key={`${activeMeeting.id}-${row.nr}-${col.key}`} style={col.width ? { width: col.width } : undefined}>
+                                {isEditing ? (
+                                  <input
+                                    className="input"
+                                    type="number"
+                                    min={1}
+                                    max={activeMeeting.rows.length}
+                                    value={editDraft.nr}
+                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, nr: e.target.value }))}
+                                  />
+                                ) : (
+                                  value
+                                )}
                               </td>
                             )
                           }
@@ -8719,42 +8796,6 @@ export default function CommonViewPage() {
                               </div>
                             ) : (
                               <div className="meeting-row-actions">
-                                <button
-                                  className="btn-icon"
-                                  type="button"
-                                  onClick={() => void moveMeetingRow(activeMeeting.id, row.id, "up")}
-                                  aria-label="Move row up"
-                                  title="Move up"
-                                  disabled={rowIndex === 0 || Boolean(movingMeetingRowId)}
-                                >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path
-                                      d="M6 15l6-6 6 6"
-                                      stroke="currentColor"
-                                      strokeWidth="1.8"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                  </svg>
-                                </button>
-                                <button
-                                  className="btn-icon"
-                                  type="button"
-                                  onClick={() => void moveMeetingRow(activeMeeting.id, row.id, "down")}
-                                  aria-label="Move row down"
-                                  title="Move down"
-                                  disabled={rowIndex === activeMeeting.rows.length - 1 || Boolean(movingMeetingRowId)}
-                                >
-                                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                                    <path
-                                      d="M6 9l6 6 6-6"
-                                      stroke="currentColor"
-                                      strokeWidth="1.8"
-                                      strokeLinecap="round"
-                                      strokeLinejoin="round"
-                                    />
-                                  </svg>
-                                </button>
                                 <button className="btn-icon" type="button" onClick={() => startEditMeetingRow(row)} aria-label="Edit row">
                                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true">
                                     <path

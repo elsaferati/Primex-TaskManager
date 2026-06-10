@@ -22,6 +22,7 @@ class PlanNoteAttachmentOut(BaseModel):
 class PlanNoteOut(BaseModel):
     id: uuid.UUID
     content: str
+    comment: str | None = None
     created_by: uuid.UUID | None = None
     note_type: GaNoteType
     status: GaNoteStatus
@@ -31,6 +32,7 @@ class PlanNoteOut(BaseModel):
     completed_at: datetime | None = None
     is_converted_to_task: bool
     is_discussed: bool = False
+    next_week: bool = False
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     planned_for_date: date | None = None
@@ -41,6 +43,7 @@ class PlanNoteOut(BaseModel):
 
 class PlanNoteCreate(BaseModel):
     content: str
+    comment: str | None = None
     created_by: uuid.UUID | None = None
     note_type: GaNoteType | None = None
     status: GaNoteStatus | None = None
@@ -50,6 +53,7 @@ class PlanNoteCreate(BaseModel):
     completed_at: datetime | None = None
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
+    next_week: bool | None = None
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     planned_for_date: date | None = None
@@ -57,10 +61,12 @@ class PlanNoteCreate(BaseModel):
 
 class PlanNoteUpdate(BaseModel):
     content: str | None = None
+    comment: str | None = None
     status: GaNoteStatus | None = None
     priority: GaNotePriority | None = None
     is_converted_to_task: bool | None = None
     is_discussed: bool | None = None
+    next_week: bool | None = None
     planned_for_date: date | None = None
 
 
