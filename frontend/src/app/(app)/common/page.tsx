@@ -86,7 +86,17 @@ type PersonalItem = {
   status?: string
   isDone?: boolean
 } & FastTaskItemMeta
-type ExternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
+type ExternalItem = {
+  title: string
+  date: string
+  time: string
+  platform: string
+  owner: string
+  assignees?: string[]
+  department?: string
+  recurrenceType?: string | null
+  recurrence_type?: string | null
+}
 type InternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
 type R1Item = {
   title: string
@@ -265,6 +275,7 @@ type SwimlaneCell = {
   startDate?: string | null
   completedAt?: string | null
   dateIsToday?: boolean
+  recurrenceType?: string | null
 }
 type SwimlaneRow = {
   id: CommonType
@@ -538,6 +549,12 @@ const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
 
 const getCommonTaskPeriodLabel = (finishPeriod?: string | null) =>
   getFinishPeriodIndicatorLabel(finishPeriod) || "AM/PM"
+
+const isNonDailyWeeklyRecurrence = (recurrenceType?: string | null) => {
+  if (recurrenceType == null) return false
+  const normalized = recurrenceType.trim().toLowerCase()
+  return normalized !== "daily" && normalized !== "weekly"
+}
 
 export default function CommonViewPage() {
   const { apiFetch, user, loading: authLoading } = useAuth()
@@ -826,7 +843,7 @@ export default function CommonViewPage() {
     return `${dateLabel} ${timeLabel}`
   }
   const mapMeetingToCommonItem = React.useCallback(
-    (meeting: Meeting, meetingType: "external" | "internal", fallbackOwnerName?: string) => {
+    (meeting: Meeting, meetingType: "external" | "internal", fallbackOwnerName?: string): ExternalItem | InternalItem | null => {
       const resolvedDate = resolveExternalMeetingDate(meeting)
       const createdAt = new Date(meeting.created_at)
       const validCreatedAt = Number.isNaN(createdAt.getTime()) ? null : createdAt
@@ -838,6 +855,7 @@ export default function CommonViewPage() {
         time: resolvedDate ? formatTime(resolvedDate) : "TBD",
         platform: meeting.platform?.trim() || "TBD",
         owner: fallbackOwnerName || "Unknown",
+        recurrenceType: meeting.recurrence_type || "none",
       }
     },
     [formatTime, toISODate]
@@ -918,6 +936,7 @@ export default function CommonViewPage() {
   const [deletingMeetingTemplate, setDeletingMeetingTemplate] = React.useState(false)
   const [meetingTemplateGroup, setMeetingTemplateGroup] = React.useState<"board" | "staff">("board")
   const [meetingTemplateTitle, setMeetingTemplateTitle] = React.useState("")
+  const [meetingTemplateTopicHeader, setMeetingTemplateTopicHeader] = React.useState("M1 PIKAT")
   const [meetingTemplateNote, setMeetingTemplateNote] = React.useState("")
   const [meetingTemplateDefaultOwner, setMeetingTemplateDefaultOwner] = React.useState("")
   const [meetingTemplateDefaultTime, setMeetingTemplateDefaultTime] = React.useState("")
@@ -926,6 +945,7 @@ export default function CommonViewPage() {
   const [showMeetingTemplateForm, setShowMeetingTemplateForm] = React.useState(false)
   const [externalMeetingsOpen, setExternalMeetingsOpen] = React.useState(false)
   const [externalMeetings, setExternalMeetings] = React.useState<Meeting[]>([])
+  const [externalMeetingListFilter, setExternalMeetingListFilter] = React.useState<"next" | "past" | "all">("next")
   const [externalMeetingTitle, setExternalMeetingTitle] = React.useState("")
   const [externalMeetingPlatform, setExternalMeetingPlatform] = React.useState("")
   const [externalMeetingStartsAt, setExternalMeetingStartsAt] = React.useState("")
@@ -1168,6 +1188,10 @@ export default function CommonViewPage() {
   const [editingMeetingTitle, setEditingMeetingTitle] = React.useState(false)
   const [meetingTitleDraft, setMeetingTitleDraft] = React.useState("")
   const [savingMeetingTitle, setSavingMeetingTitle] = React.useState(false)
+  const [editingMeetingTopicHeader, setEditingMeetingTopicHeader] = React.useState(false)
+  const [meetingTopicHeaderDraft, setMeetingTopicHeaderDraft] = React.useState("")
+  const [savingMeetingTopicHeader, setSavingMeetingTopicHeader] = React.useState(false)
+  const skipMeetingTopicHeaderBlurRef = React.useRef(false)
   const [exportingExcel, setExportingExcel] = React.useState(false)
   const [exportingAllMeetingTemplatesExcel, setExportingAllMeetingTemplatesExcel] = React.useState(false)
 
@@ -1248,6 +1272,60 @@ export default function CommonViewPage() {
     }
   }, [activeMeeting, meetingTitleDraft, apiFetch])
 
+  const startEditMeetingTopicHeader = React.useCallback(() => {
+    if (!activeMeeting) return
+    const topicColumn = activeMeeting.columns.find((col) => col.key === "topic")
+    setMeetingTopicHeaderDraft(topicColumn?.label || "M1 PIKAT")
+    setEditingMeetingTopicHeader(true)
+  }, [activeMeeting])
+
+  const cancelEditMeetingTopicHeader = React.useCallback(() => {
+    skipMeetingTopicHeaderBlurRef.current = true
+    setEditingMeetingTopicHeader(false)
+    setMeetingTopicHeaderDraft("")
+  }, [])
+
+  const saveMeetingTopicHeader = React.useCallback(async () => {
+    if (!activeMeeting || !meetingTopicHeaderDraft.trim()) return
+    const nextColumns = activeMeeting.columns.map((col) =>
+      col.key === "topic" ? { ...col, label: meetingTopicHeaderDraft.trim() } : col
+    )
+    setSavingMeetingTopicHeader(true)
+    try {
+      const res = await apiFetch(`/checklists/${activeMeeting.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ columns: nextColumns }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to update meeting column."
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          detail = `Failed to update meeting column (${res.status}).`
+        }
+        toast.error(detail)
+        return
+      }
+      const updated = (await res.json()) as { id: string; columns?: MeetingColumn[] | null }
+      setMeetingTemplates((prev) =>
+        prev.map((meeting) =>
+          meeting.id === activeMeeting.id
+            ? { ...meeting, columns: updated.columns?.length ? updated.columns : nextColumns }
+            : meeting
+        )
+      )
+      setEditingMeetingTopicHeader(false)
+      setMeetingTopicHeaderDraft("")
+    } catch (err) {
+      console.error("Error updating meeting column:", err)
+      toast.error("Failed to update meeting column. Please try again.")
+    } finally {
+      setSavingMeetingTopicHeader(false)
+    }
+  }, [activeMeeting, meetingTopicHeaderDraft, apiFetch])
+
   const canSelectExternalDepartment = user?.role !== "STAFF"
   const externalMeetingDepartment = React.useMemo(
     () => departments.find((d) => d.id === externalMeetingDepartmentId) || null,
@@ -1275,6 +1353,25 @@ export default function CommonViewPage() {
       return a.title.localeCompare(b.title)
     })
   }, [externalMeetings])
+  const getExternalMeetingListDate = React.useCallback((meeting: Meeting) => {
+    const resolved = resolveExternalMeetingDate(meeting)
+    if (resolved) return resolved
+    if (!meeting.starts_at) return null
+    const startsAt = new Date(meeting.starts_at)
+    return Number.isNaN(startsAt.getTime()) ? null : startsAt
+  }, [])
+  const externalMeetingsVisible = React.useMemo(() => {
+    if (externalMeetingListFilter === "all") return externalMeetingsSorted
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return externalMeetingsSorted.filter((meeting) => {
+      const meetingDate = getExternalMeetingListDate(meeting)
+      if (!meetingDate) return false
+      return externalMeetingListFilter === "past"
+        ? meetingDate.getTime() < today.getTime()
+        : meetingDate.getTime() >= today.getTime()
+    })
+  }, [externalMeetingListFilter, externalMeetingsSorted, getExternalMeetingListDate])
   const internalMeetingsSorted = React.useMemo(() => {
     return [...internalMeetings].sort((a, b) => {
       const aResolved = resolveExternalMeetingDate(a)
@@ -1560,7 +1657,10 @@ export default function CommonViewPage() {
     setMeetingTemplateError("")
     try {
       const baseColumns = (activeMeeting?.columns?.length ? activeMeeting.columns : DEFAULT_MEETING_COLUMNS).map(
-        (col) => ({ ...col })
+        (col) => ({
+          ...col,
+          label: col.key === "topic" ? meetingTemplateTopicHeader.trim() || "M1 PIKAT" : col.label,
+        })
       )
       const maxPosition = meetingTemplates.reduce(
         (max, template) => Math.max(max, template.position ?? -1),
@@ -1596,6 +1696,7 @@ export default function CommonViewPage() {
       setMeetingTemplates(templates)
       if (created?.id) setActiveMeetingId(created.id)
       setMeetingTemplateTitle("")
+      setMeetingTemplateTopicHeader("M1 PIKAT")
       setMeetingTemplateNote("")
       setMeetingTemplateDefaultOwner("")
       setMeetingTemplateDefaultTime("")
@@ -1611,6 +1712,7 @@ export default function CommonViewPage() {
     canCreateMeetingTemplate,
     meetingTemplateDefaultOwner,
     meetingTemplateDefaultTime,
+    meetingTemplateTopicHeader,
     meetingTemplateGroup,
     meetingTemplateNote,
     meetingTemplateTitle,
@@ -2607,6 +2709,7 @@ export default function CommonViewPage() {
               time: resolvedDate ? formatTime(resolvedDate) : "TBD",
               platform: meeting.platform?.trim() || "TBD",
               owner: ownerName,
+              recurrenceType: meeting.recurrence_type || "none",
             })
           }
         }
@@ -4931,7 +5034,13 @@ export default function CommonViewPage() {
       title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
-      accentClass: "swimlane-accent external",
+      accentClass: [
+        "swimlane-accent external",
+        isNonDailyWeeklyRecurrence(x.recurrenceType ?? x.recurrence_type) ? "external-non-daily-weekly" : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      recurrenceType: x.recurrenceType ?? x.recurrence_type,
     }))
     const internalSource = isMultiDate
       ? sortByDateTime(filtered.internal, (x) => x.date, (x) => x.time, (x) => x.title)
@@ -6199,6 +6308,41 @@ export default function CommonViewPage() {
           color: #0f172a;
           margin-bottom: 8px;
         }
+        .external-meeting-list-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 12px;
+          margin-bottom: 8px;
+        }
+        .external-meeting-list-header .external-meeting-form-title {
+          margin-bottom: 0;
+        }
+        .external-meeting-filter {
+          display: inline-flex;
+          align-items: center;
+          gap: 2px;
+          border: 1px solid #dbe4f0;
+          border-radius: 8px;
+          background: #f8fafc;
+          padding: 2px;
+        }
+        .external-meeting-filter button {
+          border: 0;
+          border-radius: 6px;
+          background: transparent;
+          color: #475569;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 700;
+          line-height: 1;
+          padding: 7px 10px;
+        }
+        .external-meeting-filter button.active {
+          background: #2563eb;
+          color: #ffffff;
+          box-shadow: 0 3px 8px rgba(37, 99, 235, 0.22);
+        }
         .external-meeting-fields {
           display: grid;
           gap: 10px;
@@ -6297,6 +6441,36 @@ export default function CommonViewPage() {
           width: 860px;
           min-width: 860px;
           max-width: 860px;
+        }
+        .meeting-topic-header-edit {
+          border: 0;
+          background: transparent;
+          color: inherit;
+          cursor: pointer;
+          display: block;
+          font: inherit;
+          font-weight: inherit;
+          padding: 0;
+          text-align: left;
+          width: 100%;
+        }
+        .meeting-topic-header-edit:hover {
+          color: #1d4ed8;
+        }
+        .meeting-topic-header-input {
+          width: 100%;
+          border: 1px solid #93c5fd;
+          border-radius: 6px;
+          background: #ffffff;
+          color: #0f172a;
+          font: inherit;
+          font-weight: 700;
+          padding: 6px 8px;
+          outline: none;
+        }
+        .meeting-topic-header-input:focus {
+          border-color: #2563eb;
+          box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.18);
         }
         .meeting-topic-cell .input {
           white-space: normal;
@@ -6763,6 +6937,17 @@ export default function CommonViewPage() {
           background:rgb(255, 222, 241);
           border-left-color: #ffffff;
         }
+        .swimlane-cell.external-non-daily-weekly {
+          background: #fef2f2;
+          border-color: #ef4444;
+          color: #991b1b;
+        }
+        .swimlane-cell.external-non-daily-weekly .swimlane-date,
+        .swimlane-cell.external-non-daily-weekly .swimlane-subtitle,
+        .swimlane-cell.external-non-daily-weekly .swimlane-note,
+        .swimlane-cell.external-non-daily-weekly .swimlane-note * {
+          color: #991b1b;
+        }
         .swimlane-title-row {
           display: flex;
           flex-direction: column;
@@ -7112,12 +7297,27 @@ export default function CommonViewPage() {
         .week-table-entry.task-state-todo {
           background: #fbcfe8;
         }
+        .week-table-entry.external-non-daily-weekly {
+          background: #fef2f2;
+          border-color: #ef4444;
+          color: #991b1b;
+        }
+        .week-table-entry.external-non-daily-weekly .week-table-avatar {
+          border-color: #fecaca;
+          background: #fee2e2;
+          color: #991b1b;
+        }
         .week-table-view.neutral-all-days .week-table-entry,
         .week-table-view.neutral-all-days .week-table-entry.task-state-done,
         .week-table-view.neutral-all-days .week-table-entry.task-state-in-progress,
         .week-table-view.neutral-all-days .week-table-entry.task-state-waiting,
         .week-table-view.neutral-all-days .week-table-entry.task-state-todo {
           background: #ffffff;
+        }
+        .week-table-view.neutral-all-days .week-table-entry.external-non-daily-weekly {
+          background: #fef2f2;
+          border-color: #ef4444;
+          color: #991b1b;
         }
         .week-table-entry-main {
           flex: 1;
@@ -7424,6 +7624,11 @@ export default function CommonViewPage() {
             display: flex;
             align-items: center;
           }
+          .week-table-entry.external-non-daily-weekly {
+            background: #fef2f2 !important;
+            border-color: #ef4444 !important;
+            color: #991b1b !important;
+          }
           .week-table-entries {
             gap: 1px;
           }
@@ -7508,6 +7713,17 @@ export default function CommonViewPage() {
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
         .swimlane-accent.priority { border-left: 4px solid var(--priority-accent); }
+        .swimlane-cell.external-non-daily-weekly {
+          background: #fef2f2;
+          border-color: #ef4444;
+          color: #991b1b;
+        }
+        .swimlane-cell.external-non-daily-weekly .swimlane-date,
+        .swimlane-cell.external-non-daily-weekly .swimlane-subtitle,
+        .swimlane-cell.external-non-daily-weekly .swimlane-note,
+        .swimlane-cell.external-non-daily-weekly .swimlane-note * {
+          color: #991b1b;
+        }
         .swimlane-cell.deadline-important:not(.done) {
           background: #dc2626;
           border-color: #b91c1c;
@@ -8424,6 +8640,7 @@ export default function CommonViewPage() {
                         onClick={() => {
                           setShowMeetingTemplateForm(false)
                           setMeetingTemplateError("")
+                          setMeetingTemplateTopicHeader("M1 PIKAT")
                         }}
                       >
                         Cancel
@@ -8459,6 +8676,17 @@ export default function CommonViewPage() {
                         placeholder="Checklist title"
                         value={meetingTemplateTitle}
                         onChange={(e) => setMeetingTemplateTitle(e.target.value)}
+                      />
+                    </div>
+                    <div className="meeting-create-field">
+                      <label htmlFor="meeting-create-topic-header">M1 PIKAT</label>
+                      <input
+                        id="meeting-create-topic-header"
+                        className="input"
+                        type="text"
+                        placeholder="M1 PIKAT"
+                        value={meetingTemplateTopicHeader}
+                        onChange={(e) => setMeetingTemplateTopicHeader(e.target.value)}
                       />
                     </div>
                     <div className="meeting-create-field">
@@ -8563,7 +8791,44 @@ export default function CommonViewPage() {
                           className={col.key === "topic" ? "meeting-topic-header" : undefined}
                           style={col.width ? { width: col.width } : undefined}
                         >
-                          {col.label}
+                          {col.key === "topic" && canEditMeetingTemplates ? (
+                            editingMeetingTopicHeader ? (
+                              <input
+                                type="text"
+                                className="meeting-topic-header-input"
+                                value={meetingTopicHeaderDraft}
+                                onChange={(e) => setMeetingTopicHeaderDraft(e.target.value)}
+                                autoFocus
+                                disabled={savingMeetingTopicHeader}
+                                onBlur={() => {
+                                  if (skipMeetingTopicHeaderBlurRef.current) {
+                                    skipMeetingTopicHeaderBlurRef.current = false
+                                    return
+                                  }
+                                  if (meetingTopicHeaderDraft.trim()) void saveMeetingTopicHeader()
+                                }}
+                                onKeyDown={(e) => {
+                                  if (e.key === "Enter") {
+                                    e.preventDefault()
+                                    void saveMeetingTopicHeader()
+                                  } else if (e.key === "Escape") {
+                                    cancelEditMeetingTopicHeader()
+                                  }
+                                }}
+                              />
+                            ) : (
+                              <button
+                                type="button"
+                                className="meeting-topic-header-edit"
+                                onClick={startEditMeetingTopicHeader}
+                                title="Click to edit"
+                              >
+                                {col.label}
+                              </button>
+                            )
+                          ) : (
+                            col.label
+                          )}
                         </th>
                       ))}
                       {canEditMeetingTemplates ? <th style={{ width: "160px" }}>Actions</th> : null}
@@ -9277,10 +9542,28 @@ export default function CommonViewPage() {
               </div>
             </div>
             <div className="external-meeting-list">
-              <div className="external-meeting-form-title">All external meetings</div>
-              {externalMeetingsSorted.length ? (
+              <div className="external-meeting-list-header">
+                <div className="external-meeting-form-title">All external meetings</div>
+                <div className="external-meeting-filter" aria-label="External meetings filter">
+                  {([
+                    ["next", "Next"],
+                    ["past", "Past"],
+                    ["all", "All"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={externalMeetingListFilter === value ? "active" : ""}
+                      onClick={() => setExternalMeetingListFilter(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {externalMeetingsVisible.length ? (
                 <div className="external-meeting-cards">
-                  {externalMeetingsSorted.map((meeting) => {
+                  {externalMeetingsVisible.map((meeting) => {
                     const department = departments.find((d) => d.id === meeting.department_id) || null
                     const owner = meeting.created_by ? userById.get(meeting.created_by) : null
                     const ownerName = owner?.full_name || owner?.username || "Unknown"
@@ -9533,7 +9816,13 @@ export default function CommonViewPage() {
                   })}
                 </div>
               ) : (
-                <div className="external-meeting-empty">No external meetings yet.</div>
+                <div className="external-meeting-empty">
+                  {externalMeetingListFilter === "past"
+                    ? "No past external meetings."
+                    : externalMeetingListFilter === "next"
+                      ? "No upcoming external meetings."
+                      : "No external meetings yet."}
+                </div>
               )}
             </div>
           </div>
@@ -10357,8 +10646,18 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "external") {
-                        return entries.map((e: ExternalItem, idx: number) => (
-                          <div key={idx} className="week-table-entry">
+                        return (entries as ExternalItem[]).map((e, idx: number) => (
+                          <div
+                            key={idx}
+                            className={[
+                              "week-table-entry",
+                              isNonDailyWeeklyRecurrence(e.recurrenceType ?? e.recurrence_type)
+                                ? "external-non-daily-weekly"
+                                : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          >
                             <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (

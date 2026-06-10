@@ -556,6 +556,8 @@ type ExternalItem = {
   owner: string
   assignees?: string[]
   department?: string
+  recurrenceType?: string | null
+  recurrence_type?: string | null
 }
 type InternalItem = {
   title: string
@@ -795,6 +797,11 @@ const mergeLabelList = (left?: string, right?: string) => {
   return Array.from(new Set(labels)).join(", ")
 }
 const formatBzTimeDisplay = (value?: string | null) => formatTimeLabel(value || "").trim() || "-"
+const isNonDailyWeeklyRecurrence = (recurrenceType?: string | null) => {
+  if (recurrenceType == null) return false
+  const normalized = recurrenceType.trim().toLowerCase()
+  return normalized !== "daily" && normalized !== "weekly"
+}
 
 const fromISODate = (s: string) => {
   const [y, m, d] = s.split("-").map(Number)
@@ -4084,8 +4091,16 @@ export default function AdminTasksPage() {
         ))
       }
       if (rowId === "external") {
-        return entries.map((e: ExternalItem, idx: number) => (
-          <div key={idx} className="week-table-entry">
+        return (entries as ExternalItem[]).map((e, idx: number) => (
+          <div
+            key={idx}
+            className={[
+              "week-table-entry",
+              isNonDailyWeeklyRecurrence(e.recurrenceType ?? e.recurrence_type) ? "external-non-daily-weekly" : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
+          >
             <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
             <div className="week-table-avatars">
               {entryAssignees(e).map((name: string) => (
@@ -5486,6 +5501,16 @@ export default function AdminTasksPage() {
           background: #ffffff;
           margin-bottom: 2px;
         }
+        .admin-week-table .week-table-entry.external-non-daily-weekly {
+          background: #fef2f2;
+          border-color: #ef4444;
+          color: #991b1b;
+        }
+        .admin-week-table .week-table-entry.external-non-daily-weekly .week-table-avatar {
+          border-color: #fecaca;
+          background: #fee2e2;
+          color: #991b1b;
+        }
         .admin-week-table .week-table-prjk-divider {
           border-top: 1px solid #64748b;
           margin: 1px 0;
@@ -5784,6 +5809,11 @@ export default function AdminTasksPage() {
             margin-bottom: 3px;
             font-size: 9px;
             padding: 2px 4px;
+          }
+          .admin-week-table .week-table-entry.external-non-daily-weekly {
+            background: #fef2f2 !important;
+            border-color: #ef4444 !important;
+            color: #991b1b !important;
           }
           .admin-week-table .week-table-entries {
             gap: 2px;
