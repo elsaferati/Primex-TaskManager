@@ -97,7 +97,17 @@ type ExternalItem = {
   recurrenceType?: string | null
   recurrence_type?: string | null
 }
-type InternalItem = { title: string; date: string; time: string; platform: string; owner: string; assignees?: string[]; department?: string }
+type InternalItem = {
+  title: string
+  date: string
+  time: string
+  platform: string
+  owner: string
+  assignees?: string[]
+  department?: string
+  recurrenceType?: string | null
+  recurrence_type?: string | null
+}
 type R1Item = {
   title: string
   date: string
@@ -550,10 +560,9 @@ const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
 const getCommonTaskPeriodLabel = (finishPeriod?: string | null) =>
   getFinishPeriodIndicatorLabel(finishPeriod) || "AM/PM"
 
-const isNonDailyWeeklyRecurrence = (recurrenceType?: string | null) => {
-  if (recurrenceType == null) return false
-  const normalized = recurrenceType.trim().toLowerCase()
-  return normalized !== "daily" && normalized !== "weekly"
+const isOneTimeMeeting = (recurrenceType?: string | null) => {
+  const normalized = (recurrenceType || "").trim().toLowerCase()
+  return !normalized || normalized === "none"
 }
 
 export default function CommonViewPage() {
@@ -901,10 +910,13 @@ export default function CommonViewPage() {
   const [multiMode, setMultiMode] = React.useState(false)
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
+  const [selectedCommonUserId, setSelectedCommonUserId] = React.useState("__all__")
+  const [commonUserMenuOpen, setCommonUserMenuOpen] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
   const [printOrientationHint, setPrintOrientationHint] = React.useState<"portrait" | "landscape">("landscape")
   const weekTablePrintRef = React.useRef<HTMLDivElement | null>(null)
   const weekTablePrintContentRef = React.useRef<HTMLDivElement | null>(null)
+  const commonUserFilterRef = React.useRef<HTMLDivElement | null>(null)
   const [exportingMeetingExcel, setExportingMeetingExcel] = React.useState(false)
 
   // Modal state
@@ -2796,6 +2808,7 @@ export default function CommonViewPage() {
               time: resolvedDate ? formatTime(resolvedDate) : "TBD",
               platform: meeting.platform?.trim() || "TBD",
               owner: ownerName,
+              recurrenceType: meeting.recurrence_type || "none",
             })
           }
         }
@@ -3117,6 +3130,49 @@ export default function CommonViewPage() {
       if (!name) return null
       return nameToUserId.get(name.trim().toLowerCase()) || null
     }
+    const selectedCommonUser = selectedCommonUserId === "__all__"
+      ? null
+      : users.find((u) => u.id === selectedCommonUserId) || null
+    const selectedCommonUserNames = new Set(
+      selectedCommonUser
+        ? [selectedCommonUser.full_name, selectedCommonUser.username, selectedCommonUser.email]
+            .map((name) => (name || "").trim().toLowerCase())
+            .filter(Boolean)
+        : []
+    )
+    const hasCommonUserFilter = Boolean(selectedCommonUser)
+    const matchesSelectedUserId = (uid?: string | null) =>
+      !hasCommonUserFilter || uid === selectedCommonUserId
+    const matchesSelectedUserName = (name?: string | null) =>
+      !hasCommonUserFilter || selectedCommonUserNames.has((name || "").trim().toLowerCase())
+    const selectedAssignees = (names?: string[]) => {
+      const source = names || []
+      if (!hasCommonUserFilter) return source
+      return source.filter((name) => matchesSelectedUserName(name))
+    }
+    const hasSelectedAssignee = (names?: string[]) =>
+      !hasCommonUserFilter || selectedAssignees(names).length > 0
+    const matchesSelectedUserEntry = (entry: {
+      userId?: string | null
+      person?: string | null
+      owner?: string | null
+      assignees?: string[]
+      isAllUsers?: boolean
+    }) => {
+      if (!hasCommonUserFilter) return true
+      if (entry.isAllUsers) return true
+      return (
+        matchesSelectedUserId(entry.userId) ||
+        matchesSelectedUserName(entry.person) ||
+        matchesSelectedUserName(entry.owner) ||
+        hasSelectedAssignee(entry.assignees)
+      )
+    }
+    const narrowAssigneesForSelectedUser = <T extends { assignees?: string[] }>(entry: T): T => {
+      if (!hasCommonUserFilter || !entry.assignees?.length) return entry
+      const assignees = selectedAssignees(entry.assignees)
+      return assignees.length ? { ...entry, assignees } : entry
+    }
     const isUserHiddenOn = (dateStr: string, uid: string | null | undefined): boolean => {
       if (!uid) return false
       const set = hiddenUsersByDate.get(dateStr)
@@ -3127,63 +3183,93 @@ export default function CommonViewPage() {
       return isUserHiddenOn(dateStr, uid)
     }
 
-    const late = commonData.late.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
-    const absent = commonData.absent.filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+    const late = commonData.late
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => matchesSelectedUserEntry(x))
+    const absent = commonData.absent
+      .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => matchesSelectedUserEntry(x))
     const externalHoliday = commonData.externalHoliday.filter((x) => inSelectedDates(x.date))
     const leave = commonData.leave.filter((x) => {
+      if (!matchesSelectedUserEntry(x)) return false
       const visibleDates = datesToUse.filter((d) => d >= x.startDate && d <= x.endDate)
       if (!visibleDates.length) return false
       return visibleDates.some((d) => !fullyCoveredDates.has(d))
     })
     const blocked = commonData.blocked
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .map(narrowAssigneesForSelectedUser)
     const oneH = commonData.oneH
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .map(narrowAssigneesForSelectedUser)
     const personal = commonData.personal
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .map(narrowAssigneesForSelectedUser)
     const r1 = commonData.r1
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
+      .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .map(narrowAssigneesForSelectedUser)
     const external = commonData.external
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .flatMap((x) => {
+        if (!matchesSelectedUserEntry(x)) return []
         const hiddenSet = hiddenUsersByDate.get(x.date)
-        if (!hiddenSet || hiddenSet.size === 0) return [x]
+        const selectedAssigneeList = selectedAssignees(x.assignees)
+        const next = hasCommonUserFilter && selectedAssigneeList.length
+          ? { ...x, assignees: selectedAssigneeList }
+          : x
+        if (!hiddenSet || hiddenSet.size === 0) return [next]
         const ownerHidden = isNameHiddenOn(x.date, x.owner)
-        const filteredAssignees = (x.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
+        const filteredAssignees = (next.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
         if (ownerHidden && filteredAssignees.length === 0) return []
-        if (filteredAssignees.length === (x.assignees?.length || 0)) return [x]
-        return [{ ...x, assignees: filteredAssignees }]
+        if (filteredAssignees.length === (next.assignees?.length || 0)) return [next]
+        return [{ ...next, assignees: filteredAssignees }]
       })
     const internal = commonData.internal
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .flatMap((x) => {
+        if (!matchesSelectedUserEntry(x)) return []
         const hiddenSet = hiddenUsersByDate.get(x.date)
-        if (!hiddenSet || hiddenSet.size === 0) return [x]
+        const selectedAssigneeList = selectedAssignees(x.assignees)
+        const next = hasCommonUserFilter && selectedAssigneeList.length
+          ? { ...x, assignees: selectedAssigneeList }
+          : x
+        if (!hiddenSet || hiddenSet.size === 0) return [next]
         const ownerHidden = isNameHiddenOn(x.date, x.owner)
-        const filteredAssignees = (x.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
+        const filteredAssignees = (next.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
         if (ownerHidden && filteredAssignees.length === 0) return []
-        if (filteredAssignees.length === (x.assignees?.length || 0)) return [x]
-        return [{ ...x, assignees: filteredAssignees }]
+        if (filteredAssignees.length === (next.assignees?.length || 0)) return [next]
+        return [{ ...next, assignees: filteredAssignees }]
       })
     const problems = commonData.problems
       .filter((x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date)))
+      .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => x.everyday || !isNameHiddenOn(x.date, x.person))
     const feedback = commonData.feedback
       .filter((x) => x.everyday || (inSelectedDates(x.date) && !fullyCoveredDates.has(x.date)))
+      .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => x.everyday || !isNameHiddenOn(x.date, x.person))
     const bz = commonData.bz
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .flatMap((x) => {
+        if (!matchesSelectedUserEntry(x)) return []
         const hiddenSet = hiddenUsersByDate.get(x.date)
-        if (!hiddenSet || hiddenSet.size === 0) return [x]
-        const filteredAssignees = (x.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
+        const selectedAssigneeList = selectedAssignees(x.assignees)
+        const next = hasCommonUserFilter && selectedAssigneeList.length
+          ? { ...x, assignees: selectedAssigneeList }
+          : x
+        if (!hiddenSet || hiddenSet.size === 0) return [next]
+        const filteredAssignees = (next.assignees || []).filter((n) => !isNameHiddenOn(x.date, n))
         if (filteredAssignees.length === 0) return []
-        if (filteredAssignees.length === (x.assignees?.length || 0)) return [x]
-        return [{ ...x, assignees: filteredAssignees }]
+        if (filteredAssignees.length === (next.assignees?.length || 0)) return [next]
+        return [{ ...next, assignees: filteredAssignees }]
       })
     const priority = commonData.priority.filter((p) =>
       selectedDates.size ? Array.from(selectedDates).includes(p.date) : true
@@ -3191,13 +3277,18 @@ export default function CommonViewPage() {
 
     const filteredPriority = priority
       .filter((p) => !fullyCoveredDates.has(p.date))
+      .filter((p) => matchesSelectedUserEntry(p))
       .flatMap((p) => {
         const hiddenSet = hiddenUsersByDate.get(p.date)
-        if (!hiddenSet || hiddenSet.size === 0) return [p]
-        const filteredAssignees = (p.assignees || []).filter((n) => !isNameHiddenOn(p.date, n))
+        const selectedAssigneeList = selectedAssignees(p.assignees)
+        const next = hasCommonUserFilter && selectedAssigneeList.length
+          ? { ...p, assignees: selectedAssigneeList }
+          : p
+        if (!hiddenSet || hiddenSet.size === 0) return [next]
+        const filteredAssignees = (next.assignees || []).filter((n) => !isNameHiddenOn(p.date, n))
         if (filteredAssignees.length === 0) return []
-        if (filteredAssignees.length === (p.assignees?.length || 0)) return [p]
-        return [{ ...p, assignees: filteredAssignees }]
+        if (filteredAssignees.length === (next.assignees?.length || 0)) return [next]
+        return [{ ...next, assignees: filteredAssignees }]
       })
 
     return {
@@ -3218,7 +3309,7 @@ export default function CommonViewPage() {
       fullyCoveredDates,
       hiddenUsersByDate,
     }
-  }, [commonData, selectedDates, users, weekISOs])
+  }, [commonData, selectedCommonUserId, selectedDates, users, weekISOs])
 
   const allUsersLeaveByDate = React.useMemo(() => {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
@@ -3244,6 +3335,23 @@ export default function CommonViewPage() {
       .slice(0, 4)
       .map((u) => u.full_name || u.username || "Unknown")
   }, [users])
+  const commonUserFilterOptions = React.useMemo(() => {
+    return users
+      .filter((u) => u.id)
+      .map((u) => ({
+        id: u.id,
+        label: u.full_name || u.username || u.email || "Unknown",
+        isActive: u.is_active,
+      }))
+      .sort((a, b) => {
+        if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
+        return a.label.localeCompare(b.label)
+      })
+  }, [users])
+  const selectedCommonUserLabel = React.useMemo(() => {
+    if (selectedCommonUserId === "__all__") return "All users"
+    return commonUserFilterOptions.find((option) => option.id === selectedCommonUserId)?.label || "All users"
+  }, [commonUserFilterOptions, selectedCommonUserId])
 
   const isMultiDate = selectedDates.size > 1
 
@@ -4911,6 +5019,27 @@ export default function CommonViewPage() {
     }
   }, [openInfoId])
 
+  React.useEffect(() => {
+    if (!commonUserMenuOpen) return
+    const handlePointerDown = (event: MouseEvent) => {
+      const menu = commonUserFilterRef.current
+      if (!menu) return
+      if (menu.contains(event.target as Node)) return
+      setCommonUserMenuOpen(false)
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setCommonUserMenuOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [commonUserMenuOpen])
+
 
   const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
@@ -5097,7 +5226,7 @@ export default function CommonViewPage() {
       dateLabel: formatDateHuman(x.date),
       accentClass: [
         "swimlane-accent external",
-        isNonDailyWeeklyRecurrence(x.recurrenceType ?? x.recurrence_type) ? "external-non-daily-weekly" : "",
+        isOneTimeMeeting(x.recurrenceType ?? x.recurrence_type) ? "one-time-meeting" : "",
       ]
         .filter(Boolean)
         .join(" "),
@@ -5110,7 +5239,13 @@ export default function CommonViewPage() {
       title: `${x.title} ${formatTimeLabel(x.time)}`.trim(),
       subtitle: x.department || "Department TBD",
       dateLabel: formatDateHuman(x.date),
-      accentClass: "swimlane-accent internal",
+      accentClass: [
+        "swimlane-accent internal",
+        isOneTimeMeeting(x.recurrenceType ?? x.recurrence_type) ? "one-time-meeting" : "",
+      ]
+        .filter(Boolean)
+        .join(" "),
+      recurrenceType: x.recurrenceType ?? x.recurrence_type,
     }))
 
     const bzSource = isMultiDate
@@ -6943,16 +7078,8 @@ export default function CommonViewPage() {
           background:rgb(255, 222, 241);
           border-left-color: #ffffff;
         }
-        .swimlane-cell.external-non-daily-weekly {
-          background: #fef2f2;
-          border-color: #ef4444;
-          color: #991b1b;
-        }
-        .swimlane-cell.external-non-daily-weekly .swimlane-date,
-        .swimlane-cell.external-non-daily-weekly .swimlane-subtitle,
-        .swimlane-cell.external-non-daily-weekly .swimlane-note,
-        .swimlane-cell.external-non-daily-weekly .swimlane-note * {
-          color: #991b1b;
+        .swimlane-cell.one-time-meeting {
+          border-color: #dc2626;
         }
         .swimlane-title-row {
           display: flex;
@@ -7303,15 +7430,11 @@ export default function CommonViewPage() {
         .week-table-entry.task-state-todo {
           background: #fbcfe8;
         }
-        .week-table-entry.external-non-daily-weekly {
-          background: #fef2f2;
-          border-color: #ef4444;
-          color: #991b1b;
+        .week-table-entry.one-time-meeting {
+          border-color: #dc2626;
         }
-        .week-table-entry.external-non-daily-weekly .week-table-avatar {
-          border-color: #fecaca;
-          background: #fee2e2;
-          color: #991b1b;
+        .week-table-entry.one-time-meeting .week-table-avatar {
+          border-color: #fca5a5;
         }
         .week-table-view.neutral-all-days .week-table-entry,
         .week-table-view.neutral-all-days .week-table-entry.task-state-done,
@@ -7320,10 +7443,8 @@ export default function CommonViewPage() {
         .week-table-view.neutral-all-days .week-table-entry.task-state-todo {
           background: #ffffff;
         }
-        .week-table-view.neutral-all-days .week-table-entry.external-non-daily-weekly {
-          background: #fef2f2;
-          border-color: #ef4444;
-          color: #991b1b;
+        .week-table-view.neutral-all-days .week-table-entry.one-time-meeting {
+          border-color: #dc2626;
         }
         .week-table-entry-main {
           flex: 1;
@@ -7630,10 +7751,8 @@ export default function CommonViewPage() {
             display: flex;
             align-items: center;
           }
-          .week-table-entry.external-non-daily-weekly {
-            background: #fef2f2 !important;
-            border-color: #ef4444 !important;
-            color: #991b1b !important;
+          .week-table-entry.one-time-meeting {
+            border-color: #dc2626 !important;
           }
           .week-table-entries {
             gap: 1px;
@@ -7719,16 +7838,8 @@ export default function CommonViewPage() {
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
         .swimlane-accent.priority { border-left: 4px solid var(--priority-accent); }
-        .swimlane-cell.external-non-daily-weekly {
-          background: #fef2f2;
-          border-color: #ef4444;
-          color: #991b1b;
-        }
-        .swimlane-cell.external-non-daily-weekly .swimlane-date,
-        .swimlane-cell.external-non-daily-weekly .swimlane-subtitle,
-        .swimlane-cell.external-non-daily-weekly .swimlane-note,
-        .swimlane-cell.external-non-daily-weekly .swimlane-note * {
-          color: #991b1b;
+        .swimlane-cell.one-time-meeting {
+          border-color: #dc2626;
         }
         .swimlane-cell.deadline-important:not(.done) {
           background: #dc2626;
@@ -7799,6 +7910,83 @@ export default function CommonViewPage() {
           display: flex;
           align-items: center;
           gap: 8px;
+        }
+        .user-filter-control {
+          position: relative;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          color: #475569;
+          font-size: 11px;
+          font-weight: 700;
+          white-space: nowrap;
+        }
+        .user-filter-button {
+          width: 180px;
+          height: 32px;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          background: #fff;
+          color: #0f172a;
+          display: inline-flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          padding: 4px 8px;
+          font-size: 12px;
+          font-weight: 600;
+          cursor: pointer;
+        }
+        .user-filter-button.active,
+        .user-filter-button:hover {
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.12);
+        }
+        .user-filter-button span:first-child {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .user-filter-chevron {
+          color: #64748b;
+          font-size: 10px;
+          flex: 0 0 auto;
+        }
+        .user-filter-menu {
+          position: absolute;
+          top: calc(100% + 6px);
+          right: 0;
+          z-index: 200;
+          width: 220px;
+          max-height: 260px;
+          overflow-y: auto;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          background: #fff;
+          box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+          padding: 4px;
+        }
+        .user-filter-option {
+          width: 100%;
+          border: 0;
+          border-radius: 6px;
+          background: transparent;
+          color: #0f172a;
+          cursor: pointer;
+          display: block;
+          padding: 7px 8px;
+          text-align: left;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .user-filter-option:hover {
+          background: #eff6ff;
+          color: #1d4ed8;
+        }
+        .user-filter-option.active {
+          background: #2563eb;
+          color: #fff;
         }
         .toolbar-group .chip-row {
           margin-right: 0;
@@ -8368,6 +8556,50 @@ export default function CommonViewPage() {
               <input type="checkbox" checked={multiMode} onChange={(e) => setMultiMode(e.target.checked)} />
               Multi-select (Days)
             </label>
+            <div className="user-filter-control" ref={commonUserFilterRef}>
+              <span>User</span>
+              <button
+                className={`user-filter-button ${commonUserMenuOpen ? "active" : ""}`}
+                type="button"
+                aria-haspopup="listbox"
+                aria-expanded={commonUserMenuOpen}
+                onClick={() => setCommonUserMenuOpen((open) => !open)}
+              >
+                <span>{selectedCommonUserLabel}</span>
+                <span className="user-filter-chevron" aria-hidden="true">v</span>
+              </button>
+              {commonUserMenuOpen ? (
+                <div className="user-filter-menu" role="listbox">
+                  <button
+                    type="button"
+                    role="option"
+                    aria-selected={selectedCommonUserId === "__all__"}
+                    className={`user-filter-option ${selectedCommonUserId === "__all__" ? "active" : ""}`}
+                    onClick={() => {
+                      setSelectedCommonUserId("__all__")
+                      setCommonUserMenuOpen(false)
+                    }}
+                  >
+                    All users
+                  </button>
+                  {commonUserFilterOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      type="button"
+                      role="option"
+                      aria-selected={selectedCommonUserId === option.id}
+                      className={`user-filter-option ${selectedCommonUserId === option.id ? "active" : ""}`}
+                      onClick={() => {
+                        setSelectedCommonUserId(option.id)
+                        setCommonUserMenuOpen(false)
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
           <div className="toolbar-group">
             <div className="chip-row">
@@ -10711,9 +10943,7 @@ export default function CommonViewPage() {
                             key={idx}
                             className={[
                               "week-table-entry",
-                              isNonDailyWeeklyRecurrence(e.recurrenceType ?? e.recurrence_type)
-                                ? "external-non-daily-weekly"
-                                : "",
+                              isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
                             ]
                               .filter(Boolean)
                               .join(" ")}
@@ -10730,7 +10960,15 @@ export default function CommonViewPage() {
                         ))
                       } else if (row.id === "internal") {
                         return entries.map((e: InternalItem, idx: number) => (
-                          <div key={idx} className="week-table-entry">
+                          <div
+                            key={idx}
+                            className={[
+                              "week-table-entry",
+                              isOneTimeMeeting(e.recurrenceType ?? e.recurrence_type) ? "one-time-meeting" : "",
+                            ]
+                              .filter(Boolean)
+                              .join(" ")}
+                          >
                             <span>{idx + 1}. {`${commonPrintTitleLine(e.title)} ${formatTimeLabel(e.time)}`.trim()}</span>
                             <div className="week-table-avatars">
                               {entryAssignees(e).map((name: string) => (

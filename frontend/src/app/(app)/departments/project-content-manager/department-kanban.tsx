@@ -1,4 +1,4 @@
-﻿"use client"
+"use client"
 
 import * as React from "react"
 import Link from "next/link"
@@ -54,7 +54,7 @@ const TABS = [
 ] as const
 
 type TabId = (typeof TABS)[number]["id"]
-type AllRange = "today" | "past-7-days" | "this-week" | "next-week" | "all" | "date"
+type AllRange = "today" | "tomorrow" | "past-7-days" | "this-week" | "next-week" | "all" | "date"
 
 const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 
@@ -153,6 +153,10 @@ const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
 
 
 const TODAY_TASK_ROW_CLASS = "align-top"
+const STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS =
+  "bg-blue-50/80 hover:bg-blue-100/80 [&>td]:!border [&>td]:!border-rose-500 [&>td:first-child]:!border-l-4"
+const STARTS_ON_SELECTED_DAY_TASK_CARD_CLASS =
+  "!border-rose-500 !bg-blue-50/80 hover:!bg-blue-100/80 ring-1 ring-rose-500"
 const TODAY_TASK_CELL_CLASS = "py-3 align-top"
 const TODAY_TASK_TEXT_CLAMP_CLASS = "leading-4 whitespace-pre-line break-words"
 
@@ -485,8 +489,17 @@ function systemTaskDisplayDate(task: SystemTaskTemplate): string | null {
 }
 
 function todayInputValue() {
+  return dateInputValueWithOffset(0)
+}
+
+function tomorrowInputValue() {
+  return dateInputValueWithOffset(1)
+}
+
+function dateInputValueWithOffset(offsetDays: number) {
   const now = new Date()
   const local = new Date(now.getTime() - now.getTimezoneOffset() * 60 * 1000)
+  local.setDate(local.getDate() + offsetDays)
   return local.toISOString().slice(0, 10)
 }
 
@@ -1954,6 +1967,10 @@ export default function DepartmentKanban() {
   }, [users, editTaskAssignees])
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
+  const tomorrowDate = React.useMemo(
+    () => new Date(todayDate.getFullYear(), todayDate.getMonth(), todayDate.getDate() + 1),
+    [todayDate]
+  )
   const selectedAllDate = React.useMemo(
     () => dateInputToDate(allDateInput) ?? todayDate,
     [allDateInput, todayDate]
@@ -1991,6 +2008,52 @@ export default function DepartmentKanban() {
       return new Date(nextWeekStart.getFullYear(), nextWeekStart.getMonth(), nextWeekStart.getDate() + index)
     })
   }, [nextWeekStart])
+  const selectedAllHighlightDate = React.useMemo(() => {
+    if (allRange === "today") return todayDate
+    if (allRange === "tomorrow") return tomorrowDate
+    if (allRange === "date") return selectedAllDate
+    return null
+  }, [allRange, selectedAllDate, todayDate, tomorrowDate])
+  const selectedAllReportDate = React.useMemo(() => {
+    if (allRange === "tomorrow") return tomorrowDate
+    if (allRange === "date") return selectedAllDate
+    return todayDate
+  }, [allRange, selectedAllDate, todayDate, tomorrowDate])
+  const selectedAllReportIso = React.useMemo(
+    () => formatDateInput(selectedAllReportDate),
+    [selectedAllReportDate]
+  )
+  const selectedAllReportLabel = React.useMemo(() => {
+    if (allRange === "tomorrow") return "Tomorrow"
+    if (allRange === "date") return formatDateDMY(selectedAllDate)
+    return null
+  }, [allRange, selectedAllDate])
+  const dailyReportHeading = selectedAllReportLabel ? `Daily Report - ${selectedAllReportLabel}` : "Daily Report"
+  const isTaskStartingOnSelectedAllDate = React.useCallback(
+    (task: Task) => {
+      if (!task.start_date) return false
+      const startDate = toDate(task.start_date)
+      return Boolean(startDate && selectedAllHighlightDate && isSameDay(startDate, selectedAllHighlightDate))
+    },
+    [selectedAllHighlightDate]
+  )
+  const isDateStartingOnSelectedAllDate = React.useCallback(
+    (value?: string | null) => {
+      if (!value || !selectedAllHighlightDate) return false
+      const date = toDate(value)
+      return date ? isSameDay(date, selectedAllHighlightDate) : false
+    },
+    [selectedAllHighlightDate]
+  )
+  const renderAllTodayTaskTitle = React.useCallback(
+    (task: Task) => {
+      if (typeof task.title !== "string" || !task.title.includes("[[")) return task.title
+      return isTaskStartingOnSelectedAllDate(task)
+        ? renderMarkedNoteContent(task.title, task.title)
+        : getPlainMarkedText(task.title)
+    },
+    [isTaskStartingOnSelectedAllDate]
+  )
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const isTaskAssignedToUser = React.useCallback(
     (task: Task, userId?: string | null) => {
@@ -2097,6 +2160,8 @@ export default function DepartmentKanban() {
         return "This Week"
       case "next-week":
         return "Next Week"
+      case "tomorrow":
+        return "Tomorrow"
       case "all":
         return "All Open"
       case "date":
@@ -2113,6 +2178,8 @@ export default function DepartmentKanban() {
         return "this week"
       case "next-week":
         return "next week"
+      case "tomorrow":
+        return "tomorrow"
       case "all":
         return "all open dates"
       case "date":
@@ -2131,6 +2198,8 @@ export default function DepartmentKanban() {
           return isTaskOverlappingWeek(task)
         case "next-week":
           return isTaskOverlappingNextWeek(task)
+        case "tomorrow":
+          return isTaskActiveForDate(task, tomorrowDate)
         case "all":
           return showAllDoneTasks || taskStatusValue(task) !== "DONE"
         case "date":
@@ -2149,6 +2218,7 @@ export default function DepartmentKanban() {
       selectedAllDate,
       showAllDoneTasks,
       todayDate,
+      tomorrowDate,
     ]
   )
   const isTaskCompletedInAllRange = React.useCallback(
@@ -2160,6 +2230,8 @@ export default function DepartmentKanban() {
           return isTaskCompletedInRange(task, weekStart, weekEnd)
         case "next-week":
           return isTaskCompletedInRange(task, nextWeekStart, nextWeekEnd)
+        case "tomorrow":
+          return isTaskCompletedOnDate(task, tomorrowDate)
         case "date":
           return isTaskCompletedOnDate(task, selectedAllDate)
         default:
@@ -2176,6 +2248,7 @@ export default function DepartmentKanban() {
       pastSevenDaysStart,
       selectedAllDate,
       todayDate,
+      tomorrowDate,
       weekEnd,
       weekStart,
     ]
@@ -2607,7 +2680,7 @@ export default function DepartmentKanban() {
     showAllDoneTasks,
   ])
   const dailyReportFastTasks = React.useMemo(() => {
-    const todayKey = dayKey(todayDate)
+    const reportDayKey = dayKey(selectedAllReportDate)
     const targetUserId =
       viewMode === "department"
         ? selectedUserId !== "__all__"
@@ -2622,19 +2695,19 @@ export default function DepartmentKanban() {
       }
 
       const completedDate = task.completed_at ? toDate(task.completed_at) : null
-      const completedToday = completedDate ? isSameDay(completedDate, todayDate) : false
-      if (completedToday) return true
+      const completedOnReportDay = completedDate ? isSameDay(completedDate, selectedAllReportDate) : false
+      if (completedOnReportDay) return true
       const isDone = Boolean(completedDate) || task.status === "DONE"
       if (isDone) {
-        return isTaskActiveForDate(task, todayDate)
+        return isTaskActiveForDate(task, selectedAllReportDate)
       }
 
       const startDate = toDate(task.start_date) || toDate(task.due_date) || toDate(task.created_at)
       if (!startDate) return false
-      return todayKey >= dayKey(startDate)
+      return reportDayKey >= dayKey(startDate)
     })
   }, [
-    todayDate,
+    selectedAllReportDate,
     visibleNoProjectTasks,
     viewMode,
     selectedUserId,
@@ -2668,6 +2741,19 @@ export default function DepartmentKanban() {
     for (const task of todaySystemTasks) {
       const dateValue = task.due_date || task.start_date || task.origin_run_at || task.created_at
       if (dateValue) map.set(task.id, dateValue)
+    }
+    return map
+  }, [dailyReportFastTasks, todayProjectTasks, todaySystemTasks])
+  const dailyReportStartDateByTaskId = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const task of dailyReportFastTasks) {
+      if (task.start_date) map.set(task.id, task.start_date)
+    }
+    for (const task of todayProjectTasks) {
+      if (task.start_date) map.set(task.id, task.start_date)
+    }
+    for (const task of todaySystemTasks) {
+      if (task.start_date) map.set(task.id, task.start_date)
     }
     return map
   }, [dailyReportFastTasks, todayProjectTasks, todaySystemTasks])
@@ -2998,7 +3084,7 @@ export default function DepartmentKanban() {
               : "-"
           : "-",
         kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
-        tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+        tyo: getTyoLabel(baseDate, task.completed_at, selectedAllReportDate),
         comment: task.user_comment ?? null,
         taskId: task.id,
         sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
@@ -3057,7 +3143,7 @@ export default function DepartmentKanban() {
           bz: "-",
           kohaBz: "-",
           tyo: getDailyReportTyo({
-            reportDate: todayDate,
+            reportDate: selectedAllReportDate,
             startDate,
             dueDate,
             mode: startDate && dueDate ? "range" : "dueOnly",
@@ -3096,7 +3182,7 @@ export default function DepartmentKanban() {
         bz: "-",
         kohaBz: "-",
         tyo: getDailyReportTyo({
-          reportDate: todayDate,
+          reportDate: selectedAllReportDate,
           dueDate,
           mode: "dueOnly",
         }),
@@ -3115,7 +3201,7 @@ export default function DepartmentKanban() {
     rows.push(...doneLast(systemPmRows))
     const importantDeadlineRank = (row: (typeof rows)[number]) => {
       const rowDate = row.sortDate ? toDate(row.sortDate) : null
-      if (rowDate && dayKey(rowDate) === dayKey(todayDate)) {
+      if (rowDate && dayKey(rowDate) === dayKey(selectedAllReportDate)) {
         if (titleHasEightAmIndicator(row.title)) return 0
         if (row.period === "PM") return 2
         return 1
@@ -3168,8 +3254,7 @@ export default function DepartmentKanban() {
     projects,
     projectTitleLookup,
     systemTemplateById,
-    todayDate,
-    todayIso,
+    selectedAllReportDate,
     todaySystemTasks,
     userMap,
     deadlineImportantTaskIds,
@@ -3373,7 +3458,7 @@ export default function DepartmentKanban() {
         if (!templateId) continue
         const tmpl = systemTemplateById.get(templateId) || null
         const baseDate = toDate(task.start_date || task.origin_run_at || task.due_date || task.created_at)
-        if (baseDate && dayKey(baseDate) > dayKey(todayDate)) {
+        if (baseDate && dayKey(baseDate) > dayKey(selectedAllReportDate)) {
           continue
         }
         const alignmentEnabled = Boolean(
@@ -3399,7 +3484,7 @@ export default function DepartmentKanban() {
                 : "-"
             : "-",
           kohaBz: alignmentEnabled ? formatAlignmentTime(tmpl?.alignment_time) : "-",
-          tyo: getTyoLabel(baseDate, task.completed_at, todayDate),
+          tyo: getTyoLabel(baseDate, task.completed_at, selectedAllReportDate),
           comment: task.user_comment ?? null,
           taskId: task.id,
           sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
@@ -3438,7 +3523,7 @@ export default function DepartmentKanban() {
             bz: "-",
             kohaBz: "-",
             tyo: getDailyReportTyo({
-              reportDate: todayDate,
+              reportDate: selectedAllReportDate,
               dueDate,
               mode: "dueOnly",
             }),
@@ -3461,7 +3546,7 @@ export default function DepartmentKanban() {
               bz: "-",
               kohaBz: "-",
               tyo: getDailyReportTyo({
-                reportDate: todayDate,
+                reportDate: selectedAllReportDate,
                 startDate,
                 dueDate,
                 mode: startDate && dueDate ? "range" : "dueOnly",
@@ -3496,7 +3581,7 @@ export default function DepartmentKanban() {
       }
       const importantDeadlineRank = (row: (typeof rows)[number]) => {
         const rowDate = row.sortDate ? toDate(row.sortDate) : null
-        if (rowDate && dayKey(rowDate) === dayKey(todayDate)) {
+        if (rowDate && dayKey(rowDate) === dayKey(selectedAllReportDate)) {
           if (titleHasEightAmIndicator(row.title)) return 0
           if (row.period === "PM") return 2
           return 1
@@ -3559,7 +3644,7 @@ export default function DepartmentKanban() {
         })
         .map((entry) => entry.row)
     },
-    [deadlineImportantTaskIds, projects, systemTemplateById, todayDate, userMap]
+    [deadlineImportantTaskIds, projects, selectedAllReportDate, systemTemplateById, userMap]
   )
 
   const weekProjectTasks = React.useMemo(() => {
@@ -3709,7 +3794,7 @@ export default function DepartmentKanban() {
     setExportingDailyReport(true)
     try {
       const qs = new URLSearchParams({
-        day: todayIso,
+        day: selectedAllReportIso,
         department_id: department.id,
         user_id: user.id,
       })
@@ -3743,7 +3828,12 @@ export default function DepartmentKanban() {
     if (!department?.id) return
     setExportingDailyReport(true)
     try {
-      const exportDay = allRange === "date" ? formatDateInput(selectedAllDate) : todayIso
+      const exportDay =
+        allRange === "date"
+          ? formatDateInput(selectedAllDate)
+          : allRange === "tomorrow"
+            ? formatDateInput(tomorrowDate)
+            : todayIso
       const qs = new URLSearchParams({
         day: exportDay,
         department_id: department.id,
@@ -4069,7 +4159,7 @@ export default function DepartmentKanban() {
     }
     const importantDeadlineRank = (row: (typeof rows)[number]) => {
       const rowDate = row.sortDate ? toDate(row.sortDate) : null
-      if (rowDate && dayKey(rowDate) === dayKey(todayDate)) {
+      if (rowDate && dayKey(rowDate) === dayKey(selectedAllReportDate)) {
         if (titleHasEightAmIndicator(row.title)) return 0
         if (row.period === "PM") return 2
         return 1
@@ -4120,7 +4210,13 @@ export default function DepartmentKanban() {
       if (tyoDiff !== 0) return tyoDiff
       return a.title.localeCompare(b.title) || a.userInitials.localeCompare(b.userInitials)
     })
-  }, [allTodayPrintBaseUsers, allUsersDailyReports, deadlineImportantTaskIds, todayDate])
+  }, [
+    allTodayPrintBaseUsers,
+    allUsersDailyReports,
+    convertDailyReportToRows,
+    deadlineImportantTaskIds,
+    selectedAllReportDate,
+  ])
 
   const projectTaskGroups = React.useMemo(() => {
     const map = new Map<string, Task[]>()
@@ -4262,7 +4358,7 @@ export default function DepartmentKanban() {
       setLoadingDailyReport(true)
       try {
         const qs = new URLSearchParams({
-          day: todayIso,
+          day: selectedAllReportIso,
           department_id: department.id,
           user_id: targetUserId,
         })
@@ -4283,7 +4379,7 @@ export default function DepartmentKanban() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, apiFetch, department?.id, todayIso, user?.id, viewMode])
+  }, [activeTab, apiFetch, department?.id, selectedAllReportIso, user?.id, viewMode])
 
   const refreshDailyReport = React.useCallback(async () => {
     const shouldFetchDailyReport =
@@ -4293,7 +4389,7 @@ export default function DepartmentKanban() {
     if (!department?.id || !targetUserId) return
     try {
       const qs = new URLSearchParams({
-        day: todayIso,
+        day: selectedAllReportIso,
         department_id: department.id,
         user_id: targetUserId,
       })
@@ -4304,7 +4400,7 @@ export default function DepartmentKanban() {
     } catch {
       // ignore refresh failures
     }
-  }, [activeTab, apiFetch, department?.id, todayIso, user?.id, viewMode])
+  }, [activeTab, apiFetch, department?.id, selectedAllReportIso, user?.id, viewMode])
 
   React.useEffect(() => {
     let cancelled = false
@@ -4321,7 +4417,7 @@ export default function DepartmentKanban() {
       }
       try {
         const qs = new URLSearchParams({
-          day: todayIso,
+          day: selectedAllReportIso,
           department_id: department.id,
           user_id: user.id,
         })
@@ -4348,7 +4444,7 @@ export default function DepartmentKanban() {
     return () => {
       cancelled = true
     }
-  }, [activeTab, apiFetch, department?.id, todayIso, user?.id, viewMode])
+  }, [activeTab, apiFetch, department?.id, selectedAllReportIso, user?.id, viewMode])
 
   const saveGaTableEntry = React.useCallback(
     async (nextValue: string) => {
@@ -4359,7 +4455,7 @@ export default function DepartmentKanban() {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            day: todayIso,
+            day: selectedAllReportIso,
             department_id: department.id,
             content: nextValue,
           }),
@@ -4372,7 +4468,7 @@ export default function DepartmentKanban() {
         setSavingGaTable(false)
       }
     },
-    [apiFetch, department?.id, todayIso, user?.id]
+    [apiFetch, department?.id, selectedAllReportIso, user?.id]
   )
 
   // Fetch daily reports for all users when showing All Today print view
@@ -4391,7 +4487,7 @@ export default function DepartmentKanban() {
           allTodayPrintBaseUsers.map(async (member) => {
             try {
               const qs = new URLSearchParams({
-                day: todayIso,
+                day: selectedAllReportIso,
                 department_id: department.id,
                 user_id: member.id,
               })
@@ -4422,7 +4518,7 @@ export default function DepartmentKanban() {
     return () => {
       cancelled = true
     }
-  }, [showAllTodayPrint, department?.id, allTodayPrintBaseUsers, todayIso, apiFetch])
+  }, [showAllTodayPrint, department?.id, allTodayPrintBaseUsers, selectedAllReportIso, apiFetch])
 
   const handlePrint = React.useCallback(() => {
     // In "My View" mode, automatically show daily report for printing
@@ -6053,7 +6149,10 @@ export default function DepartmentKanban() {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setAllRange("today")}
+                      onClick={() => {
+                        setAllDateInput(todayInputValue())
+                        setAllRange("today")
+                      }}
                       className={[
                         "relative flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors",
                         allRange === "today"
@@ -6062,6 +6161,21 @@ export default function DepartmentKanban() {
                       ].join(" ")}
                     >
                       <span className="uppercase tracking-wide">Today</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAllDateInput(tomorrowInputValue())
+                        setAllRange("tomorrow")
+                      }}
+                      className={[
+                        "relative flex items-center gap-2 rounded-full border px-2.5 py-1 text-xs font-semibold transition-colors",
+                        allRange === "tomorrow"
+                          ? "border-emerald-700 bg-emerald-700 text-white shadow-sm dark:border-emerald-300 dark:bg-emerald-300 dark:text-emerald-950"
+                          : "border-emerald-200 bg-white/85 text-emerald-800 hover:border-emerald-300 hover:bg-white dark:border-emerald-700/60 dark:bg-stone-900/40 dark:text-emerald-300 dark:hover:bg-stone-900/60",
+                      ].join(" ")}
+                    >
+                      <span className="uppercase tracking-wide">Tomorrow</span>
                     </button>
                     <button
                       type="button"
@@ -6428,11 +6542,6 @@ export default function DepartmentKanban() {
                     ? `All (${activeAllRangeLabel}) - Department`
                     : `All (${activeAllRangeLabel})`}
                 </div>
-                <div className="text-sm text-slate-600 mt-1">
-                  {viewMode === "department"
-                    ? `All ${activeAllRangeTaskLabel} tasks for the department team.`
-                    : `All ${activeAllRangeTaskLabel} tasks, organized in one place.`}
-                </div>
               </div>
               <div className="flex flex-wrap items-center gap-2">
                 {allRangeDoneToggleApplies ? (
@@ -6509,9 +6618,11 @@ export default function DepartmentKanban() {
               <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
                 <div className="flex items-center justify-between gap-3">
                   <div>
-                    <div className="text-sm font-semibold text-slate-800">Daily Report</div>
+                    <div className="text-sm font-semibold text-slate-800">{dailyReportHeading}</div>
                     <div className="text-xs text-slate-500 mt-1">
-                      System, fast, and project tasks for today.
+                      {selectedAllReportLabel
+                        ? `System, fast, and project tasks for ${selectedAllReportLabel}.`
+                        : "System, fast, and project tasks for today."}
                     </div>
                   </div>
                   <div className="flex items-center gap-3">
@@ -6645,14 +6756,18 @@ export default function DepartmentKanban() {
                           const isTitleExpanded = Boolean(expandedDailyReportTitleIds[rowId])
                           const canExpandTitle = hasDailyReportTitleDetails(row.title)
                           const visibleTitle = isTitleExpanded ? row.title : getDailyReportTitlePreview(row.title)
+                          const isStartDateHighlighted = row.taskId
+                            ? isDateStartingOnSelectedAllDate(dailyReportStartDateByTaskId.get(row.taskId))
+                            : false
                           return (
-                          <tr
-                            key={rowId}
-                            className={[
-                              dragDailyReportRowId === rowId ? "ring-2 ring-blue-300" : "",
-                              overDailyReportRowId === rowId ? "bg-blue-50/60" : "",
-                              isDeadlineImportant ? "bg-red-100/90" : "",
-                            ].join(" ")}
+                            <tr
+                              key={rowId}
+                              className={[
+                                dragDailyReportRowId === rowId ? "ring-2 ring-blue-300" : "",
+                                overDailyReportRowId === rowId ? "bg-blue-50/60" : "",
+                                isStartDateHighlighted ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : "",
+                                isDeadlineImportant ? "bg-red-100/90" : "",
+                              ].join(" ")}
                             onClick={() => {
                               if (dragDailyReportRowId && dragDailyReportRowId !== rowId) {
                                 handleDailyReportRowDrop(rowId)
@@ -6852,7 +6967,6 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">Meetings</div>
-                    <div className="text-xs text-slate-500 mt-1">Meetings scheduled for today.</div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">
                     {todayExternalMeetings.length + todayInternalMeetings.length}
@@ -6922,7 +7036,6 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">Waiting Confirmation</div>
-                    <div className="text-xs text-slate-500 mt-1">Tasks currently waiting for confirmation.</div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">{todayWaitingTasks.length}</div>
                 </div>
@@ -6957,7 +7070,10 @@ export default function DepartmentKanban() {
                         const confirmer = task.confirmation_assignee_id ? userMap.get(task.confirmation_assignee_id) : null
                         const confirmerLabel = confirmer?.full_name || confirmer?.username || confirmer?.email || "-"
                         return (
-                          <TableRow key={`waiting-${type}-${task.id}`} className={TODAY_TASK_ROW_CLASS}>
+                          <TableRow
+                            key={`waiting-${type}-${task.id}`}
+                            className={`${TODAY_TASK_ROW_CLASS} ${isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : ""}`}
+                          >
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>{index + 1}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{type}</TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{departmentLabel || "-"}</TableCell>
@@ -6983,9 +7099,7 @@ export default function DepartmentKanban() {
                             </TableCell>
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>
-                                {typeof task.title === "string" && task.title.includes("[[")
-                                  ? renderMarkedNoteContent(task.title, task.title)
-                                  : task.title}
+                                {renderAllTodayTaskTitle(task)}
                               </div>
                             </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>{confirmerLabel}</TableCell>
@@ -7049,9 +7163,6 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">Project Tasks</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {allRange === "all" ? "Open project tasks across all dates." : `Tasks scheduled for ${activeAllRangeTaskLabel}.`}
-                    </div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">{todayProjectTasks.length}</div>
                 </div>
@@ -7080,7 +7191,10 @@ export default function DepartmentKanban() {
                         const phaseLabel = PHASE_LABELS[task.phase || "MEETINGS"] || task.phase || "-"
                         const assignees = taskAssigneeInitials(task)
                         return (
-                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                          <TableRow
+                            key={task.id}
+                            className={`${TODAY_TASK_ROW_CLASS} ${isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : ""}`}
+                          >
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
                               {index + 1}
                             </TableCell>
@@ -7108,9 +7222,7 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                               <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                                 <span>
-                                  {typeof task.title === "string" && task.title.includes("[[")
-                                    ? renderMarkedNoteContent(task.title, task.title)
-                                    : task.title}
+                                  {renderAllTodayTaskTitle(task)}
                                 </span>
                                 {isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
@@ -7187,9 +7299,6 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">Fast Tasks</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {allRange === "all" ? "Open fast tasks across all dates." : `Ad-hoc tasks due ${activeAllRangeTaskLabel}.`}
-                    </div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">{todayNoProjectTasks.length}</div>
                 </div>
@@ -7214,7 +7323,10 @@ export default function DepartmentKanban() {
                       {todayNoProjectTasksSorted.map((task, index) => {
                         const assignees = taskAssigneeInitials(task)
                         return (
-                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                          <TableRow
+                            key={task.id}
+                            className={`${TODAY_TASK_ROW_CLASS} ${isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : ""}`}
+                          >
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
                               {index + 1}
                             </TableCell>
@@ -7239,9 +7351,7 @@ export default function DepartmentKanban() {
                           <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words font-medium text-slate-800`}>
                             <div className={`flex flex-wrap items-start gap-2 ${TODAY_TASK_TEXT_CLAMP_CLASS}`}>
                               <span>
-                                {typeof task.title === "string" && task.title.includes("[[")
-                                  ? renderMarkedNoteContent(task.title, task.title)
-                                  : task.title}
+                                {renderAllTodayTaskTitle(task)}
                               </span>
                               {isGaTask(task) ? (
                                 <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
@@ -7296,11 +7406,6 @@ export default function DepartmentKanban() {
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">System Tasks</div>
-                    <div className="text-xs text-slate-500 mt-1">
-                      {allRange === "all"
-                        ? "Open system tasks across all dates."
-                        : `Scheduled system tasks for ${activeAllRangeTaskLabel}.`}
-                    </div>
                   </div>
                   <div className="text-xs font-semibold text-slate-600">{todaySystemTasks.length}</div>
                 </div>
@@ -7325,7 +7430,10 @@ export default function DepartmentKanban() {
                       {todaySystemTasksSorted.map((task, index) => {
                         const assignees = taskAssigneeInitials(task)
                         return (
-                          <TableRow key={task.id} className={TODAY_TASK_ROW_CLASS}>
+                          <TableRow
+                            key={task.id}
+                            className={`${TODAY_TASK_ROW_CLASS} ${isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : ""}`}
+                          >
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
                               {index + 1}
                             </TableCell>
@@ -8294,17 +8402,20 @@ export default function DepartmentKanban() {
                         {row.items.map((t, index) => {
                           const statusValue = taskStatusValue(t)
                           const isCompleted = statusValue === "DONE"
+                          const startsOnSelectedDay = isTaskStartingOnSelectedAllDate(t)
                           return (
                             <Link
                               key={t.id}
                               id={`task-${t.id}`}
                               href={`/tasks/${t.id}?returnTo=${encodeURIComponent(`${returnToTasks}#task-${t.id}`)}`}
-                              className={`block rounded-lg border border-slate-200 border-l-4 px-2 py-2 text-sm transition hover:bg-slate-50 ${isCompleted
+                              className={`block rounded-lg border border-slate-200 border-l-4 px-2 py-2 text-sm transition hover:bg-slate-50 ${startsOnSelectedDay
+                                ? STARTS_ON_SELECTED_DAY_TASK_CARD_CLASS
+                                : isCompleted
                                 ? "border-green-500 bg-green-50/30 opacity-75"
                                 : `${row.borderClass} bg-white`
                                 }`}
                             >
-                              <div className="grid gap-2 sm:gap-0 sm:grid-cols-[36px_minmax(0,3.2fr)_minmax(0,0.45fr)_minmax(0,0.75fr)_minmax(0,0.55fr)_minmax(0,0.45fr)_minmax(0,0.65fr)_minmax(0,0.65fr)_minmax(0,0.55fr)] sm:divide-x sm:divide-slate-200">
+                              <div className={`grid gap-2 sm:gap-0 sm:grid-cols-[36px_minmax(0,3.2fr)_minmax(0,0.45fr)_minmax(0,0.75fr)_minmax(0,0.55fr)_minmax(0,0.45fr)_minmax(0,0.65fr)_minmax(0,0.65fr)_minmax(0,0.55fr)] sm:divide-x ${startsOnSelectedDay ? "sm:divide-rose-500" : "sm:divide-slate-200"}`}>
                                 <div className="sm:px-2 text-center text-[11px] font-semibold text-slate-500">
                                   {index + 1}
                                 </div>
