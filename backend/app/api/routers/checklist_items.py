@@ -1312,6 +1312,33 @@ def _item_to_out(item: ChecklistItem) -> ChecklistItemOut:
     )
 
 
+async def _reorder_checklist_item(
+    db: AsyncSession,
+    item: ChecklistItem,
+    requested_position: int,
+) -> None:
+    """Move an item to a 1-based display position and normalize sibling positions."""
+    if item.checklist_id is None:
+        item.position = max(1, requested_position)
+        return
+
+    path_filter = ChecklistItem.path.is_(None) if item.path is None else ChecklistItem.path == item.path
+    siblings = (
+        await db.execute(
+            select(ChecklistItem)
+            .where(ChecklistItem.checklist_id == item.checklist_id, path_filter)
+            .order_by(ChecklistItem.position, ChecklistItem.id)
+        )
+    ).scalars().all()
+
+    ordered = [sibling for sibling in siblings if sibling.id != item.id]
+    insert_index = max(0, min(requested_position - 1, len(ordered)))
+    ordered.insert(insert_index, item)
+
+    for index, sibling in enumerate(ordered, start=1):
+        sibling.position = index
+
+
 @router.get("", response_model=list[ChecklistItemOut])
 async def list_checklist_items(
     project_id: uuid.UUID | None = None,
@@ -1592,18 +1619,7 @@ async def create_checklist_item(
                 .order_by(ChecklistItem.position.desc())
             )
         ).scalars().first()
-        position = (max_position + 1) if max_position is not None else 0
-    else:
-        # Insert by position: shift existing items down to keep numbering consistent.
-        await db.execute(
-            update(ChecklistItem)
-            .where(
-                ChecklistItem.checklist_id == checklist.id,
-                path_filter,
-                ChecklistItem.position >= position,
-            )
-            .values(position=ChecklistItem.position + 1)
-        )
+        position = (max_position + 1) if max_position is not None else 1
 
     item = ChecklistItem(
         checklist_id=checklist.id,
@@ -1623,6 +1639,8 @@ async def create_checklist_item(
     )
     db.add(item)
     await db.flush()
+    if create_payload.position is not None:
+        await _reorder_checklist_item(db, item, create_payload.position)
 
     # Add assignees
     if create_payload.assignee_user_ids:
@@ -1777,41 +1795,7 @@ async def update_checklist_item(
     if payload.item_type is not None:
         item.item_type = payload.item_type
     if payload.position is not None:
-        new_pos = payload.position
-        old_pos = item.position
-        if new_pos != old_pos and item.checklist_id is not None:
-            path_filter = (
-                ChecklistItem.path.is_(None)
-                if item.path is None
-                else ChecklistItem.path == item.path
-            )
-            if new_pos > old_pos:
-                # Moving down: pull intervening items up.
-                await db.execute(
-                    update(ChecklistItem)
-                    .where(
-                        ChecklistItem.checklist_id == item.checklist_id,
-                        path_filter,
-                        ChecklistItem.position > old_pos,
-                        ChecklistItem.position <= new_pos,
-                        ChecklistItem.id != item.id,
-                    )
-                    .values(position=ChecklistItem.position - 1)
-                )
-            else:
-                # Moving up: push intervening items down.
-                await db.execute(
-                    update(ChecklistItem)
-                    .where(
-                        ChecklistItem.checklist_id == item.checklist_id,
-                        path_filter,
-                        ChecklistItem.position >= new_pos,
-                        ChecklistItem.position < old_pos,
-                        ChecklistItem.id != item.id,
-                    )
-                    .values(position=ChecklistItem.position + 1)
-                )
-            item.position = new_pos
+        await _reorder_checklist_item(db, item, payload.position)
     if payload.path is not None:
         item.path = payload.path
     if payload.keyword is not None:

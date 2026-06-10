@@ -1070,6 +1070,20 @@ function reportPriorityLabel(priority?: TaskPriority | string | null) {
   return PRIORITY_LABELS[normalizePriority(priority)]
 }
 
+function systemTaskAssignedToUser(task: SystemTaskTemplate, userId: string) {
+  if (task.default_assignee_id === userId) return true
+  if (task.assignees?.some((assignee) => assignee.id === userId)) return true
+  if (task.alignment_user_ids?.includes(userId)) return true
+  return false
+}
+
+function mergeSystemTaskRows(base: SystemTaskTemplate[], extra: SystemTaskTemplate[]) {
+  const rows = new Map<string, SystemTaskTemplate>()
+  for (const task of base) rows.set(task.id, task)
+  for (const task of extra) rows.set(task.id, task)
+  return Array.from(rows.values())
+}
+
 function formatMeetingPrintLabel(meeting: Meeting) {
   const date = resolveMeetingDisplayDate(meeting)
   if (!date) return meeting.title || "Meeting"
@@ -1466,6 +1480,23 @@ export default function DepartmentKanban() {
     }
     void loadSystemTasks()
   }, [apiFetch, department?.id, systemDate])
+
+  React.useEffect(() => {
+    if (viewMode !== "mine" || !user?.id) return
+    const loadAssignedSystemTasks = async () => {
+      const params = new URLSearchParams({
+        assigned_to: user.id,
+        occurrence_date: formatDateInput(systemDate),
+        include_overdue: "true",
+      })
+      const res = await apiFetch(`/system-tasks?${params.toString()}`)
+      if (res.ok) {
+        const assignedRows = (await res.json()) as SystemTaskTemplate[]
+        setSystemTasks((prev) => mergeSystemTaskRows(prev, assignedRows))
+      }
+    }
+    void loadAssignedSystemTasks()
+  }, [apiFetch, systemDate, user?.id, viewMode])
 
   React.useEffect(() => {
     if (!internalNoteDepartmentId && department?.id) {
@@ -2331,6 +2362,9 @@ export default function DepartmentKanban() {
   )
   const visibleSystemTemplates = React.useMemo(
     () => {
+      if (isMineView && user?.id) {
+        return systemTasks.filter((t) => systemTaskAssignedToUser(t, user.id))
+      }
       const depTasks = department
         ? systemTasks.filter((t) => {
           if (t.department_id === department.id) return true
@@ -2338,16 +2372,7 @@ export default function DepartmentKanban() {
           return false
         })
         : []
-      if (!isMineView || !user?.id) return depTasks
-      return depTasks.filter((t) => {
-        // Check if user is the default assignee
-        if (t.default_assignee_id === user.id) return true
-        // Check if user is in the assignees array
-        if (t.assignees?.some((assignee) => assignee.id === user.id)) return true
-        // Check if user is in the alignment_user_ids array
-        if (t.alignment_user_ids?.includes(user.id)) return true
-        return false
-      })
+      return depTasks
     },
     [systemTasks, isMineView, user?.id, department]
   )

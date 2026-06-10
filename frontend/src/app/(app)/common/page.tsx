@@ -1565,9 +1565,9 @@ export default function CommonViewPage() {
           const rows = (checklist.items || [])
             .slice()
             .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-            .map((item) => ({
+            .map((item, index) => ({
               id: item.id,
-              nr: item.position ?? 0,
+              nr: index + 1,
               day: item.day || undefined,
               topic: item.title || "",
               owner: item.owner || undefined,
@@ -5420,14 +5420,17 @@ export default function CommonViewPage() {
           setMeetingTemplates((prev) =>
             prev.map((meeting) => (meeting.id === meetingId ? { ...meeting, rows: previousRows } : meeting))
           )
+          return
         }
+        const templates = await reloadMeetingTemplates()
+        setMeetingTemplates(templates)
       } catch {
         setMeetingTemplates((prev) =>
           prev.map((meeting) => (meeting.id === meetingId ? { ...meeting, rows: previousRows } : meeting))
         )
       }
     },
-    [apiFetch, editDraft, meetingTemplates]
+    [apiFetch, editDraft, meetingTemplates, reloadMeetingTemplates]
   )
 
   const deleteMeetingRow = React.useCallback(
@@ -5472,6 +5475,8 @@ export default function CommonViewPage() {
         setMeetingTemplates((prev) =>
           prev.map((meeting) => (meeting.id === meetingId ? { ...meeting, rows: remainingRows } : meeting))
         )
+        const templates = await reloadMeetingTemplates()
+        setMeetingTemplates(templates)
       } catch {
         setMeetingTemplates((prev) =>
           prev.map((meeting) => {
@@ -5484,7 +5489,7 @@ export default function CommonViewPage() {
         )
       }
     },
-    [apiFetch, confirm, meetingTemplates]
+    [apiFetch, confirm, meetingTemplates, reloadMeetingTemplates]
   )
 
   const addMeetingRow = React.useCallback(
@@ -5544,11 +5549,13 @@ export default function CommonViewPage() {
           })
         )
         setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
+        const templates = await reloadMeetingTemplates()
+        setMeetingTemplates(templates)
       } catch (err) {
         console.error("Failed to add meeting item", err)
       }
     },
-    [addDraft, apiFetch, meetingTemplates]
+    [addDraft, apiFetch, meetingTemplates, reloadMeetingTemplates]
   )
 
   return (
@@ -8691,11 +8698,17 @@ export default function CommonViewPage() {
                                 {isEditing ? (
                                   <input
                                     className="input"
-                                    type="number"
-                                    min={1}
-                                    max={activeMeeting.rows.length}
+                                    type="text"
+                                    inputMode="numeric"
+                                    pattern="[0-9]*"
                                     value={editDraft.nr}
-                                    onChange={(e) => setEditDraft((prev) => ({ ...prev, nr: e.target.value }))}
+                                    onChange={(e) =>
+                                      setEditDraft((prev) => ({
+                                        ...prev,
+                                        nr: e.target.value.replace(/\D/g, ""),
+                                      }))
+                                    }
+                                    style={{ minWidth: "52px", textAlign: "center" }}
                                   />
                                 ) : (
                                   value
@@ -8837,11 +8850,17 @@ export default function CommonViewPage() {
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(3, minmax(0, 1fr)) auto", gap: "8px" }}>
                     <input
                       className="input"
-                      type="number"
-                      min={1}
+                      type="text"
+                      inputMode="numeric"
+                      pattern="[0-9]*"
                       placeholder="Nr"
                       value={addDraft.nr}
-                      onChange={(e) => setAddDraft((prev) => ({ ...prev, nr: e.target.value }))}
+                      onChange={(e) =>
+                        setAddDraft((prev) => ({
+                          ...prev,
+                          nr: e.target.value.replace(/\D/g, ""),
+                        }))
+                      }
                     />
                     {activeMeeting.columns.some((col) => col.key === "day") ? (
                       <input

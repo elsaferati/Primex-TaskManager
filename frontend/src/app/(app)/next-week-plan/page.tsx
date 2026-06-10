@@ -71,6 +71,7 @@ const NOTE_MARK_TOKEN_RE = /\[\[(done|added)\]\]|\[\[\/(done|added)\]\]/g
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed"
 type ContentFilter = "all" | "emails"
+type NextWeekFilter = "all" | "checked" | "unchecked"
 type TextMarkRange = { start: number; end: number }
 type DoneMarkRange = TextMarkRange
 type NoteTaskInfo = {
@@ -837,6 +838,7 @@ export default function NextWeekPlanPage() {
   const [creatingTask, setCreatingTask] = React.useState(false)
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
   const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
+  const [nextWeekFilter, setNextWeekFilter] = React.useState<NextWeekFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const deferredSearchQuery = React.useDeferredValue(searchQuery)
   const [showLegend, setShowLegend] = React.useState(false)
@@ -2134,6 +2136,11 @@ export default function NextWeekPlanPage() {
       if (contentFilter === "all") return true
       return EMAIL_MARKER_RE.test(note.content || "")
     }
+    const matchesNextWeekFilter = (note: PlanNote) => {
+      if (nextWeekFilter === "all") return true
+      const checked = Boolean(note.next_week)
+      return nextWeekFilter === "checked" ? checked : !checked
+    }
     const matchesSearchQuery = (note: PlanNote) => {
       if (!normalizedSearchQuery) return true
 
@@ -2176,6 +2183,7 @@ export default function NextWeekPlanPage() {
       .filter(withinRange)
       .filter(matchesTaskStatusFilter)
       .filter(matchesContentFilter)
+      .filter(matchesNextWeekFilter)
       .filter(matchesSearchQuery)
       .sort((a, b) => {
         const aIsClosed = a.status === "CLOSED"
@@ -2188,7 +2196,7 @@ export default function NextWeekPlanPage() {
         return bCreated - aCreated
       })
     return sorted
-  }, [notes, taskStatusFilter, contentFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
+  }, [notes, taskStatusFilter, contentFilter, nextWeekFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
 
   const attachmentDialogItems = React.useMemo(() => {
     if (!attachmentsDialogNoteId) return []
@@ -2497,6 +2505,21 @@ export default function NextWeekPlanPage() {
                 <SelectContent>
                   <SelectItem value="all">All</SelectItem>
                   <SelectItem value="emails">Emails</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Select
+                value={nextWeekFilter}
+                onValueChange={(v) => setNextWeekFilter(v as NextWeekFilter)}
+              >
+                <SelectTrigger className="h-9 w-[140px]">
+                  <SelectValue placeholder="JAV TJT?" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All JAV TJT?</SelectItem>
+                  <SelectItem value="checked">Checked</SelectItem>
+                  <SelectItem value="unchecked">Blank</SelectItem>
                 </SelectContent>
               </Select>
             </div>

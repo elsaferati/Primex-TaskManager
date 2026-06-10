@@ -208,7 +208,7 @@ async def _insert_system_task_instance(
     )
     task_insert = task_insert.on_conflict_do_nothing(
         index_elements=["system_template_origin_id", "system_task_slot_id", "origin_run_at"],
-        index_where=Task.origin_run_at.is_not(None),
+        index_where=Task.origin_run_at.is_not(None) & Task.meeting_origin_id.is_(None),
     ).returning(Task.id)
 
     try:
