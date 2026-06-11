@@ -2801,6 +2801,7 @@ export default function NextWeekPlanPage() {
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
                       <th className="min-w-[440px] w-[440px] max-w-[440px] sm:min-w-[420px] sm:w-[420px] sm:max-w-[420px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                      <th className="min-w-[180px] w-[180px] max-w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KOMENT</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
@@ -2810,7 +2811,6 @@ export default function NextWeekPlanPage() {
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DET</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>INT</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal leading-tight text-xs" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>JAV TJT?</th>
-                      <th className="min-w-[180px] w-[180px] max-w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KOMENT</th>
                       <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
@@ -3060,6 +3060,32 @@ export default function NextWeekPlanPage() {
                             </div>
                           </div>
                         </td>
+                        <td className="border border-slate-600 p-1 align-middle min-w-[180px] w-[180px] max-w-[180px]" style={{ verticalAlign: 'bottom' }}>
+                          <Textarea
+                            value={commentValue}
+                            placeholder="Koment"
+                            aria-label="Koment"
+                            rows={3}
+                            className="min-h-[72px] w-full resize-none rounded-sm border-slate-300 bg-white px-2 py-1.5 text-xs leading-snug whitespace-pre-wrap"
+                            disabled={isSavingComment}
+                            onFocus={(event) => {
+                              event.currentTarget.dataset.previousValue = commentValue
+                            }}
+                            onChange={(event) => updateNoteCommentDraft(note.id, event.target.value)}
+                            onBlur={(event) => {
+                              const previousValue = event.currentTarget.dataset.previousValue ?? ""
+                              const nextValue = event.currentTarget.value
+                              if (nextValue.trim() !== previousValue.trim()) {
+                                void saveNoteComment(note.id, nextValue, previousValue)
+                              }
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                                event.currentTarget.blur()
+                              }
+                            }}
+                          />
+                        </td>
                         <td className="border border-slate-600 p-1 align-middle whitespace-nowrap min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">
                             {note.is_discussed ? (
@@ -3198,32 +3224,6 @@ export default function NextWeekPlanPage() {
                               }}
                             />
                           </div>
-                        </td>
-                        <td className="border border-slate-600 p-1 align-middle min-w-[180px] w-[180px] max-w-[180px]" style={{ verticalAlign: 'bottom' }}>
-                          <Textarea
-                            value={commentValue}
-                            placeholder="Koment"
-                            aria-label="Koment"
-                            rows={3}
-                            className="min-h-[72px] w-full resize-none rounded-sm border-slate-300 bg-white px-2 py-1.5 text-xs leading-snug whitespace-pre-wrap"
-                            disabled={isSavingComment}
-                            onFocus={(event) => {
-                              event.currentTarget.dataset.previousValue = commentValue
-                            }}
-                            onChange={(event) => updateNoteCommentDraft(note.id, event.target.value)}
-                            onBlur={(event) => {
-                              const previousValue = event.currentTarget.dataset.previousValue ?? ""
-                              const nextValue = event.currentTarget.value
-                              if (nextValue.trim() !== previousValue.trim()) {
-                                void saveNoteComment(note.id, nextValue, previousValue)
-                              }
-                            }}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-                                event.currentTarget.blur()
-                              }
-                            }}
-                          />
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[80px] w-[80px] max-w-[80px]" style={{ verticalAlign: 'bottom' }}>
                           <div className="flex justify-center">

@@ -28,7 +28,7 @@ class TaskDailyProgress(Base):
 
     # Per-day derived status: TODO / IN_PROGRESS / DONE (matches TaskStatus values).
     daily_status: Mapped[str] = mapped_column(String(50), nullable=False, server_default="TODO")
-    # Per-day AM/PM slot snapshot. Null means the task was planned for both slots.
+    # Per-day AM/PM slot snapshot. "ALL" means both slots; NULL is legacy/missing slot history.
     finish_period: Mapped[str | None] = mapped_column(String(50), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())

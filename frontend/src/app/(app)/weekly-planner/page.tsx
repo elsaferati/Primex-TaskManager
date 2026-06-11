@@ -1521,30 +1521,29 @@ export default function WeeklyPlannerPage() {
       if (normalizedDaily === "DONE") {
         return getStatusCardClasses("DONE")
       }
+      if (normalizedDaily === "IN_PROGRESS") {
+        return getStatusCardClasses("IN_PROGRESS")
+      }
       if (normalizedDaily === "WAITING_CONFIRMATION") {
         return getStatusCardClasses("WAITING_CONFIRMATION")
+      }
+      if (normalizedDaily) {
+        return getStatusCardClasses("TODO")
       }
 
       if (completedAt && dayDate) {
         const completedDate = completedAt.slice(0, 10)
         const currentDate = dayDate.slice(0, 10)
-        if (currentDate >= completedDate) {
+        if (currentDate === completedDate) {
           return getStatusCardClasses("DONE")
         }
         if (normalized === "DONE") {
-          return getStatusCardClasses("IN_PROGRESS")
+          return getStatusCardClasses(currentDate < completedDate ? "IN_PROGRESS" : "TODO")
         }
       }
 
       if (normalized === "DONE") {
         return getStatusCardClasses("DONE")
-      }
-
-      if (normalizedDaily === "IN_PROGRESS") {
-        return getStatusCardClasses("IN_PROGRESS")
-      }
-      if (normalizedDaily) {
-        return getStatusCardClasses("TODO")
       }
 
       if (normalized === "WAITING_CONFIRMATION") {
@@ -1576,30 +1575,29 @@ export default function WeeklyPlannerPage() {
       if (normalizedDaily === "DONE") {
         return "DONE"
       }
+      if (normalizedDaily === "IN_PROGRESS") {
+        return "IN_PROGRESS"
+      }
       if (normalizedDaily === "WAITING_CONFIRMATION") {
         return "WAITING_CONFIRMATION"
+      }
+      if (normalizedDaily) {
+        return "TODO"
       }
 
       if (completedAt && dayDate) {
         const completedDate = completedAt.slice(0, 10)
         const currentDate = dayDate.slice(0, 10)
-        if (currentDate >= completedDate) {
+        if (currentDate === completedDate) {
           return "DONE"
         }
         if (normalized === "DONE") {
-          return "IN_PROGRESS"
+          return currentDate < completedDate ? "IN_PROGRESS" : "TODO"
         }
       }
 
       if (normalized === "DONE") {
         return "DONE"
-      }
-
-      if (normalizedDaily === "IN_PROGRESS") {
-        return "IN_PROGRESS"
-      }
-      if (normalizedDaily) {
-        return "TODO"
       }
 
       if (normalized === "WAITING_CONFIRMATION") {

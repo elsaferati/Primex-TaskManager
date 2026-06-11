@@ -700,23 +700,22 @@ def _status_for_day(
 
     if normalized_daily == "DONE":
         return "DONE"
+    if normalized_daily == "IN_PROGRESS":
+        return "IN_PROGRESS"
     if normalized_daily == "WAITING_CONFIRMATION":
         return "WAITING_CONFIRMATION"
+    if normalized_daily is not None:
+        return "TODO"
 
     completed_date = _as_local_date(completed_at) if completed_at is not None else None
     if completed_date is not None and day_date is not None:
-        if day_date >= completed_date:
+        if day_date == completed_date:
             return "DONE"
         if normalized == "DONE":
             return "IN_PROGRESS"
 
-    if normalized == "DONE":
+    if normalized == "DONE" and completed_date is None:
         return "DONE"
-
-    if normalized_daily == "IN_PROGRESS":
-        return "IN_PROGRESS"
-    if normalized_daily is not None:
-        return "TODO"
 
     return "TODO" if normalized == "TODO" else "IN_PROGRESS"
 
@@ -2106,6 +2105,7 @@ async def weekly_table_planner(
             )
             .where(TaskDailyProgress.task_id.in_(week_task_ids))
             .where(TaskDailyProgress.day_date < working_days[0])
+            .where(TaskDailyProgress.daily_status != TaskStatus.DONE.value)
             .group_by(TaskDailyProgress.task_id)
             .subquery()
         )
@@ -2132,21 +2132,39 @@ async def weekly_table_planner(
         for check_date in sorted([d for d in working_days if d <= day_date], reverse=True):
             key = (task.id, check_date)
             if key in daily_status_by_task_day:
-                return daily_status_by_task_day[key]
+                status_for_change = daily_status_by_task_day[key]
+                if status_for_change == TaskStatus.DONE and check_date != day_date:
+                    continue
+                return status_for_change
         if task.id in prior_status_by_task:
-            return prior_status_by_task[task.id]
+            prior_status = prior_status_by_task[task.id]
+            if prior_status != TaskStatus.DONE:
+                return prior_status
         updated_day = _as_local_date(task.updated_at)
         if updated_day is not None and day_date >= updated_day:
             try:
-                return TaskStatus(task.status)
+                current_status = TaskStatus(task.status)
+                if current_status == TaskStatus.DONE:
+                    completed_day = _as_local_date(task.completed_at)
+                    return TaskStatus.DONE if completed_day == day_date else TaskStatus.TODO
+                return current_status
             except Exception:
                 return TaskStatus.TODO
-        return None
+        return TaskStatus.TODO
 
     def _finish_period_for_task_day(task: Task, day_date: date) -> str | None:
         key = (task.id, day_date)
         if key in daily_finish_period_by_task_day:
-            return daily_finish_period_by_task_day[key]
+            daily_finish_period = daily_finish_period_by_task_day[key]
+            if daily_finish_period == "ALL":
+                return None
+            if daily_finish_period is not None:
+                return daily_finish_period
+            # Older progress rows can have NULL because status/product updates did not
+            # always persist the slot. Do not let that missing history override a
+            # task that is currently planned for a concrete AM/PM slot.
+            if task.finish_period in ("AM", "PM"):
+                return task.finish_period
         return task.finish_period
 
     # Prefetch per-day progress statuses for MST/TT tasks so we can paint each day cell independently.
@@ -3003,7 +3021,6 @@ async def save_weekly_table_day(
         task_id: uuid.UUID | None,
         status_value: TaskStatus | str | None,
         daily_status_value: TaskStatus | str | None,
-        finish_period: str | None,
         slot: str,
         completed_value: int | None = None,
         total_value: int | None = None,
@@ -3015,7 +3032,6 @@ async def save_weekly_table_day(
             {
                 "status": None,
                 "daily_status": None,
-                "finish_period": finish_period,
                 "slots": set(),
                 "completed_value": 0,
                 "total_value": 0,
@@ -3024,14 +3040,6 @@ async def save_weekly_table_day(
         row["status"] = _pick_stronger_status(row.get("status"), normalize_entry_status(status_value))
         row["daily_status"] = _pick_stronger_status(row.get("daily_status"), normalize_entry_status(daily_status_value))
         row["slots"].add(slot)
-        if finish_period is None:
-            row["finish_period"] = None
-        elif row.get("finish_period") is None and len(row["slots"]) > 1:
-            row["finish_period"] = None
-        elif row.get("finish_period") is None:
-            row["finish_period"] = finish_period
-        elif row["finish_period"] != finish_period:
-            row["finish_period"] = None
         row["completed_value"] = max(int(row.get("completed_value") or 0), int(completed_value or 0))
         row["total_value"] = max(int(row.get("total_value") or 0), int(total_value or 0))
 
@@ -3048,7 +3056,6 @@ async def save_weekly_table_day(
                             task_id=task.task_id,
                             status_value=task.status,
                             daily_status_value=task.daily_status,
-                            finish_period=task.finish_period,
                             slot=slot,
                             completed_value=task.day_done_products if task.day_done_products is not None else task.completed_products,
                             total_value=task.day_total_products if task.day_total_products is not None else task.total_products,
@@ -3064,7 +3071,6 @@ async def save_weekly_table_day(
                             task_id=task.task_id,
                             status_value=task.status,
                             daily_status_value=task.daily_status,
-                            finish_period=task.finish_period,
                             slot=slot,
                             completed_value=task.daily_products,
                             total_value=task.daily_products,
@@ -3089,29 +3095,29 @@ async def save_weekly_table_day(
         for task_id, row in rows_by_task.items():
             daily_status = row.get("daily_status") or row.get("status") or TaskStatus.TODO
             daily_status_value = normalize_entry_status(daily_status) or TaskStatus.TODO.value
-            finish_period = row.get("finish_period")
-            if finish_period is not None:
-                normalized_finish_period = str(finish_period).strip().upper()
-                finish_period = normalized_finish_period if normalized_finish_period in {"AM", "PM"} else None
+            slots = {str(slot).strip().upper() for slot in row.get("slots", set())}
+            if slots == {"AM"}:
+                finish_period = "AM"
+            elif slots == {"PM"}:
+                finish_period = "PM"
+            else:
+                finish_period = "ALL"
 
             existing = existing_by_task.get(task_id)
-            if existing is None:
-                db.add(
-                    TaskDailyProgress(
-                        task_id=task_id,
-                        day_date=day_payload.date,
-                        completed_value=max(0, int(row.get("completed_value") or 0)),
-                        total_value=max(0, int(row.get("total_value") or 0)),
-                        completed_delta=0,
-                        daily_status=daily_status_value,
-                        finish_period=finish_period,
-                    )
+            if existing is not None:
+                continue
+
+            db.add(
+                TaskDailyProgress(
+                    task_id=task_id,
+                    day_date=day_payload.date,
+                    completed_value=max(0, int(row.get("completed_value") or 0)),
+                    total_value=max(0, int(row.get("total_value") or 0)),
+                    completed_delta=0,
+                    daily_status=daily_status_value,
+                    finish_period=finish_period,
                 )
-            else:
-                existing.completed_value = max(0, int(row.get("completed_value") or 0))
-                existing.total_value = max(0, int(row.get("total_value") or 0))
-                existing.daily_status = daily_status_value
-                existing.finish_period = finish_period
+            )
             saved_count += 1
 
     await db.commit()

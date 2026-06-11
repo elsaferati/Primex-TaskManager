@@ -548,6 +548,11 @@ def _enum_value(value) -> str | None:
     return value.value if hasattr(value, "value") else value
 
 
+def _daily_progress_finish_period_value(value) -> str:
+    normalized = _enum_value(value)
+    return normalized if normalized in ("AM", "PM", "ALL") else "ALL"
+
+
 def _parse_origin_task_id(internal_notes: str | None) -> uuid.UUID | None:
     if not internal_notes:
         return None
@@ -1660,7 +1665,7 @@ async def create_task(
                 old_completed=0,
                 new_completed=completed,
                 total=total,
-                finish_period=_enum_value(task.finish_period),
+                finish_period=_daily_progress_finish_period_value(task.finish_period),
             )
 
     # Optional: store alignment users for this task (fast-task alignment).
@@ -1854,7 +1859,9 @@ async def update_task(
     start_date_set = _payload_has_field(payload, "start_date")
     due_date_set = _payload_has_field(payload, "due_date")
     finish_period_set = _payload_has_field(payload, "finish_period")
-    progress_finish_period = _enum_value(payload.finish_period) if finish_period_set else _enum_value(task.finish_period)
+    progress_finish_period = _daily_progress_finish_period_value(
+        payload.finish_period if finish_period_set else task.finish_period
+    )
 
     created_notifications: list[Notification] = []
     assignee_users: list[User] = []
