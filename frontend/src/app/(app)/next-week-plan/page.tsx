@@ -2069,7 +2069,7 @@ export default function NextWeekPlanPage() {
   }
 
   const exportDailyReport = async () => {
-    toast.info("Excel export for this view is not available yet.")
+    toast.info("Excel export for PX JAV is not available yet.")
   }
 
   // Project list is used only in the task creation dialog (filtered separately).
