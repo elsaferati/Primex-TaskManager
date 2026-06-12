@@ -253,6 +253,23 @@ const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
   return ""
 }
 
+type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange"
+
+const getCommonTaskColor = (entry: {
+  status?: string | null
+  isDone?: boolean
+  isDeadlineImportant?: boolean
+}): Exclude<CommonColorFilter, "all"> | null => {
+  if (entry.isDeadlineImportant && !entry.isDone) return "red"
+
+  const normalized = normalizeCommonTaskStatus(entry.status, entry.isDone)
+  if (normalized === "DONE") return "green"
+  if (normalized === "IN_PROGRESS") return "yellow"
+  if (normalized === "WAITING_CONFIRMATION") return "orange"
+  if (normalized === "TODO") return "pink"
+  return null
+}
+
 const commonTaskSortRank = (status?: string | null, isDone?: boolean) => {
   const normalized = normalizeCommonTaskStatus(status, isDone)
 
@@ -298,6 +315,18 @@ type SwimlaneRow = {
   headerBreakdown?: { value: number; label: string; className?: string }[]
   items: SwimlaneCell[]
 }
+
+const COMMON_COLOR_FILTER_OPTIONS: {
+  value: CommonColorFilter
+  label: string
+  swatch: string
+}[] = [
+  { value: "pink", label: "Pink", swatch: "#fbcfe8" },
+  { value: "yellow", label: "Yellow", swatch: "#fef3c7" },
+  { value: "red", label: "Red", swatch: "#dc2626" },
+  { value: "green", label: "Green", swatch: "#d4ffe1" },
+  { value: "orange", label: "Orange", swatch: "#ffedd5" },
+]
 
 type MeetingColumnKey = "nr" | "day" | "topic" | "check" | "owner" | "time"
 type MeetingColumn = { key: MeetingColumnKey; label: string; width?: string }
@@ -910,6 +939,7 @@ export default function CommonViewPage() {
   const [multiMode, setMultiMode] = React.useState(false)
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
+  const [colorFilter, setColorFilter] = React.useState<CommonColorFilter>("all")
   const [selectedCommonUserId, setSelectedCommonUserId] = React.useState("__all__")
   const [commonUserMenuOpen, setCommonUserMenuOpen] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
@@ -3182,6 +3212,8 @@ export default function CommonViewPage() {
       const uid = resolveUserId(name)
       return isUserHiddenOn(dateStr, uid)
     }
+    const matchesColorFilter = (entry: FastTaskEntry) =>
+      colorFilter === "all" || getCommonTaskColor(entry) === colorFilter
 
     const late = commonData.late
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -3200,21 +3232,25 @@ export default function CommonViewPage() {
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .filter(matchesColorFilter)
       .map(narrowAssigneesForSelectedUser)
     const oneH = commonData.oneH
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .filter(matchesColorFilter)
       .map(narrowAssigneesForSelectedUser)
     const personal = commonData.personal
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .filter(matchesColorFilter)
       .map(narrowAssigneesForSelectedUser)
     const r1 = commonData.r1
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .filter(matchesColorFilter)
       .map(narrowAssigneesForSelectedUser)
     const external = commonData.external
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -3309,7 +3345,7 @@ export default function CommonViewPage() {
       fullyCoveredDates,
       hiddenUsersByDate,
     }
-  }, [commonData, selectedCommonUserId, selectedDates, users, weekISOs])
+  }, [colorFilter, commonData, selectedCommonUserId, selectedDates, users, weekISOs])
 
   const allUsersLeaveByDate = React.useMemo(() => {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
@@ -4120,8 +4156,10 @@ export default function CommonViewPage() {
   }
 
   const showCard = (type: CommonType) => {
-    if (typeFilters.size === 0) return true
-    return typeFilters.has(type)
+    const matchesType = typeFilters.size === 0 || typeFilters.has(type)
+    if (!matchesType) return false
+    if (colorFilter === "all") return true
+    return isFastTaskRowId(type)
   }
 
   const deleteCommonEntry = React.useCallback(
@@ -8028,6 +8066,24 @@ export default function CommonViewPage() {
           background: #2563eb;
           box-shadow: none;
         }
+        .chip.color-chip {
+          border: 1px solid transparent;
+        }
+        .chip.color-chip.active {
+          background: #0f172a;
+          border-color: #0f172a;
+          color: #ffffff;
+        }
+        .color-swatch {
+          width: 12px;
+          height: 12px;
+          border-radius: 999px;
+          border: 1px solid rgba(15, 23, 42, 0.22);
+          flex: 0 0 auto;
+        }
+        .chip.color-chip.active .color-swatch {
+          border-color: rgba(255, 255, 255, 0.85);
+        }
         
         /* Week Navigation Buttons - Different style from day chips */
         .week-nav-buttons {
@@ -8706,6 +8762,33 @@ export default function CommonViewPage() {
               <input type="checkbox" checked={typeMultiMode} onChange={(e) => setTypeMultiMode(e.target.checked)} />
               Multi-select (Types)
             </label>
+          </div>
+          <div className="toolbar-group">
+            <div className="chip-row" aria-label="Filter by color">
+              <button
+                className={`chip color-chip ${colorFilter === "all" ? "active" : ""}`}
+                type="button"
+                onClick={() => setColorFilter("all")}
+              >
+                All colors
+              </button>
+              {COMMON_COLOR_FILTER_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  className={`chip color-chip ${colorFilter === option.value ? "active" : ""}`}
+                  type="button"
+                  onClick={() => setColorFilter(option.value)}
+                  title={`Show ${option.label.toLowerCase()} rows only`}
+                >
+                  <span
+                    className="color-swatch"
+                    style={{ backgroundColor: option.swatch }}
+                    aria-hidden="true"
+                  />
+                  {option.label}
+                </button>
+              ))}
+            </div>
           </div>
           <div style={{ position: "relative", display: "inline-flex", alignItems: "center", width: "auto" }}>
             <input
