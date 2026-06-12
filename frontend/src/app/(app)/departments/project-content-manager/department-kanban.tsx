@@ -2048,6 +2048,7 @@ export default function DepartmentKanban() {
   const renderAllTodayTaskTitle = React.useCallback(
     (task: Task) => {
       if (typeof task.title !== "string" || !task.title.includes("[[")) return task.title
+      if (task.ga_note_origin_id) return renderMarkedNoteContent(task.title, task.title)
       return isTaskStartingOnSelectedAllDate(task)
         ? renderMarkedNoteContent(task.title, task.title)
         : getPlainMarkedText(task.title)
