@@ -155,15 +155,15 @@ jobs:
 
           $connections = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
           foreach ($connection in $connections) {
-            $pid = $connection.OwningProcess
-            if (-not $pid) { continue }
-            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $pid" -ErrorAction SilentlyContinue
+            $ownerProcessId = $connection.OwningProcess
+            if (-not $ownerProcessId) { continue }
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerProcessId" -ErrorAction SilentlyContinue
             $commandLine = $process.CommandLine
             if ($commandLine -and $commandLine -match "uvicorn|app\.main:app|python") {
-              Write-Host "Stopping stale API process $pid on port $port"
-              Stop-Process -Id $pid -Force
+              Write-Host "Stopping stale API process $ownerProcessId on port $port"
+              Stop-Process -Id $ownerProcessId -Force
             } else {
-              Write-Host "Port $port is owned by process $pid and was not stopped: $commandLine"
+              Write-Host "Port $port is owned by process $ownerProcessId and was not stopped: $commandLine"
             }
           }
 
