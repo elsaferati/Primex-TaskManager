@@ -8,19 +8,39 @@ const redisEnabled = (process.env.REDIS_ENABLED ?? "false").toLowerCase() === "t
 const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379/0";
 const appTimezone = process.env.APP_TIMEZONE ?? "Europe/Budapest";
 
+const sharedEnv = {
+  REDIS_ENABLED: String(redisEnabled),
+  REDIS_URL: redisUrl,
+  APP_TIMEZONE: appTimezone,
+};
+
+const apiProcess = {
+  cwd,
+  script: python,
+  autorestart: true,
+  max_restarts: 10,
+  min_uptime: "5s",
+  listen_timeout: 10000,
+};
+
 module.exports = {
   apps: [
     {
+      ...apiProcess,
       name: "backend",
-      cwd,
-      script: python,
       args: "-m uvicorn app.main:app --host 0.0.0.0 --port 8000",
-      autorestart: true,
-      max_restarts: 10,
       env: {
-        REDIS_ENABLED: String(redisEnabled),
-        REDIS_URL: redisUrl,
-        APP_TIMEZONE: appTimezone,
+        ...sharedEnv,
+      },
+    },
+    {
+      ...apiProcess,
+      name: "backend-api-flow",
+      args: "-m uvicorn app.main:app --host 0.0.0.0 --port 8080",
+      env: {
+        ...sharedEnv,
+        // Only one API instance should run the weekly system-task scheduler.
+        SYSTEM_TASK_SCHEDULER_ENABLED: "false",
       },
     },
     {
@@ -30,11 +50,7 @@ module.exports = {
       args: "-m celery -A app.celery_app.celery_app worker -l info --pool=solo",
       autorestart: true,
       max_restarts: 10,
-      env: {
-        REDIS_ENABLED: String(redisEnabled),
-        REDIS_URL: redisUrl,
-        APP_TIMEZONE: appTimezone,
-      },
+      env: sharedEnv,
     },
     {
       name: "celery_beat",
@@ -43,11 +59,7 @@ module.exports = {
       args: "-m celery -A app.celery_app.celery_app beat -l info",
       autorestart: true,
       max_restarts: 10,
-      env: {
-        REDIS_ENABLED: String(redisEnabled),
-        REDIS_URL: redisUrl,
-        APP_TIMEZONE: appTimezone,
-      },
+      env: sharedEnv,
     },
   ],
 };
