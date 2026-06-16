@@ -97,8 +97,37 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
+            $PSNativeCommandUseErrorActionPreference = $false
+          }
+
+          $pythonCandidates = @(
+            $env:PM2_PYTHON_PATH,
+            "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe",
+            "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\python.exe"
+          ) | Where-Object { $_ -and (Test-Path $_) }
+          $python = $pythonCandidates | Select-Object -First 1
+          if (-not $python) {
+            throw "Python not found. Set PM2_PYTHON_PATH or install Python 3.11/3.13."
+          }
+          Write-Host "Using Python: $python"
+          $env:PM2_PYTHON_PATH = $python
           Set-Location backend
+
+          function Invoke-Pm2Optional {
+            param([string]$Command)
+            Write-Host "PM2: $Command"
+            cmd /c "$Command 2>nul || exit /b 0" | Out-Host
+          }
+
+          function Invoke-Pm2Required {
+            param([string]$Command)
+            Write-Host "PM2: $Command"
+            cmd /c $Command
+            if ($LASTEXITCODE -ne 0) {
+              throw "PM2 command failed (exit $LASTEXITCODE): $Command"
+            }
+          }
 
           Write-Host "Installing Python dependencies..."
           & $python -m pip install -r requirements.txt
@@ -108,13 +137,13 @@ jobs:
           $env:REDIS_URL = "redis://127.0.0.1:6379/0"
           $env:APP_TIMEZONE = "Europe/Budapest"
 
-          Write-Host "Stopping Celery processes..."
-          cmd /c "pm2 stop celery_worker" | Out-Null
-          cmd /c "pm2 stop celery_beat" | Out-Null
+          Write-Host "Stopping Celery processes (ignore if not registered)..."
+          Invoke-Pm2Optional "pm2 stop celery_worker"
+          Invoke-Pm2Optional "pm2 stop celery_beat"
 
-          Write-Host "Removing legacy PM2 backend processes..."
+          Write-Host "Removing legacy PM2 backend processes (ignore if not registered)..."
           foreach ($name in @("backend-api", "backend", "backend-api-flow")) {
-            cmd /c "pm2 delete $name" 2>$null | Out-Null
+            Invoke-Pm2Optional "pm2 delete $name"
           }
 
           function Clear-ApiListenPort {
@@ -137,10 +166,8 @@ jobs:
           Clear-ApiListenPort -Port 8080
 
           Write-Host "Starting backend and backend-api-flow via PM2 ecosystem..."
-          cmd /c "pm2 start ecosystem.config.cjs --only backend --update-env"
-          if ($LASTEXITCODE -ne 0) { throw "PM2 backend start failed" }
-          cmd /c "pm2 start ecosystem.config.cjs --only backend-api-flow --update-env"
-          if ($LASTEXITCODE -ne 0) { throw "PM2 backend-api-flow start failed" }
+          Invoke-Pm2Required "pm2 start ecosystem.config.cjs --only backend --update-env"
+          Invoke-Pm2Required "pm2 start ecosystem.config.cjs --only backend-api-flow --update-env"
 
           cmd /c "pm2 describe backend" | Out-Host
           cmd /c "pm2 describe backend-api-flow" | Out-Host

@@ -1,9 +1,12 @@
 const path = require("path");
 
 const cwd = __dirname;
-const python =
+const pythonCandidate =
   process.env.PM2_PYTHON_PATH ||
   "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python313\\python.exe";
+const python = require("fs").existsSync(pythonCandidate)
+  ? pythonCandidate
+  : "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python311\\python.exe";
 const redisEnabled = (process.env.REDIS_ENABLED ?? "false").toLowerCase() === "true";
 const redisUrl = process.env.REDIS_URL ?? "redis://127.0.0.1:6379/0";
 const appTimezone = process.env.APP_TIMEZONE ?? "Europe/Budapest";
