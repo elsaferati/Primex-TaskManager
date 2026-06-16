@@ -720,6 +720,19 @@ def _status_for_day(
     return "TODO" if normalized == "TODO" else "IN_PROGRESS"
 
 
+def _override_daily_status_from_progress(
+    daily_status: TaskStatus | None,
+    progress_counts: tuple[int, int] | None,
+) -> TaskStatus | None:
+    """When per-day product counts are complete, treat the day as DONE even if daily_status is stale."""
+    if progress_counts is None:
+        return daily_status
+    completed, total = progress_counts
+    if total > 0 and completed >= total:
+        return TaskStatus.DONE
+    return daily_status
+
+
 def _build_task_fallback_key(
     *,
     title: str,
@@ -2820,7 +2833,10 @@ async def weekly_table_planner(
                     for t in tasks_list:
                         base_total_products, base_completed_products = _task_product_counts(t)
                         progress_counts = _progress_counts_for_day(t.id, day_date)
-                        daily_status_value = _daily_status_for_task_day(t, day_date)
+                        daily_status_value = _override_daily_status_from_progress(
+                            _daily_status_for_task_day(t, day_date),
+                            progress_counts,
+                        )
                         status_for_day = _status_for_day(
                             status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                             daily_status=daily_status_value,
@@ -2882,7 +2898,10 @@ async def weekly_table_planner(
                     for t in tasks_list:
                         base_total_products, base_completed_products = _task_product_counts(t)
                         progress_counts = _progress_counts_for_day(t.id, day_date)
-                        daily_status_value = _daily_status_for_task_day(t, day_date)
+                        daily_status_value = _override_daily_status_from_progress(
+                            _daily_status_for_task_day(t, day_date),
+                            progress_counts,
+                        )
                         status_for_day = _status_for_day(
                             status=TaskStatus(t.status) if t.status else TaskStatus.TODO,
                             daily_status=daily_status_value,

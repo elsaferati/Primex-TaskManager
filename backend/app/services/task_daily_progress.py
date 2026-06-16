@@ -73,11 +73,10 @@ async def upsert_task_daily_progress(
     existing.total_value = max(0, total)
     if delta_positive:
         existing.completed_delta = max(0, (existing.completed_delta or 0) + delta_positive)
-    # Only update daily_status if explicit_status is provided, or if no explicit status was previously set
-    # This preserves user-set status changes
+    # Only update daily_status if explicit_status is provided, or when product counts
+    # drive a new derived status. Preserve WAITING_CONFIRMATION until explicitly resolved.
     if explicit_status is not None:
         existing.daily_status = status.value
-    elif existing.daily_status == TaskStatus.TODO.value:
-        # Only auto-update if current status is TODO (no explicit status set)
+    elif (existing.daily_status or "").upper() != TaskStatus.WAITING_CONFIRMATION.value:
         existing.daily_status = status.value
     existing.finish_period = finish_period_value

@@ -12,6 +12,13 @@ import { resolveProjectTitle } from "@/lib/project-display-title"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
 import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
 
+function canCreateAgentTestTaskForMeeting(meeting: Meeting): boolean {
+  if (meeting.external_agent_test_task_requested) return false
+  const recurrence = (meeting.recurrence_type || "").trim().toLowerCase()
+  const isOneTime = !recurrence || recurrence === "none"
+  return isOneTime && Boolean(meeting.starts_at)
+}
+
 type CommonType =
   | "late"
   | "absent"
@@ -1180,6 +1187,7 @@ export default function CommonViewPage() {
   const [showEditWeekendDays, setShowEditWeekendDays] = React.useState(false)
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
   const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
+  const [creatingAgentTestTaskMeetingId, setCreatingAgentTestTaskMeetingId] = React.useState<string | null>(null)
   const [externalMeetingCreateAgentTestTask, setExternalMeetingCreateAgentTestTask] = React.useState(false)
   const [showInternalWeekendDays, setShowInternalWeekendDays] = React.useState(false)
   const [creatingInternalMeeting, setCreatingInternalMeeting] = React.useState(false)
@@ -4631,6 +4639,40 @@ export default function CommonViewPage() {
       }
     },
     [isAdmin, apiFetch, commonDepartmentId, confirm, syncCommonMeetingBucket]
+  )
+
+  const createAgentTestTaskForExternalMeeting = React.useCallback(
+    async (meetingId: string) => {
+      if (!isAdmin && !isManager) return
+      setCreatingAgentTestTaskMeetingId(meetingId)
+      try {
+        const res = await apiFetch(`/meetings/${meetingId}/agent-test-task`, {
+          method: "POST",
+        })
+        if (!res?.ok) {
+          const detail = await res
+            .json()
+            .then((body) => (typeof body?.detail === "string" ? body.detail : null))
+            .catch(() => null)
+          toast.error(detail || "Failed to create Testimi i agentave task.")
+          return
+        }
+        const updated = (await res.json()) as Meeting
+        COMMON_VIEW_CACHE.clear()
+        setExternalMeetings((prev) => {
+          const next = prev.map((meeting) => (meeting.id === updated.id ? updated : meeting))
+          syncCommonMeetingBucket("external", next)
+          return next
+        })
+        toast.success("Testimi i agentave task created.")
+      } catch (err) {
+        console.error("Error creating agent test task:", err)
+        toast.error("Failed to create Testimi i agentave task.")
+      } finally {
+        setCreatingAgentTestTaskMeetingId(null)
+      }
+    },
+    [apiFetch, isAdmin, isManager, syncCommonMeetingBucket]
   )
 
 
@@ -9892,7 +9934,7 @@ export default function CommonViewPage() {
                     color: externalMeetingCreateAgentTestTask ? "#166534" : "#334155",
                   }}
                 >
-                  {externalMeetingCreateAgentTestTask ? "Test task will be created" : "Create test task"}
+                  {externalMeetingCreateAgentTestTask ? "Test task will be created" : "A krijohet detyra 'Testimi i agentave'?"}
                 </button>
                 <div className="external-meeting-row" style={{ marginTop: "16px" }}>
                   <button
@@ -10158,28 +10200,57 @@ export default function CommonViewPage() {
                                   <span>Owner: {ownerName}</span>
                                 </div>
                               </div>
-                              {canEditExternalMeeting(meeting) ? (
+                              {((isAdmin || isManager) && canCreateAgentTestTaskForMeeting(meeting))
+                              || canEditExternalMeeting(meeting) ? (
                                 <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
-                                  <button
-                                    className="btn-surface"
-                                    type="button"
-                                    onClick={() => startEditExternalMeeting(meeting)}
-                                    disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
-                                    title="Edit meeting"
-                                  >
-                                    Edit
-                                  </button>
-                                  {isAdmin ? (
+                                  {(isAdmin || isManager) && canCreateAgentTestTaskForMeeting(meeting) ? (
                                     <button
                                       className="btn-surface"
                                       type="button"
-                                      onClick={() => void deleteExternalMeeting(meeting.id)}
-                                      disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
-                                      title="Delete meeting"
-                                      style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                                      onClick={() => void createAgentTestTaskForExternalMeeting(meeting.id)}
+                                      disabled={
+                                        creatingAgentTestTaskMeetingId === meeting.id
+                                        || deletingExternalMeetingId === meeting.id
+                                        || updatingExternalMeeting
+                                      }
+                                      title="Create Testimi i agentave task for this meeting"
+                                      style={{
+                                        fontSize: "12px",
+                                        padding: "4px 8px",
+                                        backgroundColor: "#ffffff",
+                                        borderColor: "#cbd5e1",
+                                        color: "#334155",
+                                      }}
                                     >
-                                      {deletingExternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
+                                      {creatingAgentTestTaskMeetingId === meeting.id
+                                        ? "Creating..."
+                                        : "Krijo detyrën 'Testimi i agentave'"}
                                     </button>
+                                  ) : null}
+                                  {canEditExternalMeeting(meeting) ? (
+                                    <>
+                                      <button
+                                        className="btn-surface"
+                                        type="button"
+                                        onClick={() => startEditExternalMeeting(meeting)}
+                                        disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
+                                        title="Edit meeting"
+                                      >
+                                        Edit
+                                      </button>
+                                      {isAdmin ? (
+                                        <button
+                                          className="btn-surface"
+                                          type="button"
+                                          onClick={() => void deleteExternalMeeting(meeting.id)}
+                                          disabled={deletingExternalMeetingId === meeting.id || updatingExternalMeeting}
+                                          title="Delete meeting"
+                                          style={{ color: "#dc2626", borderColor: "#fecaca" }}
+                                        >
+                                          {deletingExternalMeetingId === meeting.id ? "Deleting..." : "Delete"}
+                                        </button>
+                                      ) : null}
+                                    </>
                                   ) : null}
                                 </div>
                               ) : null}

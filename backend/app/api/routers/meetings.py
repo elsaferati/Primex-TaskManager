@@ -6,7 +6,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_admin, ensure_department_access, ensure_meeting_editor
+from app.api.access import ensure_admin, ensure_department_access, ensure_manager_or_admin, ensure_meeting_editor
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.meeting import Meeting, MeetingParticipant
@@ -278,6 +278,7 @@ async def create_agent_test_task_for_meeting(
     meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    ensure_manager_or_admin(user)
     ensure_department_access(user, meeting.department_id)
     if meeting.meeting_type != "external":
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent test task is only available for external meetings")
