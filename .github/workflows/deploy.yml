@@ -1,9 +1,9 @@
 name: Primex Auto Deploy
-
+ 
 on:
   push:
     branches: [ main ]
-
+ 
 jobs:
   deploy:
     runs-on: self-hosted
@@ -15,18 +15,18 @@ jobs:
         with:
           clean: false
           fetch-depth: 0
-
+ 
       - name: Configure Server Tooling
         shell: powershell
         run: |
           "C:\npm-global" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-
+ 
       - name: Force Sync with GitHub
         shell: cmd
         run: |
           git fetch origin main
           git reset --hard origin/main
-
+ 
       - name: Detect Changed Files
         id: changes
         shell: powershell
@@ -40,7 +40,7 @@ jobs:
               $before = $after
             }
           }
-
+ 
           $changedFiles = @(git diff --name-only $before $after | Where-Object { $_ -and $_.Trim() -ne "" })
           Write-Host "Comparing commits: $before -> $after"
           Write-Host "Changed files:"
@@ -49,11 +49,11 @@ jobs:
           } else {
             $changedFiles | ForEach-Object { Write-Host " - $_" }
           }
-
+ 
           $backendChanged = $false
           $frontendChanged = $false
           $migrationChanged = $false
-
+ 
           foreach ($file in $changedFiles) {
             if ($file -like "backend/*") {
               $backendChanged = $true
@@ -65,11 +65,11 @@ jobs:
               $migrationChanged = $true
             }
           }
-
+ 
           "backend_changed=$($backendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "migration_changed=$($migrationChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-
+ 
       - name: Create Env Files
         shell: cmd
         run: |
@@ -85,185 +85,124 @@ jobs:
           echo APP_TIMEZONE=Europe/Budapest >> backend/.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
           echo FRONTEND_URL=https://primeflow.primexeu.com >> backend/.env
-
+ 
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}
         shell: powershell
         run: |
           Write-Warning "Alembic auto-migration is disabled in deploy. Apply DB SQL manually in pgAdmin before or after this deploy as needed."
-
-      - name: Deploy Backend APIs
+ 
+      - name: Update Backend
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: cmd
+        run: |
+          cd backend
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
+ 
+          REM Database migrations are manual in pgAdmin (no alembic auto-run in deploy).
+ 
+          REM Redis is disabled in this environment, so keep Celery processes stopped.
+          call pm2 stop celery_worker
+          call pm2 stop celery_beat
+ 
+          REM Stop legacy backend process names so the current checkout owns the API port.
+          set REDIS_ENABLED=false
+          set REDIS_URL=redis://127.0.0.1:6379/0
+          set APP_TIMEZONE=Europe/Budapest
+          call pm2 delete backend-api || ver > NUL
+          call pm2 delete backend || ver > NUL
+          call pm2 start ecosystem.config.cjs --only backend --update-env
+          call pm2 describe backend | findstr /I "status"
+          echo PM2 backend restart/start completed.
+ 
+      - name: Wait for Backend Readiness
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
         run: |
-          $ErrorActionPreference = "Stop"
-          if (Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue) {
-            $PSNativeCommandUseErrorActionPreference = $false
-          }
-
-          $pythonCandidates = @(
-            $env:PM2_PYTHON_PATH,
-            "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe",
-            "C:\Users\Administrator\AppData\Local\Programs\Python\Python311\python.exe"
-          ) | Where-Object { $_ -and (Test-Path $_) }
-          $python = $pythonCandidates | Select-Object -First 1
-          if (-not $python) {
-            throw "Python not found. Set PM2_PYTHON_PATH or install Python 3.11/3.13."
-          }
-          Write-Host "Using Python: $python"
-          $env:PM2_PYTHON_PATH = $python
-          Set-Location backend
-
-          function Invoke-Pm2Optional {
-            param([string]$Command)
-            Write-Host "PM2: $Command"
-            cmd /c "$Command 2>nul || exit /b 0" | Out-Host
-          }
-
-          function Invoke-Pm2Required {
-            param([string]$Command)
-            Write-Host "PM2: $Command"
-            cmd /c $Command
-            if ($LASTEXITCODE -ne 0) {
-              throw "PM2 command failed (exit $LASTEXITCODE): $Command"
+          $ok = $false
+          $uri = "http://127.0.0.1:8000/health"
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+              Write-Host "Backend health check attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
+              if ($resp.StatusCode -eq 200) {
+                $ok = $true
+                break
+              }
+            } catch {
+              Write-Host "Backend health check attempt $($i + 1)/20: no response yet"
+              Start-Sleep -Seconds 2
             }
           }
-
-          Write-Host "Installing Python dependencies..."
-          & $python -m pip install -r requirements.txt
-          if ($LASTEXITCODE -ne 0) { throw "pip install failed" }
-
+          if (-not $ok) {
+            Write-Error "Backend /health did not become ready after restart."
+            exit 1
+          }
+          Write-Host "Backend health check: OK ($uri)"
+ 
+      - name: Replace Public API Backend
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          Set-Location backend
+ 
+          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+          $port = 8080
+          $processName = "backend-api-flow"
+ 
+          Write-Host "Replacing public API backend on port $port..."
+          cmd /c "pm2 delete $processName" | Out-Host
+ 
+          $connections = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
+          foreach ($connection in $connections) {
+            $ownerProcessId = $connection.OwningProcess
+            if (-not $ownerProcessId) { continue }
+            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerProcessId" -ErrorAction SilentlyContinue
+            $commandLine = $process.CommandLine
+            if ($commandLine -and $commandLine -match "uvicorn|app\.main:app|python") {
+              Write-Host "Stopping stale API process $ownerProcessId on port $port"
+              Stop-Process -Id $ownerProcessId -Force
+            } else {
+              Write-Host "Port $port is owned by process $ownerProcessId and was not stopped: $commandLine"
+            }
+          }
+ 
           $env:REDIS_ENABLED = "false"
           $env:REDIS_URL = "redis://127.0.0.1:6379/0"
           $env:APP_TIMEZONE = "Europe/Budapest"
-
-          Write-Host "Stopping Celery processes (ignore if not registered)..."
-          Invoke-Pm2Optional "pm2 stop celery_worker"
-          Invoke-Pm2Optional "pm2 stop celery_beat"
-
-          Write-Host "Stopping backend processes (ignore if not registered)..."
-          foreach ($name in @(
-            "backend-api",
-            "backend",
-            "backend-api-flow",
-            "primex-backend",
-            "primex-public-api"
-          )) {
-            Invoke-Pm2Optional "pm2 stop $name"
-          }
-
-          Write-Host "Removing backend PM2 processes (ignore if not registered)..."
-          foreach ($name in @(
-            "backend-api",
-            "backend",
-            "backend-api-flow",
-            "primex-backend",
-            "primex-public-api"
-          )) {
-            Invoke-Pm2Optional "pm2 delete $name"
-          }
-
-          Start-Sleep -Seconds 3
-
-          function Clear-ApiListenPort {
-            param([int]$Port)
-            $connections = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-            foreach ($connection in $connections) {
-              $ownerProcessId = $connection.OwningProcess
-              if (-not $ownerProcessId) { continue }
-              $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerProcessId" -ErrorAction SilentlyContinue
-              $commandLine = $process.CommandLine
-              Write-Host "Freeing port ${Port}: stopping PID $ownerProcessId ($commandLine)"
-              Stop-Process -Id $ownerProcessId -Force -ErrorAction SilentlyContinue
-            }
-          }
-
-          function Wait-ForPortFree {
-            param(
-              [int]$Port,
-              [int]$Attempts = 20
-            )
-            for ($i = 0; $i -lt $Attempts; $i++) {
-              Clear-ApiListenPort -Port $Port
-              $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
-              if ($listeners.Count -eq 0) {
-                Write-Host "Port $Port is free"
-                return $true
+          cmd /c "pm2 start `"$python`" --name $processName --cwd `"$PWD`" -- -m uvicorn app.main:app --host 0.0.0.0 --port $port"
+          if ($LASTEXITCODE -ne 0) { Write-Error "PM2 public API start failed"; exit 1 }
+ 
+          $ok = $false
+          $uri = "http://127.0.0.1:$port/health"
+          for ($i = 0; $i -lt 20; $i++) {
+            try {
+              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+              Write-Host "Public API health check attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
+              if ($resp.StatusCode -eq 200) {
+                $ok = $true
+                break
               }
-              Write-Host "Port $Port still in use (attempt $($i + 1)/$Attempts)"
+            } catch {
+              Write-Host "Public API health check attempt $($i + 1)/20: no response yet"
               Start-Sleep -Seconds 2
             }
-            foreach ($connection in @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
-              $ownerProcessId = $connection.OwningProcess
-              $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerProcessId" -ErrorAction SilentlyContinue
-              Write-Host "Port $Port blocked by PID $ownerProcessId : $($process.CommandLine)"
-            }
-            return $false
           }
-
-          if (-not (Wait-ForPortFree -Port 8000)) {
-            throw "Port 8000 is still in use."
+          if (-not $ok) {
+            Write-Error "Public API backend did not become ready on port $port."
+            exit 1
           }
-          if (-not (Wait-ForPortFree -Port 8080)) {
-            throw "Port 8080 is still in use."
-          }
-
-          Write-Host "Starting primex-backend on port 8000..."
-          Invoke-Pm2Required "pm2 start ecosystem.config.cjs --only primex-backend --update-env"
-
-          function Wait-ApiHealth {
-            param(
-              [string]$Uri,
-              [string]$Pm2ProcessName,
-              [int]$Attempts = 30
-            )
-            for ($i = 0; $i -lt $Attempts; $i++) {
-              try {
-                $resp = Invoke-WebRequest -Uri $Uri -UseBasicParsing -TimeoutSec 3
-                Write-Host "${Pm2ProcessName} health attempt $($i + 1)/${Attempts}: HTTP $($resp.StatusCode)"
-                if ($resp.StatusCode -eq 200) {
-                  Write-Host "Health check OK: $Uri"
-                  return $true
-                }
-              } catch {
-                Write-Host "${Pm2ProcessName} health attempt $($i + 1)/${Attempts}: no response yet"
-                Start-Sleep -Seconds 2
-              }
-            }
-            Write-Host "=== pm2 describe $Pm2ProcessName ==="
-            cmd /c "pm2 describe $Pm2ProcessName" | Out-Host
-            Write-Host "=== pm2 logs $Pm2ProcessName (last 80 lines) ==="
-            cmd /c "pm2 logs $Pm2ProcessName --lines 80 --nostream" | Out-Host
-            return $false
-          }
-
-          if (-not (Wait-ApiHealth -Uri "http://127.0.0.1:8000/health" -Pm2ProcessName "primex-backend")) {
-            throw "Backend /health did not become ready on port 8000."
-          }
-
-          if (-not (Wait-ForPortFree -Port 8080)) {
-            throw "Port 8080 became busy before starting primex-public-api."
-          }
-          Write-Host "Starting primex-public-api on port 8080..."
-          Invoke-Pm2Required "pm2 start ecosystem.config.cjs --only primex-public-api --update-env"
-
-          cmd /c "pm2 describe primex-backend" | Out-Host
-          cmd /c "pm2 describe primex-public-api" | Out-Host
-
-          if (-not (Wait-ApiHealth -Uri "http://127.0.0.1:8080/health" -Pm2ProcessName "primex-public-api")) {
-            throw "Public API /health did not become ready on port 8080."
-          }
-
+ 
       - name: Update Frontend
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
         run: |
           Set-Location frontend
-
+ 
           Write-Host "1. Installing Dependencies..."
           npm install
           if ($LASTEXITCODE -ne 0) { Write-Error "NPM Install Failed"; exit 1 }
-
+ 
           Write-Host "2. Stopping Existing Frontend Process..."
           $pm2Describe = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 describe frontend > NUL 2>&1" -NoNewWindow -Wait -PassThru
           if ($pm2Describe.ExitCode -eq 0) {
@@ -272,7 +211,7 @@ jobs:
           } else {
             Write-Host "PM2 frontend process did not exist yet. Continuing with clean start."
           }
-
+ 
           Write-Host "3. Cleaning Old Build..."
           if (Test-Path .next) {
             Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue
@@ -281,16 +220,16 @@ jobs:
               Remove-Item .next -Recurse -Force
             }
           }
-
+ 
           Write-Host "4. Building New Version (This takes time)..."
           npm run build
           if ($LASTEXITCODE -ne 0) { Write-Error "Build Failed"; exit 1 }
-
+ 
           Write-Host "5. Starting Frontend Process..."
           $CurrentPath = (Get-Location).Path
           $pm2Start = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000" -NoNewWindow -Wait -PassThru
           if ($pm2Start.ExitCode -ne 0) { Write-Error "PM2 frontend start failed"; exit 1 }
-
+ 
       - name: Wait for Frontend Readiness
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
@@ -315,15 +254,14 @@ jobs:
             exit 1
           }
           Write-Host "Frontend readiness check: OK ($uri)"
-
+ 
       - name: Save PM2 Process List
         shell: cmd
         run: |
           pm2 save
-
+ 
       - name: Deploy Observability
         shell: cmd
         run: |
           call pm2 status
-          call pm2 logs primex-backend --lines 50 --nostream || ver > NUL
-          call pm2 logs primex-public-api --lines 50 --nostream || ver > NUL
+          call pm2 logs backend --lines 50 --nostream || ver > NUL
