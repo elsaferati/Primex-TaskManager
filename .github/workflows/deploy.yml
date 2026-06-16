@@ -141,10 +141,29 @@ jobs:
           Invoke-Pm2Optional "pm2 stop celery_worker"
           Invoke-Pm2Optional "pm2 stop celery_beat"
 
-          Write-Host "Removing legacy PM2 backend processes (ignore if not registered)..."
-          foreach ($name in @("backend-api", "backend", "backend-api-flow")) {
+          Write-Host "Stopping backend processes (ignore if not registered)..."
+          foreach ($name in @(
+            "backend-api",
+            "backend",
+            "backend-api-flow",
+            "primex-backend",
+            "primex-public-api"
+          )) {
+            Invoke-Pm2Optional "pm2 stop $name"
+          }
+
+          Write-Host "Removing backend PM2 processes (ignore if not registered)..."
+          foreach ($name in @(
+            "backend-api",
+            "backend",
+            "backend-api-flow",
+            "primex-backend",
+            "primex-public-api"
+          )) {
             Invoke-Pm2Optional "pm2 delete $name"
           }
+
+          Start-Sleep -Seconds 3
 
           function Clear-ApiListenPort {
             param([int]$Port)
@@ -157,20 +176,40 @@ jobs:
               Write-Host "Freeing port ${Port}: stopping PID $ownerProcessId ($commandLine)"
               Stop-Process -Id $ownerProcessId -Force -ErrorAction SilentlyContinue
             }
-            if ($connections.Count -gt 0) {
-              Start-Sleep -Seconds 2
-            }
           }
 
-          Clear-ApiListenPort -Port 8000
-          Clear-ApiListenPort -Port 8080
+          function Wait-ForPortFree {
+            param(
+              [int]$Port,
+              [int]$Attempts = 20
+            )
+            for ($i = 0; $i -lt $Attempts; $i++) {
+              Clear-ApiListenPort -Port $Port
+              $listeners = @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)
+              if ($listeners.Count -eq 0) {
+                Write-Host "Port $Port is free"
+                return $true
+              }
+              Write-Host "Port $Port still in use (attempt $($i + 1)/$Attempts)"
+              Start-Sleep -Seconds 2
+            }
+            foreach ($connection in @(Get-NetTCPConnection -LocalPort $Port -State Listen -ErrorAction SilentlyContinue)) {
+              $ownerProcessId = $connection.OwningProcess
+              $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerProcessId" -ErrorAction SilentlyContinue
+              Write-Host "Port $Port blocked by PID $ownerProcessId : $($process.CommandLine)"
+            }
+            return $false
+          }
 
-          Write-Host "Starting backend and backend-api-flow via PM2 ecosystem..."
-          Invoke-Pm2Required "pm2 start ecosystem.config.cjs --only backend --update-env"
-          Invoke-Pm2Required "pm2 start ecosystem.config.cjs --only backend-api-flow --update-env"
+          if (-not (Wait-ForPortFree -Port 8000)) {
+            throw "Port 8000 is still in use."
+          }
+          if (-not (Wait-ForPortFree -Port 8080)) {
+            throw "Port 8080 is still in use."
+          }
 
-          cmd /c "pm2 describe backend" | Out-Host
-          cmd /c "pm2 describe backend-api-flow" | Out-Host
+          Write-Host "Starting primex-backend on port 8000..."
+          Invoke-Pm2Required "pm2 start ecosystem.config.cjs --only primex-backend --update-env"
 
           function Wait-ApiHealth {
             param(
@@ -198,10 +237,20 @@ jobs:
             return $false
           }
 
-          if (-not (Wait-ApiHealth -Uri "http://127.0.0.1:8000/health" -Pm2ProcessName "backend")) {
+          if (-not (Wait-ApiHealth -Uri "http://127.0.0.1:8000/health" -Pm2ProcessName "primex-backend")) {
             throw "Backend /health did not become ready on port 8000."
           }
-          if (-not (Wait-ApiHealth -Uri "http://127.0.0.1:8080/health" -Pm2ProcessName "backend-api-flow")) {
+
+          if (-not (Wait-ForPortFree -Port 8080)) {
+            throw "Port 8080 became busy before starting primex-public-api."
+          }
+          Write-Host "Starting primex-public-api on port 8080..."
+          Invoke-Pm2Required "pm2 start ecosystem.config.cjs --only primex-public-api --update-env"
+
+          cmd /c "pm2 describe primex-backend" | Out-Host
+          cmd /c "pm2 describe primex-public-api" | Out-Host
+
+          if (-not (Wait-ApiHealth -Uri "http://127.0.0.1:8080/health" -Pm2ProcessName "primex-public-api")) {
             throw "Public API /health did not become ready on port 8080."
           }
 
@@ -276,5 +325,5 @@ jobs:
         shell: cmd
         run: |
           call pm2 status
-          call pm2 logs backend --lines 50 --nostream || ver > NUL
-          call pm2 logs backend-api-flow --lines 50 --nostream || ver > NUL
+          call pm2 logs primex-backend --lines 50 --nostream || ver > NUL
+          call pm2 logs primex-public-api --lines 50 --nostream || ver > NUL

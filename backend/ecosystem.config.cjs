@@ -1,10 +1,11 @@
 const path = require("path");
+const fs = require("fs");
 
 const cwd = __dirname;
 const pythonCandidate =
   process.env.PM2_PYTHON_PATH ||
   "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python313\\python.exe";
-const python = require("fs").existsSync(pythonCandidate)
+const python = fs.existsSync(pythonCandidate)
   ? pythonCandidate
   : "C:\\Users\\Administrator\\AppData\\Local\\Programs\\Python\\Python311\\python.exe";
 const redisEnabled = (process.env.REDIS_ENABLED ?? "false").toLowerCase() === "true";
@@ -24,13 +25,15 @@ const apiProcess = {
   max_restarts: 10,
   min_uptime: "5s",
   listen_timeout: 10000,
+  instances: 1,
+  exec_mode: "fork",
 };
 
 module.exports = {
   apps: [
     {
       ...apiProcess,
-      name: "backend",
+      name: "primex-backend",
       args: "-m uvicorn app.main:app --host 0.0.0.0 --port 8000",
       env: {
         ...sharedEnv,
@@ -38,7 +41,7 @@ module.exports = {
     },
     {
       ...apiProcess,
-      name: "backend-api-flow",
+      name: "primex-public-api",
       args: "-m uvicorn app.main:app --host 0.0.0.0 --port 8080",
       env: {
         ...sharedEnv,
