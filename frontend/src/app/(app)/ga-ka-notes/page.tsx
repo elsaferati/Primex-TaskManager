@@ -778,7 +778,7 @@ export default function GaKaNotesPage() {
   const [deletingAttachmentIds, setDeletingAttachmentIds] = React.useState<string[]>([])
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
   const [creatingTask, setCreatingTask] = React.useState(false)
-  const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("week")
+  const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("all")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
   const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
@@ -2539,8 +2539,8 @@ export default function GaKaNotesPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="week">This week (default)</SelectItem>
-                  <SelectItem value="all">All</SelectItem>
+                  <SelectItem value="week">This week</SelectItem>
+                  <SelectItem value="all">All (default)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
