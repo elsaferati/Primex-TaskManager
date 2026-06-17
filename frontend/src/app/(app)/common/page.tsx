@@ -9934,7 +9934,7 @@ export default function CommonViewPage() {
                     color: externalMeetingCreateAgentTestTask ? "#166534" : "#334155",
                   }}
                 >
-                  {externalMeetingCreateAgentTestTask ? "Test task will be created" : "A krijohet detyra 'Testimi i agentave'?"}
+                  {externalMeetingCreateAgentTestTask ? "Test task will be created" : "A duhet te krijohet detyra 'Testimi i agentave'?"}
                 </button>
                 <div className="external-meeting-row" style={{ marginTop: "16px" }}>
                   <button
