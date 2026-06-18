@@ -2254,6 +2254,7 @@ export default function NextWeekPlanPage() {
 
   const departmentMap = React.useMemo(() => new Map(departments.map((dept) => [dept.id, dept])), [departments])
   const projectMap = React.useMemo(() => new Map(projects.map((project) => [project.id, project])), [projects])
+  const userMap = React.useMemo(() => new Map(users.map((person) => [person.id, person])), [users])
 
   return (
     <div className="space-y-6">
@@ -2795,8 +2796,8 @@ export default function NextWeekPlanPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1350px] sm:min-w-[1550px]">
-                <table className="w-full table-fixed caption-bottom text-sm min-w-[1350px] sm:min-w-[1550px]">
+              <div className="w-full min-w-[1410px] sm:min-w-[1610px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1410px] sm:min-w-[1610px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
@@ -2804,6 +2805,7 @@ export default function NextWeekPlanPage() {
                       <th className="min-w-[180px] w-[180px] max-w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KOMENT</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
+                      <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DEP</th>
                       <th className="w-[62px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PRJK</th>
@@ -2817,6 +2819,15 @@ export default function NextWeekPlanPage() {
                   </thead>
                   <tbody>
                   {visibleNotes.map((note, idx) => {
+                    const creator = note.created_by ? userMap.get(note.created_by) : null
+                    const creatorLabel = creator?.full_name || creator?.username || "Unknown user"
+                    const creatorInitials = getInitials(creatorLabel)
+                    const creatorBadgeClasses =
+                      creatorInitials === "GA"
+                        ? "bg-rose-100 text-rose-800 border border-rose-200"
+                        : creatorInitials === "KA"
+                          ? "bg-blue-100 text-blue-800 border border-blue-200"
+                          : "bg-slate-200 text-slate-700"
                     const noteDepartment = note.department_id ? departmentMap.get(note.department_id) : null
                     const noteProject = note.project_id ? projectMap.get(note.project_id) : null
                     const taskInfo = noteTaskInfo.get(note.id)
@@ -3115,6 +3126,18 @@ export default function NextWeekPlanPage() {
                               </div>
                             )
                           })()}
+                        </td>
+                        <td className="w-[60px] border border-slate-600 p-1.5 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>
+                          {creator ? (
+                            <div
+                              className={`flex h-6 w-6 items-center justify-center rounded-full text-[10px] font-semibold ${creatorBadgeClasses}`}
+                              title={creatorLabel}
+                            >
+                              {creatorInitials}
+                            </div>
+                          ) : (
+                            <span className="text-xs text-slate-500">-</span>
+                          )}
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[70px] w-[70px] max-w-[70px]" style={{ verticalAlign: 'bottom' }}>
                           {!note.is_converted_to_task ? (
