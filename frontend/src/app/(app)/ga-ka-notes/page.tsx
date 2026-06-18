@@ -20,6 +20,7 @@ import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
+import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
@@ -749,6 +750,13 @@ function isDevelopmentDepartment(dept?: Department | null) {
   const name = (dept.name || "").trim().toUpperCase()
   const code = (dept.code || "").trim().toUpperCase()
   return name === "DEVELOPMENT" || code === "DEV"
+}
+
+function isGraphicDesignDepartment(dept?: Department | null) {
+  if (!dept) return false
+  const name = (dept.name || "").trim().toUpperCase()
+  const code = (dept.code || "").trim().toUpperCase()
+  return name === "GRAPHIC DESIGN" || code === "GD" || code === "GDS"
 }
 
 export default function GaKaNotesPage() {
@@ -2072,12 +2080,26 @@ export default function GaKaNotesPage() {
 
   // Projects filtered by the department chosen in the task dialog
   const primaryDepartmentId = effectiveTaskDepartmentIds[0] || null
+  const primaryDepartment = React.useMemo(
+    () => (primaryDepartmentId ? departments.find((dept) => dept.id === primaryDepartmentId) || null : null),
+    [departments, primaryDepartmentId]
+  )
   const taskProjectOptions = React.useMemo(() => {
-    if (primaryDepartmentId) {
-      return projects.filter((p) => p.department_id === primaryDepartmentId)
-    }
-    return projects
-  }, [primaryDepartmentId, projects])
+    const isGraphicDesign = isGraphicDesignDepartment(primaryDepartment)
+    const filtered = projects.filter((project) => {
+      if (primaryDepartmentId && project.department_id !== primaryDepartmentId) return false
+      if (project.is_template) return false
+      if ((project.current_phase || "").toUpperCase() === "CLOSED") return false
+      if (isGraphicDesign && (project.project_type || "").toUpperCase() === "GENERAL") return false
+      return true
+    })
+
+    return filtered.sort((a, b) => {
+      const aLabel = resolveProjectTitle(a) || "Untitled project"
+      const bLabel = resolveProjectTitle(b) || "Untitled project"
+      return aLabel.localeCompare(bLabel)
+    })
+  }, [primaryDepartment, primaryDepartmentId, projects])
 
   // Keep projects in sync when opening dialog or changing department
   React.useEffect(() => {
@@ -3759,7 +3781,7 @@ export default function GaKaNotesPage() {
                       <SelectItem value="NONE">No project</SelectItem>
                       {taskProjectOptions.map((p) => (
                         <SelectItem key={p.id} value={p.id}>
-                          {p.title || p.name || "Untitled project"}
+                          {resolveProjectTitle(p) || "Untitled project"}
                         </SelectItem>
                       ))}
                     </SelectContent>

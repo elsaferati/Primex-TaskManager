@@ -131,10 +131,10 @@ const PRIORITY_BORDER_STYLES: Record<TaskPriority, string> = {
 
 
 const TODAY_TASK_ROW_CLASS = "align-top"
-const STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS =
-  "bg-blue-50/80 hover:bg-blue-100/80 [&>td]:!border [&>td]:!border-rose-500 [&>td:first-child]:!border-l-4"
-const STARTS_ON_SELECTED_DAY_TASK_CARD_CLASS =
-  "!border-rose-500 !bg-blue-50/80 hover:!bg-blue-100/80 ring-1 ring-rose-500"
+const STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS = "task-row-starts-selected-day"
+const DUE_ON_SELECTED_DAY_TASK_ROW_CLASS = "task-row-due-selected-day"
+const STARTS_ON_SELECTED_DAY_TASK_CARD_CLASS = "task-card-starts-selected-day"
+const DUE_ON_SELECTED_DAY_TASK_CARD_CLASS = "task-card-due-selected-day"
 const TODAY_TASK_CELL_CLASS = "py-3 align-top"
 const TODAY_TASK_TEXT_CLAMP_CLASS = "leading-4 whitespace-pre-line break-words"
 
@@ -1716,6 +1716,15 @@ export default function DepartmentKanban() {
     },
     [selectedAllHighlightDate]
   )
+  const isTaskDueOnSelectedAllDate = React.useCallback(
+    (task: Task) => {
+      if (!task.is_deadline_important) return false
+      if (!task.due_date) return false
+      const dueDate = toDate(task.due_date)
+      return Boolean(dueDate && selectedAllHighlightDate && isSameDay(dueDate, selectedAllHighlightDate))
+    },
+    [selectedAllHighlightDate]
+  )
   const isDateStartingOnSelectedAllDate = React.useCallback(
     (value?: string | null) => {
       if (!value || !selectedAllHighlightDate) return false
@@ -1723,6 +1732,22 @@ export default function DepartmentKanban() {
       return date ? isSameDay(date, selectedAllHighlightDate) : false
     },
     [selectedAllHighlightDate]
+  )
+  const selectedDayTaskRowClass = React.useCallback(
+    (task: Task) =>
+      [
+        isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : "",
+        isTaskDueOnSelectedAllDate(task) ? DUE_ON_SELECTED_DAY_TASK_ROW_CLASS : "",
+      ].join(" "),
+    [isTaskDueOnSelectedAllDate, isTaskStartingOnSelectedAllDate]
+  )
+  const selectedDayDateRowClass = React.useCallback(
+    (startDate?: string | null, dueDate?: string | null, isDeadlineImportant = false) =>
+      [
+        isDateStartingOnSelectedAllDate(startDate) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : "",
+        isDeadlineImportant && isDateStartingOnSelectedAllDate(dueDate) ? DUE_ON_SELECTED_DAY_TASK_ROW_CLASS : "",
+      ].join(" "),
+    [isDateStartingOnSelectedAllDate]
   )
   const renderAllTodayTaskTitle = React.useCallback(
     (task: Task) => {
@@ -2555,6 +2580,19 @@ export default function DepartmentKanban() {
     }
     return map
   }, [dailyReportFastTasks, dailyReportProjectTasks, todaySystemTasks])
+  const dailyReportDueDateByTaskId = React.useMemo(() => {
+    const map = new Map<string, string>()
+    for (const task of dailyReportFastTasks) {
+      if (task.due_date) map.set(task.id, task.due_date)
+    }
+    for (const task of dailyReportProjectTasks) {
+      if (task.due_date) map.set(task.id, task.due_date)
+    }
+    for (const task of todaySystemTasks) {
+      if (task.due_date) map.set(task.id, task.due_date)
+    }
+    return map
+  }, [dailyReportFastTasks, dailyReportProjectTasks, todaySystemTasks])
 
   React.useEffect(() => {
     const existingTitles = new Map<string, string>()
@@ -2615,6 +2653,8 @@ export default function DepartmentKanban() {
       systemOccurrenceDate?: string
       systemStatus?: string
       sortDate?: string | null
+      startDate?: string | null
+      dueDate?: string | null
     }> = []
     const systemAmRows: typeof rows = []
     const systemPmRows: typeof rows = []
@@ -3059,6 +3099,8 @@ export default function DepartmentKanban() {
       systemOccurrenceDate?: string
       systemStatus?: string
       sortDate?: string | null
+      startDate?: string | null
+      dueDate?: string | null
     }> => {
       const rows: ReturnType<typeof convertDailyReportToRows> = []
       const systemAmRows: typeof rows = []
@@ -3163,6 +3205,8 @@ export default function DepartmentKanban() {
           comment: task.user_comment ?? null,
           taskId: task.id,
           sortDate: task.due_date || task.start_date || task.origin_run_at || task.created_at,
+          startDate: task.start_date || null,
+          dueDate: task.due_date || null,
         })
       }
 
@@ -3206,6 +3250,8 @@ export default function DepartmentKanban() {
             comment: task.user_comment ?? null,
             taskId: task.id,
             sortDate: task.due_date || task.start_date || task.created_at,
+            startDate: task.start_date || null,
+            dueDate: task.due_date || null,
           })
         } else {
           fastRows.push({
@@ -3230,6 +3276,8 @@ export default function DepartmentKanban() {
               comment: task.user_comment ?? null,
               taskId: task.id,
               sortDate: task.due_date || task.start_date || task.created_at,
+              startDate: task.start_date || null,
+              dueDate: task.due_date || null,
             },
           })
           fastIndex += 1
@@ -6035,17 +6083,20 @@ export default function DepartmentKanban() {
                               const isTitleExpanded = Boolean(expandedDailyReportTitleIds[rowId])
                               const canExpandTitle = hasDailyReportTitleDetails(row.title)
                               const visibleTitle = isTitleExpanded ? row.title : getDailyReportTitlePreview(row.title)
-                              const isStartDateHighlighted = row.taskId
-                                ? isDateStartingOnSelectedAllDate(dailyReportStartDateByTaskId.get(row.taskId))
-                                : false
+                              const selectedDayClass = row.taskId
+                                ? selectedDayDateRowClass(
+                                  dailyReportStartDateByTaskId.get(row.taskId),
+                                  dailyReportDueDateByTaskId.get(row.taskId),
+                                  isDeadlineImportant,
+                                )
+                                : ""
                               return (
                                 <tr
                                   key={rowId}
                                   className={[
                                     dragDailyReportRowId === rowId ? "ring-2 ring-blue-300" : "",
                                     overDailyReportRowId === rowId ? "bg-blue-50/60" : "",
-                                    isStartDateHighlighted ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : "",
-                                    isDeadlineImportant ? "bg-red-100/90" : "",
+                                    selectedDayClass,
                                   ].join(" ")}
                               onClick={() => {
                                 if (dragDailyReportRowId && dragDailyReportRowId !== rowId) {
@@ -6200,7 +6251,7 @@ export default function DepartmentKanban() {
                       </table>
                     </div>
                     <div className="mt-4">
-                      <table className="min-w-[900px] w-full border border-slate-200 text-[11px] daily-report-table">
+                      <table className="min-w-[900px] w-full border border-slate-200 text-[11px]">
                         <colgroup>
                           <col className="w-[180px]" />
                           <col />
@@ -6351,7 +6402,7 @@ export default function DepartmentKanban() {
                             return (
                               <TableRow
                                 key={`waiting-${type}-${task.id}`}
-                                className={`${TODAY_TASK_ROW_CLASS} ${isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : ""}`}
+                                className={`${TODAY_TASK_ROW_CLASS} ${selectedDayTaskRowClass(task)}`}
                               >
                                 <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>{index + 1}</TableCell>
                                 <TableCell className={TODAY_TASK_CELL_CLASS}>{type}</TableCell>
@@ -6485,7 +6536,7 @@ export default function DepartmentKanban() {
                         return (
                           <TableRow
                             key={task.id}
-                            className={`${TODAY_TASK_ROW_CLASS} ${isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : ""}`}
+                            className={`${TODAY_TASK_ROW_CLASS} ${selectedDayTaskRowClass(task)}`}
                           >
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
                               {index + 1}
@@ -6617,7 +6668,7 @@ export default function DepartmentKanban() {
                         return (
                           <TableRow
                             key={task.id}
-                            className={`${TODAY_TASK_ROW_CLASS} ${isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : ""}`}
+                            className={`${TODAY_TASK_ROW_CLASS} ${selectedDayTaskRowClass(task)}`}
                           >
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
                               {index + 1}
@@ -6724,7 +6775,7 @@ export default function DepartmentKanban() {
                         return (
                           <TableRow
                             key={task.id}
-                            className={`${TODAY_TASK_ROW_CLASS} ${isTaskStartingOnSelectedAllDate(task) ? STARTS_ON_SELECTED_DAY_TASK_ROW_CLASS : ""}`}
+                            className={`${TODAY_TASK_ROW_CLASS} ${selectedDayTaskRowClass(task)}`}
                           >
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
                               {index + 1}
@@ -7666,6 +7717,7 @@ export default function DepartmentKanban() {
                               const statusValue = taskStatusValue(t)
                               const isCompleted = statusValue === "DONE"
                               const startsOnSelectedDay = isTaskStartingOnSelectedAllDate(t)
+                              const dueOnSelectedDay = isTaskDueOnSelectedAllDate(t)
                               const returnTo = `${returnToTasks}#task-${t.id}`
                               const taskHref = `/tasks/${t.id}?returnTo=${encodeURIComponent(returnTo)}`
                               return (
@@ -7673,14 +7725,16 @@ export default function DepartmentKanban() {
                                   key={t.id}
                                   id={`task-${t.id}`}
                                   href={taskHref}
-                                  className={`block rounded-lg border border-slate-200 border-l-4 px-2 py-2 text-sm transition hover:bg-slate-50 ${startsOnSelectedDay
+                                  className={`block rounded-lg border border-slate-200 border-l-4 px-2 py-2 text-sm transition hover:bg-slate-50 ${dueOnSelectedDay
+                                    ? DUE_ON_SELECTED_DAY_TASK_CARD_CLASS
+                                    : startsOnSelectedDay
                                     ? STARTS_ON_SELECTED_DAY_TASK_CARD_CLASS
                                     : isCompleted
                                     ? "border-green-500 bg-green-50/30 opacity-75"
                                     : `${row.borderClass} bg-white`
                                     }`}
                                 >
-                                  <div className={`grid gap-2 sm:gap-0 sm:grid-cols-[36px_minmax(0,3.2fr)_minmax(0,0.45fr)_minmax(0,0.75fr)_minmax(0,0.55fr)_minmax(0,0.45fr)_minmax(0,0.65fr)_minmax(0,0.65fr)_minmax(0,0.55fr)] sm:divide-x ${startsOnSelectedDay ? "sm:divide-rose-500" : "sm:divide-slate-200"}`}>
+                                  <div className={`grid gap-2 sm:gap-0 sm:grid-cols-[36px_minmax(0,3.2fr)_minmax(0,0.45fr)_minmax(0,0.75fr)_minmax(0,0.55fr)_minmax(0,0.45fr)_minmax(0,0.65fr)_minmax(0,0.65fr)_minmax(0,0.55fr)] sm:divide-x ${dueOnSelectedDay ? "sm:divide-red-600" : startsOnSelectedDay ? "sm:divide-blue-600" : "sm:divide-slate-200"}`}>
                                     <div className="sm:px-2 text-center text-[11px] font-semibold text-slate-500">
                                       {index + 1}
                                     </div>
@@ -8420,6 +8474,8 @@ export default function DepartmentKanban() {
                   systemOccurrenceDate?: string
                   systemStatus?: string
                   sortDate?: string | null
+                  startDate?: string | null
+                  dueDate?: string | null
                   userName: string
                   userInitials: string
                 }> = []
@@ -8567,7 +8623,13 @@ export default function DepartmentKanban() {
                         sortedRows.map((row, index) => (
                           <tr
                             key={`${row.userName}-${row.typeLabel}-${row.title}-${index}`}
-                            className={row.taskId && deadlineImportantTaskIds.has(row.taskId) ? "bg-red-100/90" : ""}
+                            className={[
+                              selectedDayDateRowClass(
+                                row.startDate,
+                                row.dueDate,
+                                Boolean(row.taskId && deadlineImportantTaskIds.has(row.taskId)),
+                              ),
+                            ].join(" ")}
                           >
                             <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
@@ -8670,7 +8732,15 @@ export default function DepartmentKanban() {
                     dailyUserReportRows.map((row, index) => (
                           <tr
                             key={`${row.typeLabel}-${row.title}-${index}`}
-                            className={row.taskId && deadlineImportantTaskIds.has(row.taskId) ? "bg-red-100/90" : ""}
+                            className={[
+                              row.taskId
+                                ? selectedDayDateRowClass(
+                                  dailyReportStartDateByTaskId.get(row.taskId),
+                                  dailyReportDueDateByTaskId.get(row.taskId),
+                                  deadlineImportantTaskIds.has(row.taskId),
+                                )
+                                : "",
+                            ].join(" ")}
                           >
                         <td className="border border-slate-900 px-2 py-2 align-top print-nr-cell">{index + 1}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
@@ -8729,7 +8799,7 @@ export default function DepartmentKanban() {
                 </tbody>
               </table>
               <div className="mt-4">
-                <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
+                <table className="w-full border border-slate-900 text-[11px] print:table-fixed">
                   <colgroup>
                     <col className="w-[180px]" />
                     <col />
@@ -8870,6 +8940,54 @@ export default function DepartmentKanban() {
         </div>
       </div>
       <style jsx global>{`
+        .task-row-starts-selected-day {
+          background-color: rgb(239 246 255 / 0.86) !important;
+        }
+        .task-row-starts-selected-day:hover {
+          background-color: rgb(219 234 254 / 0.9) !important;
+        }
+        .task-row-starts-selected-day > td {
+          border-top: 3px solid #2563eb !important;
+          border-bottom: 3px solid #2563eb !important;
+        }
+        .task-row-starts-selected-day > td:first-child {
+          border-left: 3px solid #2563eb !important;
+        }
+        .task-row-starts-selected-day > td:last-child {
+          border-right: 3px solid #2563eb !important;
+        }
+        .task-card-starts-selected-day {
+          border: 3px solid #2563eb !important;
+          background-color: rgb(239 246 255 / 0.88) !important;
+          box-shadow: 0 0 0 1px rgb(37 99 235 / 0.22);
+        }
+        .task-card-starts-selected-day:hover {
+          background-color: rgb(219 234 254 / 0.92) !important;
+        }
+        .task-row-due-selected-day {
+          background-color: rgb(254 242 242 / 0.92) !important;
+        }
+        .task-row-due-selected-day:hover {
+          background-color: rgb(254 226 226 / 0.95) !important;
+        }
+        .task-row-due-selected-day > td {
+          border-top: 3px solid #dc2626 !important;
+          border-bottom: 3px solid #dc2626 !important;
+        }
+        .task-row-due-selected-day > td:first-child {
+          border-left: 3px solid #dc2626 !important;
+        }
+        .task-row-due-selected-day > td:last-child {
+          border-right: 3px solid #dc2626 !important;
+        }
+        .task-card-due-selected-day {
+          border: 3px solid #dc2626 !important;
+          background-color: rgb(254 242 242 / 0.94) !important;
+          box-shadow: 0 0 0 1px rgb(220 38 38 / 0.24);
+        }
+        .task-card-due-selected-day:hover {
+          background-color: rgb(254 226 226 / 0.96) !important;
+        }
         .daily-report-table th,
         .daily-report-table td {
           vertical-align: bottom;
@@ -8877,6 +8995,10 @@ export default function DepartmentKanban() {
           padding-top: 15px;
           direction: ltr;
           text-align: left;
+        }
+        .daily-report-table {
+          border: 3px solid #0f172a !important;
+          border-collapse: collapse;
         }
         .weekly-report-table th,
         .weekly-report-table td {
@@ -9093,9 +9215,28 @@ export default function DepartmentKanban() {
           .daily-report-table td {
             border: 1px solid #0f172a !important;
           }
+          .daily-report-table .task-row-starts-selected-day > td {
+            border-top: 3px solid #2563eb !important;
+            border-bottom: 3px solid #2563eb !important;
+          }
+          .daily-report-table .task-row-starts-selected-day > td:first-child {
+            border-left: 3px solid #2563eb !important;
+          }
+          .daily-report-table .task-row-starts-selected-day > td:last-child {
+            border-right: 3px solid #2563eb !important;
+          }
+          .daily-report-table .task-row-due-selected-day > td {
+            border-top: 3px solid #dc2626 !important;
+            border-bottom: 3px solid #dc2626 !important;
+          }
+          .daily-report-table .task-row-due-selected-day > td:first-child {
+            border-left: 3px solid #dc2626 !important;
+          }
+          .daily-report-table .task-row-due-selected-day > td:last-child {
+            border-right: 3px solid #dc2626 !important;
+          }
           .daily-report-table {
-            border-width: 2px;
-            border-color: #0f172a;
+            border: 3px solid #0f172a !important;
             border-collapse: collapse !important;
             border-spacing: 0 !important;
           }
