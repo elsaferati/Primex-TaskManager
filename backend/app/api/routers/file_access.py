@@ -168,6 +168,16 @@ async def list_user_mappings(
     ]
 
 
+@router.get("/health")
+async def file_access_health(_: User = Depends(get_current_user)) -> dict[str, Any]:
+    data = await _file_access_request("GET", "/api/health")
+    return {
+        "base_url": settings.FILE_ACCESS_API_BASE_URL,
+        "status": "ok",
+        "file_access": data,
+    }
+
+
 @router.get("/folders", response_model=list[FileAccessFolderOut])
 async def search_folders(
     search: str | None = Query(default=None, max_length=200),

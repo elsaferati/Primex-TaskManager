@@ -54,7 +54,9 @@ function readError(detail: unknown, fallback: string) {
   if (detail && typeof detail === "object" && "detail" in detail) {
     const value = (detail as { detail?: unknown }).detail
     if (typeof value === "string" && value.trim()) return value
+    if (value && typeof value === "object") return JSON.stringify(value)
   }
+  if (detail && typeof detail === "object") return JSON.stringify(detail)
   return fallback
 }
 
@@ -94,6 +96,7 @@ export default function FileAccessPage() {
   const [reason, setReason] = React.useState("")
   const [removeSam, setRemoveSam] = React.useState("")
   const [removeFolderPath, setRemoveFolderPath] = React.useState("")
+  const [healthStatus, setHealthStatus] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(true)
   const [searching, setSearching] = React.useState(false)
   const [submitting, setSubmitting] = React.useState(false)
@@ -148,6 +151,27 @@ export default function FileAccessPage() {
     } finally {
       setSearching(false)
     }
+  }
+
+  const checkFileAccessHealth = async () => {
+    setHealthStatus("Checking FileAccess connection...")
+    const res = await apiFetch("/file-access/health")
+    if (!res.ok) {
+      let detail: unknown = null
+      try {
+        detail = await res.json()
+      } catch {
+        detail = null
+      }
+      const message = readError(detail, "FileAccess health check failed")
+      setHealthStatus(message)
+      toast.error(message)
+      return
+    }
+    const data = (await res.json()) as { base_url?: string; file_access?: { status?: string } }
+    const message = `Connected to ${data.base_url || "FileAccess"} (${data.file_access?.status || "ok"})`
+    setHealthStatus(message)
+    toast.success(message)
   }
 
   const submitRequest = async (event: React.FormEvent<HTMLFormElement>) => {
@@ -284,6 +308,22 @@ export default function FileAccessPage() {
           </div>
         </div>
       </div>
+
+      {canApprove ? (
+        <Card className="rounded-lg">
+          <CardContent className="flex flex-col gap-3 pt-6 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-medium">FileAccess backend connection</div>
+              <div className="mt-1 text-sm text-muted-foreground">
+                {healthStatus || "Check whether the live PrimeFlow API can reach the FileAccess server."}
+              </div>
+            </div>
+            <Button type="button" variant="outline" onClick={checkFileAccessHealth}>
+              Check connection
+            </Button>
+          </CardContent>
+        </Card>
+      ) : null}
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.1fr)_minmax(360px,0.9fr)]">
         <Card className="rounded-lg">
