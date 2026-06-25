@@ -366,7 +366,7 @@ export default function FileAccessPage() {
                     <div className="min-w-0">
                       <div className="truncate text-sm font-medium">{request.folder_name}</div>
                       <div className="mt-1 text-xs text-muted-foreground">
-                        {request.requester_name} ({request.requester_sam_account_name}) Â- {formatDate(request.created_at)}
+                        {request.requester_name} ({request.requester_sam_account_name}) Ã‚- {formatDate(request.created_at)}
                       </div>
                     </div>
                     <Badge variant="outline" className={cn("capitalize", statusBadge(request.status))}>
