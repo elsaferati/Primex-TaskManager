@@ -85,7 +85,8 @@ async def _file_access_request(
 ) -> Any:
     base_url = settings.FILE_ACCESS_API_BASE_URL.rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
+        timeout = httpx.Timeout(90.0, connect=10.0)
+        async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
             response = await client.request(
                 method,
                 f"{base_url}{path}",
