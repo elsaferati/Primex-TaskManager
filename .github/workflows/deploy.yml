@@ -150,29 +150,21 @@ jobs:
         run: |
           Set-Location backend
  
-          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
           $port = 8080
-          $processName = "backend-api-flow"
+          $processName = "primex-public-api"
  
-          Write-Host "Replacing public API backend on port $port..."
+          Write-Host "Restarting public API backend on port $port..."
           cmd /c "pm2 delete backend-api-flow" | Out-Host
-          cmd /c "pm2 delete primex-public-api" | Out-Host
- 
-          $connections = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-          foreach ($connection in $connections) {
-            $ownerProcessId = $connection.OwningProcess
-            if (-not $ownerProcessId) { continue }
-            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerProcessId" -ErrorAction SilentlyContinue
-            $commandLine = $process.CommandLine
-            Write-Host "Stopping process $ownerProcessId on public API port $port: $commandLine"
-            Stop-Process -Id $ownerProcessId -Force
-          }
  
           $env:REDIS_ENABLED = "false"
           $env:REDIS_URL = "redis://127.0.0.1:6379/0"
           $env:APP_TIMEZONE = "Europe/Budapest"
-          cmd /c "pm2 start `"$python`" --name $processName --cwd `"$PWD`" -- -m uvicorn app.main:app --host 0.0.0.0 --port $port"
-          if ($LASTEXITCODE -ne 0) { Write-Error "PM2 public API start failed"; exit 1 }
+          cmd /c "pm2 restart $processName --update-env"
+          if ($LASTEXITCODE -ne 0) {
+            Write-Host "Existing $processName process not found. Starting from ecosystem config..."
+            cmd /c "pm2 start ecosystem.config.cjs --only $processName --update-env"
+            if ($LASTEXITCODE -ne 0) { Write-Error "PM2 public API start failed"; exit 1 }
+          }
  
           $ok = $false
           $uri = "http://127.0.0.1:$port/health"
