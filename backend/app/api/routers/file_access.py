@@ -85,7 +85,7 @@ async def _file_access_request(
 ) -> Any:
     base_url = settings.FILE_ACCESS_API_BASE_URL.rstrip("/")
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
+        async with httpx.AsyncClient(timeout=15.0, trust_env=False) as client:
             response = await client.request(
                 method,
                 f"{base_url}{path}",
@@ -104,8 +104,11 @@ async def _file_access_request(
         except ValueError:
             pass
         raise HTTPException(status_code=exc.response.status_code, detail=detail)
-    except httpx.RequestError:
-        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="FileAccess API is unavailable")
+    except httpx.RequestError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=f"FileAccess API is unavailable: {exc}",
+        )
 
 
 def _folder_to_out(folder: dict[str, Any]) -> FileAccessFolderOut:
