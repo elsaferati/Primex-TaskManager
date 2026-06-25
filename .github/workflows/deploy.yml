@@ -111,8 +111,8 @@ jobs:
           set APP_TIMEZONE=Europe/Budapest
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
-          call pm2 start ecosystem.config.cjs --only backend --update-env
-          call pm2 describe backend | findstr /I "status"
+          call pm2 start ecosystem.config.cjs --only primex-backend --update-env
+          call pm2 describe primex-backend | findstr /I "status"
           echo PM2 backend restart/start completed.
  
       - name: Wait for Backend Readiness
@@ -264,4 +264,4 @@ jobs:
         shell: cmd
         run: |
           call pm2 status
-          call pm2 logs backend --lines 50 --nostream || ver > NUL
+          call pm2 logs primex-backend --lines 50 --nostream || ver > NUL
