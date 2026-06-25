@@ -22,6 +22,7 @@ import {
   CalendarClock,
   Briefcase,
   DollarSign,
+  FolderLock,
   Clock3,
   Shield,
   X,
@@ -138,6 +139,11 @@ const items: NavItem[] = [
     href: "/platforms",
     label: "PrimexEU Links",
     icon: Shield,
+  },
+  {
+    href: "/file-access",
+    label: "File Access",
+    icon: FolderLock,
   },
   { 
     href: "/users", 
@@ -343,3 +349,4 @@ export function Sidebar({ role }: { role: UserRole }) {
     </>
   )
 }
+
