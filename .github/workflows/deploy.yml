@@ -61,6 +61,10 @@ jobs:
             if ($file -like "frontend/*") {
               $frontendChanged = $true
             }
+            if ($file -eq ".github/workflows/deploy.yml") {
+              $backendChanged = $true
+              $frontendChanged = $true
+            }
             if ($file -like "backend/alembic/versions/*") {
               $migrationChanged = $true
             }
