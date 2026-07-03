@@ -145,6 +145,15 @@ const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20"] as const
+type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
+const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS)
+const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
+
+const normalizeOneHReportSlot = (value?: string | null): OneHReportSlot | null => {
+  const normalized = (value || "").trim()
+  return ONE_H_REPORT_SLOT_SET.has(normalized) ? (normalized as OneHReportSlot) : null
+}
 
 const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",
@@ -1041,6 +1050,7 @@ export default function DepartmentKanban() {
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
+  const [savingOneHReportSlotTaskId, setSavingOneHReportSlotTaskId] = React.useState<string | null>(null)
   const [gaTableEntry, setGaTableEntry] = React.useState<DailyReportGaEntry | null>(null)
   const [gaTableInput, setGaTableInput] = React.useState("")
   const [savingGaTable, setSavingGaTable] = React.useState(false)
@@ -2655,6 +2665,7 @@ export default function DepartmentKanban() {
       sortDate?: string | null
       startDate?: string | null
       dueDate?: string | null
+      oneHReportSlot?: OneHReportSlot | null
     }> = []
     const systemAmRows: typeof rows = []
     const systemPmRows: typeof rows = []
@@ -2844,6 +2855,7 @@ export default function DepartmentKanban() {
           comment: task.user_comment ?? null,
           taskId: task.id,
           sortDate: task.due_date || task.start_date || task.planned_for || task.created_at,
+          oneHReportSlot: task.is_1h_report ? normalizeOneHReportSlot(task.one_h_report_slot) : null,
         },
       })
       fastIndex += 1
@@ -2877,6 +2889,7 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         taskId: task.id,
         sortDate: task.due_date || task.start_date || task.created_at,
+        oneHReportSlot: task.is_1h_report ? normalizeOneHReportSlot(task.one_h_report_slot) : null,
       })
     }
 
@@ -3575,6 +3588,52 @@ export default function DepartmentKanban() {
   const setDailyReportCommentSaving = (key: string, value: boolean) => {
     setSavingDailyReportComments((prev) => ({ ...prev, [key]: value }))
   }
+
+  const updateTaskOneHReportSlotState = React.useCallback((taskId: string, oneHReportSlot: OneHReportSlot | null) => {
+    setDailyReport((prev) => {
+      if (!prev) return prev
+      const applySlot = (task: Task) =>
+        task.id === taskId ? { ...task, one_h_report_slot: oneHReportSlot } : task
+      const applyItemSlot = <T extends { task: Task }>(items: T[]) =>
+        items.map((item) => (item.task.id === taskId ? { ...item, task: applySlot(item.task) } : item))
+      return {
+        ...prev,
+        tasks_today: applyItemSlot(prev.tasks_today),
+        tasks_overdue: applyItemSlot(prev.tasks_overdue),
+        system_today: applyItemSlot(prev.system_today),
+        system_overdue: applyItemSlot(prev.system_overdue),
+      }
+    })
+  }, [])
+
+  const saveOneHReportSlot = React.useCallback(
+    async (taskId: string, slotValue: string) => {
+      const nextSlot = slotValue === ONE_H_REPORT_SLOT_NONE_VALUE ? null : normalizeOneHReportSlot(slotValue)
+      setSavingOneHReportSlotTaskId(taskId)
+      try {
+        const res = await apiFetch(`/tasks/${taskId}/one-h-report-slot`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            report_date: selectedAllReportIso,
+            one_h_report_slot: nextSlot,
+          }),
+        })
+        if (!res.ok) {
+          const data = await res.json().catch(() => null)
+          toast.error(data?.detail || "Failed to save 1H time")
+          return
+        }
+        updateTaskOneHReportSlotState(taskId, nextSlot)
+      } catch (error) {
+        console.error("Failed to save 1H time", error)
+        toast.error("Failed to save 1H time")
+      } finally {
+        setSavingOneHReportSlotTaskId((current) => (current === taskId ? null : current))
+      }
+    },
+    [apiFetch, selectedAllReportIso, updateTaskOneHReportSlotState]
+  )
 
   const saveDailyReportTaskComment = async (
     taskId: string,
@@ -6144,7 +6203,30 @@ export default function DepartmentKanban() {
                                     {index + 1}
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top font-semibold">{dailyReportTypeLabel(row.typeLabel)}</td>
-                                  <td className="border border-slate-200 px-2 py-2 align-top">{row.subtype}</td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">
+                                    {row.subtype === "1H" && row.taskId ? (
+                                      <select
+                                        className="h-7 w-full rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-semibold text-amber-900 shadow-sm outline-none focus:border-amber-500"
+                                        value={normalizeOneHReportSlot(row.oneHReportSlot) || ONE_H_REPORT_SLOT_NONE_VALUE}
+                                        disabled={savingOneHReportSlotTaskId === row.taskId}
+                                        aria-label="1H report time"
+                                        onClick={(event) => event.stopPropagation()}
+                                        onChange={(event) => {
+                                          event.stopPropagation()
+                                          void saveOneHReportSlot(row.taskId!, event.target.value)
+                                        }}
+                                      >
+                                        <option value={ONE_H_REPORT_SLOT_NONE_VALUE}>No slot</option>
+                                        {ONE_H_REPORT_SLOT_OPTIONS.map((slot) => (
+                                          <option key={slot} value={slot}>
+                                            {slot}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      row.subtype
+                                    )}
+                                  </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.period}</td>
                               <td
                                 className={[
