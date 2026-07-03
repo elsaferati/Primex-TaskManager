@@ -21,6 +21,7 @@ from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.schemas.daily_report import (
@@ -44,6 +45,7 @@ from app.services.daily_report_logic import (
 
 
 router = APIRouter()
+_ONE_H_SLOT_UNSET = object()
 try:
     APP_TZ = ZoneInfo(settings.APP_TIMEZONE)
 except Exception:
@@ -158,6 +160,7 @@ def _task_to_out(
     t: Task,
     assignees: list[TaskAssigneeOut],
     user_comment: str | None = None,
+    one_h_report_slot: str | None | object = _ONE_H_SLOT_UNSET,
 ) -> TaskOut:
     # Reuse TaskOut model shape; keep it minimal for reporting.
     return TaskOut(
@@ -185,6 +188,7 @@ def _task_to_out(
         is_deadline_important=t.is_deadline_important,
         is_bllok=t.is_bllok,
         is_1h_report=t.is_1h_report,
+        one_h_report_slot=t.one_h_report_slot if one_h_report_slot is _ONE_H_SLOT_UNSET else one_h_report_slot,
         is_r1=t.is_r1,
         is_personal=t.is_personal,
         is_active=t.is_active,
@@ -323,6 +327,16 @@ async def daily_report(
     task_ids = [t.id for t in tasks]
     assignee_out_map = await _assignees_for_tasks(db, task_ids)
     comment_map = await _user_comments_for_tasks(db, task_ids, user_id)
+    one_h_slot_map: dict[uuid.UUID, str] = {}
+    if task_ids:
+        rows = (
+            await db.execute(
+                select(TaskOneHReportSlot.task_id, TaskOneHReportSlot.one_h_report_slot)
+                .where(TaskOneHReportSlot.task_id.in_(task_ids))
+                .where(TaskOneHReportSlot.report_date == day)
+            )
+        ).all()
+        one_h_slot_map = {task_id: slot for task_id, slot in rows}
 
     assignee_ids_by_task: dict[uuid.UUID, set[uuid.UUID]] = {tid: set() for tid in task_ids}
     if task_ids:
@@ -379,6 +393,7 @@ async def daily_report(
                         t,
                         assignee_out_map.get(t.id, []),
                         user_comment=comment_map.get(t.id),
+                        one_h_report_slot=one_h_slot_map.get(t.id),
                     ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
@@ -397,6 +412,7 @@ async def daily_report(
                         t,
                         assignee_out_map.get(t.id, []),
                         user_comment=comment_map.get(t.id),
+                        one_h_report_slot=one_h_slot_map.get(t.id),
                     ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,
@@ -416,6 +432,7 @@ async def daily_report(
                         t,
                         assignee_out_map.get(t.id, []),
                         user_comment=comment_map.get(t.id),
+                        one_h_report_slot=one_h_slot_map.get(t.id),
                     ),
                     project_title=project_title_by_id.get(t.project_id) if t.project_id else None,
                     planned_start=planned_start,

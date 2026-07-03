@@ -31,6 +31,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.system_task_schedule import matches_template_date
 
@@ -389,8 +390,15 @@ async def _compute_etag(
         effective_date = cast(func.coalesce(*effective_columns), Date)
         task_filters = [effective_date >= week_start, effective_date <= week_end]
         ts = await _max_timestamp(db, Task, Task.updated_at, task_filters)
+        one_h_slot_ts = await _max_timestamp(
+            db,
+            TaskOneHReportSlot,
+            TaskOneHReportSlot.updated_at,
+            [TaskOneHReportSlot.report_date >= week_start, TaskOneHReportSlot.report_date <= week_end],
+        )
         ga_note_ts = await _max_timestamp(db, GaNote, GaNote.updated_at)
         parts.append(ts.isoformat() if ts else "")
+        parts.append(one_h_slot_ts.isoformat() if one_h_slot_ts else "")
         parts.append(ga_note_ts.isoformat() if ga_note_ts else "")
 
     raw = "|".join(parts).encode("utf-8")
@@ -692,6 +700,23 @@ async def get_common_view(
         tasks = [t for t in tasks if _should_include_task(t)]
 
         task_ids = [t.id for t in tasks]
+        one_h_slots_by_task_date: dict[tuple[uuid.UUID, date], str] = {}
+        if task_ids:
+            rows = (
+                await db.execute(
+                    select(
+                        TaskOneHReportSlot.task_id,
+                        TaskOneHReportSlot.report_date,
+                        TaskOneHReportSlot.one_h_report_slot,
+                    )
+                    .where(TaskOneHReportSlot.task_id.in_(task_ids))
+                    .where(TaskOneHReportSlot.report_date >= week_start_date)
+                    .where(TaskOneHReportSlot.report_date <= week_end)
+                )
+            ).all()
+            one_h_slots_by_task_date = {
+                (task_id, report_date): slot for task_id, report_date, slot in rows
+            }
         assignee_rows = (
             await db.execute(
                 select(TaskAssignee.task_id, User)
@@ -794,6 +819,7 @@ async def get_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
+                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, task_date)),
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,

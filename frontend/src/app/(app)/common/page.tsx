@@ -26,6 +26,11 @@ type CommonType =
   | "externalHoliday"
   | "blocked"
   | "oneH"
+  | "oneH10"
+  | "oneH11"
+  | "oneH1150"
+  | "oneH1420"
+  | "oneHNoSlot"
   | "personal"
   | "external"
   | "internal"
@@ -35,8 +40,8 @@ type CommonType =
   | "priority"
   | "bz"
 
-const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH", "r1", "personal"]
-const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH", "r1", "personal", "feedback"]
+const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneHNoSlot", "r1", "personal"]
+const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneHNoSlot", "r1", "personal", "feedback"]
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
@@ -58,6 +63,7 @@ type FastTaskItemMeta = {
   userId?: string
   fastTaskOrder?: number | null
   finishPeriod?: "AM" | "PM" | null
+  oneHReportSlot?: OneHReportSlot | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -175,6 +181,7 @@ type CommonBucket =
   | "priority"
   | "bz"
 type FastTaskRowId = "blocked" | "oneH" | "personal" | "r1"
+type OneHSlotRowId = "oneH" | "oneH10" | "oneH11" | "oneH1150" | "oneH1420" | "oneHNoSlot"
 type FastTaskEntry = BlockedItem | OneHItem | PersonalItem | R1Item
 type CommonWeekTableEntry =
   | LateItem
@@ -304,6 +311,7 @@ type SwimlaneCell = {
   userId?: string
   fastTaskOrder?: number | null
   finishPeriod?: "AM" | "PM" | null
+  oneHReportSlot?: OneHReportSlot | null
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
@@ -396,6 +404,34 @@ const ALL_USERS_INITIALS = "ALL"
 const ALL_USERS_MARKER = "[ALL_USERS]"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 const MEETING_CHECK_STATUS_RE = /\[MEETING_CHECK_STATUS:(CHECK|X|O)\]/i
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20"] as const
+type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
+const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS)
+const ONE_H_SLOT_ROWS: Array<{ id: OneHSlotRowId; slot: OneHReportSlot | null; label: string }> = [
+  { id: "oneH10", slot: "10:00", label: "1H 10:00" },
+  { id: "oneH11", slot: "11:00", label: "1H 11:00" },
+  { id: "oneH1150", slot: "11:50", label: "1H 11:50" },
+  { id: "oneH1420", slot: "14:20", label: "1H 14:20" },
+  { id: "oneHNoSlot", slot: null, label: "1H NO SLOT" },
+]
+
+const normalizeOneHReportSlot = (value?: string | null): OneHReportSlot | null => {
+  const normalized = (value || "").trim()
+  return ONE_H_REPORT_SLOT_SET.has(normalized) ? (normalized as OneHReportSlot) : null
+}
+
+const oneHReportSlotRank = (value?: string | null) => {
+  const normalized = normalizeOneHReportSlot(value)
+  if (!normalized) return ONE_H_REPORT_SLOT_OPTIONS.length
+  const index = ONE_H_REPORT_SLOT_OPTIONS.indexOf(normalized)
+  return index >= 0 ? index : ONE_H_REPORT_SLOT_OPTIONS.length
+}
+
+const getOneHReportSlotLabel = (value?: string | null) => normalizeOneHReportSlot(value) || "No slot"
+const isOneHSlotRowId = (rowId: CommonType): rowId is OneHSlotRowId =>
+  rowId === "oneH" || rowId === "oneH10" || rowId === "oneH11" || rowId === "oneH1150" || rowId === "oneH1420" || rowId === "oneHNoSlot"
+const getOneHSlotRowSlot = (rowId: CommonType): OneHReportSlot | null | undefined =>
+  ONE_H_SLOT_ROWS.find((row) => row.id === rowId)?.slot
 
 const getMeetingCheckStatus = (isChecked?: boolean | null, comment?: string | null): MeetingCheckStatus => {
   const match = (comment || "").match(MEETING_CHECK_STATUS_RE)
@@ -548,8 +584,8 @@ const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: 
   entry.assignees && entry.assignees.length
     ? entry.assignees
     : normalizeAssigneeList(entry.person || entry.owner || "")
-const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId =>
-  rowId === "blocked" || rowId === "oneH" || rowId === "personal" || rowId === "r1"
+const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId | OneHSlotRowId =>
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || rowId === "r1"
 
 const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
   const person = "person" in entry ? entry.person : ""
@@ -1098,6 +1134,7 @@ export default function CommonViewPage() {
         fastTaskOrder?: number | null
         isDeadlineImportant?: boolean
         dueDate?: string | null
+        oneHReportSlot?: string | null
       },
       b: {
         status?: string
@@ -1111,6 +1148,7 @@ export default function CommonViewPage() {
         fastTaskOrder?: number | null
         isDeadlineImportant?: boolean
         dueDate?: string | null
+        oneHReportSlot?: string | null
       }
     ) => {
       const isDoneA = Boolean(a.isDone)
@@ -1126,6 +1164,9 @@ export default function CommonViewPage() {
       const personA = getFastTaskAssigneeKey(a as FastTaskEntry) || getPersonSortKey(a)
       const personB = getFastTaskAssigneeKey(b as FastTaskEntry) || getPersonSortKey(b)
       if (personA !== personB) return personA.localeCompare(personB)
+      const slotRankA = oneHReportSlotRank(a.oneHReportSlot)
+      const slotRankB = oneHReportSlotRank(b.oneHReportSlot)
+      if (slotRankA !== slotRankB) return slotRankA - slotRankB
       const importantA = Boolean(a.isDeadlineImportant)
       const importantB = Boolean(b.isDeadlineImportant)
       if (importantA !== importantB) return importantA ? -1 : 1
@@ -1156,6 +1197,7 @@ export default function CommonViewPage() {
       fastTaskOrder?: number | null
       isDeadlineImportant?: boolean
       dueDate?: string | null
+      oneHReportSlot?: string | null
     }>(
       items: T[],
       multiDate: boolean
@@ -1949,6 +1991,7 @@ export default function CommonViewPage() {
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
+          oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -1968,6 +2011,7 @@ export default function CommonViewPage() {
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
+          oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -2073,15 +2117,20 @@ export default function CommonViewPage() {
       )
       if (res?.status === 304 && cached) {
         applyCommonViewPayload(cached.payload)
-        return
+        return true
       }
       if (!res?.ok) {
-        throw new Error(`common_view_failed_${res?.status}`)
+        if (res?.status === 401) {
+          throw new Error("common_view_failed_401")
+        }
+        console.warn(`Aggregate common view failed with status ${res?.status}; falling back to legacy loader.`)
+        return false
       }
       const payload = (await res.json()) as CommonViewPayload
       const etag = res.headers.get("ETag")
       COMMON_VIEW_CACHE.set(cacheKey, { etag, payload, cachedAt: Date.now() })
       applyCommonViewPayload(payload)
+      return true
     },
     [apiFetch, applyCommonViewPayload, user?.department_id, user?.role, commonDepartmentId]
   )
@@ -2119,10 +2168,15 @@ export default function CommonViewPage() {
                 bz: [],
               })
             }
+            let aggregateLoaded = true
             for (const includeList of commonViewIncludeStages) {
-              await fetchCommonViewStage(weekStartIso, includeList)
+              const stageLoaded = await fetchCommonViewStage(weekStartIso, includeList)
+              if (!stageLoaded) {
+                aggregateLoaded = false
+                break
+              }
             }
-            if (mounted) {
+            if (aggregateLoaded && mounted) {
               if (selectedDates.size === 0) {
                 const todayIso = toISODate(new Date())
                 setSelectedDates(new Set([todayIso]))
@@ -2130,7 +2184,7 @@ export default function CommonViewPage() {
               }
               setDataLoaded(true)
             }
-            return
+            if (aggregateLoaded) return
           } catch (err) {
             if (!(err instanceof Error && err.message === "common_view_failed_401")) {
               console.error("Failed to load aggregate common view data", err)
@@ -2585,6 +2639,7 @@ export default function CommonViewPage() {
                   isDone: isCommonTaskDone(normalizedTaskStatus, isDone),
                   fastTaskOrder: t.fast_task_order ?? undefined,
                   finishPeriod: t.finish_period || null,
+                  oneHReportSlot: normalizeOneHReportSlot(t.one_h_report_slot),
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
@@ -3105,6 +3160,16 @@ export default function CommonViewPage() {
       )
     },
     [canReorderFastTask, moveFastTaskEntry, reorderingTaskId]
+  )
+  const renderOneHReportSlotControl = React.useCallback(
+    (entry: OneHItem | SwimlaneCell) => {
+      return (
+        <span className="oneh-slot-indicator" title="1H report time">
+          {getOneHReportSlotLabel(entry.oneHReportSlot)}
+        </span>
+      )
+    },
+    []
   )
 
   // Filtered data
@@ -3789,6 +3854,14 @@ export default function CommonViewPage() {
       return initialsList.length ? ` (${initialsList.join(", ")})` : ""
     }
 
+    const getOneHEntriesForRow = (entries: OneHItem[], rowId: CommonType) => {
+      const slot = getOneHSlotRowSlot(rowId)
+      if (slot === undefined) return entries
+      return entries.filter((entry) =>
+        slot === null ? !normalizeOneHReportSlot(entry.oneHReportSlot) : normalizeOneHReportSlot(entry.oneHReportSlot) === slot
+      )
+    }
+
     const renderCellLines = (rowId: CommonType, iso: string) => {
       const dayData = dataByDay[iso]
       if (!dayData) return []
@@ -3803,8 +3876,8 @@ export default function CommonViewPage() {
                 ? dayData.externalHoliday
                 : rowId === "blocked"
                   ? dayData.blocked
-                  : rowId === "oneH"
-                    ? dayData.oneH
+                  : isOneHSlotRowId(rowId)
+                    ? getOneHEntriesForRow(dayData.oneH, rowId)
                     : rowId === "r1"
                       ? dayData.r1
                       : rowId === "personal"
@@ -3846,10 +3919,12 @@ export default function CommonViewPage() {
           (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
-      if (rowId === "oneH" || rowId === "r1") {
+      if (isOneHSlotRowId(rowId) || rowId === "r1") {
         return (entries as (OneHItem | R1Item)[]).map(
           (e: OneHItem | R1Item) =>
-            `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+            `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${
+              isOneHSlotRowId(rowId) ? `[${getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}] ` : ""
+            }${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
       if (rowId === "personal") {
@@ -4164,7 +4239,7 @@ export default function CommonViewPage() {
   }
 
   const showCard = (type: CommonType) => {
-    const matchesType = typeFilters.size === 0 || typeFilters.has(type)
+    const matchesType = typeFilters.size === 0 || typeFilters.has(type) || (isOneHSlotRowId(type) && typeFilters.has("oneH"))
     if (!matchesType) return false
     if (colorFilter === "all") return true
     return isFastTaskRowId(type)
@@ -5040,6 +5115,11 @@ export default function CommonViewPage() {
     externalHoliday: "Festa zyrtare / External holiday",
     blocked: "JANE DETYRA ME PRIORITET TE LARTE MERRET VETËM ME ATË DETYRË ",
     oneH: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
+    oneH10: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
+    oneH11: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
+    oneH1150: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
+    oneH1420: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
+    oneHNoSlot: "DETYRA 1H QE NUK KANE SLOT TE CAKTUAR.",
     personal: "JANË DETYRA TË VENDOSURA NGA GA/KA DHE PERGJEGJESIT BARAZOHEMI VETËM ME TA ORA PËR BZ: 16:00",
     external: "Takime externe",
     internal: "Takime interne",
@@ -5053,7 +5133,11 @@ export default function CommonViewPage() {
   const swimlaneHeaderSubtext: Partial<Record<CommonType, string>> = {
     bz:
       "AM: 8-9/10-10:30/11:30-12:15/\nPM: 13:30-14/14:30-15 (URGJ)",
-    oneH: "AM: 08:50/10:00/11:00-11:50) \nPM: 14:30/16:00",
+    oneH10: "10:00",
+    oneH11: "11:00",
+    oneH1150: "11:50",
+    oneH1420: "14:20",
+    oneHNoSlot: "PA SLOT",
     r1:"AM: 08:50/10:00/11:00-11:50)\nPM: 14:30/16:00",
     blocked: "NUK PENGOHET.",
     personal:"NGA GA/KA/\nPERGJEGJESIT BARAZOHEMI VETËM ME TA. BZ 16:00."
@@ -5245,6 +5329,7 @@ export default function CommonViewPage() {
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
+      oneHReportSlot: x.oneHReportSlot,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -5267,6 +5352,7 @@ export default function CommonViewPage() {
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
+      oneHReportSlot: x.oneHReportSlot,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -5414,7 +5500,37 @@ export default function CommonViewPage() {
     }
 
     const blockedHeaderBreakdown = buildFastHeaderBreakdown(blockedItems)
-    const oneHHeaderBreakdown = buildFastHeaderBreakdown(oneHItems)
+    const buildOneHSlotItems = (slot: OneHReportSlot | null) =>
+      oneHItems.filter((item) =>
+        slot === null ? !normalizeOneHReportSlot(item.oneHReportSlot) : normalizeOneHReportSlot(item.oneHReportSlot) === slot
+      )
+    const oneHRows = isMultiDate
+      ? [
+          {
+            id: "oneH" as const,
+            label: "1H",
+            count: oneHTotal,
+            countLabel: oneHTotal === 0 ? "0" : `${oneHTotal}/${oneHDone}`,
+            headerClass: "swimlane-header oneh",
+            badgeClass: "swimlane-badge oneh",
+            headerBreakdown: buildFastHeaderBreakdown(oneHItems),
+            items: oneHItems,
+          },
+        ]
+      : ONE_H_SLOT_ROWS.map((slotRow) => {
+          const items = buildOneHSlotItems(slotRow.slot)
+          const doneCount = items.filter((item) => item.isDone).length
+          return {
+            id: slotRow.id,
+            label: slotRow.label,
+            count: items.length,
+            countLabel: items.length === 0 ? "0" : `${items.length}/${doneCount}`,
+            headerClass: "swimlane-header oneh",
+            badgeClass: "swimlane-badge oneh",
+            headerBreakdown: buildFastHeaderBreakdown(items),
+            items,
+          }
+        })
     const r1HeaderBreakdown = buildFastHeaderBreakdown(r1Items)
     const personalHeaderBreakdown = buildFastHeaderBreakdown(personalItems)
 
@@ -5484,16 +5600,7 @@ export default function CommonViewPage() {
         headerBreakdown: blockedHeaderBreakdown,
         items: blockedItems,
       },
-      {
-        id: "oneH",
-        label: "1H",
-        count: oneHTotal,
-        countLabel: oneHTotal === 0 ? "0" : `${oneHTotal}/${oneHDone}`,
-        headerClass: "swimlane-header oneh",
-        badgeClass: "swimlane-badge oneh",
-        headerBreakdown: oneHHeaderBreakdown,
-        items: oneHItems,
-      },
+      ...oneHRows,
       {
         id: "r1",
         label: "R1=1H",
@@ -7650,6 +7757,23 @@ export default function CommonViewPage() {
           flex: 0 0 auto;
           white-space: nowrap;
         }
+        .oneh-slot-indicator {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 0;
+          height: 20px;
+          padding: 0 7px;
+          border-radius: 999px;
+          background: #fef3c7;
+          border: 1px solid #fbbf24;
+          color: #92400e;
+          font-weight: 800;
+          font-size: 10px;
+          line-height: 1;
+          flex: 0 0 auto;
+          white-space: nowrap;
+        }
         .fast-task-order-controls {
           display: inline-flex;
           align-items: center;
@@ -7721,7 +7845,8 @@ export default function CommonViewPage() {
         .week-table-entry.repeat-task-muted .week-table-avatar,
         .week-table-entry.repeat-task-muted .fast-task-order-badge,
         .week-table-entry.repeat-task-muted .deadline-indicator,
-        .week-table-entry.repeat-task-muted .period-indicator {
+        .week-table-entry.repeat-task-muted .period-indicator,
+        .week-table-entry.repeat-task-muted .oneh-slot-indicator {
           color: #9ca3af;
         }
         .week-table-entry.repeat-task-muted .time-indicator {
@@ -7942,7 +8067,8 @@ export default function CommonViewPage() {
         .swimlane-cell.deadline-important:not(.done) .fast-task-order-badge,
         .swimlane-cell.deadline-important:not(.done) .deadline-indicator,
         .swimlane-cell.deadline-important:not(.done) .time-indicator,
-        .swimlane-cell.deadline-important:not(.done) .period-indicator {
+        .swimlane-cell.deadline-important:not(.done) .period-indicator,
+        .swimlane-cell.deadline-important:not(.done) .oneh-slot-indicator {
           background: rgba(255, 255, 255, 0.12);
           border-color: rgba(255, 255, 255, 0.38);
           color: #ffffff;
@@ -10812,7 +10938,17 @@ export default function CommonViewPage() {
                       else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
                       else if (row.id === "externalHoliday") dayEntries[iso] = dayData?.externalHoliday || []
                       else if (row.id === "blocked") dayEntries[iso] = dayData?.blocked || []
-                      else if (row.id === "oneH") dayEntries[iso] = includeOneH ? dayData?.oneH || [] : []
+                      else if (isOneHSlotRowId(row.id)) {
+                        const oneHEntries = includeOneH ? dayData?.oneH || [] : []
+                        const slot = getOneHSlotRowSlot(row.id)
+                        dayEntries[iso] = slot === undefined
+                          ? oneHEntries
+                          : oneHEntries.filter((entry) =>
+                              slot === null
+                                ? !normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot)
+                                : normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot) === slot
+                            )
+                      }
                       else if (row.id === "r1") dayEntries[iso] = includeR1 ? dayData?.r1 || [] : []
                       else if (row.id === "personal") dayEntries[iso] = dayData?.personal || []
                       else if (row.id === "external") dayEntries[iso] = dayData?.external || []
@@ -10835,7 +10971,7 @@ export default function CommonViewPage() {
                       if (rowId === "leave") return "leave"
                       if (rowId === "externalHoliday") return "externalHoliday"
                       if (rowId === "blocked") return "blocked"
-                      if (rowId === "oneH") return "oneh"
+                      if (isOneHSlotRowId(rowId as CommonType)) return "oneh"
                       if (rowId === "personal") return "personal"
                       if (rowId === "external") return "external"
                       if (rowId === "internal") return "internal"
@@ -10978,6 +11114,9 @@ export default function CommonViewPage() {
                             <div className="week-table-entry-main">
                                   <span>
                                   <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  {isOneHSlotRowId(row.id) ? (
+                                    <span className="oneh-slot-indicator">{getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}</span>
+                                  ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
@@ -11025,7 +11164,7 @@ export default function CommonViewPage() {
                             ) : null}
                           </div>
                         ))
-                      } else if (row.id === "oneH" || row.id === "r1") {
+                      } else if (isOneHSlotRowId(row.id) || row.id === "r1") {
                         return (entries as (OneHItem | R1Item)[]).map((e, idx: number) => (
                           <div
                             key={idx}
@@ -11500,6 +11639,7 @@ export default function CommonViewPage() {
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
                                           <span className="fast-task-order-badge">{cell.number}</span>
                                         ) : null}
+                                        {isOneHSlotRowId(row.id) ? renderOneHReportSlotControl(cell) : null}
                                         {isFastTaskRowId(row.id) ? (
                                           <span className="period-indicator" title={`${getCommonTaskPeriodLabel(cell.finishPeriod)} task`}>
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
@@ -11529,6 +11669,7 @@ export default function CommonViewPage() {
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
                                           <span className="fast-task-order-badge">{cell.number}</span>
                                         ) : null}
+                                        {isOneHSlotRowId(row.id) ? renderOneHReportSlotControl(cell) : null}
                                         {isFastTaskRowId(row.id) ? (
                                           <span className="period-indicator" title={`${getCommonTaskPeriodLabel(cell.finishPeriod)} task`}>
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}

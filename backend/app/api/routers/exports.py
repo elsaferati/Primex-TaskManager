@@ -2279,6 +2279,20 @@ def _open_task_source_label(task: Task) -> str:
     return "FAST"
 
 
+def _open_task_type_label(task: Task) -> str:
+    if task.system_template_origin_id:
+        return "SYS"
+    if task.is_1h_report:
+        return "1H"
+    if task.is_personal:
+        return "P"
+    if task.is_bllok:
+        return "BLL"
+    if task.is_r1:
+        return "R1"
+    return ""
+
+
 def _task_date_key(value: datetime | date | None) -> date | None:
     if value is None:
         return None
@@ -2345,12 +2359,38 @@ async def export_open_tasks_xlsx(
     project_ids = {task.project_id for task in tasks if task.project_id}
     department_ids = {task.department_id for task in tasks if task.department_id}
     ga_note_ids = {task.ga_note_origin_id for task in tasks if task.ga_note_origin_id}
+    task_ids = [task.id for task in tasks]
+    template_ids = {task.system_template_origin_id for task in tasks if task.system_template_origin_id}
     assignee_user_ids: set[uuid.UUID] = set()
     for task in tasks:
         if task.assigned_to:
             assignee_user_ids.add(task.assigned_to)
         for assignee in task.assignees or []:
             assignee_user_ids.add(assignee.user_id)
+
+    task_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if task_ids:
+        task_alignment_rows = (
+            await db.execute(
+                select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
+                .where(TaskAlignmentUser.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, alignment_user_id in task_alignment_rows:
+            task_alignment_map.setdefault(task_id, []).append(alignment_user_id)
+            assignee_user_ids.add(alignment_user_id)
+
+    template_alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if template_ids:
+        template_alignment_rows = (
+            await db.execute(
+                select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id)
+                .where(SystemTaskTemplateAlignmentUser.template_id.in_(template_ids))
+            )
+        ).all()
+        for template_id, alignment_user_id in template_alignment_rows:
+            template_alignment_map.setdefault(template_id, []).append(alignment_user_id)
+            assignee_user_ids.add(alignment_user_id)
 
     project_map: dict[uuid.UUID, Project] = {}
     if project_ids:
@@ -2398,6 +2438,19 @@ async def export_open_tasks_xlsx(
             else:
                 labels.append(str(assignee_id))
         return ", ".join(labels) if labels else "Unassigned"
+
+    def bz_me_label(task: Task) -> str:
+        alignment_ids = task_alignment_map.get(task.id) or []
+        if not alignment_ids and task.system_template_origin_id:
+            alignment_ids = template_alignment_map.get(task.system_template_origin_id) or []
+        labels: list[str] = []
+        for alignment_user_id in alignment_ids:
+            alignment_user = user_map.get(alignment_user_id)
+            if alignment_user:
+                labels.append(_initials(alignment_user.full_name or alignment_user.username or ""))
+            else:
+                labels.append(str(alignment_user_id))
+        return ", ".join([label for label in labels if label])
 
     normalized_filter = (filter or "all").strip().lower()
     normalized_search = (search or "").strip().lower()
@@ -2474,9 +2527,10 @@ async def export_open_tasks_xlsx(
         "DUE DATE",
         "STATUS",
         "PRIORITY",
+        "LLOJI 1H/P/BLL/R1",
+        "BZ ME",
         "TITLE",
         "PROJECT",
-        "SOURCE NOTE",
         "DESCRIPTION",
     ]
 
@@ -2510,7 +2564,6 @@ async def export_open_tasks_xlsx(
     for idx, (group, task) in enumerate(export_rows, start=1):
         project = project_map.get(task.project_id) if task.project_id else None
         department = department_map.get(task.department_id) if task.department_id else None
-        note = ga_note_map.get(task.ga_note_origin_id) if task.ga_note_origin_id else None
         values = [
             idx,
             group,
@@ -2523,9 +2576,10 @@ async def export_open_tasks_xlsx(
             _format_excel_datetime(task.due_date),
             task.status or "",
             (task.priority or "").upper(),
+            _open_task_type_label(task),
+            bz_me_label(task),
             task.title or "",
             project.title if project else "",
-            _strip_html_keep_breaks(note.content if note else ""),
             _strip_html_keep_breaks(task.description),
         ]
         for col_idx, value in enumerate(values, start=1):
@@ -2548,10 +2602,11 @@ async def export_open_tasks_xlsx(
         9: 12,
         10: 15,
         11: 10,
-        12: 44,
-        13: 34,
+        12: 18,
+        13: 14,
         14: 44,
-        15: 44,
+        15: 34,
+        16: 44,
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)

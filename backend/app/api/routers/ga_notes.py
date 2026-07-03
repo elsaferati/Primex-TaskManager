@@ -40,6 +40,7 @@ class MarkWaitingDoneResponse(BaseModel):
 
 class GaNoteTaskDeadlineResponse(BaseModel):
     updated_count: int
+    start_date: datetime | None = None
     due_date: datetime | None = None
     is_deadline_important: bool | None = None
 
@@ -321,11 +322,11 @@ async def update_ga_note_task_deadline(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> GaNoteTaskDeadlineResponse:
-    """Set or clear the deadline on every task created from this GA/KA note.
+    """Set or clear the task dates on every task created from this GA/KA note.
 
     Per-user task copies created from a GA note are not linked by
     fast_task_group_id, so we use the shared ga_note_origin_id as the grouping
-    key. The same due_date (and is_deadline_important) is applied to every
+    key. The same start_date, due_date (and is_deadline_important) is applied to every
     active linked task so all assignees stay in sync.
     """
     note = await _get_note_or_404(note_id, db)
@@ -345,13 +346,16 @@ async def update_ga_note_task_deadline(
             detail="No active tasks found for this GA/KA note",
         )
 
+    new_start_date = None if payload.clear_start else payload.start_date
+    update_start = payload.clear_start or payload.start_date is not None
     new_due_date = None if payload.clear else payload.due_date
     update_due = payload.clear or payload.due_date is not None
     update_important = payload.is_deadline_important is not None
 
-    if not update_due and not update_important:
+    if not update_start and not update_due and not update_important:
         return GaNoteTaskDeadlineResponse(
             updated_count=0,
+            start_date=linked_tasks[0].start_date,
             due_date=linked_tasks[0].due_date,
             is_deadline_important=linked_tasks[0].is_deadline_important,
         )
@@ -359,10 +363,15 @@ async def update_ga_note_task_deadline(
     updated_count = 0
     for task in linked_tasks:
         before = {
+            "start_date": task.start_date.isoformat() if task.start_date else None,
             "due_date": task.due_date.isoformat() if task.due_date else None,
             "is_deadline_important": task.is_deadline_important,
         }
         changed = False
+
+        if update_start and task.start_date != new_start_date:
+            task.start_date = new_start_date
+            changed = True
 
         if update_due:
             if (
@@ -383,6 +392,7 @@ async def update_ga_note_task_deadline(
         if changed:
             updated_count += 1
             after = {
+                "start_date": task.start_date.isoformat() if task.start_date else None,
                 "due_date": task.due_date.isoformat() if task.due_date else None,
                 "is_deadline_important": task.is_deadline_important,
             }
@@ -401,6 +411,7 @@ async def update_ga_note_task_deadline(
     sample = linked_tasks[0]
     return GaNoteTaskDeadlineResponse(
         updated_count=updated_count,
+        start_date=sample.start_date,
         due_date=sample.due_date,
         is_deadline_important=sample.is_deadline_important,
     )

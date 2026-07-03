@@ -29,6 +29,7 @@ from app.models.task_user_comment import TaskUserComment
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
 from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFromDayRequest, TaskUpdate
@@ -531,6 +532,7 @@ def _task_to_out(
         is_deadline_important=task.is_deadline_important,
         is_bllok=task.is_bllok,
         is_1h_report=task.is_1h_report,
+        one_h_report_slot=task.one_h_report_slot,
         is_r1=task.is_r1,
         is_personal=task.is_personal,
         fast_task_order=task.fast_task_order,
@@ -1210,6 +1212,7 @@ async def create_task(
                     is_deadline_important=payload.is_deadline_important or False,
                     is_bllok=payload.is_bllok or False,
                     is_1h_report=payload.is_1h_report or False,
+                    one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
                     is_r1=payload.is_r1 or False,
                     is_personal=payload.is_personal or False,
                     fast_task_order=fast_task_order_value,
@@ -1341,6 +1344,7 @@ async def create_task(
                             is_deadline_important=payload.is_deadline_important or False,
                             is_bllok=payload.is_bllok or False,
                             is_1h_report=payload.is_1h_report or False,
+                            one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
                             is_r1=payload.is_r1 or False,
                             is_personal=payload.is_personal or False,
                             fast_task_order=fast_task_order_value,
@@ -1452,6 +1456,7 @@ async def create_task(
                 is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
+                one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
                 is_r1=payload.is_r1 or False,
                 is_personal=payload.is_personal or False,
                 fast_task_order=fast_task_order_value,
@@ -1552,6 +1557,7 @@ async def create_task(
                 is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
+                one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
                 is_r1=payload.is_r1 or False,
                 is_personal=payload.is_personal or False,
                 fast_task_order=fast_task_order_value,
@@ -1644,6 +1650,7 @@ async def create_task(
         is_deadline_important=payload.is_deadline_important or False,
         is_bllok=payload.is_bllok or False,
         is_1h_report=payload.is_1h_report or False,
+        one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
         is_r1=payload.is_r1 or False,
         is_personal=payload.is_personal or False,
         fast_task_order=fast_task_order_value,
@@ -2158,6 +2165,10 @@ async def update_task(
         task.is_bllok = payload.is_bllok
     if payload.is_1h_report is not None:
         task.is_1h_report = payload.is_1h_report
+        if not payload.is_1h_report and not _payload_has_field(payload, "one_h_report_slot"):
+            task.one_h_report_slot = None
+    if _payload_has_field(payload, "one_h_report_slot"):
+        task.one_h_report_slot = payload.one_h_report_slot if task.is_1h_report else None
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
 
@@ -2325,6 +2336,8 @@ async def update_task(
             shared_values["is_r1"] = task.is_r1
         if payload.is_1h_report is not None:
             shared_values["is_1h_report"] = task.is_1h_report
+        if _payload_has_field(payload, "one_h_report_slot") or payload.is_1h_report is not None:
+            shared_values["one_h_report_slot"] = task.one_h_report_slot
         if payload.is_personal is not None:
             shared_values["is_personal"] = task.is_personal
         if fast_task_order_set:
@@ -2407,6 +2420,7 @@ async def update_task(
                         is_deadline_important=task.is_deadline_important,
                         is_bllok=task.is_bllok,
                         is_1h_report=task.is_1h_report,
+                        one_h_report_slot=task.one_h_report_slot,
                         is_r1=task.is_r1,
                         is_personal=task.is_personal,
                         fast_task_order=task.fast_task_order,
@@ -2450,6 +2464,7 @@ async def update_task(
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
         "is_deadline_important": task.is_deadline_important,
+        "one_h_report_slot": task.one_h_report_slot,
     }
 
     add_audit_log(
@@ -2515,6 +2530,81 @@ async def deactivate_task(
 
 class TaskCommentUpdate(BaseModel):
     comment: str | None = None
+
+
+class TaskOneHReportSlotUpdate(BaseModel):
+    report_date: date
+    one_h_report_slot: str | None = None
+
+
+def _normalize_one_h_report_slot(value: str | None) -> str | None:
+    normalized = (value or "").strip()
+    return normalized if normalized in {"10:00", "11:00", "11:50", "14:20"} else None
+
+
+@router.patch("/{task_id}/one-h-report-slot", response_model=TaskOut)
+async def update_task_one_h_report_slot(
+    task_id: uuid.UUID,
+    payload: TaskOneHReportSlotUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> TaskOut:
+    task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
+    if task is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
+    if not task.is_1h_report:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only 1H tasks can have a 1H report slot")
+
+    is_assigned = (
+        task.assigned_to == user.id
+        or (await db.execute(
+            select(TaskAssignee).where(
+                TaskAssignee.task_id == task_id,
+                TaskAssignee.user_id == user.id,
+            )
+        )).scalar_one_or_none() is not None
+    )
+    if not is_assigned:
+        ensure_task_editor(user, task)
+
+    next_slot = _normalize_one_h_report_slot(payload.one_h_report_slot)
+    if payload.one_h_report_slot is not None and next_slot is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
+
+    existing = (
+        await db.execute(
+            select(TaskOneHReportSlot).where(
+                TaskOneHReportSlot.task_id == task_id,
+                TaskOneHReportSlot.report_date == payload.report_date,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if next_slot is None:
+        if existing is not None:
+            await db.delete(existing)
+    elif existing is None:
+        db.add(
+            TaskOneHReportSlot(
+                task_id=task_id,
+                report_date=payload.report_date,
+                one_h_report_slot=next_slot,
+            )
+        )
+    else:
+        existing.one_h_report_slot = next_slot
+
+    await db.commit()
+    await db.refresh(task)
+    assignee_map = await _assignees_for_tasks(db, [task.id])
+    if not assignee_map.get(task.id) and task.assigned_to is not None:
+        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
+        if assigned_user is not None:
+            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
+    comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
+    task_out = _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
+    task_out.one_h_report_slot = next_slot
+    return task_out
 
 
 @router.patch("/{task_id}/comment", response_model=TaskOut)

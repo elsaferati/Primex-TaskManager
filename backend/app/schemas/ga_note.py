@@ -69,7 +69,8 @@ class GaNoteUpdate(BaseModel):
 
 
 class GaNoteTaskDeadlineUpdate(BaseModel):
+    start_date: datetime | None = None
     due_date: datetime | None = None
     is_deadline_important: bool | None = None
+    clear_start: bool = False
     clear: bool = False
-
