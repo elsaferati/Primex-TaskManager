@@ -5009,7 +5009,7 @@ export default function DepartmentKanban() {
       const nextSlot = slotValue === ONE_H_REPORT_SLOT_NONE_VALUE ? null : normalizeOneHReportSlot(slotValue)
       setSavingOneHReportSlotTaskId(taskId)
       try {
-        const res = await apiFetch(`/tasks/${taskId}/one-h-report-slot`, {
+        let res = await apiFetch(`/tasks/${taskId}/one-h-report-slot`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -5017,6 +5017,13 @@ export default function DepartmentKanban() {
             one_h_report_slot: nextSlot,
           }),
         })
+        if (res.status === 404) {
+          res = await apiFetch(`/tasks/${taskId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ one_h_report_slot: nextSlot }),
+          })
+        }
         if (!res.ok) {
           const data = await res.json().catch(() => null)
           toast.error(data?.detail || "Failed to save 1H time")
