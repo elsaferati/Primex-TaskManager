@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { Menu, Trash2 } from "lucide-react"
+import { PanelLeftOpen, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -32,7 +32,7 @@ function initials(user: User) {
 
 export function Topbar() {
   const { user, apiFetch, logout } = useAuth()
-  const { toggle } = useSidebar()
+  const { isOpen, toggle } = useSidebar()
   const [sheetOpen, setSheetOpen] = React.useState(false)
   const [notifications, setNotifications] = React.useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = React.useState(0)
@@ -199,15 +199,15 @@ export function Topbar() {
   return (
     <header className="flex h-14 items-center justify-between border-b px-4 print:hidden">
       <div className="flex items-center gap-3">
-        {/* Hamburger menu button for mobile */}
         <Button
           variant="ghost"
           size="icon"
           onClick={toggle}
-          className="md:hidden"
-          aria-label="Toggle sidebar"
+          className={isOpen ? "md:hidden" : undefined}
+          aria-label="Open sidebar"
+          title="Open sidebar"
         >
-          <Menu className="h-5 w-5" />
+          <PanelLeftOpen className="h-5 w-5" />
         </Button>
         <div className="text-sm text-muted-foreground hidden md:block">Ctrl+K to search</div>
       </div>
@@ -287,6 +287,5 @@ export function Topbar() {
     </header>
   )
 }
-
 
 

@@ -3075,7 +3075,7 @@ export default function GaKaNotesPage() {
                                   size="icon"
                                   disabled={editDisabled}
                                   aria-disabled={editDisabled}
-                                  className={`h-7 w-7 shrink-0 sm:hidden ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                                  className={`h-7 w-7 shrink-0 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
                                   aria-label={editDisabledTitle}
                                   title={editDisabledTitle}
                                   onClick={() => !editDisabled && openEditNote(note)}
@@ -3403,14 +3403,15 @@ export default function GaKaNotesPage() {
                           <div className="flex justify-center">
                             <Button
                               variant="outline"
-                              size="sm"
+                              size="icon"
                               disabled={editDisabled}
                               aria-disabled={editDisabled}
+                              aria-label={editDisabledTitle}
                               title={editDisabledTitle}
-                              className={`h-7 text-xs border-slate-200 text-slate-700 hover:bg-slate-50 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                              className={`h-7 w-7 shrink-0 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
                               onClick={() => !editDisabled && openEditNote(note)}
                             >
-                              Edit
+                              <Pencil className="h-4 w-4" />
                             </Button>
                           </div>
                         </td>

@@ -4,23 +4,63 @@ import * as React from "react"
 
 interface SidebarContextType {
   isOpen: boolean
+  isDesktop: boolean
   setIsOpen: (open: boolean) => void
   toggle: () => void
 }
 
 const SidebarContext = React.createContext<SidebarContextType | undefined>(undefined)
+const SIDEBAR_STORAGE_KEY = "primeflow-sidebar-open"
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
-  // Start closed on mobile (will be overridden by CSS on desktop)
   const [isOpen, setIsOpen] = React.useState(false)
+  const [isDesktop, setIsDesktop] = React.useState(false)
+
+  React.useEffect(() => {
+    const mediaQuery = window.matchMedia("(min-width: 768px)")
+
+    const syncSidebarForViewport = () => {
+      const nextIsDesktop = mediaQuery.matches
+      setIsDesktop(nextIsDesktop)
+
+      if (!nextIsDesktop) {
+        setIsOpen(false)
+        return
+      }
+
+      const savedPreference = window.localStorage.getItem(SIDEBAR_STORAGE_KEY)
+      setIsOpen(savedPreference == null ? true : savedPreference === "true")
+    }
+
+    syncSidebarForViewport()
+    mediaQuery.addEventListener("change", syncSidebarForViewport)
+
+    return () => mediaQuery.removeEventListener("change", syncSidebarForViewport)
+  }, [])
+
+  const setSidebarOpen = React.useCallback((open: boolean) => {
+    setIsOpen(open)
+
+    if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
+      window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(open))
+    }
+  }, [])
 
   const toggle = React.useCallback(() => {
-    setIsOpen((prev) => !prev)
+    setIsOpen((prev) => {
+      const next = !prev
+
+      if (typeof window !== "undefined" && window.matchMedia("(min-width: 768px)").matches) {
+        window.localStorage.setItem(SIDEBAR_STORAGE_KEY, String(next))
+      }
+
+      return next
+    })
   }, [])
 
   const value = React.useMemo(
-    () => ({ isOpen, setIsOpen, toggle }),
-    [isOpen, toggle]
+    () => ({ isOpen, isDesktop, setIsOpen: setSidebarOpen, toggle }),
+    [isDesktop, isOpen, setSidebarOpen, toggle]
   )
 
   return (

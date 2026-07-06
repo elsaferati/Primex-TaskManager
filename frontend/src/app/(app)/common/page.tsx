@@ -248,6 +248,49 @@ const normalizeCommonTaskStatus = (status?: string | null, isDone?: boolean) => 
 const isCommonTaskDone = (status?: string | null, isDone?: boolean) =>
   normalizeCommonTaskStatus(status, isDone) === "DONE"
 
+const normalizeCommonDateOnly = (value?: string | null) => {
+  if (!value) return null
+  const raw = String(value).trim()
+  const exact = /^(\d{4})-(\d{2})-(\d{2})$/.exec(raw)
+  if (exact) return raw
+  const parsed = new Date(raw)
+  if (Number.isNaN(parsed.getTime())) return null
+  const year = parsed.getFullYear()
+  const month = String(parsed.getMonth() + 1).padStart(2, "0")
+  const day = String(parsed.getDate()).padStart(2, "0")
+  return `${year}-${month}-${day}`
+}
+
+const isCommonTaskStartingOnDate = (entry: { startDate?: string | null; date?: string | null; entryDate?: string | null }) => {
+  const startDate = normalizeCommonDateOnly(entry.startDate)
+  const targetDate = normalizeCommonDateOnly(entry.date ?? entry.entryDate)
+  return Boolean(startDate && targetDate && startDate === targetDate)
+}
+
+const isCommonTaskDueOnDate = (entry: {
+  isDeadlineImportant?: boolean
+  dueDate?: string | null
+  date?: string | null
+  entryDate?: string | null
+}) => {
+  if (!entry.isDeadlineImportant) return false
+  const dueDate = normalizeCommonDateOnly(entry.dueDate)
+  const targetDate = normalizeCommonDateOnly(entry.date ?? entry.entryDate)
+  return Boolean(dueDate && targetDate && dueDate === targetDate)
+}
+
+const commonTaskHighlightClassName = (entry: {
+  isDeadlineImportant?: boolean
+  dueDate?: string | null
+  startDate?: string | null
+  date?: string | null
+  entryDate?: string | null
+}) => {
+  if (isCommonTaskStartingOnDate(entry)) return "starts-selected-day"
+  if (isCommonTaskDueOnDate(entry)) return "deadline-important"
+  return ""
+}
+
 const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
   if (status == null && typeof isDone !== "boolean") return ""
 
@@ -266,8 +309,11 @@ const getCommonTaskColor = (entry: {
   status?: string | null
   isDone?: boolean
   isDeadlineImportant?: boolean
+  dueDate?: string | null
+  date?: string | null
+  entryDate?: string | null
 }): Exclude<CommonColorFilter, "all"> | null => {
-  if (entry.isDeadlineImportant && !entry.isDone) return "red"
+  if (isCommonTaskDueOnDate(entry)) return "red"
 
   const normalized = normalizeCommonTaskStatus(entry.status, entry.isDone)
   if (normalized === "DONE") return "green"
@@ -5250,7 +5296,7 @@ export default function CommonViewPage() {
       dueDate: x.dueDate,
       startDate: x.startDate,
       completedAt: x.completedAt,
-      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
+      dateIsToday: isCommonTaskStartingOnDate(x),
     }))
 
     const oneHSource = includeOneH ? sortTasksByOrder(filtered.oneH, isMultiDate) : []
@@ -5272,7 +5318,7 @@ export default function CommonViewPage() {
       dueDate: x.dueDate,
       startDate: x.startDate,
       completedAt: x.completedAt,
-      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
+      dateIsToday: isCommonTaskStartingOnDate(x),
     }))
 
     const personalSource = sortTasksByOrder(filtered.personal, isMultiDate)
@@ -5294,7 +5340,7 @@ export default function CommonViewPage() {
       dueDate: x.dueDate,
       startDate: x.startDate,
       completedAt: x.completedAt,
-      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
+      dateIsToday: isCommonTaskStartingOnDate(x),
     }))
 
     const externalSource = isMultiDate
@@ -5358,7 +5404,7 @@ export default function CommonViewPage() {
       dueDate: x.dueDate,
       startDate: x.startDate,
       completedAt: x.completedAt,
-      dateIsToday: isOpenTaskStartingToday(x.isDone, x.startDate),
+      dateIsToday: isCommonTaskStartingOnDate(x),
     }))
 
     const problemSource = isMultiDate
@@ -6139,6 +6185,7 @@ export default function CommonViewPage() {
           .week-table {
             page-break-inside: auto;
             margin-top: 0;
+            border: 3px solid #111827 !important;
           }
           .print-title {
             font-size: 16px;
@@ -7158,6 +7205,11 @@ export default function CommonViewPage() {
           background:rgb(255, 222, 241);
           border-left-color: #ffffff;
         }
+        .swimlane-cell.starts-selected-day {
+          background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
+          border: 2px solid #2563eb;
+          box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
+        }
         .swimlane-cell.one-time-meeting {
           border-color: #dc2626;
         }
@@ -7380,7 +7432,7 @@ export default function CommonViewPage() {
         .week-table {
           width: 100%;
           border-collapse: collapse;
-          border: 2px solid #111827;
+          border: 3px solid #111827;
           font-size: 11px;
           direction: ltr;
         }
@@ -7703,9 +7755,23 @@ export default function CommonViewPage() {
           color: #adb5bd;
           font-style: italic;
         }
-        .week-table-entry.deadline-important:not(.task-state-done) {
-          background: linear-gradient(90deg, rgba(254, 242, 242, 0.96), rgba(255, 255, 255, 0.98));
-          border-color: #fca5a5;
+        .week-table-entry.starts-selected-day,
+        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day,
+        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-done,
+        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-in-progress,
+        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-waiting,
+        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-todo {
+          background: linear-gradient(90deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.98)) !important;
+          border: 2px solid #2563eb;
+        }
+        .week-table-entry.deadline-important,
+        .week-table-view.neutral-all-days .week-table-entry.deadline-important,
+        .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-done,
+        .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-in-progress,
+        .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-waiting,
+        .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-todo {
+          background: linear-gradient(90deg, rgba(254, 242, 242, 0.98), rgba(255, 255, 255, 0.98)) !important;
+          border: 2px solid #dc2626;
         }
         .week-table-entry.repeat-task-muted,
         .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted,
@@ -7715,7 +7781,8 @@ export default function CommonViewPage() {
         .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-todo {
           color: #9ca3af;
         }
-        .week-table-entry.repeat-task-muted.deadline-important:not(.task-state-done) {
+        .week-table-entry.repeat-task-muted.deadline-important,
+        .week-table-entry.repeat-task-muted.starts-selected-day {
           color: #9ca3af;
         }
         .week-table-entry.repeat-task-muted .week-table-avatar,
@@ -7748,6 +7815,7 @@ export default function CommonViewPage() {
             page-break-inside: auto;
             table-layout: fixed;
             width: 100%;
+            border: 3px solid #111827 !important;
             font-size: 10px;
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
@@ -10971,7 +11039,7 @@ export default function CommonViewPage() {
                             className={[
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
-                              e.isDeadlineImportant ? "deadline-important" : "",
+                              commonTaskHighlightClassName(e),
                               repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
@@ -11032,7 +11100,7 @@ export default function CommonViewPage() {
                             className={[
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
-                              e.isDeadlineImportant ? "deadline-important" : "",
+                              commonTaskHighlightClassName(e),
                               repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
@@ -11065,7 +11133,7 @@ export default function CommonViewPage() {
                             className={[
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
-                              e.isDeadlineImportant ? "deadline-important" : "",
+                              commonTaskHighlightClassName(e),
                               repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
@@ -11449,7 +11517,7 @@ export default function CommonViewPage() {
                                   cell.accentClass || "",
                                   getSwimlaneDividerClass(row.id, cells, index),
                                   cell.placeholder ? "placeholder" : "",
-                                  cell.isDeadlineImportant ? "deadline-important" : "",
+                                  commonTaskHighlightClassName(cell),
                                   cell.isDone ? "done" : "",
                                   commonTaskStateClassName(cell.status, cell.isDone),
                                 ]

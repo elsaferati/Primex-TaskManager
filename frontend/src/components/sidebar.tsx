@@ -24,7 +24,7 @@ import {
   DollarSign,
   Clock3,
   Shield,
-  X,
+  PanelLeftClose,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -158,8 +158,6 @@ export function Sidebar({ role }: { role: UserRole }) {
   const { apiFetch } = useAuth()
   const { isOpen, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
-  const touchStartXRef = React.useRef<number | null>(null)
-  const touchStartYRef = React.useRef<number | null>(null)
   const [resolvedProjectRoute, setResolvedProjectRoute] = React.useState<"dev" | "pcm" | "design" | null>(null)
   const genericProjectId = React.useMemo(() => {
     const match = pathname.match(/^\/projects\/([^/]+)$/)
@@ -228,82 +226,41 @@ export function Sidebar({ role }: { role: UserRole }) {
             ? resolvedProjectRoute
             : null
 
-  // Close sidebar when route changes on mobile
-  React.useEffect(() => {
-    setIsOpen(false)
-  }, [pathname, setIsOpen])
-
-  const resetTouchState = React.useCallback(() => {
-    touchStartXRef.current = null
-    touchStartYRef.current = null
-  }, [])
-
-  const handleTouchStart = React.useCallback((event: React.TouchEvent<HTMLElement>) => {
-    const touch = event.touches[0]
-    if (!touch) return
-    touchStartXRef.current = touch.clientX
-    touchStartYRef.current = touch.clientY
-  }, [])
-
-  const handleTouchMove = React.useCallback((event: React.TouchEvent<HTMLElement>) => {
-    if (!isOpen) return
-
-    const startX = touchStartXRef.current
-    const startY = touchStartYRef.current
-    const touch = event.touches[0]
-
-    if (startX == null || startY == null || !touch) return
-
-    const deltaX = touch.clientX - startX
-    const deltaY = touch.clientY - startY
-    const isHorizontalSwipe = Math.abs(deltaX) > Math.abs(deltaY) * 1.2
-
-    if (deltaX < -70 && isHorizontalSwipe) {
-      setIsOpen(false)
-      resetTouchState()
-    }
-  }, [isOpen, resetTouchState, setIsOpen])
-
   return (
     <>
       {/* Mobile backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-[110] md:hidden"
-          onClick={() => setIsOpen(false)}
+          className="fixed inset-0 bg-black/50 z-[110] md:hidden pointer-events-none"
+          aria-hidden="true"
         />
       )}
       
       <aside
-        onTouchStart={handleTouchStart}
-        onTouchMove={handleTouchMove}
-        onTouchEnd={resetTouchState}
-        onTouchCancel={resetTouchState}
         className={cn(
-          "fixed md:sticky md:top-0 left-0 z-[110] md:z-50 w-64 shrink-0 border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen md:h-[100vh] print:hidden transition-transform duration-300 ease-in-out",
-          "md:translate-x-0",
-          isOpen ? "translate-x-0" : "-translate-x-full md:translate-x-0"
+          "fixed md:sticky md:top-0 left-0 z-[110] md:z-50 w-64 shrink-0 overflow-hidden border-r bg-sidebar text-sidebar-foreground flex flex-col h-screen md:h-[100vh] print:hidden transition-[width,transform] duration-300 ease-in-out",
+          isOpen ? "translate-x-0 md:w-64" : "-translate-x-full md:w-0 md:translate-x-0 md:border-r-0"
         )}
         style={{ touchAction: "pan-y" }}
       >
         {/* Header / Logo Area */}
-        <div className="flex h-16 items-center justify-between border-b px-6">
+        <div className="flex h-16 w-64 items-center justify-between border-b px-6">
           <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg tracking-tight">
             <Hexagon className="h-6 w-6 text-primary fill-primary/20" />
             <span>PrimeFlow</span>
           </Link>
-          {/* Close button for mobile */}
           <button
             onClick={() => setIsOpen(false)}
-            className="md:hidden p-2 rounded-md hover:bg-sidebar-accent transition-colors"
+            className="p-2 rounded-md hover:bg-sidebar-accent transition-colors"
             aria-label="Close sidebar"
+            title="Close sidebar"
           >
-            <X className="h-5 w-5" />
+            <PanelLeftClose className="h-5 w-5" />
           </button>
         </div>
 
       {/* Navigation Links */}
-      <nav className="flex-1 overflow-y-auto py-4 px-3 space-y-1">
+      <nav className="w-64 flex-1 overflow-y-auto py-4 px-3 space-y-1">
         {items
           .filter((i) => (!i.roles ? true : i.roles.includes(role)))
           .map((item) => {
@@ -319,7 +276,6 @@ export function Sidebar({ role }: { role: UserRole }) {
               <Link
                 key={item.href}
                 href={item.href}
-                onClick={() => setIsOpen(false)}
                 className={cn(
                   "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
                   "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
