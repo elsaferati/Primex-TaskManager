@@ -22,6 +22,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
+from app.services.one_h_slots import effective_slot_date
 from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.schemas.daily_report import (
@@ -333,7 +334,7 @@ async def daily_report(
             await db.execute(
                 select(TaskOneHReportSlot.task_id, TaskOneHReportSlot.one_h_report_slot)
                 .where(TaskOneHReportSlot.task_id.in_(task_ids))
-                .where(TaskOneHReportSlot.report_date == day)
+                .where(TaskOneHReportSlot.report_date == effective_slot_date(day))
             )
         ).all()
         one_h_slot_map = {task_id: slot for task_id, slot in rows}
