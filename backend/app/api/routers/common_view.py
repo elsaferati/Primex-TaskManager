@@ -819,7 +819,7 @@ async def get_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, task_date)),
+                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, task_date), t.one_h_report_slot),
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,

@@ -2571,6 +2571,8 @@ async def update_task_one_h_report_slot(
     if payload.one_h_report_slot is not None and next_slot is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
 
+    task.one_h_report_slot = next_slot
+
     existing = (
         await db.execute(
             select(TaskOneHReportSlot).where(
