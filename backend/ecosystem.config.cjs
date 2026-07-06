@@ -16,6 +16,7 @@ const sharedEnv = {
   REDIS_ENABLED: String(redisEnabled),
   REDIS_URL: redisUrl,
   APP_TIMEZONE: appTimezone,
+  APP_BUILD_SHA: process.env.APP_BUILD_SHA ?? "unknown",
 };
 
 const apiProcess = {
