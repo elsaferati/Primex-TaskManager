@@ -145,6 +145,31 @@ const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20"] as const
+type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
+const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS)
+const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
+
+const normalizeOneHReportSlot = (value?: string | null): OneHReportSlot | null => {
+  const normalized = (value || "").trim()
+  return ONE_H_REPORT_SLOT_SET.has(normalized) ? (normalized as OneHReportSlot) : null
+}
+const getOneHReportSlotLabel = (value?: string | null) => normalizeOneHReportSlot(value) || "No slot"
+const getReportRowOneHReportSlot = (row: unknown) => {
+  if (!row || typeof row !== "object" || !("oneHReportSlot" in row)) return null
+  return normalizeOneHReportSlot((row as { oneHReportSlot?: string | null }).oneHReportSlot)
+}
+const buildDailyReportOneHSlotMap = (report: DailyReportResponse | null) => {
+  const map: Record<string, OneHReportSlot | null> = {}
+  const items = [...(report?.tasks_today || []), ...(report?.tasks_overdue || [])]
+  for (const item of items) {
+    const task = item.task
+    if (task?.id && task.is_1h_report) {
+      map[task.id] = normalizeOneHReportSlot(task.one_h_report_slot)
+    }
+  }
+  return map
+}
 
 const STATUS_LABELS: Record<string, string> = {
   OPEN: "Open",
@@ -1041,6 +1066,8 @@ export default function DepartmentKanban() {
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
   const [dailyReportCommentEdits, setDailyReportCommentEdits] = React.useState<Record<string, string>>({})
+  const [dailyReportOneHSlots, setDailyReportOneHSlots] = React.useState<Record<string, OneHReportSlot | null>>({})
+  const [savingOneHReportSlotTaskId, setSavingOneHReportSlotTaskId] = React.useState<string | null>(null)
   const [gaTableEntry, setGaTableEntry] = React.useState<DailyReportGaEntry | null>(null)
   const [gaTableInput, setGaTableInput] = React.useState("")
   const [savingGaTable, setSavingGaTable] = React.useState(false)
@@ -2655,6 +2682,7 @@ export default function DepartmentKanban() {
       sortDate?: string | null
       startDate?: string | null
       dueDate?: string | null
+      oneHReportSlot?: OneHReportSlot | null
     }> = []
     const systemAmRows: typeof rows = []
     const systemPmRows: typeof rows = []
@@ -2844,6 +2872,9 @@ export default function DepartmentKanban() {
           comment: task.user_comment ?? null,
           taskId: task.id,
           sortDate: task.due_date || task.start_date || task.planned_for || task.created_at,
+          oneHReportSlot: task.is_1h_report
+            ? dailyReportOneHSlots[task.id] ?? null
+            : null,
         },
       })
       fastIndex += 1
@@ -2877,6 +2908,9 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         taskId: task.id,
         sortDate: task.due_date || task.start_date || task.created_at,
+        oneHReportSlot: task.is_1h_report
+          ? dailyReportOneHSlots[task.id] ?? null
+          : null,
       })
     }
 
@@ -2966,6 +3000,7 @@ export default function DepartmentKanban() {
     dailyReport,
     dailyReportFastTasks,
     dailyReportProjectTasks,
+    dailyReportOneHSlots,
     projects,
     projectTitleLookup,
     systemTemplateById,
@@ -3101,6 +3136,7 @@ export default function DepartmentKanban() {
       sortDate?: string | null
       startDate?: string | null
       dueDate?: string | null
+      oneHReportSlot?: OneHReportSlot | null
     }> => {
       const rows: ReturnType<typeof convertDailyReportToRows> = []
       const systemAmRows: typeof rows = []
@@ -3252,6 +3288,9 @@ export default function DepartmentKanban() {
             sortDate: task.due_date || task.start_date || task.created_at,
             startDate: task.start_date || null,
             dueDate: task.due_date || null,
+            oneHReportSlot: task.is_1h_report
+              ? dailyReportOneHSlots[task.id] ?? normalizeOneHReportSlot(task.one_h_report_slot)
+              : null,
           })
         } else {
           fastRows.push({
@@ -3278,6 +3317,9 @@ export default function DepartmentKanban() {
               sortDate: task.due_date || task.start_date || task.created_at,
               startDate: task.start_date || null,
               dueDate: task.due_date || null,
+              oneHReportSlot: task.is_1h_report
+                ? dailyReportOneHSlots[task.id] ?? normalizeOneHReportSlot(task.one_h_report_slot)
+                : null,
             },
           })
           fastIndex += 1
@@ -3368,7 +3410,7 @@ export default function DepartmentKanban() {
         })
         .map((entry) => entry.row)
     },
-    [deadlineImportantTaskIds, projects, selectedAllReportDate, systemTemplateById, userMap]
+    [dailyReportOneHSlots, deadlineImportantTaskIds, projects, selectedAllReportDate, systemTemplateById, userMap]
   )
 
   const weekProjectTasks = React.useMemo(() => {
@@ -3575,6 +3617,63 @@ export default function DepartmentKanban() {
   const setDailyReportCommentSaving = (key: string, value: boolean) => {
     setSavingDailyReportComments((prev) => ({ ...prev, [key]: value }))
   }
+
+  const updateTaskOneHReportSlotState = React.useCallback((taskId: string, oneHReportSlot: OneHReportSlot | null) => {
+    setDailyReportOneHSlots((prev) => ({ ...prev, [taskId]: oneHReportSlot }))
+    setDailyReport((prev) => {
+      if (!prev) return prev
+      const applySlot = (task: Task) =>
+        task.id === taskId ? { ...task, one_h_report_slot: oneHReportSlot } : task
+      const applyItemSlot = <T extends { task: Task }>(items: T[]) =>
+        items.map((item) => (item.task.id === taskId ? { ...item, task: applySlot(item.task) } : item))
+      return {
+        ...prev,
+        tasks_today: applyItemSlot(prev.tasks_today),
+        tasks_overdue: applyItemSlot(prev.tasks_overdue),
+        system_today: applyItemSlot(prev.system_today),
+        system_overdue: applyItemSlot(prev.system_overdue),
+      }
+    })
+  }, [])
+
+  const saveOneHReportSlot = React.useCallback(
+    async (taskId: string, slotValue: string) => {
+      const nextSlot = slotValue === ONE_H_REPORT_SLOT_NONE_VALUE ? null : normalizeOneHReportSlot(slotValue)
+      setSavingOneHReportSlotTaskId(taskId)
+      try {
+        let res = await apiFetch(`/tasks/${taskId}/one-h-report-slot`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            report_date: selectedAllReportIso,
+            one_h_report_slot: nextSlot,
+          }),
+        })
+        if (res.status === 400 || res.status === 404 || res.status === 500) {
+          res = await apiFetch(`/tasks/${taskId}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              is_1h_report: nextSlot !== null ? true : undefined,
+              one_h_report_slot: nextSlot,
+            }),
+          })
+        }
+        if (!res.ok) {
+          const data = await res.json().catch(() => null)
+          toast.error(data?.detail || "Failed to save 1H time")
+          return
+        }
+        updateTaskOneHReportSlotState(taskId, nextSlot)
+      } catch (error) {
+        console.error("Failed to save 1H time", error)
+        toast.error("Failed to save 1H time")
+      } finally {
+        setSavingOneHReportSlotTaskId((current) => (current === taskId ? null : current))
+      }
+    },
+    [apiFetch, selectedAllReportIso, updateTaskOneHReportSlotState]
+  )
 
   const saveDailyReportTaskComment = async (
     taskId: string,
@@ -3917,12 +4016,14 @@ export default function DepartmentKanban() {
         viewMode === "mine" && (activeTab === "all" || activeTab === "system")
       if (!shouldFetchDailyReport) {
         setDailyReport(null)
+        setDailyReportOneHSlots({})
         setLoadingDailyReport(false)
         return
       }
       const targetUserId = user?.id
       if (!department?.id || !targetUserId) {
         setDailyReport(null)
+        setDailyReportOneHSlots({})
         setLoadingDailyReport(false)
         return
       }
@@ -3936,12 +4037,19 @@ export default function DepartmentKanban() {
         const res = await apiFetch(`/reports/daily?${qs.toString()}`)
         if (!res.ok) {
           setDailyReport(null)
+          setDailyReportOneHSlots({})
           return
         }
         const payload = (await res.json()) as DailyReportResponse
-        if (!cancelled) setDailyReport(payload)
+        if (!cancelled) {
+          setDailyReport(payload)
+          setDailyReportOneHSlots(buildDailyReportOneHSlotMap(payload))
+        }
       } catch {
-        if (!cancelled) setDailyReport(null)
+        if (!cancelled) {
+          setDailyReport(null)
+          setDailyReportOneHSlots({})
+        }
       } finally {
         if (!cancelled) setLoadingDailyReport(false)
       }
@@ -3968,6 +4076,7 @@ export default function DepartmentKanban() {
       if (!res.ok) return
       const payload = (await res.json()) as DailyReportResponse
       setDailyReport(payload)
+      setDailyReportOneHSlots(buildDailyReportOneHSlotMap(payload))
     } catch {
       // ignore refresh failures
     }
@@ -6040,7 +6149,7 @@ export default function DepartmentKanban() {
                       onMouseUp={handleDailyReportMouseEnd}
                       onMouseLeave={handleDailyReportMouseEnd}
                     >
-                      <table className="min-w-[1100px] w-full table-fixed border border-slate-200 text-[11px] daily-report-table">
+                      <table className="min-w-[1180px] w-full table-fixed border border-slate-200 text-[11px] daily-report-table">
                         <colgroup>
                           <col className="w-[24px]" />
                           <col className="w-[32px]" />
@@ -6049,6 +6158,7 @@ export default function DepartmentKanban() {
                           <col className="w-[52px]" />
                           <col />
                           <col className="w-[92px]" />
+                          <col className="w-[86px]" />
                           <col className="w-[64px]" />
                           <col className="w-[88px]" />
                           <col className="w-[72px]" />
@@ -6065,6 +6175,7 @@ export default function DepartmentKanban() {
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-nowrap">AM/PM</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">1H SLOT</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-nowrap">T/Y/O</th>
@@ -6191,6 +6302,30 @@ export default function DepartmentKanban() {
                                     className={`border border-slate-200 px-2 py-2 align-top uppercase ${weeklyPlanStatusBgClass(normalizeDailyReportStatusKey(row.status))}`}
                                   >
                                     {dailyReportStatusDisplay(row.status)}
+                                  </td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">
+                                    {row.subtype === "1H" && row.taskId ? (
+                                      <select
+                                        className="h-7 w-full rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-semibold text-amber-900 shadow-sm outline-none focus:border-amber-500"
+                                        value={normalizeOneHReportSlot(row.oneHReportSlot) || ONE_H_REPORT_SLOT_NONE_VALUE}
+                                        disabled={savingOneHReportSlotTaskId === row.taskId}
+                                        aria-label="1H report time"
+                                        onClick={(event) => event.stopPropagation()}
+                                        onChange={(event) => {
+                                          event.stopPropagation()
+                                          void saveOneHReportSlot(row.taskId!, event.target.value)
+                                        }}
+                                      >
+                                        <option value={ONE_H_REPORT_SLOT_NONE_VALUE}>No slot</option>
+                                        {ONE_H_REPORT_SLOT_OPTIONS.map((slot) => (
+                                          <option key={slot} value={slot}>
+                                            {slot}
+                                          </option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      "-"
+                                    )}
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.bz}</td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">{row.kohaBz}</td>
@@ -8589,6 +8724,7 @@ export default function DepartmentKanban() {
                       <col className="w-[170px]" />
                       <col className="w-[60px]" />
                       <col className="w-[36px]" />
+                      <col className="w-[46px]" />
                       <col className="w-[50px]" />
                       <col className="w-[36px]" />
                       <col className="w-[90px]" />
@@ -8609,6 +8745,7 @@ export default function DepartmentKanban() {
                         </th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
+                        <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">1H SLOT</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                         <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">
@@ -8668,6 +8805,9 @@ export default function DepartmentKanban() {
                             >
                               {dailyReportStatusDisplay(row.status)}
                             </td>
+                            <td className="border border-slate-900 px-2 py-2 align-top">
+                              {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : "-"}
+                            </td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
                             <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
@@ -8685,7 +8825,7 @@ export default function DepartmentKanban() {
                         ))
                       ) : (
                         <tr>
-                          <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
+                          <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={12}>
                             No data available.
                           </td>
                         </tr>
@@ -8706,6 +8846,7 @@ export default function DepartmentKanban() {
                   <col className="w-[200px]" />
                   <col className="w-[60px]" />
                   <col className="w-[40px]" />
+                  <col className="w-[48px]" />
                   <col className="w-[52px]" />
                   <col className="w-[40px]" />
                   <col className="w-[140px]" />
@@ -8721,6 +8862,7 @@ export default function DepartmentKanban() {
                     </th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">Titulli</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">STATUSI</th>
+                    <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">1H SLOT</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase">BZ</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                     <th className="border border-slate-900 px-2 py-2 text-left text-xs uppercase whitespace-normal break-words">T/Y/O</th>
@@ -8775,6 +8917,9 @@ export default function DepartmentKanban() {
                         >
                           {dailyReportStatusDisplay(row.status)}
                         </td>
+                        <td className="border border-slate-900 px-2 py-2 align-top">
+                          {row.subtype === "1H" ? getOneHReportSlotLabel(getReportRowOneHReportSlot(row)) : "-"}
+                        </td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.bz}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top">{row.kohaBz}</td>
                         <td className="border border-slate-900 px-2 py-2 align-top whitespace-normal break-words">
@@ -8791,7 +8936,7 @@ export default function DepartmentKanban() {
                     ))
                   ) : (
                     <tr>
-                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={10}>
+                      <td className="border border-slate-900 px-2 py-4 text-center italic text-slate-600" colSpan={11}>
                         No data available.
                       </td>
                     </tr>

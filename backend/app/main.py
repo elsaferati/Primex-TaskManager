@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import uuid
 
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, status
@@ -33,7 +34,7 @@ scheduler_task: asyncio.Task | None = None
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "build": os.getenv("APP_BUILD_SHA", "unknown")}
 
 
 @app.on_event("startup")

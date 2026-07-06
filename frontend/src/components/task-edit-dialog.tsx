@@ -47,10 +47,23 @@ const PROJECT_TASK_TYPES = [
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
+const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
+const ONE_H_REPORT_SLOT_OPTIONS = [
+  { value: "10:00", label: "10:00" },
+  { value: "11:00", label: "11:00" },
+  { value: "11:50", label: "11:50" },
+  { value: "14:20", label: "14:20" },
+] as const
+const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS.map((option) => option.value))
 
 type TaskStatusValue = typeof TASK_STATUS_OPTIONS[number]["value"]
 type FastTaskTypeValue = typeof FAST_TASK_TYPES[number]["value"]
 type ProjectTaskTypeValue = typeof PROJECT_TASK_TYPES[number]["value"]
+
+function getOneHReportSlotValue(value?: string | null) {
+  const normalized = (value || "").trim()
+  return ONE_H_REPORT_SLOT_SET.has(normalized) ? normalized : ONE_H_REPORT_SLOT_NONE_VALUE
+}
 
 function getCurrentFastTaskType(task: Task | null): FastTaskTypeValue {
   if (!task) return "N"
@@ -103,6 +116,7 @@ export function TaskEditDialog({
   const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
+  const [oneHReportSlot, setOneHReportSlot] = React.useState<string>(ONE_H_REPORT_SLOT_NONE_VALUE)
   const [saving, setSaving] = React.useState(false)
 
   React.useEffect(() => {
@@ -115,6 +129,7 @@ export function TaskEditDialog({
     setStartDate(toDateInputValue(task.start_date))
     setDueDate(toDateInputValue(task.due_date))
     setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
+    setOneHReportSlot(getOneHReportSlotValue(task.one_h_report_slot))
   }, [task])
 
   const statusOptions = React.useMemo(() => {
@@ -148,6 +163,11 @@ export function TaskEditDialog({
     try {
       const currentFastTaskType = getCurrentFastTaskType(task)
       const currentProjectTaskType = getCurrentProjectTaskType(task)
+      const nextIsOneH = isFastTask(task)
+        ? fastTaskType === "1H"
+        : isProjectTask(task)
+          ? projectTaskType === "1H"
+          : Boolean(task.is_1h_report)
       const res = await apiFetch(`/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -158,6 +178,7 @@ export function TaskEditDialog({
           start_date: startDate || null,
           due_date: dueDate || null,
           finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
+          one_h_report_slot: nextIsOneH && oneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE ? oneHReportSlot : null,
           ...(isFastTask(task) && fastTaskType !== currentFastTaskType
             ? {
                 is_bllok: fastTaskType === "BLL",
@@ -205,6 +226,7 @@ export function TaskEditDialog({
     dueDate,
     fastTaskType,
     finishPeriod,
+    oneHReportSlot,
     onOpenChange,
     onUpdated,
     projectTaskType,
@@ -348,6 +370,25 @@ export function TaskEditDialog({
               </SelectContent>
             </Select>
           </div>
+
+          {((isFastTask(task) && fastTaskType === "1H") || (isProjectTask(task) && projectTaskType === "1H")) ? (
+            <div className="space-y-2">
+              <Label>1H report time</Label>
+              <Select value={oneHReportSlot} onValueChange={setOneHReportSlot}>
+                <SelectTrigger disabled={saving}>
+                  <SelectValue placeholder="Select time" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={ONE_H_REPORT_SLOT_NONE_VALUE}>Unassigned</SelectItem>
+                  {ONE_H_REPORT_SLOT_OPTIONS.map((option) => (
+                    <SelectItem key={option.value} value={option.value}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : null}
         </div>
 
         <DialogFooter className="shrink-0 border-t bg-background pt-4">

@@ -7,6 +7,7 @@ from app.models.common_entry import CommonEntry
 from app.models.daily_report_ga_entry import DailyReportGaEntry
 from app.models.department import Department
 from app.models.external_platform_link import ExternalPlatformLink
+from app.models.file_access_request import FileAccessRequest
 from app.models.feedback_log import FeedbackLog
 from app.models.ga_note import GaNote
 from app.models.ga_note_attachment import GaNoteAttachment
@@ -38,6 +39,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.task_status import TaskStatus
 from app.models.task_user_comment import TaskUserComment
 from app.models.task_template import TaskTemplate
@@ -58,6 +60,7 @@ __all__ = [
     "DailyReportGaEntry",
     "Department",
     "ExternalPlatformLink",
+    "FileAccessRequest",
     "FeedbackLog",
     "GaNote",
     "GaNoteAttachment",
@@ -89,6 +92,7 @@ __all__ = [
     "TaskAlignmentUser",
     "TaskPlannerExclusion",
     "TaskDailyProgress",
+    "TaskOneHReportSlot",
     "TaskStatus",
     "TaskUserComment",
     "TaskTemplate",
@@ -98,3 +102,4 @@ __all__ = [
     "WeeklyPlannerSnapshot",
     "WeeklyPlannerLegendEntry",
 ]
+

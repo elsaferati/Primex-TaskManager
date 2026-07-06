@@ -48,3 +48,6 @@ python scripts/reconcile_system_task_slots.py --days 7
 ```
 
 Then verify system tasks are present for the current local day.
+# Redeploy Notes
+
+- 2026-07-06: Trigger backend redeploy so production API serves the 1H report slot save endpoint and schema.

@@ -61,6 +61,10 @@ jobs:
             if ($file -like "frontend/*") {
               $frontendChanged = $true
             }
+            if ($file -eq ".github/workflows/deploy.yml") {
+              $backendChanged = $true
+              $frontendChanged = $true
+            }
             if ($file -like "backend/alembic/versions/*") {
               $migrationChanged = $true
             }
@@ -109,10 +113,17 @@ jobs:
           set REDIS_ENABLED=false
           set REDIS_URL=redis://127.0.0.1:6379/0
           set APP_TIMEZONE=Europe/Budapest
+          set APP_BUILD_SHA=${{ github.sha }}
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
-          call pm2 start ecosystem.config.cjs --only backend --update-env
-          call pm2 describe backend | findstr /I "status"
+          call pm2 delete primex-backend || ver > NUL
+
+          REM Kill any orphaned process still holding port 8000 (a squatter outside PM2
+          REM keeps serving stale code and makes health checks pass against old builds).
+          powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8000'); Stop-Process -Id $_ -Force }"
+
+          call pm2 start ecosystem.config.cjs --only primex-backend --update-env
+          call pm2 describe primex-backend | findstr /I "status"
           echo PM2 backend restart/start completed.
  
       - name: Wait for Backend Readiness
@@ -120,25 +131,30 @@ jobs:
         shell: powershell
         run: |
           $ok = $false
+          $expected = "${{ github.sha }}"
+          $lastBuild = "<no response>"
           $uri = "http://127.0.0.1:8000/health"
           for ($i = 0; $i -lt 20; $i++) {
             try {
               $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
-              Write-Host "Backend health check attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
-              if ($resp.StatusCode -eq 200) {
+              $body = $resp.Content | ConvertFrom-Json
+              $lastBuild = "$($body.build)"
+              Write-Host "Backend health check attempt $($i + 1)/20: HTTP $($resp.StatusCode) build=$lastBuild"
+              if ($resp.StatusCode -eq 200 -and $lastBuild -eq $expected) {
                 $ok = $true
                 break
               }
+              Start-Sleep -Seconds 2
             } catch {
               Write-Host "Backend health check attempt $($i + 1)/20: no response yet"
               Start-Sleep -Seconds 2
             }
           }
           if (-not $ok) {
-            Write-Error "Backend /health did not become ready after restart."
+            Write-Error "Backend /health not serving deployed build $expected (last seen: $lastBuild). A stale process may be holding port 8000."
             exit 1
           }
-          Write-Host "Backend health check: OK ($uri)"
+          Write-Host "Backend health check: OK ($uri) serving build $expected"
  
       - name: Replace Public API Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
@@ -150,46 +166,48 @@ jobs:
           $port = 8080
           $processName = "backend-api-flow"
  
-          Write-Host "Replacing public API backend on port $port..."
-          cmd /c "pm2 delete $processName" | Out-Host
- 
-          $connections = @(Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue)
-          foreach ($connection in $connections) {
-            $ownerProcessId = $connection.OwningProcess
-            if (-not $ownerProcessId) { continue }
-            $process = Get-CimInstance Win32_Process -Filter "ProcessId = $ownerProcessId" -ErrorAction SilentlyContinue
-            $commandLine = $process.CommandLine
-            if ($commandLine -and $commandLine -match "uvicorn|app\.main:app|python") {
-              Write-Host "Stopping stale API process $ownerProcessId on port $port"
-              Stop-Process -Id $ownerProcessId -Force
-            } else {
-              Write-Host "Port $port is owned by process $ownerProcessId and was not stopped: $commandLine"
+          Write-Host "Replacing public API backend on port $port from current checkout..."
+          cmd /c "pm2 delete backend-api-flow || ver > NUL" | Out-Host
+          cmd /c "pm2 delete primex-public-api || ver > NUL" | Out-Host
+
+          # Kill any orphaned process still holding the port (a squatter outside PM2
+          # keeps serving stale code and makes health checks pass against old builds).
+          Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique |
+            ForEach-Object {
+              Write-Host "Killing stale listener PID $_ on port $port"
+              Stop-Process -Id $_ -Force
             }
-          }
- 
+
           $env:REDIS_ENABLED = "false"
           $env:REDIS_URL = "redis://127.0.0.1:6379/0"
           $env:APP_TIMEZONE = "Europe/Budapest"
+          $env:APP_BUILD_SHA = "${{ github.sha }}"
           cmd /c "pm2 start `"$python`" --name $processName --cwd `"$PWD`" -- -m uvicorn app.main:app --host 0.0.0.0 --port $port"
           if ($LASTEXITCODE -ne 0) { Write-Error "PM2 public API start failed"; exit 1 }
- 
+
           $ok = $false
+          $expected = "${{ github.sha }}"
+          $lastBuild = "<no response>"
           $uri = "http://127.0.0.1:$port/health"
           for ($i = 0; $i -lt 20; $i++) {
             try {
               $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
-              Write-Host "Public API health check attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
-              if ($resp.StatusCode -eq 200) {
+              $body = $resp.Content | ConvertFrom-Json
+              $lastBuild = "$($body.build)"
+              Write-Host "Public API health check attempt $($i + 1)/20: HTTP $($resp.StatusCode) build=$lastBuild"
+              if ($resp.StatusCode -eq 200 -and $lastBuild -eq $expected) {
                 $ok = $true
                 break
               }
+              Start-Sleep -Seconds 2
             } catch {
               Write-Host "Public API health check attempt $($i + 1)/20: no response yet"
               Start-Sleep -Seconds 2
             }
           }
           if (-not $ok) {
-            Write-Error "Public API backend did not become ready on port $port."
+            Write-Error "Public API /health not serving deployed build $expected (last seen: $lastBuild). A stale process may be holding port $port."
             exit 1
           }
  
@@ -264,4 +282,4 @@ jobs:
         shell: cmd
         run: |
           call pm2 status
-          call pm2 logs backend --lines 50 --nostream || ver > NUL
+          call pm2 logs primex-backend --lines 50 --nostream || ver > NUL

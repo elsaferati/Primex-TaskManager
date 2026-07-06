@@ -261,6 +261,7 @@ export interface Task {
   is_deadline_important?: boolean
   is_bllok?: boolean
   is_1h_report?: boolean
+  one_h_report_slot?: string | null
   is_r1?: boolean
   is_personal?: boolean
   fast_task_order?: number | null
