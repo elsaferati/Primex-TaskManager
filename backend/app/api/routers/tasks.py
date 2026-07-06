@@ -2622,7 +2622,7 @@ class TaskOneHReportSlotUpdate(BaseModel):
 
 def _normalize_one_h_report_slot(value: str | None) -> str | None:
     normalized = (value or "").strip()
-    return normalized if normalized in {"10:00", "11:00", "11:50", "14:20"} else None
+    return normalized if normalized in {"10:00", "11:00", "11:50", "14:20", "16:00"} else None
 
 
 @router.patch("/{task_id}/one-h-report-slot", response_model=TaskOut)
@@ -2654,37 +2654,6 @@ async def update_task_one_h_report_slot(
     # After 16:00 the slot workday rolls over: today's slot edits target the
     # next working day. Past/future dates are stored as sent.
     slot_date = effective_slot_date(payload.report_date)
-
-    if next_slot is not None:
-        assignee_ids: set[uuid.UUID] = set()
-        if task.assigned_to is not None:
-            assignee_ids.add(task.assigned_to)
-        assignee_ids.update(
-            (await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id == task_id))).scalars().all()
-        )
-        if assignee_ids:
-            slot_rows = (
-                await db.execute(
-                    select(TaskOneHReportSlot.task_id, Task.assigned_to, TaskAssignee.user_id)
-                    .join(Task, Task.id == TaskOneHReportSlot.task_id)
-                    .outerjoin(TaskAssignee, TaskAssignee.task_id == TaskOneHReportSlot.task_id)
-                    .where(
-                        TaskOneHReportSlot.report_date == slot_date,
-                        TaskOneHReportSlot.one_h_report_slot == next_slot,
-                        TaskOneHReportSlot.task_id != task_id,
-                    )
-                )
-            ).all()
-            slot_tasks_by_user: dict[uuid.UUID, set[uuid.UUID]] = {}
-            for other_task_id, other_assigned_to, other_assignee_id in slot_rows:
-                for uid in (other_assigned_to, other_assignee_id):
-                    if uid is not None and uid in assignee_ids:
-                        slot_tasks_by_user.setdefault(uid, set()).add(other_task_id)
-            if any(len(task_ids) >= 2 for task_ids in slot_tasks_by_user.values()):
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"An employee already has 2 tasks in the {next_slot} slot for this day",
-                )
 
     task.one_h_report_slot = next_slot
     if next_slot is not None:

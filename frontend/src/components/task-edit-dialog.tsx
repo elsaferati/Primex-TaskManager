@@ -53,6 +53,7 @@ const ONE_H_REPORT_SLOT_OPTIONS = [
   { value: "11:00", label: "11:00" },
   { value: "11:50", label: "11:50" },
   { value: "14:20", label: "14:20" },
+  { value: "16:00", label: "16:00" },
 ] as const
 const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS.map((option) => option.value))
 

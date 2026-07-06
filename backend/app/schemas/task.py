@@ -86,7 +86,7 @@ class TaskCreate(BaseModel):
     is_deadline_important: bool | None = None
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
-    one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20)$")
+    one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
     is_r1: bool | None = None
     is_personal: bool | None = None
     fast_task_order: int | None = Field(default=None, ge=1)
@@ -121,7 +121,7 @@ class TaskUpdate(BaseModel):
     is_deadline_important: bool | None = None
     is_bllok: bool | None = None
     is_1h_report: bool | None = None
-    one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20)$")
+    one_h_report_slot: str | None = Field(default=None, pattern=r"^(10:00|11:00|11:50|14:20|16:00)$")
     is_r1: bool | None = None
     is_personal: bool | None = None
     fast_task_order: int | None = Field(default=None, ge=1)
