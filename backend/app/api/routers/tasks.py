@@ -649,6 +649,13 @@ class FastTaskOrderUpdate(BaseModel):
     ordered_task_ids: list[uuid.UUID]
 
 
+class GaNoteTaskBatchRequest(BaseModel):
+    ga_note_origin_ids: list[uuid.UUID]
+    include_done: bool = True
+    include_all_done: bool = False
+    include_inactive: bool = False
+
+
 def _is_common_view_orderable_task(task: Task) -> bool:
     return bool(
         is_fast_task_model(task)
@@ -863,6 +870,77 @@ async def list_tasks(
             moved_days=_task_moved_days(t),
         )
         dto.alignment_user_ids = alignment_map.get(t.id)
+        out.append(dto)
+    return out
+
+
+@router.post("/by-ga-notes", response_model=list[TaskOut])
+async def list_tasks_by_ga_notes(
+    payload: GaNoteTaskBatchRequest,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[TaskOut]:
+    note_ids = list(dict.fromkeys(payload.ga_note_origin_ids))
+    if not note_ids:
+        return []
+
+    stmt = select(Task).where(Task.ga_note_origin_id.in_(note_ids))
+
+    if not payload.include_inactive:
+        stmt = stmt.where(Task.is_active.is_(True))
+    if not payload.include_done:
+        stmt = stmt.where(cast(Task.status, SQLString) != TaskStatus.DONE.value)
+    elif not payload.include_all_done:
+        done_cutoff = datetime.now(timezone.utc) - timedelta(days=45)
+        stmt = stmt.where(
+            or_(
+                cast(Task.status, SQLString) != TaskStatus.DONE.value,
+                Task.completed_at >= done_cutoff,
+            )
+        )
+
+    tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
+    task_ids = [task.id for task in tasks]
+    assignee_map = await _assignees_for_tasks(db, task_ids)
+    comment_map = await _user_comments_for_tasks(db, task_ids, user.id)
+    fallback_ids = [
+        task.assigned_to
+        for task in tasks
+        if task.assigned_to is not None and not assignee_map.get(task.id)
+    ]
+    if fallback_ids:
+        fallback_users = (
+            await db.execute(select(User).where(User.id.in_(fallback_ids)))
+        ).scalars().all()
+        fallback_map = {fallback_user.id: fallback_user for fallback_user in fallback_users}
+        for task in tasks:
+            if assignee_map.get(task.id):
+                continue
+            if task.assigned_to in fallback_map:
+                assignee_map[task.id] = [_user_to_assignee(fallback_map[task.assigned_to])]
+
+    alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
+    if task_ids:
+        rows = (
+            await db.execute(
+                select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
+                .where(TaskAlignmentUser.task_id.in_(task_ids))
+            )
+        ).all()
+        for task_id, user_id in rows:
+            alignment_map.setdefault(task_id, []).append(user_id)
+
+    today = _as_local_date(datetime.now(timezone.utc)) or datetime.now(timezone.utc).date()
+    out = []
+    for task in tasks:
+        dto = _task_to_out(
+            task,
+            assignee_map.get(task.id, []) or [],
+            user_comment=comment_map.get(task.id),
+            late_days=_task_late_days(task, today=today),
+            moved_days=_task_moved_days(task),
+        )
+        dto.alignment_user_ids = alignment_map.get(task.id)
         out.append(dto)
     return out
 

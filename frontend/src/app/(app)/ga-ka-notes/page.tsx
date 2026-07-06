@@ -993,24 +993,17 @@ export default function GaKaNotesPage() {
       }
       return
     }
-    const chunkSize = 50
-    const chunks: string[][] = []
-    for (let i = 0; i < noteIds.length; i += chunkSize) {
-      chunks.push(noteIds.slice(i, i + chunkSize))
-    }
+    const res = await apiFetch("/tasks/by-ga-notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ga_note_origin_ids: noteIds,
+        include_done: true,
+      }),
+    })
+    if (!res?.ok) return
 
-    const data: Task[] = []
-    for (const chunk of chunks) {
-      const params = new URLSearchParams()
-      params.set("include_done", "true")
-      params.set("include_all_departments", "true")
-      chunk.forEach((id) => params.append("ga_note_origin_ids", id))
-      const res = await apiFetch(`/tasks?${params.toString()}`)
-      if (!res?.ok) return
-      const chunkData = (await res.json()) as Task[]
-      data.push(...chunkData)
-    }
-    const userMapById = new Map(users.map((u) => [u.id, u]))
+    const data = (await res.json()) as Task[]
 
     const map = new Map<string, NoteTaskInfo>()
     const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
@@ -1038,20 +1031,6 @@ export default function GaKaNotesPage() {
         // Use TaskAssignee directly from API - it has all the info we need for display
         assignees = t.assignees
       }
-      if (assignees.length === 0 && t.assigned_to) {
-        // Fallback to assigned_to if no assignees in TaskAssignee table
-        const fallback = userMapById.get(t.assigned_to)
-        if (fallback) {
-          // Convert UserLookup to TaskAssignee format for consistency
-          assignees = [{
-            id: fallback.id,
-            email: null,
-            username: fallback.username || null,
-            full_name: fallback.full_name || null,
-            department_id: fallback.department_id || null,
-          }]
-        }
-      }
       const existing = map.get(t.ga_note_origin_id)
       map.set(t.ga_note_origin_id, {
         assignees: mergeAssignees(existing?.assignees ?? [], assignees),
@@ -1075,7 +1054,7 @@ export default function GaKaNotesPage() {
       })
     }
     setNoteTaskInfo(map)
-  }, [apiFetch, notes, users])
+  }, [apiFetch, notes])
 
   // Load tasks linked to notes to show assignees/descriptions
   React.useEffect(() => {
