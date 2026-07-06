@@ -30,6 +30,7 @@ from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
+from app.services.one_h_slots import effective_slot_date
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
 from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFromDayRequest, TaskUpdate
@@ -2572,6 +2573,10 @@ async def update_task_one_h_report_slot(
     if payload.one_h_report_slot is not None and next_slot is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
 
+    # After 16:00 the slot workday rolls over: today's slot edits target the
+    # next working day. Past/future dates are stored as sent.
+    slot_date = effective_slot_date(payload.report_date)
+
     if next_slot is not None:
         assignee_ids: set[uuid.UUID] = set()
         if task.assigned_to is not None:
@@ -2586,7 +2591,7 @@ async def update_task_one_h_report_slot(
                     .join(Task, Task.id == TaskOneHReportSlot.task_id)
                     .outerjoin(TaskAssignee, TaskAssignee.task_id == TaskOneHReportSlot.task_id)
                     .where(
-                        TaskOneHReportSlot.report_date == payload.report_date,
+                        TaskOneHReportSlot.report_date == slot_date,
                         TaskOneHReportSlot.one_h_report_slot == next_slot,
                         TaskOneHReportSlot.task_id != task_id,
                     )
@@ -2611,7 +2616,7 @@ async def update_task_one_h_report_slot(
         await db.execute(
             select(TaskOneHReportSlot).where(
                 TaskOneHReportSlot.task_id == task_id,
-                TaskOneHReportSlot.report_date == payload.report_date,
+                TaskOneHReportSlot.report_date == slot_date,
             )
         )
     ).scalar_one_or_none()
@@ -2623,7 +2628,7 @@ async def update_task_one_h_report_slot(
         db.add(
             TaskOneHReportSlot(
                 task_id=task_id,
-                report_date=payload.report_date,
+                report_date=slot_date,
                 one_h_report_slot=next_slot,
             )
         )

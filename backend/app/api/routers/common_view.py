@@ -33,6 +33,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
+from app.services.one_h_slots import effective_slot_date
 from app.services.system_task_schedule import matches_template_date
 
 
@@ -819,7 +820,7 @@ async def get_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, task_date)),
+                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, effective_slot_date(task_date))),
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,
