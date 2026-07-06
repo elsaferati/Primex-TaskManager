@@ -2168,7 +2168,11 @@ async def update_task(
         if not payload.is_1h_report and not _payload_has_field(payload, "one_h_report_slot"):
             task.one_h_report_slot = None
     if _payload_has_field(payload, "one_h_report_slot"):
-        task.one_h_report_slot = payload.one_h_report_slot if task.is_1h_report else None
+        if payload.one_h_report_slot is not None:
+            task.is_1h_report = True
+            task.one_h_report_slot = payload.one_h_report_slot
+        else:
+            task.one_h_report_slot = None
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
 
@@ -2552,9 +2556,6 @@ async def update_task_one_h_report_slot(
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
-    if not task.is_1h_report:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only 1H tasks can have a 1H report slot")
-
     is_assigned = (
         task.assigned_to == user.id
         or (await db.execute(
@@ -2572,6 +2573,8 @@ async def update_task_one_h_report_slot(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
 
     task.one_h_report_slot = next_slot
+    if next_slot is not None:
+        task.is_1h_report = True
 
     existing = (
         await db.execute(

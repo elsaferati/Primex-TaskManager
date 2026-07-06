@@ -5017,7 +5017,7 @@ export default function DepartmentKanban() {
             one_h_report_slot: nextSlot,
           }),
         })
-        if (res.status === 404) {
+        if (res.status === 400 || res.status === 404 || res.status === 500) {
           res = await apiFetch(`/tasks/${taskId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
