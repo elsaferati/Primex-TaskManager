@@ -55,6 +55,13 @@ export interface SystemTaskTemplateDefinition {
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
   is_active: boolean
+  created_by_user_id?: string | null
+  approval_status?: CommonApprovalStatus | null
+  approved_by_user_id?: string | null
+  approved_at?: string | null
+  rejected_by_user_id?: string | null
+  rejected_at?: string | null
+  rejection_reason?: string | null
   created_at: string
 }
 
@@ -90,6 +97,8 @@ export interface SystemTaskTemplate {
   status?: string | null
   is_active: boolean
   user_comment?: string | null
+  approval_status?: CommonApprovalStatus | null
+  rejection_reason?: string | null
   created_at: string
 }
 
@@ -124,6 +133,7 @@ export interface SystemTaskOut {
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
   created_by?: string | null
+  approval_status?: CommonApprovalStatus | null
   created_at: string
 }
 

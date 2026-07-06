@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.common_entry import CommonEntry
-from app.models.enums import CommonCategory, TaskPriority, TaskStatus
+from app.models.enums import CommonApprovalStatus, CommonCategory, TaskPriority, TaskStatus
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.task import Task
@@ -252,6 +252,7 @@ async def generate_system_task_instances(
             .join(SystemTaskTemplate, SystemTaskTemplateAssigneeSlot.template_id == SystemTaskTemplate.id)
             .where(SystemTaskTemplateAssigneeSlot.is_active.is_(True))
             .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
             .where(SystemTaskTemplate.trigger_type.is_(None))
             .with_for_update(skip_locked=True)
         )
@@ -359,6 +360,7 @@ async def ensure_slots_initialized(db: AsyncSession) -> None:
         await db.execute(
             select(SystemTaskTemplate)
             .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
             .where(SystemTaskTemplate.trigger_type.is_(None))
         )
     ).scalars().all()

@@ -394,6 +394,10 @@ function resolveTemplateScope(template: SystemTaskTemplateDefinition): SystemTas
   return template.department_id ? "DEPARTMENT" : "ALL"
 }
 
+function templateApprovalStatus(template: SystemTaskTemplateDefinition) {
+  return template.approval_status ?? "approved"
+}
+
 type SystemTasksViewProps = {
   scopeFilter?: SystemTaskScope
   headingTitle?: string
@@ -435,6 +439,10 @@ export function SystemTasksView({
   const [saving, setSaving] = React.useState(false)
   const [editSaving, setEditSaving] = React.useState(false)
   const [deletingTemplateId, setDeletingTemplateId] = React.useState<string | null>(null)
+  const [approvingTemplateId, setApprovingTemplateId] = React.useState<string | null>(null)
+  const [rejectingTemplateId, setRejectingTemplateId] = React.useState<string | null>(null)
+  const [rejectTemplate, setRejectTemplate] = React.useState<SystemTaskTemplateDefinition | null>(null)
+  const [rejectReason, setRejectReason] = React.useState("")
   const [frequencyFilters, setFrequencyFilters] = React.useState<SystemTaskFrequency[]>([])
   const [frequencyMultiSelect, setFrequencyMultiSelect] = React.useState(false)
   const [priorityFilters, setPriorityFilters] = React.useState<TaskPriority[]>([])
@@ -922,6 +930,20 @@ export function SystemTasksView({
     searchQuery,
   ])
 
+  const pendingTemplates = React.useMemo(
+    () => filteredTemplates.filter((template) => templateApprovalStatus(template) === "pending"),
+    [filteredTemplates]
+  )
+
+  const rejectedTemplates = React.useMemo(
+    () => filteredTemplates.filter((template) => templateApprovalStatus(template) === "rejected"),
+    [filteredTemplates]
+  )
+
+  const approvedTemplates = React.useMemo(
+    () => filteredTemplates.filter((template) => templateApprovalStatus(template) === "approved"),
+    [filteredTemplates]
+  )
 
   React.useEffect(() => {
     const combinedSelected =
@@ -941,7 +963,7 @@ export function SystemTasksView({
       "6_MONTHS": 4,
       YEARLY: 5,
     }
-    const sorted = [...filteredTemplates].sort((a, b) => {
+    const sorted = [...approvedTemplates].sort((a, b) => {
       const aInactive = !a.is_active
       const bInactive = !b.is_active
       if (aInactive !== bInactive) return aInactive ? 1 : -1
@@ -964,7 +986,7 @@ export function SystemTasksView({
         templates: sorted,
       },
     ]
-  }, [filteredTemplates])
+  }, [approvedTemplates])
 
   const resetFilters = () => {
     setFrequencyFilters([])
@@ -1091,7 +1113,7 @@ export function SystemTasksView({
       setAlignmentTime("")
       setAlignmentManagerIds([])
       await load()
-      toast.success("System task created")
+      toast.success("System task submitted for approval")
     } finally {
       setSaving(false)
     }
@@ -1264,6 +1286,77 @@ export function SystemTasksView({
     }
   }
 
+  const approveTemplate = async (template: SystemTaskTemplateDefinition) => {
+    const confirmed = await confirm({
+      title: "Approve system task",
+      description: `Approve "${template.title}" and allow it to generate scheduled task instances?`,
+      confirmLabel: "Approve",
+    })
+    if (!confirmed) return
+
+    setApprovingTemplateId(template.id)
+    try {
+      const res = await apiFetch(`/system-tasks/${template.id}/approve`, {
+        method: "POST",
+      })
+      if (!res.ok) {
+        let detail = "Failed to approve system task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      toast.success("System task approved")
+      await load()
+    } finally {
+      setApprovingTemplateId(null)
+    }
+  }
+
+  const openRejectDialog = (template: SystemTaskTemplateDefinition) => {
+    setRejectTemplate(template)
+    setRejectReason("")
+  }
+
+  const submitReject = async () => {
+    if (!rejectTemplate) return
+    const reason = rejectReason.trim()
+    if (reason.length < 2) {
+      toast.error("Please enter a rejection reason.")
+      return
+    }
+
+    setRejectingTemplateId(rejectTemplate.id)
+    try {
+      const res = await apiFetch(`/system-tasks/${rejectTemplate.id}/reject`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ reason }),
+      })
+      if (!res.ok) {
+        let detail = "Failed to reject system task"
+        try {
+          const data = (await res.json()) as { detail?: string }
+          if (data?.detail) detail = data.detail
+        } catch {
+          // ignore
+        }
+        toast.error(typeof detail === "string" ? detail : "An error occurred")
+        return
+      }
+      toast.success("System task rejected")
+      setRejectTemplate(null)
+      setRejectReason("")
+      await load()
+    } finally {
+      setRejectingTemplateId(null)
+    }
+  }
+
   const availableAssignees = React.useMemo(() => {
     if (!departmentId || isGlobalScopeValue(departmentId)) return users
     return users.filter((u) => u.department_id === departmentId || !u.department_id)
@@ -1415,6 +1508,106 @@ export function SystemTasksView({
       return <span className="text-slate-400">-</span>
     },
     [renderAssigneeSummaryText, resolveAssigneeNameById]
+  )
+
+  const renderApprovalSection = React.useCallback(
+    (
+      title: string,
+      description: string,
+      items: SystemTaskTemplateDefinition[],
+      status: "pending" | "rejected"
+    ) => {
+      if (!showSystemActions || items.length === 0) return null
+
+      return (
+        <div className="rounded-lg border bg-white shadow-sm">
+          <div className="border-b bg-slate-50 px-4 py-3">
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <div>
+                <div className="text-sm font-semibold text-slate-900">{title}</div>
+                <div className="text-xs text-slate-500">{description}</div>
+              </div>
+              <Badge variant="outline" className="bg-white text-slate-700">
+                {items.length}
+              </Badge>
+            </div>
+          </div>
+          <div className="divide-y">
+            {items.map((template) => {
+              const priorityValue = normalizePriority(template.priority)
+              const rejectedAt = template.rejected_at ? formatDateTimeDMY(template.rejected_at) : null
+              return (
+                <div key={template.id} className="grid gap-3 px-4 py-3 md:grid-cols-[1fr_160px_180px_220px] md:items-center">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <div className="font-medium text-slate-900">{template.title}</div>
+                      <Badge
+                        variant="outline"
+                        className={cn("border text-[11px]", PRIORITY_BADGE_STYLES[priorityValue])}
+                      >
+                        {PRIORITY_LABELS[priorityValue]}
+                      </Badge>
+                    </div>
+                    <div className="mt-1 text-xs text-slate-500">
+                      {templateDepartmentLabel(template)} · {FREQUENCY_OPTIONS.find((option) => option.value === template.frequency)?.label ?? template.frequency}
+                    </div>
+                    {status === "rejected" ? (
+                      <div className="mt-2 rounded border border-red-100 bg-red-50 px-2 py-1.5 text-xs text-red-700">
+                        {template.rejection_reason || "Rejected"}
+                        {rejectedAt ? <span className="ml-1 text-red-500">({rejectedAt})</span> : null}
+                      </div>
+                    ) : null}
+                  </div>
+                  <div className="text-xs text-slate-600 md:text-sm">
+                    {template.finish_period || "-"}
+                  </div>
+                  <div>{renderManagementAssignees(template)}</div>
+                  <div className="flex flex-wrap justify-start gap-2 md:justify-end">
+                    {canEditTemplate(template) ? (
+                      <Button variant="outline" size="sm" onClick={() => startEdit(template)}>
+                        Edit
+                      </Button>
+                    ) : null}
+                    {status === "pending" && isManagerOrAdmin ? (
+                      <>
+                        <Button
+                          size="sm"
+                          disabled={approvingTemplateId === template.id}
+                          onClick={() => void approveTemplate(template)}
+                        >
+                          {approvingTemplateId === template.id ? "Approving..." : "Approve"}
+                        </Button>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          disabled={rejectingTemplateId === template.id}
+                          className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                          onClick={() => openRejectDialog(template)}
+                        >
+                          Reject
+                        </Button>
+                      </>
+                    ) : null}
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )
+    },
+    [
+      approveTemplate,
+      approvingTemplateId,
+      canEditTemplate,
+      isManagerOrAdmin,
+      openRejectDialog,
+      rejectingTemplateId,
+      renderManagementAssignees,
+      showSystemActions,
+      startEdit,
+      templateDepartmentLabel,
+    ]
   )
 
   const setInternalNoteValue = (
@@ -3120,6 +3313,54 @@ export function SystemTasksView({
                 </DialogContent>
               </Dialog>
 
+              <Dialog
+                open={Boolean(rejectTemplate)}
+                onOpenChange={(open) => {
+                  if (!open) {
+                    setRejectTemplate(null)
+                    setRejectReason("")
+                  }
+                }}
+              >
+                <DialogContent className="max-w-md">
+                  <DialogHeader>
+                    <DialogTitle>Reject system task</DialogTitle>
+                  </DialogHeader>
+                  <div className="space-y-3">
+                    <div className="text-sm text-slate-600">
+                      {rejectTemplate ? `Reject "${rejectTemplate.title}" and keep it in rejected system tasks.` : ""}
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Reason</Label>
+                      <Textarea
+                        value={rejectReason}
+                        onChange={(event) => setRejectReason(event.target.value)}
+                        placeholder="Enter the reason for rejection..."
+                        rows={4}
+                      />
+                    </div>
+                    <div className="flex justify-end gap-2">
+                      <Button
+                        variant="outline"
+                        onClick={() => {
+                          setRejectTemplate(null)
+                          setRejectReason("")
+                        }}
+                      >
+                        Cancel
+                      </Button>
+                      <Button
+                        variant="destructive"
+                        disabled={!rejectReason.trim() || Boolean(rejectTemplate && rejectingTemplateId === rejectTemplate.id)}
+                        onClick={() => void submitReject()}
+                      >
+                        {rejectTemplate && rejectingTemplateId === rejectTemplate.id ? "Rejecting..." : "Reject"}
+                      </Button>
+                    </div>
+                  </div>
+                </DialogContent>
+              </Dialog>
+
               {!canCreate ? (
                 <span className="text-base text-muted-foreground">Only managers or admins can add tasks.</span>
               ) : null}
@@ -3249,6 +3490,20 @@ export function SystemTasksView({
           </div>
         ) : null}
       </div>
+
+      {renderApprovalSection(
+        "New System Tasks",
+        "Submitted system tasks waiting for manager/admin approval.",
+        pendingTemplates,
+        "pending"
+      )}
+
+      {renderApprovalSection(
+        "Rejected System Tasks",
+        "Rejected submissions kept for review and editing.",
+        rejectedTemplates,
+        "rejected"
+      )}
 
       {loading ? (
         <div className="py-8 text-center text-sm text-muted-foreground">Loading tasks...</div>

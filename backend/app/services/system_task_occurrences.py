@@ -13,6 +13,7 @@ from app.models.system_task_occurrence import SystemTaskOccurrence
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.enums import CommonApprovalStatus
 from app.services.system_task_schedule import matches_template_date
 from app.services.system_task_instances import ensure_task_instances_in_range
 
@@ -82,7 +83,11 @@ async def ensure_occurrences_in_range(
     if end < start:
         return
 
-    tmpl_stmt = select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True))
+    tmpl_stmt = (
+        select(SystemTaskTemplate)
+        .where(SystemTaskTemplate.is_active.is_(True))
+        .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
+    )
     if template_ids:
         tmpl_stmt = tmpl_stmt.where(SystemTaskTemplate.id.in_(template_ids))
     templates = (await db.execute(tmpl_stmt)).scalars().all()

@@ -25,7 +25,7 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
 from app.models.common_entry import CommonEntry
-from app.models.enums import CommonCategory, ProjectPhaseStatus, ProjectType, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
+from app.models.enums import CommonApprovalStatus, CommonCategory, ProjectPhaseStatus, ProjectType, TaskFinishPeriod, TaskPriority, TaskStatus, UserRole
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_member import ProjectMember
@@ -1383,7 +1383,11 @@ async def weekly_planner(
     # Prefetch active system task templates and resolve assignees for weekly planner display.
     # Weekly Planner must show only the occurrences that belong to the selected week and day (no overdue/late).
     system_templates = (
-        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True)))
+        await db.execute(
+            select(SystemTaskTemplate)
+            .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
+        )
     ).scalars().all()
     system_template_ids = [t.id for t in system_templates]
     # template_id -> set[user_id]
@@ -2406,7 +2410,11 @@ async def weekly_table_planner(
 
     # Prefetch active system task templates and resolve assignees for weekly planner display.
     system_templates = (
-        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active.is_(True)))
+        await db.execute(
+            select(SystemTaskTemplate)
+            .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
+        )
     ).scalars().all()
     system_template_ids = [t.id for t in system_templates]
     system_template_assignees: dict[uuid.UUID, set[uuid.UUID]] = {tid: set() for tid in system_template_ids}
@@ -2671,6 +2679,7 @@ async def weekly_table_planner(
                             .where(Task.is_active.is_(True))
                             .where(task_local_day == day_date)
                             .where(SystemTaskTemplate.is_active.is_(True))
+                            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
                             .order_by(SystemTaskTemplate.title, Task.created_at.desc())
                         )
                     ).all()

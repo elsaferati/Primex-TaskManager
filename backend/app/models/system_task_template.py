@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
-from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority
+from app.models.enums import CommonApprovalStatus, FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority
 
 
 class SystemTaskTemplate(Base):
@@ -55,5 +55,23 @@ class SystemTaskTemplate(Base):
     requires_alignment: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     alignment_time: Mapped[time | None] = mapped_column(Time, nullable=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    created_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    approval_status: Mapped[CommonApprovalStatus] = mapped_column(
+        Enum(CommonApprovalStatus, name="common_approval_status"),
+        nullable=False,
+        index=True,
+        server_default=CommonApprovalStatus.approved.value,
+    )
+    approved_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    approved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejected_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
+    )
+    rejected_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    rejection_reason: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 

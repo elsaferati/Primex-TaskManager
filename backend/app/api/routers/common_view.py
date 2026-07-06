@@ -23,7 +23,7 @@ from app.config import settings
 from app.db import get_db
 from app.models.common_entry import CommonEntry
 from app.models.department import Department
-from app.models.enums import CommonCategory, UserRole
+from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.ga_note import GaNote
 from app.models.meeting import Meeting
 from app.models.project import Project
@@ -1015,7 +1015,11 @@ async def get_common_view(
     if "system_tasks" in requested:
         ts = _time_start()
         templates = (
-            await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.is_active == True))
+            await db.execute(
+                select(SystemTaskTemplate)
+                .where(SystemTaskTemplate.is_active == True)
+                .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
+            )
         ).scalars().all()
         template_ids = [t.id for t in templates]
         alignment_user_rows = (

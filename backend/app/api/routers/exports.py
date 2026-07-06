@@ -45,7 +45,7 @@ from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.ga_note import GaNote
 from app.models.daily_report_ga_entry import DailyReportGaEntry
-from app.models.enums import CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType, SystemTaskScope, GaNoteStatus
+from app.models.enums import CommonApprovalStatus, CommonCategory, TaskStatus as TaskStatusEnum, UserRole, ChecklistItemType, SystemTaskScope, GaNoteStatus
 from app.api.routers import planners as planners_router
 from app.api.routers.planners import weekly_table_planner
 from app.schemas.planner import WeeklyTableDepartment
@@ -4373,6 +4373,7 @@ async def export_system_task_templates_xlsx(
     template_stmt = select(SystemTaskTemplate)
     if normalized_mode == "active":
         template_stmt = template_stmt.where(SystemTaskTemplate.is_active.is_(True))
+        template_stmt = template_stmt.where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
     elif normalized_mode == "inactive":
         template_stmt = template_stmt.where(SystemTaskTemplate.is_active.is_(False))
 

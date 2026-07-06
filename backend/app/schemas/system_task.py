@@ -5,7 +5,7 @@ from datetime import date, datetime, time
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority, TaskStatus
+from app.models.enums import CommonApprovalStatus, FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority, TaskStatus
 from app.schemas.task import TaskAssigneeOut
 
 
@@ -40,4 +40,5 @@ class SystemTaskOut(BaseModel):
     alignment_roles: list[str] | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
     created_by: uuid.UUID | None = None
+    approval_status: CommonApprovalStatus | None = None
     created_at: datetime

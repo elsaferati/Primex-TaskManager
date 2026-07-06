@@ -21,6 +21,7 @@ from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.models.department import Department
 from app.models.enums import (
+    CommonApprovalStatus,
     FrequencyType,
     SystemTaskScope,
     TaskFinishPeriod,
@@ -42,6 +43,7 @@ from app.schemas.system_task_template import (
     SystemTaskTemplateAssigneeSlotIn,
     SystemTaskTemplateAssigneeSlotOut,
     SystemTaskTemplateCreate, SystemTaskTemplateOut,
+    SystemTaskTemplateReject,
     SystemTaskTemplateUpdate,
 )
 from app.services.system_task_schedule import (
@@ -72,7 +74,16 @@ def _enum_value(value) -> str | None:
 def _task_is_active(template: SystemTaskTemplate) -> bool:
     if not template.is_active:
         return False
+    if _template_approval_status(template) != CommonApprovalStatus.approved:
+        return False
     return True
+
+
+def _template_approval_status(template: SystemTaskTemplate) -> CommonApprovalStatus:
+    value = getattr(template, "approval_status", None)
+    if value is None:
+        return CommonApprovalStatus.approved
+    return value if isinstance(value, CommonApprovalStatus) else CommonApprovalStatus(value)
 
 
 def _user_to_assignee(user: User) -> TaskAssigneeOut:
@@ -334,6 +345,7 @@ def _task_row_to_out(
         alignment_roles=alignment_roles,
         alignment_user_ids=alignment_user_ids,
         created_by=task.created_by,
+        approval_status=_template_approval_status(template),
         created_at=task.created_at,
     )
 
@@ -399,7 +411,8 @@ async def _template_to_out(
         alignment_time=getattr(template, "alignment_time", None),
         alignment_roles=alignment_roles,
         alignment_user_ids=alignment_user_ids,
-        created_by=user_id,
+        created_by=template.created_by_user_id or user_id,
+        approval_status=_template_approval_status(template),
         created_at=template.created_at,
     )
     task_out.department_ids = department_ids
@@ -464,6 +477,13 @@ async def _template_definition_to_out(
         alignment_roles=role_map.get(template.id),
         alignment_user_ids=alignment_user_map.get(template.id),
         is_active=template.is_active,
+        created_by_user_id=template.created_by_user_id,
+        approval_status=_template_approval_status(template),
+        approved_by_user_id=template.approved_by_user_id,
+        approved_at=template.approved_at,
+        rejected_by_user_id=template.rejected_by_user_id,
+        rejected_at=template.rejected_at,
+        rejection_reason=template.rejection_reason,
         created_at=template.created_at,
     )
 
@@ -569,6 +589,7 @@ async def list_system_tasks(
     template_stmt = (
         select(SystemTaskTemplate)
         .where(SystemTaskTemplate.trigger_type.is_(None))
+        .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
         .order_by(SystemTaskTemplate.created_at.desc())
     )
 
@@ -978,6 +999,13 @@ async def list_system_task_templates(
             alignment_user_ids=alignment_users_map.get(t.id),
             assignee_slots=slots_map.get(t.id, []),
             is_active=t.is_active,
+            created_by_user_id=t.created_by_user_id,
+            approval_status=_template_approval_status(t),
+            approved_by_user_id=t.approved_by_user_id,
+            approved_at=t.approved_at,
+            rejected_by_user_id=t.rejected_by_user_id,
+            rejected_at=t.rejected_at,
+            rejection_reason=t.rejection_reason,
             created_at=t.created_at,
         )
         for t in templates
@@ -1324,6 +1352,8 @@ async def create_system_task_template(
         requires_alignment=payload.requires_alignment if payload.requires_alignment is not None else False,
         alignment_time=payload.alignment_time,
         is_active=payload.is_active if payload.is_active is not None else True,
+        created_by_user_id=user.id,
+        approval_status=CommonApprovalStatus.pending,
     )
 
     db.add(template)
@@ -1351,6 +1381,65 @@ async def create_system_task_template(
                 insert(SystemTaskTemplateAlignmentUser),
                 [{"template_id": template.id, "user_id": uid} for uid in alignment_user_ids],
             )
+    await db.commit()
+    await db.refresh(template)
+    return await _template_definition_to_out(db, template=template)
+
+
+@router.post("/{template_id}/approve", response_model=SystemTaskTemplateOut)
+async def approve_system_task_template(
+    template_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> SystemTaskTemplateOut:
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    template = (
+        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
+    if _template_approval_status(template) != CommonApprovalStatus.pending:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="System task already processed")
+
+    template.approval_status = CommonApprovalStatus.approved
+    template.approved_by_user_id = user.id
+    template.approved_at = datetime.now(timezone.utc)
+    template.rejected_by_user_id = None
+    template.rejected_at = None
+    template.rejection_reason = None
+
+    await db.commit()
+    await db.refresh(template)
+    return await _template_definition_to_out(db, template=template)
+
+
+@router.post("/{template_id}/reject", response_model=SystemTaskTemplateOut)
+async def reject_system_task_template(
+    template_id: uuid.UUID,
+    payload: SystemTaskTemplateReject,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> SystemTaskTemplateOut:
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+
+    template = (
+        await db.execute(select(SystemTaskTemplate).where(SystemTaskTemplate.id == template_id))
+    ).scalar_one_or_none()
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
+    if _template_approval_status(template) != CommonApprovalStatus.pending:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="System task already processed")
+
+    template.approval_status = CommonApprovalStatus.rejected
+    template.rejected_by_user_id = user.id
+    template.rejected_at = datetime.now(timezone.utc)
+    template.rejection_reason = payload.reason
+    template.approved_by_user_id = None
+    template.approved_at = None
+
     await db.commit()
     await db.refresh(template)
     return await _template_definition_to_out(db, template=template)
@@ -1396,6 +1485,7 @@ async def update_system_task_template(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="System task not found")
 
     # Allow all users to edit all system tasks - no permission restrictions
+    original_approval_status = _template_approval_status(template)
 
     fields_set = payload.__fields_set__
     scope_set = "scope" in fields_set
@@ -1583,6 +1673,14 @@ async def update_system_task_template(
         template.alignment_time = payload.alignment_time
     if payload.is_active is not None:
         template.is_active = payload.is_active
+
+    if original_approval_status == CommonApprovalStatus.rejected:
+        template.approval_status = CommonApprovalStatus.pending
+        template.approved_by_user_id = None
+        template.approved_at = None
+        template.rejected_by_user_id = None
+        template.rejected_at = None
+        template.rejection_reason = None
 
     # Update alignment roles if provided.
     if (

@@ -5,7 +5,7 @@ from datetime import datetime, time
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority
+from app.models.enums import CommonApprovalStatus, FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority
 from app.schemas.task import TaskAssigneeOut
 
 
@@ -39,6 +39,13 @@ class SystemTaskTemplateOut(BaseModel):
     alignment_roles: list[str] | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool
+    created_by_user_id: uuid.UUID | None = None
+    approval_status: CommonApprovalStatus = CommonApprovalStatus.approved
+    approved_by_user_id: uuid.UUID | None = None
+    approved_at: datetime | None = None
+    rejected_by_user_id: uuid.UUID | None = None
+    rejected_at: datetime | None = None
+    rejection_reason: str | None = None
     created_at: datetime
 
 
@@ -98,6 +105,10 @@ class SystemTaskTemplateUpdate(BaseModel):
     alignment_roles: list[str] | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
+
+
+class SystemTaskTemplateReject(BaseModel):
+    reason: str = Field(min_length=2, max_length=1000)
 
 
 class SystemTaskTemplateAssigneeSlotIn(BaseModel):
