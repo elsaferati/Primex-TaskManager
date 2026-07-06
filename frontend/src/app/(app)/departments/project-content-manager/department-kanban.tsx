@@ -3462,6 +3462,7 @@ export default function DepartmentKanban() {
       sortDate?: string | null
       startDate?: string | null
       dueDate?: string | null
+      oneHReportSlot?: OneHReportSlot | null
     }> => {
       const rows: ReturnType<typeof convertDailyReportToRows> = []
       const systemAmRows: typeof rows = []
@@ -3612,6 +3613,9 @@ export default function DepartmentKanban() {
             sortDate: task.due_date || task.start_date || task.created_at,
             startDate: task.start_date || null,
             dueDate: task.due_date || null,
+            oneHReportSlot: task.is_1h_report
+              ? dailyReportOneHSlots[task.id] ?? normalizeOneHReportSlot(task.one_h_report_slot)
+              : null,
           })
         } else {
           fastRows.push({
@@ -3638,6 +3642,9 @@ export default function DepartmentKanban() {
               sortDate: task.due_date || task.start_date || task.created_at,
               startDate: task.start_date || null,
               dueDate: task.due_date || null,
+              oneHReportSlot: task.is_1h_report
+                ? dailyReportOneHSlots[task.id] ?? normalizeOneHReportSlot(task.one_h_report_slot)
+                : null,
             },
           })
           fastIndex += 1
@@ -3728,7 +3735,7 @@ export default function DepartmentKanban() {
         })
         .map((entry) => entry.row)
     },
-    [deadlineImportantTaskIds, projects, selectedAllReportDate, systemTemplateById, userMap]
+    [dailyReportOneHSlots, deadlineImportantTaskIds, projects, selectedAllReportDate, systemTemplateById, userMap]
   )
 
   const weekProjectTasks = React.useMemo(() => {
@@ -3996,7 +4003,10 @@ export default function DepartmentKanban() {
           res = await apiFetch(`/tasks/${taskId}`, {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({ one_h_report_slot: nextSlot }),
+            body: JSON.stringify({
+              is_1h_report: nextSlot !== null ? true : undefined,
+              one_h_report_slot: nextSlot,
+            }),
           })
         }
         if (!res.ok) {
