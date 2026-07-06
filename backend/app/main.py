@@ -33,7 +33,7 @@ scheduler_task: asyncio.Task | None = None
 
 @app.get("/health")
 async def health() -> dict:
-    return {"status": "ok"}
+    return {"status": "ok", "build": "one-h-slot-2026-07-06"}
 
 
 @app.on_event("startup")
