@@ -196,6 +196,8 @@ type Section = {
   templates: SystemTaskTemplateDefinition[]
 }
 
+type ApprovalView = "approved" | "pending" | "rejected"
+
 // --- Helpers ---
 
 function resolveScope(value: string): SystemTaskScope {
@@ -312,7 +314,7 @@ function matchesTemplateDate(template: SystemTaskTemplateDefinition, date: Date)
   const year = date.getFullYear()
   const lastDay = new Date(year, monthIndex + 1, 0).getDate()
 
-  if (template.frequency === "DAILY") return true
+  if (template.frequency === "DAILY") return dayOfWeek <= 4
   if (template.frequency === "WEEKLY") {
     return matchesTemplateDayOfWeek(template, dayOfWeek)
   }
@@ -443,6 +445,7 @@ export function SystemTasksView({
   const [rejectingTemplateId, setRejectingTemplateId] = React.useState<string | null>(null)
   const [rejectTemplate, setRejectTemplate] = React.useState<SystemTaskTemplateDefinition | null>(null)
   const [rejectReason, setRejectReason] = React.useState("")
+  const [approvalView, setApprovalView] = React.useState<ApprovalView>("approved")
   const [frequencyFilters, setFrequencyFilters] = React.useState<SystemTaskFrequency[]>([])
   const [frequencyMultiSelect, setFrequencyMultiSelect] = React.useState(false)
   const [priorityFilters, setPriorityFilters] = React.useState<TaskPriority[]>([])
@@ -498,7 +501,8 @@ export function SystemTasksView({
   const [editAlignmentManagerIds, setEditAlignmentManagerIds] = React.useState<string[]>([])
   const [editShowWeekendDays, setEditShowWeekendDays] = React.useState(false)
 
-  const isManagerOrAdmin = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const isAdmin = user?.role === "ADMIN"
+  const isManagerOrAdmin = isAdmin || user?.role === "MANAGER"
   const canCreate = showSystemActions
 
   // Resolve Gane user id once for GA scoping checks
@@ -1568,6 +1572,17 @@ export function SystemTasksView({
                         Edit
                       </Button>
                     ) : null}
+                    {isAdmin ? (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={deletingTemplateId === template.id}
+                        className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                        onClick={() => void deleteTemplate(template)}
+                      >
+                        {deletingTemplateId === template.id ? "Deleting..." : "Delete"}
+                      </Button>
+                    ) : null}
                     {status === "pending" && isManagerOrAdmin ? (
                       <>
                         <Button
@@ -1600,6 +1615,9 @@ export function SystemTasksView({
       approveTemplate,
       approvingTemplateId,
       canEditTemplate,
+      deleteTemplate,
+      deletingTemplateId,
+      isAdmin,
       isManagerOrAdmin,
       openRejectDialog,
       rejectingTemplateId,
@@ -2495,23 +2513,52 @@ export function SystemTasksView({
           </div>
           {showSystemActions ? (
             <div className="flex flex-wrap items-center gap-2">
-              <Button
-                variant="outline"
-                onClick={handlePrint}
-                size="sm"
-                className="h-9 border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50"
-              >
-                Print
-              </Button>
-              <Button
-                variant="outline"
-                onClick={() => void exportTemplatesExcel()}
-                disabled={exportingExcel}
-                size="sm"
-                className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
-              >
-                {exportingExcel ? "Exporting..." : "Export Excel"}
-              </Button>
+              <div className="flex h-9 overflow-hidden rounded-md border border-slate-200 bg-slate-50">
+                {[
+                  { id: "approved", label: "System Tasks", count: approvedTemplates.length },
+                  { id: "pending", label: "New", count: pendingTemplates.length },
+                  { id: "rejected", label: "Rejected", count: rejectedTemplates.length },
+                ].map((item) => {
+                  const active = approvalView === item.id
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      className={cn(
+                        "border-r border-slate-200 px-3 text-sm font-medium last:border-r-0",
+                        active
+                          ? "bg-blue-600 text-white"
+                          : "bg-white text-slate-700 hover:bg-slate-100"
+                      )}
+                      onClick={() => setApprovalView(item.id as ApprovalView)}
+                    >
+                      {item.label}
+                      {item.count > 0 ? <span className="ml-1 text-xs opacity-80">({item.count})</span> : null}
+                    </button>
+                  )
+                })}
+              </div>
+              {approvalView === "approved" ? (
+                <>
+                  <Button
+                    variant="outline"
+                    onClick={handlePrint}
+                    size="sm"
+                    className="h-9 border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    Print
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => void exportTemplatesExcel()}
+                    disabled={exportingExcel}
+                    size="sm"
+                    className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
+                  >
+                    {exportingExcel ? "Exporting..." : "Export Excel"}
+                  </Button>
+                </>
+              ) : null}
               <Dialog open={createOpen} onOpenChange={setCreateOpen}>
                 <DialogTrigger asChild>
                   <Button
@@ -3491,22 +3538,34 @@ export function SystemTasksView({
         ) : null}
       </div>
 
-      {renderApprovalSection(
-        "New System Tasks",
-        "Submitted system tasks waiting for manager/admin approval.",
-        pendingTemplates,
-        "pending"
-      )}
-
-      {renderApprovalSection(
-        "Rejected System Tasks",
-        "Rejected submissions kept for review and editing.",
-        rejectedTemplates,
-        "rejected"
-      )}
-
       {loading ? (
         <div className="py-8 text-center text-sm text-muted-foreground">Loading tasks...</div>
+      ) : approvalView === "pending" ? (
+        pendingTemplates.length ? (
+          renderApprovalSection(
+            "New System Tasks",
+            "Submitted system tasks waiting for manager/admin approval.",
+            pendingTemplates,
+            "pending"
+          )
+        ) : (
+          <div className="rounded-lg border bg-white py-12 text-center text-sm text-muted-foreground">
+            No new system tasks waiting for approval.
+          </div>
+        )
+      ) : approvalView === "rejected" ? (
+        rejectedTemplates.length ? (
+          renderApprovalSection(
+            "Rejected System Tasks",
+            "Rejected submissions kept for review and editing.",
+            rejectedTemplates,
+            "rejected"
+          )
+        ) : (
+          <div className="rounded-lg border bg-white py-12 text-center text-sm text-muted-foreground">
+            No rejected system tasks.
+          </div>
+        )
       ) : sections.length ? (
         <div
           id="system-task-table"

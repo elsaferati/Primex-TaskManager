@@ -24,6 +24,10 @@ def _previous_working_day(value: date) -> date:
     return value
 
 
+def _is_working_day(value: date) -> bool:
+    return value.weekday() <= 4
+
+
 def _last_working_day_of_month(year: int, month: int) -> date:
     last_day = calendar.monthrange(year, month)[1]
     return _previous_working_day(date(year, month, last_day))
@@ -72,7 +76,7 @@ def _matches_month_cycle(
 def matches_template_date(template: SystemTaskTemplate, target: date) -> bool:
     frequency = template.frequency
     if frequency == FrequencyType.DAILY:
-        return True
+        return _is_working_day(target)
     if frequency == FrequencyType.WEEKLY:
         return _matches_template_day_of_week(template, target)
 

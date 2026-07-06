@@ -1,12 +1,12 @@
 from __future__ import annotations
 
-from datetime import datetime, time, timezone
+from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
 from unittest import TestCase
 
 from app.models.enums import FrequencyType
 from app.services.system_task_instances import _adjust_due_datetime_local
-from app.services.system_task_schedule import first_run_at, next_occurrence
+from app.services.system_task_schedule import first_run_at, matches_template_date, next_occurrence
 
 
 class TestSystemTaskScheduleRefactor(TestCase):
@@ -20,6 +20,31 @@ class TestSystemTaskScheduleRefactor(TestCase):
         )
         run_at = first_run_at(tmpl, datetime(2026, 3, 3, 10, 0, tzinfo=timezone.utc))
         self.assertEqual(run_at.astimezone(timezone.utc).date().isoformat(), "2026-03-04")
+
+    def test_daily_does_not_match_weekends(self) -> None:
+        tmpl = SimpleNamespace(
+            frequency=FrequencyType.DAILY,
+            timezone="Europe/Budapest",
+            due_time=time(9, 0),
+            interval=1,
+            created_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(matches_template_date(tmpl, date(2026, 3, 6)))
+        self.assertFalse(matches_template_date(tmpl, date(2026, 3, 7)))
+        self.assertFalse(matches_template_date(tmpl, date(2026, 3, 8)))
+
+    def test_daily_next_occurrence_skips_weekend(self) -> None:
+        tmpl = SimpleNamespace(
+            frequency=FrequencyType.DAILY,
+            timezone="Europe/Budapest",
+            due_time=time(9, 0),
+            interval=1,
+            created_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+        )
+
+        run_at = next_occurrence(tmpl, datetime(2026, 3, 6, 9, 0, tzinfo=timezone.utc))
+        self.assertEqual(run_at.astimezone(timezone.utc).date().isoformat(), "2026-03-09")
 
     def test_monthly_overflow_uses_last_working_day_of_month(self) -> None:
         tmpl = SimpleNamespace(
