@@ -2379,6 +2379,9 @@ export default function GaKaNotesPage() {
                 Numbers
               </Button>
               <span className="text-xs text-muted-foreground">Select text for bold, or lines for bullets/numbers.</span>
+              <Button className="ml-auto h-8 sm:hidden" onClick={() => void createNote()} disabled={posting}>
+                {posting ? "Saving..." : "Save note"}
+              </Button>
             </div>
             <Textarea
               ref={contentTextareaRef}
@@ -2433,7 +2436,7 @@ export default function GaKaNotesPage() {
               </div>
             )}
           </div>
-          <div className="flex justify-end">
+          <div className="hidden justify-end sm:flex">
             <Button onClick={() => void createNote()} disabled={posting}>
               {posting ? "Saving..." : "Save note"}
             </Button>
@@ -2891,12 +2894,12 @@ export default function GaKaNotesPage() {
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
             <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1326px] sm:min-w-[1516px]">
-                <table className="w-full table-fixed caption-bottom text-sm min-w-[1326px] sm:min-w-[1516px]">
+              <div className="w-full min-w-[1266px] sm:min-w-[1516px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1266px] sm:min-w-[1516px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
-                      <th className="min-w-[340px] w-[340px] max-w-[340px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
+                      <th className="min-w-[280px] w-[280px] max-w-[280px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
                       <th className="hidden sm:table-cell min-w-[220px] w-[220px] max-w-[220px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
@@ -2997,7 +3000,7 @@ export default function GaKaNotesPage() {
                     return (
                       <tr key={note.id} className="hover:bg-muted/50 border-b transition-colors">
                         <td className="font-bold text-muted-foreground border border-slate-600 border-l-2 border-l-slate-800 p-2 align-middle whitespace-nowrap" style={{ verticalAlign: 'bottom' }}>{idx + 1}</td>
-                        <td className={`min-w-[340px] w-[340px] max-w-[340px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] whitespace-pre-wrap break-words border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
+                        <td className={`min-w-[280px] w-[280px] max-w-[280px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] whitespace-pre-wrap break-words border border-slate-600 p-2 align-middle ${shenimiCellClass}`} style={{ verticalAlign: 'bottom' }}>
                           <div className="flex flex-col gap-1">
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0 flex flex-wrap items-center gap-1">

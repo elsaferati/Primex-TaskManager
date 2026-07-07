@@ -162,7 +162,7 @@ const items: NavItem[] = [
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const { apiFetch } = useAuth()
-  const { isOpen, setIsOpen } = useSidebar()
+  const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
   const [resolvedProjectRoute, setResolvedProjectRoute] = React.useState<"dev" | "pcm" | "design" | null>(null)
   const genericProjectId = React.useMemo(() => {
@@ -237,8 +237,9 @@ export function Sidebar({ role }: { role: UserRole }) {
       {/* Mobile backdrop */}
       {isOpen && (
         <div
-          className="fixed inset-0 bg-black/50 z-[110] md:hidden pointer-events-none"
+          className="fixed inset-0 bg-black/50 z-[100] md:hidden"
           aria-hidden="true"
+          onClick={() => setIsOpen(false)}
         />
       )}
       
@@ -282,6 +283,9 @@ export function Sidebar({ role }: { role: UserRole }) {
               <Link
                 key={item.href}
                 href={item.href}
+                onClick={() => {
+                  if (!isDesktop) setIsOpen(false)
+                }}
                 className={cn(
                   "group flex items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
                   "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",

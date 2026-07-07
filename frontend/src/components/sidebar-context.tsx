@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
 
 interface SidebarContextType {
   isOpen: boolean
@@ -13,8 +14,10 @@ const SidebarContext = React.createContext<SidebarContextType | undefined>(undef
 const SIDEBAR_STORAGE_KEY = "primeflow-sidebar-open"
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
+  const pathname = usePathname()
   const [isOpen, setIsOpen] = React.useState(false)
   const [isDesktop, setIsDesktop] = React.useState(false)
+  const previousPathnameRef = React.useRef<string | null>(null)
 
   React.useEffect(() => {
     const mediaQuery = window.matchMedia("(min-width: 768px)")
@@ -24,7 +27,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
       setIsDesktop(nextIsDesktop)
 
       if (!nextIsDesktop) {
-        setIsOpen(false)
+        setIsOpen(true)
         return
       }
 
@@ -37,6 +40,20 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 
     return () => mediaQuery.removeEventListener("change", syncSidebarForViewport)
   }, [])
+
+  React.useEffect(() => {
+    if (previousPathnameRef.current === null) {
+      previousPathnameRef.current = pathname
+      return
+    }
+
+    if (previousPathnameRef.current === pathname) return
+    previousPathnameRef.current = pathname
+
+    if (!isDesktop) {
+      setIsOpen(false)
+    }
+  }, [isDesktop, pathname])
 
   const setSidebarOpen = React.useCallback((open: boolean) => {
     setIsOpen(open)

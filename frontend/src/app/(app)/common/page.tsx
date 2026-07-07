@@ -321,10 +321,9 @@ const getCommonTaskColor = (entry: {
   date?: string | null
   entryDate?: string | null
 }): Exclude<CommonColorFilter, "all"> | null => {
-  if (isCommonTaskDueOnDate(entry)) return "red"
-
   const normalized = normalizeCommonTaskStatus(entry.status, entry.isDone)
   if (normalized === "DONE") return "green"
+  if (isCommonTaskDueOnDate(entry)) return "red"
   if (normalized === "IN_PROGRESS") return "yellow"
   if (normalized === "WAITING_CONFIRMATION") return "orange"
   if (normalized === "TODO") return "pink"
@@ -7300,7 +7299,8 @@ export default function CommonViewPage() {
           color: var(--swim-muted);
           font-style: italic;
         }
-        .swimlane-cell.done {
+        .swimlane-cell.done,
+        .swimlane-cell.task-state-done {
           background: #d4ffe1;
           border-left-color: #ffffff;
         }
@@ -7320,6 +7320,12 @@ export default function CommonViewPage() {
           background: linear-gradient(180deg, #eff6ff 0%, #dbeafe 100%);
           border: 2px solid #2563eb;
           box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
+        }
+        .swimlane-cell.done,
+        .swimlane-cell.starts-selected-day.done,
+        .swimlane-cell.task-state-done,
+        .swimlane-cell.starts-selected-day.task-state-done {
+          background: #d4ffe1;
         }
         .swimlane-cell.one-time-meeting {
           border-color: #dc2626;
@@ -7883,23 +7889,29 @@ export default function CommonViewPage() {
           color: #adb5bd;
           font-style: italic;
         }
-        .week-table-entry.starts-selected-day,
-        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day,
-        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-done,
+        .week-table-entry.starts-selected-day:not(.task-state-done),
+        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day:not(.task-state-done),
         .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-in-progress,
         .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-waiting,
         .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-todo {
           background: linear-gradient(90deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.98)) !important;
           border: 2px solid #2563eb;
         }
-        .week-table-entry.deadline-important,
-        .week-table-view.neutral-all-days .week-table-entry.deadline-important,
-        .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-done,
+        .week-table-entry.deadline-important:not(.task-state-done),
+        .week-table-view.neutral-all-days .week-table-entry.deadline-important:not(.task-state-done),
         .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-in-progress,
         .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-waiting,
         .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-todo {
           background: linear-gradient(90deg, rgba(254, 242, 242, 0.98), rgba(255, 255, 255, 0.98)) !important;
           border: 2px solid #dc2626;
+        }
+        .week-table-entry.task-state-done,
+        .week-table-entry.starts-selected-day.task-state-done,
+        .week-table-entry.deadline-important.task-state-done,
+        .week-table-view.neutral-all-days .week-table-entry.task-state-done,
+        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-done,
+        .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-done {
+          background: #d4ffe1 !important;
         }
         .week-table-entry.repeat-task-muted,
         .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted,
@@ -8118,55 +8130,55 @@ export default function CommonViewPage() {
         .swimlane-cell.one-time-meeting {
           border-color: #dc2626;
         }
-        .swimlane-cell.deadline-important:not(.done) {
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) {
           background: #dc2626;
           border-color: #b91c1c;
           box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.12);
           color: #ffffff;
         }
-        .swimlane-cell.deadline-important:not(.done) .swimlane-title,
-        .swimlane-cell.deadline-important:not(.done) .swimlane-date,
-        .swimlane-cell.deadline-important:not(.done) .swimlane-subtitle,
-        .swimlane-cell.deadline-important:not(.done) .swimlane-note,
-        .swimlane-cell.deadline-important:not(.done) .swimlane-note * {
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-title,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-date,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-subtitle,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-note,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-note * {
           color: #ffffff;
         }
-        .swimlane-cell.deadline-important:not(.done) .swimlane-note {
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-note {
           background: rgba(127, 29, 29, 0.35);
           border-color: rgba(255, 255, 255, 0.32);
         }
-        .swimlane-cell.deadline-important:not(.done) .swimlane-avatar,
-        .swimlane-cell.deadline-important:not(.done) .fast-task-order-badge,
-        .swimlane-cell.deadline-important:not(.done) .deadline-indicator,
-        .swimlane-cell.deadline-important:not(.done) .time-indicator,
-        .swimlane-cell.deadline-important:not(.done) .period-indicator,
-        .swimlane-cell.deadline-important:not(.done) .oneh-slot-indicator {
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-avatar,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .fast-task-order-badge,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .deadline-indicator,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .time-indicator,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .period-indicator,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .oneh-slot-indicator {
           background: rgba(255, 255, 255, 0.12);
           border-color: rgba(255, 255, 255, 0.38);
           color: #ffffff;
         }
-        .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle,
-        .swimlane-cell.deadline-important:not(.done) .swimlane-title-toggle,
-        .swimlane-cell.deadline-important:not(.done) .swimlane-delete,
-        .swimlane-cell.deadline-important:not(.done) .fast-task-order-btn {
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-note-toggle,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-title-toggle,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-delete,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .fast-task-order-btn {
           background: rgba(255, 255, 255, 0.12);
           border-color: rgba(255, 255, 255, 0.38);
           color: #ffffff;
         }
-        .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle:hover,
-        .swimlane-cell.deadline-important:not(.done) .swimlane-title-toggle:hover,
-        .swimlane-cell.deadline-important:not(.done) .swimlane-delete:hover,
-        .swimlane-cell.deadline-important:not(.done) .fast-task-order-btn:hover {
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-note-toggle:hover,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-title-toggle:hover,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-delete:hover,
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .fast-task-order-btn:hover {
           background: rgba(255, 255, 255, 0.2);
           border-color: rgba(255, 255, 255, 0.5);
           color: #ffffff;
         }
-        .swimlane-cell.deadline-important:not(.done) .swimlane-title-toggle[aria-expanded="true"] {
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-title-toggle[aria-expanded="true"] {
           background: #ffffff;
           border-color: #ffffff;
           color: #b91c1c;
         }
-        .swimlane-cell.deadline-important:not(.done) .swimlane-note-toggle[aria-expanded="true"] {
+        .swimlane-cell.deadline-important:not(.done):not(.task-state-done) .swimlane-note-toggle[aria-expanded="true"] {
           background: #ffffff;
           border-color: #ffffff;
           color: #b91c1c;
