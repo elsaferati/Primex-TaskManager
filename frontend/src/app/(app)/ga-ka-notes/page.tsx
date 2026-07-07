@@ -3049,6 +3049,18 @@ export default function GaKaNotesPage() {
                                     <Check className="h-3 w-3" />
                                   </Button>
                                 ) : null}
+                                <Button
+                                  variant="outline"
+                                  size="icon"
+                                  disabled={editDisabled}
+                                  aria-disabled={editDisabled}
+                                  className={`h-7 w-7 shrink-0 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
+                                  aria-label={editDisabledTitle}
+                                  title={editDisabledTitle}
+                                  onClick={() => !editDisabled && openEditNote(note)}
+                                >
+                                  <Pencil className="h-4 w-4" />
+                                </Button>
                                 {canAddAttachments || attachments.length > 0 ? (
                                   <Button
                                     variant="outline"
@@ -3075,18 +3087,6 @@ export default function GaKaNotesPage() {
                                     {attachments.length > 0 ? <ImageIcon className="h-4 w-4" /> : <Paperclip className="h-4 w-4" />}
                                   </Button>
                                 ) : null}
-                                <Button
-                                  variant="outline"
-                                  size="icon"
-                                  disabled={editDisabled}
-                                  aria-disabled={editDisabled}
-                                  className={`h-7 w-7 shrink-0 ${editDisabled ? "opacity-50 cursor-not-allowed" : ""}`}
-                                  aria-label={editDisabledTitle}
-                                  title={editDisabledTitle}
-                                  onClick={() => !editDisabled && openEditNote(note)}
-                                >
-                                  <Pencil className="h-4 w-4" />
-                                </Button>
                                 {hasTask && aggregatedStatus === "WAITING_CONFIRMATION" && note.status !== "CLOSED" ? (
                                   <Button
                                     variant="outline"
