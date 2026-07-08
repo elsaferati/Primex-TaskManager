@@ -702,23 +702,30 @@ const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 const GA_TIME_ROWS: readonly GaTimeRow[] = [
   { start: "00:00", end: "00:01", label: "", nrLabel: "", isSpecial: true },
   { start: "00:01", end: "00:02", label: "", nrLabel: "", isSpecial: true },
-  { start: "08:00", end: "09:00", label: "08:00 - 09:00", nrLabel: "1" },
-  { start: "09:00", end: "10:00", label: "09:00 - 10:00", nrLabel: "2" },
-  { start: "10:00", end: "11:00", label: "10:00 - 11:00", nrLabel: "3" },
-  { start: "11:00", end: "12:00", label: "11:00 - 12:00", nrLabel: "4" },
-  { start: "12:00", end: "13:00", label: "12:00 - 13:00", nrLabel: "5" },
-  { start: "13:00", end: "13:30", label: "13:00 - 13:30", nrLabel: "6" },
-  { start: "13:30", end: "14:00", label: "13:30 - 14:00", nrLabel: "7" },
-  { start: "14:00", end: "15:00", label: "14:00 - 15:00", nrLabel: "8" },
-  { start: "15:00", end: "16:00", label: "15:00 - 16:00", nrLabel: "9" },
-  { start: "16:00", end: "16:30", label: "16:00 - 16:30", nrLabel: "10" },
-  { start: "16:30", end: "17:00", label: "16:30 - 17:00", nrLabel: "11" },
-  { start: "17:00", end: "18:00", label: "17:00 - 18:00", nrLabel: "12" },
-  { start: "18:00", end: "19:00", label: "18:00 - 19:00", nrLabel: "13" },
-  { start: "19:00", end: "20:00", label: "19:00 - 20:00", nrLabel: "14" },
-  { start: "20:00", end: "21:00", label: "20:00 - 21:00", nrLabel: "15" },
-  { start: "21:00", end: "22:00", label: "21:00 - 22:00", nrLabel: "16" },
+  { start: "07:30", end: "08:00", label: "07:30 - 08:00", nrLabel: "1" },
+  { start: "08:00", end: "09:00", label: "08:00 - 09:00", nrLabel: "2" },
+  { start: "09:00", end: "10:00", label: "09:00 - 10:00", nrLabel: "3" },
+  { start: "10:00", end: "11:00", label: "10:00 - 11:00", nrLabel: "4" },
+  { start: "11:00", end: "12:00", label: "11:00 - 12:00", nrLabel: "5" },
+  { start: "12:00", end: "13:00", label: "12:00 - 13:00", nrLabel: "6" },
+  { start: "13:00", end: "13:30", label: "13:00 - 13:30", nrLabel: "7" },
+  { start: "13:30", end: "14:00", label: "13:30 - 14:00", nrLabel: "8" },
+  { start: "14:00", end: "14:30", label: "14:00 - 14:30", nrLabel: "9" },
+  { start: "14:30", end: "15:30", label: "14:30 - 15:30", nrLabel: "10" },
+  { start: "15:30", end: "16:00", label: "15:30 - 16:00", nrLabel: "11" },
+  { start: "16:00", end: "16:30", label: "16:00 - 16:30", nrLabel: "12" },
+  { start: "16:30", end: "17:00", label: "16:30 - 17:00", nrLabel: "13" },
+  { start: "17:00", end: "18:00", label: "17:00 - 18:00", nrLabel: "14" },
+  { start: "18:00", end: "19:00", label: "18:00 - 19:00", nrLabel: "15" },
+  { start: "19:00", end: "20:00", label: "19:00 - 20:00", nrLabel: "16" },
+  { start: "20:00", end: "21:00", label: "20:00 - 21:00", nrLabel: "17" },
+  { start: "21:00", end: "22:00", label: "21:00 - 22:00", nrLabel: "18" },
 ] as const
+
+const resolveGaTimeRowStart = (start: string) => {
+  if (GA_TIME_ROWS.some((row) => row.start === start)) return start
+  return GA_TIME_ROWS.find((row) => !row.isSpecial && row.start <= start && start < row.end)?.start ?? start
+}
 
 const parseFeedbackNote = (note: string | null | undefined) => {
   const raw = note || ""
@@ -3636,7 +3643,7 @@ export default function AdminTasksPage() {
     const map = new Map<string, GaTimeSlotEntry[]>()
     for (const entry of gaTimeEntries) {
       const day = entry.day_of_week
-      const start = normalizeSlotTime(entry.start_time)
+      const start = resolveGaTimeRowStart(normalizeSlotTime(entry.start_time))
       const key = `${day}|${start}`
       const list = map.get(key) || []
       list.push(entry)
