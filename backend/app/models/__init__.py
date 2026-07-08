@@ -14,6 +14,7 @@ from app.models.ga_note_attachment import GaNoteAttachment
 from app.models.plan_note import PlanNote
 from app.models.plan_note_attachment import PlanNoteAttachment
 from app.models.ga_time_slot_entry import GaTimeSlotEntry
+from app.models.ga_time_table_row import GaTimeTableRow
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.holiday import Holiday
 from app.models.internal_note import InternalNote
@@ -67,6 +68,7 @@ __all__ = [
     "PlanNote",
     "PlanNoteAttachment",
     "GaTimeSlotEntry",
+    "GaTimeTableRow",
     "GaTimeSlotTemplate",
     "Holiday",
     "InternalNote",

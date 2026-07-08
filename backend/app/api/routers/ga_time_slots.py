@@ -1,16 +1,24 @@
 import uuid
-from datetime import date
+from datetime import date, time
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import UserRole
+from app.models.ga_time_table_row import GaTimeTableRow
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.user import User
-from app.schemas.ga_time_slot import GaTimeSlotEntryIn, GaTimeSlotEntryOut, GaTimeSlotEntryUpdate
+from app.schemas.ga_time_slot import (
+    GaTimeSlotEntryIn,
+    GaTimeSlotEntryOut,
+    GaTimeSlotEntryUpdate,
+    GaTimeTableRowOut,
+    GaTimeTableRowsUpdate,
+)
+from app.services.ga_time_table import GaTimeTableRowData, format_ga_time_label, get_ga_time_table_rows
 
 
 router = APIRouter()
@@ -36,6 +44,80 @@ def _ensure_can_edit(current_user: User) -> None:
     if (current_user.username or "").lower() == GA_USERNAME:
         return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Not authorized")
+
+
+def _row_out(row: GaTimeTableRow | GaTimeTableRowData) -> GaTimeTableRowOut:
+    return GaTimeTableRowOut(
+        id=getattr(row, "id", None),
+        sort_order=row.sort_order,
+        nr_label=row.nr_label,
+        label=row.label,
+        start_time=row.start_time,
+        end_time=row.end_time,
+        is_special=row.is_special,
+    )
+
+
+@router.get("/rows", response_model=list[GaTimeTableRowOut])
+async def list_ga_time_table_rows(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[GaTimeTableRowOut]:
+    rows = await get_ga_time_table_rows(db)
+    return [_row_out(row) for row in rows]
+
+
+@router.put("/rows", response_model=list[GaTimeTableRowOut])
+async def update_ga_time_table_rows(
+    payload: GaTimeTableRowsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[GaTimeTableRowOut]:
+    _ensure_can_edit(current_user)
+    visible_rows = sorted(payload.rows, key=lambda row: row.start_time)
+    if not visible_rows:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="At least one row is required")
+    for idx, row in enumerate(visible_rows):
+        if row.start_time >= row.end_time:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="End time must be after start time")
+        if idx > 0 and visible_rows[idx - 1].end_time > row.start_time:
+            raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Rows cannot overlap")
+
+    await db.execute(delete(GaTimeTableRow))
+    rows: list[GaTimeTableRow] = [
+        GaTimeTableRow(
+            sort_order=0,
+            nr_label="",
+            label="",
+            start_time=time(0, 0),
+            end_time=time(0, 1),
+            is_special=True,
+        ),
+        GaTimeTableRow(
+            sort_order=1,
+            nr_label="",
+            label="",
+            start_time=time(0, 1),
+            end_time=time(0, 2),
+            is_special=True,
+        ),
+    ]
+    for idx, row in enumerate(visible_rows, start=1):
+        rows.append(
+            GaTimeTableRow(
+                sort_order=idx + 1,
+                nr_label=str(idx),
+                label=format_ga_time_label(row.start_time, row.end_time),
+                start_time=row.start_time,
+                end_time=row.end_time,
+                is_special=False,
+            )
+        )
+    db.add_all(rows)
+    await db.commit()
+    for row in rows:
+        await db.refresh(row)
+    return [_row_out(row) for row in rows]
 
 
 @router.get("", response_model=list[GaTimeSlotEntryOut])

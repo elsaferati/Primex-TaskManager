@@ -21,7 +21,7 @@ import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmat
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
-import { Pencil } from "lucide-react"
+import { Plus, Pencil, Trash2 } from "lucide-react"
 import type {
   DailyReportResponse,
   DailyReportSystemOccurrence,
@@ -639,11 +639,23 @@ type GaTimeSlotEntry = {
 }
 
 type GaTimeRow = {
+  id?: string | null
   start: string
   end: string
   label: string
   nrLabel: string
   isSpecial?: boolean
+  sortOrder?: number
+}
+
+type GaTimeTableRowResponse = {
+  id?: string | null
+  sort_order: number
+  nr_label: string
+  label: string
+  start_time: string
+  end_time: string
+  is_special?: boolean
 }
 
 type CommonBucket =
@@ -699,7 +711,7 @@ type CommonViewPayload = {
 const ALL_USERS_INITIALS = "ALL"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 
-const GA_TIME_ROWS: readonly GaTimeRow[] = [
+const DEFAULT_GA_TIME_ROWS: readonly GaTimeRow[] = [
   { start: "00:00", end: "00:01", label: "", nrLabel: "", isSpecial: true },
   { start: "00:01", end: "00:02", label: "", nrLabel: "", isSpecial: true },
   { start: "07:30", end: "08:00", label: "07:30 - 08:00", nrLabel: "1" },
@@ -722,9 +734,52 @@ const GA_TIME_ROWS: readonly GaTimeRow[] = [
   { start: "21:00", end: "22:00", label: "21:00 - 22:00", nrLabel: "18" },
 ] as const
 
-const resolveGaTimeRowStart = (start: string) => {
-  if (GA_TIME_ROWS.some((row) => row.start === start)) return start
-  return GA_TIME_ROWS.find((row) => !row.isSpecial && row.start <= start && start < row.end)?.start ?? start
+const formatGaTimeRowLabel = (start: string, end: string) => `${start} - ${end}`
+
+const normalizeGaTimeValue = (value: string) => (value ? value.slice(0, 5) : "")
+
+const normalizeGaTimeRows = (rows: GaTimeTableRowResponse[]): GaTimeRow[] =>
+  rows
+    .map((row) => {
+      const start = normalizeGaTimeValue(row.start_time)
+      const end = normalizeGaTimeValue(row.end_time)
+      return {
+        id: row.id,
+        sortOrder: row.sort_order,
+        start,
+        end,
+        label: row.label || (start && end ? formatGaTimeRowLabel(start, end) : ""),
+        nrLabel: row.nr_label || "",
+        isSpecial: Boolean(row.is_special),
+      }
+    })
+    .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.start.localeCompare(b.start))
+
+const renumberGaTimeRows = (rows: GaTimeRow[]): GaTimeRow[] => {
+  let nr = 1
+  return rows.map((row, index) => {
+    if (row.isSpecial) return { ...row, sortOrder: index, nrLabel: "", label: "" }
+    const start = normalizeGaTimeValue(row.start)
+    const end = normalizeGaTimeValue(row.end)
+    const next = {
+      ...row,
+      start,
+      end,
+      sortOrder: index,
+      nrLabel: String(nr),
+      label: start && end ? formatGaTimeRowLabel(start, end) : "",
+    }
+    nr += 1
+    return next
+  })
+}
+
+const sortVisibleGaTimeRows = (rows: GaTimeRow[]) =>
+  [...rows].sort((a, b) => a.start.localeCompare(b.start) || a.end.localeCompare(b.end))
+
+const resolveGaTimeRowStart = (start: string, rows: readonly GaTimeRow[]) => {
+  if (rows.some((row) => row.start === start)) return start
+  return rows.find((row) => !row.isSpecial && row.start <= start && start < row.end)?.start ?? start
 }
 
 const parseFeedbackNote = (note: string | null | undefined) => {
@@ -841,6 +896,15 @@ const parseTimeValue = (value: string) => {
   if (Number.isNaN(hours) || Number.isNaN(minutes)) return null
   if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
   return { hours, minutes }
+}
+const minutesToTimeValue = (minutes: number) => {
+  const bounded = Math.max(0, Math.min(minutes, 23 * 60 + 59))
+  return `${pad2(Math.floor(bounded / 60))}:${pad2(bounded % 60)}`
+}
+const addMinutesToTimeValue = (value: string, minutes: number) => {
+  const parsed = parseTimeValue(value)
+  if (!parsed) return value
+  return minutesToTimeValue(parsed.hours * 60 + parsed.minutes + minutes)
 }
 const parseTimeToMinutes = (value?: string | null) => {
   if (!value) return null
@@ -1051,6 +1115,7 @@ export default function AdminTasksPage() {
   const [gaSystemLoading, setGaSystemLoading] = React.useState(false)
   const [gaSystemError, setGaSystemError] = React.useState<string | null>(null)
   const [gaTimeEntries, setGaTimeEntries] = React.useState<GaTimeSlotEntry[]>([])
+  const [gaTimeRows, setGaTimeRows] = React.useState<GaTimeRow[]>(() => [...DEFAULT_GA_TIME_ROWS])
   const [gaTimeLoading, setGaTimeLoading] = React.useState(false)
   const [gaTimeError, setGaTimeError] = React.useState<string | null>(null)
   const [gaTimeSaving, setGaTimeSaving] = React.useState<Record<string, boolean>>({})
@@ -1059,6 +1124,9 @@ export default function AdminTasksPage() {
   const [gaTimeDrafts, setGaTimeDrafts] = React.useState<Record<string, string>>({})
   const [gaTimeAddingCell, setGaTimeAddingCell] = React.useState<string | null>(null)
   const [gaTimeAddDrafts, setGaTimeAddDrafts] = React.useState<Record<string, string>>({})
+  const [gaTimeRowsDialogOpen, setGaTimeRowsDialogOpen] = React.useState(false)
+  const [gaTimeRowsDraft, setGaTimeRowsDraft] = React.useState<GaTimeRow[]>([])
+  const [gaTimeRowsSaving, setGaTimeRowsSaving] = React.useState(false)
   const [secondarySectionsReady, setSecondarySectionsReady] = React.useState(false)
   const confirmerCandidates = React.useMemo(
     () => getConfirmerCandidates(users as UserLookup[]),
@@ -1337,12 +1405,20 @@ export default function AdminTasksPage() {
       setGaTimeError(null)
       try {
         const weekStartIso = toISODate(commonWeekStart)
-        const res = await apiFetch(`/ga-time-slots?week_start=${encodeURIComponent(weekStartIso)}`)
-        if (!res.ok) {
-          throw new Error(`ga_time_slots_failed_${res.status}`)
+        const [rowsRes, entriesRes] = await Promise.all([
+          apiFetch("/ga-time-slots/rows"),
+          apiFetch(`/ga-time-slots?week_start=${encodeURIComponent(weekStartIso)}`),
+        ])
+        if (!rowsRes.ok) {
+          throw new Error(`ga_time_rows_failed_${rowsRes.status}`)
         }
-        const data = (await res.json()) as GaTimeSlotEntry[]
+        if (!entriesRes.ok) {
+          throw new Error(`ga_time_slots_failed_${entriesRes.status}`)
+        }
+        const rows = normalizeGaTimeRows((await rowsRes.json()) as GaTimeTableRowResponse[])
+        const data = (await entriesRes.json()) as GaTimeSlotEntry[]
         if (!mounted) return
+        setGaTimeRows(rows.length ? rows : [...DEFAULT_GA_TIME_ROWS])
         setGaTimeEntries(data)
       } catch (err) {
         console.error("Failed to load GA time slots", err)
@@ -3639,18 +3715,114 @@ export default function AdminTasksPage() {
   const normalizeSlotTime = (value: string) => (value ? value.slice(0, 5) : "")
   const toDayOfWeek = (iso: string) => getMondayBasedDay(fromISODate(iso))
 
+  const openGaTimeRowsDialog = React.useCallback(() => {
+    setGaTimeRowsDraft(sortVisibleGaTimeRows(gaTimeRows.filter((row) => !row.isSpecial)))
+    setGaTimeRowsDialogOpen(true)
+  }, [gaTimeRows])
+
+  const updateGaTimeRowDraft = React.useCallback(
+    (index: number, field: "start" | "end", value: string) => {
+      setGaTimeRowsDraft((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)))
+    },
+    []
+  )
+
+  const addGaTimeRowDraft = React.useCallback(() => {
+    setGaTimeRowsDraft((prev) => {
+      const sorted = sortVisibleGaTimeRows(prev)
+      const lastEnd = sorted[sorted.length - 1]?.end || "08:00"
+      return [
+        ...sorted,
+        {
+          start: lastEnd,
+          end: addMinutesToTimeValue(lastEnd, 30),
+          label: "",
+          nrLabel: "",
+        },
+      ]
+    })
+  }, [])
+
+  const removeGaTimeRowDraft = React.useCallback((index: number) => {
+    setGaTimeRowsDraft((prev) => prev.filter((_, rowIndex) => rowIndex !== index))
+  }, [])
+
+  const resetGaTimeRowsDraft = React.useCallback(() => {
+    setGaTimeRowsDraft(sortVisibleGaTimeRows(DEFAULT_GA_TIME_ROWS.filter((row) => !row.isSpecial)))
+  }, [])
+
+  const saveGaTimeRows = React.useCallback(async () => {
+    const visibleRows = sortVisibleGaTimeRows(
+      gaTimeRowsDraft.map((row) => ({
+        ...row,
+        start: normalizeGaTimeValue(row.start),
+        end: normalizeGaTimeValue(row.end),
+      }))
+    )
+    if (!visibleRows.length) {
+      toast.error("Add at least one time row.")
+      return
+    }
+    for (let idx = 0; idx < visibleRows.length; idx += 1) {
+      const row = visibleRows[idx]
+      const start = parseTimeValue(row.start)
+      const end = parseTimeValue(row.end)
+      if (!start || !end) {
+        toast.error("Use valid HH:MM times.")
+        return
+      }
+      const startMinutes = start.hours * 60 + start.minutes
+      const endMinutes = end.hours * 60 + end.minutes
+      if (startMinutes >= endMinutes) {
+        toast.error("Each row end time must be after start time.")
+        return
+      }
+      if (idx > 0) {
+        const previousEnd = parseTimeToMinutes(visibleRows[idx - 1].end)
+        if (previousEnd !== null && previousEnd > startMinutes) {
+          toast.error("Time rows cannot overlap.")
+          return
+        }
+      }
+    }
+
+    setGaTimeRowsSaving(true)
+    try {
+      const res = await apiFetch("/ga-time-slots/rows", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          rows: visibleRows.map((row) => ({
+            start_time: row.start,
+            end_time: row.end,
+          })),
+        }),
+      })
+      if (!res.ok) throw new Error(`ga_time_rows_update_failed_${res.status}`)
+      const rows = normalizeGaTimeRows((await res.json()) as GaTimeTableRowResponse[])
+      setGaTimeRows(rows.length ? rows : renumberGaTimeRows([...DEFAULT_GA_TIME_ROWS]))
+      setGaTimeRowsDialogOpen(false)
+      toast.success("GA timetable rows updated.")
+    } catch (err) {
+      console.error("Failed to update GA timetable rows", err)
+      toast.error("Failed to update GA timetable rows.")
+    } finally {
+      setGaTimeRowsSaving(false)
+    }
+  }, [apiFetch, gaTimeRowsDraft])
+
   const gaTimeEntriesByCell = React.useMemo(() => {
     const map = new Map<string, GaTimeSlotEntry[]>()
     for (const entry of gaTimeEntries) {
       const day = entry.day_of_week
-      const start = resolveGaTimeRowStart(normalizeSlotTime(entry.start_time))
+      const start = resolveGaTimeRowStart(normalizeSlotTime(entry.start_time), gaTimeRows)
       const key = `${day}|${start}`
       const list = map.get(key) || []
       list.push(entry)
       map.set(key, list)
     }
     return map
-  }, [gaTimeEntries])
+  }, [gaTimeEntries, gaTimeRows])
 
   const createGaTimeEntry = React.useCallback(
     async (dayOfWeek: string, startTime: string, endTime: string, content: string) => {
@@ -4687,7 +4859,7 @@ export default function AdminTasksPage() {
                     </tr>
                   </thead>
                   <tbody>
-                    {GA_TIME_ROWS.map((slot) => (
+                    {gaTimeRows.map((slot) => (
                       <tr
                         key={`ga-print-${slot.start}`}
                         className={
@@ -4740,6 +4912,12 @@ export default function AdminTasksPage() {
             description=""
             actions={
               <div className="flex items-center gap-2 print:hidden">
+                {canEditGaTimeSlots ? (
+                  <Button variant="outline" size="sm" onClick={openGaTimeRowsDialog}>
+                    <Pencil className="mr-2 h-4 w-4" />
+                    Times
+                  </Button>
+                ) : null}
                 <Button variant="outline" size="sm" onClick={() => handleSectionPrint("ga-time")}>
                   Print
                 </Button>
@@ -4776,7 +4954,7 @@ export default function AdminTasksPage() {
                 </tr>
               </thead>
               <tbody>
-                {GA_TIME_ROWS.map((slot) => (
+                {gaTimeRows.map((slot) => (
                   <tr key={slot.start} className={slot.isSpecial ? "ga-time-row-custom" : undefined}>
                     <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
                     <td className="ga-time-slot-label">{slot.label || "\u00A0"}</td>
@@ -4905,6 +5083,72 @@ export default function AdminTasksPage() {
           </div>
           </AdminTasksSection>
           </div>
+          <Dialog open={gaTimeRowsDialogOpen} onOpenChange={setGaTimeRowsDialogOpen}>
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>GA timetable times</DialogTitle>
+              </DialogHeader>
+              <div className="space-y-3">
+                <div className="max-h-[60vh] overflow-y-auto rounded-md border">
+                  <div className="grid grid-cols-[48px_minmax(0,1fr)_minmax(0,1fr)_48px] items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
+                    <div>NR</div>
+                    <div>Start</div>
+                    <div>End</div>
+                    <div />
+                  </div>
+                  <div className="divide-y">
+                    {gaTimeRowsDraft.map((row, index) => (
+                      <div
+                        key={`${row.start}-${row.end}-${index}`}
+                        className="grid grid-cols-[48px_minmax(0,1fr)_minmax(0,1fr)_48px] items-center gap-2 px-3 py-2"
+                      >
+                        <div className="text-sm font-medium text-slate-700">{index + 1}</div>
+                        <Input
+                          type="time"
+                          value={row.start}
+                          onChange={(event) => updateGaTimeRowDraft(index, "start", event.target.value)}
+                        />
+                        <Input
+                          type="time"
+                          value={row.end}
+                          onChange={(event) => updateGaTimeRowDraft(index, "end", event.target.value)}
+                        />
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => removeGaTimeRowDraft(index)}
+                          disabled={gaTimeRowsDraft.length <= 1}
+                          title="Delete row"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                        </Button>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={addGaTimeRowDraft}>
+                      <Plus className="mr-2 h-4 w-4" />
+                      Add row
+                    </Button>
+                    <Button type="button" variant="ghost" size="sm" onClick={resetGaTimeRowsDraft}>
+                      Reset defaults
+                    </Button>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <Button type="button" variant="outline" size="sm" onClick={() => setGaTimeRowsDialogOpen(false)}>
+                      Cancel
+                    </Button>
+                    <Button type="button" size="sm" onClick={() => void saveGaTimeRows()} disabled={gaTimeRowsSaving}>
+                      {gaTimeRowsSaving ? "Saving..." : "Save"}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
         </div>
       </div>
     )

@@ -59,6 +59,7 @@ from app.services.daily_report_logic import (
     task_matches_department_scope,
     task_is_visible_to_user,
 )
+from app.services.ga_time_table import get_ga_time_table_rows
 
 
 router = APIRouter()
@@ -209,28 +210,6 @@ def _frequency_label(value: str | None) -> str:
 
 _WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 _MONTH_LABELS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
-GA_TIME_ROWS: list[tuple[str, str, str, str]] = [
-    ("", "", "00:00", "00:01"),
-    ("", "", "00:01", "00:02"),
-    ("1", "08:00 - 09:00", "08:00", "09:00"),
-    ("2", "09:00 - 10:00", "09:00", "10:00"),
-    ("3", "10:00 - 11:00", "10:00", "11:00"),
-    ("4", "11:00 - 12:00", "11:00", "12:00"),
-    ("5", "12:00 - 13:00", "12:00", "13:00"),
-    ("6", "13:00 - 13:30", "13:00", "13:30"),
-    ("7", "13:30 - 14:00", "13:30", "14:00"),
-    ("8", "14:00 - 15:00", "14:00", "15:00"),
-    ("9", "15:00 - 16:00", "15:00", "16:00"),
-    ("10", "16:00 - 16:30", "16:00", "16:30"),
-    ("11", "16:30 - 17:00", "16:30", "17:00"),
-    ("12", "17:00 - 18:00", "17:00", "18:00"),
-    ("13", "18:00 - 19:00", "18:00", "19:00"),
-    ("14", "19:00 - 20:00", "19:00", "20:00"),
-    ("15", "20:00 - 21:00", "20:00", "21:00"),
-    ("16", "21:00 - 22:00", "21:00", "22:00"),
-]
-
 
 def _month_cycle_labels(start_month: int, interval: int) -> list[str]:
     if start_month < 1 or start_month > 12 or interval <= 0:
@@ -1525,11 +1504,28 @@ async def export_ga_time_xlsx(
             .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.created_at)
         )
     ).scalars().all()
+    table_rows = await get_ga_time_table_rows(db)
+
+    def resolve_row_start(start_value: time | None) -> str:
+        if start_value is None:
+            return ""
+        exact = next((row for row in table_rows if row.start_time == start_value), None)
+        if exact is not None:
+            return _format_time(exact.start_time)
+        containing = next(
+            (
+                row
+                for row in table_rows
+                if not row.is_special and row.start_time <= start_value < row.end_time
+            ),
+            None,
+        )
+        return _format_time(containing.start_time if containing is not None else start_value)
 
     entry_map: dict[tuple[int, str], list[str]] = {}
     for entry in entries:
         day_value = int(entry.day_of_week or 0)
-        start_label = _format_time(entry.start_time)
+        start_label = resolve_row_start(entry.start_time)
         key = (day_value, start_label)
         entry_map.setdefault(key, []).append(entry.content or "")
 
@@ -1589,7 +1585,10 @@ async def export_ga_time_xlsx(
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
 
     row_idx = data_start_row
-    for nr_label, time_label, start_label, _end_label in GA_TIME_ROWS:
+    for row in table_rows:
+        nr_label = row.nr_label
+        time_label = row.label
+        start_label = _format_time(row.start_time)
         nr_cell = ws.cell(row=row_idx, column=1, value=nr_label or None)
         nr_cell.font = Font(bold=True)
         nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)

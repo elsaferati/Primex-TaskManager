@@ -2804,6 +2804,7 @@ export default function NextWeekPlanPage() {
                       <th className="min-w-[300px] w-[300px] max-w-[300px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
                       <th className="min-w-[180px] w-[180px] max-w-[180px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KOMENT</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
+                      <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal leading-tight text-xs" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>JAV TJT?</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[44px] min-w-[44px] max-w-[44px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>NGA</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PER</th>
@@ -2812,7 +2813,6 @@ export default function NextWeekPlanPage() {
                       <th className="min-w-[76px] w-[76px] border border-slate-600 bg-white text-foreground h-10 px-1.5 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Linked task start date">START</th>
                       <th className="w-[90px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>KRIJO DET</th>
                       <th className="w-[60px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>INT</th>
-                      <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-1 text-center align-middle font-medium whitespace-normal leading-tight text-xs" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>JAV TJT?</th>
                       <th className="min-w-[80px] w-[80px] max-w-[80px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>MBYLL</th>
                       <th className="min-w-[70px] w-[70px] max-w-[70px] border border-slate-600 border-r-2 border-r-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDIT</th>
                     </tr>
@@ -3116,6 +3116,18 @@ export default function NextWeekPlanPage() {
                             )}
                           </div>
                         </td>
+                        <td className="border border-slate-600 p-1 align-middle min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
+                          <div className="flex justify-center">
+                            <Checkbox
+                              checked={Boolean(note.next_week)}
+                              disabled={isSavingNextWeek}
+                              aria-label="Javen tjeter"
+                              onCheckedChange={(value) => {
+                                void toggleNoteNextWeek(note.id, value === true)
+                              }}
+                            />
+                          </div>
+                        </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap w-[96px]" style={{ verticalAlign: 'bottom' }}>
                           {(() => {
                             const parts = formatDateParts(note.created_at)
@@ -3234,18 +3246,6 @@ export default function NextWeekPlanPage() {
                             ) : (
                               <span className="text-xs text-slate-400">-</span>
                             )}
-                          </div>
-                        </td>
-                        <td className="border border-slate-600 p-1 align-middle min-w-[50px] w-[50px] max-w-[50px]" style={{ verticalAlign: 'bottom' }}>
-                          <div className="flex justify-center">
-                            <Checkbox
-                              checked={Boolean(note.next_week)}
-                              disabled={isSavingNextWeek}
-                              aria-label="Javen tjeter"
-                              onCheckedChange={(value) => {
-                                void toggleNoteNextWeek(note.id, value === true)
-                              }}
-                            />
                           </div>
                         </td>
                         <td className="border border-slate-600 p-2 align-middle whitespace-nowrap min-w-[80px] w-[80px] max-w-[80px]" style={{ verticalAlign: 'bottom' }}>

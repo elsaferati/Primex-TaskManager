@@ -25,3 +25,22 @@ class GaTimeSlotEntryOut(BaseModel):
     content: str
     created_at: datetime
     updated_at: datetime
+
+
+class GaTimeTableRowIn(BaseModel):
+    start_time: time
+    end_time: time
+
+
+class GaTimeTableRowsUpdate(BaseModel):
+    rows: list[GaTimeTableRowIn]
+
+
+class GaTimeTableRowOut(BaseModel):
+    id: uuid.UUID | None = None
+    sort_order: int
+    nr_label: str
+    label: str
+    start_time: time
+    end_time: time
+    is_special: bool = False
