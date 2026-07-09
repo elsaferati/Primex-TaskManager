@@ -12,7 +12,7 @@ from mcp.server.fastmcp import FastMCP
 
 
 ENV_FILE = Path(__file__).resolve().with_name(".env")
-load_dotenv(ENV_FILE)
+load_dotenv(ENV_FILE, override=True)
 
 API_BASE_URL = os.getenv("PRIMEFLOW_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 WEB_BASE_URL = os.getenv("PRIMEFLOW_WEB_BASE_URL", "http://127.0.0.1:3000").rstrip("/")
