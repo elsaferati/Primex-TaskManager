@@ -79,6 +79,7 @@ jobs:
         env:
           PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
           PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
+          PRIMEFLOW_READONLY_DATABASE_URL: ${{ secrets.PRIMEFLOW_READONLY_DATABASE_URL }}
         run: |
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
@@ -99,6 +100,7 @@ jobs:
           echo PRIMEFLOW_MCP_PORT=8010 >> backend\.env
           echo PRIMEFLOW_EMAIL=%PRIMEFLOW_MCP_EMAIL% >> backend\.env
           echo PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD% >> backend\.env
+          echo PRIMEFLOW_READONLY_DATABASE_URL=%PRIMEFLOW_READONLY_DATABASE_URL% >> backend\.env
  
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}

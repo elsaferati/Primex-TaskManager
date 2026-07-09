@@ -64,6 +64,7 @@ module.exports = {
         PRIMEFLOW_ACCESS_TOKEN: process.env.PRIMEFLOW_ACCESS_TOKEN ?? "",
         PRIMEFLOW_EMAIL: process.env.PRIMEFLOW_EMAIL ?? "",
         PRIMEFLOW_PASSWORD: process.env.PRIMEFLOW_PASSWORD ?? "",
+        PRIMEFLOW_READONLY_DATABASE_URL: process.env.PRIMEFLOW_READONLY_DATABASE_URL ?? "",
       },
     },
     {

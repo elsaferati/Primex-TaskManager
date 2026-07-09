@@ -10,6 +10,7 @@ from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 import httpx
+import asyncpg
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
@@ -20,6 +21,7 @@ load_dotenv(ENV_FILE, override=True)
 API_BASE_URL = os.getenv("PRIMEFLOW_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 WEB_BASE_URL = os.getenv("PRIMEFLOW_WEB_BASE_URL", "http://127.0.0.1:3000").rstrip("/")
 ACCESS_TOKEN = os.getenv("PRIMEFLOW_ACCESS_TOKEN")
+READONLY_DATABASE_URL = os.getenv("PRIMEFLOW_READONLY_DATABASE_URL")
 REQUEST_TIMEOUT = float(os.getenv("PRIMEFLOW_MCP_TIMEOUT", "30"))
 MCP_HOST = os.getenv("PRIMEFLOW_MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.getenv("PRIMEFLOW_MCP_PORT", "8010"))
@@ -70,11 +72,18 @@ Endpoint guidance:
 - Use DELETE only when the user explicitly asks to delete/deactivate/remove and the target ID is clear.
 - Never invent UUIDs. Resolve names with list_users, resolve_user, list_projects, or relevant lookup endpoints.
 - For "what tasks does X have today / unfinished today", use get_user_tasks_for_day or get_user_unfinished_tasks_today. Do not manually filter by assignee name.
+- Database read-only tools are for schema understanding, relationship discovery, debugging, and simple analytics only. Use API tools for writes and Primeflow business logic.
+- run_readonly_sql allows only SELECT/WITH statements and runs in a read-only transaction. Never use database tools for create/update/delete actions.
 """
 
 mcp = FastMCP("primeflow", instructions=PRIMEFLOW_GUIDE, host=MCP_HOST, port=MCP_PORT)
 
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
+FORBIDDEN_SQL_RE = re.compile(
+    r"\b(insert|update|delete|drop|alter|truncate|create|grant|revoke|copy|execute|call|merge|"
+    r"refresh|vacuum|analyze|reindex|cluster|comment|security|set|reset|listen|notify)\b",
+    re.IGNORECASE,
+)
 
 
 def _jwt_exp(token: str) -> int:
@@ -133,6 +142,45 @@ async def _request(method: str, path: str, *, params: dict[str, Any] | None = No
     if response.status_code == 204 or not response.content:
         return {"status": "ok"}
     return response.json()
+
+
+def _db_url() -> str:
+    if not READONLY_DATABASE_URL:
+        raise RuntimeError(
+            "PRIMEFLOW_READONLY_DATABASE_URL is not set. Configure a PostgreSQL read-only user before using DB tools."
+        )
+    return READONLY_DATABASE_URL.replace("postgresql+asyncpg://", "postgresql://", 1)
+
+
+def _validate_readonly_sql(sql: str) -> str:
+    statement = sql.strip()
+    if not statement:
+        raise ValueError("SQL query is required.")
+    if ";" in statement.rstrip(";"):
+        raise ValueError("Only one SQL statement is allowed.")
+    statement = statement.rstrip(";").strip()
+    lowered = statement.lower()
+    if not (lowered.startswith("select ") or lowered.startswith("with ")):
+        raise ValueError("Only SELECT or WITH read-only queries are allowed.")
+    if FORBIDDEN_SQL_RE.search(statement):
+        raise ValueError("This SQL contains a forbidden non-read-only keyword.")
+    return statement
+
+
+def _quote_ident(value: str) -> str:
+    if not re.match(r"^[A-Za-z_][A-Za-z0-9_]*$", value):
+        raise ValueError(f"Invalid SQL identifier: {value}")
+    return f'"{value}"'
+
+
+async def _db_fetch(sql: str, *args: Any) -> list[dict[str, Any]]:
+    conn = await asyncpg.connect(_db_url())
+    try:
+        async with conn.transaction(readonly=True):
+            rows = await conn.fetch(sql, *args)
+            return [dict(row) for row in rows]
+    finally:
+        await conn.close()
 
 
 def _parse_json_arg(value: str | None, *, default: Any) -> Any:
@@ -389,6 +437,102 @@ async def primeflow_api_request(
         "content_length": len(response.content),
         "text_preview": text[:2000],
     }
+
+
+@mcp.tool()
+async def list_database_tables(schema_name: str = "public") -> Any:
+    """List database tables/views in a schema using the read-only DB connection."""
+    return await _db_fetch(
+        """
+        select table_schema, table_name, table_type
+        from information_schema.tables
+        where table_schema = $1
+        order by table_type, table_name
+        """,
+        schema_name,
+    )
+
+
+@mcp.tool()
+async def describe_database_table(table_name: str, schema_name: str = "public") -> Any:
+    """Describe columns, types, nullability, defaults, and primary key status for a database table."""
+    columns = await _db_fetch(
+        """
+        select
+            c.ordinal_position,
+            c.column_name,
+            c.data_type,
+            c.udt_name,
+            c.is_nullable,
+            c.column_default,
+            case when pk.column_name is not null then true else false end as is_primary_key
+        from information_schema.columns c
+        left join (
+            select ku.table_schema, ku.table_name, ku.column_name
+            from information_schema.table_constraints tc
+            join information_schema.key_column_usage ku
+              on tc.constraint_name = ku.constraint_name
+             and tc.table_schema = ku.table_schema
+            where tc.constraint_type = 'PRIMARY KEY'
+        ) pk
+          on pk.table_schema = c.table_schema
+         and pk.table_name = c.table_name
+         and pk.column_name = c.column_name
+        where c.table_schema = $1 and c.table_name = $2
+        order by c.ordinal_position
+        """,
+        schema_name,
+        table_name,
+    )
+    if not columns:
+        raise ValueError(f"Table not found: {schema_name}.{table_name}")
+    return columns
+
+
+@mcp.tool()
+async def list_database_relationships(table_name: str | None = None, schema_name: str = "public") -> Any:
+    """List foreign-key relationships, optionally filtered to one table."""
+    return await _db_fetch(
+        """
+        select
+            tc.constraint_name,
+            kcu.table_schema,
+            kcu.table_name,
+            kcu.column_name,
+            ccu.table_schema as foreign_table_schema,
+            ccu.table_name as foreign_table_name,
+            ccu.column_name as foreign_column_name
+        from information_schema.table_constraints tc
+        join information_schema.key_column_usage kcu
+          on tc.constraint_name = kcu.constraint_name
+         and tc.table_schema = kcu.table_schema
+        join information_schema.constraint_column_usage ccu
+          on ccu.constraint_name = tc.constraint_name
+         and ccu.table_schema = tc.table_schema
+        where tc.constraint_type = 'FOREIGN KEY'
+          and kcu.table_schema = $1
+          and ($2::text is null or kcu.table_name = $2 or ccu.table_name = $2)
+        order by kcu.table_name, kcu.column_name
+        """,
+        schema_name,
+        table_name,
+    )
+
+
+@mcp.tool()
+async def run_readonly_sql(sql: str, max_rows: int = 100) -> Any:
+    """
+    Run a read-only SQL query against Primeflow DB.
+
+    Only SELECT/WITH are allowed. The query runs in a read-only transaction.
+    Results are capped to max_rows, default 100, hard max 500.
+    Use this for understanding data and relationships, not for app writes.
+    """
+    statement = _validate_readonly_sql(sql)
+    row_limit = min(max(max_rows, 1), 500)
+    wrapped = f"select * from ({statement}) as mcp_readonly_result limit {row_limit}"
+    rows = await _db_fetch(wrapped)
+    return {"row_count": len(rows), "max_rows": row_limit, "rows": rows}
 
 
 @mcp.tool()

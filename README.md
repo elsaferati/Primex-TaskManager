@@ -125,6 +125,24 @@ In this repo's GitHub Actions deploy, backend changes start a `primeflow-mcp` PM
 
 Available tools include ChatGPT-compatible `search`/`fetch`, task/project search, list/get/create/update tasks, list/get projects, list users, and current user lookup. The MCP server uses the normal Primeflow API, so existing backend permissions still apply.
 
+Optional read-only database tools:
+
+```sql
+CREATE USER primeflow_mcp_reader WITH PASSWORD 'use-a-strong-password';
+GRANT CONNECT ON DATABASE primex_nexus TO primeflow_mcp_reader;
+GRANT USAGE ON SCHEMA public TO primeflow_mcp_reader;
+GRANT SELECT ON ALL TABLES IN SCHEMA public TO primeflow_mcp_reader;
+ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO primeflow_mcp_reader;
+```
+
+Then add the GitHub Actions secret:
+
+```text
+PRIMEFLOW_READONLY_DATABASE_URL=postgresql://primeflow_mcp_reader:password@localhost:5433/primex_nexus
+```
+
+The MCP database tools only expose schema inspection and read-only SQL. App writes should still go through the Primeflow API tools.
+
 ## Production notes
 
 - Frontend: `cd frontend; npm run build; npm start`
