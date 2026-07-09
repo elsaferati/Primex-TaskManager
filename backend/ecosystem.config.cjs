@@ -51,6 +51,22 @@ module.exports = {
       },
     },
     {
+      ...apiProcess,
+      name: "primeflow-mcp",
+      args: "mcp_server.py",
+      env: {
+        ...sharedEnv,
+        PRIMEFLOW_API_BASE_URL: process.env.PRIMEFLOW_API_BASE_URL ?? "https://api-flow.primexeu.com",
+        PRIMEFLOW_WEB_BASE_URL: process.env.PRIMEFLOW_WEB_BASE_URL ?? "https://primeflow.primexeu.com",
+        PRIMEFLOW_MCP_TRANSPORT: process.env.PRIMEFLOW_MCP_TRANSPORT ?? "sse",
+        PRIMEFLOW_MCP_HOST: process.env.PRIMEFLOW_MCP_HOST ?? "0.0.0.0",
+        PRIMEFLOW_MCP_PORT: process.env.PRIMEFLOW_MCP_PORT ?? "8010",
+        PRIMEFLOW_ACCESS_TOKEN: process.env.PRIMEFLOW_ACCESS_TOKEN ?? "",
+        PRIMEFLOW_EMAIL: process.env.PRIMEFLOW_EMAIL ?? "",
+        PRIMEFLOW_PASSWORD: process.env.PRIMEFLOW_PASSWORD ?? "",
+      },
+    },
+    {
       name: "celery_worker",
       cwd,
       script: python,

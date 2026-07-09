@@ -75,20 +75,32 @@ jobs:
           "migration_changed=$($migrationChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
  
       - name: Create Env Files
-        shell: cmd
+        shell: powershell
+        env:
+          PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
+          PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
         run: |
-          echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend/.env.local
-          echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend/.env
-          echo DB_POOL_SIZE=20 >> backend/.env
-          echo DB_MAX_OVERFLOW=20 >> backend/.env
-          echo DB_POOL_TIMEOUT=30 >> backend/.env
-          echo DB_POOL_RECYCLE=1800 >> backend/.env
-          echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend/.env
-          echo REDIS_ENABLED=false >> backend/.env
-          echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend/.env
-          echo APP_TIMEZONE=Europe/Budapest >> backend/.env
-          echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend/.env
-          echo FRONTEND_URL=https://primeflow.primexeu.com >> backend/.env
+          "NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com" | Set-Content -Path frontend/.env.local -Encoding utf8
+          @(
+            "DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus"
+            "DB_POOL_SIZE=20"
+            "DB_MAX_OVERFLOW=20"
+            "DB_POOL_TIMEOUT=30"
+            "DB_POOL_RECYCLE=1800"
+            "JWT_SECRET=primex_nexus_secret_key_2026"
+            "REDIS_ENABLED=false"
+            "REDIS_URL=redis://127.0.0.1:6379/0"
+            "APP_TIMEZONE=Europe/Budapest"
+            "CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com"
+            "FRONTEND_URL=https://primeflow.primexeu.com"
+            "PRIMEFLOW_API_BASE_URL=https://api-flow.primexeu.com"
+            "PRIMEFLOW_WEB_BASE_URL=https://primeflow.primexeu.com"
+            "PRIMEFLOW_MCP_TRANSPORT=sse"
+            "PRIMEFLOW_MCP_HOST=0.0.0.0"
+            "PRIMEFLOW_MCP_PORT=8010"
+            "PRIMEFLOW_EMAIL=$env:PRIMEFLOW_MCP_EMAIL"
+            "PRIMEFLOW_PASSWORD=$env:PRIMEFLOW_MCP_PASSWORD"
+          ) | Set-Content -Path backend/.env -Encoding utf8
  
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}
@@ -117,13 +129,17 @@ jobs:
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
           call pm2 delete primex-backend || ver > NUL
+          call pm2 delete primeflow-mcp || ver > NUL
 
           REM Kill any orphaned process still holding port 8000 (a squatter outside PM2
           REM keeps serving stale code and makes health checks pass against old builds).
           powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8000'); Stop-Process -Id $_ -Force }"
+          powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8010'); Stop-Process -Id $_ -Force }"
 
           call pm2 start ecosystem.config.cjs --only primex-backend --update-env
+          call pm2 start ecosystem.config.cjs --only primeflow-mcp --update-env
           call pm2 describe primex-backend | findstr /I "status"
+          call pm2 describe primeflow-mcp | findstr /I "status"
           echo PM2 backend restart/start completed.
  
       - name: Wait for Backend Readiness

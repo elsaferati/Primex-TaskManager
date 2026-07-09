@@ -10,7 +10,7 @@ Production-ready internal task & project management platform (Trello-like) with:
 
 ## Requirements (No Docker)
 
-- Python 3.11+ (recommended)
+- Python 3.11 or 3.12 recommended
 - Node.js 20+
 - PostgreSQL 14+
 - Redis 6+
@@ -73,6 +73,57 @@ npm run dev
 ```
 
 Open `http://localhost:3000`.
+
+## MCP for ChatGPT / Codex
+
+This repo includes an MCP server that lets an MCP-capable client call Primeflow through the existing FastAPI API. Local MCP clients can use stdio. ChatGPT Apps/connectors need the server deployed as a reachable HTTPS remote MCP endpoint.
+
+Install backend dependencies, start the API, then set a Primeflow access token.
+
+Local stdio mode:
+
+```powershell
+cd backend
+python -m pip install -r requirements.txt
+$token = (Invoke-RestMethod -Method Post -Uri "http://127.0.0.1:8000/api/auth/login" -ContentType "application/json" -Body '{"email":"admin@example.com","password":"change-me-now"}').access_token
+$env:PRIMEFLOW_API_BASE_URL="http://127.0.0.1:8000"
+$env:PRIMEFLOW_ACCESS_TOKEN=$token
+python mcp_server.py
+```
+
+Example local MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "primeflow": {
+      "command": "python",
+      "args": ["C:\\Users\\Admin\\Documents\\GitHub\\Primex-TaskManager\\backend\\mcp_server.py"],
+      "env": {
+        "PRIMEFLOW_API_BASE_URL": "http://127.0.0.1:8000",
+        "PRIMEFLOW_ACCESS_TOKEN": "<access token>"
+      }
+    }
+  }
+}
+```
+
+Hosted SSE mode for ChatGPT/App testing:
+
+```powershell
+cd backend
+$env:PRIMEFLOW_API_BASE_URL="https://api-flow.primexeu.com"
+$env:PRIMEFLOW_WEB_BASE_URL="https://primeflow.primexeu.com"
+$env:PRIMEFLOW_EMAIL="<service account email>"
+$env:PRIMEFLOW_PASSWORD="<service account password>"
+$env:PRIMEFLOW_MCP_TRANSPORT="sse"
+$env:PRIMEFLOW_MCP_PORT="8010"
+python mcp_server.py
+```
+
+In this repo's GitHub Actions deploy, backend changes start a `primeflow-mcp` PM2 process on port `8010`. Add GitHub Actions secrets named `PRIMEFLOW_MCP_EMAIL` and `PRIMEFLOW_MCP_PASSWORD` before deploying, then expose port `8010` through HTTPS, for example `https://mcp-flow.primexeu.com/sse`. Add that URL in ChatGPT's Apps & Connectors developer setup. For production, replace the service-account prototype with OAuth so each ChatGPT user authorizes their own Primeflow account.
+
+Available tools include ChatGPT-compatible `search`/`fetch`, task/project search, list/get/create/update tasks, list/get projects, list users, and current user lookup. The MCP server uses the normal Primeflow API, so existing backend permissions still apply.
 
 ## Production notes
 
