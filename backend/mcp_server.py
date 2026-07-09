@@ -3,9 +3,11 @@ import base64
 import json
 import re
 import time
+from datetime import date, datetime, time as datetime_time, timedelta, timezone
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
+from zoneinfo import ZoneInfo
 
 import httpx
 from dotenv import load_dotenv
@@ -21,6 +23,7 @@ ACCESS_TOKEN = os.getenv("PRIMEFLOW_ACCESS_TOKEN")
 REQUEST_TIMEOUT = float(os.getenv("PRIMEFLOW_MCP_TIMEOUT", "30"))
 MCP_HOST = os.getenv("PRIMEFLOW_MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.getenv("PRIMEFLOW_MCP_PORT", "8010"))
+APP_TIMEZONE = os.getenv("APP_TIMEZONE", "Europe/Budapest")
 _token_cache: dict[str, Any] = {"access_token": ACCESS_TOKEN, "expires_at": 0}
 
 PRIMEFLOW_GUIDE = """
@@ -66,6 +69,7 @@ Endpoint guidance:
 - Use POST/PATCH/PUT only when the user clearly asks to create, update, approve, reject, save, or generate.
 - Use DELETE only when the user explicitly asks to delete/deactivate/remove and the target ID is clear.
 - Never invent UUIDs. Resolve names with list_users, resolve_user, list_projects, or relevant lookup endpoints.
+- For "what tasks does X have today / unfinished today", use get_user_tasks_for_day or get_user_unfinished_tasks_today. Do not manually filter by assignee name.
 """
 
 mcp = FastMCP("primeflow", instructions=PRIMEFLOW_GUIDE, host=MCP_HOST, port=MCP_PORT)
@@ -159,6 +163,27 @@ def _frontend_url(path: str) -> str:
     return urljoin(f"{WEB_BASE_URL}/", path.lstrip("/"))
 
 
+def _local_tz() -> ZoneInfo | timezone:
+    try:
+        return ZoneInfo(APP_TIMEZONE)
+    except Exception:
+        return timezone.utc
+
+
+def _parse_day(value: str | None) -> date:
+    if value:
+        return date.fromisoformat(value)
+    return datetime.now(_local_tz()).date()
+
+
+def _day_bounds(value: str | None) -> tuple[str, str, str]:
+    day = _parse_day(value)
+    tz = _local_tz()
+    start = datetime.combine(day, datetime_time.min, tzinfo=tz)
+    end = start + timedelta(days=1)
+    return day.isoformat(), start.isoformat(), end.isoformat()
+
+
 def _user_initials(user: dict[str, Any]) -> str:
     full_name = str(user.get("full_name") or "").strip()
     if full_name:
@@ -218,6 +243,45 @@ async def _resolve_user_id(user_ref: str | None) -> str | None:
     raise ValueError(f"Ambiguous Primeflow user '{user_ref}'. Matching candidates: {names}")
 
 
+async def _resolve_department_id(department_ref: str | None) -> str | None:
+    if not department_ref:
+        return None
+    value = department_ref.strip()
+    if not value:
+        return None
+    if UUID_RE.match(value):
+        return value
+
+    departments = await _request("GET", "/api/departments")
+    query = value.lower()
+    exact_matches = [
+        dept for dept in departments
+        if query in {
+            str(dept.get("name") or "").lower(),
+            str(dept.get("code") or "").lower(),
+            str(dept.get("slug") or "").lower(),
+        }
+    ]
+    if len(exact_matches) == 1:
+        return str(exact_matches[0]["id"])
+
+    contains_matches = [
+        dept for dept in departments
+        if query in " ".join(str(dept.get(key) or "").lower() for key in ("name", "code", "slug"))
+    ]
+    if len(contains_matches) == 1:
+        return str(contains_matches[0]["id"])
+
+    candidates = exact_matches or contains_matches
+    if not candidates:
+        raise ValueError(f"No Primeflow department matched '{department_ref}'. Use list_departments to inspect departments.")
+    names = ", ".join(
+        f"{dept.get('name') or dept.get('code')} ({dept.get('id')})"
+        for dept in candidates[:10]
+    )
+    raise ValueError(f"Ambiguous Primeflow department '{department_ref}'. Matching candidates: {names}")
+
+
 @mcp.tool()
 async def primeflow_me() -> Any:
     """Return the Primeflow user connected to this MCP server."""
@@ -265,6 +329,23 @@ async def list_api_endpoints(tag: str | None = None, query: str | None = None) -
                 }
             )
     return results
+
+
+@mcp.tool()
+async def list_departments() -> Any:
+    """List Primeflow departments. Use this before department-specific reports if the department ID is unknown."""
+    return await _request("GET", "/api/departments")
+
+
+@mcp.tool()
+async def resolve_department(department_ref: str) -> Any:
+    """Resolve a Primeflow department name/code/slug/UUID such as Development, DEV, GA, PCM to a department record."""
+    department_id = await _resolve_department_id(department_ref)
+    departments = await _request("GET", "/api/departments")
+    for department in departments:
+        if str(department.get("id")) == department_id:
+            return department
+    return {"id": department_id}
 
 
 @mcp.tool()
@@ -393,12 +474,21 @@ async def list_tasks(
     project_id: str | None = None,
     status: str | None = None,
     assigned_to: str | None = None,
+    assignee_name: str | None = None,
     due_from: str | None = None,
     due_to: str | None = None,
+    window_from: str | None = None,
+    window_to: str | None = None,
     include_done: bool = True,
     include_inactive: bool = False,
 ) -> Any:
-    """List Primeflow tasks with optional filters. Date filters should be ISO datetime strings."""
+    """
+    List Primeflow tasks with optional filters.
+
+    Use assignee_name for names/initials like "Endi Hyseni" or "EH"; the MCP server resolves it to assigned_to UUID.
+    Date filters should be ISO datetime strings. window_from/window_to is better for "tasks for this day" because it considers due/start/created planner windows.
+    """
+    resolved_assignee = await _resolve_user_id(assignee_name or assigned_to)
     return await _request(
         "GET",
         "/api/tasks",
@@ -406,12 +496,78 @@ async def list_tasks(
             "department_id": department_id,
             "project_id": project_id,
             "status": status,
-            "assigned_to": assigned_to,
+            "assigned_to": resolved_assignee,
             "due_from": due_from,
             "due_to": due_to,
+            "window_from": window_from,
+            "window_to": window_to,
             "include_done": include_done,
             "include_inactive": include_inactive,
         },
+    )
+
+
+@mcp.tool()
+async def get_user_tasks_for_day(
+    user_ref: str,
+    day_date: str | None = None,
+    unfinished_only: bool = False,
+    include_inactive: bool = False,
+) -> Any:
+    """
+    Get one user's Primeflow tasks for a specific local day.
+
+    Use this for questions like "what does Endi Hyseni need to finish today?"
+    user_ref can be a full name, username, email, UUID, or initials.
+    day_date is YYYY-MM-DD; omitted means today in APP_TIMEZONE.
+    unfinished_only=true excludes DONE/completed tasks.
+    """
+    user_id = await _resolve_user_id(user_ref)
+    day, start, end = _day_bounds(day_date)
+    tasks = await _request(
+        "GET",
+        "/api/tasks",
+        params={
+            "assigned_to": user_id,
+            "window_from": start,
+            "window_to": end,
+            "include_done": not unfinished_only,
+            "include_inactive": include_inactive,
+        },
+    )
+    if unfinished_only:
+        tasks = [
+            task for task in tasks
+            if str(task.get("status") or "").upper() not in {"DONE", "COMPLETED"}
+            and not task.get("completed_at")
+        ]
+    return {
+        "user_id": user_id,
+        "day": day,
+        "unfinished_only": unfinished_only,
+        "count": len(tasks),
+        "tasks": tasks,
+    }
+
+
+@mcp.tool()
+async def get_user_unfinished_tasks_today(user_ref: str) -> Any:
+    """Get unfinished Primeflow tasks for a user today. Use this for 'left unfinished today' questions."""
+    return await get_user_tasks_for_day(user_ref=user_ref, day_date=None, unfinished_only=True)
+
+
+@mcp.tool()
+async def get_open_tasks_by_department(
+    department_ref: str,
+    include_done: bool = False,
+    include_inactive: bool = False,
+) -> Any:
+    """Get open/unfinished tasks for a Primeflow department by name/code/UUID."""
+    department_id = await _resolve_department_id(department_ref)
+    return await list_tasks(
+        department_id=department_id,
+        include_done=include_done,
+        include_inactive=include_inactive,
     )
 
 
@@ -445,6 +601,38 @@ async def get_common_view(
 
 
 @mcp.tool()
+async def get_common_view_meetings_for_week(
+    week_start: str | None = None,
+    department_ref: str | None = None,
+    include_all_departments: bool = True,
+) -> Any:
+    """
+    Get internal and external meetings from Common View for a week.
+
+    Use this for "takime interne/eksterne kete jave/javen tjeter".
+    week_start should be Monday YYYY-MM-DD. The result contains internal and external lists.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    data = await get_common_view(
+        week_start=week_start,
+        include="users,departments,meetings",
+        department_id=department_id,
+        include_all_departments=include_all_departments,
+    )
+    items = data.get("items") or {}
+    return {
+        "week_start": data.get("week_start"),
+        "week_end": data.get("week_end"),
+        "counts": {
+            "internal": len(items.get("internal") or []),
+            "external": len(items.get("external") or []),
+        },
+        "internal": items.get("internal") or [],
+        "external": items.get("external") or [],
+    }
+
+
+@mcp.tool()
 async def list_meetings(
     department_id: str | None = None,
     project_id: str | None = None,
@@ -467,6 +655,166 @@ async def list_meetings(
             "meeting_type": meeting_type,
         },
     )
+
+
+@mcp.tool()
+async def get_weekly_planner(
+    week_start: str | None = None,
+    department_ref: str | None = None,
+    user_ref: str | None = None,
+) -> Any:
+    """Get Primeflow weekly planner data. Use for weekly plan/project/task planning views."""
+    department_id = await _resolve_department_id(department_ref)
+    user_id = await _resolve_user_id(user_ref)
+    return await _request(
+        "GET",
+        "/api/planners/weekly",
+        params={"week_start": week_start, "department_id": department_id, "user_id": user_id},
+    )
+
+
+@mcp.tool()
+async def get_weekly_table(
+    week_start: str | None = None,
+    department_ref: str | None = None,
+    is_this_week: bool = False,
+) -> Any:
+    """Get Primeflow weekly table planner, organized by departments/users/days/AM/PM."""
+    department_id = await _resolve_department_id(department_ref)
+    return await _request(
+        "GET",
+        "/api/planners/weekly-table",
+        params={"week_start": week_start, "department_id": department_id, "is_this_week": is_this_week},
+    )
+
+
+@mcp.tool()
+async def get_monthly_planner(
+    year: int,
+    month: int,
+    department_ref: str | None = None,
+    user_ref: str | None = None,
+) -> Any:
+    """Get Primeflow monthly planner for a year/month, optionally scoped to department or user."""
+    department_id = await _resolve_department_id(department_ref)
+    user_id = await _resolve_user_id(user_ref)
+    return await _request(
+        "GET",
+        "/api/planners/monthly",
+        params={"year": year, "month": month, "department_id": department_id, "user_id": user_id},
+    )
+
+
+@mcp.tool()
+async def get_daily_report(
+    day: str | None = None,
+    department_ref: str | None = None,
+    user_ref: str | None = None,
+) -> Any:
+    """Get Primeflow daily report for execution/accountability, late items, daily tasks, and system occurrences."""
+    day_value = _parse_day(day).isoformat()
+    department_id = await _resolve_department_id(department_ref)
+    user_id = await _resolve_user_id(user_ref)
+    return await _request(
+        "GET",
+        "/api/reports/daily",
+        params={"day": day_value, "department_id": department_id, "user_id": user_id},
+    )
+
+
+@mcp.tool()
+async def get_daily_ga_table(
+    day: str | None = None,
+    department_ref: str | None = None,
+    user_ref: str | None = None,
+) -> Any:
+    """Get Primeflow daily GA table/report data for a day."""
+    day_value = _parse_day(day).isoformat()
+    department_id = await _resolve_department_id(department_ref)
+    user_id = await _resolve_user_id(user_ref)
+    return await _request(
+        "GET",
+        "/api/reports/daily-ga-table",
+        params={"day": day_value, "department_id": department_id, "user_id": user_id},
+    )
+
+
+@mcp.tool()
+async def list_common_entries(from_date: str | None = None, to_date: str | None = None) -> Any:
+    """List Common entries, optionally by date range. Use for complaints, requests, proposals, problems, leave/PV, holidays, feedback."""
+    return await _request("GET", "/api/common-entries", params={"from": from_date, "to": to_date})
+
+
+@mcp.tool()
+async def list_leave_blocks(
+    block_type: str = "PV_FEST",
+    start: str | None = None,
+    end: str | None = None,
+    department_ref: str | None = None,
+) -> Any:
+    """List Common View leave/holiday blocks. block_type defaults to PV_FEST."""
+    department_id = await _resolve_department_id(department_ref)
+    return await _request(
+        "GET",
+        "/api/common-entries/blocks",
+        params={"type": block_type, "start": start, "end": end, "department_id": department_id},
+    )
+
+
+@mcp.tool()
+async def list_ga_notes(project_id: str | None = None, department_ref: str | None = None) -> Any:
+    """List GA/KA notes, optionally for a project or department."""
+    department_id = await _resolve_department_id(department_ref)
+    return await _request("GET", "/api/ga-notes", params={"project_id": project_id, "department_id": department_id})
+
+
+@mcp.tool()
+async def list_plan_notes(project_id: str | None = None, department_ref: str | None = None) -> Any:
+    """List plan notes, optionally for a project or department."""
+    department_id = await _resolve_department_id(department_ref)
+    return await _request("GET", "/api/plan-notes", params={"project_id": project_id, "department_id": department_id})
+
+
+@mcp.tool()
+async def list_internal_notes(department_ref: str, to_user_ref: str | None = None) -> Any:
+    """List internal notes for a department, optionally targeted to a user."""
+    department_id = await _resolve_department_id(department_ref)
+    to_user_id = await _resolve_user_id(to_user_ref)
+    return await _request(
+        "GET",
+        "/api/internal-notes",
+        params={"department_id": department_id, "to_user_id": to_user_id},
+    )
+
+
+@mcp.tool()
+async def list_system_tasks(
+    department_ref: str | None = None,
+    only_active: bool = False,
+    assigned_to: str | None = None,
+    occurrence_date: str | None = None,
+    include_overdue: bool = False,
+) -> Any:
+    """List system tasks/occurrences. assigned_to can be name/initials/UUID."""
+    department_id = await _resolve_department_id(department_ref)
+    assigned_to_id = await _resolve_user_id(assigned_to)
+    return await _request(
+        "GET",
+        "/api/system-tasks",
+        params={
+            "department_id": department_id,
+            "only_active": only_active,
+            "assigned_to": assigned_to_id,
+            "occurrence_date": occurrence_date,
+            "include_overdue": include_overdue,
+        },
+    )
+
+
+@mcp.tool()
+async def list_system_task_templates() -> Any:
+    """List Primeflow system task templates including recurring task definitions where visible."""
+    return await _request("GET", "/api/system-tasks/templates")
 
 
 @mcp.tool()
@@ -519,6 +867,35 @@ async def create_task(
             "is_1h_report": is_1h_report,
             "one_h_report_slot": one_h_report_slot,
         },
+    )
+
+
+@mcp.tool()
+async def create_1h_task(
+    title: str,
+    assignee_name: str,
+    description: str | None = None,
+    department_ref: str | None = None,
+    due_date: str | None = None,
+    one_h_report_slot: str | None = None,
+    priority: str | None = None,
+) -> Any:
+    """
+    Create a Primeflow 1H task for a user.
+
+    Use this when the user says "krijo task 1H per LH/filan person".
+    1H means is_1h_report=true. assignee_name can be initials or full name.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    return await create_task(
+        title=title,
+        description=description,
+        department_id=department_id,
+        assignee_name=assignee_name,
+        due_date=due_date,
+        priority=priority,
+        is_1h_report=True,
+        one_h_report_slot=one_h_report_slot,
     )
 
 
