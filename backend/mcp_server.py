@@ -416,6 +416,60 @@ async def list_tasks(
 
 
 @mcp.tool()
+async def get_common_view(
+    week_start: str | None = None,
+    include: str | None = "users,departments,entries,meetings,system_tasks,tasks",
+    department_id: str | None = None,
+    include_all_departments: bool = True,
+    max_items_per_bucket: int | None = None,
+) -> Any:
+    """
+    Get Primeflow Common View.
+
+    Use this for Common View, internal/external meetings, 1H, blocked, personal, R1, priority, feedback,
+    absent/leave, external holidays, system-task BZ rows, and weekly operational overview.
+    For meetings, Common View returns them in items.internal and items.external.
+    week_start should be the Monday date in YYYY-MM-DD format; omitted means current week.
+    """
+    return await _request(
+        "GET",
+        "/api/common-view",
+        params={
+            "week_start": week_start,
+            "include": include,
+            "department_id": department_id,
+            "include_all_departments": include_all_departments,
+            "max_items_per_bucket": max_items_per_bucket,
+        },
+    )
+
+
+@mcp.tool()
+async def list_meetings(
+    department_id: str | None = None,
+    project_id: str | None = None,
+    include_all_departments: bool = True,
+    meeting_type: str | None = None,
+) -> Any:
+    """
+    List Primeflow meetings.
+
+    meeting_type can be "internal" or "external".
+    For week-based internal/external meeting summaries, prefer get_common_view because it expands recurring meetings by week.
+    """
+    return await _request(
+        "GET",
+        "/api/meetings",
+        params={
+            "department_id": department_id,
+            "project_id": project_id,
+            "include_all_departments": include_all_departments,
+            "meeting_type": meeting_type,
+        },
+    )
+
+
+@mcp.tool()
 async def get_task(task_id: str) -> Any:
     """Get a Primeflow task by ID."""
     return await _request("GET", f"/api/tasks/{task_id}")
