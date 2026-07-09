@@ -72,6 +72,7 @@ Endpoint guidance:
 - Use DELETE only when the user explicitly asks to delete/deactivate/remove and the target ID is clear.
 - Never invent UUIDs. Resolve names with list_users, resolve_user, list_projects, or relevant lookup endpoints.
 - For "what tasks does X have today / unfinished today", use get_user_tasks_for_day or get_user_unfinished_tasks_today. Do not manually filter by assignee name.
+- For GA/KA note creation, use create_ga_note. note_type must be GA or KA. priority, when provided, must be NORMAL or HIGH.
 - Database read-only tools are for schema understanding, relationship discovery, debugging, and simple analytics only. Use API tools for writes and Primeflow business logic.
 - run_readonly_sql allows only SELECT/WITH statements and runs in a read-only transaction. Never use database tools for create/update/delete actions.
 """
@@ -910,6 +911,55 @@ async def list_ga_notes(project_id: str | None = None, department_ref: str | Non
     """List GA/KA notes, optionally for a project or department."""
     department_id = await _resolve_department_id(department_ref)
     return await _request("GET", "/api/ga-notes", params={"project_id": project_id, "department_id": department_id})
+
+
+@mcp.tool()
+async def create_ga_note(
+    content: str,
+    note_type: str = "GA",
+    department_ref: str | None = None,
+    project_id: str | None = None,
+    priority: str | None = None,
+    status: str | None = None,
+    start_date: str | None = None,
+    due_date: str | None = None,
+    is_discussed: bool | None = None,
+) -> Any:
+    """
+    Create a GA/KA note in Primeflow.
+
+    Use this for requests like "krijo GA note" or "shto KA note".
+    note_type must be GA or KA. priority can be NORMAL or HIGH. department_ref
+    can be a department name such as "Development" or "GA/KA".
+    """
+    normalized_note_type = (note_type or "GA").upper()
+    if normalized_note_type not in {"GA", "KA"}:
+        raise ValueError("note_type must be GA or KA")
+
+    normalized_priority = priority.upper() if priority else None
+    if normalized_priority is not None and normalized_priority not in {"NORMAL", "HIGH"}:
+        raise ValueError("priority must be NORMAL or HIGH")
+
+    normalized_status = status.upper() if status else None
+    if normalized_status is not None and normalized_status not in {"OPEN", "CLOSED"}:
+        raise ValueError("status must be OPEN or CLOSED")
+
+    department_id = await _resolve_department_id(department_ref)
+    return await _request(
+        "POST",
+        "/api/ga-notes",
+        json={
+            "content": content,
+            "note_type": normalized_note_type,
+            "department_id": department_id,
+            "project_id": project_id,
+            "priority": normalized_priority,
+            "status": normalized_status,
+            "start_date": start_date,
+            "due_date": due_date,
+            "is_discussed": is_discussed,
+        },
+    )
 
 
 @mcp.tool()
