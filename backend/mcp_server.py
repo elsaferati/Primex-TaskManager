@@ -23,7 +23,52 @@ MCP_HOST = os.getenv("PRIMEFLOW_MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.getenv("PRIMEFLOW_MCP_PORT", "8010"))
 _token_cache: dict[str, Any] = {"access_token": ACCESS_TOKEN, "expires_at": 0}
 
-mcp = FastMCP("primeflow", host=MCP_HOST, port=MCP_PORT)
+PRIMEFLOW_GUIDE = """
+Primeflow is an internal task, project, planning, reporting, and operations system.
+
+Use the specific MCP tools first for common work. Use primeflow_api_request only when a specific tool does not cover the request.
+All API calls go through the existing Primeflow FastAPI backend and use the configured service account, so backend permissions still apply.
+
+Core language and business rules:
+- "1H" means a Primeflow 1H report task. It is not a request to set the deadline one hour from now. Set is_1h_report=true.
+- 1H slots, when requested, use one_h_report_slot values: 10:00, 11:00, 11:50, 14:20, 16:00.
+- After the app's slot rollover time, Primeflow may apply 1H slot work to the next effective workday. Let the backend enforce this.
+- Initials such as LH should be resolved to users before assignment. LH normally means Laurent Hoxha if that is the unique matching user.
+- For task assignment, prefer assignee_name or assignee_ids in MCP tools. The MCP server resolves names/initials and sends assignees=[user_id] plus assigned_to.
+- Status values commonly include TODO, IN_PROGRESS, WAITING_CONFIRMATION, DONE, and related backend enum values.
+- Priority values commonly include NORMAL and HIGH.
+- Dates should be ISO strings. For day filters, use local-day bounds such as 2026-07-09T00:00:00+02:00 to 2026-07-10T00:00:00+02:00.
+
+Major modules:
+- Auth: login, refresh, logout, and /api/auth/me. MCP handles login internally with the configured service account.
+- Users: list users, lookup users, create/update/deactivate users where permitted. Use list_users or resolve_user before assigning by name.
+- Departments and boards: departments group work areas such as Development, Graphic Design, Finance, HR, PCM, GA/KA. Boards support department kanban views.
+- Tasks: primary work item. Tasks have title, description, internal_notes, project_id, department_id, assigned_to, assignees, status, priority, phase, progress, start_date, due_date, completed_at, is_1h_report, one_h_report_slot, is_bllok, is_r1, is_personal, and related planner fields.
+- Projects: grouped work with current_phase, status, manager, department, project_type, total_products, templates, workflow items, phase advancement, close/remove-from-day operations.
+- Common View: operational cross-department view built from common entries and task/project signals. It includes common entries, approval/rejection, assignment, leave/block rows, bllok tasks, personal/R1/1H/common orderable tasks, and consolidated planning visibility.
+- Weekly Planner: weekly and weekly-table endpoints show planned work by user/day/slot, support save-day, user ordering, user visibility, snapshots, plan-vs-actual, plan-vs-final, comparison, latest snapshot, overview, and legend rows.
+- Monthly Planner: monthly planning endpoint for larger time windows.
+- System Tasks: recurring/system templates, approvals, rejections, occurrence generation, occurrence date changes, and generated task visibility.
+- GA notes and Plan notes: notes with attachments, discussed/done fields, task conversion, task deadlines, waiting confirmation handling, and public GA notes.
+- GA time slots/table: GA time table rows, slot entries, and time-based reporting.
+- Meetings: meetings, external/internal meeting flows, triggered system tasks, meeting templates/exports.
+- Internal notes and internal meeting sessions: internal note creation, grouped updates, done state, cleanup/session handling.
+- Checklists and checklist items: reusable checklists, project phase checklist items, checklist item editing/deletion, import/export support.
+- Reports and exports: daily reports, GA daily table, XLSX/CSV/PDF exports for tasks, weekly planner, common view, snapshots, system tasks, GA notes, meetings, checklists, and daily reports.
+- File access: maps users, lists folders/access, creates/approves/rejects file access requests, removes access where permitted.
+- Microsoft integration: authorization URL, callback, status, disconnect, calendar events.
+- Notifications and audit logs: user notifications, read/delete operations, audit history.
+- External platform links and project prompts: platform references and prompt/config records for project workflows.
+
+Endpoint guidance:
+- Use /openapi.json or list_api_endpoints to discover exact routes and schemas.
+- Use GET endpoints for lookup/reporting before mutating.
+- Use POST/PATCH/PUT only when the user clearly asks to create, update, approve, reject, save, or generate.
+- Use DELETE only when the user explicitly asks to delete/deactivate/remove and the target ID is clear.
+- Never invent UUIDs. Resolve names with list_users, resolve_user, list_projects, or relevant lookup endpoints.
+"""
+
+mcp = FastMCP("primeflow", instructions=PRIMEFLOW_GUIDE, host=MCP_HOST, port=MCP_PORT)
 
 UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
@@ -84,6 +129,30 @@ async def _request(method: str, path: str, *, params: dict[str, Any] | None = No
     if response.status_code == 204 or not response.content:
         return {"status": "ok"}
     return response.json()
+
+
+def _parse_json_arg(value: str | None, *, default: Any) -> Any:
+    if value is None or value.strip() == "":
+        return default
+    try:
+        return json.loads(value)
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"Expected valid JSON, got: {value}") from exc
+
+
+def _normalize_api_path(path: str) -> str:
+    value = path.strip()
+    if not value:
+        raise ValueError("API path is required.")
+    if value.startswith("http://") or value.startswith("https://"):
+        raise ValueError("Use a relative Primeflow path, not a full URL.")
+    if value in {"/health", "health", "/openapi.json", "openapi.json"}:
+        return value if value.startswith("/") else f"/{value}"
+    if value.startswith("/api/"):
+        return value
+    if value.startswith("api/"):
+        return f"/{value}"
+    return f"/api/{value.lstrip('/')}"
 
 
 def _frontend_url(path: str) -> str:
@@ -153,6 +222,92 @@ async def _resolve_user_id(user_ref: str | None) -> str | None:
 async def primeflow_me() -> Any:
     """Return the Primeflow user connected to this MCP server."""
     return await _request("GET", "/api/auth/me")
+
+
+@mcp.tool()
+async def primeflow_guide() -> str:
+    """Return a broad guide explaining Primeflow modules, terminology, and MCP/API usage rules."""
+    return PRIMEFLOW_GUIDE
+
+
+@mcp.tool()
+async def list_api_endpoints(tag: str | None = None, query: str | None = None) -> Any:
+    """List Primeflow API endpoints from FastAPI OpenAPI. Optional tag/query filters narrow the result."""
+    spec = await _request("GET", "/openapi.json")
+    results: list[dict[str, Any]] = []
+    tag_filter = tag.lower() if tag else None
+    query_filter = query.lower() if query else None
+    for path, methods in spec.get("paths", {}).items():
+        for method, details in methods.items():
+            if method.lower() not in {"get", "post", "patch", "put", "delete"}:
+                continue
+            tags = details.get("tags") or []
+            haystack = " ".join(
+                [
+                    path,
+                    method,
+                    str(details.get("summary") or ""),
+                    str(details.get("description") or ""),
+                    " ".join(str(item) for item in tags),
+                ]
+            ).lower()
+            if tag_filter and tag_filter not in [str(item).lower() for item in tags]:
+                continue
+            if query_filter and query_filter not in haystack:
+                continue
+            results.append(
+                {
+                    "method": method.upper(),
+                    "path": path,
+                    "tags": tags,
+                    "summary": details.get("summary"),
+                    "operation_id": details.get("operationId"),
+                }
+            )
+    return results
+
+
+@mcp.tool()
+async def primeflow_api_request(
+    method: str,
+    path: str,
+    params_json: str | None = None,
+    body_json: str | None = None,
+) -> Any:
+    """
+    Call any Primeflow API endpoint through the existing backend.
+
+    method: GET, POST, PATCH, PUT, or DELETE.
+    path: relative path such as /api/tasks, /api/planners/weekly-table, /api/common-view, or /openapi.json.
+    params_json: JSON object for query params, for example {"include_done": false}.
+    body_json: JSON body for POST/PATCH/PUT, for example {"title": "Task"}.
+
+    Use DELETE only after an explicit user request and a clear target ID.
+    """
+    method_upper = method.strip().upper()
+    if method_upper not in {"GET", "POST", "PATCH", "PUT", "DELETE"}:
+        raise ValueError("method must be GET, POST, PATCH, PUT, or DELETE.")
+    normalized_path = _normalize_api_path(path)
+    params = _parse_json_arg(params_json, default={})
+    body = _parse_json_arg(body_json, default=None)
+    if not isinstance(params, dict):
+        raise ValueError("params_json must be a JSON object.")
+
+    async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT, headers=await _headers()) as client:
+        response = await client.request(method_upper, normalized_path, params=params, json=body)
+    response.raise_for_status()
+    content_type = response.headers.get("content-type", "")
+    if response.status_code == 204 or not response.content:
+        return {"status": "ok", "status_code": response.status_code}
+    if "application/json" in content_type:
+        return response.json()
+    text = response.text
+    return {
+        "status_code": response.status_code,
+        "content_type": content_type,
+        "content_length": len(response.content),
+        "text_preview": text[:2000],
+    }
 
 
 @mcp.tool()
