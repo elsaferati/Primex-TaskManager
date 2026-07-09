@@ -2,6 +2,7 @@ import os
 import base64
 import json
 import time
+from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
@@ -10,13 +11,12 @@ from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
 
-load_dotenv()
+ENV_FILE = Path(__file__).resolve().with_name(".env")
+load_dotenv(ENV_FILE)
 
 API_BASE_URL = os.getenv("PRIMEFLOW_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 WEB_BASE_URL = os.getenv("PRIMEFLOW_WEB_BASE_URL", "http://127.0.0.1:3000").rstrip("/")
 ACCESS_TOKEN = os.getenv("PRIMEFLOW_ACCESS_TOKEN")
-PRIMEFLOW_EMAIL = os.getenv("PRIMEFLOW_EMAIL")
-PRIMEFLOW_PASSWORD = os.getenv("PRIMEFLOW_PASSWORD")
 REQUEST_TIMEOUT = float(os.getenv("PRIMEFLOW_MCP_TIMEOUT", "30"))
 MCP_HOST = os.getenv("PRIMEFLOW_MCP_HOST", "0.0.0.0")
 MCP_PORT = int(os.getenv("PRIMEFLOW_MCP_PORT", "8010"))
@@ -40,11 +40,13 @@ async def _access_token() -> str:
     if cached_token and cached_exp > int(time.time()) + 30:
         return cached_token
 
-    if PRIMEFLOW_EMAIL and PRIMEFLOW_PASSWORD:
+    primeflow_email = os.getenv("PRIMEFLOW_EMAIL")
+    primeflow_password = os.getenv("PRIMEFLOW_PASSWORD")
+    if primeflow_email and primeflow_password:
         async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT) as client:
             response = await client.post(
                 "/api/auth/login",
-                json={"email": PRIMEFLOW_EMAIL, "password": PRIMEFLOW_PASSWORD},
+                json={"email": primeflow_email, "password": primeflow_password},
             )
         response.raise_for_status()
         token = response.json()["access_token"]
