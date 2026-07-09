@@ -1,6 +1,7 @@
 import os
 import base64
 import json
+import re
 import time
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,8 @@ MCP_PORT = int(os.getenv("PRIMEFLOW_MCP_PORT", "8010"))
 _token_cache: dict[str, Any] = {"access_token": ACCESS_TOKEN, "expires_at": 0}
 
 mcp = FastMCP("primeflow", host=MCP_HOST, port=MCP_PORT)
+
+UUID_RE = re.compile(r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$")
 
 
 def _jwt_exp(token: str) -> int:
@@ -85,6 +88,65 @@ async def _request(method: str, path: str, *, params: dict[str, Any] | None = No
 
 def _frontend_url(path: str) -> str:
     return urljoin(f"{WEB_BASE_URL}/", path.lstrip("/"))
+
+
+def _user_initials(user: dict[str, Any]) -> str:
+    full_name = str(user.get("full_name") or "").strip()
+    if full_name:
+        parts = [part for part in re.split(r"\s+", full_name) if part]
+        return "".join(part[0] for part in parts).upper()
+    username = str(user.get("username") or "").strip()
+    return "".join(part[0] for part in re.split(r"[\s._-]+", username) if part).upper()
+
+
+def _user_search_text(user: dict[str, Any]) -> str:
+    return " ".join(
+        str(user.get(key) or "").lower()
+        for key in ("full_name", "username", "email")
+    )
+
+
+async def _resolve_user_id(user_ref: str | None) -> str | None:
+    if not user_ref:
+        return None
+    value = user_ref.strip()
+    if not value:
+        return None
+    if UUID_RE.match(value):
+        return value
+
+    users = await _request("GET", "/api/users")
+    query = value.lower()
+    query_initials = value.replace(".", "").replace(" ", "").upper()
+
+    exact_matches = [
+        user for user in users
+        if query in {
+            str(user.get("full_name") or "").lower(),
+            str(user.get("username") or "").lower(),
+            str(user.get("email") or "").lower(),
+        }
+    ]
+    if len(exact_matches) == 1:
+        return str(exact_matches[0]["id"])
+
+    initials_matches = [user for user in users if _user_initials(user) == query_initials]
+    if len(initials_matches) == 1:
+        return str(initials_matches[0]["id"])
+
+    contains_matches = [user for user in users if query in _user_search_text(user)]
+    if len(contains_matches) == 1:
+        return str(contains_matches[0]["id"])
+
+    if not exact_matches and not initials_matches and not contains_matches:
+        raise ValueError(f"No Primeflow user matched '{user_ref}'. Use list_users to inspect users.")
+
+    candidates = exact_matches or initials_matches or contains_matches
+    names = ", ".join(
+        f"{user.get('full_name') or user.get('username')} ({user.get('id')})"
+        for user in candidates[:10]
+    )
+    raise ValueError(f"Ambiguous Primeflow user '{user_ref}'. Matching candidates: {names}")
 
 
 @mcp.tool()
@@ -211,10 +273,28 @@ async def create_task(
     project_id: str | None = None,
     department_id: str | None = None,
     assigned_to: str | None = None,
+    assignee_name: str | None = None,
+    assignee_ids: list[str] | None = None,
     due_date: str | None = None,
     priority: str | None = None,
+    is_1h_report: bool | None = None,
+    one_h_report_slot: str | None = None,
 ) -> Any:
-    """Create a Primeflow task. due_date should be an ISO datetime string."""
+    """
+    Create a Primeflow task.
+
+    Primeflow rules:
+    - Use assignee_name for names or initials such as "Laurent Hoxha" or "LH"; the MCP server resolves it to a user ID.
+    - Use assignee_ids only when exact Primeflow user UUIDs are already known.
+    - "1H" means set is_1h_report=true, not "due in one hour".
+    - one_h_report_slot, when known, must be one of 10:00, 11:00, 11:50, 14:20, 16:00.
+    - due_date should be an ISO datetime string.
+    """
+    resolved_assignees = list(assignee_ids or [])
+    resolved_assignee = await _resolve_user_id(assignee_name or assigned_to)
+    if resolved_assignee and resolved_assignee not in resolved_assignees:
+        resolved_assignees.insert(0, resolved_assignee)
+
     return await _request(
         "POST",
         "/api/tasks",
@@ -223,9 +303,12 @@ async def create_task(
             "description": description,
             "project_id": project_id,
             "department_id": department_id,
-            "assigned_to": assigned_to,
+            "assigned_to": resolved_assignees[0] if resolved_assignees else None,
+            "assignees": resolved_assignees or None,
             "due_date": due_date,
             "priority": priority,
+            "is_1h_report": is_1h_report,
+            "one_h_report_slot": one_h_report_slot,
         },
     )
 
@@ -238,18 +321,29 @@ async def update_task(
     status: str | None = None,
     priority: str | None = None,
     assigned_to: str | None = None,
+    assignee_name: str | None = None,
+    assignee_ids: list[str] | None = None,
     due_date: str | None = None,
     progress_percentage: int | None = None,
+    is_1h_report: bool | None = None,
+    one_h_report_slot: str | None = None,
 ) -> Any:
-    """Update selected fields on a Primeflow task."""
+    """Update selected fields on a Primeflow task. Use assignee_name for names/initials such as LH."""
+    resolved_assignees = list(assignee_ids or [])
+    resolved_assignee = await _resolve_user_id(assignee_name or assigned_to)
+    if resolved_assignee and resolved_assignee not in resolved_assignees:
+        resolved_assignees.insert(0, resolved_assignee)
     payload = {
         "title": title,
         "description": description,
         "status": status,
         "priority": priority,
-        "assigned_to": assigned_to,
+        "assigned_to": resolved_assignees[0] if resolved_assignees else None,
+        "assignees": resolved_assignees or None,
         "due_date": due_date,
         "progress_percentage": progress_percentage,
+        "is_1h_report": is_1h_report,
+        "one_h_report_slot": one_h_report_slot,
     }
     return await _request("PATCH", f"/api/tasks/{task_id}", json={key: value for key, value in payload.items() if value is not None})
 
@@ -277,6 +371,17 @@ async def get_project(project_id: str) -> Any:
 async def list_users() -> Any:
     """List active Primeflow users visible to the connected account."""
     return await _request("GET", "/api/users")
+
+
+@mcp.tool()
+async def resolve_user(user_ref: str) -> Any:
+    """Resolve a Primeflow user name, email, username, UUID, or initials like LH to a user record."""
+    user_id = await _resolve_user_id(user_ref)
+    users = await _request("GET", "/api/users")
+    for user in users:
+        if str(user.get("id")) == user_id:
+            return user
+    return {"id": user_id}
 
 
 if __name__ == "__main__":
