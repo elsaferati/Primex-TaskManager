@@ -75,32 +75,30 @@ jobs:
           "migration_changed=$($migrationChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
  
       - name: Create Env Files
-        shell: powershell
+        shell: cmd
         env:
           PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
           PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
         run: |
-          "NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com" | Set-Content -Path frontend/.env.local -Encoding utf8
-          @(
-            "DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus"
-            "DB_POOL_SIZE=20"
-            "DB_MAX_OVERFLOW=20"
-            "DB_POOL_TIMEOUT=30"
-            "DB_POOL_RECYCLE=1800"
-            "JWT_SECRET=primex_nexus_secret_key_2026"
-            "REDIS_ENABLED=false"
-            "REDIS_URL=redis://127.0.0.1:6379/0"
-            "APP_TIMEZONE=Europe/Budapest"
-            "CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com"
-            "FRONTEND_URL=https://primeflow.primexeu.com"
-            "PRIMEFLOW_API_BASE_URL=https://api-flow.primexeu.com"
-            "PRIMEFLOW_WEB_BASE_URL=https://primeflow.primexeu.com"
-            "PRIMEFLOW_MCP_TRANSPORT=sse"
-            "PRIMEFLOW_MCP_HOST=0.0.0.0"
-            "PRIMEFLOW_MCP_PORT=8010"
-            "PRIMEFLOW_EMAIL=$env:PRIMEFLOW_MCP_EMAIL"
-            "PRIMEFLOW_PASSWORD=$env:PRIMEFLOW_MCP_PASSWORD"
-          ) | Set-Content -Path backend/.env -Encoding utf8
+          echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
+          echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
+          echo DB_POOL_SIZE=20 >> backend\.env
+          echo DB_MAX_OVERFLOW=20 >> backend\.env
+          echo DB_POOL_TIMEOUT=30 >> backend\.env
+          echo DB_POOL_RECYCLE=1800 >> backend\.env
+          echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend\.env
+          echo REDIS_ENABLED=false >> backend\.env
+          echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend\.env
+          echo APP_TIMEZONE=Europe/Budapest >> backend\.env
+          echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend\.env
+          echo FRONTEND_URL=https://primeflow.primexeu.com >> backend\.env
+          echo PRIMEFLOW_API_BASE_URL=https://api-flow.primexeu.com >> backend\.env
+          echo PRIMEFLOW_WEB_BASE_URL=https://primeflow.primexeu.com >> backend\.env
+          echo PRIMEFLOW_MCP_TRANSPORT=sse >> backend\.env
+          echo PRIMEFLOW_MCP_HOST=0.0.0.0 >> backend\.env
+          echo PRIMEFLOW_MCP_PORT=8010 >> backend\.env
+          echo PRIMEFLOW_EMAIL=%PRIMEFLOW_MCP_EMAIL% >> backend\.env
+          echo PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD% >> backend\.env
  
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}
@@ -167,6 +165,8 @@ jobs:
             }
           }
           if (-not $ok) {
+            cmd /c "pm2 status"
+            cmd /c "pm2 logs primex-backend --lines 100 --nostream || ver > NUL"
             Write-Error "Backend /health not serving deployed build $expected (last seen: $lastBuild). A stale process may be holding port 8000."
             exit 1
           }
