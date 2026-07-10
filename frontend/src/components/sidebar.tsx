@@ -2,7 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { 
   LayoutDashboard, 
   Globe, 
@@ -161,6 +161,7 @@ const items: NavItem[] = [
 
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
+  const router = useRouter()
   const { apiFetch } = useAuth()
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
@@ -283,6 +284,9 @@ export function Sidebar({ role }: { role: UserRole }) {
               <Link
                 key={item.href}
                 href={item.href}
+                prefetch={false}
+                onMouseEnter={() => router.prefetch(item.href)}
+                onFocus={() => router.prefetch(item.href)}
                 onClick={() => {
                   if (!isDesktop) setIsOpen(false)
                 }}

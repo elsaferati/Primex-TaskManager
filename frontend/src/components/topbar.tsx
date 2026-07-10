@@ -91,10 +91,10 @@ export function Topbar() {
   }, [apiFetch])
 
   const loadUnreadCount = React.useCallback(async () => {
-    const res = await apiFetch("/notifications?unread_only=true")
+    const res = await apiFetch("/notifications/unread-count")
     if (!res.ok) return
-    const data = (await res.json()) as Notification[]
-    setUnreadCount(data.length)
+    const data = (await res.json()) as { count: number }
+    setUnreadCount(Math.max(0, Number(data.count) || 0))
   }, [apiFetch])
 
   const handleNotificationsOpenChange = React.useCallback(

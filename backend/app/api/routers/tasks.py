@@ -10,7 +10,7 @@ except ImportError:
     ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
-from sqlalchemy import delete, insert, or_, select, cast, update, String as SQLString, func, Date
+from sqlalchemy import Date, cast, delete, exists, func, insert, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
@@ -314,17 +314,49 @@ async def _assignees_for_tasks(
 ) -> dict[uuid.UUID, list[TaskAssigneeOut]]:
     if not task_ids:
         return {}
+
+    # Legacy tasks can have assigned_to without a TaskAssignee row. Resolve
+    # explicit and fallback assignees in one query, while preserving the rule
+    # that explicit TaskAssignee rows take precedence.
+    explicit_assignees = select(
+        TaskAssignee.task_id.label("task_id"),
+        TaskAssignee.user_id.label("user_id"),
+    ).where(TaskAssignee.task_id.in_(task_ids))
+    has_explicit_assignee = exists(
+        select(1).where(TaskAssignee.task_id == Task.id)
+    ).correlate(Task)
+    fallback_assignees = select(
+        Task.id.label("task_id"),
+        Task.assigned_to.label("user_id"),
+    ).where(
+        Task.id.in_(task_ids),
+        Task.assigned_to.is_not(None),
+        ~has_explicit_assignee,
+    )
+    effective_assignees = union_all(explicit_assignees, fallback_assignees).subquery()
     rows = (
         await db.execute(
-            select(TaskAssignee.task_id, User)
-            .join(User, TaskAssignee.user_id == User.id)
-            .where(TaskAssignee.task_id.in_(task_ids))
+            select(
+                effective_assignees.c.task_id,
+                User.id,
+                User.email,
+                User.username,
+                User.full_name,
+            )
+            .join(User, effective_assignees.c.user_id == User.id)
             .order_by(User.full_name)
         )
     ).all()
     assignees: dict[uuid.UUID, list[TaskAssigneeOut]] = {task_id: [] for task_id in task_ids}
-    for task_id, user in rows:
-        assignees.setdefault(task_id, []).append(_user_to_assignee(user))
+    for task_id, user_id, email, username, full_name in rows:
+        assignees.setdefault(task_id, []).append(
+            TaskAssigneeOut(
+                id=user_id,
+                email=email,
+                username=username,
+                full_name=full_name,
+            )
+        )
     return assignees
 
 
@@ -339,7 +371,13 @@ async def _assignees_for_fast_task_groups(
         return {}
     rows = (
         await db.execute(
-            select(Task.fast_task_group_id, User)
+            select(
+                Task.fast_task_group_id,
+                User.id,
+                User.email,
+                User.username,
+                User.full_name,
+            )
             .join(TaskAssignee, TaskAssignee.task_id == Task.id)
             .join(User, TaskAssignee.user_id == User.id)
             .where(Task.fast_task_group_id.in_(group_ids))
@@ -349,15 +387,22 @@ async def _assignees_for_fast_task_groups(
     ).all()
     out: dict[uuid.UUID, list[TaskAssigneeOut]] = {}
     seen: dict[uuid.UUID, set[uuid.UUID]] = {}
-    for group_id, user in rows:
+    for group_id, user_id, email, username, full_name in rows:
         if group_id is None:
             continue
         if group_id not in seen:
             seen[group_id] = set()
-        if user.id in seen[group_id]:
+        if user_id in seen[group_id]:
             continue
-        seen[group_id].add(user.id)
-        out.setdefault(group_id, []).append(_user_to_assignee(user))
+        seen[group_id].add(user_id)
+        out.setdefault(group_id, []).append(
+            TaskAssigneeOut(
+                id=user_id,
+                email=email,
+                username=username,
+                full_name=full_name,
+            )
+        )
     return out
 
 
@@ -765,23 +810,20 @@ async def list_tasks(
     if project_id:
         stmt = stmt.where(Task.project_id == project_id)
     if status:
-        stmt = stmt.where(cast(Task.status, SQLString) == status.value)
+        stmt = stmt.where(Task.status == status.value)
     if assigned_to:
         # Check both Task.assigned_to and TaskAssignee table for multiple assignees
-        task_ids_with_assignee = (
-            await db.execute(
-                select(TaskAssignee.task_id).where(TaskAssignee.user_id == assigned_to).distinct()
+        stmt = stmt.where(
+            or_(
+                Task.assigned_to == assigned_to,
+                exists(
+                    select(1).where(
+                        TaskAssignee.task_id == Task.id,
+                        TaskAssignee.user_id == assigned_to,
+                    )
+                ),
             )
-        ).scalars().all()
-        if task_ids_with_assignee:
-            stmt = stmt.where(
-                or_(
-                    Task.assigned_to == assigned_to,
-                    Task.id.in_(task_ids_with_assignee)
-                )
-            )
-        else:
-            stmt = stmt.where(Task.assigned_to == assigned_to)
+        )
     if created_by:
         stmt = stmt.where(Task.created_by == created_by)
     if ga_note_origin_ids:
@@ -806,14 +848,14 @@ async def list_tasks(
             if window_to_date:
                 stmt = stmt.where(effective_date <= window_to_date)
     if not include_done:
-        stmt = stmt.where(cast(Task.status, SQLString) != TaskStatus.DONE.value)
+        stmt = stmt.where(Task.status != TaskStatus.DONE.value)
     elif not include_all_done:
         # Only include DONE tasks completed within the last 45 days.
         # Historical completed tasks are never shown in kanban views anyway.
         done_cutoff = datetime.now(timezone.utc) - timedelta(days=45)
         stmt = stmt.where(
             or_(
-                cast(Task.status, SQLString) != TaskStatus.DONE.value,
+                Task.status != TaskStatus.DONE.value,
                 Task.completed_at >= done_cutoff,
             )
         )
@@ -822,21 +864,6 @@ async def list_tasks(
     task_ids = [t.id for t in tasks]
     assignee_map = await _assignees_for_tasks(db, task_ids)
     comment_map = await _user_comments_for_tasks(db, task_ids, user.id)
-    fallback_ids = [
-        t.assigned_to
-        for t in tasks
-        if t.assigned_to is not None and not assignee_map.get(t.id)
-    ]
-    if fallback_ids:
-        fallback_users = (
-            await db.execute(select(User).where(User.id.in_(fallback_ids)))
-        ).scalars().all()
-        fallback_map = {user.id: user for user in fallback_users}
-        for t in tasks:
-            if assignee_map.get(t.id):
-                continue
-            if t.assigned_to in fallback_map:
-                assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
 
     # Fetch alignment users for returned tasks
     alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
@@ -890,12 +917,12 @@ async def list_tasks_by_ga_notes(
     if not payload.include_inactive:
         stmt = stmt.where(Task.is_active.is_(True))
     if not payload.include_done:
-        stmt = stmt.where(cast(Task.status, SQLString) != TaskStatus.DONE.value)
+        stmt = stmt.where(Task.status != TaskStatus.DONE.value)
     elif not payload.include_all_done:
         done_cutoff = datetime.now(timezone.utc) - timedelta(days=45)
         stmt = stmt.where(
             or_(
-                cast(Task.status, SQLString) != TaskStatus.DONE.value,
+                Task.status != TaskStatus.DONE.value,
                 Task.completed_at >= done_cutoff,
             )
         )
@@ -904,21 +931,6 @@ async def list_tasks_by_ga_notes(
     task_ids = [task.id for task in tasks]
     assignee_map = await _assignees_for_tasks(db, task_ids)
     comment_map = await _user_comments_for_tasks(db, task_ids, user.id)
-    fallback_ids = [
-        task.assigned_to
-        for task in tasks
-        if task.assigned_to is not None and not assignee_map.get(task.id)
-    ]
-    if fallback_ids:
-        fallback_users = (
-            await db.execute(select(User).where(User.id.in_(fallback_ids)))
-        ).scalars().all()
-        fallback_map = {fallback_user.id: fallback_user for fallback_user in fallback_users}
-        for task in tasks:
-            if assignee_map.get(task.id):
-                continue
-            if task.assigned_to in fallback_map:
-                assignee_map[task.id] = [_user_to_assignee(fallback_map[task.assigned_to])]
 
     alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
     if task_ids:
@@ -1013,10 +1025,6 @@ async def get_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     assignee_map = await _assignees_for_tasks(db, [task.id])
-    if not assignee_map.get(task.id) and task.assigned_to is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
-        if assigned_user is not None:
-            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     dto_assignees = assignee_map.get(task.id, [])
     if task.fast_task_group_id is not None and is_fast_task_model(task):
         group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
@@ -1840,10 +1848,6 @@ async def create_task(
 
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
-    if not assignee_map.get(task.id) and task.assigned_to is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
-        if assigned_user is not None:
-            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     dto_assignees = assignee_map.get(task.id, [])
     if task.fast_task_group_id is not None and is_fast_task_model(task):
         group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
@@ -2570,10 +2574,6 @@ async def update_task(
 
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
-    if not assignee_map.get(task.id) and task.assigned_to is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
-        if assigned_user is not None:
-            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     dto_assignees = assignee_map.get(task.id, [])
     if task.fast_task_group_id is not None and is_fast_task_model(task):
         group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
@@ -2604,10 +2604,6 @@ async def deactivate_task(
     await db.commit()
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
-    if not assignee_map.get(task.id) and task.assigned_to is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
-        if assigned_user is not None:
-            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     return _task_to_out(task, assignee_map.get(task.id, []))
 
 
@@ -2685,10 +2681,6 @@ async def update_task_one_h_report_slot(
     await db.commit()
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
-    if not assignee_map.get(task.id) and task.assigned_to is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
-        if assigned_user is not None:
-            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
     task_out = _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
     task_out.one_h_report_slot = next_slot
@@ -2742,10 +2734,6 @@ async def update_task_user_comment(
     await db.commit()
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
-    if not assignee_map.get(task.id) and task.assigned_to is not None:
-        assigned_user = (await db.execute(select(User).where(User.id == task.assigned_to))).scalar_one_or_none()
-        if assigned_user is not None:
-            assignee_map[task.id] = [_user_to_assignee(assigned_user)]
     comment_map = await _user_comments_for_tasks(db, [task.id], user.id)
     return _task_to_out(task, assignee_map.get(task.id, []), comment_map.get(task.id))
 

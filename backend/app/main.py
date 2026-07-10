@@ -7,6 +7,7 @@ import uuid
 from fastapi import FastAPI, Query, WebSocket, WebSocketDisconnect, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import ORJSONResponse
+from starlette.middleware.gzip import GZipMiddleware
 
 from app.auth.security import ACCESS_TOKEN_TYPE, decode_token, require_token_type
 from app.api.routers import api_router
@@ -26,6 +27,7 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
 
 app.include_router(api_router, prefix="/api")
 

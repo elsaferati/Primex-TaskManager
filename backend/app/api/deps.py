@@ -6,6 +6,7 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import joinedload
 
 from app.auth.security import ACCESS_TOKEN_TYPE, decode_token, require_token_type
 from app.db import get_db
@@ -30,7 +31,9 @@ async def get_current_user(
     except Exception:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
 
-    result = await db.execute(select(User).where(User.id == user_id))
+    result = await db.execute(
+        select(User).options(joinedload(User.department)).where(User.id == user_id)
+    )
     user = result.scalar_one_or_none()
     if user is None or not user.is_active:
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Inactive user")

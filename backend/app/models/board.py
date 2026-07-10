@@ -21,6 +21,6 @@ class Board(Base):
     description: Mapped[str | None] = mapped_column(String(1000))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    department = relationship("Department", lazy="joined")
+    department = relationship("Department", lazy="noload")
 
 

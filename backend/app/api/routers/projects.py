@@ -6,7 +6,7 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from datetime import datetime
 from pydantic import BaseModel
-from sqlalchemy import func, select, update, cast, String as SQLString, or_, insert, delete
+from sqlalchemy import delete, func, insert, or_, select, update
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -776,7 +776,7 @@ async def advance_project_phase(
             select(func.count(Task.id)).where(
                 Task.project_id == project.id,
                 Task.phase == project.current_phase,
-                cast(Task.status, SQLString) != TaskStatus.DONE.value,
+                Task.status != TaskStatus.DONE.value,
             )
         )
     ).scalar_one()

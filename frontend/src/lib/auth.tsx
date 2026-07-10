@@ -23,6 +23,7 @@ const FETCH_TIMEOUT_MS = 8000
 // Refresh token when it has less than 3 minutes remaining (15 min total - 3 min buffer = 12 min)
 const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
 let refreshPromise: Promise<string | null> | null = null
+const inFlightGetRequests = new Map<string, Promise<Response>>()
 
 function getStoredToken(): string | null {
   if (typeof window === "undefined") return null
@@ -305,69 +306,98 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return fetch(overrideUrl || url, { ...init, headers: h, credentials: "include" })
       }
 
-      let res: Response
-      try {
-        res = await doFetch()
-      } catch (err) {
-        const errName = (err as { name?: string } | null)?.name
-        const aborted = init.signal?.aborted || errName === "AbortError"
-        if (aborted) {
-          return new Response(null, { status: 499, statusText: "Request aborted" })
-        }
+      const executeRequest = async (): Promise<Response> => {
+        let res: Response
+        try {
+          res = await doFetch()
+        } catch (err) {
+          const errName = (err as { name?: string } | null)?.name
+          const aborted = init.signal?.aborted || errName === "AbortError"
+          if (aborted) {
+            return new Response(null, { status: 499, statusText: "Request aborted" })
+          }
 
-        if (!path.startsWith("http") && API_HTTP_FALLBACK_URL !== API_HTTP_URL) {
-          try {
-            res = await doFetch(undefined, makeUrl(API_HTTP_FALLBACK_URL))
-          } catch (fallbackErr) {
-            const fallbackErrName = (fallbackErr as { name?: string } | null)?.name
-            const fallbackAborted = init.signal?.aborted || fallbackErrName === "AbortError"
-            if (fallbackAborted) {
-              return new Response(null, { status: 499, statusText: "Request aborted" })
+          if (!path.startsWith("http") && API_HTTP_FALLBACK_URL !== API_HTTP_URL) {
+            try {
+              res = await doFetch(undefined, makeUrl(API_HTTP_FALLBACK_URL))
+            } catch (fallbackErr) {
+              const fallbackErrName = (fallbackErr as { name?: string } | null)?.name
+              const fallbackAborted = init.signal?.aborted || fallbackErrName === "AbortError"
+              if (fallbackAborted) {
+                return new Response(null, { status: 499, statusText: "Request aborted" })
+              }
+              toast("Network error", {
+                description: "Unable to reach the server. Check the API URL or backend status.",
+              })
+              return new Response(null, { status: 503, statusText: "Network error" })
             }
+          } else {
             toast("Network error", {
               description: "Unable to reach the server. Check the API URL or backend status.",
             })
             return new Response(null, { status: 503, statusText: "Network error" })
           }
-        } else {
-          toast("Network error", {
-            description: "Unable to reach the server. Check the API URL or backend status.",
-          })
-          return new Response(null, { status: 503, statusText: "Network error" })
+        }
+        if (res.status !== 401) return res
+
+        const refreshed = await refreshAccessTokenShared()
+        if (!refreshed) {
+          setStoredToken(null)
+          setStoredLogoutAt(null)
+          setToken(null)
+          setUser(null)
+          return res
+        }
+
+        setStoredToken(refreshed)
+        setToken(refreshed)
+        try {
+          const me = await fetchMe(refreshed)
+          setUser(me)
+        } catch {
+          setStoredToken(null)
+          setStoredLogoutAt(null)
+          setToken(null)
+          setUser(null)
+          return res
+        }
+
+        const retryRes = await doFetch(refreshed)
+        if (retryRes.status === 401) {
+          setStoredToken(null)
+          setStoredLogoutAt(null)
+          setToken(null)
+          setUser(null)
+        }
+        return retryRes
+      }
+
+      const method = (init.method || "GET").toUpperCase()
+      const canShareRequest = method === "GET" && init.body == null && init.signal == null
+      if (!canShareRequest) return executeRequest()
+
+      const requestKey = JSON.stringify([
+        url,
+        Array.from(headers.entries()).sort(([left], [right]) => left.localeCompare(right)),
+        init.cache,
+        init.mode,
+        init.redirect,
+        init.referrer,
+        init.referrerPolicy,
+        init.integrity,
+      ])
+      const existingRequest = inFlightGetRequests.get(requestKey)
+      if (existingRequest) return (await existingRequest).clone()
+
+      const request = executeRequest()
+      inFlightGetRequests.set(requestKey, request)
+      try {
+        return (await request).clone()
+      } finally {
+        if (inFlightGetRequests.get(requestKey) === request) {
+          inFlightGetRequests.delete(requestKey)
         }
       }
-      if (res.status !== 401) return res
-
-      const refreshed = await refreshAccessTokenShared()
-      if (!refreshed) {
-        setStoredToken(null)
-        setStoredLogoutAt(null)
-        setToken(null)
-        setUser(null)
-        return res
-      }
-
-      setStoredToken(refreshed)
-      setToken(refreshed)
-      try {
-        const me = await fetchMe(refreshed)
-        setUser(me)
-      } catch {
-        setStoredToken(null)
-        setStoredLogoutAt(null)
-        setToken(null)
-        setUser(null)
-        return res
-      }
-
-      const retryRes = await doFetch(refreshed)
-      if (retryRes.status === 401) {
-        setStoredToken(null)
-        setStoredLogoutAt(null)
-        setToken(null)
-        setUser(null)
-      }
-      return retryRes
     },
     []
   )

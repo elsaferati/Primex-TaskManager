@@ -32,5 +32,7 @@ class User(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    department = relationship("Department", lazy="joined")
+    # Most user lookups only need department_id. The authentication dependency
+    # opts into the joined Department for the one request path that reads it.
+    department = relationship("Department", lazy="noload")
 

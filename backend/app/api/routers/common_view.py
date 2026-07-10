@@ -324,23 +324,18 @@ def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
     return False
 
 
-async def _max_timestamp(
-    db: AsyncSession, model, column, filters: list[Any] | None = None
-) -> datetime | None:
+def _max_timestamp_scalar(column, filters: list[Any] | None = None):
     stmt = select(func.max(column))
     if filters:
         stmt = stmt.where(and_(*filters))
-    return (await db.execute(stmt)).scalar_one_or_none()
+    return stmt.scalar_subquery()
 
 
-async def _count_rows(
-    db: AsyncSession, model, filters: list[Any] | None = None
-) -> int:
+def _count_rows_scalar(model, filters: list[Any] | None = None):
     stmt = select(func.count()).select_from(model)
     if filters:
         stmt = stmt.where(and_(*filters))
-    value = (await db.execute(stmt)).scalar_one_or_none()
-    return int(value or 0)
+    return stmt.scalar_subquery()
 
 
 async def _compute_etag(
@@ -361,46 +356,69 @@ async def _compute_etag(
         "1" if include_all_departments else "0",
         str(user.role),
     ]
+    fingerprint_fields: list[tuple[str, Any, bool]] = []
     if "users" in requested:
-        ts = await _max_timestamp(db, User, User.updated_at)
-        parts.append(ts.isoformat() if ts else "")
+        fingerprint_fields.append(("users_updated", _max_timestamp_scalar(User.updated_at), False))
     if "departments" in requested or "meetings" in requested or "tasks" in requested:
-        ts = await _max_timestamp(db, Department, Department.created_at)
-        parts.append(ts.isoformat() if ts else "")
+        fingerprint_fields.append(
+            ("departments_created", _max_timestamp_scalar(Department.created_at), False)
+        )
     if "entries" in requested:
         entry_effective = func.coalesce(CommonEntry.entry_date, func.date(CommonEntry.created_at))
         date_filter = and_(entry_effective >= week_start, entry_effective <= week_end)
         entry_filters = [or_(date_filter, _daily_feedback_filter())]
-        ts = await _max_timestamp(db, CommonEntry, CommonEntry.updated_at, entry_filters)
-        parts.append(ts.isoformat() if ts else "")
+        fingerprint_fields.append(
+            ("entries_updated", _max_timestamp_scalar(CommonEntry.updated_at, entry_filters), False)
+        )
     if "meetings" in requested:
         meeting_filters: list[Any] = []
         if department_id is not None:
             meeting_filters.append(Meeting.department_id == department_id)
-        ts = await _max_timestamp(db, Meeting, Meeting.updated_at, meeting_filters)
-        meeting_count = await _count_rows(db, Meeting, meeting_filters)
-        parts.append(ts.isoformat() if ts else "")
-        parts.append(str(meeting_count))
+        fingerprint_fields.extend(
+            [
+                ("meetings_updated", _max_timestamp_scalar(Meeting.updated_at, meeting_filters), False),
+                ("meetings_count", _count_rows_scalar(Meeting, meeting_filters), True),
+            ]
+        )
     if "system_tasks" in requested:
-        ts = await _max_timestamp(db, SystemTaskTemplate, SystemTaskTemplate.created_at)
-        parts.append(ts.isoformat() if ts else "")
+        fingerprint_fields.append(
+            ("system_tasks_created", _max_timestamp_scalar(SystemTaskTemplate.created_at), False)
+        )
     if "tasks" in requested:
         effective_columns = [Task.due_date, Task.start_date, Task.created_at]
         if hasattr(Task, "planned_for"):
             effective_columns.insert(0, getattr(Task, "planned_for"))
         effective_date = cast(func.coalesce(*effective_columns), Date)
         task_filters = [effective_date >= week_start, effective_date <= week_end]
-        ts = await _max_timestamp(db, Task, Task.updated_at, task_filters)
-        one_h_slot_ts = await _max_timestamp(
-            db,
-            TaskOneHReportSlot,
-            TaskOneHReportSlot.updated_at,
-            [TaskOneHReportSlot.report_date >= week_start, TaskOneHReportSlot.report_date <= week_end],
+        fingerprint_fields.extend(
+            [
+                ("tasks_updated", _max_timestamp_scalar(Task.updated_at, task_filters), False),
+                (
+                    "one_h_slots_updated",
+                    _max_timestamp_scalar(
+                        TaskOneHReportSlot.updated_at,
+                        [
+                            TaskOneHReportSlot.report_date >= week_start,
+                            TaskOneHReportSlot.report_date <= week_end,
+                        ],
+                    ),
+                    False,
+                ),
+                ("ga_notes_updated", _max_timestamp_scalar(GaNote.updated_at), False),
+            ]
         )
-        ga_note_ts = await _max_timestamp(db, GaNote, GaNote.updated_at)
-        parts.append(ts.isoformat() if ts else "")
-        parts.append(one_h_slot_ts.isoformat() if one_h_slot_ts else "")
-        parts.append(ga_note_ts.isoformat() if ga_note_ts else "")
+
+    if fingerprint_fields:
+        fingerprint_stmt = select(
+            *(expression.label(label) for label, expression, _ in fingerprint_fields)
+        )
+        fingerprint = (await db.execute(fingerprint_stmt)).mappings().one()
+        for label, _, is_count in fingerprint_fields:
+            value = fingerprint[label]
+            if is_count:
+                parts.append(str(int(value or 0)))
+            else:
+                parts.append(value.isoformat() if value else "")
 
     raw = "|".join(parts).encode("utf-8")
     return hashlib.sha1(raw).hexdigest()

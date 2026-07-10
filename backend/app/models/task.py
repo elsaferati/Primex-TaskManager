@@ -97,4 +97,7 @@ class Task(Base):
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )
 
-    assignees = relationship("TaskAssignee", backref="task", lazy="selectin", passive_deletes=True)
+    # Assignees are loaded explicitly by the endpoints that return them. Keeping
+    # this relationship unloaded prevents a second, duplicate SELECT on every
+    # ordinary Task query.
+    assignees = relationship("TaskAssignee", backref="task", lazy="noload", passive_deletes=True)
