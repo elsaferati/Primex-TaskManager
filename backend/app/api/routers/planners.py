@@ -17,7 +17,7 @@ except ImportError:
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import func, select, or_, cast, Date
+from sqlalchemy import Date, cast, exists, func, or_, select, union_all
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
@@ -326,31 +326,51 @@ def _today_app_date() -> date:
     return datetime.now(timezone.utc).astimezone(_app_tz()).date()
 
 
-def _user_to_assignee(user: User) -> TaskAssigneeOut:
-    return TaskAssigneeOut(
-        id=user.id,
-        email=user.email,
-        username=user.username,
-        full_name=user.full_name,
-    )
-
-
 async def _assignees_for_tasks(
     db: AsyncSession, task_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, list[TaskAssigneeOut]]:
     if not task_ids:
         return {}
+
+    explicit_assignees = select(
+        TaskAssignee.task_id.label("task_id"),
+        TaskAssignee.user_id.label("user_id"),
+    ).where(TaskAssignee.task_id.in_(task_ids))
+    has_explicit_assignee = exists(
+        select(1).where(TaskAssignee.task_id == Task.id)
+    ).correlate(Task)
+    fallback_assignees = select(
+        Task.id.label("task_id"),
+        Task.assigned_to.label("user_id"),
+    ).where(
+        Task.id.in_(task_ids),
+        Task.assigned_to.is_not(None),
+        ~has_explicit_assignee,
+    )
+    effective_assignees = union_all(explicit_assignees, fallback_assignees).subquery()
     rows = (
         await db.execute(
-            select(TaskAssignee.task_id, User)
-            .join(User, TaskAssignee.user_id == User.id)
-            .where(TaskAssignee.task_id.in_(task_ids))
+            select(
+                effective_assignees.c.task_id,
+                User.id,
+                User.email,
+                User.username,
+                User.full_name,
+            )
+            .join(User, effective_assignees.c.user_id == User.id)
             .order_by(User.full_name)
         )
     ).all()
     assignees: dict[uuid.UUID, list[TaskAssigneeOut]] = {task_id: [] for task_id in task_ids}
-    for task_id, user in rows:
-        assignees.setdefault(task_id, []).append(_user_to_assignee(user))
+    for task_id, user_id, email, username, full_name in rows:
+        assignees.setdefault(task_id, []).append(
+            TaskAssigneeOut(
+                id=user_id,
+                email=email,
+                username=username,
+                full_name=full_name,
+            )
+        )
     return assignees
 
 
@@ -1363,22 +1383,6 @@ async def weekly_planner(
     # Get task assignees
     task_ids = [t.id for t in all_tasks]
     assignee_map = await _assignees_for_tasks(db, task_ids)
-    # Fallback to assigned_to if no assignees
-    fallback_ids = [
-        t.assigned_to
-        for t in all_tasks
-        if t.assigned_to is not None and not assignee_map.get(t.id)
-    ]
-    if fallback_ids:
-        fallback_users = (
-            await db.execute(select(User).where(User.id.in_(fallback_ids)))
-        ).scalars().all()
-        fallback_map = {user.id: user for user in fallback_users}
-        for t in all_tasks:
-            if assignee_map.get(t.id):
-                continue
-            if t.assigned_to in fallback_map:
-                assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
 
     # Prefetch active system task templates and resolve assignees for weekly planner display.
     # Weekly Planner must show only the occurrences that belong to the selected week and day (no overdue/late).
@@ -1863,7 +1867,27 @@ async def weekly_table_planner(
     
     # Get active tasks (including completed ones so they can show through completion day).
     # We don't filter by department here because we show tasks by assignee department.
-    task_stmt = select(Task).where(Task.is_active == True)
+    task_stmt = select(Task).where(
+        Task.is_active == True,
+        Task.system_template_origin_id.is_(None),
+    )
+    if department_id is not None:
+        selected_user_ids = [user.id for user in all_users]
+        if selected_user_ids:
+            task_stmt = task_stmt.where(
+                or_(
+                    Task.assigned_to.in_(selected_user_ids),
+                    exists(
+                        select(1).where(
+                            TaskAssignee.task_id == Task.id,
+                            TaskAssignee.user_id.in_(selected_user_ids),
+                        )
+                    ),
+                    # Product Content CONTROL ownership can be encoded in
+                    # internal_notes instead of the normal assignee columns.
+                    Task.phase == ProjectPhaseStatus.CONTROL.value,
+                )
+            )
     all_tasks = (await db.execute(task_stmt.order_by(Task.due_date.nullsfirst(), Task.created_at))).scalars().all()
     
     # Filter tasks for the selected week (planning only):
@@ -2048,17 +2072,25 @@ async def weekly_table_planner(
     # Replanned tasks may move out of this week, but any per-day progress rows
     # are still historical work that should remain visible on the days it happened.
     progress_days_by_task: dict[uuid.UUID, set[date]] = {}
+    progress_rows = []
     all_task_ids = [t.id for t in all_tasks]
     if all_task_ids:
-        progress_day_rows = (
+        progress_rows = (
             await db.execute(
-                select(TaskDailyProgress.task_id, TaskDailyProgress.day_date)
+                select(
+                    TaskDailyProgress.task_id,
+                    TaskDailyProgress.day_date,
+                    TaskDailyProgress.daily_status,
+                    TaskDailyProgress.finish_period,
+                    TaskDailyProgress.completed_value,
+                    TaskDailyProgress.total_value,
+                )
                 .where(TaskDailyProgress.task_id.in_(all_task_ids))
                 .where(TaskDailyProgress.day_date >= working_days[0])
                 .where(TaskDailyProgress.day_date <= working_days[-1])
             )
         ).all()
-        for progress_task_id, progress_day in progress_day_rows:
+        for progress_task_id, progress_day, _, _, _, _ in progress_rows:
             progress_days_by_task.setdefault(progress_task_id, set()).add(progress_day)
 
     week_tasks: list[Task] = []
@@ -2095,20 +2127,10 @@ async def weekly_table_planner(
     daily_finish_period_by_task_day: dict[tuple[uuid.UUID, date], str | None] = {}
     prior_status_by_task: dict[uuid.UUID, TaskStatus] = {}
     if week_task_ids:
-        in_week_rows = (
-            await db.execute(
-                select(
-                    TaskDailyProgress.task_id,
-                    TaskDailyProgress.day_date,
-                    TaskDailyProgress.daily_status,
-                    TaskDailyProgress.finish_period,
-                )
-                .where(TaskDailyProgress.task_id.in_(week_task_ids))
-                .where(TaskDailyProgress.day_date >= working_days[0])
-                .where(TaskDailyProgress.day_date <= working_days[-1])
-            )
-        ).all()
-        for task_id_row, day_date_row, daily_status_row, finish_period_row in in_week_rows:
+        week_task_id_set = set(week_task_ids)
+        for task_id_row, day_date_row, daily_status_row, finish_period_row, _, _ in progress_rows:
+            if task_id_row not in week_task_id_set:
+                continue
             try:
                 daily_status_by_task_day[(task_id_row, day_date_row)] = TaskStatus(daily_status_row)
             except Exception:
@@ -2197,20 +2219,9 @@ async def weekly_table_planner(
 
     daily_progress_counts_map: dict[tuple[uuid.UUID, date], tuple[int, int]] = {}
     if mst_tt_task_ids:
-        rows = (
-            await db.execute(
-                select(
-                    TaskDailyProgress.task_id,
-                    TaskDailyProgress.day_date,
-                    TaskDailyProgress.completed_value,
-                    TaskDailyProgress.total_value,
-                )
-                .where(TaskDailyProgress.task_id.in_(list(mst_tt_task_ids)))
-                .where(TaskDailyProgress.day_date >= working_days[0])
-                .where(TaskDailyProgress.day_date <= working_days[-1])
-            )
-        ).all()
-        for task_id_row, day_date_row, completed_value_row, total_value_row in rows:
+        for task_id_row, day_date_row, _, _, completed_value_row, total_value_row in progress_rows:
+            if task_id_row not in mst_tt_task_ids:
+                continue
             try:
                 completed_value = int(completed_value_row or 0)
             except Exception:
@@ -2242,22 +2253,6 @@ async def weekly_table_planner(
     # Get task assignees for all week tasks
     task_ids = [t.id for t in week_tasks]
     assignee_map = await _assignees_for_tasks(db, task_ids)
-    # Fallback to assigned_to
-    fallback_ids = [
-        t.assigned_to
-        for t in week_tasks
-        if t.assigned_to is not None and not assignee_map.get(t.id)
-    ]
-    if fallback_ids:
-        fallback_users = (
-            await db.execute(select(User).where(User.id.in_(fallback_ids)))
-        ).scalars().all()
-        fallback_map = {u.id: u for u in fallback_users}
-        for t in week_tasks:
-            if assignee_map.get(t.id):
-                continue
-            if t.assigned_to in fallback_map:
-                assignee_map[t.id] = [_user_to_assignee(fallback_map[t.assigned_to])]
 
     # Derive product totals for MST/TT CONTROL tasks.
     # These tasks often store totals in internal_notes (total_products=...) or reference an origin task

@@ -303,7 +303,9 @@ export default function WeeklyPlannerPage() {
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
-  const [departmentId, setDepartmentId] = React.useState<string>(ALL_DEPARTMENTS_VALUE)
+  const [departmentId, setDepartmentId] = React.useState<string>(() =>
+    user?.role === "STAFF" && user.department_id ? user.department_id : ALL_DEPARTMENTS_VALUE
+  )
   const [viewMode, setViewMode] = React.useState<"current" | "snapshots">("current")
   const [selectedWeek, setSelectedWeek] = React.useState<SelectedWeek>("this")
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
@@ -724,9 +726,10 @@ export default function WeeklyPlannerPage() {
 
   React.useEffect(() => {
     const boot = async () => {
-      const [depRes, projRes] = await Promise.all([
+      const [depRes, projRes, usersList] = await Promise.all([
         apiFetch("/departments"),
         apiFetch("/projects"),
+        fetchUsersLookupCached(apiFetch),
       ])
       if (depRes.ok) {
         const deps = (await depRes.json()) as Department[]
@@ -741,96 +744,12 @@ export default function WeeklyPlannerPage() {
         const projs = (await projRes.json()) as Project[]
         setProjects(projs)
       }
-      const usersList = await fetchUsersLookupCached(apiFetch)
       if (usersList) {
         setUsers((usersList as UserLookup[]).filter((u) => u.is_active))
       }
     }
     void boot()
   }, [apiFetch, user])
-
-  const loadPlanner = React.useCallback(async () => {
-    setIsLoading(true)
-    setError(null)
-    try {
-      const qs = buildCurrentWeekParams()
-      const res = await apiFetch(`/planners/weekly-table?${qs.toString()}`)
-      if (!res.ok) {
-        const errorText = await res.text()
-        console.error("Failed to load weekly planner:", res.status, res.statusText, errorText)
-        setError(`Failed to load planner: ${res.status} ${res.statusText}`)
-        setData(null)
-        setPvFestBlocks([])
-        return
-      }
-      const payload = (await res.json()) as WeeklyTableResponse
-      console.log("Weekly planner data:", payload)
-      setData(payload)
-      try {
-        const blockParams = new URLSearchParams()
-        blockParams.set("type", "PV_FEST")
-        blockParams.set("start", payload.week_start)
-        blockParams.set("end", payload.week_end)
-        if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
-          blockParams.set("department_id", departmentId)
-        }
-        const blocksRes = await apiFetch(`/common-entries/blocks?${blockParams.toString()}`)
-        if (blocksRes.ok) {
-          const blocks = (await blocksRes.json()) as WeeklyPlannerBlock[]
-          setPvFestBlocks(blocks)
-        } else {
-          setPvFestBlocks([])
-        }
-      } catch (err) {
-        console.error("Failed to load PV/FEST blocks:", err)
-        setPvFestBlocks([])
-      }
-    } catch (error) {
-      console.error("Error loading weekly planner:", error)
-      setError(error instanceof Error ? error.message : "Unknown error occurred")
-      setData(null)
-      setPvFestBlocks([])
-    } finally {
-      setIsLoading(false)
-    }
-  }, [apiFetch, buildCurrentWeekParams])
-
-  const toggleWeeklyPlannerUserVisibility = React.useCallback(
-    async (targetUser: UserLookup, hidden: boolean) => {
-      if (!canManageUserVisibility || departmentId === ALL_DEPARTMENTS_VALUE) return
-      setSavingUserVisibilityId(targetUser.id)
-      try {
-        const res = await apiFetch("/planners/weekly-table/user-visibility", {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            department_id: departmentId,
-            user_id: targetUser.id,
-            hidden,
-          }),
-        })
-        if (!res.ok) {
-          const message = await res.text().catch(() => "Failed to update user visibility")
-          toast.error(message || "Failed to update user visibility")
-          return
-        }
-        setUsers((prev) =>
-          prev.map((entry) =>
-            entry.id === targetUser.id ? { ...entry, weekly_planner_hidden: hidden } : entry
-          )
-        )
-        invalidateUsersLookupCache()
-        toast.success(hidden ? "User hidden from weekly plan." : "User shown in weekly plan.")
-        void loadPlanner()
-      } catch (err) {
-        console.error("Failed to update weekly planner user visibility", err)
-        toast.error("Failed to update user visibility")
-      } finally {
-        setSavingUserVisibilityId(null)
-      }
-    },
-    [apiFetch, canManageUserVisibility, departmentId, loadPlanner]
-  )
 
   const loadPlanningInbox = React.useCallback(async () => {
     setPlanningInboxLoading(true)
@@ -872,6 +791,91 @@ export default function WeeklyPlannerPage() {
     }
   }, [apiFetch, departmentId])
 
+  const loadPlanner = React.useCallback(async () => {
+    setIsLoading(true)
+    setError(null)
+    try {
+      const qs = buildCurrentWeekParams()
+      const res = await apiFetch(`/planners/weekly-table?${qs.toString()}`)
+      if (!res.ok) {
+        const errorText = await res.text()
+        console.error("Failed to load weekly planner:", res.status, res.statusText, errorText)
+        setError(`Failed to load planner: ${res.status} ${res.statusText}`)
+        setData(null)
+        setPvFestBlocks([])
+        return
+      }
+      const payload = (await res.json()) as WeeklyTableResponse
+      setData(payload)
+      void loadPlanningInbox()
+      void (async () => {
+        try {
+          const blockParams = new URLSearchParams()
+          blockParams.set("type", "PV_FEST")
+          blockParams.set("start", payload.week_start)
+          blockParams.set("end", payload.week_end)
+          if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
+            blockParams.set("department_id", departmentId)
+          }
+          const blocksRes = await apiFetch(`/common-entries/blocks?${blockParams.toString()}`)
+          if (blocksRes.ok) {
+            const blocks = (await blocksRes.json()) as WeeklyPlannerBlock[]
+            setPvFestBlocks(blocks)
+          } else {
+            setPvFestBlocks([])
+          }
+        } catch (err) {
+          console.error("Failed to load PV/FEST blocks:", err)
+          setPvFestBlocks([])
+        }
+      })()
+    } catch (error) {
+      console.error("Error loading weekly planner:", error)
+      setError(error instanceof Error ? error.message : "Unknown error occurred")
+      setData(null)
+      setPvFestBlocks([])
+    } finally {
+      setIsLoading(false)
+    }
+  }, [apiFetch, buildCurrentWeekParams, departmentId, loadPlanningInbox])
+
+  const toggleWeeklyPlannerUserVisibility = React.useCallback(
+    async (targetUser: UserLookup, hidden: boolean) => {
+      if (!canManageUserVisibility || departmentId === ALL_DEPARTMENTS_VALUE) return
+      setSavingUserVisibilityId(targetUser.id)
+      try {
+        const res = await apiFetch("/planners/weekly-table/user-visibility", {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            department_id: departmentId,
+            user_id: targetUser.id,
+            hidden,
+          }),
+        })
+        if (!res.ok) {
+          const message = await res.text().catch(() => "Failed to update user visibility")
+          toast.error(message || "Failed to update user visibility")
+          return
+        }
+        setUsers((prev) =>
+          prev.map((entry) =>
+            entry.id === targetUser.id ? { ...entry, weekly_planner_hidden: hidden } : entry
+          )
+        )
+        invalidateUsersLookupCache()
+        toast.success(hidden ? "User hidden from weekly plan." : "User shown in weekly plan.")
+        void loadPlanner()
+      } catch (err) {
+        console.error("Failed to update weekly planner user visibility", err)
+        toast.error("Failed to update user visibility")
+      } finally {
+        setSavingUserVisibilityId(null)
+      }
+    },
+    [apiFetch, canManageUserVisibility, departmentId, loadPlanner]
+  )
+
   const saveUserOrder = React.useCallback(async () => {
     if (!canEditUserOrder) return
     const deptId = departmentId
@@ -911,11 +915,6 @@ export default function WeeklyPlannerPage() {
     if (viewMode !== "current") return
     void loadPlanner()
   }, [loadPlanner, viewMode])
-
-  React.useEffect(() => {
-    if (viewMode !== "current") return
-    void loadPlanningInbox()
-  }, [loadPlanningInbox, viewMode])
 
   React.useEffect(() => {
     if (!data) {
