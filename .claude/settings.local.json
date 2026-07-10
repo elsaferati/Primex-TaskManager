@@ -4,7 +4,15 @@
       "Bash(find:*)",
       "Bash(ls:*)",
       "Bash(wc:*)",
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(curl -s https://api-flow.primexeu.com/health)",
+      "Bash(curl -s https://api-flow.primexeu.com/openapi.json -o __TRACKED_VAR__/openapi.json)",
+      "Bash(curl -s https://api-flow.primexeu.com/openapi.json)",
+      "Bash(python -c \"import yaml; yaml.safe_load\\(open\\('.github/workflows/deploy.yml', encoding='utf-8'\\)\\); print\\('YAML OK'\\)\")",
+      "Bash(python -m py_compile backend/app/main.py)",
+      "Bash(node -e \"require\\('./backend/ecosystem.config.cjs'\\); console.log\\('CJS OK'\\)\")",
+      "Bash(git credential *)",
+      "Bash(python -c ' *)"
     ]
   }
 }

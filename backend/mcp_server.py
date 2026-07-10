@@ -14,6 +14,8 @@ import asyncpg
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
 
+from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
+
 
 ENV_FILE = Path(__file__).resolve().with_name(".env")
 load_dotenv(ENV_FILE, override=True)
@@ -73,6 +75,7 @@ Endpoint guidance:
 - Never invent UUIDs. Resolve names with list_users, resolve_user, list_projects, or relevant lookup endpoints.
 - For "what tasks does X have today / unfinished today", use get_user_tasks_for_day or get_user_unfinished_tasks_today. Do not manually filter by assignee name.
 - For GA/KA note creation, use create_ga_note. note_type must be GA or KA. priority, when provided, must be NORMAL or HIGH.
+- To create a task from an existing GA/KA note, always use create_task_from_ga_note instead of create_task. It keeps ga_note_origin_id linked to the source note, uses the note title/content, and marks the note as converted only after task creation succeeds.
 - Database read-only tools are for schema understanding, relationship discovery, debugging, and simple analytics only. Use API tools for writes and Primeflow business logic.
 - run_readonly_sql allows only SELECT/WITH statements and runs in a read-only transaction. Never use database tools for create/update/delete actions.
 """
@@ -960,6 +963,97 @@ async def create_ga_note(
             "is_discussed": is_discussed,
         },
     )
+
+
+@mcp.tool()
+async def create_task_from_ga_note(
+    note_id: str,
+    assignee_name: str | None = None,
+    assignee_names: list[str] | None = None,
+    assignee_ids: list[str] | None = None,
+    department_ref: str | None = None,
+    project_id: str | None = None,
+    start_date: str | None = None,
+    due_date: str | None = None,
+    priority: str = "NORMAL",
+    is_1h_report: bool = False,
+    one_h_report_slot: str | None = None,
+    is_deadline_important: bool = False,
+) -> Any:
+    """
+    Create a task from an existing GA/KA note and keep it linked to that note.
+
+    The task title and description are always taken from the note. Assign at
+    least one person through assignee_name/assignee_names or exact assignee_ids.
+    Dates must be ISO strings. Use this instead of create_task for any existing
+    GA/KA note; it prevents a second conversion of the same note.
+    """
+    note = await _request("GET", f"/api/ga-notes/{note_id}")
+    if note.get("is_converted_to_task"):
+        raise ValueError(f"GA/KA note {note_id} is already converted to a task.")
+
+    resolved_assignees = list(dict.fromkeys(assignee_ids or []))
+    name_refs = list(assignee_names or [])
+    if assignee_name:
+        name_refs.insert(0, assignee_name)
+    for name_ref in name_refs:
+        resolved_user_id = await _resolve_user_id(name_ref)
+        if resolved_user_id and resolved_user_id not in resolved_assignees:
+            resolved_assignees.append(resolved_user_id)
+    if not resolved_assignees:
+        raise ValueError("Provide at least one assignee_name, assignee_names, or assignee_ids value.")
+
+    note_project_id = note.get("project_id")
+    if project_id and note_project_id and project_id != note_project_id:
+        raise ValueError("project_id must match the source GA/KA note project.")
+    effective_project_id = project_id or note_project_id
+    department_id = await _resolve_department_id(department_ref)
+    department_id = department_id or note.get("department_id")
+    if effective_project_id and not department_id:
+        project = await _request("GET", f"/api/projects/{effective_project_id}")
+        department_id = project.get("department_id")
+    if not department_id:
+        raise ValueError(
+            "The source note has no department. Provide department_ref so the task can be created."
+        )
+
+    normalized_priority = priority.upper()
+    if normalized_priority not in {"NORMAL", "HIGH"}:
+        raise ValueError("priority must be NORMAL or HIGH")
+    if one_h_report_slot and one_h_report_slot not in {"10:00", "11:00", "11:50", "14:20", "16:00"}:
+        raise ValueError("one_h_report_slot must be 10:00, 11:00, 11:50, 14:20, or 16:00")
+
+    content = note.get("content")
+    task = await _request(
+        "POST",
+        "/api/tasks",
+        json={
+            "title": ga_note_task_title(content),
+            "description": ga_note_default_task_description(content),
+            "project_id": effective_project_id,
+            "department_id": department_id,
+            "assigned_to": resolved_assignees[0],
+            "assignees": resolved_assignees,
+            "ga_note_origin_id": note_id,
+            "status": "TODO",
+            "priority": normalized_priority,
+            "start_date": start_date,
+            "due_date": due_date,
+            "is_deadline_important": is_deadline_important,
+            "is_1h_report": is_1h_report or bool(one_h_report_slot),
+            "one_h_report_slot": one_h_report_slot,
+        },
+    )
+    updated_note = await _request(
+        "PATCH",
+        f"/api/ga-notes/{note_id}",
+        json={"is_converted_to_task": True},
+    )
+    return {
+        "task": task,
+        "ga_note": updated_note,
+        "message": "Task created from GA/KA note and linked to its source note.",
+    }
 
 
 @mcp.tool()

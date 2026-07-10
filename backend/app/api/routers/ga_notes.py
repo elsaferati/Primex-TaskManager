@@ -3,7 +3,6 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta
 from pathlib import Path
-import re
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from sqlalchemy import or_, select
@@ -27,6 +26,7 @@ from app.schemas.ga_note import (
     GaNoteUpdate,
 )
 from app.services.audit import add_audit_log
+from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
 from app.config import settings
 
 
@@ -45,20 +45,9 @@ class GaNoteTaskDeadlineResponse(BaseModel):
     is_deadline_important: bool | None = None
 
 
-def _ga_note_task_title(content: str | None) -> str:
-    lines = [
-        re.sub(r"[ \t\f\v]+", " ", line).strip()
-        for line in (content or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    ]
-    cleaned = "\n".join(line for line in lines if line)
-    if not cleaned:
-        return "GA/KA note task"
-    return cleaned
-
-
-def _ga_note_default_task_description(content: str | None) -> str | None:
-    trimmed = (content or "").strip()
-    return trimmed or None
+# Backward-compatible aliases retained for router tests and callers.
+_ga_note_task_title = ga_note_task_title
+_ga_note_default_task_description = ga_note_default_task_description
 
 
 def _attachment_out(attachment: GaNoteAttachment) -> GaNoteAttachmentOut:
