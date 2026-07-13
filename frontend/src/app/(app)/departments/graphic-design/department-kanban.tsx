@@ -2560,9 +2560,27 @@ export default function DepartmentKanban() {
         return isTaskActiveForDate(task, selectedAllReportDate)
       }
 
-      const dueDate = toDate(task.due_date)
-      if (!dueDate) return false
-      return reportDayKey >= dayKey(dueDate)
+      const startDate = task.start_date ? toDate(task.start_date) : null
+      const dueDate = task.due_date ? toDate(task.due_date) : null
+      const createdDate = task.created_at ? toDate(task.created_at) : null
+
+      if (startDate && dueDate) {
+        return reportDayKey >= dayKey(startDate)
+      }
+
+      if (dueDate) {
+        return reportDayKey >= dayKey(dueDate)
+      }
+
+      if (startDate) {
+        return reportDayKey >= dayKey(startDate)
+      }
+
+      if (createdDate) {
+        return reportDayKey >= dayKey(createdDate)
+      }
+
+      return false
     })
   }, [projectTasks, selectedAllReportDate, viewMode, selectedUserId, user?.id, isTaskOwnedByViewUser, isTaskActiveForDate])
   const deadlineImportantTaskIds = React.useMemo(() => {
