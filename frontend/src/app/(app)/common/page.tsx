@@ -6224,6 +6224,8 @@ export default function CommonViewPage() {
         }
         .hide-in-print { display: none !important; }
         .hide-when-all-days { display: none !important; }
+        .swimlane-print-title { display: none; }
+        .single-day-print-table { display: none; }
         .print-header,
         .print-footer {
           display: none;
@@ -6231,7 +6233,7 @@ export default function CommonViewPage() {
         @media print {
           @page {
             margin: 0.45in 0.35in 0.51in 0.35in;
-            size: auto;
+            size: landscape;
           }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
@@ -6348,6 +6350,131 @@ export default function CommonViewPage() {
             bottom: 0.2in;
             padding-left: 0.1in;
             padding-right: 0.1in;
+          }
+          .single-day-print .swimlane-board {
+            display: none !important;
+          }
+          .single-day-print-table {
+            display: table !important;
+            width: 100% !important;
+            border-collapse: collapse !important;
+            table-layout: fixed;
+            color: #000;
+            font-size: 9px;
+            line-height: 1.2;
+          }
+          .single-day-print-table th,
+          .single-day-print-table td {
+            border: 1px solid #000 !important;
+            padding: 4px 5px;
+            vertical-align: top;
+            text-align: left;
+            font-weight: 400 !important;
+            overflow-wrap: anywhere;
+          }
+          .single-day-print-table th {
+            width: 64px;
+          }
+          /* A one-day Common View printout is the compact fast-task report. */
+          .single-day-print .swimlane-row:not(
+            .swimlane-row-blocked,
+            .swimlane-row-oneH10,
+            .swimlane-row-oneH11,
+            .swimlane-row-oneH1150,
+            .swimlane-row-oneH1420,
+            .swimlane-row-oneH1600,
+            .swimlane-row-oneHNoSlot,
+            .swimlane-row-r1,
+            .swimlane-row-personal
+          ) {
+            display: none !important;
+          }
+          .single-day-print .swimlane-board,
+          .single-day-print .swimlane-row,
+          .single-day-print .swimlane-header,
+          .single-day-print .swimlane-cell,
+          .single-day-print .swimlane-cell::before,
+          .single-day-print .swimlane-cell::after {
+            background: #fff !important;
+            background-image: none !important;
+            color: #000 !important;
+            box-shadow: none !important;
+          }
+          .single-day-print .swimlane-board {
+            border: 1px solid #000 !important;
+          }
+          .single-day-print .swimlane-row {
+            border: 0 !important;
+          }
+          .single-day-print .swimlane-row + .swimlane-row {
+            border-top: 0 !important;
+          }
+          .single-day-print .swimlane-index-col,
+          .single-day-print .swimlane-header {
+            border-right: 1px solid #000 !important;
+            border-bottom: 1px solid #000 !important;
+          }
+          .single-day-print .swimlane-cell {
+            border: 0 !important;
+            border-right: 1px solid #000 !important;
+            border-bottom: 1px solid #000 !important;
+          }
+          .single-day-print .swimlane-cell:nth-child(3n) {
+            border-right: 1px solid #000 !important;
+          }
+          .single-day-print .swimlane-cell.swimlane-cell-user-break::before {
+            display: none !important;
+          }
+          .single-day-print .swimlane-index-col,
+          .single-day-print .swimlane-badges,
+          .single-day-print .swimlane-info-wrap,
+          .single-day-print .swimlane-title-row-toggle,
+          .single-day-print .swimlane-assignees,
+          .single-day-print .swimlane-note-toggle,
+          .single-day-print .swimlane-meta,
+          .single-day-print .fast-task-order-badge,
+          .single-day-print .period-indicator,
+          .single-day-print .deadline-indicator,
+          .single-day-print .time-indicator {
+            display: none !important;
+          }
+          .single-day-print .swimlane-header,
+          .single-day-print .swimlane-cell {
+            padding: 6px 8px !important;
+          }
+          .single-day-print .swimlane-content {
+            grid-template-columns: repeat(6, minmax(0, 1fr)) !important;
+            grid-auto-columns: auto !important;
+          }
+          .single-day-print .swimlane-cell.empty {
+            display: flex !important;
+          }
+          .single-day-print .swimlane-cell {
+            min-height: 0 !important;
+            height: auto !important;
+          }
+          .single-day-print .swimlane-title-row,
+          .single-day-print .swimlane-title-main,
+          .single-day-print .swimlane-title {
+            display: block !important;
+            width: 100% !important;
+          }
+          .single-day-print .swimlane-title-row {
+            flex: 0 0 auto !important;
+          }
+          .single-day-print .swimlane-title-text {
+            display: none !important;
+          }
+          .single-day-print .swimlane-print-title {
+            display: block !important;
+            color: #000 !important;
+            font-weight: 400 !important;
+            white-space: normal !important;
+            overflow: visible !important;
+          }
+          .single-day-print .swimlane-header,
+          .single-day-print .swimlane-label {
+            font-weight: 400 !important;
           }
           .swimlane-board { gap: 12px; }
           .swimlane-row { break-inside: avoid; page-break-inside: avoid; }
@@ -11527,7 +11654,7 @@ export default function CommonViewPage() {
             </div>
           </div>
         ) : null}
-        <div className={`print-page ${allDaysSelected ? "hide-when-all-days" : ""}`}>
+        <div className={`print-page single-day-print ${allDaysSelected ? "hide-when-all-days" : ""}`}>
           <div className="print-header">
             <div />
             <div className="print-title">COMMON VIEW</div>
@@ -11535,6 +11662,29 @@ export default function CommonViewPage() {
               {formatDateTimeDMY(printedAt)}
             </div>
           </div>
+          <table className="single-day-print-table">
+            <tbody>
+              {swimlaneRows
+                .filter((row) => showCard(row.id))
+                .filter((row) => ["blocked", "oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1600", "oneHNoSlot", "r1", "personal"].includes(row.id))
+                .flatMap((row) => {
+                  const items = row.items.filter((item) => !item.placeholder)
+                  const rowCount = Math.max(1, Math.ceil(items.length / 6))
+                  return Array.from({ length: rowCount }, (_, chunkIndex) => {
+                    const taskCells = items.slice(chunkIndex * 6, chunkIndex * 6 + 6)
+                    return (
+                      <tr key={`${row.id}-${chunkIndex}`}>
+                        {chunkIndex === 0 ? <th rowSpan={rowCount}>{row.label}</th> : null}
+                        {Array.from({ length: 6 }, (_, cellIndex) => {
+                          const item = taskCells[cellIndex]
+                          return <td key={`${row.id}-${chunkIndex}-${cellIndex}`}>{item ? commonPrintTitleLine(item.title) : ""}</td>
+                        })}
+                      </tr>
+                    )
+                  })
+                })}
+            </tbody>
+          </table>
           <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
             {swimlaneRows
               .filter((row) => showCard(row.id))
@@ -11544,7 +11694,11 @@ export default function CommonViewPage() {
                 return (
                   <div
                     key={row.id}
-                    className={["swimlane-row", hasSubtext ? "swimlane-row-subtext" : ""].filter(Boolean).join(" ")}
+                    className={[
+                      "swimlane-row",
+                      `swimlane-row-${row.id}`,
+                      hasSubtext ? "swimlane-row-subtext" : "",
+                    ].filter(Boolean).join(" ")}
                   >
                     <div className="swimlane-index-col">
                       <span className="swimlane-index">{rowIndex + 1}</span>
@@ -11775,6 +11929,9 @@ export default function CommonViewPage() {
                                       </div>
                                     ) : null}
                                     <div className="swimlane-title">
+                                      <span className="swimlane-print-title">
+                                        {commonPrintTitleLine(cell.title)}
+                                      </span>
                                       <span
                                         className={[
                                           "swimlane-title-text",
