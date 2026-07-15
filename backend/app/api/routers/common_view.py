@@ -338,6 +338,20 @@ def _count_rows_scalar(model, filters: list[Any] | None = None):
     return stmt.scalar_subquery()
 
 
+def _one_h_slot_report_dates(
+    week_start: date,
+    week_end: date,
+    freeze_one_h_slots: bool,
+    now: datetime,
+) -> list[date]:
+    dates: list[date] = []
+    current = week_start
+    while current <= week_end:
+        dates.append(current if freeze_one_h_slots else effective_slot_date(current, now))
+        current += timedelta(days=1)
+    return dates
+
+
 async def _compute_etag(
     db: AsyncSession,
     week_start: date,
@@ -346,6 +360,10 @@ async def _compute_etag(
     user: User,
     department_id: uuid.UUID | None,
     include_all_departments: bool,
+    freeze_one_h_slots: bool,
+    one_h_slot_report_dates: list[date],
+    one_h_slot_report_start: date,
+    one_h_slot_report_end: date,
 ) -> str:
     parts: list[str] = [
         COMMON_VIEW_CACHE_VERSION,
@@ -355,6 +373,10 @@ async def _compute_etag(
         str(department_id) if department_id else "",
         "1" if include_all_departments else "0",
         str(user.role),
+        "1" if freeze_one_h_slots else "0",
+        ",".join(day.isoformat() for day in one_h_slot_report_dates),
+        one_h_slot_report_start.isoformat(),
+        one_h_slot_report_end.isoformat(),
     ]
     fingerprint_fields: list[tuple[str, Any, bool]] = []
     if "users" in requested:
@@ -398,8 +420,8 @@ async def _compute_etag(
                     _max_timestamp_scalar(
                         TaskOneHReportSlot.updated_at,
                         [
-                            TaskOneHReportSlot.report_date >= week_start,
-                            TaskOneHReportSlot.report_date <= week_end,
+                            TaskOneHReportSlot.report_date >= one_h_slot_report_start,
+                            TaskOneHReportSlot.report_date <= one_h_slot_report_end,
                         ],
                     ),
                     False,
@@ -432,6 +454,7 @@ async def get_common_view(
     include: str | None = None,
     department_id: uuid.UUID | None = None,
     include_all_departments: bool = False,
+    freeze_one_h_slots: bool = False,
     max_items_per_bucket: int | None = None,
     debug: int = 0,
     db: AsyncSession = Depends(get_db),
@@ -455,6 +478,19 @@ async def get_common_view(
 
     week_start_date = _week_start_for(week_start)
     week_end = week_start_date + timedelta(days=6)
+    slot_effective_now = (
+        datetime.now(ZoneInfo(settings.APP_TIMEZONE))
+        if ZoneInfo is not None
+        else datetime.now(timezone.utc)
+    )
+    one_h_slot_report_dates = _one_h_slot_report_dates(
+        week_start_date,
+        week_end,
+        freeze_one_h_slots,
+        slot_effective_now,
+    )
+    one_h_slot_report_start = min(one_h_slot_report_dates)
+    one_h_slot_report_end = max(one_h_slot_report_dates)
 
     etag = await _compute_etag(
         db=db,
@@ -464,6 +500,10 @@ async def get_common_view(
         user=user,
         department_id=department_id,
         include_all_departments=include_all_departments,
+        freeze_one_h_slots=freeze_one_h_slots,
+        one_h_slot_report_dates=one_h_slot_report_dates,
+        one_h_slot_report_start=one_h_slot_report_start,
+        one_h_slot_report_end=one_h_slot_report_end,
     )
     if_match = request.headers.get("if-none-match")
     if if_match and if_match.strip('"') == etag:
@@ -471,7 +511,9 @@ async def get_common_view(
 
     cache_key = (
         f"{COMMON_VIEW_CACHE_VERSION}|{week_start_date}|{week_end}|{','.join(sorted(requested))}|"
-        f"{department_id}|{include_all_departments}|{user.role}"
+        f"{department_id}|{include_all_departments}|{user.role}|{freeze_one_h_slots}|"
+        f"{','.join(day.isoformat() for day in one_h_slot_report_dates)}|"
+        f"{one_h_slot_report_start}|{one_h_slot_report_end}"
     )
     if SERVER_CACHE_TTL_SECONDS > 0:
         cached = _cache.get(cache_key)
@@ -729,8 +771,8 @@ async def get_common_view(
                         TaskOneHReportSlot.one_h_report_slot,
                     )
                     .where(TaskOneHReportSlot.task_id.in_(task_ids))
-                    .where(TaskOneHReportSlot.report_date >= week_start_date)
-                    .where(TaskOneHReportSlot.report_date <= week_end)
+                    .where(TaskOneHReportSlot.report_date >= one_h_slot_report_start)
+                    .where(TaskOneHReportSlot.report_date <= one_h_slot_report_end)
                 )
             ).all()
             one_h_slots_by_task_date = {
@@ -801,6 +843,9 @@ async def get_common_view(
                 continue
 
             for task_date in task_dates:
+                one_h_slot_date = (
+                    task_date if freeze_one_h_slots else effective_slot_date(task_date, slot_effective_now)
+                )
                 if t.is_bllok:
                     items["blocked"].append(
                         {
@@ -838,7 +883,7 @@ async def get_common_view(
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
                             "finish_period": t.finish_period,
-                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, effective_slot_date(task_date))),
+                            "one_h_report_slot": one_h_slots_by_task_date.get((t.id, one_h_slot_date)),
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,

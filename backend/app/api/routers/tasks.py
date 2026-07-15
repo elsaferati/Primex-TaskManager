@@ -1103,7 +1103,7 @@ async def create_task(
 
     if payload.ga_note_origin_id is not None:
         ga_note = (
-            await db.execute(select(GaNote).where(GaNote.id == payload.ga_note_origin_id))
+            await db.execute(select(GaNote).where(GaNote.id == payload.ga_note_origin_id).with_for_update())
         ).scalar_one_or_none()
         if ga_note is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note not found")
@@ -1138,6 +1138,31 @@ async def create_task(
         #     raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note department mismatch")
         if ga_note.project_id is not None and ga_note.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="GA note project mismatch")
+        existing_ga_note_task = (
+            await db.execute(
+                select(Task)
+                .where(Task.ga_note_origin_id == payload.ga_note_origin_id)
+                .where(Task.is_active.is_(True))
+                .order_by(Task.created_at.asc(), Task.id.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing_ga_note_task is not None:
+            if not ga_note.is_converted_to_task:
+                ga_note.is_converted_to_task = True
+                await db.commit()
+                await db.refresh(existing_ga_note_task)
+
+            assignee_map = await _assignees_for_tasks(db, [existing_ga_note_task.id])
+            dto = _task_to_out(existing_ga_note_task, assignee_map.get(existing_ga_note_task.id, []))
+            rows = (
+                await db.execute(
+                    select(TaskAlignmentUser.user_id).where(TaskAlignmentUser.task_id == existing_ga_note_task.id)
+                )
+            ).scalars().all()
+            dto.alignment_user_ids = list(rows) if rows else None
+            return dto
+        ga_note.is_converted_to_task = True
 
     if payload.plan_note_origin_id is not None:
         plan_note = (
@@ -2647,8 +2672,7 @@ async def update_task_one_h_report_slot(
     if payload.one_h_report_slot is not None and next_slot is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
 
-    # After 16:00 the slot workday rolls over: today's slot edits target the
-    # next working day. Past/future dates are stored as sent.
+    # Current-day slots roll over to the next working day at 16:00.
     slot_date = effective_slot_date(payload.report_date)
 
     task.one_h_report_slot = next_slot

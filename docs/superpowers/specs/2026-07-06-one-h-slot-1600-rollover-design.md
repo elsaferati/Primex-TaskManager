@@ -1,60 +1,56 @@
-# 1H Report Slot: 16:00 Daily Rollover
+# 1H Report Slot: 16:00 Rollover + Common View Freeze
 
 **Date:** 2026-07-06
-**Status:** Approved
+**Status:** Updated
 
 ## Problem
 
 1H report slots are stored per task per date (`task_one_h_report_slots`, unique on
-`task_id` + `report_date`) and are set manually each day. Today the slot column
-implicitly resets at midnight: a new date has no slot rows, so the column starts
-empty. The business rule is that the workday ends at 16:00 — after 16:00,
-employees should be planning the **next working day's** slots, not still looking
-at today's.
+`task_id` + `report_date`) and are set manually each day. The default behavior
+maps today's slot column to the next working day after 16:00. Common View also
+needs a display-only freeze option so users can still inspect or print the
+selected date's saved slots when needed.
 
 ## Behavior
 
-The slot column operates on an **effective slot date**:
+Default slot behavior:
 
-- Before 16:00 (app timezone, `APP_TIMEZONE` = Europe/Budapest), viewing/editing
-  today's slot column targets **today**.
-- From 16:00 onward (16:00:00 inclusive), viewing/editing today's slot column
-  targets the **next working day**: Mon–Thu → tomorrow; Fri (and weekend days)
-  after 16:00 → next Monday.
-- Past dates always show their stored slots unchanged. History is never
-  modified or deleted. No scheduled job; nothing is wiped.
+- Before 16:00, today's slot reads and writes use today.
+- At and after 16:00, today's slot reads and writes use the next working day.
+- Past and future selected dates keep their own date.
+- History is never modified or deleted. No scheduled job wipes slot rows.
+
+Common View freeze behavior:
+
+- `freeze_one_h_slots=true` makes Common View read the selected task date's slot
+  row directly for display and print.
+- The freeze option does not change slot saving and does not affect Daily Report
+  or department views.
 
 ## Implementation
 
-One pure helper on the backend:
+One shared backend helper is used by Daily Report, default Common View reads,
+and the slot update endpoint:
 
 ```python
-effective_slot_date(view_date: date, now: datetime) -> date
+effective_slot_date(view_date: date, now: datetime | None = None) -> date
 ```
-
-Returns `view_date` unless `view_date == now.date()` (app timezone) and
-`now.time() >= 16:00`, in which case it returns the next working day
-(skipping Saturday/Sunday).
 
 Used in three places:
 
-1. **`backend/app/api/routers/reports.py`** — daily report builds
-   `one_h_slot_map` by querying slots for the effective date instead of the
-   requested date.
-2. **`backend/app/api/routers/common_view.py`** — the per-task-date slot lookup
-   maps today's column through the effective date.
+1. **`backend/app/api/routers/reports.py`** - daily report builds
+   `one_h_slot_map` by querying slots for the effective date.
+2. **`backend/app/api/routers/common_view.py`** - Common View reads the effective
+   date by default, or the selected task date when `freeze_one_h_slots=true`.
 3. **`backend/app/api/routers/tasks.py`**
-   (`update_task_one_h_report_slot`) — if the client sends today's date, the
-   server converts to the effective date before saving and before enforcing the
-   max-2-tasks-per-employee-per-slot rule. Explicit past/future dates are
-   honored as-is.
+   (`update_task_one_h_report_slot`) - writes the slot under the effective date.
 
-The frontend needs no changes; it keeps sending the visible date.
+The frontend keeps sending the visible selected date. Common View adds a local
+toolbar toggle that only changes the aggregate `/common-view` read mode.
 
 ## Testing
 
-- Unit tests for `effective_slot_date`: before/after 16:00, exactly 16:00,
-  Friday→Monday, Saturday/Sunday after 16:00 → Monday, past and future dates
-  unaffected.
-- Endpoint test: writing a slot "today" after 16:00 stores it under the next
-  working day, and the 2-task limit is checked against that day.
+- Unit tests for `effective_slot_date`: before 16:00, exactly 16:00, after
+  16:00, Friday, Saturday, Sunday, past dates, and future dates.
+- Common View default mode reads the effective rollover date.
+- Common View freeze mode reads the selected task date.

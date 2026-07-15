@@ -786,6 +786,7 @@ export default function GaKaNotesPage() {
   const [deletingAttachmentIds, setDeletingAttachmentIds] = React.useState<string[]>([])
   const [taskDialogNoteId, setTaskDialogNoteId] = React.useState<string | null>(null)
   const [creatingTask, setCreatingTask] = React.useState(false)
+  const creatingTaskRef = React.useRef(false)
   const [rangeFilter, setRangeFilter] = React.useState<"week" | "all">("all")
   const [taskStatusFilter, setTaskStatusFilter] = React.useState<TaskStatusFilter>("all")
   const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
@@ -1784,7 +1785,15 @@ export default function GaKaNotesPage() {
   }, [taskProjectId])
 
   const createTaskFromNote = async (note: GaNote) => {
-    if (note.is_converted_to_task) return
+    if (creatingTaskRef.current) return
+    if (note.is_converted_to_task || noteTaskInfo.has(note.id)) {
+      setNotes((prev) =>
+        prev.map((n) => (n.id === note.id ? { ...n, is_converted_to_task: true } : n))
+      )
+      setTaskDialogNoteId(null)
+      toast.info("Task already exists for this note")
+      return
+    }
     const hasProject = Boolean(note.project_id)
     const noteDepartment = note.department_id ? departments.find((d) => d.id === note.department_id) || null : null
     const noteProject = note.project_id ? projects.find((p) => p.id === note.project_id) || null : null
@@ -1811,6 +1820,7 @@ export default function GaKaNotesPage() {
       return
     }
     const primaryDepartmentId = effectiveDepartments[0]
+    creatingTaskRef.current = true
     setCreatingTask(true)
     try {
       const dueDateValue = taskDueDate ? new Date(taskDueDate).toISOString() : null
@@ -1952,6 +1962,7 @@ export default function GaKaNotesPage() {
       setTaskDialogNoteId(null)
       toast.success("Task created from note")
     } finally {
+      creatingTaskRef.current = false
       setCreatingTask(false)
     }
   }

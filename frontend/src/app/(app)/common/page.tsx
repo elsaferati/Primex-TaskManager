@@ -240,6 +240,7 @@ const COMMON_VIEW_CACHE = new Map<
   string,
   { etag: string | null; payload: CommonViewPayload; cachedAt: number }
 >()
+const COMMON_VIEW_FREEZE_ONE_H_SLOTS_KEY = "commonViewFreezeOneHSlots"
 
 const normalizeCommonTaskStatus = (status?: string | null, isDone?: boolean) => {
   const normalized = (status || "")
@@ -1114,6 +1115,10 @@ export default function CommonViewPage() {
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
   const [colorFilter, setColorFilter] = React.useState<CommonColorFilter>("all")
+  const [freezeOneHSlots, setFreezeOneHSlots] = React.useState(() => {
+    if (typeof window === "undefined") return false
+    return window.localStorage.getItem(COMMON_VIEW_FREEZE_ONE_H_SLOTS_KEY) === "true"
+  })
   const [selectedCommonUserId, setSelectedCommonUserId] = React.useState("__all__")
   const [commonUserMenuOpen, setCommonUserMenuOpen] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
@@ -1144,6 +1149,10 @@ export default function CommonViewPage() {
   const [openSwimlaneTitleRows, setOpenSwimlaneTitleRows] = React.useState<Set<CommonType>>(
     () => new Set(DEFAULT_OPEN_SWIMLANE_TITLE_ROWS)
   )
+
+  React.useEffect(() => {
+    window.localStorage.setItem(COMMON_VIEW_FREEZE_ONE_H_SLOTS_KEY, freezeOneHSlots ? "true" : "false")
+  }, [freezeOneHSlots])
   const infoPopoverRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingPanelOpen, setMeetingPanelOpen] = React.useState(false)
   const [meetingAutoSelectEnabled, setMeetingAutoSelectEnabled] = React.useState(true)
@@ -2232,7 +2241,15 @@ export default function CommonViewPage() {
   const fetchCommonViewStage = React.useCallback(
     async (weekStartIso: string, includeList: string[]) => {
       const includeKey = includeList.join(",")
-      const cacheKey = `${weekStartIso}|${includeKey}|${user?.role || "anon"}|${user?.department_id || ""}`
+      const freezeParam = freezeOneHSlots ? "&freeze_one_h_slots=true" : ""
+      const cacheKey = [
+        weekStartIso,
+        includeKey,
+        user?.role || "anon",
+        user?.department_id || "",
+        commonDepartmentId || "all",
+        freezeOneHSlots ? "freeze-1h" : "rollover-1h",
+      ].join("|")
       const cached = COMMON_VIEW_CACHE.get(cacheKey)
       if (cached) {
         applyCommonViewPayload(cached.payload)
@@ -2243,7 +2260,7 @@ export default function CommonViewPage() {
         ? `&department_id=${encodeURIComponent(commonDepartmentId)}`
         : "&include_all_departments=true"
       const res = await apiFetch(
-        `/common-view?week_start=${encodeURIComponent(weekStartIso)}&include=${encodeURIComponent(includeKey)}${deptParam}`,
+        `/common-view?week_start=${encodeURIComponent(weekStartIso)}&include=${encodeURIComponent(includeKey)}${deptParam}${freezeParam}`,
         { headers }
       )
       if (res?.status === 304 && cached) {
@@ -2263,7 +2280,7 @@ export default function CommonViewPage() {
       applyCommonViewPayload(payload)
       return true
     },
-    [apiFetch, applyCommonViewPayload, user?.department_id, user?.role, commonDepartmentId]
+    [apiFetch, applyCommonViewPayload, user?.department_id, user?.role, commonDepartmentId, freezeOneHSlots]
   )
 
   // Load data on mount
@@ -9097,6 +9114,14 @@ export default function CommonViewPage() {
             <label className="switch" title="When OFF: select only one. When ON: select multiple.">
               <input type="checkbox" checked={multiMode} onChange={(e) => setMultiMode(e.target.checked)} />
               Multi-select (Days)
+            </label>
+            <label className="switch" title="Show the selected date's saved 1H slots in Common View and print.">
+              <input
+                type="checkbox"
+                checked={freezeOneHSlots}
+                onChange={(e) => setFreezeOneHSlots(e.target.checked)}
+              />
+              Freeze 1H slots
             </label>
             <div className="user-filter-control" ref={commonUserFilterRef}>
               <span>User</span>
