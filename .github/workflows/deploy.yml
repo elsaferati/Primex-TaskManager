@@ -114,6 +114,11 @@ jobs:
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
+          if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m py_compile mcp_server.py app\api\routers\search.py app\schemas\search.py
+          if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server
+          if errorlevel 1 exit /b 1
  
           REM Database migrations are manual in pgAdmin (no alembic auto-run in deploy).
  
@@ -173,6 +178,31 @@ jobs:
             exit 1
           }
           Write-Host "Backend health check: OK ($uri) serving build $expected"
+
+      - name: Wait for MCP Readiness
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          $ok = $false
+          $port = 8010
+          for ($i = 0; $i -lt 20; $i++) {
+            $listener = Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -First 1
+            if ($listener) {
+              Write-Host "MCP readiness attempt $($i + 1)/20: listening on port $port (PID $($listener.OwningProcess))"
+              $ok = $true
+              break
+            }
+            Write-Host "MCP readiness attempt $($i + 1)/20: port $port not listening yet"
+            Start-Sleep -Seconds 2
+          }
+          if (-not $ok) {
+            cmd /c "pm2 status"
+            cmd /c "pm2 logs primeflow-mcp --lines 100 --nostream || ver > NUL"
+            Write-Error "Primeflow MCP did not start listening on port $port."
+            exit 1
+          }
+          Write-Host "Primeflow MCP readiness: OK"
  
       - name: Replace Public API Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
