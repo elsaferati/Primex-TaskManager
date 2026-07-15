@@ -7943,6 +7943,11 @@ export default function CommonViewPage() {
           white-space: pre-wrap;
           line-height: 1.35;
         }
+        .week-table-line-number {
+          display: inline;
+          font-weight: 800;
+          margin-right: 2px;
+        }
         .week-table-merged-cell {
           background: #ffffff;
         }
@@ -11433,7 +11438,7 @@ export default function CommonViewPage() {
                           >
                             <div className="week-table-entry-main">
                                   <span>
-                                  <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  <span className="week-table-line-number">{idx + 1}.</span>
                                   {isOneHSlotRowId(row.id) ? (
                                     <span className="oneh-slot-indicator">{getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}</span>
                                   ) : null}
@@ -11497,7 +11502,7 @@ export default function CommonViewPage() {
                           >
                             <div className="week-table-entry-main">
                                   <span>
-                                  <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  <span className="week-table-line-number">{idx + 1}.</span>
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
@@ -11530,7 +11535,7 @@ export default function CommonViewPage() {
                           >
                             <div className="week-table-entry-main">
                                   <span>
-                                  <span className="fast-task-order-badge">{getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}</span>
+                                  <span className="week-table-line-number">{idx + 1}.</span>
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
@@ -11789,7 +11794,11 @@ export default function CommonViewPage() {
                         {chunkIndex === 0 ? <th rowSpan={rowCount}>{row.label}</th> : null}
                         {Array.from({ length: 6 }, (_, cellIndex) => {
                           const item = taskCells[cellIndex]
-                          return <td key={`${row.id}-${chunkIndex}-${cellIndex}`}>{item ? commonPrintTaskTitle(item) : ""}</td>
+                          return (
+                            <td key={`${row.id}-${chunkIndex}-${cellIndex}`}>
+                              {item ? `${chunkIndex * 6 + cellIndex + 1}. ${commonPrintTaskTitle(item)}` : ""}
+                            </td>
+                          )
                         })}
                       </tr>
                     )
