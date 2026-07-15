@@ -531,6 +531,13 @@ const commonPrintTitleLine = (value: string) =>
     .split(/\r?\n/)
     .map((line) => line.trim())
     .find(Boolean) || ""
+const stripTaskInitialsPrefix = (value: string) =>
+  value.replace(/^[A-Z]{1,4}(?:\/[A-Z]{1,4})*:\s*/, "")
+const commonPrintTaskTitle = (entry: { title: string; assignees?: string[]; person?: string; owner?: string }) => {
+  const title = stripTaskInitialsPrefix(commonPrintTitleLine(entry.title))
+  const assigneeInitials = entryAssignees(entry).map((name) => initials(name)).filter(Boolean)
+  return assigneeInitials.length ? `${assigneeInitials.join("/")}: ${title}` : title
+}
 
 const getCommonTitleMarkClass = (isDone: boolean, isAdded: boolean) => {
   if (isDone && isAdded) {
@@ -633,6 +640,8 @@ const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: 
     : normalizeAssigneeList(entry.person || entry.owner || "")
 const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId | OneHSlotRowId =>
   rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || rowId === "r1"
+const isPrintDedupeTaskRowId = (rowId: CommonType) =>
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || rowId === "r1"
 
 const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
   const person = "person" in entry ? entry.person : ""
@@ -642,6 +651,81 @@ const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
 
 const getFastTaskEntryDate = (entry: FastTaskEntry | SwimlaneCell) =>
   ("date" in entry ? entry.date : entry.entryDate) || ""
+
+const getPrintTaskDedupeKey = (rowId: CommonType, entry: FastTaskEntry | SwimlaneCell) =>
+  [
+    rowId,
+    normalizeTitle(entry.title || ""),
+    getFastTaskEntryDate(entry),
+    normalizeOneHReportSlot(entry.oneHReportSlot) || "",
+    (entry.finishPeriod || "").trim().toUpperCase(),
+    normalizeTitle(entry.note || ""),
+  ].join("\0")
+
+const mergeAssigneeNames = (current: string[], next: string[]) => {
+  const merged = [...current]
+  const seen = new Set(merged.map((name) => name.trim().toLowerCase()).filter(Boolean))
+  for (const name of next) {
+    const trimmed = name.trim()
+    if (!trimmed) continue
+    const key = trimmed.toLowerCase()
+    if (seen.has(key)) continue
+    seen.add(key)
+    merged.push(trimmed)
+  }
+  return merged
+}
+
+const mergePrintTaskEntries = <T extends FastTaskEntry | SwimlaneCell>(rowId: CommonType, entries: T[]): T[] => {
+  if (!isPrintDedupeTaskRowId(rowId)) return entries
+
+  const merged = new Map<string, T>()
+  for (const entry of entries) {
+    const key = getPrintTaskDedupeKey(rowId, entry)
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, { ...entry, assignees: [...entryAssignees(entry)] })
+      continue
+    }
+
+    const existingRank = commonTaskSortRank(existing.status, existing.isDone)
+    const nextRank = commonTaskSortRank(entry.status, entry.isDone)
+    const strongestStatus =
+      nextRank < existingRank
+        ? { status: entry.status, isDone: entry.isDone, completedAt: entry.completedAt }
+        : { status: existing.status, isDone: existing.isDone, completedAt: existing.completedAt }
+
+    merged.set(key, {
+      ...existing,
+      ...strongestStatus,
+      assignees: mergeAssigneeNames(entryAssignees(existing), entryAssignees(entry)),
+      isDeadlineImportant: Boolean(existing.isDeadlineImportant || entry.isDeadlineImportant),
+      dateIsToday: Boolean(existing.dateIsToday || entry.dateIsToday),
+      dueDate: existing.dueDate || entry.dueDate,
+      startDate: existing.startDate || entry.startDate,
+      oneHReportSlot: existing.oneHReportSlot || entry.oneHReportSlot,
+    })
+  }
+
+  return Array.from(merged.values())
+}
+
+const suppressRepeatedPrintTaskEntries = <T extends CommonWeekTableEntry>(
+  rowId: CommonType,
+  entries: T[],
+  dateIso: string,
+  firstDateByTaskId: Map<string, string>
+) => {
+  if (!isPrintDedupeTaskRowId(rowId)) return entries
+  return entries.filter(
+    (entry) =>
+      !isRepeatedTaskInstance(
+        entry as { taskId?: string | null; task_id?: string | null },
+        dateIso,
+        firstDateByTaskId
+      )
+  )
+}
 
 const getSwimlaneTaskUserKey = (entry: SwimlaneCell | null) => {
   if (!entry || entry.placeholder) return ""
@@ -11166,20 +11250,21 @@ export default function CommonViewPage() {
                       else if (row.id === "absent") dayEntries[iso] = dayData?.absent || []
                       else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
                       else if (row.id === "externalHoliday") dayEntries[iso] = dayData?.externalHoliday || []
-                      else if (row.id === "blocked") dayEntries[iso] = dayData?.blocked || []
+                      else if (row.id === "blocked") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.blocked || [])
                       else if (isOneHSlotRowId(row.id)) {
                         const oneHEntries = includeOneH ? dayData?.oneH || [] : []
                         const slot = getOneHSlotRowSlot(row.id)
-                        dayEntries[iso] = slot === undefined
+                        const slotEntries = slot === undefined
                           ? oneHEntries
                           : oneHEntries.filter((entry) =>
                               slot === null
                                 ? !normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot)
                                 : normalizeOneHReportSlot((entry as OneHItem).oneHReportSlot) === slot
                             )
+                        dayEntries[iso] = mergePrintTaskEntries(row.id, slotEntries)
                       }
-                      else if (row.id === "r1") dayEntries[iso] = includeR1 ? dayData?.r1 || [] : []
-                      else if (row.id === "personal") dayEntries[iso] = dayData?.personal || []
+                      else if (row.id === "r1") dayEntries[iso] = includeR1 ? mergePrintTaskEntries(row.id, dayData?.r1 || []) : []
+                      else if (row.id === "personal") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.personal || [])
                       else if (row.id === "external") dayEntries[iso] = dayData?.external || []
                       else if (row.id === "internal") dayEntries[iso] = dayData?.internal || []
                       else if (row.id === "bz") dayEntries[iso] = dayData?.bz || []
@@ -11189,7 +11274,8 @@ export default function CommonViewPage() {
                     })
                     const repeatedTaskFirstDateById = buildRepeatedTaskFirstDateMap(
                       weekISOs,
-                      (dateIso) => dayEntries[dateIso] || []
+                      (dateIso) =>
+                        (dayEntries[dateIso] || []) as { taskId?: string | null; task_id?: string | null }[]
                     )
                     const repeatedTaskClassName = (entry: { taskId?: string | null; task_id?: string | null }, dateIso: string) =>
                       isRepeatedTaskInstance(entry, dateIso, repeatedTaskFirstDateById) ? "repeat-task-muted" : ""
@@ -11214,11 +11300,16 @@ export default function CommonViewPage() {
                     const weekRowClass = getWeekRowClass(row.id)
 
                     const getCellContent = (iso: string) => {
-                      const entries = dayEntries[iso] || []
+                      const entries = suppressRepeatedPrintTaskEntries(
+                        row.id,
+                        dayEntries[iso] || [],
+                        iso,
+                        repeatedTaskFirstDateById
+                      )
                       if (entries.length === 0) return null
                       
                       if (row.id === "late") {
-        return entries.map((e: LateItem, idx: number) => (
+        return (entries as LateItem[]).map((e, idx: number) => (
           <div key={idx} className="week-table-entry">
             <span>{idx + 1}. {e.start || "08:00"}-{e.until}</span>
             <div className="week-table-avatars">
@@ -11242,7 +11333,7 @@ export default function CommonViewPage() {
           </div>
         ))
                       } else if (row.id === "absent") {
-                        return entries.map((e: AbsentItem, idx: number) => (
+                        return (entries as AbsentItem[]).map((e, idx: number) => (
                           <div key={idx} className="week-table-entry">
                             <span>{idx + 1}. {e.from} - {e.to}</span>
                             <div className="week-table-avatars">
@@ -11266,7 +11357,7 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "leave") {
-                        return entries.map((e: LeaveItem, idx: number) => {
+                        return (entries as LeaveItem[]).map((e, idx: number) => {
                           const range = "" // hide date in table view
                           const isAllUsers = Boolean(e.isAllUsers || e.person === ALL_USERS_INITIALS)
                           const timeLabel = e.fullDay ? "08:00-16:30" : `${e.from}-${e.to}`
@@ -11313,7 +11404,7 @@ export default function CommonViewPage() {
                           )
                         })
                       } else if (row.id === "externalHoliday") {
-                        return entries.map((e: ExternalHolidayItem, idx: number) => (
+                        return (entries as ExternalHolidayItem[]).map((e, idx: number) => (
                           <div key={idx} className="week-table-entry">
                             <span>{idx + 1}. {e.title}{e.note ? ` - ${e.note}` : ""}</span>
                             {canDeleteCommon && e.entryId ? (
@@ -11330,7 +11421,7 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "blocked") {
-                        return entries.map((e: BlockedItem, idx: number) => (
+                        return (entries as BlockedItem[]).map((e, idx: number) => (
                           <div
                             key={idx}
                             className={[
@@ -11353,7 +11444,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintTitleLine(e.title)}
+                                  {commonPrintTaskTitle(e)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -11366,7 +11457,7 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "problem" || row.id === "feedback") {
-                        return entries.map((e: ProblemItem | FeedbackItem, idx: number) => (
+                        return (entries as (ProblemItem | FeedbackItem)[]).map((e, idx: number) => (
                           <div key={idx} className="week-table-entry">
                             <span className={row.id === "feedback" ? "feedback-print-clamp" : undefined}>
                               {idx + 1}. {e.title}
@@ -11414,7 +11505,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintTitleLine(e.title)}
+                                  {commonPrintTaskTitle(e)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -11427,7 +11518,7 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "personal") {
-                        return entries.map((e: PersonalItem, idx: number) => (
+                        return (entries as PersonalItem[]).map((e, idx: number) => (
                           <div
                             key={idx}
                             className={[
@@ -11447,7 +11538,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintTitleLine(e.title)}
+                                  {commonPrintTaskTitle(e)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -11481,7 +11572,7 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "internal") {
-                        return entries.map((e: InternalItem, idx: number) => (
+                        return (entries as InternalItem[]).map((e, idx: number) => (
                           <div
                             key={idx}
                             className={[
@@ -11502,7 +11593,7 @@ export default function CommonViewPage() {
                           </div>
                         ))
                       } else if (row.id === "bz") {
-                        return entries.map((e: BzItem, idx: number) => (
+                        return (entries as BzItem[]).map((e, idx: number) => (
                           <div
                             key={idx}
                             className={[
@@ -11686,7 +11777,10 @@ export default function CommonViewPage() {
                 .filter((row) => showCard(row.id))
                 .filter((row) => ["blocked", "oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1600", "oneHNoSlot", "r1", "personal"].includes(row.id))
                 .flatMap((row) => {
-                  const items = row.items.filter((item) => !item.placeholder)
+                  const items = mergePrintTaskEntries(
+                    row.id,
+                    row.items.filter((item) => !item.placeholder)
+                  )
                   const rowCount = Math.max(1, Math.ceil(items.length / 6))
                   return Array.from({ length: rowCount }, (_, chunkIndex) => {
                     const taskCells = items.slice(chunkIndex * 6, chunkIndex * 6 + 6)
@@ -11695,7 +11789,7 @@ export default function CommonViewPage() {
                         {chunkIndex === 0 ? <th rowSpan={rowCount}>{row.label}</th> : null}
                         {Array.from({ length: 6 }, (_, cellIndex) => {
                           const item = taskCells[cellIndex]
-                          return <td key={`${row.id}-${chunkIndex}-${cellIndex}`}>{item ? commonPrintTitleLine(item.title) : ""}</td>
+                          return <td key={`${row.id}-${chunkIndex}-${cellIndex}`}>{item ? commonPrintTaskTitle(item) : ""}</td>
                         })}
                       </tr>
                     )
