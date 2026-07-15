@@ -6040,6 +6040,7 @@ export default function CommonViewPage() {
 
   return (
     <div
+      className="common-view-page-root"
       style={{
         display: "flex",
         flexDirection: "column",
@@ -6353,6 +6354,23 @@ export default function CommonViewPage() {
           }
           .single-day-print .swimlane-board {
             display: none !important;
+          }
+          html,
+          body,
+          main,
+          .common-view-page-root,
+          .common-view-page-root .view-container,
+          .single-day-print,
+          .print-page.single-day-print,
+          .single-day-print-table,
+          .single-day-print-table tbody,
+          .single-day-print-table tr,
+          .single-day-print-table th,
+          .single-day-print-table td {
+            background-color: transparent !important;
+            background-image: none !important;
+            -webkit-print-color-adjust: economy !important;
+            print-color-adjust: economy !important;
           }
           .single-day-print-table {
             display: table !important;
