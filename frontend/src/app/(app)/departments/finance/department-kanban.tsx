@@ -23,6 +23,8 @@ const VIEW_ALL = "all"
 const VIEW_TODAY = "today"
 const VIEW_OVERDUE = "overdue"
 const VIEW_TODAY_OVERDUE = "today_overdue"
+const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "16:00"] as const
 
 type ViewFilter = typeof VIEW_ALL | typeof VIEW_TODAY | typeof VIEW_OVERDUE | typeof VIEW_TODAY_OVERDUE
 
@@ -179,7 +181,7 @@ function systemFrequencyDisplayLabel(frequency?: string | null) {
 
 function normalizeOneHReportSlot(value?: string | null) {
   const normalized = (value || "").trim()
-  return ["10:00", "11:00", "11:50", "14:20", "16:00"].includes(normalized) ? normalized : ""
+  return ONE_H_REPORT_SLOT_OPTIONS.includes(normalized as (typeof ONE_H_REPORT_SLOT_OPTIONS)[number]) ? normalized : ""
 }
 
 function getOneHReportSlotLabel(value?: string | null) {
@@ -498,6 +500,45 @@ export default function DepartmentKanban() {
     setTasks((prev) => prev.map((task) => (task.id === updatedTask.id ? updatedTask : task)))
   }, [])
 
+  const saveOneHReportSlot = React.useCallback(
+    async (taskId: string, slotValue: string) => {
+      const nextSlot = slotValue === ONE_H_REPORT_SLOT_NONE_VALUE ? null : normalizeOneHReportSlot(slotValue)
+      setUpdatingTaskIds((prev) => ({ ...prev, [taskId]: true }))
+      try {
+        const res = await apiFetch(`/tasks/${taskId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ one_h_report_slot: nextSlot }),
+        })
+
+        if (!res.ok) {
+          let detail = "Failed to save 1H slot."
+          try {
+            const payload = (await res.json()) as { detail?: string }
+            if (payload?.detail) detail = payload.detail
+          } catch {
+            // Ignore JSON parse errors for non-JSON error bodies.
+          }
+          throw new Error(detail)
+        }
+
+        const updatedTask = (await res.json()) as Task
+        handleTaskUpdated(updatedTask)
+        toast.success("Slot updated")
+      } catch (slotError) {
+        const message = slotError instanceof Error ? slotError.message : "Failed to save 1H slot."
+        toast.error(message)
+      } finally {
+        setUpdatingTaskIds((prev) => {
+          const next = { ...prev }
+          delete next[taskId]
+          return next
+        })
+      }
+    },
+    [apiFetch, handleTaskUpdated]
+  )
+
   const handleMarkDone = React.useCallback(
     async (taskId: string) => {
       setUpdatingTaskIds((prev) => ({ ...prev, [taskId]: true }))
@@ -674,7 +715,7 @@ export default function DepartmentKanban() {
                     <TableHead>Title</TableHead>
                     <TableHead className="w-20 min-w-20 px-1 text-center" title="Frequency">Frequency</TableHead>
                     <TableHead>Type</TableHead>
-                    <TableHead className="w-24 min-w-24 px-1 text-center" title="1H report time">
+                    <TableHead className="w-28 min-w-28 px-1 text-center" title="1H report time">
                       Slot
                     </TableHead>
                     <TableHead className="w-12 min-w-12 px-1 text-center" title="Assignee">Asg</TableHead>
@@ -709,14 +750,35 @@ export default function DepartmentKanban() {
                         <TableCell>
                           <Badge variant="outline">{row.typeLabel}</Badge>
                         </TableCell>
-                        <TableCell className="w-24 min-w-24 px-1 text-center">
-                          {row.oneHReportSlot ? (
-                            <span
-                              className="inline-flex h-5 items-center justify-center rounded-full border border-slate-200 px-2 text-[10px] font-semibold text-slate-600"
-                              title="1H report time"
-                            >
-                              {getOneHReportSlotLabel(row.oneHReportSlot)}
-                            </span>
+                        <TableCell className="w-28 min-w-28 px-1 text-center">
+                          {row.task.is_1h_report || row.oneHReportSlot ? (
+                            row.canEdit ? (
+                              <select
+                                className="h-7 w-full rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-semibold text-amber-900 shadow-sm outline-none focus:border-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
+                                value={row.oneHReportSlot || ONE_H_REPORT_SLOT_NONE_VALUE}
+                                disabled={Boolean(updatingTaskIds[row.id])}
+                                aria-label="1H report time"
+                                onClick={(event) => event.stopPropagation()}
+                                onChange={(event) => {
+                                  event.stopPropagation()
+                                  void saveOneHReportSlot(row.id, event.target.value)
+                                }}
+                              >
+                                <option value={ONE_H_REPORT_SLOT_NONE_VALUE}>No slot</option>
+                                {ONE_H_REPORT_SLOT_OPTIONS.map((slot) => (
+                                  <option key={slot} value={slot}>
+                                    {slot}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span
+                                className="inline-flex h-5 items-center justify-center rounded-full border border-slate-200 px-2 text-[10px] font-semibold text-slate-600"
+                                title="1H report time"
+                              >
+                                {row.oneHReportSlot || "No slot"}
+                              </span>
+                            )
                           ) : (
                             "-"
                           )}
