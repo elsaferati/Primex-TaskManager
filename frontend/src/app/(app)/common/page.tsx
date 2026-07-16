@@ -539,6 +539,7 @@ const commonPrintTaskTitle = (entry: { title: string; assignees?: string[]; pers
   const assigneeInitials = entryAssignees(entry).map((name) => initials(name)).filter(Boolean)
   return assigneeInitials.length ? `${assigneeInitials.join("/")}: ${title}` : title
 }
+const commonPrintPersonalTaskTitle = (entry: { title: string }) => commonPrintTitleLine(entry.title)
 
 const getCommonTitleMarkClass = (isDone: boolean, isAdded: boolean) => {
   if (isDone && isAdded) {
@@ -4077,7 +4078,7 @@ export default function CommonViewPage() {
       }
       if (rowId === "personal") {
         return (entries as PersonalItem[]).map(
-          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+          (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintPersonalTaskTitle(e)}${assigneesSuffix(e)}`
         )
       }
       if (rowId === "external") {
@@ -11474,7 +11475,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintTaskTitle(e)}
+                                  {commonPrintPersonalTaskTitle(e)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -11821,7 +11822,13 @@ export default function CommonViewPage() {
                           const item = taskCells[cellIndex]
                           return (
                             <td key={`${row.id}-${chunkIndex}-${cellIndex}`}>
-                              {item ? `${chunkIndex * 6 + cellIndex + 1}. ${commonPrintTaskTitle(item)}` : ""}
+                              {item
+                                ? `${chunkIndex * 6 + cellIndex + 1}. ${
+                                    row.id === "personal"
+                                      ? commonPrintPersonalTaskTitle(item)
+                                      : commonPrintTaskTitle(item)
+                                  }`
+                                : ""}
                             </td>
                           )
                         })}
