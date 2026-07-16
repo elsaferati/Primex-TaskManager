@@ -5965,11 +5965,11 @@ export default function AdminTasksPage() {
           .print-section[data-print-section="ga-time"] .print-page {
             display: flex;
             flex-direction: column;
-            height: 184mm;
-            min-height: 184mm;
-            max-height: 184mm;
-            overflow: hidden;
-            padding: 0.04in 0.02in 0.08in 0.02in;
+            height: calc(210mm - 8mm);
+            min-height: calc(210mm - 8mm);
+            max-height: none;
+            overflow: visible;
+            padding: 0.04in 0.02in 0.22in 0.02in;
           }
           .print-section[data-print-section="ga-time"] .print-header {
             margin-bottom: 4px;
@@ -6082,16 +6082,14 @@ export default function AdminTasksPage() {
             flex: 1;
             display: flex;
             min-height: 0;
-            overflow: hidden;
+            overflow: visible;
           }
-          .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-primary {
-            height: 13.8%;
-          }
+          .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-primary,
           .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-secondary {
-            height: 6.2%;
+            height: auto;
           }
-          .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-secondary > td {
-            height: 6.2%;
+          .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-custom {
+            height: 5mm;
           }
           .admin-week-table .ga-time-table-table th,
           .admin-week-table .ga-time-table-table td {
@@ -6167,6 +6165,7 @@ export default function AdminTasksPage() {
             color: #334155;
           }
           .print-section[data-print-section="ga-time"] .print-footer {
+            position: absolute;
             bottom: 0.04in;
             left: 0.04in;
             right: 0.04in;
