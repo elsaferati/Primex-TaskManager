@@ -61,6 +61,21 @@ const items: NavItem[] = [
     icon: StickyNote,
   },
   {
+    href: "/primeflow-notes",
+    label: "Notes",
+    icon: StickyNote,
+  },
+  {
+    href: "/primeflow-classifications",
+    label: "Klasifikime",
+    icon: Layers,
+  },
+  {
+    href: "/primeflow-pyetje",
+    label: "Pyetje",
+    icon: ClipboardCheck,
+  },
+  {
     href: "/next-week-plan",
     label: "PX JAV",
     icon: CalendarClock,

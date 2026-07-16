@@ -27,6 +27,12 @@ from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project_member import ProjectMember
 from app.models.project_prompt import ProjectPrompt
+from app.models.question_library import (
+    QuestionCategory,
+    QuestionDefinition,
+    QuestionStatusEvent,
+    QuestionUserStatus,
+)
 from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.refresh_token import RefreshToken
 from app.models.system_task_template import SystemTaskTemplate
@@ -81,6 +87,10 @@ __all__ = [
     "ProjectPhaseChecklistItem",
     "ProjectMember",
     "ProjectPrompt",
+    "QuestionCategory",
+    "QuestionDefinition",
+    "QuestionStatusEvent",
+    "QuestionUserStatus",
     "VsWorkflowItem",
     "RefreshToken",
     "SystemTaskTemplate",

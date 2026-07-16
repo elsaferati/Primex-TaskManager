@@ -30,6 +30,7 @@ from app.api.routers.external_platform_links import router as external_platform_
 from app.api.routers.file_access import router as file_access_router
 from app.api.routers.speech import router as speech_router
 from app.api.routers.public import router as public_router
+from app.api.routers.question_library import router as question_library_router
 
 
 api_router = APIRouter()
@@ -63,4 +64,5 @@ api_router.include_router(external_platform_links_router, prefix="/external-plat
 api_router.include_router(file_access_router, prefix="/file-access", tags=["file-access"])
 api_router.include_router(speech_router, prefix="/speech", tags=["speech"])
 api_router.include_router(public_router, prefix="/public", tags=["public"])
+api_router.include_router(question_library_router, prefix="/question-library", tags=["question-library"])
 
