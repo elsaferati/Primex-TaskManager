@@ -132,5 +132,261 @@ class TestMcpTaskTools(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(meeting_type["enum"], ["internal", "external"])
 
 
+class TestTaskTypeHelpers(unittest.TestCase):
+    def test_normalize_task_type_accepts_aliases(self) -> None:
+        self.assertEqual(mcp_server._normalize_task_type("1h"), "1H")
+        self.assertEqual(mcp_server._normalize_task_type("P:"), "P")
+        self.assertEqual(mcp_server._normalize_task_type("bllok"), "BLL")
+        self.assertIsNone(mcp_server._normalize_task_type("ALL"))
+        self.assertIsNone(mcp_server._normalize_task_type(None))
+        with self.assertRaises(ValueError):
+            mcp_server._normalize_task_type("XYZ")
+
+    def test_task_type_code_mirrors_backend_priority(self) -> None:
+        self.assertEqual(mcp_server._task_type_code({"is_bllok": True, "is_1h_report": True}), "BLL")
+        self.assertEqual(mcp_server._task_type_code({"is_1h_report": True}), "1H")
+        self.assertEqual(mcp_server._task_type_code({"ga_note_origin_id": "x"}), "GA")
+        self.assertEqual(mcp_server._task_type_code({"is_personal": True}), "P")
+        self.assertIsNone(mcp_server._task_type_code({}))
+
+    def test_task_matches_type_filters_by_flag(self) -> None:
+        task = {"is_1h_report": True, "is_personal": True}
+        self.assertTrue(mcp_server._task_matches_type(task, "1H"))
+        self.assertTrue(mcp_server._task_matches_type(task, "P"))
+        self.assertFalse(mcp_server._task_matches_type(task, "BLL"))
+        self.assertTrue(mcp_server._task_matches_type(task, None))
+
+
+class TestNewTaskViewTools(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        mcp_server._lookup_cache.clear()
+        self.users = [
+            {"id": "11111111-1111-1111-1111-111111111111", "full_name": "Endi Hyseni"},
+            {"id": "22222222-2222-2222-2222-222222222222", "full_name": "Laurent Hoxha"},
+        ]
+        self.tasks = [
+            {
+                "id": "aaaa",
+                "title": "1H task",
+                "status": "IN_PROGRESS",
+                "is_1h_report": True,
+                "one_h_report_slot": "10:00",
+                "assignees": [self.users[0]],
+            },
+            {
+                "id": "bbbb",
+                "title": "Personal task",
+                "status": "TODO",
+                "is_personal": True,
+                "assignees": [self.users[1]],
+            },
+        ]
+
+    async def test_get_tasks_today_filters_type_and_groups_by_person(self) -> None:
+        async def fake_request(method: str, path: str, **kwargs):
+            if path == "/api/tasks":
+                return list(self.tasks)
+            if path == "/api/users":
+                return self.users
+            raise AssertionError(path)
+
+        with patch.object(mcp_server, "_request", side_effect=fake_request):
+            result = await mcp_server.get_tasks_today(task_type="1H")
+
+        self.assertEqual(result["task_type"], "1H")
+        self.assertEqual(result["total_tasks"], 1)
+        self.assertEqual(len(result["people"]), 1)
+        self.assertEqual(result["people"][0]["name"], "Endi Hyseni")
+        self.assertEqual(result["people"][0]["tasks"][0]["type"], "1H")
+
+    async def test_get_all_open_tasks_by_person_groups_everyone(self) -> None:
+        async def fake_request(method: str, path: str, **kwargs):
+            if path == "/api/tasks":
+                self.assertFalse(kwargs["params"]["include_done"])
+                return list(self.tasks)
+            if path == "/api/users":
+                return self.users
+            raise AssertionError(path)
+
+        with patch.object(mcp_server, "_request", side_effect=fake_request):
+            result = await mcp_server.get_all_open_tasks_by_person()
+
+        self.assertEqual(result["people_count"], 2)
+        self.assertEqual(result["total_open_tasks"], 2)
+        names = {person["name"] for person in result["people"]}
+        self.assertEqual(names, {"Endi Hyseni", "Laurent Hoxha"})
+
+
+class TestWeeklyPlanTools(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        mcp_server._lookup_cache.clear()
+
+    async def test_save_weekly_plan_creates_when_no_plan_exists(self) -> None:
+        calls = []
+
+        async def fake_request(method: str, path: str, **kwargs):
+            calls.append((method, path))
+            if method == "GET" and path == "/api/planners/weekly-plans":
+                return []
+            if method == "POST" and path == "/api/planners/weekly-plans":
+                return {"id": "plan-id", **kwargs["json"]}
+            raise AssertionError((method, path))
+
+        with (
+            patch.object(mcp_server, "_request", side_effect=fake_request),
+            patch.object(
+                mcp_server,
+                "_resolve_department_id",
+                AsyncMock(return_value="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            ),
+        ):
+            result = await mcp_server.save_weekly_plan(
+                department_ref="Development",
+                content_json='{"days": {}}',
+                week_start="2026-07-20",
+            )
+
+        self.assertEqual(result["action"], "created")
+        self.assertEqual(result["plan"]["start_date"], "2026-07-20")
+        self.assertEqual(result["plan"]["end_date"], "2026-07-26")
+        self.assertIn(("POST", "/api/planners/weekly-plans"), calls)
+
+    async def test_save_weekly_plan_updates_existing_plan(self) -> None:
+        async def fake_request(method: str, path: str, **kwargs):
+            if method == "GET" and path == "/api/planners/weekly-plans":
+                return [{"id": "plan-id"}]
+            if method == "PATCH" and path == "/api/planners/weekly-plans/plan-id":
+                return {"id": "plan-id", **kwargs["json"]}
+            raise AssertionError((method, path))
+
+        with (
+            patch.object(mcp_server, "_request", side_effect=fake_request),
+            patch.object(
+                mcp_server,
+                "_resolve_department_id",
+                AsyncMock(return_value="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            ),
+        ):
+            result = await mcp_server.save_weekly_plan(
+                department_ref="Development",
+                content_json='{"days": {}}',
+                week_start="2026-07-20",
+                finalize=True,
+            )
+
+        self.assertEqual(result["action"], "updated")
+        self.assertTrue(result["plan"]["is_finalized"])
+
+    async def test_save_weekly_plan_rejects_non_object_content(self) -> None:
+        with patch.object(
+            mcp_server,
+            "_resolve_department_id",
+            AsyncMock(return_value="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+        ):
+            with self.assertRaises(ValueError):
+                await mcp_server.save_weekly_plan(
+                    department_ref="Development",
+                    content_json='["not", "an", "object"]',
+                )
+
+
+class TestPeopleAndStepsTools(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        mcp_server._lookup_cache.clear()
+
+    async def test_get_task_people_maps_controls(self) -> None:
+        users = [
+            {"id": "11111111-1111-1111-1111-111111111111", "full_name": "Endi Hyseni"},
+            {"id": "22222222-2222-2222-2222-222222222222", "full_name": "Laurent Hoxha"},
+            {"id": "33333333-3333-3333-3333-333333333333", "full_name": "Elsa Ferati"},
+        ]
+
+        async def fake_request(method: str, path: str, **kwargs):
+            if path == "/api/tasks/task-1":
+                return {
+                    "id": "task-1",
+                    "title": "Task",
+                    "status": "TODO",
+                    "assigned_to": users[0]["id"],
+                    "assignees": [users[0]],
+                    "confirmation_assignee_id": users[1]["id"],
+                    "alignment_user_ids": [users[2]["id"]],
+                    "department_id": "dddddddd-dddd-dddd-dddd-dddddddddddd",
+                }
+            if path == "/api/users":
+                return users
+            if path == "/api/departments":
+                return [{"id": "dddddddd-dddd-dddd-dddd-dddddddddddd", "name": "Development"}]
+            raise AssertionError(path)
+
+        with patch.object(mcp_server, "_request", side_effect=fake_request):
+            result = await mcp_server.get_task_people("task-1")
+
+        self.assertEqual(result["control_1_confirmer"]["name"], "Laurent Hoxha")
+        self.assertEqual(result["control_2_alignment_users"][0]["name"], "Elsa Ferati")
+        self.assertEqual(result["department"]["name"], "Development")
+
+    async def test_add_task_step_creates_checklist_when_missing(self) -> None:
+        calls = []
+
+        async def fake_request(method: str, path: str, **kwargs):
+            calls.append((method, path))
+            if method == "GET" and path == "/api/checklists":
+                return []
+            if method == "POST" and path == "/api/checklists":
+                return {"id": "checklist-1"}
+            if method == "POST" and path == "/api/checklist-items":
+                self.assertEqual(kwargs["json"]["checklist_id"], "checklist-1")
+                return {"id": "item-1", "title": kwargs["json"]["title"]}
+            raise AssertionError((method, path))
+
+        with patch.object(mcp_server, "_request", side_effect=fake_request):
+            result = await mcp_server.add_task_step("task-1", "Step one")
+
+        self.assertEqual(result["item"]["title"], "Step one")
+        self.assertIn(("POST", "/api/checklists"), calls)
+
+    async def test_schedule_task_validates_slot_and_requires_fields(self) -> None:
+        with self.assertRaises(ValueError):
+            await mcp_server.schedule_task("task-1", one_h_report_slot="09:00")
+        with self.assertRaises(ValueError):
+            await mcp_server.schedule_task("task-1")
+
+    async def test_schedule_task_sets_1h_flag_with_slot(self) -> None:
+        request = AsyncMock(return_value={"id": "task-1"})
+        with patch.object(mcp_server, "_request", request):
+            await mcp_server.schedule_task("task-1", due_date="2026-07-20", one_h_report_slot="10:00")
+
+        payload = request.await_args.kwargs["json"]
+        self.assertEqual(payload["due_date"], "2026-07-20")
+        self.assertEqual(payload["one_h_report_slot"], "10:00")
+        self.assertTrue(payload["is_1h_report"])
+
+
+class TestNewToolsRegistered(unittest.IsolatedAsyncioTestCase):
+    async def test_all_new_tools_are_registered(self) -> None:
+        tools = {tool.name for tool in await mcp_server.mcp.list_tools()}
+        expected = {
+            "get_tasks_today",
+            "get_tasks_this_week",
+            "get_all_open_tasks_by_person",
+            "get_overdue_tasks",
+            "get_weekly_plan",
+            "save_weekly_plan",
+            "get_plan_vs_actual",
+            "prepare_next_week_plan",
+            "get_task_people",
+            "get_person_workload",
+            "get_department_overview",
+            "get_task_steps",
+            "add_task_step",
+            "set_task_step_done",
+            "schedule_task",
+            "get_weekly_report",
+            "export_report",
+        }
+        self.assertTrue(expected.issubset(tools), expected - tools)
+
+
 if __name__ == "__main__":
     unittest.main()

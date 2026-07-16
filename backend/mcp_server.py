@@ -49,6 +49,9 @@ Core language and business rules:
 - Priority values commonly include NORMAL and HIGH.
 - Dates should be ISO strings. For day filters, use local-day bounds such as 2026-07-09T00:00:00+02:00 to 2026-07-10T00:00:00+02:00.
 - Albanian time words: sot=today, neser/nesër=tomorrow, dje=yesterday, kete jave/këtë javë=current week, and javen tjeter/javën tjetër=next week.
+- Task type codes (badges): BLL=blocked task (is_bllok), R1 (is_r1), 1H=1H report task (is_1h_report), GA=created from a GA/KA note (ga_note_origin_id), P=personal task (is_personal). "Detyrat 1H" means tasks with is_1h_report=true, "detyrat P" means personal tasks.
+- Control persons on a task: control 1 = the confirmer (confirmation_assignee_id), control 2 = the alignment users (alignment_user_ids). In VS/VL project workflows these correspond to the KO1/KO2 control steps.
+- Task steps live in checklists attached to the task; per-day scheduling uses start_date/due_date, finish_period (AM/PM), and the 1H slot.
 
 Major modules:
 - Auth: login, refresh, logout, and /api/auth/me. MCP handles login internally with the configured service account.
@@ -84,6 +87,17 @@ Endpoint guidance:
 - To create a task from an existing GA/KA note, always use create_task_from_ga_note instead of create_task. It keeps ga_note_origin_id linked to the source note, uses the note title/content, and marks the note as converted only after task creation succeeds.
 - Use create_meeting, create_plan_note, create_internal_note, and create_common_entry for those actions instead of primeflow_api_request.
 - After a successful write tool call, report the returned object and ID. Do not repeat a create call merely because a later read does not immediately show it.
+- Tool selection map for common questions:
+  - "detyrat per sot / detyrat 1H per sot per te gjithe" -> get_tasks_today (task_type="1H" for 1H tasks only).
+  - "detyrat e kesaj jave / javes tjeter" -> get_tasks_this_week with week=current or next.
+  - "te gjitha detyrat e hapura per secilin person" -> get_all_open_tasks_by_person.
+  - "detyrat me vonese / te pakryera" -> get_overdue_tasks.
+  - Weekly plan: get_weekly_plan to read, save_weekly_plan to draft/save, get_plan_vs_actual to compare plan with reality.
+  - "me ndihmo te bej planin e javes tjeter" -> call prepare_next_week_plan first, draft the plan from its data, then save with save_weekly_plan.
+  - "kush e ka kontrollin / kush e konfirmon" -> get_task_people (control 1 and control 2).
+  - Workload of one person -> get_person_workload. Whole department -> get_department_overview.
+  - Task steps -> get_task_steps, add_task_step, set_task_step_done. Scheduling a task to days/slots -> schedule_task.
+  - Weekly summary report -> get_weekly_report. Excel/PDF downloads -> export_report.
 - Database read-only tools are for schema understanding, relationship discovery, debugging, and simple analytics only. Use API tools for writes and Primeflow business logic.
 - run_readonly_sql allows only SELECT/WITH statements and runs in a read-only transaction. Never use database tools for create/update/delete actions.
 """
@@ -453,6 +467,176 @@ async def _resolve_project_id(project_ref: str | None, department_ref: str | Non
         for project in candidates[:10]
     )
     raise ValueError(f"Ambiguous Primeflow project '{project_ref}'. Matching candidates: {names}")
+
+
+ONE_H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
+TASK_TYPE_ALIASES = {
+    "1H": "1H",
+    "P": "P",
+    "P:": "P",
+    "PERSONAL": "P",
+    "BLL": "BLL",
+    "BLLOK": "BLL",
+    "R1": "R1",
+    "GA": "GA",
+}
+
+
+def _normalize_task_type(task_type: str | None) -> str | None:
+    if not task_type:
+        return None
+    value = task_type.strip().upper().rstrip(":") or None
+    if value in {None, "ALL"}:
+        return None
+    normalized = TASK_TYPE_ALIASES.get(value) or TASK_TYPE_ALIASES.get(f"{value}:")
+    if not normalized:
+        raise ValueError("task_type must be one of 1H, P, BLL, R1, GA, or ALL")
+    return normalized
+
+
+def _task_type_code(task: dict[str, Any]) -> str | None:
+    # Mirrors get_fast_task_type in app/api/routers/planners.py.
+    if task.get("is_bllok"):
+        return "BLL"
+    if task.get("is_r1"):
+        return "R1"
+    if task.get("is_1h_report"):
+        return "1H"
+    if task.get("ga_note_origin_id"):
+        return "GA"
+    if task.get("is_personal"):
+        return "P"
+    return None
+
+
+def _task_matches_type(task: dict[str, Any], task_type: str | None) -> bool:
+    if not task_type:
+        return True
+    if task_type == "BLL":
+        return bool(task.get("is_bllok"))
+    if task_type == "R1":
+        return bool(task.get("is_r1"))
+    if task_type == "1H":
+        return bool(task.get("is_1h_report"))
+    if task_type == "GA":
+        return bool(task.get("ga_note_origin_id"))
+    if task_type == "P":
+        return bool(task.get("is_personal"))
+    return True
+
+
+def _task_is_open(task: dict[str, Any]) -> bool:
+    return (
+        str(task.get("status") or "").upper() not in {"DONE", "COMPLETED"}
+        and not task.get("completed_at")
+    )
+
+
+def _iso_date_part(value: Any) -> date | None:
+    if not value:
+        return None
+    try:
+        return date.fromisoformat(str(value)[:10])
+    except ValueError:
+        return None
+
+
+def _task_overdue_days(task: dict[str, Any], today: date) -> int | None:
+    if not _task_is_open(task):
+        return None
+    due = _iso_date_part(task.get("due_date"))
+    if due and due < today:
+        return (today - due).days
+    return None
+
+
+def _effective_task_date(task: dict[str, Any]) -> date | None:
+    # Same precedence the backend uses for planner-window filtering.
+    for key in ("planned_date", "due_date", "start_date", "created_at"):
+        parsed = _iso_date_part(task.get(key))
+        if parsed:
+            return parsed
+    return None
+
+
+def _user_label(user: dict[str, Any] | None) -> str:
+    if not user:
+        return "Unassigned"
+    return str(user.get("full_name") or user.get("username") or user.get("email") or user.get("id"))
+
+
+async def _users_by_id() -> dict[str, dict[str, Any]]:
+    users = await _cached_lookup("users", "/api/users")
+    return {str(user.get("id")): user for user in users}
+
+
+def _compact_task(task: dict[str, Any], today: date | None = None) -> dict[str, Any]:
+    today = today or datetime.now(_local_tz()).date()
+    compact = {
+        "id": task.get("id"),
+        "title": task.get("title"),
+        "type": _task_type_code(task),
+        "status": task.get("status"),
+        "priority": task.get("priority") if task.get("priority") != "NORMAL" else None,
+        "one_h_report_slot": task.get("one_h_report_slot"),
+        "finish_period": task.get("finish_period"),
+        "start_date": task.get("start_date"),
+        "due_date": task.get("due_date"),
+        "original_due_date": task.get("original_due_date"),
+        "days_late": _task_overdue_days(task, today),
+        "progress_percentage": task.get("progress_percentage") or None,
+        "assignees": [_user_label(assignee) for assignee in task.get("assignees") or []] or None,
+        "project_id": task.get("project_id"),
+        "is_deadline_important": task.get("is_deadline_important") or None,
+    }
+    return {key: value for key, value in compact.items() if value is not None}
+
+
+def _group_tasks_by_person(
+    tasks: list[dict[str, Any]],
+    users_by_id: dict[str, dict[str, Any]],
+    today: date | None = None,
+) -> list[dict[str, Any]]:
+    today = today or datetime.now(_local_tz()).date()
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        keys = [str(assignee.get("id")) for assignee in task.get("assignees") or []]
+        if not keys and task.get("assigned_to"):
+            keys = [str(task["assigned_to"])]
+        for key in keys or ["unassigned"]:
+            groups.setdefault(key, []).append(task)
+    people: list[dict[str, Any]] = []
+    for key, person_tasks in groups.items():
+        user = users_by_id.get(key)
+        people.append(
+            {
+                "user_id": None if key == "unassigned" else key,
+                "name": _user_label(user) if user or key == "unassigned" else key,
+                "count": len(person_tasks),
+                "overdue_count": sum(1 for task in person_tasks if _task_overdue_days(task, today)),
+                "tasks": [_compact_task(task, today) for task in person_tasks],
+            }
+        )
+    people.sort(key=lambda person: (person["user_id"] is None, person["name"].lower()))
+    return people
+
+
+def _week_bounds(week_start_iso: str) -> tuple[date, date, str, str]:
+    monday = date.fromisoformat(week_start_iso)
+    sunday = monday + timedelta(days=6)
+    tz = _local_tz()
+    window_from = datetime.combine(monday, datetime_time.min, tzinfo=tz)
+    window_to = datetime.combine(sunday, datetime_time.min, tzinfo=tz) + timedelta(days=1) - timedelta(microseconds=1)
+    return monday, sunday, window_from.isoformat(), window_to.isoformat()
+
+
+def _parse_date_arg(value: str | None) -> str | None:
+    """Accept ISO datetimes as-is; convert plain dates and sot/neser/dje words to ISO dates."""
+    if not value:
+        return None
+    if "T" in value:
+        return value
+    return _parse_day(value).isoformat()
 
 
 @mcp.tool()
@@ -1667,6 +1851,701 @@ async def resolve_user(user_ref: str, department_ref: str | None = None) -> Any:
         if str(user.get("id")) == user_id:
             return user
     return {"id": user_id}
+
+
+@mcp.tool()
+async def get_tasks_today(
+    user_ref: str | None = None,
+    department_ref: str | None = None,
+    task_type: str | None = None,
+    unfinished_only: bool = True,
+    include_overdue: bool = False,
+    day_date: str | None = None,
+) -> Any:
+    """
+    Get tasks for one local day, grouped by person.
+
+    Use this for "detyrat per sot", "detyrat 1H per sot per te gjithe personat", etc.
+    task_type filters by badge: 1H, P (personal), BLL (blocked), R1, GA, or ALL.
+    Omit user_ref to include every person. day_date accepts YYYY-MM-DD, sot, neser, dje.
+    include_overdue=true also lists unfinished tasks due before the day.
+    """
+    normalized_type = _normalize_task_type(task_type)
+    user_id = await _resolve_user_id(user_ref, department_ref)
+    department_id = await _resolve_department_id(department_ref)
+    day, start, end = _day_bounds(day_date)
+    tasks = await _request(
+        "GET",
+        "/api/tasks",
+        params={
+            "assigned_to": user_id,
+            "department_id": department_id,
+            "window_from": start,
+            "window_to": end,
+            "include_done": not unfinished_only,
+        },
+    )
+    if include_overdue:
+        overdue_before = datetime.fromisoformat(start) - timedelta(microseconds=1)
+        overdue_tasks = await _request(
+            "GET",
+            "/api/tasks",
+            params={
+                "assigned_to": user_id,
+                "department_id": department_id,
+                "due_to": overdue_before.isoformat(),
+                "include_done": False,
+            },
+        )
+        existing_ids = {str(task.get("id")) for task in tasks}
+        tasks = [task for task in overdue_tasks if str(task.get("id")) not in existing_ids] + tasks
+    if unfinished_only:
+        tasks = [task for task in tasks if _task_is_open(task)]
+    tasks = [task for task in tasks if _task_matches_type(task, normalized_type)]
+    people = _group_tasks_by_person(tasks, await _users_by_id(), _parse_day(day_date))
+    return {
+        "day": day,
+        "task_type": normalized_type or "ALL",
+        "unfinished_only": unfinished_only,
+        "total_tasks": len(tasks),
+        "people": people,
+    }
+
+
+@mcp.tool()
+async def get_tasks_this_week(
+    week: str = "current",
+    week_start: str | None = None,
+    user_ref: str | None = None,
+    department_ref: str | None = None,
+    task_type: str | None = None,
+    unfinished_only: bool = False,
+) -> Any:
+    """
+    Get tasks for a whole week, grouped by day and then by person.
+
+    Use this for "detyrat e kesaj jave" or "detyrat e javes tjeter". week is current or next,
+    or pass week_start as YYYY-MM-DD. task_type filters by badge: 1H, P, BLL, R1, GA, ALL.
+    """
+    normalized_type = _normalize_task_type(task_type)
+    user_id = await _resolve_user_id(user_ref, department_ref)
+    department_id = await _resolve_department_id(department_ref)
+    monday, sunday, window_from, window_to = _week_bounds(_week_start(week_start, week))
+    tasks = await _request(
+        "GET",
+        "/api/tasks",
+        params={
+            "assigned_to": user_id,
+            "department_id": department_id,
+            "window_from": window_from,
+            "window_to": window_to,
+            "include_done": not unfinished_only,
+        },
+    )
+    if unfinished_only:
+        tasks = [task for task in tasks if _task_is_open(task)]
+    tasks = [task for task in tasks if _task_matches_type(task, normalized_type)]
+    users_by_id = await _users_by_id()
+    today = datetime.now(_local_tz()).date()
+    days: list[dict[str, Any]] = []
+    for offset in range(7):
+        day = monday + timedelta(days=offset)
+        day_tasks = [task for task in tasks if _effective_task_date(task) == day]
+        if not day_tasks and offset >= 5:
+            continue
+        days.append(
+            {
+                "date": day.isoformat(),
+                "weekday": day.strftime("%A"),
+                "total_tasks": len(day_tasks),
+                "people": _group_tasks_by_person(day_tasks, users_by_id, today),
+            }
+        )
+    return {
+        "week_start": monday.isoformat(),
+        "week_end": sunday.isoformat(),
+        "task_type": normalized_type or "ALL",
+        "total_tasks": len(tasks),
+        "days": days,
+    }
+
+
+@mcp.tool()
+async def get_all_open_tasks_by_person(
+    department_ref: str | None = None,
+    task_type: str | None = None,
+    max_tasks_per_person: int = 50,
+) -> Any:
+    """
+    Get every open (not DONE) task for every person, grouped by person.
+
+    Use this for "te gjitha detyrat e hapura per secilin person". Optionally scope to a
+    department or a task_type badge (1H, P, BLL, R1, GA). Overdue tasks include days_late.
+    """
+    normalized_type = _normalize_task_type(task_type)
+    department_id = await _resolve_department_id(department_ref)
+    tasks = await _request(
+        "GET",
+        "/api/tasks",
+        params={"department_id": department_id, "include_done": False},
+    )
+    tasks = [task for task in tasks if _task_matches_type(task, normalized_type)]
+    people = _group_tasks_by_person(tasks, await _users_by_id())
+    for person in people:
+        person["tasks"] = person["tasks"][: max(1, max_tasks_per_person)]
+    return {
+        "task_type": normalized_type or "ALL",
+        "total_open_tasks": len(tasks),
+        "people_count": len(people),
+        "people": people,
+    }
+
+
+@mcp.tool()
+async def get_overdue_tasks(
+    user_ref: str | None = None,
+    department_ref: str | None = None,
+) -> Any:
+    """Get unfinished tasks whose due date has passed, grouped by person, with days_late and the original due date."""
+    user_id = await _resolve_user_id(user_ref, department_ref)
+    department_id = await _resolve_department_id(department_ref)
+    today = datetime.now(_local_tz()).date()
+    tz = _local_tz()
+    due_before = datetime.combine(today, datetime_time.min, tzinfo=tz) - timedelta(microseconds=1)
+    tasks = await _request(
+        "GET",
+        "/api/tasks",
+        params={
+            "assigned_to": user_id,
+            "department_id": department_id,
+            "due_to": due_before.isoformat(),
+            "include_done": False,
+        },
+    )
+    tasks = [task for task in tasks if _task_overdue_days(task, today)]
+    return {
+        "as_of": today.isoformat(),
+        "total_overdue": len(tasks),
+        "people": _group_tasks_by_person(tasks, await _users_by_id(), today),
+    }
+
+
+@mcp.tool()
+async def get_weekly_plan(
+    week: str = "current",
+    week_start: str | None = None,
+    department_ref: str | None = None,
+) -> Any:
+    """
+    Get the stored weekly plan for a week (and department). Falls back to the computed
+    weekly table grid when no stored plan exists yet.
+
+    Use this for "plani i javes / plani i javes tjeter".
+    """
+    department_id = await _resolve_department_id(department_ref)
+    monday = _week_start(week_start, week)
+    plans = await _request(
+        "GET",
+        "/api/planners/weekly-plans",
+        params={"department_id": department_id, "week_start": monday},
+    )
+    if plans:
+        return {"week_start": monday, "source": "stored_plan", "plans": plans}
+    table = await _request(
+        "GET",
+        "/api/planners/weekly-table",
+        params={"week_start": monday, "department_id": department_id},
+    )
+    return {"week_start": monday, "source": "weekly_table", "plans": [], "weekly_table": table}
+
+
+@mcp.tool()
+async def save_weekly_plan(
+    department_ref: str,
+    content_json: str,
+    week: str = "next",
+    week_start: str | None = None,
+    finalize: bool | None = None,
+) -> Any:
+    """
+    Create or update the stored weekly plan for a department and week.
+
+    content_json is the plan payload as a JSON object string. If a plan already exists
+    for that week it is updated, otherwise a new one is created. week defaults to next.
+    Set finalize=true only when the user says the plan is final.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    content = _parse_json_arg(content_json, default=None)
+    if not isinstance(content, dict):
+        raise ValueError("content_json must be a JSON object.")
+    monday_iso = _week_start(week_start, week)
+    monday, sunday, _, _ = _week_bounds(monday_iso)
+    existing = await _request(
+        "GET",
+        "/api/planners/weekly-plans",
+        params={"department_id": department_id, "week_start": monday_iso},
+    )
+    if existing:
+        plan_id = existing[0]["id"]
+        payload = {"content": content}
+        if finalize is not None:
+            payload["is_finalized"] = finalize
+        plan = await _request("PATCH", f"/api/planners/weekly-plans/{plan_id}", json=payload)
+        return {"action": "updated", "plan": plan}
+    plan = await _request(
+        "POST",
+        "/api/planners/weekly-plans",
+        json={
+            "department_id": department_id,
+            "start_date": monday.isoformat(),
+            "end_date": sunday.isoformat(),
+            "content": content,
+            "is_finalized": finalize,
+        },
+    )
+    return {"action": "created", "plan": plan}
+
+
+@mcp.tool()
+async def get_plan_vs_actual(
+    department_ref: str,
+    week: str = "current",
+    week_start: str | None = None,
+    compare_to: Literal["actual", "final"] = "actual",
+) -> Any:
+    """
+    Compare the planned week (snapshot) with what actually happened.
+
+    compare_to=actual compares against the live state; compare_to=final compares against
+    the end-of-week snapshot. Requires a department.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    monday = _week_start(week_start, week)
+    return await _request(
+        "GET",
+        f"/api/planners/weekly-snapshots/plan-vs-{compare_to}",
+        params={"department_id": department_id, "week_start": monday},
+    )
+
+
+@mcp.tool()
+async def prepare_next_week_plan(department_ref: str | None = None) -> Any:
+    """
+    Collect everything needed to draft next week's plan in one call.
+
+    Returns: this week's planner table with completion state, all open/overdue tasks per
+    person (carryover candidates), leave/holiday blocks and meetings for next week, any
+    already-stored next-week plan, and the projects list. Draft the plan from this data,
+    then persist it with save_weekly_plan.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    this_monday = _week_start(None, "current")
+    next_monday = _week_start(None, "next")
+    _, next_sunday, _, _ = _week_bounds(next_monday)
+
+    async def _safe(coro: Any) -> Any:
+        try:
+            return await coro
+        except Exception as exc:
+            return {"error": str(exc)}
+
+    (
+        current_week_table,
+        open_tasks,
+        leave_blocks,
+        meetings,
+        stored_next_plans,
+        projects,
+    ) = await asyncio.gather(
+        _safe(_request(
+            "GET",
+            "/api/planners/weekly-table",
+            params={"week_start": this_monday, "department_id": department_id, "is_this_week": True},
+        )),
+        _safe(_request(
+            "GET",
+            "/api/tasks",
+            params={"department_id": department_id, "include_done": False},
+        )),
+        _safe(_request(
+            "GET",
+            "/api/common-entries/blocks",
+            params={
+                "type": "PV_FEST",
+                "start": next_monday,
+                "end": next_sunday.isoformat(),
+                "department_id": department_id,
+            },
+        )),
+        _safe(get_common_view_meetings_for_week(week_start=next_monday)),
+        _safe(_request(
+            "GET",
+            "/api/planners/weekly-plans",
+            params={"department_id": department_id, "week_start": next_monday},
+        )),
+        _safe(_request("GET", "/api/projects", params={"department_id": department_id})),
+    )
+    open_by_person: Any = open_tasks
+    if isinstance(open_tasks, list):
+        open_by_person = _group_tasks_by_person(open_tasks, await _users_by_id())
+    return {
+        "this_week_start": this_monday,
+        "next_week_start": next_monday,
+        "next_week_end": next_sunday.isoformat(),
+        "current_week_table": current_week_table,
+        "open_tasks_by_person": open_by_person,
+        "leave_blocks_next_week": leave_blocks,
+        "meetings_next_week": meetings,
+        "stored_next_week_plans": stored_next_plans,
+        "projects": projects,
+        "hint": (
+            "Draft next week's plan per person and day (AM/PM), carrying over overdue and open tasks, "
+            "avoiding people on leave, keeping meeting times free, then call save_weekly_plan."
+        ),
+    }
+
+
+@mcp.tool()
+async def get_task_people(task_id: str) -> Any:
+    """
+    Get everyone involved in a task: assignees, control 1 (the confirmer), control 2
+    (alignment users), creator, and department. Use for "kush e ka kontrollin e taskut".
+    """
+    task = await _request("GET", f"/api/tasks/{task_id}")
+    users_by_id = await _users_by_id()
+    departments = await _cached_lookup("departments", "/api/departments")
+
+    def _person(user_id: Any) -> dict[str, Any] | None:
+        if not user_id:
+            return None
+        user = users_by_id.get(str(user_id))
+        return {"id": str(user_id), "name": _user_label(user) if user else str(user_id)}
+
+    department = next(
+        (dept for dept in departments if str(dept.get("id")) == str(task.get("department_id"))),
+        None,
+    )
+    return {
+        "task": _compact_task(task),
+        "assignees": [
+            {"id": str(assignee.get("id")), "name": _user_label(assignee)}
+            for assignee in task.get("assignees") or []
+        ],
+        "primary_assignee": _person(task.get("assigned_to")),
+        "control_1_confirmer": _person(task.get("confirmation_assignee_id")),
+        "control_2_alignment_users": [
+            person for person in (_person(user_id) for user_id in task.get("alignment_user_ids") or []) if person
+        ],
+        "created_by": _person(task.get("created_by")),
+        "department": department,
+    }
+
+
+@mcp.tool()
+async def get_person_workload(
+    user_ref: str,
+    week: str = "current",
+    week_start: str | None = None,
+) -> Any:
+    """
+    Get one person's full workload: open tasks, this week's tasks, overdue tasks,
+    1H slots, and the projects they are involved in.
+    """
+    user_id = await _resolve_user_id(user_ref)
+    monday, sunday, window_from, window_to = _week_bounds(_week_start(week_start, week))
+    today = datetime.now(_local_tz()).date()
+    open_tasks, week_tasks = await asyncio.gather(
+        _request("GET", "/api/tasks", params={"assigned_to": user_id, "include_done": False}),
+        _request(
+            "GET",
+            "/api/tasks",
+            params={"assigned_to": user_id, "window_from": window_from, "window_to": window_to},
+        ),
+    )
+    overdue = [task for task in open_tasks if _task_overdue_days(task, today)]
+    one_h = [task for task in open_tasks if task.get("is_1h_report")]
+    projects = await _cached_lookup("projects", "/api/projects")
+    project_titles = {
+        str(project.get("id")): project.get("display_title") or project.get("title")
+        for project in projects
+    }
+    involved_projects = sorted(
+        {
+            project_titles.get(str(task.get("project_id")), str(task.get("project_id")))
+            for task in open_tasks
+            if task.get("project_id")
+        }
+    )
+    users_by_id = await _users_by_id()
+    return {
+        "user": {"id": user_id, "name": _user_label(users_by_id.get(user_id))},
+        "week_start": monday.isoformat(),
+        "week_end": sunday.isoformat(),
+        "counts": {
+            "open": len(open_tasks),
+            "overdue": len(overdue),
+            "one_h": len(one_h),
+            "blocked": sum(1 for task in open_tasks if task.get("is_bllok")),
+            "personal": sum(1 for task in open_tasks if task.get("is_personal")),
+            "this_week": len(week_tasks),
+        },
+        "open_tasks": [_compact_task(task, today) for task in open_tasks],
+        "this_week_tasks": [_compact_task(task, today) for task in week_tasks],
+        "projects_involved": involved_projects,
+    }
+
+
+@mcp.tool()
+async def get_department_overview(
+    department_ref: str,
+    week: str = "current",
+    week_start: str | None = None,
+) -> Any:
+    """
+    Get a department overview: members with open/overdue/1H/blocked task counts,
+    and the department's projects with phase/status.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    monday = _week_start(week_start, week)
+    users, open_tasks, projects = await asyncio.gather(
+        _cached_lookup("users", "/api/users"),
+        _request("GET", "/api/tasks", params={"department_id": department_id, "include_done": False}),
+        _request("GET", "/api/projects", params={"department_id": department_id}),
+    )
+    members = [user for user in users if str(user.get("department_id")) == department_id]
+    users_by_id = {str(user.get("id")): user for user in users}
+    people = _group_tasks_by_person(open_tasks, users_by_id)
+    by_user = {person["user_id"]: person for person in people}
+    today = datetime.now(_local_tz()).date()
+    member_rows = []
+    for member in members:
+        member_id = str(member.get("id"))
+        person = by_user.get(member_id)
+        person_tasks = person["tasks"] if person else []
+        member_rows.append(
+            {
+                "id": member_id,
+                "name": _user_label(member),
+                "role": member.get("role"),
+                "open": len(person_tasks),
+                "overdue": person["overdue_count"] if person else 0,
+                "one_h": sum(1 for task in person_tasks if task.get("type") == "1H"),
+                "blocked": sum(1 for task in person_tasks if task.get("type") == "BLL"),
+            }
+        )
+    return {
+        "department_id": department_id,
+        "week_start": monday,
+        "as_of": today.isoformat(),
+        "members": member_rows,
+        "total_open_tasks": len(open_tasks),
+        "projects": [
+            {
+                "id": project.get("id"),
+                "title": project.get("display_title") or project.get("title"),
+                "current_phase": project.get("current_phase"),
+                "status": project.get("status"),
+                "progress_percentage": project.get("progress_percentage"),
+            }
+            for project in (projects if isinstance(projects, list) else [])
+        ],
+    }
+
+
+@mcp.tool()
+async def get_task_steps(task_id: str) -> Any:
+    """Get a task with its step checklists and items. Use for "detyra me hapat/steps"."""
+    task, checklists = await asyncio.gather(
+        _request("GET", f"/api/tasks/{task_id}"),
+        _request("GET", "/api/checklists", params={"task_id": task_id}),
+    )
+    return {"task": _compact_task(task), "checklists": checklists}
+
+
+@mcp.tool()
+async def add_task_step(
+    task_id: str,
+    title: str,
+    comment: str | None = None,
+    checklist_title: str = "Steps",
+) -> Any:
+    """Add a step (checklist item) to a task. Creates the task's checklist first if it has none."""
+    checklists = await _request("GET", "/api/checklists", params={"task_id": task_id})
+    if checklists:
+        checklist_id = checklists[0]["id"]
+    else:
+        checklist = await _request(
+            "POST",
+            "/api/checklists",
+            json={"task_id": task_id, "title": checklist_title},
+        )
+        checklist_id = checklist["id"]
+    item = await _request(
+        "POST",
+        "/api/checklist-items",
+        json={"checklist_id": checklist_id, "title": title, "comment": comment},
+    )
+    return {"checklist_id": checklist_id, "item": item}
+
+
+@mcp.tool()
+async def set_task_step_done(item_id: str, done: bool = True) -> Any:
+    """Mark a task step (checklist item) as done or not done."""
+    return await _request("PATCH", f"/api/checklist-items/{item_id}", json={"is_checked": done})
+
+
+@mcp.tool()
+async def schedule_task(
+    task_id: str,
+    start_date: str | None = None,
+    due_date: str | None = None,
+    finish_period: Literal["AM", "PM"] | None = None,
+    one_h_report_slot: str | None = None,
+) -> Any:
+    """
+    Schedule a task onto days and slots: start/due dates (YYYY-MM-DD, sot, neser, or ISO
+    datetime), AM/PM finish period, and the 1H slot (10:00, 11:00, 11:50, 14:20, 16:00).
+    """
+    if one_h_report_slot and one_h_report_slot not in ONE_H_SLOTS:
+        raise ValueError("one_h_report_slot must be 10:00, 11:00, 11:50, 14:20, or 16:00")
+    payload = {
+        "start_date": _parse_date_arg(start_date),
+        "due_date": _parse_date_arg(due_date),
+        "finish_period": finish_period,
+        "one_h_report_slot": one_h_report_slot,
+        "is_1h_report": True if one_h_report_slot else None,
+    }
+    payload = {key: value for key, value in payload.items() if value is not None}
+    if not payload:
+        raise ValueError("Provide at least one of start_date, due_date, finish_period, or one_h_report_slot.")
+    return await _request("PATCH", f"/api/tasks/{task_id}", json=payload)
+
+
+@mcp.tool()
+async def get_weekly_report(
+    week: str = "current",
+    week_start: str | None = None,
+    department_ref: str | None = None,
+    user_ref: str | None = None,
+) -> Any:
+    """
+    Get a weekly execution report: for each workday, the planned tasks, what was done,
+    and what is late, plus per-person totals for the week.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    user_id = await _resolve_user_id(user_ref, department_ref)
+    monday, sunday, _, _ = _week_bounds(_week_start(week_start, week))
+    weekdays = [monday + timedelta(days=offset) for offset in range(5)]
+    reports = await asyncio.gather(
+        *(
+            _request(
+                "GET",
+                "/api/reports/daily",
+                params={"day": day.isoformat(), "department_id": department_id, "user_id": user_id},
+            )
+            for day in weekdays
+        )
+    )
+    users_by_id = await _users_by_id()
+    per_person: dict[str, dict[str, int]] = {}
+    days_out = []
+    for day, report in zip(weekdays, reports):
+        items = list(report.get("tasks_today") or [])
+        overdue_items = list(report.get("tasks_overdue") or [])
+        done = 0
+        for item in items:
+            task = item.get("task") or {}
+            if not _task_is_open(task):
+                done += 1
+            for assignee in task.get("assignees") or [{"id": task.get("assigned_to")}]:
+                if not assignee.get("id"):
+                    continue
+                stats = per_person.setdefault(
+                    _user_label(users_by_id.get(str(assignee["id"]))),
+                    {"planned": 0, "done": 0, "overdue": 0},
+                )
+                stats["planned"] += 1
+                if not _task_is_open(task):
+                    stats["done"] += 1
+        for item in overdue_items:
+            task = item.get("task") or {}
+            for assignee in task.get("assignees") or [{"id": task.get("assigned_to")}]:
+                if not assignee.get("id"):
+                    continue
+                stats = per_person.setdefault(
+                    _user_label(users_by_id.get(str(assignee["id"]))),
+                    {"planned": 0, "done": 0, "overdue": 0},
+                )
+                stats["overdue"] += 1
+        days_out.append(
+            {
+                "date": day.isoformat(),
+                "weekday": day.strftime("%A"),
+                "planned": len(items),
+                "done": done,
+                "overdue_carried": len(overdue_items),
+                "system_overdue": len(report.get("system_overdue") or []),
+            }
+        )
+    return {
+        "week_start": monday.isoformat(),
+        "week_end": sunday.isoformat(),
+        "days": days_out,
+        "per_person": [
+            {"name": name, **stats}
+            for name, stats in sorted(per_person.items(), key=lambda entry: entry[0].lower())
+        ],
+    }
+
+
+@mcp.tool()
+async def export_report(
+    kind: Literal[
+        "tasks",
+        "open_tasks",
+        "weekly_planner",
+        "daily_report",
+        "plan_vs_actual",
+        "plan_vs_final",
+        "common_view",
+    ],
+    week_start: str | None = None,
+    day: str | None = None,
+    department_ref: str | None = None,
+    user_ref: str | None = None,
+) -> Any:
+    """
+    Build a download URL for a Primeflow XLSX export (tasks, open tasks, weekly planner,
+    daily report, plan-vs-actual/final, common view). The link requires a logged-in
+    Primeflow session, so share it for the user to open in their browser.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    user_id = await _resolve_user_id(user_ref, department_ref)
+    paths = {
+        "tasks": "/api/exports/tasks.xlsx",
+        "open_tasks": "/api/exports/open-tasks.xlsx",
+        "weekly_planner": "/api/exports/weekly-planner.xlsx",
+        "daily_report": "/api/exports/daily-report.xlsx",
+        "plan_vs_actual": "/api/exports/weekly-plan-vs-actual.xlsx",
+        "plan_vs_final": "/api/exports/weekly-plan-vs-final.xlsx",
+        "common_view": "/api/exports/common.xlsx",
+    }
+    params: dict[str, Any] = {"department_id": department_id, "user_id": user_id}
+    if kind in {"weekly_planner", "plan_vs_actual", "plan_vs_final", "common_view"}:
+        params["week_start"] = _week_start(week_start, "current")
+    if kind == "daily_report":
+        params["day"] = _parse_day(day).isoformat()
+    if kind in {"plan_vs_actual", "plan_vs_final"} and not department_id:
+        raise ValueError("plan_vs_actual/plan_vs_final exports require a department_ref.")
+    query = "&".join(
+        f"{key}={value}" for key, value in params.items() if value is not None
+    )
+    url = f"{API_BASE_URL}{paths[kind]}" + (f"?{query}" if query else "")
+    return {
+        "kind": kind,
+        "url": url,
+        "note": "Open this link while logged in to Primeflow; the export endpoint requires authentication.",
+    }
 
 
 if __name__ == "__main__":
