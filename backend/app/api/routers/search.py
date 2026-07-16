@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Depends
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.board import Board
 from app.models.project import Project
 from app.models.task import Task
 from app.schemas.search import SearchProjectResult, SearchResponse, SearchTaskResult
@@ -25,21 +24,30 @@ async def search(
     if not query:
         return SearchResponse(tasks=[], projects=[])
 
-    task_stmt = select(Task).where((Task.title.ilike(f"%{query}%")) | (Task.description.ilike(f"%{query}%")))
-    project_stmt = select(Project).where(Project.name.ilike(f"%{query}%"))
-
-    if user.role.value != "admin":
-        if user.department_id is None:
-            return SearchResponse(tasks=[], projects=[])
-        task_stmt = task_stmt.where(Task.department_id == user.department_id)
-        project_stmt = project_stmt.join(Board, Board.id == Project.board_id).where(Board.department_id == user.department_id)
+    pattern = f"%{query}%"
+    task_stmt = (
+        select(Task)
+        .where(
+            or_(
+                Task.title.ilike(pattern),
+                Task.description.ilike(pattern),
+                Task.internal_notes.ilike(pattern),
+            )
+        )
+        .where(Task.is_active.is_(True))
+    )
+    project_stmt = (
+        select(Project)
+        .where(or_(Project.title.ilike(pattern), Project.description.ilike(pattern)))
+        .where(Project.is_template.is_(False))
+    )
 
     tasks = (await db.execute(task_stmt.limit(20))).scalars().all()
     projects = (await db.execute(project_stmt.limit(20))).scalars().all()
 
     return SearchResponse(
         tasks=[SearchTaskResult(id=t.id, title=t.title, project_id=t.project_id, department_id=t.department_id) for t in tasks],
-        projects=[SearchProjectResult(id=p.id, name=p.name, board_id=p.board_id) for p in projects],
+        projects=[SearchProjectResult(id=p.id, title=p.title, department_id=p.department_id) for p in projects],
     )
 
 
