@@ -31,6 +31,7 @@ type RowView = {
   id: string
   title: string
   typeLabel: string
+  oneHReportSlot: string
   assigneeIds: string[]
   assigneeLabel: string
   assigneeInitials: string
@@ -174,6 +175,15 @@ function systemFrequencyDisplayLabel(frequency?: string | null) {
   if (normalized === "3_MONTHS") return "3M"
   if (normalized === "6_MONTHS") return "6M"
   return normalized || ""
+}
+
+function normalizeOneHReportSlot(value?: string | null) {
+  const normalized = (value || "").trim()
+  return ["10:00", "11:00", "11:50", "14:20", "16:00"].includes(normalized) ? normalized : ""
+}
+
+function getOneHReportSlotLabel(value?: string | null) {
+  return normalizeOneHReportSlot(value) || "No slot"
 }
 
 function isoOrEmpty(value?: string | null) {
@@ -360,6 +370,7 @@ export default function DepartmentKanban() {
           id: task.id,
           title: task.title || "-",
           typeLabel: financeTaskTypeLabel(task),
+          oneHReportSlot: normalizeOneHReportSlot(task.one_h_report_slot),
           assigneeIds: assigneeInfo.ids,
           assigneeLabel: assigneeInfo.label,
           assigneeInitials: assigneeInfo.initials,
@@ -663,6 +674,9 @@ export default function DepartmentKanban() {
                     <TableHead>Title</TableHead>
                     <TableHead className="w-20 min-w-20 px-1 text-center" title="Frequency">Frequency</TableHead>
                     <TableHead>Type</TableHead>
+                    <TableHead className="w-24 min-w-24 px-1 text-center" title="1H report time">
+                      Slot
+                    </TableHead>
                     <TableHead className="w-12 min-w-12 px-1 text-center" title="Assignee">Asg</TableHead>
                     <TableHead>Start Date</TableHead>
                     <TableHead>Due Date</TableHead>
@@ -694,6 +708,18 @@ export default function DepartmentKanban() {
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline">{row.typeLabel}</Badge>
+                        </TableCell>
+                        <TableCell className="w-24 min-w-24 px-1 text-center">
+                          {row.oneHReportSlot ? (
+                            <span
+                              className="inline-flex h-5 items-center justify-center rounded-full border border-slate-200 px-2 text-[10px] font-semibold text-slate-600"
+                              title="1H report time"
+                            >
+                              {getOneHReportSlotLabel(row.oneHReportSlot)}
+                            </span>
+                          ) : (
+                            "-"
+                          )}
                         </TableCell>
                         <TableCell className="w-12 min-w-12 px-1 text-center" title={row.assigneeLabel}>
                           <span className="text-xs font-semibold text-slate-700">{row.assigneeInitials}</span>

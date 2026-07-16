@@ -242,7 +242,7 @@ export function TaskEditDialog({
 
   return (
     <Dialog open={open} onOpenChange={(nextOpen) => (!saving ? onOpenChange(nextOpen) : undefined)}>
-      <DialogContent className="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden sm:max-w-md">
+      <DialogContent className="flex max-h-[calc(100vh-2rem)] flex-col overflow-hidden sm:max-w-2xl lg:max-w-4xl">
         <DialogHeader>
           <DialogTitle>Edit task</DialogTitle>
           <DialogDescription>
@@ -251,42 +251,78 @@ export function TaskEditDialog({
         </DialogHeader>
 
         <div className="min-h-0 flex-1 space-y-4 overflow-y-auto pr-1">
-          <div className="space-y-2">
-            <Label htmlFor="task-edit-title">Title</Label>
-            <Textarea
-              id="task-edit-title"
-              value={title}
-              onChange={(event) => setTitle(event.target.value)}
-              autoResize
-              rows={3}
-              className="min-h-[88px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere]"
-              disabled={saving}
-            />
-          </div>
-
-          {showDescriptionField ? (
-            <div className="space-y-2">
-              <Label htmlFor="task-edit-description">Description</Label>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2 md:col-span-2">
+              <Label htmlFor="task-edit-title">Title</Label>
               <Textarea
-                id="task-edit-description"
-                value={description}
-                onChange={(event) => setDescription(event.target.value)}
-                rows={4}
-                className="h-36 min-h-36 max-h-36 resize-none overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]"
+                id="task-edit-title"
+                value={title}
+                onChange={(event) => setTitle(event.target.value)}
+                autoResize
+                rows={2}
+                className="min-h-[72px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere]"
                 disabled={saving}
               />
             </div>
-          ) : null}
 
-          {isFastTask(task) ? (
+            {showDescriptionField ? (
+              <div className="space-y-2 md:col-span-2">
+                <Label htmlFor="task-edit-description">Description</Label>
+                <Textarea
+                  id="task-edit-description"
+                  value={description}
+                  onChange={(event) => setDescription(event.target.value)}
+                  rows={3}
+                  className="h-28 min-h-28 max-h-28 resize-none overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere]"
+                  disabled={saving}
+                />
+              </div>
+            ) : null}
+
+            {isFastTask(task) ? (
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select value={fastTaskType} onValueChange={(value) => setFastTaskType(value as FastTaskTypeValue)}>
+                  <SelectTrigger disabled={saving}>
+                    <SelectValue placeholder="Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {FAST_TASK_TYPES.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+
+            {isProjectTask(task) ? (
+              <div className="space-y-2">
+                <Label>Type</Label>
+                <Select value={projectTaskType} onValueChange={(value) => setProjectTaskType(value as ProjectTaskTypeValue)}>
+                  <SelectTrigger disabled={saving}>
+                    <SelectValue placeholder="Type" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {PROJECT_TASK_TYPES.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
+
             <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={fastTaskType} onValueChange={(value) => setFastTaskType(value as FastTaskTypeValue)}>
+              <Label>Status</Label>
+              <Select value={statusValue} onValueChange={(value) => setStatusValue(value as TaskStatusValue)}>
                 <SelectTrigger disabled={saving}>
-                  <SelectValue placeholder="Type" />
+                  <SelectValue placeholder="Status" />
                 </SelectTrigger>
                 <SelectContent>
-                  {FAST_TASK_TYPES.map((option) => (
+                  {statusOptions.map((option) => (
                     <SelectItem key={option.value} value={option.value}>
                       {option.label}
                     </SelectItem>
@@ -294,102 +330,68 @@ export function TaskEditDialog({
                 </SelectContent>
               </Select>
             </div>
-          ) : null}
 
-          {isProjectTask(task) ? (
             <div className="space-y-2">
-              <Label>Type</Label>
-              <Select value={projectTaskType} onValueChange={(value) => setProjectTaskType(value as ProjectTaskTypeValue)}>
+              <Label htmlFor="task-edit-start-date">Start date</Label>
+              <Input
+                id="task-edit-start-date"
+                type="date"
+                value={startDate}
+                onChange={(event) => setStartDate(normalizeDueDateInput(event.target.value))}
+                disabled={saving}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="task-edit-due-date">Due date</Label>
+              <Input
+                id="task-edit-due-date"
+                type="date"
+                value={dueDate}
+                onChange={(event) => setDueDate(normalizeDueDateInput(event.target.value))}
+                disabled={saving}
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label>Finish by (optional)</Label>
+              <Select
+                value={finishPeriod}
+                onValueChange={(value) => setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}
+              >
                 <SelectTrigger disabled={saving}>
-                  <SelectValue placeholder="Type" />
+                  <SelectValue placeholder="Select period" />
                 </SelectTrigger>
                 <SelectContent>
-                  {PROJECT_TASK_TYPES.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
+                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
+                  {FINISH_PERIOD_OPTIONS.map((value) => (
+                    <SelectItem key={value} value={value}>
+                      {value}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
-          ) : null}
 
-          <div className="space-y-2">
-            <Label>Status</Label>
-            <Select value={statusValue} onValueChange={(value) => setStatusValue(value as TaskStatusValue)}>
-              <SelectTrigger disabled={saving}>
-                <SelectValue placeholder="Status" />
-              </SelectTrigger>
-              <SelectContent>
-                {statusOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {((isFastTask(task) && fastTaskType === "1H") || (isProjectTask(task) && projectTaskType === "1H")) ? (
+              <div className="space-y-2">
+                <Label>1H report time</Label>
+                <Select value={oneHReportSlot} onValueChange={setOneHReportSlot}>
+                  <SelectTrigger disabled={saving}>
+                    <SelectValue placeholder="Select time" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ONE_H_REPORT_SLOT_NONE_VALUE}>Unassigned</SelectItem>
+                    {ONE_H_REPORT_SLOT_OPTIONS.map((option) => (
+                      <SelectItem key={option.value} value={option.value}>
+                        {option.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
           </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="task-edit-start-date">Start date</Label>
-            <Input
-              id="task-edit-start-date"
-              type="date"
-              value={startDate}
-              onChange={(event) => setStartDate(normalizeDueDateInput(event.target.value))}
-              disabled={saving}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label htmlFor="task-edit-due-date">Due date</Label>
-            <Input
-              id="task-edit-due-date"
-              type="date"
-              value={dueDate}
-              onChange={(event) => setDueDate(normalizeDueDateInput(event.target.value))}
-              disabled={saving}
-            />
-          </div>
-
-          <div className="space-y-2">
-            <Label>Finish by (optional)</Label>
-            <Select
-              value={finishPeriod}
-              onValueChange={(value) => setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)}
-            >
-              <SelectTrigger disabled={saving}>
-                <SelectValue placeholder="Select period" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                {FINISH_PERIOD_OPTIONS.map((value) => (
-                  <SelectItem key={value} value={value}>
-                    {value}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-
-          {((isFastTask(task) && fastTaskType === "1H") || (isProjectTask(task) && projectTaskType === "1H")) ? (
-            <div className="space-y-2">
-              <Label>1H report time</Label>
-              <Select value={oneHReportSlot} onValueChange={setOneHReportSlot}>
-                <SelectTrigger disabled={saving}>
-                  <SelectValue placeholder="Select time" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value={ONE_H_REPORT_SLOT_NONE_VALUE}>Unassigned</SelectItem>
-                  {ONE_H_REPORT_SLOT_OPTIONS.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-          ) : null}
         </div>
 
         <DialogFooter className="shrink-0 border-t bg-background pt-4">
