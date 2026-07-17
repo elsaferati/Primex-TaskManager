@@ -7,7 +7,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, require_manager_or_admin
+from app.api.deps import get_current_user, require_admin, require_manager_or_admin
 from app.db import get_db
 from app.models.enums import UserRole
 from app.models.question_library import (
@@ -241,7 +241,7 @@ async def update_question_category(
     category_id: uuid.UUID,
     payload: QuestionCategoryUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_manager_or_admin),
+    current_user: User = Depends(get_current_user),
 ) -> QuestionCategoryOut:
     category = await _category_or_404(db, category_id)
     name = _clean_required(payload.name)
@@ -283,7 +283,7 @@ async def update_question_category(
 async def delete_question_category(
     category_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_manager_or_admin),
+    _: User = Depends(require_admin),
 ) -> Response:
     category = await _category_or_404(db, category_id)
     await db.delete(category)
@@ -328,7 +328,7 @@ async def update_question_definition(
     question_id: uuid.UUID,
     payload: QuestionDefinitionUpdate,
     db: AsyncSession = Depends(get_db),
-    current_user: User = Depends(require_manager_or_admin),
+    current_user: User = Depends(get_current_user),
 ) -> QuestionDefinitionOut:
     question = await _question_or_404(db, question_id)
     siblings = (
@@ -338,11 +338,13 @@ async def update_question_definition(
             .order_by(QuestionDefinition.sort_order, QuestionDefinition.created_at)
         )
     ).scalars().all()
-    reordered = [item for item in siblings if item.id != question.id]
-    target = min(payload.sort_order, len(reordered))
-    reordered.insert(target, question)
-    for index, item in enumerate(reordered):
-        item.sort_order = index
+    current_index = next((index for index, item in enumerate(siblings) if item.id == question.id), None)
+    target_index = min(max(payload.sort_order, 0), len(siblings) - 1)
+    if current_index is not None and current_index != target_index:
+        siblings[current_index].sort_order, siblings[target_index].sort_order = (
+            siblings[target_index].sort_order,
+            siblings[current_index].sort_order,
+        )
     question.text = _clean_required(payload.text)
     question.guidance = _clean_optional(payload.guidance)
     await db.commit()
@@ -354,7 +356,7 @@ async def update_question_definition(
 async def delete_question_definition(
     question_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_manager_or_admin),
+    _: User = Depends(require_admin),
 ) -> Response:
     question = await _question_or_404(db, question_id)
     category_id = question.category_id
