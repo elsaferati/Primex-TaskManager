@@ -43,6 +43,49 @@ type CommonType =
 
 const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1600", "oneHNoSlot", "r1", "personal"]
 const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1600", "oneHNoSlot", "r1", "personal", "feedback"]
+const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
+  "late",
+  "absent",
+  "leave",
+  "externalHoliday",
+  "external",
+  "internal",
+  "bz",
+  "oneH10",
+  "oneH11",
+  "oneH1150",
+  "oneH1420",
+  "oneH",
+  "blocked",
+  "oneH1600",
+  "oneHNoSlot",
+  "r1",
+  "personal",
+  "priority",
+  "problem",
+  "feedback",
+]
+const COMMON_FAST_PRINT_ROW_IDS: readonly CommonType[] = [
+  "oneH10",
+  "oneH11",
+  "oneH1150",
+  "oneH1420",
+  "blocked",
+  "oneH1600",
+  "oneHNoSlot",
+  "r1",
+  "personal",
+]
+const getCommonPrintRowRank = (id: CommonType) => {
+  const rank = COMMON_PRINT_ROW_ORDER.indexOf(id)
+  return rank === -1 ? COMMON_PRINT_ROW_ORDER.length : rank
+}
+const orderCommonRowsForPrint = <T extends { id: CommonType }>(rows: readonly T[]) =>
+  rows
+    .map((row, index) => ({ row, index }))
+    .sort((a, b) => getCommonPrintRowRank(a.row.id) - getCommonPrintRowRank(b.row.id) || a.index - b.index)
+    .map(({ row }) => row)
+const getCommonPrintRowSubtext = (id: CommonType) => (id === "blocked" ? "14:30 - 15:30" : "")
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
@@ -8241,6 +8284,14 @@ export default function CommonViewPage() {
           .week-table-label {
             width: 72px !important;
           }
+          .week-table-label-subtext {
+            display: block;
+            margin-top: 2px;
+            font-size: 8px;
+            font-weight: 700;
+            line-height: 1;
+            white-space: nowrap;
+          }
           .week-table-cell,
           .week-table-entry > span:not(.week-table-avatar) {
             white-space: normal;
@@ -11269,8 +11320,7 @@ export default function CommonViewPage() {
                 </tr>
               </thead>
               <tbody>
-                {swimlaneRows
-                  .filter((row) => showCard(row.id))
+                {orderCommonRowsForPrint(swimlaneRows.filter((row) => showCard(row.id)))
                   .map((row, rowIndex) => {
                     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
                     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
@@ -11475,7 +11525,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintPersonalTaskTitle(e)}
+                                  {commonPrintTaskTitle(e)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -11536,7 +11586,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintTaskTitle(e)}
+                                  {commonPrintPersonalTaskTitle(e)}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -11713,12 +11763,16 @@ export default function CommonViewPage() {
                     }
                     
                     const rowLabel = row.label.toUpperCase()
+                    const rowSubtext = getCommonPrintRowSubtext(row.id)
                     if (row.id === "feedback") {
                       const feedbackSummary = getFeedbackWeekSummary()
                       return (
                         <tr key={row.id} className={`week-table-row ${weekRowClass} week-table-row-merged`}>
                           <td className="week-table-number">{rowIndex + 1}</td>
-                          <td className="week-table-label">{rowLabel}</td>
+                          <td className="week-table-label">
+                            <span>{rowLabel}</span>
+                            {rowSubtext ? <span className="week-table-label-subtext">{rowSubtext}</span> : null}
+                          </td>
                           <td colSpan={weekISOs.length} className="week-table-cell week-table-merged-cell">
                             {feedbackSummary.length ? (
                               <div className="week-table-entries week-table-feedback-summary">
@@ -11766,7 +11820,10 @@ export default function CommonViewPage() {
                     return (
                       <tr key={row.id} className={`week-table-row ${weekRowClass}`}>
                         <td className="week-table-number">{rowIndex + 1}</td>
-                        <td className="week-table-label">{rowLabel}</td>
+                        <td className="week-table-label">
+                          <span>{rowLabel}</span>
+                          {rowSubtext ? <span className="week-table-label-subtext">{rowSubtext}</span> : null}
+                        </td>
                         {weekISOs.map((iso) => {
                           const content = getCellContent(iso)
                           return (
@@ -11804,9 +11861,11 @@ export default function CommonViewPage() {
           </div>
           <table className="single-day-print-table">
             <tbody>
-              {swimlaneRows
-                .filter((row) => showCard(row.id))
-                .filter((row) => ["blocked", "oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1600", "oneHNoSlot", "r1", "personal"].includes(row.id))
+              {orderCommonRowsForPrint(
+                swimlaneRows
+                  .filter((row) => showCard(row.id))
+                  .filter((row) => COMMON_FAST_PRINT_ROW_IDS.includes(row.id))
+              )
                 .flatMap((row) => {
                   const items = mergePrintTaskEntries(
                     row.id,
@@ -11817,7 +11876,14 @@ export default function CommonViewPage() {
                     const taskCells = items.slice(chunkIndex * 6, chunkIndex * 6 + 6)
                     return (
                       <tr key={`${row.id}-${chunkIndex}`}>
-                        {chunkIndex === 0 ? <th rowSpan={rowCount}>{row.label}</th> : null}
+                        {chunkIndex === 0 ? (
+                          <th rowSpan={rowCount}>
+                            <span>{row.label}</span>
+                            {getCommonPrintRowSubtext(row.id) ? (
+                              <span className="week-table-label-subtext">{getCommonPrintRowSubtext(row.id)}</span>
+                            ) : null}
+                          </th>
+                        ) : null}
                         {Array.from({ length: 6 }, (_, cellIndex) => {
                           const item = taskCells[cellIndex]
                           return (
