@@ -143,7 +143,9 @@ async function responseError(response: Response, fallback: string) {
 export function PrimeflowQuestionsPage() {
   const { apiFetch, user } = useAuth()
   const confirm = useConfirm()
-  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const canManage = Boolean(user)
+  const canDelete = user?.role === "ADMIN"
+  const canViewHistory = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [categories, setCategories] = React.useState<QuestionCategory[]>([])
   const [activeCategoryId, setActiveCategoryId] = React.useState("")
   const [loading, setLoading] = React.useState(true)
@@ -340,7 +342,7 @@ export function PrimeflowQuestionsPage() {
   }
 
   const openHistory = async (question: QuestionDefinition) => {
-    if (!canManage) return
+    if (!canViewHistory) return
     setHistoryQuestion(question)
     setHistory([])
     setHistoryLoading(true)
@@ -390,9 +392,11 @@ export function PrimeflowQuestionsPage() {
               <Button variant="outline" size="icon" onClick={openCategoryEditor} title="Edit category" aria-label="Edit category">
                 <Pencil />
               </Button>
-              <Button variant="outline" size="icon" onClick={() => void deleteCategory()} title="Delete category" aria-label="Delete category" className="text-destructive">
-                <Trash2 />
-              </Button>
+              {canDelete && (
+                <Button variant="outline" size="icon" onClick={() => void deleteCategory()} title="Delete category" aria-label="Delete category" className="text-destructive">
+                  <Trash2 />
+                </Button>
+              )}
             </div>
           )}
         </div>
@@ -432,7 +436,17 @@ export function PrimeflowQuestionsPage() {
                   <tr key={question.id} className="border-t border-[#183b68] bg-[#f7fbff] align-middle">
                     <td className="border-r border-[#183b68] px-2 py-3 text-center">
                       {isEditing ? (
-                        <Input type="number" min={1} max={activeCategory.questions.length} value={editOrder} onChange={(event) => setEditOrder(Number(event.target.value))} className="h-8 text-center" />
+                        <Input
+                          inputMode="numeric"
+                          pattern="[0-9]*"
+                          value={String(editOrder)}
+                          onChange={(event) => {
+                            const value = event.target.value.replace(/\D/g, "")
+                            setEditOrder(value ? Number(value) : 1)
+                          }}
+                          onFocus={(event) => event.currentTarget.select()}
+                          className="mx-auto h-7 w-10 border-0 bg-transparent px-0 text-center text-sm font-medium shadow-none outline-none focus-visible:ring-0"
+                        />
                       ) : index + 1}
                     </td>
                     <td className="border-r border-[#183b68] px-3 py-3 font-medium text-[#071126]">
@@ -451,17 +465,17 @@ export function PrimeflowQuestionsPage() {
                     <td className="border-r border-[#183b68] px-3 py-3 text-center">
                       <button
                         type="button"
-                        disabled={!canManage}
+                        disabled={!canViewHistory}
                         onClick={() => void openHistory(question)}
-                        className={cn("inline-flex min-h-8 max-w-full flex-wrap items-center justify-center gap-1.5 rounded-md px-1", canManage && "hover:bg-muted")}
-                        title={canManage ? "View status history" : undefined}
+                        className={cn("inline-flex min-h-8 max-w-full flex-wrap items-center justify-center gap-1.5 rounded-md px-1", canViewHistory && "hover:bg-muted")}
+                        title={canViewHistory ? "View status history" : undefined}
                       >
                         {question.statuses.length ? question.statuses.map((item) => (
                           <Badge key={item.user_id} variant="outline" className="bg-white" title={`${item.full_name}: ${item.status}`}>
                             {initials(item.full_name)} <StatusIcon status={item.status} className="size-3" />
                           </Badge>
                         )) : <span className="text-muted-foreground">-</span>}
-                        {canManage && <History className="size-3.5 text-muted-foreground" />}
+                        {canViewHistory && <History className="size-3.5 text-muted-foreground" />}
                       </button>
                     </td>
                     <td className="border-r border-[#183b68] px-3 py-3 text-center">
@@ -477,7 +491,9 @@ export function PrimeflowQuestionsPage() {
                         ) : (
                           <div className="flex justify-center gap-1">
                             <Button size="icon-sm" variant="outline" onClick={() => startQuestionEdit(question)} title="Edit" aria-label="Edit"><Pencil /></Button>
-                            <Button size="icon-sm" variant="outline" onClick={() => void deleteQuestion(question)} title="Fshi" aria-label="Fshi" className="text-destructive"><Trash2 /></Button>
+                            {canDelete && (
+                              <Button size="icon-sm" variant="outline" onClick={() => void deleteQuestion(question)} title="Fshi" aria-label="Fshi" className="text-destructive"><Trash2 /></Button>
+                            )}
                           </div>
                         )}
                       </td>
