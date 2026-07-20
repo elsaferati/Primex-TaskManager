@@ -12,6 +12,7 @@ from fastapi.responses import StreamingResponse
 from openpyxl import Workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
+from openpyxl.worksheet.datavalidation import DataValidation
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
@@ -2531,6 +2532,9 @@ async def export_open_tasks_xlsx(
         "TITLE",
         "PROJECT",
         "DESCRIPTION",
+        "WHEN",
+        "STATUS",
+        "KOMENT",
     ]
 
     wb = Workbook()
@@ -2577,9 +2581,12 @@ async def export_open_tasks_xlsx(
             (task.priority or "").upper(),
             _open_task_type_label(task),
             bz_me_label(task),
-            task.title or "",
+            _strip_html(task.title) or "",
             project.title if project else "",
             _strip_html_keep_breaks(task.description),
+            "",
+            "",
+            "",
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=data_row, column=col_idx, value=value)
@@ -2606,9 +2613,20 @@ async def export_open_tasks_xlsx(
         14: 44,
         15: 34,
         16: 44,
+        17: 16,
+        18: 16,
+        19: 34,
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
+
+    if data_row > 5:
+        when_validation = DataValidation(type="list", formula1='"SOT,NEXT WEEK,FUTURE"', allow_blank=True)
+        status_validation = DataValidation(type="list", formula1='"PERSONAL,1H,BLLOK,R1"', allow_blank=True)
+        ws.add_data_validation(when_validation)
+        ws.add_data_validation(status_validation)
+        when_validation.add(f"{get_column_letter(17)}5:{get_column_letter(17)}{data_row - 1}")
+        status_validation.add(f"{get_column_letter(18)}5:{get_column_letter(18)}{data_row - 1}")
 
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
     ws.freeze_panes = "B5"

@@ -2,6 +2,7 @@
 
 import * as React from "react"
 import Link from "next/link"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 
 import { DndContext, PointerSensor, useSensor, useSensors, type DragEndEvent } from "@dnd-kit/core"
 import { arrayMove, SortableContext, useSortable, horizontalListSortingStrategy } from "@dnd-kit/sortable"
@@ -300,14 +301,22 @@ const SortableUserHeader = ({ user, isOrdering }: SortableUserHeaderProps) => {
 export default function WeeklyPlannerPage() {
   const { apiFetch, user } = useAuth()
   const confirm = useConfirm()
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
-  const [departmentId, setDepartmentId] = React.useState<string>(() =>
-    user?.role === "STAFF" && user.department_id ? user.department_id : ALL_DEPARTMENTS_VALUE
-  )
+  const initialUrlWeek = searchParams.get("week")
+  const initialUrlDepartmentId = searchParams.get("department_id")
+  const [departmentId, setDepartmentId] = React.useState<string>(() => {
+    if (user?.role === "STAFF" && user.department_id) return user.department_id
+    return initialUrlDepartmentId || ALL_DEPARTMENTS_VALUE
+  })
   const [viewMode, setViewMode] = React.useState<"current" | "snapshots">("current")
-  const [selectedWeek, setSelectedWeek] = React.useState<SelectedWeek>("this")
+  const [selectedWeek, setSelectedWeek] = React.useState<SelectedWeek>(
+    initialUrlWeek === "last" || initialUrlWeek === "next" ? initialUrlWeek : "this"
+  )
   const [data, setData] = React.useState<WeeklyTableResponse | null>(null)
   const [pvFestBlocks, setPvFestBlocks] = React.useState<WeeklyPlannerBlock[]>([])
   const [orderedUsersByDept, setOrderedUsersByDept] = React.useState<Record<string, WeeklyPrintUser[]>>({})
@@ -502,6 +511,32 @@ export default function WeeklyPlannerPage() {
     qs.set("week_start", shiftIsoDateByDays(currentMonday, offsetDays))
     return qs
   }, [departmentId, selectedWeek])
+
+  const updatePlannerFilterUrl = React.useCallback((nextWeek: SelectedWeek, nextDepartmentId: string) => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (nextWeek === "this") {
+      params.delete("week")
+    } else {
+      params.set("week", nextWeek)
+    }
+    if (nextDepartmentId && nextDepartmentId !== ALL_DEPARTMENTS_VALUE && user?.role !== "STAFF") {
+      params.set("department_id", nextDepartmentId)
+    } else {
+      params.delete("department_id")
+    }
+    const query = params.toString()
+    router.replace(query ? `${pathname}?${query}` : pathname, { scroll: false })
+  }, [pathname, router, searchParams, user?.role])
+
+  const handleSelectedWeekChange = React.useCallback((value: SelectedWeek) => {
+    setSelectedWeek(value)
+    updatePlannerFilterUrl(value, departmentId)
+  }, [departmentId, updatePlannerFilterUrl])
+
+  const handleDepartmentChange = React.useCallback((value: string) => {
+    setDepartmentId(value)
+    updatePlannerFilterUrl(selectedWeek, value)
+  }, [selectedWeek, updatePlannerFilterUrl])
 
   const deleteTask = React.useCallback(async (
     taskId: string,
@@ -736,8 +771,6 @@ export default function WeeklyPlannerPage() {
         setDepartments(deps)
         if (user?.role === "STAFF" && user?.department_id) {
           setDepartmentId(user.department_id)
-        } else {
-          setDepartmentId(ALL_DEPARTMENTS_VALUE)
         }
       }
       if (projRes.ok) {
@@ -3831,7 +3864,7 @@ export default function WeeklyPlannerPage() {
         {viewMode === "current" ? (
         <div className="space-y-2">
           <Label>Week</Label>
-          <Select value={selectedWeek} onValueChange={(value) => setSelectedWeek(value as SelectedWeek)}>
+          <Select value={selectedWeek} onValueChange={(value) => handleSelectedWeekChange(value as SelectedWeek)}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
@@ -3846,7 +3879,7 @@ export default function WeeklyPlannerPage() {
         {user?.role !== "STAFF" ? (
           <div className="space-y-2">
             <Label>Department</Label>
-            <Select value={departmentId} onValueChange={setDepartmentId}>
+            <Select value={departmentId} onValueChange={handleDepartmentChange}>
               <SelectTrigger>
                 <SelectValue placeholder="Department" />
               </SelectTrigger>
