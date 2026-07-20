@@ -2621,7 +2621,7 @@ async def export_open_tasks_xlsx(
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
 
     if data_row > 5:
-        when_validation = DataValidation(type="list", formula1='"SOT,NEXT WEEK,FUTURE"', allow_blank=True)
+        when_validation = DataValidation(type="list", formula1='"SOT,THIS WEEK,NEXT WEEK,FUTURE"', allow_blank=True)
         status_validation = DataValidation(type="list", formula1='"PERSONAL,1H,BLLOK,R1"', allow_blank=True)
         ws.add_data_validation(when_validation)
         ws.add_data_validation(status_validation)
