@@ -151,6 +151,7 @@ export default function TaskDetailsPage() {
   const [statusValue, setStatusValue] = React.useState<Task["status"] | "">("")
   const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
+  const [deadlineImportant, setDeadlineImportant] = React.useState(false)
   const [assignedTo, setAssignedTo] = React.useState(UNASSIGNED_VALUE)
   const [confirmationAssigneeId, setConfirmationAssigneeId] = React.useState("")
   const [assignees, setAssignees] = React.useState<string[]>([])
@@ -197,6 +198,7 @@ export default function TaskDetailsPage() {
     )
     setStartDate(toDateInputValue(task.start_date))
     setDueDate(toDateInputValue(task.due_date))
+    setDeadlineImportant(Boolean(task.is_deadline_important))
     setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
     setConfirmationAssigneeId(task.confirmation_assignee_id || "")
     // Get assignees from assignees array, fallback to assigned_to for backward compatibility
@@ -332,6 +334,10 @@ export default function TaskDetailsPage() {
         toast.error("Title must be at least 2 characters")
         return
       }
+      if (startDate && dueDate && startDate > dueDate) {
+        toast.error("Start date cannot be after due date")
+        return
+      }
 
       const payload: Record<string, unknown> = isGaOriginTask
         ? { reminder_enabled: reminder }
@@ -358,11 +364,10 @@ export default function TaskDetailsPage() {
         payload.confirmation_assignee_id = confirmationAssigneeId
       }
       if (canAssign) {
-        if (!isGaOriginTask) {
-          payload.start_date = startDate || null
-          payload.due_date = dueDate || null
-          payload.finish_period = finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod
-        }
+        payload.start_date = startDate || null
+        payload.due_date = dueDate || null
+        payload.finish_period = finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod
+        payload.is_deadline_important = deadlineImportant
         // Only send assignees if the user actually changed them.
         // For fast tasks, sending assignees can trigger backend "group membership" logic
         // (and potentially create per-user copies). Status-only changes shouldn't do that.
@@ -570,7 +575,7 @@ export default function TaskDetailsPage() {
             <CardContent className="space-y-4">
               {task.ga_note_origin_id ? (
                 <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                  This is your independent GA copy. Edit its status here; shared details are managed in GA Notes.
+                  This is your independent GA copy. Edit its status and scheduling here; shared details are managed in GA Notes.
                 </div>
               ) : null}
               <div className="space-y-2">
@@ -704,6 +709,27 @@ export default function TaskDetailsPage() {
                 </div>
               ) : null}
 
+              {task.ga_note_origin_id && canAssign ? (
+                <div className="space-y-2">
+                  <Label>Finish period</Label>
+                  <Select
+                    value={finishPeriod}
+                    onValueChange={(value) =>
+                      setFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
+                    }
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select period" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value={FINISH_PERIOD_NONE_VALUE}>All day</SelectItem>
+                      <SelectItem value="AM">AM</SelectItem>
+                      <SelectItem value="PM">PM</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : null}
+
               {canAssign ? (
                 <div className="grid gap-3 md:grid-cols-2">
                   <div className="space-y-2">
@@ -711,7 +737,6 @@ export default function TaskDetailsPage() {
                     <Input
                       type="date"
                       value={startDate}
-                      disabled={Boolean(task.ga_note_origin_id)}
                       onChange={(e) => setStartDate(normalizeDueDateInput(e.target.value))}
                     />
                   </div>
@@ -720,11 +745,19 @@ export default function TaskDetailsPage() {
                     <Input
                       type="date"
                       value={dueDate}
-                      disabled={Boolean(task.ga_note_origin_id)}
                       onChange={(e) => setDueDate(normalizeDueDateInput(e.target.value))}
                     />
                   </div>
                 </div>
+              ) : null}
+              {canAssign ? (
+                <label className="flex items-center gap-3 rounded-md border px-3 py-2">
+                  <Checkbox
+                    checked={deadlineImportant}
+                    onCheckedChange={(checked) => setDeadlineImportant(checked === true)}
+                  />
+                  <span className="text-sm font-medium">Deadline important</span>
+                </label>
               ) : null}
               {canAssign ? (
                 <div className="space-y-2">

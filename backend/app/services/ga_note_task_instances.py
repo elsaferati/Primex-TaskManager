@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 
 from sqlalchemy import delete, insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -11,7 +11,7 @@ from app.models.ga_note import GaNote
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
-from app.models.enums import TaskStatus
+from app.models.enums import TaskFinishPeriod, TaskStatus
 
 
 @dataclass(slots=True)
@@ -22,6 +22,16 @@ class GaNoteTaskReconcileResult:
     created_count: int = 0
     deactivated_count: int = 0
     deduplicated_count: int = 0
+
+
+@dataclass(frozen=True, slots=True)
+class GaNoteAssigneeExecutionState:
+    assignee_id: uuid.UUID
+    status: TaskStatus
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    finish_period: TaskFinishPeriod | None = None
+    is_deadline_important: bool = False
 
 
 def _dedupe_ids(values: list[uuid.UUID]) -> list[uuid.UUID]:
@@ -211,12 +221,6 @@ def apply_ga_note_shared_task_fields(
     title: str | None = None,
     description_is_set: bool = False,
     description: str | None = None,
-    start_date_is_set: bool = False,
-    start_date: datetime | None = None,
-    due_date_is_set: bool = False,
-    due_date: datetime | None = None,
-    is_deadline_important_is_set: bool = False,
-    is_deadline_important: bool | None = None,
 ) -> int:
     """Apply GA-controlled fields without touching per-person execution state."""
 
@@ -229,26 +233,60 @@ def apply_ga_note_shared_task_fields(
         if description_is_set and task.description != description:
             task.description = description
             changed = True
-        if start_date_is_set and task.start_date != start_date:
-            task.start_date = start_date
+        if changed:
+            updated_count += 1
+    return updated_count
+
+
+def apply_ga_note_assignee_execution_states(
+    tasks: list[Task],
+    states: list[GaNoteAssigneeExecutionState],
+) -> int:
+    """Apply personal execution fields to exactly the matching active copy."""
+
+    active_by_assignee = {
+        task.assigned_to: task
+        for task in tasks
+        if task.is_active and task.assigned_to is not None
+    }
+    seen_assignees: set[uuid.UUID] = set()
+    updated_count = 0
+    for state in states:
+        if state.assignee_id in seen_assignees:
+            raise ValueError("Duplicate assignee state")
+        seen_assignees.add(state.assignee_id)
+        task = active_by_assignee.get(state.assignee_id)
+        if task is None:
+            raise ValueError("Assignee state does not match an active GA task copy")
+        if state.status not in {TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.DONE}:
+            raise ValueError("GA task status must be TODO, IN_PROGRESS, or DONE")
+        if state.start_date is not None and state.due_date is not None and state.start_date > state.due_date:
+            raise ValueError("Start date cannot be after due date")
+
+        changed = False
+        next_status = state.status.value
+        current_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
+        if current_status != next_status:
+            task.status = next_status
+            task.completed_at = datetime.now(timezone.utc) if next_status == TaskStatus.DONE.value else None
             changed = True
-        if due_date_is_set:
-            if (
-                task.due_date is not None
-                and due_date is not None
-                and task.due_date != due_date
-                and task.original_due_date is None
-            ):
+        if task.start_date != state.start_date:
+            task.start_date = state.start_date
+            changed = True
+        if task.due_date != state.due_date:
+            if task.due_date is not None and task.original_due_date is None:
                 task.original_due_date = task.due_date
-            if task.due_date != due_date:
-                task.due_date = due_date
-                changed = True
-        if (
-            is_deadline_important_is_set
-            and task.is_deadline_important != bool(is_deadline_important)
-        ):
-            task.is_deadline_important = bool(is_deadline_important)
+            task.due_date = state.due_date
+            changed = True
+        next_finish_period = state.finish_period.value if state.finish_period is not None else None
+        current_finish_period = task.finish_period.value if hasattr(task.finish_period, "value") else task.finish_period
+        if current_finish_period != next_finish_period:
+            task.finish_period = next_finish_period
+            changed = True
+        if task.is_deadline_important != state.is_deadline_important:
+            task.is_deadline_important = state.is_deadline_important
             changed = True
         if changed:
             updated_count += 1
+
     return updated_count

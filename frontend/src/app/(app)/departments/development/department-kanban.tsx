@@ -5557,7 +5557,13 @@ export default function DepartmentKanban() {
       let gaMembershipChanged = false
       let removedEditingCopy = false
       const payload: Record<string, unknown> = editingTask?.ga_note_origin_id
-        ? { status: editTaskStatus }
+        ? {
+            status: editTaskStatus,
+            start_date: startDateValue,
+            due_date: dueDateValue,
+            finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
+            is_deadline_important: editTaskDeadlineImportant,
+          }
         : {
             title: buildMarkedAppendOnlyText(editingTask?.title, editTaskTitle.trim()),
             description: editTaskDescription.trim() || null,
@@ -5644,7 +5650,9 @@ export default function DepartmentKanban() {
     setAllTodayEditType(getAllTodayTaskType(task))
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
-      ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
+      task.ga_note_origin_id && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)
+        ? "TODO"
+        : ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
         ? statusValue
         : "TODO"
     )
@@ -5675,10 +5683,10 @@ export default function DepartmentKanban() {
       toast.error("You do not have permission to edit this task")
       return
     }
-    const confirmationValidation = validateWaitingConfirmation(
-      allTodayEditStatus,
-      allTodayEditConfirmationAssigneeId
-    )
+    const isGaOriginTask = Boolean(editingTask?.ga_note_origin_id)
+    const confirmationValidation = isGaOriginTask
+      ? null
+      : validateWaitingConfirmation(allTodayEditStatus, allTodayEditConfirmationAssigneeId)
     if (confirmationValidation) {
       toast.error(confirmationValidation)
       return
@@ -5691,32 +5699,42 @@ export default function DepartmentKanban() {
       const res = await apiFetch(`/tasks/${allTodayEditingTaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
-          description: allTodayEditDescription.trim() || null,
-          ...(isProjectLinked
+        body: JSON.stringify(
+          isGaOriginTask
             ? {
-                priority: allTodayEditType === "high" ? "HIGH" : "NORMAL",
-                is_bllok: allTodayEditType === "blocked",
-                is_1h_report: allTodayEditType === "hourly",
-                is_r1: allTodayEditType === "r1",
-                is_personal: allTodayEditType === "personal",
+                status: allTodayEditStatus,
+                start_date: startDateValue,
+                due_date: dueDateValue,
+                finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
+                is_deadline_important: allTodayEditDeadlineImportant,
               }
             : {
-                is_bllok: allTodayEditType === "blocked",
-                is_1h_report: allTodayEditType === "hourly",
-                is_r1: allTodayEditType === "r1",
-                is_personal: allTodayEditType === "personal",
-              }),
-          status: allTodayEditStatus,
-          start_date: startDateValue,
-          due_date: dueDateValue,
-          finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
-          is_deadline_important: allTodayEditDeadlineImportant,
-          ...(isWaitingConfirmation(allTodayEditStatus)
-            ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
-            : {}),
-        }),
+                title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
+                description: allTodayEditDescription.trim() || null,
+                ...(isProjectLinked
+                  ? {
+                      priority: allTodayEditType === "high" ? "HIGH" : "NORMAL",
+                      is_bllok: allTodayEditType === "blocked",
+                      is_1h_report: allTodayEditType === "hourly",
+                      is_r1: allTodayEditType === "r1",
+                      is_personal: allTodayEditType === "personal",
+                    }
+                  : {
+                      is_bllok: allTodayEditType === "blocked",
+                      is_1h_report: allTodayEditType === "hourly",
+                      is_r1: allTodayEditType === "r1",
+                      is_personal: allTodayEditType === "personal",
+                    }),
+                status: allTodayEditStatus,
+                start_date: startDateValue,
+                due_date: dueDateValue,
+                finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
+                is_deadline_important: allTodayEditDeadlineImportant,
+                ...(isWaitingConfirmation(allTodayEditStatus)
+                  ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
+                  : {}),
+              }
+        ),
       })
       if (!res.ok) {
         let detail = "Failed to update task"
@@ -8081,10 +8099,16 @@ export default function DepartmentKanban() {
                     <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4">
+                    {allTodayEditingTask?.ga_note_origin_id ? (
+                      <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                        This is your independent GA copy. Edit its status and scheduling here; shared details are managed in GA Notes.
+                      </div>
+                    ) : null}
                     <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
                       <Textarea
                         value={allTodayEditTitle}
+                        disabled={Boolean(allTodayEditingTask?.ga_note_origin_id)}
                         onChange={(e) => setAllTodayEditTitle(e.target.value)}
                         rows={3}
                         className="h-24 min-h-24 max-h-24 resize-none overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] border-slate-200 focus:border-slate-400 rounded-xl"
@@ -8092,16 +8116,22 @@ export default function DepartmentKanban() {
                     </div>
                     <div className="space-y-2">
                       <Label className="text-slate-700">Description</Label>
-                      <BoldOnlyEditor
-                        value={allTodayEditDescription}
-                        onChange={setAllTodayEditDescription}
-                        editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto"
-                      />
+                      {allTodayEditingTask?.ga_note_origin_id ? (
+                        <div className="h-32 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                          {allTodayEditDescription || "—"}
+                        </div>
+                      ) : (
+                        <BoldOnlyEditor
+                          value={allTodayEditDescription}
+                          onChange={setAllTodayEditDescription}
+                          editorClassName="h-32 min-h-32 max-h-32 overflow-y-auto"
+                        />
+                      )}
                     </div>
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label className="text-slate-700">Type</Label>
-                        <Select value={allTodayEditType} onValueChange={(value) => setAllTodayEditType(value as AllTodayEditTypeId)}>
+                        <Select value={allTodayEditType} disabled={Boolean(allTodayEditingTask?.ga_note_origin_id)} onValueChange={(value) => setAllTodayEditType(value as AllTodayEditTypeId)}>
                           <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>
@@ -8124,7 +8154,9 @@ export default function DepartmentKanban() {
                             <SelectValue placeholder="Select status" />
                           </SelectTrigger>
                           <SelectContent>
-                            {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
+                            {ALL_TODAY_TASK_STATUS_OPTIONS.filter((value) =>
+                              !allTodayEditingTask?.ga_note_origin_id || value === "TODO" || value === "IN_PROGRESS" || value === "DONE"
+                            ).map((value) => (
                               <SelectItem key={value} value={value}>
                                 {reportStatusLabel(value)}
                               </SelectItem>
@@ -8133,7 +8165,7 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                     </div>
-                    {isWaitingConfirmation(allTodayEditStatus) ? (
+                    {!allTodayEditingTask?.ga_note_origin_id && isWaitingConfirmation(allTodayEditStatus) ? (
                       <div className="space-y-2">
                         <Label className="text-slate-700">Confirm by (Manager/Admin)</Label>
                         <Select
@@ -8210,10 +8242,10 @@ export default function DepartmentKanban() {
                       </Button>
                       <Button
                         disabled={
-                          !allTodayEditTitle.trim() ||
+                          (!allTodayEditingTask?.ga_note_origin_id && !allTodayEditTitle.trim()) ||
                           !allTodayEditStatus ||
                           allTodayUpdating ||
-                          (isWaitingConfirmation(allTodayEditStatus) && !allTodayEditConfirmationAssigneeId) ||
+                          (!allTodayEditingTask?.ga_note_origin_id && isWaitingConfirmation(allTodayEditStatus) && !allTodayEditConfirmationAssigneeId) ||
                           !canEditAllTodayTask(allTodayEditingTask)
                         }
                         onClick={() => void updateAllTodayTask()}
@@ -8723,7 +8755,7 @@ export default function DepartmentKanban() {
                     <div className="space-y-4">
                       {editingGaTask ? (
                         <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                          This is an independent GA copy. Edit its status here; shared details are managed in GA Notes.
+                          This is an independent GA copy. Edit its status and scheduling here; shared details are managed in GA Notes.
                         </div>
                       ) : null}
                       <div className="space-y-2">
@@ -8789,7 +8821,6 @@ export default function DepartmentKanban() {
                           <Label className="text-slate-700">Finish by (optional)</Label>
                           <Select
                             value={editTaskFinishPeriod}
-                            disabled={editingGaTask}
                             onValueChange={(value) =>
                               setEditTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
                             }
@@ -8813,7 +8844,6 @@ export default function DepartmentKanban() {
                             type="date"
                             required
                             value={editTaskStartDate}
-                            disabled={editingGaTask}
                             onChange={(e) => setEditTaskStartDate(normalizeDueDateInput(e.target.value))}
                             className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
@@ -8823,7 +8853,6 @@ export default function DepartmentKanban() {
                           <Input
                             type="date"
                             value={editTaskDueDate}
-                            disabled={editingGaTask}
                             onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
                             className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
@@ -8832,7 +8861,6 @@ export default function DepartmentKanban() {
                       <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
                         <Checkbox
                           checked={editTaskDeadlineImportant}
-                          disabled={editingGaTask}
                           onCheckedChange={(checked) => setEditTaskDeadlineImportant(checked === true)}
                         />
                         <span className="text-sm font-medium text-slate-700">Deadline important</span>

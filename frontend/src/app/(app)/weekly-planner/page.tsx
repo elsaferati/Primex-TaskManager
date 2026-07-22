@@ -1254,10 +1254,6 @@ export default function WeeklyPlannerPage() {
 
   const savePlannerTask = React.useCallback(async () => {
     if (!plannerTask) return
-    if (plannerTask.ga_note_origin_id) {
-      toast.error("GA task dates are shared. Change them from GA Notes.")
-      return
-    }
     if (!plannerTaskDueDate) {
       toast.error("Due date is required to place a task in the weekly planner.")
       return
@@ -1276,8 +1272,12 @@ export default function WeeklyPlannerPage() {
           start_date: plannerTaskStartDate ? new Date(plannerTaskStartDate).toISOString() : null,
           due_date: new Date(plannerTaskDueDate).toISOString(),
           finish_period: plannerTaskFinishPeriod === "__none__" ? null : plannerTaskFinishPeriod,
-          assigned_to: plannerTaskAssigneeIds[0] ?? null,
-          assignees: plannerTaskAssigneeIds,
+          ...(plannerTask.ga_note_origin_id
+            ? {}
+            : {
+                assigned_to: plannerTaskAssigneeIds[0] ?? null,
+                assignees: plannerTaskAssigneeIds,
+              }),
         }),
       })
 
@@ -4322,6 +4322,11 @@ export default function WeeklyPlannerPage() {
                 <div className="line-clamp-2 text-sm font-semibold text-slate-900">{plannerTask.title}</div>
               </div>
             ) : null}
+            {plannerTask?.ga_note_origin_id ? (
+              <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                You are planning this person&apos;s independent GA copy. Membership is managed in GA Notes.
+              </div>
+            ) : null}
 
             <div className="grid gap-3 md:grid-cols-2">
               <div className="space-y-2">
@@ -4359,7 +4364,7 @@ export default function WeeklyPlannerPage() {
               </Select>
             </div>
 
-            <div className="space-y-2">
+            {!plannerTask?.ga_note_origin_id ? <div className="space-y-2">
               <Label>Members</Label>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -4397,7 +4402,7 @@ export default function WeeklyPlannerPage() {
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
-            </div>
+            </div> : null}
 
             <div className="flex justify-end gap-2">
               <Button

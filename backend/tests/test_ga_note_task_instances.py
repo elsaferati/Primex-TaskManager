@@ -2,13 +2,16 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from datetime import datetime, timezone
 from types import SimpleNamespace
 
 from sqlalchemy.sql import Select
 
-from app.models.enums import ProjectPhaseStatus, TaskPriority, TaskStatus
+from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus
 from app.models.task import Task
 from app.services.ga_note_task_instances import (
+    GaNoteAssigneeExecutionState,
+    apply_ga_note_assignee_execution_states,
     apply_ga_note_shared_task_fields,
     reconcile_ga_note_task_assignees,
 )
@@ -164,6 +167,56 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
             TaskStatus.DONE,
         ])
         self.assertTrue(all(task.title == "Updated title" for task in (task_a, task_b, task_c)))
+
+    def test_assignee_execution_updates_only_the_matching_copy(self) -> None:
+        note_id = uuid.uuid4()
+        owner_a, owner_b = uuid.uuid4(), uuid.uuid4()
+        task_a = _task(note_id, owner_a, TaskStatus.TODO)
+        task_b = _task(note_id, owner_b, TaskStatus.IN_PROGRESS)
+        start = datetime(2026, 7, 22, tzinfo=timezone.utc)
+        due = datetime(2026, 7, 24, tzinfo=timezone.utc)
+
+        updated = apply_ga_note_assignee_execution_states(
+            [task_a, task_b],
+            [
+                GaNoteAssigneeExecutionState(
+                    assignee_id=owner_a,
+                    status=TaskStatus.DONE,
+                    start_date=start,
+                    due_date=due,
+                    finish_period=TaskFinishPeriod.PM,
+                    is_deadline_important=True,
+                )
+            ],
+        )
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(task_a.status, TaskStatus.DONE.value)
+        self.assertEqual(task_a.start_date, start)
+        self.assertEqual(task_a.due_date, due)
+        self.assertEqual(task_a.finish_period, TaskFinishPeriod.PM.value)
+        self.assertTrue(task_a.is_deadline_important)
+        self.assertIsNotNone(task_a.completed_at)
+        self.assertEqual(task_b.status, TaskStatus.IN_PROGRESS)
+        self.assertIsNone(task_b.due_date)
+
+    def test_assignee_execution_rejects_invalid_date_range(self) -> None:
+        note_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        task = _task(note_id, owner_id, TaskStatus.TODO)
+
+        with self.assertRaisesRegex(ValueError, "Start date cannot be after due date"):
+            apply_ga_note_assignee_execution_states(
+                [task],
+                [
+                    GaNoteAssigneeExecutionState(
+                        assignee_id=owner_id,
+                        status=TaskStatus.TODO,
+                        start_date=datetime(2026, 7, 25, tzinfo=timezone.utc),
+                        due_date=datetime(2026, 7, 24, tzinfo=timezone.utc),
+                    )
+                ],
+            )
 
 
 if __name__ == "__main__":

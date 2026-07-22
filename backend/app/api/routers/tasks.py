@@ -255,11 +255,7 @@ _GA_NOTE_SHARED_TASK_FIELDS = {
     "department_id",
     "confirmation_assignee_id",
     "priority",
-    "finish_period",
     "phase",
-    "start_date",
-    "due_date",
-    "is_deadline_important",
     "is_bllok",
     "is_1h_report",
     "one_h_report_slot",
@@ -2026,6 +2022,17 @@ async def update_task(
     start_date_set = _payload_has_field(payload, "start_date")
     due_date_set = _payload_has_field(payload, "due_date")
     finish_period_set = _payload_has_field(payload, "finish_period")
+    effective_start_date = payload.start_date if start_date_set else task.start_date
+    effective_due_date = payload.due_date if due_date_set else task.due_date
+    if (
+        effective_start_date is not None
+        and effective_due_date is not None
+        and effective_start_date > effective_due_date
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Start date cannot be after due date",
+        )
     progress_finish_period = _daily_progress_finish_period_value(
         payload.finish_period if finish_period_set else task.finish_period
     )

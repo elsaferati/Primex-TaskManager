@@ -76,6 +76,15 @@ type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | Normaliz
 type ContentFilter = "all" | "emails"
 type TextMarkRange = { start: number; end: number }
 type DoneMarkRange = TextMarkRange
+type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "DONE"
+type GaAssigneeTaskState = {
+  taskId: string | null
+  status: GaAssigneeTaskStatus
+  startDate: string
+  dueDate: string
+  finishPeriod: TaskFinishPeriod | null
+  isDeadlineImportant: boolean
+}
 type NoteTaskInfo = {
   assignees: TaskAssignee[]
   description: string | null
@@ -91,6 +100,7 @@ type NoteTaskInfo = {
   isDeadlineImportant?: boolean | null
   taskCreatedAt?: string | null
   taskUpdatedAt?: string | null
+  assigneeStates: Record<string, GaAssigneeTaskState>
 }
 
 const pad2 = (value: number) => String(value).padStart(2, "0")
@@ -102,6 +112,17 @@ function taskDateKey(value?: string | null) {
   const date = new Date(value)
   if (Number.isNaN(date.getTime())) return null
   return toISODate(date)
+}
+
+function createEmptyGaAssigneeTaskState(): GaAssigneeTaskState {
+  return {
+    taskId: null,
+    status: "TODO",
+    startDate: "",
+    dueDate: "",
+    finishPeriod: null,
+    isDeadlineImportant: false,
+  }
 }
 
 function parseMarkedNoteContent(content?: string | null): {
@@ -812,10 +833,8 @@ export default function GaKaNotesPage() {
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
   const [editAddedRanges, setEditAddedRanges] = React.useState<TextMarkRange[]>([])
   const [editDescription, setEditDescription] = React.useState("")
-  const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
-  const [editTaskDeadline, setEditTaskDeadline] = React.useState("")
-  const [editTaskDeadlineImportant, setEditTaskDeadlineImportant] = React.useState(false)
   const [editTaskAssigneeIds, setEditTaskAssigneeIds] = React.useState<string[]>([])
+  const [editTaskAssigneeStates, setEditTaskAssigneeStates] = React.useState<Record<string, GaAssigneeTaskState>>({})
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
@@ -1041,6 +1060,19 @@ export default function GaKaNotesPage() {
             }]
       }
       const existing = map.get(t.ga_note_origin_id)
+      const normalizedStatus = normalizeTaskStatus(t.status)
+      const assigneeState: Record<string, GaAssigneeTaskState> = t.assigned_to
+        ? {
+            [t.assigned_to]: {
+              taskId: t.id,
+              status: normalizedStatus === "IN_PROGRESS" || normalizedStatus === "DONE" ? normalizedStatus : "TODO",
+              startDate: taskDateKey(t.start_date) || "",
+              dueDate: taskDateKey(t.due_date) || "",
+              finishPeriod: t.finish_period === "AM" || t.finish_period === "PM" ? t.finish_period : null,
+              isDeadlineImportant: Boolean(t.is_deadline_important),
+            },
+          }
+        : {}
       map.set(t.ga_note_origin_id, {
         assignees: mergeAssignees(existing?.assignees ?? [], assignees),
         description: existing?.description ?? t.description ?? null,
@@ -1060,6 +1092,10 @@ export default function GaKaNotesPage() {
           existing?.taskUpdatedAt && new Date(existing.taskUpdatedAt).getTime() > new Date(t.updated_at).getTime()
             ? existing.taskUpdatedAt
             : t.updated_at,
+        assigneeStates: {
+          ...(existing?.assigneeStates ?? {}),
+          ...assigneeState,
+        },
       })
     }
     if (noteIdsOverride) {
@@ -1417,6 +1453,19 @@ export default function GaKaNotesPage() {
     }
   }
 
+  const updateEditTaskAssigneeState = (
+    assigneeId: string,
+    patch: Partial<GaAssigneeTaskState>
+  ) => {
+    setEditTaskAssigneeStates((current) => ({
+      ...current,
+      [assigneeId]: {
+        ...(current[assigneeId] ?? createEmptyGaAssigneeTaskState()),
+        ...patch,
+      },
+    }))
+  }
+
   const openEditNote = (note: GaNote) => {
     const parsedContent = parseMarkedNoteContent(note.content)
     setEditNoteId(note.id)
@@ -1425,12 +1474,7 @@ export default function GaKaNotesPage() {
     setEditAddedRanges(parsedContent.addedRanges)
     const taskInfo = noteTaskInfo.get(note.id)
     setEditDescription(taskInfo?.description || "")
-    const isoStartDate = taskDateKey(taskInfo?.startDate ?? null) || ""
-    const isoDeadline = taskDateKey(taskInfo?.dueDate ?? null) || ""
-    const importantInitial = Boolean(taskInfo?.isDeadlineImportant)
-    setEditTaskStartDate(isoStartDate)
-    setEditTaskDeadline(isoDeadline)
-    setEditTaskDeadlineImportant(importantInitial)
+    setEditTaskAssigneeStates(taskInfo?.assigneeStates ?? {})
     setEditTaskAssigneeIds(
       Array.from(new Set((taskInfo?.assignees ?? []).map((assignee) => assignee.id).filter(Boolean)))
     )
@@ -1594,6 +1638,14 @@ export default function GaKaNotesPage() {
       toast.error("Note text cannot be empty")
       return
     }
+    for (const assigneeId of editTaskAssigneeIds) {
+      const state = editTaskAssigneeStates[assigneeId]
+      if (state?.startDate && state?.dueDate && state.startDate > state.dueDate) {
+        const person = taskAssigneeOptions.find((item) => item.id === assigneeId)
+        toast.error(`Start date cannot be after due date for ${person?.full_name || person?.username || assigneeId}`)
+        return
+      }
+    }
     setSavingEdit(true)
     try {
       const serializedContent = serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim()
@@ -1607,9 +1659,17 @@ export default function GaKaNotesPage() {
             content: serializedContent,
             description: editDescription.trim() || null,
             assignee_ids: editTaskAssigneeIds,
-            start_date: editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null,
-            due_date: editTaskDeadline ? new Date(editTaskDeadline).toISOString() : null,
-            is_deadline_important: editTaskDeadlineImportant,
+            assignee_states: editTaskAssigneeIds.map((assigneeId) => {
+              const state = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
+              return {
+                assignee_id: assigneeId,
+                status: state.status,
+                start_date: state.startDate ? new Date(state.startDate).toISOString() : null,
+                due_date: state.dueDate ? new Date(state.dueDate).toISOString() : null,
+                finish_period: state.finishPeriod,
+                is_deadline_important: state.isDeadlineImportant,
+              }
+            }),
             expected_updated_at: currentNote?.updated_at || null,
           }
         : { content: serializedContent }
@@ -1631,10 +1691,8 @@ export default function GaKaNotesPage() {
         setEditNoteId(null)
         setEditDoneRanges([])
         setEditAddedRanges([])
-        setEditTaskStartDate("")
-        setEditTaskDeadline("")
-        setEditTaskDeadlineImportant(false)
         setEditTaskAssigneeIds([])
+        setEditTaskAssigneeStates({})
       } else {
         let errorMessage = "Failed to update note"
         try {
@@ -3726,10 +3784,8 @@ export default function GaKaNotesPage() {
           setEditDoneRanges([])
           setEditAddedRanges([])
           setEditDescription("")
-          setEditTaskStartDate("")
-          setEditTaskDeadline("")
-          setEditTaskDeadlineImportant(false)
           setEditTaskAssigneeIds([])
+          setEditTaskAssigneeStates({})
         }
       }}>
         <DialogContent className="flex max-h-[90vh] flex-col overflow-hidden sm:max-w-3xl">
@@ -3817,6 +3873,11 @@ export default function GaKaNotesPage() {
                     onValueChange={(value) => {
                       if (value === "__edit_assignee_picker__") return
                       setEditTaskAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
+                      setEditTaskAssigneeStates((current) =>
+                        current[value]
+                          ? current
+                          : { ...current, [value]: createEmptyGaAssigneeTaskState() }
+                      )
                     }}
                     disabled={savingEdit || taskAssigneeOptions.length === 0}
                   >
@@ -3844,76 +3905,95 @@ export default function GaKaNotesPage() {
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <Label className="flex items-center gap-1">
                     <CalendarIcon className="h-4 w-4 text-emerald-600" />
-                    Task dates
+                    Per-person execution
                   </Label>
                   <span className="text-[10px] uppercase tracking-wide text-muted-foreground">
-                    Applies to all assignees
+                    Independent status and scheduling
                   </span>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-3">
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Start date</Label>
-                    <Input
-                      type="date"
-                      value={editTaskStartDate}
-                      onChange={(e) => setEditTaskStartDate(e.target.value)}
-                      disabled={savingEdit}
-                    />
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs text-muted-foreground">Due date</Label>
-                    <Input
-                      type="date"
-                      value={editTaskDeadline}
-                      onChange={(e) => setEditTaskDeadline(e.target.value)}
-                      disabled={savingEdit}
-                    />
-                  </div>
-                  <label className="flex items-center gap-3 rounded-md border px-3 py-2">
-                    <Checkbox
-                      checked={editTaskDeadlineImportant}
-                      onCheckedChange={(checked) =>
-                        setEditTaskDeadlineImportant(checked === true)
-                      }
-                      disabled={savingEdit}
-                    />
-                    <span className="text-sm font-medium">Deadline important</span>
-                  </label>
-                </div>
-                {editTaskStartDate || editTaskDeadline ? (
-                  <div className="flex flex-wrap gap-2">
-                    {editTaskStartDate ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-[11px] border-rose-200 text-rose-700 hover:bg-rose-50"
-                        disabled={savingEdit}
-                        onClick={() => setEditTaskStartDate("")}
-                      >
-                        Clear start date
-                      </Button>
-                    ) : null}
-                    {editTaskDeadline ? (
-                      <Button
-                        type="button"
-                        variant="outline"
-                        size="sm"
-                        className="h-7 px-2 text-[11px] border-rose-200 text-rose-700 hover:bg-rose-50"
-                        disabled={savingEdit}
-                        onClick={() => {
-                          setEditTaskDeadline("")
-                          setEditTaskDeadlineImportant(false)
-                        }}
-                      >
-                        Clear deadline
-                      </Button>
-                    ) : null}
-                  </div>
+                {editTaskAssigneeIds.length === 0 ? (
+                  <p className="text-xs text-muted-foreground">Select at least one assignee.</p>
                 ) : (
-                  <p className="text-xs text-muted-foreground">
-                    No task dates set. Pick a start date or due date above for every assignee.
-                  </p>
+                  <div className="space-y-3">
+                    {editTaskAssigneeIds.map((assigneeId) => {
+                      const person = taskAssigneeOptions.find((item) => item.id === assigneeId)
+                      const state = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
+                      return (
+                        <div key={assigneeId} className="space-y-3 rounded-md border border-slate-200 bg-slate-50/60 p-3">
+                          <div className="text-sm font-semibold text-slate-800">
+                            {person?.full_name || person?.username || assigneeId}
+                          </div>
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Status</Label>
+                              <Select
+                                value={state.status}
+                                onValueChange={(value) =>
+                                  updateEditTaskAssigneeState(assigneeId, { status: value as GaAssigneeTaskStatus })
+                                }
+                                disabled={savingEdit}
+                              >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value="TODO">To do</SelectItem>
+                                  <SelectItem value="IN_PROGRESS">In progress</SelectItem>
+                                  <SelectItem value="DONE">Done</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Start date</Label>
+                              <Input
+                                type="date"
+                                value={state.startDate}
+                                onChange={(event) => updateEditTaskAssigneeState(assigneeId, { startDate: event.target.value })}
+                                disabled={savingEdit}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Due date</Label>
+                              <Input
+                                type="date"
+                                value={state.dueDate}
+                                onChange={(event) => updateEditTaskAssigneeState(assigneeId, { dueDate: event.target.value })}
+                                disabled={savingEdit}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Finish by</Label>
+                              <Select
+                                value={state.finishPeriod ?? FINISH_PERIOD_NONE_VALUE}
+                                onValueChange={(value) =>
+                                  updateEditTaskAssigneeState(assigneeId, {
+                                    finishPeriod: value === FINISH_PERIOD_NONE_VALUE ? null : value as TaskFinishPeriod,
+                                  })
+                                }
+                                disabled={savingEdit}
+                              >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={FINISH_PERIOD_NONE_VALUE}>All day</SelectItem>
+                                  {FINISH_PERIOD_OPTIONS.map((value) => (
+                                    <SelectItem key={value} value={value}>{value}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          </div>
+                          <label className="flex items-center gap-2 text-xs text-slate-700">
+                            <Checkbox
+                              checked={state.isDeadlineImportant}
+                              onCheckedChange={(checked) =>
+                                updateEditTaskAssigneeState(assigneeId, { isDeadlineImportant: checked === true })
+                              }
+                              disabled={savingEdit}
+                            />
+                            Deadline important
+                          </label>
+                        </div>
+                      )
+                    })}
+                  </div>
                 )}
               </div>
             ) : null}
@@ -3923,10 +4003,8 @@ export default function GaKaNotesPage() {
                 setEditDoneRanges([])
                 setEditAddedRanges([])
                 setEditDescription("")
-                setEditTaskStartDate("")
-                setEditTaskDeadline("")
-                setEditTaskDeadlineImportant(false)
                 setEditTaskAssigneeIds([])
+                setEditTaskAssigneeStates({})
               }}>
                 Cancel
               </Button>

@@ -16,7 +16,7 @@ class GaNoteAttachmentOut(BaseModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
 
-from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType
+from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, TaskFinishPeriod, TaskStatus
 
 class GaNoteOut(BaseModel):
     id: uuid.UUID
@@ -76,15 +76,24 @@ class GaNoteTaskDeadlineUpdate(BaseModel):
     clear: bool = False
 
 
+class GaNoteTaskAssigneeStateUpdate(BaseModel):
+    """Execution state owned by one independent GA-task assignee copy."""
+
+    assignee_id: uuid.UUID
+    status: TaskStatus
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    finish_period: TaskFinishPeriod | None = None
+    is_deadline_important: bool = False
+
+
 class GaNoteTaskBundleUpdate(BaseModel):
     """Atomic update for a GA note and its independent assignee copies."""
 
     content: str | None = None
     description: str | None = None
     assignee_ids: list[uuid.UUID] | None = None
-    start_date: datetime | None = None
-    due_date: datetime | None = None
-    is_deadline_important: bool | None = None
+    assignee_states: list[GaNoteTaskAssigneeStateUpdate] | None = None
     expected_updated_at: datetime | None = None
 
 

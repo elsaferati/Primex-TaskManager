@@ -30,6 +30,8 @@ from app.schemas.ga_note import (
 from app.services.audit import add_audit_log
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
 from app.services.ga_note_task_instances import (
+    GaNoteAssigneeExecutionState,
+    apply_ga_note_assignee_execution_states,
     apply_ga_note_shared_task_fields,
     reconcile_ga_note_task_assignees,
 )
@@ -376,12 +378,14 @@ async def update_ga_note_task_bundle(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Note text cannot be empty")
         note.content = cleaned_content
 
-    if payload.assignee_ids is not None:
+    if payload.assignee_ids is not None or payload.assignee_states is not None:
         if user.role not in (UserRole.ADMIN, UserRole.MANAGER) and note.created_by != user.id:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the note creator or a manager can change GA task assignees",
+                detail="Only the note creator or a manager can change GA task assignees or schedules",
             )
+
+    if payload.assignee_ids is not None:
         try:
             reconcile_result = await reconcile_ga_note_task_assignees(
                 db,
@@ -407,21 +411,31 @@ async def update_ga_note_task_bundle(
 
     title = _ga_note_task_title(note.content) if "content" in fields_set else None
     description_is_set = "description" in fields_set
-    start_date_is_set = "start_date" in fields_set
-    due_date_is_set = "due_date" in fields_set
-    important_is_set = "is_deadline_important" in fields_set
     updated_count = apply_ga_note_shared_task_fields(
         active_tasks,
         title=title,
         description_is_set=description_is_set,
         description=payload.description,
-        start_date_is_set=start_date_is_set,
-        start_date=payload.start_date,
-        due_date_is_set=due_date_is_set,
-        due_date=payload.due_date,
-        is_deadline_important_is_set=important_is_set,
-        is_deadline_important=payload.is_deadline_important,
     )
+
+    if payload.assignee_states is not None:
+        try:
+            updated_count += apply_ga_note_assignee_execution_states(
+                active_tasks,
+                [
+                    GaNoteAssigneeExecutionState(
+                        assignee_id=item.assignee_id,
+                        status=item.status,
+                        start_date=item.start_date,
+                        due_date=item.due_date,
+                        finish_period=item.finish_period,
+                        is_deadline_important=item.is_deadline_important,
+                    )
+                    for item in payload.assignee_states
+                ],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
     # Preserve the legacy default-description behavior when only note content
     # changed and the description was never customized.
@@ -444,7 +458,20 @@ async def update_ga_note_task_bundle(
         entity_id=note.id,
         action="task_bundle_updated",
         before={"content": old_content, "assignees": before_assignees},
-        after={"content": note.content, "assignees": after_assignees},
+        after={
+            "content": note.content,
+            "assignees": after_assignees,
+            "assignee_states": [
+                {
+                    "assignee_id": str(item.assignee_id),
+                    "status": item.status.value,
+                    "start_date": item.start_date.isoformat() if item.start_date else None,
+                    "due_date": item.due_date.isoformat() if item.due_date else None,
+                    "finish_period": item.finish_period.value if item.finish_period else None,
+                }
+                for item in (payload.assignee_states or [])
+            ],
+        },
     )
 
     created_notifications = []

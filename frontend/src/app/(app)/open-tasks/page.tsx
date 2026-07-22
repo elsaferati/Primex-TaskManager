@@ -512,7 +512,7 @@ export default function OpenTasksPage() {
       toast.error("Title must be at least 2 characters.")
       return
     }
-    if (!isGaOriginTask && startDate && dueDate && startDate > dueDate) {
+    if (startDate && dueDate && startDate > dueDate) {
       toast.error("Start date cannot be after due date.")
       return
     }
@@ -524,9 +524,13 @@ export default function OpenTasksPage() {
     try {
       const updatePayload = isGaOriginTask
         ? {
-            // GA task definition and membership are controlled from GA Notes.
-            // This screen edits only this person's execution status.
+            // Shared GA task definition and membership are controlled from GA Notes.
+            // Execution status and scheduling belong to this person's copy.
             status: taskStatus,
+            start_date: startDate ? new Date(startDate).toISOString() : null,
+            due_date: dueDate ? new Date(dueDate).toISOString() : null,
+            finish_period: finishPeriod === NONE_VALUE ? null : finishPeriod,
+            is_deadline_important: deadlineImportant,
           }
         : {
             title: nextTitle,
@@ -794,7 +798,7 @@ export default function OpenTasksPage() {
             <div className="space-y-4">
               {selectedTask.ga_note_origin_id ? (
                 <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                  This is your independent GA task copy. Only its status is edited here; task details and assignees are managed in GA Notes.
+                  This is your independent GA task copy. Edit its status and scheduling here; shared details and assignees are managed in GA Notes.
                 </div>
               ) : null}
               <div className="space-y-2">
@@ -842,7 +846,7 @@ export default function OpenTasksPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Finish by</Label>
-                  <Select value={finishPeriod} disabled={saving || Boolean(selectedTask.ga_note_origin_id)} onValueChange={(value) => setFinishPeriod(value as "AM" | "PM" | typeof NONE_VALUE)}>
+                  <Select value={finishPeriod} disabled={saving} onValueChange={(value) => setFinishPeriod(value as "AM" | "PM" | typeof NONE_VALUE)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NONE_VALUE}>None / all day</SelectItem>
@@ -856,17 +860,17 @@ export default function OpenTasksPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Start date</Label>
-                  <Input type="date" value={startDate} disabled={saving || Boolean(selectedTask.ga_note_origin_id)} onChange={(event) => setStartDate(normalizeDueDateInput(event.target.value))} />
+                  <Input type="date" value={startDate} disabled={saving} onChange={(event) => setStartDate(normalizeDueDateInput(event.target.value))} />
                 </div>
                 <div className="space-y-2">
                   <Label>Due date</Label>
-                  <Input type="date" value={dueDate} disabled={saving || Boolean(selectedTask.ga_note_origin_id)} onChange={(event) => setDueDate(normalizeDueDateInput(event.target.value))} />
+                  <Input type="date" value={dueDate} disabled={saving} onChange={(event) => setDueDate(normalizeDueDateInput(event.target.value))} />
                 </div>
               </div>
               <label className="flex items-center gap-3 rounded-md border px-3 py-2">
                 <Checkbox
                   checked={deadlineImportant}
-                  disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
+                  disabled={saving}
                   onCheckedChange={(checked) => setDeadlineImportant(checked === true)}
                 />
                 <span className="text-sm font-medium">Deadline important</span>
