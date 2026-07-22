@@ -430,6 +430,11 @@ async def update_ga_note_task_bundle(
                         due_date=item.due_date,
                         finish_period=item.finish_period,
                         is_deadline_important=item.is_deadline_important,
+                        priority=item.priority,
+                        is_bllok=item.is_bllok,
+                        is_1h_report=item.is_1h_report,
+                        is_r1=item.is_r1,
+                        is_personal=item.is_personal,
                     )
                     for item in payload.assignee_states
                 ],
@@ -468,6 +473,11 @@ async def update_ga_note_task_bundle(
                     "start_date": item.start_date.isoformat() if item.start_date else None,
                     "due_date": item.due_date.isoformat() if item.due_date else None,
                     "finish_period": item.finish_period.value if item.finish_period else None,
+                    "priority": item.priority.value,
+                    "is_bllok": item.is_bllok,
+                    "is_1h_report": item.is_1h_report,
+                    "is_r1": item.is_r1,
+                    "is_personal": item.is_personal,
                 }
                 for item in (payload.assignee_states or [])
             ],
@@ -515,15 +525,13 @@ async def update_ga_note_task_deadline(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> GaNoteTaskDeadlineResponse:
-    """Set or clear the task dates on every task created from this GA/KA note.
-
-    Per-user task copies created from a GA note are not linked by
-    fast_task_group_id, so we use the shared ga_note_origin_id as the grouping
-    key. The same start_date, due_date (and is_deadline_important) is applied to every
-    active linked task so all assignees stay in sync.
-    """
+    """Reject the legacy global-date operation for independent GA task copies."""
     note = await _get_note_or_404(note_id, db)
     await _ensure_note_access(note, user, db)
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail="GA task scheduling is per assignee; update assignee_states through the task bundle",
+    )
 
     linked_tasks = (
         await db.execute(

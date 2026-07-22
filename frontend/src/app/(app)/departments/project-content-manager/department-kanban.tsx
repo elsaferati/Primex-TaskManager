@@ -5526,6 +5526,11 @@ export default function DepartmentKanban() {
             due_date: dueDateValue,
             finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
             is_deadline_important: editTaskDeadlineImportant,
+            priority: "NORMAL",
+            is_bllok: editTaskType === "blocked",
+            is_1h_report: editTaskType === "hourly",
+            is_r1: editTaskType === "r1",
+            is_personal: editTaskType === "personal",
           }
         : {
             title: buildMarkedAppendOnlyText(editingTask?.title, editTaskTitle.trim()),
@@ -5668,6 +5673,11 @@ export default function DepartmentKanban() {
           due_date: dueDateValue,
           finish_period: allTodayEditFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : allTodayEditFinishPeriod,
           is_deadline_important: allTodayEditDeadlineImportant,
+          priority: allTodayEditType === "high" ? "HIGH" : "NORMAL",
+          is_bllok: allTodayEditType === "blocked",
+          is_1h_report: allTodayEditType === "hourly",
+          is_r1: allTodayEditType === "r1",
+          is_personal: allTodayEditType === "personal",
         } : {
           title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
           description: allTodayEditDescription.trim() || null,
@@ -7796,7 +7806,7 @@ export default function DepartmentKanban() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label className="text-slate-700">Type</Label>
-                        <Select value={allTodayEditType} disabled={Boolean(allTodayEditingTask?.ga_note_origin_id)} onValueChange={(value) => setAllTodayEditType(value as AllTodayEditTypeId)}>
+                        <Select value={allTodayEditType} onValueChange={(value) => setAllTodayEditType(value as AllTodayEditTypeId)}>
                           <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>
@@ -8435,7 +8445,7 @@ export default function DepartmentKanban() {
                     <div className="grid gap-4 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label className="text-slate-700">Type</Label>
-                        <Select value={editTaskType} disabled={editingGaTask} onValueChange={(value) => setEditTaskType(value as typeof editTaskType)}>
+                        <Select value={editTaskType} onValueChange={(value) => setEditTaskType(value as typeof editTaskType)}>
                           <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                             <SelectValue placeholder="Select type" />
                           </SelectTrigger>

@@ -186,6 +186,8 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
                     due_date=due,
                     finish_period=TaskFinishPeriod.PM,
                     is_deadline_important=True,
+                    priority=TaskPriority.HIGH,
+                    is_1h_report=True,
                 )
             ],
         )
@@ -196,9 +198,13 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task_a.due_date, due)
         self.assertEqual(task_a.finish_period, TaskFinishPeriod.PM.value)
         self.assertTrue(task_a.is_deadline_important)
+        self.assertEqual(task_a.priority, TaskPriority.HIGH.value)
+        self.assertTrue(task_a.is_1h_report)
         self.assertIsNotNone(task_a.completed_at)
         self.assertEqual(task_b.status, TaskStatus.IN_PROGRESS)
         self.assertIsNone(task_b.due_date)
+        self.assertEqual(task_b.priority, TaskPriority.NORMAL)
+        self.assertFalse(task_b.is_1h_report)
 
     def test_assignee_execution_rejects_invalid_date_range(self) -> None:
         note_id = uuid.uuid4()

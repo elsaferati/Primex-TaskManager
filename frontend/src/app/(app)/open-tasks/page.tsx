@@ -531,6 +531,11 @@ export default function OpenTasksPage() {
             due_date: dueDate ? new Date(dueDate).toISOString() : null,
             finish_period: finishPeriod === NONE_VALUE ? null : finishPeriod,
             is_deadline_important: deadlineImportant,
+            priority: taskType === "high" ? "HIGH" : "NORMAL",
+            is_bllok: taskType === "blocked",
+            is_1h_report: taskType === "hourly",
+            is_r1: taskType === "r1",
+            is_personal: taskType === "personal",
           }
         : {
             title: nextTitle,
@@ -822,7 +827,7 @@ export default function OpenTasksPage() {
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label>Type</Label>
-                  <Select value={taskType} disabled={saving || Boolean(selectedTask.ga_note_origin_id)} onValueChange={(value) => setTaskType(value as OpenTaskEditType)}>
+                  <Select value={taskType} disabled={saving} onValueChange={(value) => setTaskType(value as OpenTaskEditType)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {TASK_TYPE_OPTIONS.map((option) => (

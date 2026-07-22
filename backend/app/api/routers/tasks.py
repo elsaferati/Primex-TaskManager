@@ -254,13 +254,8 @@ _GA_NOTE_SHARED_TASK_FIELDS = {
     "dependency_task_id",
     "department_id",
     "confirmation_assignee_id",
-    "priority",
     "phase",
-    "is_bllok",
-    "is_1h_report",
     "one_h_report_slot",
-    "is_r1",
-    "is_personal",
     "fast_task_order",
     "alignment_user_ids",
 }

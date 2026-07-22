@@ -77,8 +77,10 @@ type ContentFilter = "all" | "emails"
 type TextMarkRange = { start: number; end: number }
 type DoneMarkRange = TextMarkRange
 type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "DONE"
+type GaAssigneeTaskType = "NORMAL" | "HIGH" | "1H" | "R1" | "PERSONAL" | "BLLOK"
 type GaAssigneeTaskState = {
   taskId: string | null
+  type: GaAssigneeTaskType
   status: GaAssigneeTaskStatus
   startDate: string
   dueDate: string
@@ -117,12 +119,22 @@ function taskDateKey(value?: string | null) {
 function createEmptyGaAssigneeTaskState(): GaAssigneeTaskState {
   return {
     taskId: null,
+    type: "NORMAL",
     status: "TODO",
     startDate: "",
     dueDate: "",
     finishPeriod: null,
     isDeadlineImportant: false,
   }
+}
+
+function gaAssigneeTaskType(task: Task): GaAssigneeTaskType {
+  if (task.is_bllok) return "BLLOK"
+  if (task.is_1h_report) return "1H"
+  if (task.is_r1) return "R1"
+  if (task.is_personal) return "PERSONAL"
+  if (task.priority === "HIGH") return "HIGH"
+  return "NORMAL"
 }
 
 function parseMarkedNoteContent(content?: string | null): {
@@ -1065,6 +1077,7 @@ export default function GaKaNotesPage() {
         ? {
             [t.assigned_to]: {
               taskId: t.id,
+              type: gaAssigneeTaskType(t),
               status: normalizedStatus === "IN_PROGRESS" || normalizedStatus === "DONE" ? normalizedStatus : "TODO",
               startDate: taskDateKey(t.start_date) || "",
               dueDate: taskDateKey(t.due_date) || "",
@@ -1664,6 +1677,11 @@ export default function GaKaNotesPage() {
               return {
                 assignee_id: assigneeId,
                 status: state.status,
+                priority: state.type === "HIGH" ? "HIGH" : "NORMAL",
+                is_bllok: state.type === "BLLOK",
+                is_1h_report: state.type === "1H",
+                is_r1: state.type === "R1",
+                is_personal: state.type === "PERSONAL",
                 start_date: state.startDate ? new Date(state.startDate).toISOString() : null,
                 due_date: state.dueDate ? new Date(state.dueDate).toISOString() : null,
                 finish_period: state.finishPeriod,
@@ -3923,7 +3941,27 @@ export default function GaKaNotesPage() {
                           <div className="text-sm font-semibold text-slate-800">
                             {person?.full_name || person?.username || assigneeId}
                           </div>
-                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+                          <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Type</Label>
+                              <Select
+                                value={state.type}
+                                onValueChange={(value) =>
+                                  updateEditTaskAssigneeState(assigneeId, { type: value as GaAssigneeTaskType })
+                                }
+                                disabled={savingEdit}
+                              >
+                                <SelectTrigger><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                  <SelectItem value="NORMAL">Normal</SelectItem>
+                                  <SelectItem value="HIGH">High</SelectItem>
+                                  <SelectItem value="1H">1H</SelectItem>
+                                  <SelectItem value="R1">R1</SelectItem>
+                                  <SelectItem value="PERSONAL">Personal</SelectItem>
+                                  <SelectItem value="BLLOK">BLLOK</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Status</Label>
                               <Select

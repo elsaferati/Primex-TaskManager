@@ -11,7 +11,7 @@ from app.models.ga_note import GaNote
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
-from app.models.enums import TaskFinishPeriod, TaskStatus
+from app.models.enums import TaskFinishPeriod, TaskPriority, TaskStatus
 
 
 @dataclass(slots=True)
@@ -32,6 +32,11 @@ class GaNoteAssigneeExecutionState:
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None
     is_deadline_important: bool = False
+    priority: TaskPriority = TaskPriority.NORMAL
+    is_bllok: bool = False
+    is_1h_report: bool = False
+    is_r1: bool = False
+    is_personal: bool = False
 
 
 def _dedupe_ids(values: list[uuid.UUID]) -> list[uuid.UUID]:
@@ -286,6 +291,20 @@ def apply_ga_note_assignee_execution_states(
         if task.is_deadline_important != state.is_deadline_important:
             task.is_deadline_important = state.is_deadline_important
             changed = True
+        next_priority = state.priority.value
+        current_priority = task.priority.value if isinstance(task.priority, TaskPriority) else str(task.priority)
+        if current_priority != next_priority:
+            task.priority = next_priority
+            changed = True
+        for field_name, next_value in (
+            ("is_bllok", state.is_bllok),
+            ("is_1h_report", state.is_1h_report),
+            ("is_r1", state.is_r1),
+            ("is_personal", state.is_personal),
+        ):
+            if bool(getattr(task, field_name)) != next_value:
+                setattr(task, field_name, next_value)
+                changed = True
         if changed:
             updated_count += 1
 

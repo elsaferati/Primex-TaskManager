@@ -404,7 +404,7 @@ export default function TaskDetailsPage() {
       }
 
       // Handle fast task type changes (only for fast tasks)
-      if (!isGaOriginTask && isFastTask(task)) {
+      if (isFastTask(task)) {
         const currentType = getCurrentFastTaskType(task)
         if (fastTaskType !== currentType) {
           // Reset all flags first
@@ -434,7 +434,7 @@ export default function TaskDetailsPage() {
         }
       }
 
-      if (!isGaOriginTask && isProjectTask(task)) {
+      if (isProjectTask(task)) {
         const currentType = getCurrentProjectTaskType(task)
         if (projectTaskType !== currentType) {
           payload.priority = projectTaskType === "HIGH" ? "HIGH" : "NORMAL"
@@ -643,7 +643,7 @@ export default function TaskDetailsPage() {
                 )}
               </div>
 
-              {!task.ga_note_origin_id && isFastTask(task) ? (
+              {isFastTask(task) ? (
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Type</Label>
@@ -688,7 +688,7 @@ export default function TaskDetailsPage() {
                 </div>
               ) : null}
 
-              {!task.ga_note_origin_id && isProjectTask(task) ? (
+              {isProjectTask(task) ? (
                 <div className="space-y-2">
                   <Label>Type</Label>
                   <Select
@@ -709,7 +709,7 @@ export default function TaskDetailsPage() {
                 </div>
               ) : null}
 
-              {task.ga_note_origin_id && canAssign ? (
+              {task.ga_note_origin_id && canAssign && isProjectTask(task) ? (
                 <div className="space-y-2">
                   <Label>Finish period</Label>
                   <Select

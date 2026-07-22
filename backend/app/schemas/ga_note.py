@@ -16,7 +16,7 @@ class GaNoteAttachmentOut(BaseModel):
     created_by: uuid.UUID | None = None
     created_at: datetime
 
-from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, TaskFinishPeriod, TaskStatus
+from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, TaskFinishPeriod, TaskPriority, TaskStatus
 
 class GaNoteOut(BaseModel):
     id: uuid.UUID
@@ -85,6 +85,11 @@ class GaNoteTaskAssigneeStateUpdate(BaseModel):
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None
     is_deadline_important: bool = False
+    priority: TaskPriority = TaskPriority.NORMAL
+    is_bllok: bool = False
+    is_1h_report: bool = False
+    is_r1: bool = False
+    is_personal: bool = False
 
 
 class GaNoteTaskBundleUpdate(BaseModel):
