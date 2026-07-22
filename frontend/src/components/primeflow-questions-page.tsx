@@ -26,6 +26,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 import {
   Select,
   SelectContent,
@@ -209,19 +210,24 @@ export function PrimeflowQuestionsPage() {
   }
 
   const createQuestion = async () => {
-    const text = newQuestion.trim()
-    if (!activeCategory || !text) return
+    const questionsToCreate = newQuestion
+      .split(/\r?\n/)
+      .map((line) => line.trim())
+      .filter(Boolean)
+    if (!activeCategory || questionsToCreate.length === 0) return
     setSaving(true)
     try {
-      const response = await apiFetch(`/question-library/categories/${activeCategory.id}/questions`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ text }),
-      })
-      if (!response.ok) throw new Error(await responseError(response, "Failed to add question"))
+      for (const text of questionsToCreate) {
+        const response = await apiFetch(`/question-library/categories/${activeCategory.id}/questions`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ text }),
+        })
+        if (!response.ok) throw new Error(await responseError(response, "Failed to add question"))
+      }
       setNewQuestion("")
       await loadCategories(activeCategory.id)
-      toast.success("Question added")
+      toast.success(questionsToCreate.length === 1 ? "Question added" : `${questionsToCreate.length} questions added`)
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Failed to add question")
     } finally {
@@ -452,13 +458,28 @@ export function PrimeflowQuestionsPage() {
                     <td className="border-r border-[#183b68] px-3 py-3 font-medium text-[#071126]">
                       {isEditing ? (
                         <div className="grid gap-2">
-                          <Input value={editText} onChange={(event) => setEditText(event.target.value)} maxLength={2000} />
-                          <Input value={editGuidance} onChange={(event) => setEditGuidance(event.target.value)} placeholder="Udhëzimi / shpjegimi" maxLength={2000} />
+                          <Textarea
+                            value={editText}
+                            onChange={(event) => setEditText(event.target.value)}
+                            maxLength={2000}
+                            autoResize
+                            rows={1}
+                            className="min-h-9 resize-none whitespace-pre-wrap py-1.5"
+                          />
+                          <Textarea
+                            value={editGuidance}
+                            onChange={(event) => setEditGuidance(event.target.value)}
+                            placeholder="Udhëzimi / shpjegimi"
+                            maxLength={2000}
+                            autoResize
+                            rows={1}
+                            className="min-h-9 resize-none whitespace-pre-wrap py-1.5"
+                          />
                         </div>
                       ) : (
                         <div className="grid gap-1">
-                          <span>{question.text}</span>
-                          {question.guidance && <span className="text-xs font-normal text-muted-foreground">{question.guidance}</span>}
+                          <span className="whitespace-pre-wrap">{question.text}</span>
+                          {question.guidance && <span className="whitespace-pre-wrap text-xs font-normal text-muted-foreground">{question.guidance}</span>}
                         </div>
                       )}
                     </td>
@@ -506,15 +527,18 @@ export function PrimeflowQuestionsPage() {
         </div>
 
         {activeCategory && (
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row">
-            <Input
+          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+            <Textarea
               value={newQuestion}
               onChange={(event) => setNewQuestion(event.target.value)}
               onKeyDown={(event) => {
-                if (event.key === "Enter") void createQuestion()
+                if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) void createQuestion()
               }}
               placeholder="Shto pyetje të re në këtë kategori..."
               maxLength={2000}
+              autoResize
+              rows={1}
+              className="min-h-9 resize-none py-1.5"
             />
             <Button onClick={() => void createQuestion()} disabled={saving || !newQuestion.trim()}>
               <Plus /> Add
