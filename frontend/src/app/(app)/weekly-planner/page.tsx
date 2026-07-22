@@ -1254,6 +1254,10 @@ export default function WeeklyPlannerPage() {
 
   const savePlannerTask = React.useCallback(async () => {
     if (!plannerTask) return
+    if (plannerTask.ga_note_origin_id) {
+      toast.error("GA task dates are shared. Change them from GA Notes.")
+      return
+    }
     if (!plannerTaskDueDate) {
       toast.error("Due date is required to place a task in the weekly planner.")
       return

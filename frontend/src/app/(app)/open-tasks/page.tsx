@@ -506,42 +506,50 @@ export default function OpenTasksPage() {
 
   const saveTask = async () => {
     if (!selectedTask) return
+    const isGaOriginTask = Boolean(selectedTask.ga_note_origin_id)
     const nextTitle = taskTitle.trim()
-    if (nextTitle.length < 2) {
+    if (!isGaOriginTask && nextTitle.length < 2) {
       toast.error("Title must be at least 2 characters.")
       return
     }
-    if (startDate && dueDate && startDate > dueDate) {
+    if (!isGaOriginTask && startDate && dueDate && startDate > dueDate) {
       toast.error("Start date cannot be after due date.")
       return
     }
-    if (taskStatus === "WAITING_CONFIRMATION" && !selectedTask.confirmation_assignee_id) {
+    if (!isGaOriginTask && taskStatus === "WAITING_CONFIRMATION" && !selectedTask.confirmation_assignee_id) {
       toast.error("This task needs a confirmation assignee before it can use Waiting Confirmation.")
       return
     }
     setSaving(true)
     try {
+      const updatePayload = isGaOriginTask
+        ? {
+            // GA task definition and membership are controlled from GA Notes.
+            // This screen edits only this person's execution status.
+            status: taskStatus,
+          }
+        : {
+            title: nextTitle,
+            description: taskDescription,
+            status: taskStatus,
+            priority: taskType === "high" ? "HIGH" : "NORMAL",
+            is_bllok: taskType === "blocked",
+            is_1h_report: taskType === "hourly",
+            is_r1: taskType === "r1",
+            is_personal: taskType === "personal",
+            department_id: taskDepartmentId === ALL_VALUE ? null : taskDepartmentId,
+            project_id: taskProjectId === PROJECT_NONE_VALUE ? null : taskProjectId,
+            start_date: startDate ? new Date(startDate).toISOString() : null,
+            due_date: dueDate ? new Date(dueDate).toISOString() : null,
+            finish_period: finishPeriod === NONE_VALUE ? null : finishPeriod,
+            is_deadline_important: deadlineImportant,
+            assigned_to: assigneeIds[0] ?? null,
+            assignees: assigneeIds,
+          }
       const res = await apiFetch(`/tasks/${selectedTask.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: nextTitle,
-          description: taskDescription,
-          status: taskStatus,
-          priority: taskType === "high" ? "HIGH" : "NORMAL",
-          is_bllok: taskType === "blocked",
-          is_1h_report: taskType === "hourly",
-          is_r1: taskType === "r1",
-          is_personal: taskType === "personal",
-          department_id: taskDepartmentId === ALL_VALUE ? null : taskDepartmentId,
-          project_id: taskProjectId === PROJECT_NONE_VALUE ? null : taskProjectId,
-          start_date: startDate ? new Date(startDate).toISOString() : null,
-          due_date: dueDate ? new Date(dueDate).toISOString() : null,
-          finish_period: finishPeriod === NONE_VALUE ? null : finishPeriod,
-          is_deadline_important: deadlineImportant,
-          assigned_to: assigneeIds[0] ?? null,
-          assignees: assigneeIds,
-        }),
+        body: JSON.stringify(updatePayload),
       })
       if (!res.ok) {
         toast.error("Failed to update task planning.")
@@ -784,11 +792,16 @@ export default function OpenTasksPage() {
           </DialogHeader>
           {selectedTask ? (
             <div className="space-y-4">
+              {selectedTask.ga_note_origin_id ? (
+                <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                  This is your independent GA task copy. Only its status is edited here; task details and assignees are managed in GA Notes.
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label>Title</Label>
                 <Textarea
                   value={taskTitle}
-                  disabled={saving}
+                  disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
                   onChange={(event) => setTaskTitle(event.target.value)}
                   className="min-h-[72px]"
                 />
@@ -797,7 +810,7 @@ export default function OpenTasksPage() {
                 <Label>Description</Label>
                 <Textarea
                   value={taskDescription}
-                  disabled={saving}
+                  disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
                   onChange={(event) => setTaskDescription(event.target.value)}
                   className="min-h-[72px]"
                 />
@@ -805,7 +818,7 @@ export default function OpenTasksPage() {
               <div className="grid gap-3 md:grid-cols-3">
                 <div className="space-y-2">
                   <Label>Type</Label>
-                  <Select value={taskType} disabled={saving} onValueChange={(value) => setTaskType(value as OpenTaskEditType)}>
+                  <Select value={taskType} disabled={saving || Boolean(selectedTask.ga_note_origin_id)} onValueChange={(value) => setTaskType(value as OpenTaskEditType)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {TASK_TYPE_OPTIONS.map((option) => (
@@ -819,7 +832,9 @@ export default function OpenTasksPage() {
                   <Select value={taskStatus} disabled={saving} onValueChange={setTaskStatus}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      {TASK_STATUS_OPTIONS.map((option) => (
+                      {TASK_STATUS_OPTIONS.filter((option) =>
+                        !selectedTask.ga_note_origin_id || ["TODO", "IN_PROGRESS", "DONE"].includes(option.value)
+                      ).map((option) => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -827,7 +842,7 @@ export default function OpenTasksPage() {
                 </div>
                 <div className="space-y-2">
                   <Label>Finish by</Label>
-                  <Select value={finishPeriod} disabled={saving} onValueChange={(value) => setFinishPeriod(value as "AM" | "PM" | typeof NONE_VALUE)}>
+                  <Select value={finishPeriod} disabled={saving || Boolean(selectedTask.ga_note_origin_id)} onValueChange={(value) => setFinishPeriod(value as "AM" | "PM" | typeof NONE_VALUE)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value={NONE_VALUE}>None / all day</SelectItem>
@@ -841,17 +856,17 @@ export default function OpenTasksPage() {
               <div className="grid gap-3 md:grid-cols-2">
                 <div className="space-y-2">
                   <Label>Start date</Label>
-                  <Input type="date" value={startDate} disabled={saving} onChange={(event) => setStartDate(normalizeDueDateInput(event.target.value))} />
+                  <Input type="date" value={startDate} disabled={saving || Boolean(selectedTask.ga_note_origin_id)} onChange={(event) => setStartDate(normalizeDueDateInput(event.target.value))} />
                 </div>
                 <div className="space-y-2">
                   <Label>Due date</Label>
-                  <Input type="date" value={dueDate} disabled={saving} onChange={(event) => setDueDate(normalizeDueDateInput(event.target.value))} />
+                  <Input type="date" value={dueDate} disabled={saving || Boolean(selectedTask.ga_note_origin_id)} onChange={(event) => setDueDate(normalizeDueDateInput(event.target.value))} />
                 </div>
               </div>
               <label className="flex items-center gap-3 rounded-md border px-3 py-2">
                 <Checkbox
                   checked={deadlineImportant}
-                  disabled={saving}
+                  disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
                   onCheckedChange={(checked) => setDeadlineImportant(checked === true)}
                 />
                 <span className="text-sm font-medium">Deadline important</span>
@@ -861,7 +876,7 @@ export default function OpenTasksPage() {
                   <Label>Department</Label>
                   <Select
                     value={taskDepartmentId}
-                    disabled={saving}
+                    disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
                     onValueChange={(value) => {
                       setTaskDepartmentId(value)
                       setTaskProjectId(PROJECT_NONE_VALUE)
@@ -882,7 +897,7 @@ export default function OpenTasksPage() {
                   <Label>Project</Label>
                   <Select
                     value={taskProjectId}
-                    disabled={saving}
+                    disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
                     onValueChange={(value) => {
                       setTaskProjectId(value)
                       const project = projects.find((item) => item.id === value)
@@ -906,13 +921,13 @@ export default function OpenTasksPage() {
                     {assigneeIds.length ? assigneeIds.map((id) => {
                       const person = userById.get(id)
                       return (
-                        <button key={id} type="button" disabled={saving} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs" onClick={() => setAssigneeIds((prev) => prev.filter((item) => item !== id))}>
+                        <button key={id} type="button" disabled={saving || Boolean(selectedTask.ga_note_origin_id)} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs" onClick={() => setAssigneeIds((prev) => prev.filter((item) => item !== id))}>
                           {person?.full_name || person?.username || id} <span className="text-slate-500">x</span>
                         </button>
                       )
                     }) : <span className="text-xs text-slate-500">No assignees selected.</span>}
                   </div>
-                  <Select value="__picker__" disabled={saving || dialogAssigneeOptions.length === 0} onValueChange={(value) => {
+                  <Select value="__picker__" disabled={saving || Boolean(selectedTask.ga_note_origin_id) || dialogAssigneeOptions.length === 0} onValueChange={(value) => {
                     if (value === "__picker__") return
                     setAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
                     const person = users.find((item) => item.id === value)

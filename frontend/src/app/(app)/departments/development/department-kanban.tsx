@@ -23,6 +23,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import { formatDepartmentName } from "@/lib/department-name"
+import { loadGaNoteTaskAssigneeIds, replaceGaNoteTaskAssignees } from "@/lib/ga-note-task-membership"
 import { buildMarkedAppendOnlyText, getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
@@ -1310,6 +1311,7 @@ export default function DepartmentKanban() {
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [editTaskDeadlineImportant, setEditTaskDeadlineImportant] = React.useState(false)
   const [editTaskAssignees, setEditTaskAssignees] = React.useState<string[]>([])
+  const [editTaskInitialAssignees, setEditTaskInitialAssignees] = React.useState<string[]>([])
   const [selectEditTaskAssigneesOpen, setSelectEditTaskAssigneesOpen] = React.useState(false)
   const [updatingTask, setUpdatingTask] = React.useState(false)
   const [allTodayEditingTaskId, setAllTodayEditingTaskId] = React.useState<string | null>(null)
@@ -1500,6 +1502,9 @@ export default function DepartmentKanban() {
     if (cached) {
       applyBootstrap(cached)
       setLoading(false)
+      // Cached task data is only a fast first paint. Always revalidate so a
+      // task created/assigned in GA Notes cannot stay missing for five minutes.
+      void loadBootstrapData({ silent: true })
       return
     }
     void loadBootstrapData({ silent: false })
@@ -1975,6 +1980,9 @@ export default function DepartmentKanban() {
     }
     return `${editTaskAssignees.length} selected`
   }, [users, editTaskAssignees])
+  const editingGaTask = Boolean(
+    editingTaskId && noProjectTasks.some((task) => task.id === editingTaskId && task.ga_note_origin_id)
+  )
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
   const tomorrowDate = React.useMemo(
@@ -5503,6 +5511,15 @@ export default function DepartmentKanban() {
       ? task.assignees.map(a => a.id).filter((id): id is string => Boolean(id))
       : (task.assigned_to ? [task.assigned_to] : [])
     setEditTaskAssignees(assigneeIds)
+    setEditTaskInitialAssignees(assigneeIds)
+    if (task.ga_note_origin_id) {
+      void loadGaNoteTaskAssigneeIds(apiFetch, task.ga_note_origin_id)
+        .then((gaAssigneeIds) => {
+          setEditTaskAssignees(gaAssigneeIds)
+          setEditTaskInitialAssignees(gaAssigneeIds)
+        })
+        .catch((error) => console.warn("Failed to load GA task membership", error))
+    }
   }
 
   const cancelEditTask = () => {
@@ -5516,6 +5533,7 @@ export default function DepartmentKanban() {
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
     setEditTaskDeadlineImportant(false)
     setEditTaskAssignees([])
+    setEditTaskInitialAssignees([])
   }
 
   const sameIdSet = (a: string[], b: string[]) => {
@@ -5535,27 +5553,54 @@ export default function DepartmentKanban() {
       const editingTask = noProjectTasks.find((candidate) => candidate.id === editingTaskId) || null
       const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
-      const currentTaskAssigneeIds =
-        editingTask?.assignees && editingTask.assignees.length > 0
-          ? editingTask.assignees.map((a) => a.id).filter((id): id is string => Boolean(id))
-          : (editingTask?.assigned_to ? [editingTask.assigned_to] : [])
-      const assigneesChanged = !sameIdSet(editTaskAssignees, currentTaskAssigneeIds)
-      const payload: Record<string, unknown> = {
-        title: buildMarkedAppendOnlyText(editingTask?.title, editTaskTitle.trim()),
-        description: editTaskDescription.trim() || null,
-        is_bllok: editTaskType === "blocked",
-        is_1h_report: editTaskType === "hourly",
-        is_r1: editTaskType === "r1",
-        is_personal: editTaskType === "personal",
-        status: editTaskStatus,
-        start_date: startDateValue,
-        due_date: dueDateValue,
-        finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
-        is_deadline_important: editTaskDeadlineImportant,
-      }
-      if (assigneesChanged) {
+      const assigneesChanged = !sameIdSet(editTaskAssignees, editTaskInitialAssignees)
+      let gaMembershipChanged = false
+      let removedEditingCopy = false
+      const payload: Record<string, unknown> = editingTask?.ga_note_origin_id
+        ? { status: editTaskStatus }
+        : {
+            title: buildMarkedAppendOnlyText(editingTask?.title, editTaskTitle.trim()),
+            description: editTaskDescription.trim() || null,
+            is_bllok: editTaskType === "blocked",
+            is_1h_report: editTaskType === "hourly",
+            is_r1: editTaskType === "r1",
+            is_personal: editTaskType === "personal",
+            status: editTaskStatus,
+            start_date: startDateValue,
+            due_date: dueDateValue,
+            finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
+            is_deadline_important: editTaskDeadlineImportant,
+          }
+      if (assigneesChanged && editingTask?.ga_note_origin_id) {
+        const membershipRes = await replaceGaNoteTaskAssignees(
+          apiFetch,
+          editingTask.ga_note_origin_id,
+          editTaskAssignees
+        )
+        if (!membershipRes.ok) {
+          let detail = "Failed to update GA task assignees"
+          try {
+            const data = (await membershipRes.json()) as { detail?: string }
+            if (typeof data.detail === "string") detail = data.detail
+          } catch {
+            // Keep fallback.
+          }
+          toast.error(detail)
+          return
+        }
+        gaMembershipChanged = true
+        removedEditingCopy = Boolean(
+          editingTask.assigned_to && !editTaskAssignees.includes(editingTask.assigned_to)
+        )
+      } else if (assigneesChanged) {
         payload.assignees = editTaskAssignees
         payload.assigned_to = editTaskAssignees.length > 0 ? editTaskAssignees[0] : null
+      }
+      if (removedEditingCopy) {
+        await loadBootstrapData({ silent: true })
+        cancelEditTask()
+        toast.success("Task assignees updated")
+        return
       }
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
@@ -5574,8 +5619,12 @@ export default function DepartmentKanban() {
         return
       }
       const updated = (await res.json()) as Task
-      setDepartmentTasks((prev) => prev.map((t) => (t.id === editingTaskId ? updated : t)))
-      setNoProjectTasks((prev) => prev.map((t) => (t.id === editingTaskId ? updated : t)))
+      if (gaMembershipChanged) {
+        await loadBootstrapData({ silent: true })
+      } else {
+        setDepartmentTasks((prev) => prev.map((t) => (t.id === editingTaskId ? updated : t)))
+        setNoProjectTasks((prev) => prev.map((t) => (t.id === editingTaskId ? updated : t)))
+      }
       cancelEditTask()
       toast.success("Task updated")
     } finally {
@@ -8672,10 +8721,16 @@ export default function DepartmentKanban() {
                       <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
                     </DialogHeader>
                     <div className="space-y-4">
+                      {editingGaTask ? (
+                        <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                          This is an independent GA copy. Edit its status here; shared details are managed in GA Notes.
+                        </div>
+                      ) : null}
                       <div className="space-y-2">
                         <Label className="text-slate-700">Title</Label>
                         <Textarea
                           value={editTaskTitle}
+                          disabled={editingGaTask}
                           onChange={(e) => setEditTaskTitle(e.target.value)}
                           autoResize
                           rows={3}
@@ -8684,12 +8739,18 @@ export default function DepartmentKanban() {
                       </div>
                       <div className="space-y-2">
                         <Label className="text-slate-700">Description</Label>
-                        <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
+                        {editingGaTask ? (
+                          <div className="min-h-[44px] rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                            {editTaskDescription || "—"}
+                          </div>
+                        ) : (
+                          <BoldOnlyEditor value={editTaskDescription} onChange={setEditTaskDescription} />
+                        )}
                       </div>
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                           <Label className="text-slate-700">Type</Label>
-                          <Select value={editTaskType} onValueChange={(value) => setEditTaskType(value as typeof editTaskType)}>
+                          <Select value={editTaskType} disabled={editingGaTask} onValueChange={(value) => setEditTaskType(value as typeof editTaskType)}>
                             <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
                               <SelectValue placeholder="Select type" />
                             </SelectTrigger>
@@ -8712,7 +8773,9 @@ export default function DepartmentKanban() {
                               <SelectValue placeholder="Select status" />
                             </SelectTrigger>
                             <SelectContent>
-                              {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
+                              {ALL_TODAY_TASK_STATUS_OPTIONS.filter((value) =>
+                                !editingGaTask || value === "TODO" || value === "IN_PROGRESS" || value === "DONE"
+                              ).map((value) => (
                                 <SelectItem key={value} value={value}>
                                   {reportStatusLabel(value)}
                                 </SelectItem>
@@ -8726,6 +8789,7 @@ export default function DepartmentKanban() {
                           <Label className="text-slate-700">Finish by (optional)</Label>
                           <Select
                             value={editTaskFinishPeriod}
+                            disabled={editingGaTask}
                             onValueChange={(value) =>
                               setEditTaskFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
                             }
@@ -8749,6 +8813,7 @@ export default function DepartmentKanban() {
                             type="date"
                             required
                             value={editTaskStartDate}
+                            disabled={editingGaTask}
                             onChange={(e) => setEditTaskStartDate(normalizeDueDateInput(e.target.value))}
                             className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
@@ -8758,6 +8823,7 @@ export default function DepartmentKanban() {
                           <Input
                             type="date"
                             value={editTaskDueDate}
+                            disabled={editingGaTask}
                             onChange={(e) => setEditTaskDueDate(normalizeDueDateInput(e.target.value))}
                             className="border-slate-200 focus:border-slate-400 rounded-xl w-full"
                           />
@@ -8766,6 +8832,7 @@ export default function DepartmentKanban() {
                       <label className="flex items-center gap-3 rounded-xl border border-slate-200 px-3 py-2">
                         <Checkbox
                           checked={editTaskDeadlineImportant}
+                          disabled={editingGaTask}
                           onCheckedChange={(checked) => setEditTaskDeadlineImportant(checked === true)}
                         />
                         <span className="text-sm font-medium text-slate-700">Deadline important</span>

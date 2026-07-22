@@ -62,7 +62,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "5"
+COMMON_VIEW_CACHE_VERSION = "6"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -411,10 +411,29 @@ async def _compute_etag(
         if hasattr(Task, "planned_for"):
             effective_columns.insert(0, getattr(Task, "planned_for"))
         effective_date = cast(func.coalesce(*effective_columns), Date)
-        task_filters = [effective_date >= week_start, effective_date <= week_end]
+        task_filters = [
+            Task.is_active.is_(True),
+            effective_date >= week_start,
+            effective_date <= week_end,
+        ]
+        active_task_ids = select(Task.id).where(*task_filters)
+        active_task_assignee_count = (
+            select(func.count())
+            .select_from(TaskAssignee)
+            .where(TaskAssignee.task_id.in_(active_task_ids))
+            .scalar_subquery()
+        )
+        active_task_assignee_updated = (
+            select(func.max(TaskAssignee.created_at))
+            .where(TaskAssignee.task_id.in_(active_task_ids))
+            .scalar_subquery()
+        )
         fingerprint_fields.extend(
             [
                 ("tasks_updated", _max_timestamp_scalar(Task.updated_at, task_filters), False),
+                ("tasks_count", _count_rows_scalar(Task, task_filters), True),
+                ("task_assignees_count", active_task_assignee_count, True),
+                ("task_assignees_updated", active_task_assignee_updated, False),
                 (
                     "one_h_slots_updated",
                     _max_timestamp_scalar(

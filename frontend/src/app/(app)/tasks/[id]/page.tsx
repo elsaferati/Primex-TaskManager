@@ -15,6 +15,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth"
 import { clearDepartmentBootstrapCacheByPrefix } from "@/lib/department-bootstrap-cache"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
+import { loadGaNoteTaskAssigneeIds, replaceGaNoteTaskAssignees } from "@/lib/ga-note-task-membership"
 import { buildMarkedAppendOnlyText, getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { GaNoteAttachment, Task, TaskFinishPeriod, User, UserLookup } from "@/lib/types"
@@ -153,6 +154,7 @@ export default function TaskDetailsPage() {
   const [assignedTo, setAssignedTo] = React.useState(UNASSIGNED_VALUE)
   const [confirmationAssigneeId, setConfirmationAssigneeId] = React.useState("")
   const [assignees, setAssignees] = React.useState<string[]>([])
+  const [initialAssignees, setInitialAssignees] = React.useState<string[]>([])
   const [selectAssigneesOpen, setSelectAssigneesOpen] = React.useState(false)
   const [reminder, setReminder] = React.useState(false)
   const [fastTaskType, setFastTaskType] = React.useState<FastTaskType>("N")
@@ -188,7 +190,11 @@ export default function TaskDetailsPage() {
     if (!task) return
     setTitle(getPlainMarkedText(task.title))
     setDescription(task.description || "")
-    setStatusValue(task.status || "")
+    setStatusValue(
+      task.ga_note_origin_id && !["TODO", "IN_PROGRESS", "DONE"].includes(task.status || "")
+        ? "TODO"
+        : (task.status || "")
+    )
     setStartDate(toDateInputValue(task.start_date))
     setDueDate(toDateInputValue(task.due_date))
     setAssignedTo(task.assigned_to || UNASSIGNED_VALUE)
@@ -198,12 +204,21 @@ export default function TaskDetailsPage() {
       ? task.assignees.map(a => a.id).filter((id): id is string => Boolean(id))
       : (task.assigned_to ? [task.assigned_to] : [])
     setAssignees(assigneeIds)
+    setInitialAssignees(assigneeIds)
+    if (task.ga_note_origin_id) {
+      void loadGaNoteTaskAssigneeIds(apiFetch, task.ga_note_origin_id)
+        .then((gaAssigneeIds) => {
+          setAssignees(gaAssigneeIds)
+          setInitialAssignees(gaAssigneeIds)
+        })
+        .catch((error) => console.warn("Failed to load GA task membership", error))
+    }
     setReminder(Boolean(task.reminder_enabled))
     // Initialize fast task type
     setFastTaskType(getCurrentFastTaskType(task))
     setProjectTaskType(getCurrentProjectTaskType(task))
     setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
-  }, [task])
+  }, [apiFetch, task])
 
   React.useEffect(() => {
     let cancelled = false
@@ -311,42 +326,80 @@ export default function TaskDetailsPage() {
     if (!task) return
     setSaving(true)
     try {
+      const isGaOriginTask = Boolean(task.ga_note_origin_id)
       const trimmedTitle = title.trim()
-      if (trimmedTitle.length < 2) {
+      if (!isGaOriginTask && trimmedTitle.length < 2) {
         toast.error("Title must be at least 2 characters")
         return
       }
 
-      const payload: Record<string, unknown> = {
-        title: buildMarkedAppendOnlyText(task.title, trimmedTitle),
-        description,
-        reminder_enabled: reminder,
-      }
+      const payload: Record<string, unknown> = isGaOriginTask
+        ? { reminder_enabled: reminder }
+        : {
+            title: buildMarkedAppendOnlyText(task.title, trimmedTitle),
+            description,
+            reminder_enabled: reminder,
+          }
+      let gaMembershipChanged = false
+      let removedCurrentCopy = false
       if (statusValue) payload.status = statusValue
-      const confirmationValidation = validateWaitingConfirmation(statusValue || null, confirmationAssigneeId)
+      if (isGaOriginTask && statusValue && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)) {
+        toast.error("GA task status must be To Do, In Progress, or Done")
+        return
+      }
+      const confirmationValidation = isGaOriginTask
+        ? null
+        : validateWaitingConfirmation(statusValue || null, confirmationAssigneeId)
       if (confirmationValidation) {
         toast.error(confirmationValidation)
         return
       }
-      if (isWaitingConfirmation(statusValue || null)) {
+      if (!isGaOriginTask && isWaitingConfirmation(statusValue || null)) {
         payload.confirmation_assignee_id = confirmationAssigneeId
       }
       if (canAssign) {
-        payload.start_date = startDate || null
-        payload.due_date = dueDate || null
-        payload.finish_period = finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod
+        if (!isGaOriginTask) {
+          payload.start_date = startDate || null
+          payload.due_date = dueDate || null
+          payload.finish_period = finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod
+        }
         // Only send assignees if the user actually changed them.
         // For fast tasks, sending assignees can trigger backend "group membership" logic
         // (and potentially create per-user copies). Status-only changes shouldn't do that.
-        const assigneesChanged = !sameIdSet(assignees, currentTaskAssigneeIds)
-        if (assigneesChanged) {
+        const assigneesChanged = !sameIdSet(
+          assignees,
+          task.ga_note_origin_id ? initialAssignees : currentTaskAssigneeIds
+        )
+        if (assigneesChanged && task.ga_note_origin_id) {
+          const membershipRes = await replaceGaNoteTaskAssignees(apiFetch, task.ga_note_origin_id, assignees)
+          if (!membershipRes.ok) {
+            let detail = "Failed to update GA task assignees"
+            try {
+              const data = (await membershipRes.json()) as { detail?: string }
+              if (typeof data.detail === "string") detail = data.detail
+            } catch {
+              // Keep fallback.
+            }
+            toast.error(detail)
+            return
+          }
+          gaMembershipChanged = true
+          removedCurrentCopy = Boolean(task.assigned_to && !assignees.includes(task.assigned_to))
+        } else if (assigneesChanged) {
           payload.assigned_to = assignees.length > 0 ? assignees[0] : null
           payload.assignees = assignees
         }
       }
 
+      if (removedCurrentCopy) {
+        clearDepartmentBootstrapCacheByPrefix("department:")
+        toast.success("Task assignees updated")
+        router.push(returnTo || "/open-tasks")
+        return
+      }
+
       // Handle fast task type changes (only for fast tasks)
-      if (isFastTask(task)) {
+      if (!isGaOriginTask && isFastTask(task)) {
         const currentType = getCurrentFastTaskType(task)
         if (fastTaskType !== currentType) {
           // Reset all flags first
@@ -376,7 +429,7 @@ export default function TaskDetailsPage() {
         }
       }
 
-      if (isProjectTask(task)) {
+      if (!isGaOriginTask && isProjectTask(task)) {
         const currentType = getCurrentProjectTaskType(task)
         if (projectTaskType !== currentType) {
           payload.priority = projectTaskType === "HIGH" ? "HIGH" : "NORMAL"
@@ -408,6 +461,9 @@ export default function TaskDetailsPage() {
         }
         toast.error(errorMessage)
         return
+      }
+      if (gaMembershipChanged) {
+        clearDepartmentBootstrapCacheByPrefix("department:")
       }
       toast.success("Task updated")
       if (returnTo) {
@@ -512,11 +568,17 @@ export default function TaskDetailsPage() {
               <CardTitle className="text-sm">Update Task</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
+              {task.ga_note_origin_id ? (
+                <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
+                  This is your independent GA copy. Edit its status here; shared details are managed in GA Notes.
+                </div>
+              ) : null}
               <div className="space-y-2">
                 <Label htmlFor="task-title">Title</Label>
                 <Input
                   id="task-title"
                   value={title}
+                  disabled={Boolean(task.ga_note_origin_id)}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Task title"
                 />
@@ -534,7 +596,9 @@ export default function TaskDetailsPage() {
                     <SelectValue placeholder="Status" />
                   </SelectTrigger>
                   <SelectContent>
-                    {TASK_STATUS_OPTIONS.map((option) => (
+                    {TASK_STATUS_OPTIONS.filter((option) =>
+                      !task.ga_note_origin_id || ["TODO", "IN_PROGRESS", "DONE"].includes(option.value)
+                    ).map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
                       </SelectItem>
@@ -565,10 +629,16 @@ export default function TaskDetailsPage() {
 
               <div className="space-y-2">
                 <Label>Description</Label>
-                <BoldOnlyEditor value={description} onChange={setDescription} />
+                {task.ga_note_origin_id ? (
+                  <div className="min-h-[44px] rounded-md border bg-slate-50 px-3 py-2 text-sm text-slate-700">
+                    {description || "—"}
+                  </div>
+                ) : (
+                  <BoldOnlyEditor value={description} onChange={setDescription} />
+                )}
               </div>
 
-              {isFastTask(task) ? (
+              {!task.ga_note_origin_id && isFastTask(task) ? (
                 <div className="grid gap-4 md:grid-cols-2">
                   <div className="space-y-2">
                     <Label>Type</Label>
@@ -613,7 +683,7 @@ export default function TaskDetailsPage() {
                 </div>
               ) : null}
 
-              {isProjectTask(task) ? (
+              {!task.ga_note_origin_id && isProjectTask(task) ? (
                 <div className="space-y-2">
                   <Label>Type</Label>
                   <Select
@@ -641,6 +711,7 @@ export default function TaskDetailsPage() {
                     <Input
                       type="date"
                       value={startDate}
+                      disabled={Boolean(task.ga_note_origin_id)}
                       onChange={(e) => setStartDate(normalizeDueDateInput(e.target.value))}
                     />
                   </div>
@@ -649,6 +720,7 @@ export default function TaskDetailsPage() {
                     <Input
                       type="date"
                       value={dueDate}
+                      disabled={Boolean(task.ga_note_origin_id)}
                       onChange={(e) => setDueDate(normalizeDueDateInput(e.target.value))}
                     />
                   </div>

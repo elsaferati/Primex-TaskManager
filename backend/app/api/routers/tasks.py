@@ -247,6 +247,28 @@ _GA_NOTE_VALID_STATUSES = {
     TaskStatus.DONE.value,
 }
 
+_GA_NOTE_SHARED_TASK_FIELDS = {
+    "title",
+    "description",
+    "project_id",
+    "dependency_task_id",
+    "department_id",
+    "confirmation_assignee_id",
+    "priority",
+    "finish_period",
+    "phase",
+    "start_date",
+    "due_date",
+    "is_deadline_important",
+    "is_bllok",
+    "is_1h_report",
+    "one_h_report_slot",
+    "is_r1",
+    "is_personal",
+    "fast_task_order",
+    "alignment_user_ids",
+}
+
 
 def _normalize_ga_note_task_status(value: str | TaskStatus | None) -> TaskStatus:
     if not value:
@@ -712,6 +734,17 @@ def _is_common_view_orderable_task(task: Task) -> bool:
     )
 
 
+def _uses_fast_task_group(task: Task) -> bool:
+    """GA/plan-note copies are grouped by their origin, never as fast groups."""
+
+    return bool(
+        task.fast_task_group_id is not None
+        and task.ga_note_origin_id is None
+        and task.plan_note_origin_id is None
+        and is_fast_task_model(task)
+    )
+
+
 def _can_complete_waiting_confirmation(
     *,
     user_role: UserRole,
@@ -1026,7 +1059,7 @@ async def get_task(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     assignee_map = await _assignees_for_tasks(db, [task.id])
     dto_assignees = assignee_map.get(task.id, [])
-    if task.fast_task_group_id is not None and is_fast_task_model(task):
+    if _uses_fast_task_group(task):
         group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
         dto_assignees = group_map.get(task.fast_task_group_id, dto_assignees)
     status_override: TaskStatus | None = None
@@ -1214,6 +1247,12 @@ async def create_task(
     elif payload.assigned_to is not None:
         assignee_ids = [payload.assigned_to]
 
+    if payload.ga_note_origin_id is not None and not assignee_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Select at least one assignee for a GA task",
+        )
+
     if assignee_ids is not None:
         assignee_users = (
             await db.execute(select(User).where(User.id.in_(assignee_ids)))
@@ -1273,7 +1312,8 @@ async def create_task(
         )
     fast_task_order_value = payload.fast_task_order if is_fast else None
 
-    # Development project multi-assignee: create per-assignee copies.
+    # GA-origin tasks always use one independent row per assignee. Development
+    # project tasks already use the same storage model.
     if project is not None and assignee_ids is not None and len(assignee_ids) > 1:
         project_department = None
         if project.department_id is not None:
@@ -1287,7 +1327,7 @@ async def create_task(
             if dept_name == "DEVELOPMENT" or dept_code == "DEV":
                 is_development = True
 
-        if is_development:
+        if is_development or payload.ga_note_origin_id is not None:
             created_tasks: list[Task] = []
             created_notifications: list[Notification] = []
 
@@ -1729,7 +1769,11 @@ async def create_task(
         dto.alignment_user_ids = payload.alignment_user_ids
         return dto
 
-    fast_task_group_id = uuid.uuid4() if is_fast else None
+    fast_task_group_id = (
+        uuid.uuid4()
+        if is_fast and payload.ga_note_origin_id is None and payload.plan_note_origin_id is None
+        else None
+    )
 
     assigned_to_value = assignee_ids[0] if assignee_ids else None
     task_department_id = department_id
@@ -1874,7 +1918,7 @@ async def create_task(
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     dto_assignees = assignee_map.get(task.id, [])
-    if task.fast_task_group_id is not None and is_fast_task_model(task):
+    if _uses_fast_task_group(task):
         group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
         dto_assignees = group_map.get(task.fast_task_group_id, dto_assignees)
     dto = _task_to_out(task, dto_assignees or [])
@@ -1900,8 +1944,6 @@ async def update_task(
     can_edit = False
     if user.role in (UserRole.ADMIN, UserRole.MANAGER):
         can_edit = True
-    elif task.ga_note_origin_id is not None:
-        can_edit = True
     elif task.created_by and task.created_by == user.id:
         can_edit = True
     elif is_assigned_to_task:
@@ -1917,6 +1959,16 @@ async def update_task(
         current_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status).strip()
         if current_status != normalized_status.value:
             task.status = normalized_status
+
+    if (
+        task.ga_note_origin_id is not None
+        and payload.status is not None
+        and payload.status.value not in _GA_NOTE_VALID_STATUSES
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="GA task status must be TODO, IN_PROGRESS, or DONE",
+        )
 
     # Prevent DB constraint failures when updating legacy/system tasks.
     await _ensure_system_task_instance_integrity(db, task)
@@ -1988,9 +2040,14 @@ async def update_task(
 
     # Fast tasks are stored as per-user copies tied by fast_task_group_id.
     # For older rows, initialize the group id lazily on first update.
-    if is_fast_task_model(task) and task.fast_task_group_id is None:
+    if (
+        is_fast_task_model(task)
+        and task.ga_note_origin_id is None
+        and task.plan_note_origin_id is None
+        and task.fast_task_group_id is None
+    ):
         task.fast_task_group_id = task.id
-    is_fast_group_task = task.fast_task_group_id is not None and is_fast_task_model(task)
+    is_fast_group_task = _uses_fast_task_group(task)
     fast_group_desired_assignee_ids: list[uuid.UUID] | None = None
 
     if payload.title is not None:
@@ -2038,6 +2095,23 @@ async def update_task(
             if confirmation_user is None:
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
         task.confirmation_assignee_id = payload.confirmation_assignee_id
+
+    if task.ga_note_origin_id is not None and (
+        payload.assignees is not None or _payload_has_field(payload, "assigned_to")
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Change GA task membership from GA Notes",
+        )
+
+    if task.ga_note_origin_id is not None:
+        payload_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
+        shared_fields = sorted(_GA_NOTE_SHARED_TASK_FIELDS.intersection(payload_fields))
+        if shared_fields:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Change shared GA task fields from GA Notes: " + ", ".join(shared_fields),
+            )
 
     if payload.assignees is not None:
         # Fast task group: assignees represent group membership; don't mutate task.assigned_to.
@@ -2600,7 +2674,7 @@ async def update_task(
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
     dto_assignees = assignee_map.get(task.id, [])
-    if task.fast_task_group_id is not None and is_fast_task_model(task):
+    if _uses_fast_task_group(task):
         group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
         dto_assignees = group_map.get(task.fast_task_group_id, dto_assignees)
     dto = _task_to_out(task, dto_assignees or [])
@@ -2857,7 +2931,7 @@ async def delete_task(
                     control_task.internal_notes = _strip_origin_task_id(control_task.internal_notes)
 
     # Fast task groups: delete only this assignee copy, but remove the row entirely.
-    if task.fast_task_group_id is not None and is_fast_task_model(task):
+    if _uses_fast_task_group(task):
         await _clear_ga_note_conversion_if_no_active_tasks(
             db,
             note_id=task.ga_note_origin_id,

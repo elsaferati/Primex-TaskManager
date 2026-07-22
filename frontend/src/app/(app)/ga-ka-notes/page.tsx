@@ -815,9 +815,6 @@ export default function GaKaNotesPage() {
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDeadline, setEditTaskDeadline] = React.useState("")
   const [editTaskDeadlineImportant, setEditTaskDeadlineImportant] = React.useState(false)
-  const [editTaskInitialStartDate, setEditTaskInitialStartDate] = React.useState("")
-  const [editTaskInitialDeadline, setEditTaskInitialDeadline] = React.useState("")
-  const [editTaskInitialDeadlineImportant, setEditTaskInitialDeadlineImportant] = React.useState(false)
   const [editTaskAssigneeIds, setEditTaskAssigneeIds] = React.useState<string[]>([])
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [markingDoneNoteId, setMarkingDoneNoteId] = React.useState<string | null>(null)
@@ -1000,6 +997,7 @@ export default function GaKaNotesPage() {
       body: JSON.stringify({
         ga_note_origin_ids: noteIds,
         include_done: true,
+        include_all_done: true,
       }),
     })
     if (!res?.ok) return
@@ -1007,6 +1005,7 @@ export default function GaKaNotesPage() {
     const data = (await res.json()) as Task[]
 
     const map = new Map<string, NoteTaskInfo>()
+    const userMapById = new Map(users.map((person) => [person.id, person]))
     const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
       const result: TaskAssignee[] = []
       const seen = new Set<string>()
@@ -1028,9 +1027,18 @@ export default function GaKaNotesPage() {
     for (const t of data) {
       if (!t.ga_note_origin_id) continue
       let assignees: TaskAssignee[] = []
-      if (t.assignees && t.assignees.length > 0) {
-        // Use TaskAssignee directly from API - it has all the info we need for display
-        assignees = t.assignees
+      if (t.assigned_to) {
+        const explicitOwner = t.assignees?.find((assignee) => assignee.id === t.assigned_to)
+        const owner = userMapById.get(t.assigned_to)
+        assignees = explicitOwner
+          ? [explicitOwner]
+          : [{
+              id: t.assigned_to,
+              email: null,
+              username: owner?.username ?? null,
+              full_name: owner?.full_name ?? null,
+              department_id: owner?.department_id ?? null,
+            }]
       }
       const existing = map.get(t.ga_note_origin_id)
       map.set(t.ga_note_origin_id, {
@@ -1054,8 +1062,17 @@ export default function GaKaNotesPage() {
             : t.updated_at,
       })
     }
-    setNoteTaskInfo(map)
-  }, [apiFetch, notes])
+    if (noteIdsOverride) {
+      setNoteTaskInfo((current) => {
+        const next = new Map(current)
+        noteIds.forEach((noteId) => next.delete(noteId))
+        map.forEach((value, noteId) => next.set(noteId, value))
+        return next
+      })
+    } else {
+      setNoteTaskInfo(map)
+    }
+  }, [apiFetch, notes, users])
 
   // Load tasks linked to notes to show assignees/descriptions
   React.useEffect(() => {
@@ -1412,11 +1429,8 @@ export default function GaKaNotesPage() {
     const isoDeadline = taskDateKey(taskInfo?.dueDate ?? null) || ""
     const importantInitial = Boolean(taskInfo?.isDeadlineImportant)
     setEditTaskStartDate(isoStartDate)
-    setEditTaskInitialStartDate(isoStartDate)
     setEditTaskDeadline(isoDeadline)
-    setEditTaskInitialDeadline(isoDeadline)
     setEditTaskDeadlineImportant(importantInitial)
-    setEditTaskInitialDeadlineImportant(importantInitial)
     setEditTaskAssigneeIds(
       Array.from(new Set((taskInfo?.assignees ?? []).map((assignee) => assignee.id).filter(Boolean)))
     )
@@ -1582,155 +1596,44 @@ export default function GaKaNotesPage() {
     }
     setSavingEdit(true)
     try {
-      // Update the note
-      const res = await apiFetch(`/ga-notes/${editNoteId}`, {
+      const serializedContent = serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim()
+      const taskInfo = noteTaskInfo.get(editNoteId)
+      const currentNote = notes.find((note) => note.id === editNoteId) || null
+      const endpoint = taskInfo?.taskId
+        ? `/ga-notes/${editNoteId}/task-bundle`
+        : `/ga-notes/${editNoteId}`
+      const body = taskInfo?.taskId
+        ? {
+            content: serializedContent,
+            description: editDescription.trim() || null,
+            assignee_ids: editTaskAssigneeIds,
+            start_date: editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null,
+            due_date: editTaskDeadline ? new Date(editTaskDeadline).toISOString() : null,
+            is_deadline_important: editTaskDeadlineImportant,
+            expected_updated_at: currentNote?.updated_at || null,
+          }
+        : { content: serializedContent }
+
+      const res = await apiFetch(endpoint, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ content: serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim() }),
+        body: JSON.stringify(body),
       })
       if (res?.ok) {
-        const updated = (await res.json()) as GaNote
+        const payload = (await res.json()) as GaNote | { note: GaNote }
+        const updated = "note" in payload ? payload.note : payload
         setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)))
-        
-        // Update the task description if a task exists
-        const taskInfo = noteTaskInfo.get(editNoteId)
         if (taskInfo?.taskId) {
-          const taskRes = await apiFetch(`/tasks/${taskInfo.taskId}`, {
-            method: "PATCH",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              description: editDescription.trim() || null,
-              assigned_to: editTaskAssigneeIds[0] ?? null,
-              assignees: editTaskAssigneeIds,
-            }),
-          })
-          if (taskRes?.ok) {
-            // Reload note task info to reflect the updated description
-            const notesRes = await apiFetch("/tasks?include_done=true&include_all_departments=true")
-            if (notesRes?.ok) {
-              const tasksData = (await notesRes.json()) as Task[]
-              const userMapById = new Map(users.map((u) => [u.id, u]))
-              const map = new Map<string, NoteTaskInfo>()
-              const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
-                const result: TaskAssignee[] = []
-                const seen = new Set<string>()
-                const add = (assignee: TaskAssignee) => {
-                  const key =
-                    assignee.id ||
-                    assignee.username ||
-                    assignee.full_name ||
-                    assignee.email ||
-                    Math.random().toString()
-                  if (seen.has(key)) return
-                  seen.add(key)
-                  result.push(assignee)
-                }
-                base.forEach(add)
-                incoming.forEach(add)
-                return result
-              }
-              for (const t of tasksData) {
-                if (!t.ga_note_origin_id) continue
-                let assignees: TaskAssignee[] = t.assignees ?? []
-                if (assignees.length === 0 && t.assigned_to) {
-                  const fallback = userMapById.get(t.assigned_to)
-                  if (fallback) {
-                    assignees = [{
-                      id: fallback.id,
-                      email: null,
-                      username: fallback.username || null,
-                      full_name: fallback.full_name || null,
-                      department_id: fallback.department_id || null,
-                    }]
-                  }
-                }
-                const existing = map.get(t.ga_note_origin_id)
-                map.set(t.ga_note_origin_id, {
-                  assignees: mergeAssignees(existing?.assignees ?? [], assignees),
-                  description: existing?.description ?? t.description ?? null,
-                  taskId: existing?.taskId ?? t.id,
-                  taskDepartmentId: existing?.taskDepartmentId ?? t.department_id ?? null,
-                  taskProjectId: existing?.taskProjectId ?? t.project_id ?? null,
-                  taskStatus: existing?.taskStatus ?? t.status ?? null,
-                  taskStatuses: [...(existing?.taskStatuses ?? []), t.status ?? ""],
-                  taskTypeLabels: mergeTaskTypeLabels(existing?.taskTypeLabels, getTaskTypeLabels(t)),
-                  dueDate: existing?.dueDate ?? t.due_date ?? null,
-                  startDate: existing?.startDate ?? t.start_date ?? null,
-                  finishPeriod: existing?.finishPeriod ?? t.finish_period ?? null,
-                  isDeadlineImportant:
-                    existing?.isDeadlineImportant ?? (t.is_deadline_important ?? null),
-                  taskCreatedAt: existing?.taskCreatedAt ?? t.created_at,
-                  taskUpdatedAt:
-                    existing?.taskUpdatedAt && new Date(existing.taskUpdatedAt).getTime() > new Date(t.updated_at).getTime()
-                      ? existing.taskUpdatedAt
-                      : t.updated_at,
-                })
-              }
-              setNoteTaskInfo(map)
-            }
-          } else {
-            let errorMessage = "Note updated, but linked task could not be updated"
-            try {
-              const errorData = (await taskRes.json()) as { detail?: string }
-              if (errorData?.detail) {
-                errorMessage = `Note updated, but linked task could not be updated: ${errorData.detail}`
-              }
-            } catch {
-              // Keep the generic fallback message.
-            }
-            toast.error(errorMessage)
-          }
-
-          const taskDatesChanged =
-            editTaskStartDate !== editTaskInitialStartDate ||
-            editTaskDeadline !== editTaskInitialDeadline ||
-            editTaskDeadlineImportant !== editTaskInitialDeadlineImportant
-          if (taskDatesChanged) {
-            const nextIsoStartDate = editTaskStartDate
-              ? new Date(editTaskStartDate).toISOString()
-              : null
-            const nextIsoDeadline = editTaskDeadline
-              ? new Date(editTaskDeadline).toISOString()
-              : null
-            const deadlineRes = await apiFetch(`/ga-notes/${editNoteId}/task-deadline`, {
-              method: "PATCH",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                start_date: nextIsoStartDate,
-                due_date: nextIsoDeadline,
-                is_deadline_important: editTaskDeadlineImportant,
-                clear_start: nextIsoStartDate === null,
-                clear: nextIsoDeadline === null,
-              }),
-            })
-            if (deadlineRes?.ok) {
-              applyTaskDatesUpdateToInfo(editNoteId, nextIsoStartDate, nextIsoDeadline, editTaskDeadlineImportant)
-              void loadNoteTasks()
-            } else {
-              let errorMessage = "Note updated, but task dates could not be updated"
-              try {
-                const errorData = (await deadlineRes.json()) as { detail?: string }
-                if (errorData?.detail) {
-                  errorMessage = `Note updated, but task dates could not be updated: ${errorData.detail}`
-                }
-              } catch {
-                // Keep the generic fallback message.
-              }
-              toast.error(errorMessage)
-            }
-          }
+          await loadNoteTasks([editNoteId])
         }
-        
+
         toast.success("Note updated")
         setEditNoteId(null)
         setEditDoneRanges([])
         setEditAddedRanges([])
         setEditTaskStartDate("")
-        setEditTaskInitialStartDate("")
         setEditTaskDeadline("")
-        setEditTaskInitialDeadline("")
         setEditTaskDeadlineImportant(false)
-        setEditTaskInitialDeadlineImportant(false)
         setEditTaskAssigneeIds([])
       } else {
         let errorMessage = "Failed to update note"
@@ -1744,6 +1647,9 @@ export default function GaKaNotesPage() {
         }
         toast.error(errorMessage)
       }
+    } catch (error) {
+      console.error("Failed to update GA note", error)
+      toast.error("Failed to update note")
     } finally {
       setSavingEdit(false)
     }
@@ -1807,6 +1713,10 @@ export default function GaKaNotesPage() {
     }
     if (!taskTitle.trim()) {
       toast.error("Task title is required")
+      return
+    }
+    if (taskAssigneeIds.length === 0) {
+      toast.error("Select at least one assignee before creating the task")
       return
     }
     const effectiveDepartments =
@@ -1897,68 +1807,13 @@ export default function GaKaNotesPage() {
         toast.error("Failed to create task")
         return
       }
-      const createdTask = (await taskRes.json()) as Task
-      const patchRes = await apiFetch(`/ga-notes/${note.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ is_converted_to_task: true }),
-      })
-      if (patchRes.ok) {
-        const updated = (await patchRes.json()) as GaNote
-        setNotes((prev) => prev.map((n) => (n.id === note.id ? updated : n)))
-      } else {
-        setNotes((prev) =>
-          prev.map((n) => (n.id === note.id ? { ...n, is_converted_to_task: true } : n))
-        )
-      }
-      setNoteTaskInfo((prev) => {
-        const next = new Map(prev)
-        const userMapById = new Map(users.map((u) => [u.id, u]))
-        let assignees: TaskAssignee[] = []
-        if (taskAssigneeIds.length > 0) {
-          assignees = taskAssigneeIds.map((id) => {
-            const user = userMapById.get(id)
-            return {
-              id,
-              email: null,
-              username: user?.username || null,
-              full_name: user?.full_name || null,
-              department_id: user?.department_id || null,
-            }
-          })
-        } else if (createdTask.assignees && createdTask.assignees.length > 0) {
-          assignees = createdTask.assignees
-        } else if (createdTask.assigned_to) {
-          const fallback = userMapById.get(createdTask.assigned_to)
-          if (fallback) {
-            assignees = [{
-              id: fallback.id,
-              email: null,
-              username: fallback.username || null,
-              full_name: fallback.full_name || null,
-              department_id: fallback.department_id || null,
-            }]
-          }
-        }
-        const cleanedDescription = taskDescription.trim()
-        next.set(note.id, {
-          assignees,
-          description: (cleanedDescription || createdTask.description) ?? null,
-          taskId: createdTask.id,
-          taskDepartmentId: createdTask.department_id ?? null,
-          taskProjectId: createdTask.project_id ?? null,
-          taskStatus: createdTask.status ?? null,
-          taskStatuses: [createdTask.status ?? ""],
-          taskTypeLabels: getTaskTypeLabels(createdTask),
-          dueDate: createdTask.due_date ?? null,
-          startDate: createdTask.start_date ?? null,
-          finishPeriod: createdTask.finish_period ?? null,
-          isDeadlineImportant: createdTask.is_deadline_important ?? null,
-          taskCreatedAt: createdTask.created_at ?? null,
-          taskUpdatedAt: createdTask.updated_at ?? null,
-        })
-        return next
-      })
+      // Task creation already marks the note converted in the same backend
+      // transaction. Reload every independent assignee copy from the source of
+      // truth instead of synthesizing a combined client-side task.
+      setNotes((prev) =>
+        prev.map((item) => (item.id === note.id ? { ...item, is_converted_to_task: true } : item))
+      )
+      await loadNoteTasks([note.id])
       setTaskDialogNoteId(null)
       toast.success("Task created from note")
     } finally {
@@ -1966,25 +1821,6 @@ export default function GaKaNotesPage() {
       setCreatingTask(false)
     }
   }
-
-  const applyTaskDatesUpdateToInfo = React.useCallback(
-    (noteId: string, isoStartDateValue: string | null, isoDueDateValue: string | null, important: boolean) => {
-      setNoteTaskInfo((prev) => {
-        const next = new Map(prev)
-        const existing = next.get(noteId)
-        if (existing) {
-          next.set(noteId, {
-            ...existing,
-            startDate: isoStartDateValue,
-            dueDate: isoDueDateValue,
-            isDeadlineImportant: important,
-          })
-        }
-        return next
-      })
-    },
-    []
-  )
 
   const closeNote = async (id: string) => {
     const res = await apiFetch(`/ga-notes/${id}`, {
@@ -3891,11 +3727,8 @@ export default function GaKaNotesPage() {
           setEditAddedRanges([])
           setEditDescription("")
           setEditTaskStartDate("")
-          setEditTaskInitialStartDate("")
           setEditTaskDeadline("")
-          setEditTaskInitialDeadline("")
           setEditTaskDeadlineImportant(false)
-          setEditTaskInitialDeadlineImportant(false)
           setEditTaskAssigneeIds([])
         }
       }}>
@@ -4091,11 +3924,8 @@ export default function GaKaNotesPage() {
                 setEditAddedRanges([])
                 setEditDescription("")
                 setEditTaskStartDate("")
-                setEditTaskInitialStartDate("")
                 setEditTaskDeadline("")
-                setEditTaskInitialDeadline("")
                 setEditTaskDeadlineImportant(false)
-                setEditTaskInitialDeadlineImportant(false)
                 setEditTaskAssigneeIds([])
               }}>
                 Cancel

@@ -74,3 +74,25 @@ class GaNoteTaskDeadlineUpdate(BaseModel):
     is_deadline_important: bool | None = None
     clear_start: bool = False
     clear: bool = False
+
+
+class GaNoteTaskBundleUpdate(BaseModel):
+    """Atomic update for a GA note and its independent assignee copies."""
+
+    content: str | None = None
+    description: str | None = None
+    assignee_ids: list[uuid.UUID] | None = None
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    is_deadline_important: bool | None = None
+    expected_updated_at: datetime | None = None
+
+
+class GaNoteTaskBundleResponse(BaseModel):
+    note: GaNoteOut
+    active_task_ids: list[uuid.UUID]
+    assignee_ids: list[uuid.UUID]
+    created_count: int = 0
+    deactivated_count: int = 0
+    deduplicated_count: int = 0
+    updated_count: int = 0

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -15,18 +15,25 @@ from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.ga_note import GaNote
 from app.models.ga_note_attachment import GaNoteAttachment
-from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, TaskStatus, UserRole
+from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType, NotificationType, TaskStatus, UserRole
 from app.models.project import Project
 from app.models.task import Task
 from app.schemas.ga_note import (
     GaNoteAttachmentOut,
     GaNoteCreate,
     GaNoteOut,
+    GaNoteTaskBundleResponse,
+    GaNoteTaskBundleUpdate,
     GaNoteTaskDeadlineUpdate,
     GaNoteUpdate,
 )
 from app.services.audit import add_audit_log
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
+from app.services.ga_note_task_instances import (
+    apply_ga_note_shared_task_fields,
+    reconcile_ga_note_task_assignees,
+)
+from app.services.notifications import add_notification, publish_notification
 from app.config import settings
 
 
@@ -92,7 +99,19 @@ def _ga_note_upload_base_dir() -> Path:
 
 
 async def _ensure_note_access(note: GaNote, user, db: AsyncSession) -> None:
-    return
+    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
+        return
+    if note.created_by == user.id:
+        return
+
+    department_id = note.department_id
+    if department_id is None and note.project_id is not None:
+        department_id = (
+            await db.execute(select(Project.department_id).where(Project.id == note.project_id))
+        ).scalar_one_or_none()
+    if department_id is not None and user.department_id == department_id:
+        return
+    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 async def _get_note_or_404(note_id: uuid.UUID, db: AsyncSession) -> GaNote:
@@ -302,6 +321,164 @@ async def update_ga_note(
     await db.commit()
     await db.refresh(note)
     return _note_out(note)
+
+
+def _same_timestamp(left: datetime, right: datetime) -> bool:
+    def as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    return abs((as_utc(left) - as_utc(right)).total_seconds()) < 0.001
+
+
+@router.patch("/{note_id}/task-bundle", response_model=GaNoteTaskBundleResponse)
+async def update_ga_note_task_bundle(
+    note_id: uuid.UUID,
+    payload: GaNoteTaskBundleUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> GaNoteTaskBundleResponse:
+    """Atomically update a GA note and its independent per-assignee tasks.
+
+    Shared task fields are applied to every active copy. Membership changes
+    create/deactivate copies without changing the status or progress of people
+    who remain assigned.
+    """
+
+    note = (
+        await db.execute(
+            select(GaNote)
+            .options(selectinload(GaNote.attachments))
+            .where(GaNote.id == note_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA note not found")
+    await _ensure_note_access(note, user, db)
+
+    if (
+        payload.expected_updated_at is not None
+        and note.updated_at is not None
+        and not _same_timestamp(payload.expected_updated_at, note.updated_at)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This GA note was changed by another user. Reload it before saving.",
+        )
+
+    fields_set = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
+    old_content = note.content
+    if "content" in fields_set:
+        cleaned_content = (payload.content or "").strip()
+        if not cleaned_content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Note text cannot be empty")
+        note.content = cleaned_content
+
+    if payload.assignee_ids is not None:
+        if user.role not in (UserRole.ADMIN, UserRole.MANAGER) and note.created_by != user.id:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Only the note creator or a manager can change GA task assignees",
+            )
+        try:
+            reconcile_result = await reconcile_ga_note_task_assignees(
+                db,
+                note=note,
+                desired_assignee_ids=payload.assignee_ids,
+                actor_user_id=user.id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        active_tasks = reconcile_result.active_tasks
+    else:
+        active_tasks = (
+            await db.execute(
+                select(Task)
+                .where(Task.ga_note_origin_id == note.id, Task.is_active.is_(True))
+                .order_by(Task.created_at.asc(), Task.id.asc())
+                .with_for_update()
+            )
+        ).scalars().all()
+        for task in active_tasks:
+            task.fast_task_group_id = None
+        reconcile_result = None
+
+    title = _ga_note_task_title(note.content) if "content" in fields_set else None
+    description_is_set = "description" in fields_set
+    start_date_is_set = "start_date" in fields_set
+    due_date_is_set = "due_date" in fields_set
+    important_is_set = "is_deadline_important" in fields_set
+    updated_count = apply_ga_note_shared_task_fields(
+        active_tasks,
+        title=title,
+        description_is_set=description_is_set,
+        description=payload.description,
+        start_date_is_set=start_date_is_set,
+        start_date=payload.start_date,
+        due_date_is_set=due_date_is_set,
+        due_date=payload.due_date,
+        is_deadline_important_is_set=important_is_set,
+        is_deadline_important=payload.is_deadline_important,
+    )
+
+    # Preserve the legacy default-description behavior when only note content
+    # changed and the description was never customized.
+    if "content" in fields_set and not description_is_set:
+        old_default = _ga_note_default_task_description(old_content)
+        new_default = _ga_note_default_task_description(note.content)
+        for task in active_tasks:
+            if task.description == old_default and task.description != new_default:
+                task.description = new_default
+                updated_count += 1
+
+    before_assignees = None
+    after_assignees = [str(task.assigned_to) for task in active_tasks if task.assigned_to]
+    if payload.assignee_ids is not None:
+        before_assignees = "reconciled"
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="ga_note",
+        entity_id=note.id,
+        action="task_bundle_updated",
+        before={"content": old_content, "assignees": before_assignees},
+        after={"content": note.content, "assignees": after_assignees},
+    )
+
+    created_notifications = []
+    if reconcile_result is not None:
+        for created_task in reconcile_result.created_tasks:
+            if created_task.assigned_to is None:
+                continue
+            created_notifications.append(
+                add_notification(
+                    db=db,
+                    user_id=created_task.assigned_to,
+                    type=NotificationType.assignment,
+                    title="Task assigned",
+                    body=created_task.title,
+                    data={"task_id": str(created_task.id)},
+                )
+            )
+
+    await db.commit()
+    for notification in created_notifications:
+        try:
+            await publish_notification(user_id=notification.user_id, notification=notification)
+        except Exception:
+            pass
+    await db.refresh(note)
+    return GaNoteTaskBundleResponse(
+        note=_note_out(note),
+        active_task_ids=[task.id for task in active_tasks],
+        assignee_ids=[task.assigned_to for task in active_tasks if task.assigned_to is not None],
+        created_count=reconcile_result.created_count if reconcile_result else 0,
+        deactivated_count=reconcile_result.deactivated_count if reconcile_result else 0,
+        deduplicated_count=reconcile_result.deduplicated_count if reconcile_result else 0,
+        updated_count=updated_count,
+    )
 
 
 @router.patch("/{note_id}/task-deadline", response_model=GaNoteTaskDeadlineResponse)
