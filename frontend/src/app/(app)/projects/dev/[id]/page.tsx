@@ -34,6 +34,7 @@ import type {
 } from "@/lib/types"
 
 const PHASES = ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION", "CLOSED"] as const
+const TASK_PHASES = ["PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION"] as const
 const PHASE_LABELS: Record<string, string> = {
   MEETINGS: "Meetings",
   PLANNING: "Planning",
@@ -109,6 +110,12 @@ function initials(src: string) {
 
 function toDateInput(value?: string | null) {
   return toDateInputValue(value)
+}
+
+function normalizeTaskPhase(phase?: string | null) {
+  if (!phase || phase === "MEETINGS") return "PLANNING"
+  if (phase === "CLOSED" || phase === "MBYLLUR") return "DOCUMENTATION"
+  return phase
 }
 
 function getProjectTaskType(task: Task | null): (typeof PROJECT_TASK_TYPES)[number] {
@@ -573,7 +580,7 @@ export default function DevelopmentProjectPage() {
     if (!createOpen) return
     if (newTaskPhase) return
     const rawPhase = project?.current_phase || "MEETINGS"
-    const phaseValue = viewedPhase || (rawPhase === "CLOSED" ? "DOCUMENTATION" : rawPhase)
+    const phaseValue = normalizeTaskPhase(viewedPhase || rawPhase)
     setNewTaskPhase(phaseValue)
   }, [createOpen, newTaskPhase, project?.current_phase, viewedPhase])
 
@@ -606,7 +613,7 @@ export default function DevelopmentProjectPage() {
         is_r1: newTaskType === "R1",
         is_personal: newTaskType === "PERSONAL",
         is_bllok: newTaskType === "BLLOK",
-        phase: newTaskPhase || activePhase,
+        phase: normalizeTaskPhase(newTaskPhase || activePhase),
         start_date: newStartDate ? new Date(newStartDate).toISOString() : null,
         due_date: newDueDate || null,
         is_deadline_important: newDeadlineImportant,
@@ -1925,7 +1932,7 @@ export default function DevelopmentProjectPage() {
                               <SelectValue placeholder="Select phase" />
                             </SelectTrigger>
                             <SelectContent>
-                              {PHASES.map((p) => (
+                              {TASK_PHASES.map((p) => (
                                 <SelectItem key={p} value={p}>
                                   {PHASE_LABELS[p]}
                                 </SelectItem>
@@ -2112,7 +2119,7 @@ export default function DevelopmentProjectPage() {
                               <SelectValue placeholder="Select phase" />
                             </SelectTrigger>
                             <SelectContent>
-                              {PHASES.map((p) => (
+                              {TASK_PHASES.map((p) => (
                                 <SelectItem key={p} value={p}>
                                   {PHASE_LABELS[p]}
                                 </SelectItem>

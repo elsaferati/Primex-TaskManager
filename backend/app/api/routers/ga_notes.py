@@ -101,19 +101,8 @@ def _ga_note_upload_base_dir() -> Path:
 
 
 async def _ensure_note_access(note: GaNote, user, db: AsyncSession) -> None:
-    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
-        return
-    if note.created_by == user.id:
-        return
-
-    department_id = note.department_id
-    if department_id is None and note.project_id is not None:
-        department_id = (
-            await db.execute(select(Project.department_id).where(Project.id == note.project_id))
-        ).scalar_one_or_none()
-    if department_id is not None and user.department_id == department_id:
-        return
-    raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    # Every authenticated PrimeFlow user may view and edit GA/KA notes.
+    return
 
 
 async def _get_note_or_404(note_id: uuid.UUID, db: AsyncSession) -> GaNote:
@@ -377,13 +366,6 @@ async def update_ga_note_task_bundle(
         if not cleaned_content:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Note text cannot be empty")
         note.content = cleaned_content
-
-    if payload.assignee_ids is not None or payload.assignee_states is not None:
-        if user.role not in (UserRole.ADMIN, UserRole.MANAGER) and note.created_by != user.id:
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Only the note creator or a manager can change GA task assignees or schedules",
-            )
 
     if payload.assignee_ids is not None:
         try:

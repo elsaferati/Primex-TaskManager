@@ -1486,8 +1486,10 @@ async def update_system_task_template(
 
     # Allow all users to edit all system tasks - no permission restrictions
     original_approval_status = _template_approval_status(template)
+    was_active = bool(template.is_active)
 
-    fields_set = payload.__fields_set__
+    fields_set = payload.model_fields_set
+    is_reactivating = "is_active" in fields_set and payload.is_active is True and not was_active
     scope_set = "scope" in fields_set
     department_set = "department_id" in fields_set
     assignee_set = "default_assignee_id" in fields_set or "assignee_ids" in fields_set or "assignee_slots" in fields_set
@@ -1714,7 +1716,7 @@ async def update_system_task_template(
             assignee_slots=assignee_slots,
             assignee_ids=assignee_ids,
         )
-    elif slot_schedule_fields_set:
+    if slot_schedule_fields_set or is_reactivating:
         await _reset_template_slots_next_run_at(db, template=template)
     await db.commit()
     await db.refresh(template)

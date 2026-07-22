@@ -131,6 +131,25 @@ def _is_mst_or_tt_project(project: Project) -> bool:
     return project.project_type == ProjectType.MST.value or ("MST" in title) or is_tt
 
 
+def _is_development_department(department: Department | None) -> bool:
+    if department is None:
+        return False
+    name = (department.name or "").strip().upper()
+    code = (department.code or "").strip().upper()
+    return name == "DEVELOPMENT" or code == "DEV"
+
+
+def _normalize_project_task_phase(
+    phase: str | ProjectPhaseStatus,
+    *,
+    is_development_project: bool,
+) -> str | ProjectPhaseStatus:
+    phase_value = phase.value if isinstance(phase, ProjectPhaseStatus) else phase
+    if is_development_project and phase_value == ProjectPhaseStatus.MEETINGS.value:
+        return ProjectPhaseStatus.PLANNING
+    return phase
+
+
 def _signed_business_days_between(start_day: date, end_day: date) -> int:
     if end_day >= start_day:
         return business_days_between(start_day, end_day)
@@ -1097,10 +1116,17 @@ async def create_task(
         plan_note_origin_id=payload.plan_note_origin_id,
     )
     project = None
+    task_project_department = None
     if payload.project_id is not None:
         project = await _project_for_id(db, payload.project_id)
         if project.department_id is not None and project.department_id != department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project department mismatch")
+        if project.department_id is not None:
+            task_project_department = (
+                await db.execute(select(Department).where(Department.id == project.department_id))
+            ).scalar_one_or_none()
+
+    is_development_project = _is_development_department(task_project_department)
 
     # Allow GA managers (department code GA) to create tasks for any department (for fast tasks etc.)
     if department_id is not None and payload.ga_note_origin_id is None and payload.plan_note_origin_id is None:
@@ -1275,6 +1301,10 @@ async def create_task(
         )
     priority_value = payload.priority or TaskPriority.NORMAL
     phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.MEETINGS)
+    phase_value = _normalize_project_task_phase(
+        phase_value,
+        is_development_project=is_development_project,
+    )
 
     if _should_auto_status_from_product_counts(project, phase_value):
         total, completed = _extract_total_and_completed(payload.daily_products, payload.internal_notes)
@@ -1306,19 +1336,7 @@ async def create_task(
     # GA-origin tasks always use one independent row per assignee. Development
     # project tasks already use the same storage model.
     if project is not None and assignee_ids is not None and len(assignee_ids) > 1:
-        project_department = None
-        if project.department_id is not None:
-            project_department = (
-                await db.execute(select(Department).where(Department.id == project.department_id))
-            ).scalar_one_or_none()
-        is_development = False
-        if project_department is not None:
-            dept_name = (project_department.name or "").strip().upper()
-            dept_code = (project_department.code or "").strip().upper()
-            if dept_name == "DEVELOPMENT" or dept_code == "DEV":
-                is_development = True
-
-        if is_development or payload.ga_note_origin_id is not None:
+        if is_development_project or payload.ga_note_origin_id is not None:
             created_tasks: list[Task] = []
             created_notifications: list[Notification] = []
 

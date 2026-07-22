@@ -109,7 +109,7 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(),
             ) as reset_slots,
             patch(
-                "app.api.routers.system_tasks._template_to_out",
+                "app.api.routers.system_tasks._template_definition_to_out",
                 new=AsyncMock(return_value={"id": str(template.id)}),
             ),
         ):
@@ -124,6 +124,59 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
         reset_slots.assert_awaited_once_with(db, template=template)
         db.commit.assert_awaited_once()
         db.refresh.assert_awaited_once_with(template)
+        self.assertEqual(result, {"id": str(template.id)})
+
+    async def test_reactivating_template_resets_stale_slot_schedule(self) -> None:
+        template = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="APLIKANTAT",
+            description=None,
+            internal_notes=None,
+            department_id=None,
+            default_assignee_id=None,
+            assignee_ids=None,
+            scope=SystemTaskScope.ALL,
+            frequency=FrequencyType.DAILY,
+            day_of_week=None,
+            days_of_week=None,
+            day_of_month=None,
+            month_of_year=None,
+            timezone="Europe/Budapest",
+            due_time=time(9, 0),
+            lookahead=14,
+            interval=1,
+            apply_from=None,
+            duration_days=1,
+            priority=None,
+            finish_period=None,
+            requires_alignment=False,
+            alignment_time=None,
+            is_active=False,
+        )
+        db = _FakeSession([_ScalarResult(template)])
+        payload = SystemTaskTemplateUpdate(is_active=True)
+        user = SimpleNamespace(id=uuid.uuid4())
+
+        with (
+            patch(
+                "app.api.routers.system_tasks._reset_template_slots_next_run_at",
+                new=AsyncMock(),
+            ) as reset_slots,
+            patch(
+                "app.api.routers.system_tasks._template_definition_to_out",
+                new=AsyncMock(return_value={"id": str(template.id)}),
+            ),
+        ):
+            result = await update_system_task_template(
+                template_id=template.id,
+                payload=payload,
+                db=db,
+                user=user,
+            )
+
+        self.assertTrue(template.is_active)
+        reset_slots.assert_awaited_once_with(db, template=template)
+        db.commit.assert_awaited_once()
         self.assertEqual(result, {"id": str(template.id)})
 
 
