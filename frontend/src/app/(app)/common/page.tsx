@@ -111,6 +111,7 @@ type FastTaskItemMeta = {
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
+  createdAt?: string | null
   completedAt?: string | null
   dateIsToday?: boolean
 }
@@ -319,6 +320,32 @@ const isCommonTaskStartingOnDate = (entry: { startDate?: string | null; date?: s
   return Boolean(startDate && targetDate && startDate === targetDate)
 }
 
+const isCommonTaskCreatedInTargetWeek = (entry: {
+  createdAt?: string | null
+  date?: string | null
+  entryDate?: string | null
+}) => {
+  const createdDate = normalizeCommonDateOnly(entry.createdAt)
+  const targetDate = normalizeCommonDateOnly(entry.date ?? entry.entryDate)
+  if (!createdDate || !targetDate) return false
+
+  const startOfWeek = (value: string) => {
+    const parsed = new Date(`${value}T12:00:00`)
+    const day = parsed.getDay()
+    parsed.setDate(parsed.getDate() - (day === 0 ? 6 : day - 1))
+    return normalizeCommonDateOnly(parsed.toISOString())
+  }
+
+  return startOfWeek(createdDate) === startOfWeek(targetDate)
+}
+
+const isCommonTaskNewOnStartDate = (entry: {
+  startDate?: string | null
+  createdAt?: string | null
+  date?: string | null
+  entryDate?: string | null
+}) => isCommonTaskStartingOnDate(entry) && isCommonTaskCreatedInTargetWeek(entry)
+
 const isCommonTaskDueOnDate = (entry: {
   isDeadlineImportant?: boolean
   dueDate?: string | null
@@ -335,10 +362,11 @@ const commonTaskHighlightClassName = (entry: {
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
+  createdAt?: string | null
   date?: string | null
   entryDate?: string | null
 }) => {
-  if (isCommonTaskStartingOnDate(entry)) return "starts-selected-day"
+  if (isCommonTaskNewOnStartDate(entry)) return "starts-selected-day"
   if (isCommonTaskDueOnDate(entry)) return "deadline-important"
   return ""
 }
@@ -405,6 +433,7 @@ type SwimlaneCell = {
   isDeadlineImportant?: boolean
   dueDate?: string | null
   startDate?: string | null
+  createdAt?: string | null
   completedAt?: string | null
   dateIsToday?: boolean
   recurrenceType?: string | null
@@ -2179,6 +2208,7 @@ export default function CommonViewPage() {
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
+          createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
@@ -2199,6 +2229,7 @@ export default function CommonViewPage() {
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
+          createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
@@ -2219,6 +2250,7 @@ export default function CommonViewPage() {
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
+          createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
@@ -2239,6 +2271,7 @@ export default function CommonViewPage() {
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
+          createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
           departmentId: item.departmentId || item.department_id || undefined,
           status,
@@ -2835,6 +2868,7 @@ export default function CommonViewPage() {
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
+                  createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
                 })
               }
@@ -2855,6 +2889,7 @@ export default function CommonViewPage() {
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
+                  createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
                 })
               }
@@ -2875,6 +2910,7 @@ export default function CommonViewPage() {
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
+                  createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
                 })
               }
@@ -2895,6 +2931,7 @@ export default function CommonViewPage() {
                   isDeadlineImportant: Boolean(t.is_deadline_important),
                   dueDate: t.due_date || null,
                   startDate: t.start_date || null,
+                  createdAt: t.created_at || null,
                   completedAt: t.completed_at || null,
                 })
               }
@@ -5528,6 +5565,7 @@ export default function CommonViewPage() {
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
       startDate: x.startDate,
+      createdAt: x.createdAt,
       completedAt: x.completedAt,
       dateIsToday: isCommonTaskStartingOnDate(x),
     }))
@@ -5551,6 +5589,7 @@ export default function CommonViewPage() {
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
       startDate: x.startDate,
+      createdAt: x.createdAt,
       completedAt: x.completedAt,
       dateIsToday: isCommonTaskStartingOnDate(x),
     }))
@@ -5573,6 +5612,7 @@ export default function CommonViewPage() {
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
       startDate: x.startDate,
+      createdAt: x.createdAt,
       completedAt: x.completedAt,
       dateIsToday: isCommonTaskStartingOnDate(x),
     }))
@@ -5637,6 +5677,7 @@ export default function CommonViewPage() {
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
       startDate: x.startDate,
+      createdAt: x.createdAt,
       completedAt: x.completedAt,
       dateIsToday: isCommonTaskStartingOnDate(x),
     }))
@@ -7611,6 +7652,9 @@ export default function CommonViewPage() {
           border: 2px solid #2563eb;
           box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
         }
+        .swimlane-cell.eight-am-task {
+          border: 2px solid #dc2626;
+        }
         .swimlane-cell.done,
         .swimlane-cell.starts-selected-day.done,
         .swimlane-cell.task-state-done,
@@ -8191,6 +8235,9 @@ export default function CommonViewPage() {
         .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-todo {
           background: linear-gradient(90deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.98)) !important;
           border: 2px solid #2563eb;
+        }
+        .week-table-entry.eight-am-task {
+          border: 2px solid #dc2626;
         }
         .week-table-entry.deadline-important:not(.task-state-done),
         .week-table-view.neutral-all-days .week-table-entry.deadline-important:not(.task-state-done),
@@ -11509,6 +11556,7 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               commonTaskHighlightClassName(e),
+                              hasEightAmIndicator(e.title) ? "eight-am-task" : "",
                               repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
@@ -11573,6 +11621,7 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               commonTaskHighlightClassName(e),
+                              hasEightAmIndicator(e.title) ? "eight-am-task" : "",
                               repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
@@ -11606,6 +11655,7 @@ export default function CommonViewPage() {
                               "week-table-entry",
                               commonTaskStateClassName(e.status, e.isDone),
                               commonTaskHighlightClassName(e),
+                              hasEightAmIndicator(e.title) ? "eight-am-task" : "",
                               repeatedTaskClassName(e, iso),
                             ].filter(Boolean).join(" ")}
                           >
@@ -12046,6 +12096,7 @@ export default function CommonViewPage() {
                                   getSwimlaneDividerClass(row.id, cells, index),
                                   cell.placeholder ? "placeholder" : "",
                                   commonTaskHighlightClassName(cell),
+                                  isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? "eight-am-task" : "",
                                   cell.isDone ? "done" : "",
                                   commonTaskStateClassName(cell.status, cell.isDone),
                                 ]
