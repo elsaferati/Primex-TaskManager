@@ -784,23 +784,6 @@ const mergePrintTaskEntries = <T extends FastTaskEntry | SwimlaneCell>(rowId: Co
   return Array.from(merged.values())
 }
 
-const suppressRepeatedPrintTaskEntries = <T extends CommonWeekTableEntry>(
-  rowId: CommonType,
-  entries: T[],
-  dateIso: string,
-  firstDateByTaskId: Map<string, string>
-) => {
-  if (!isPrintDedupeTaskRowId(rowId)) return entries
-  return entries.filter(
-    (entry) =>
-      !isRepeatedTaskInstance(
-        entry as { taskId?: string | null; task_id?: string | null },
-        dateIso,
-        firstDateByTaskId
-      )
-  )
-}
-
 const getSwimlaneTaskUserKey = (entry: SwimlaneCell | null) => {
   if (!entry || entry.placeholder) return ""
   if (entry.userId) return entry.userId.trim().toLowerCase()
@@ -8224,6 +8207,27 @@ export default function CommonViewPage() {
           line-height: 1;
           border: 1px solid #cbd5e1;
         }
+        @media screen {
+          .week-table-entry:has(> .week-table-avatars > .week-table-avatar:nth-child(6)) {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto;
+            align-items: start;
+          }
+          .week-table-entry:has(> .week-table-avatars > .week-table-avatar:nth-child(6)) > span,
+          .week-table-entry:has(> .week-table-avatars > .week-table-avatar:nth-child(6)) > .week-table-entry-main {
+            grid-column: 1 / -1;
+            width: 100%;
+          }
+          .week-table-entry:has(> .week-table-avatars > .week-table-avatar:nth-child(6)) > .week-table-avatars {
+            grid-column: 1;
+            min-width: 0;
+            max-width: 100%;
+          }
+          .week-table-entry:has(> .week-table-avatars > .week-table-avatar:nth-child(6)) > .week-table-delete {
+            grid-column: 2;
+            grid-row: 2;
+          }
+        }
         .week-table-empty {
           color: #adb5bd;
           font-style: italic;
@@ -11428,12 +11432,7 @@ export default function CommonViewPage() {
                     const weekRowClass = getWeekRowClass(row.id)
 
                     const getCellContent = (iso: string) => {
-                      const entries = suppressRepeatedPrintTaskEntries(
-                        row.id,
-                        dayEntries[iso] || [],
-                        iso,
-                        repeatedTaskFirstDateById
-                      )
+                      const entries = dayEntries[iso] || []
                       if (entries.length === 0) return null
                       
                       if (row.id === "late") {
