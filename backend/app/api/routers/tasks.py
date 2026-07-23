@@ -268,13 +268,11 @@ _GA_NOTE_VALID_STATUSES = {
 
 _GA_NOTE_SHARED_TASK_FIELDS = {
     "title",
-    "description",
     "project_id",
     "dependency_task_id",
     "department_id",
     "confirmation_assignee_id",
     "phase",
-    "one_h_report_slot",
     "fast_task_order",
     "alignment_user_ids",
 }

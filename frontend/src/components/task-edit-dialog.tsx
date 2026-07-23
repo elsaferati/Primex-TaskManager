@@ -174,36 +174,61 @@ export function TaskEditDialog({
         : isProjectTask(task)
           ? projectTaskType === "R1"
           : Boolean(task.is_r1)
+      const nextDescription = description.trim() || null
+      const nextStartDate = startDate || null
+      const nextDueDate = dueDate || null
+      const nextFinishPeriod = finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod
+      const nextOneHReportSlot =
+        (nextIsOneH || nextIsR1) && oneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE ? oneHReportSlot : null
+      const currentStartDate = toDateInputValue(task.start_date) || null
+      const currentDueDate = toDateInputValue(task.due_date) || null
+      const currentFinishPeriod = task.finish_period || null
+      const currentOneHReportSlot =
+        getOneHReportSlotValue(task.one_h_report_slot) === ONE_H_REPORT_SLOT_NONE_VALUE
+          ? null
+          : getOneHReportSlotValue(task.one_h_report_slot)
+
+      // PATCH only fields the user actually changed. This avoids unintended
+      // updates and keeps restricted GA-note fields (such as title) out of a
+      // date/type-only edit.
+      const updates: Record<string, unknown> = {
+        ...(title !== (task.title || "") ? { title: nextTitle } : {}),
+        ...(showDescriptionField && description !== (task.description || "")
+          ? { description: nextDescription }
+          : {}),
+        ...(statusValue !== task.status ? { status: statusValue } : {}),
+        ...(nextStartDate !== currentStartDate ? { start_date: nextStartDate } : {}),
+        ...(nextDueDate !== currentDueDate ? { due_date: nextDueDate } : {}),
+        ...(nextFinishPeriod !== currentFinishPeriod ? { finish_period: nextFinishPeriod } : {}),
+        ...(nextOneHReportSlot !== currentOneHReportSlot ? { one_h_report_slot: nextOneHReportSlot } : {}),
+        ...(isFastTask(task) && fastTaskType !== currentFastTaskType
+          ? {
+              is_bllok: fastTaskType === "BLL",
+              is_r1: fastTaskType === "R1",
+              is_1h_report: fastTaskType === "1H",
+              is_personal: fastTaskType === "P:",
+            }
+          : {}),
+        ...(isProjectTask(task) && projectTaskType !== currentProjectTaskType
+          ? {
+              priority: projectTaskType === "HIGH" ? "HIGH" : "NORMAL",
+              is_1h_report: projectTaskType === "1H",
+              is_r1: projectTaskType === "R1",
+              is_personal: projectTaskType === "PERSONAL",
+              is_bllok: projectTaskType === "BLLOK",
+            }
+          : {}),
+      }
+
+      if (Object.keys(updates).length === 0) {
+        onOpenChange(false)
+        return
+      }
+
       const res = await apiFetch(`/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          title: nextTitle,
-          ...(showDescriptionField ? { description: description.trim() || null } : {}),
-          status: statusValue,
-          start_date: startDate || null,
-          due_date: dueDate || null,
-          finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
-          one_h_report_slot:
-            (nextIsOneH || nextIsR1) && oneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE ? oneHReportSlot : null,
-          ...(isFastTask(task) && fastTaskType !== currentFastTaskType
-            ? {
-                is_bllok: fastTaskType === "BLL",
-                is_r1: fastTaskType === "R1",
-                is_1h_report: fastTaskType === "1H",
-                is_personal: fastTaskType === "P:",
-              }
-            : {}),
-          ...(isProjectTask(task) && projectTaskType !== currentProjectTaskType
-            ? {
-                priority: projectTaskType === "HIGH" ? "HIGH" : "NORMAL",
-                is_1h_report: projectTaskType === "1H",
-                is_r1: projectTaskType === "R1",
-                is_personal: projectTaskType === "PERSONAL",
-                is_bllok: projectTaskType === "BLLOK",
-              }
-            : {}),
-        }),
+        body: JSON.stringify(updates),
       })
 
       if (!res.ok) {

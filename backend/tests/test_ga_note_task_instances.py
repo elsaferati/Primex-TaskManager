@@ -7,6 +7,7 @@ from types import SimpleNamespace
 
 from sqlalchemy.sql import Select
 
+from app.api.routers.tasks import _GA_NOTE_SHARED_TASK_FIELDS
 from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus
 from app.models.task import Task
 from app.services.ga_note_task_instances import (
@@ -72,6 +73,11 @@ def _task(note_id: uuid.UUID, owner_id: uuid.UUID, status: TaskStatus) -> Task:
 
 
 class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
+    def test_finance_execution_fields_are_editable_on_ga_task_copy(self) -> None:
+        self.assertNotIn("description", _GA_NOTE_SHARED_TASK_FIELDS)
+        self.assertNotIn("one_h_report_slot", _GA_NOTE_SHARED_TASK_FIELDS)
+        self.assertIn("title", _GA_NOTE_SHARED_TASK_FIELDS)
+
     async def test_reconcile_preserves_existing_statuses_and_creates_one_todo_copy(self) -> None:
         note_id = uuid.uuid4()
         owner_a, owner_b, owner_c, owner_d = (uuid.uuid4() for _ in range(4))
