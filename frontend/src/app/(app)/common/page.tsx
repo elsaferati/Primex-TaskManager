@@ -384,6 +384,7 @@ const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
 }
 
 type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange"
+type CommonTaskFocusFilter = "all" | "new" | "eightAm" | "deadline"
 
 const getCommonTaskColor = (entry: {
   status?: string | null
@@ -1171,6 +1172,7 @@ export default function CommonViewPage() {
   const [typeFilters, setTypeFilters] = React.useState<Set<CommonType>>(new Set())
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
   const [colorFilter, setColorFilter] = React.useState<CommonColorFilter>("all")
+  const [taskFocusFilter, setTaskFocusFilter] = React.useState<CommonTaskFocusFilter>("all")
   const [freezeOneHSlots, setFreezeOneHSlots] = React.useState(() => {
     if (typeof window === "undefined") return false
     return window.localStorage.getItem(COMMON_VIEW_FREEZE_ONE_H_SLOTS_KEY) === "true"
@@ -3500,6 +3502,12 @@ export default function CommonViewPage() {
     }
     const matchesColorFilter = (entry: FastTaskEntry) =>
       colorFilter === "all" || getCommonTaskColor(entry) === colorFilter
+    const matchesTaskFocusFilter = (entry: FastTaskEntry) => {
+      if (taskFocusFilter === "new") return isCommonTaskNewOnStartDate(entry)
+      if (taskFocusFilter === "eightAm") return hasEightAmIndicator(entry.title)
+      if (taskFocusFilter === "deadline") return Boolean(entry.isDeadlineImportant)
+      return true
+    }
 
     const late = commonData.late
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
@@ -3518,24 +3526,28 @@ export default function CommonViewPage() {
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
       .map(narrowAssigneesForSelectedUser)
     const oneH = commonData.oneH
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
       .map(narrowAssigneesForSelectedUser)
     const personal = commonData.personal
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
       .map(narrowAssigneesForSelectedUser)
     const r1 = commonData.r1
       .filter((x) => inSelectedDates(x.date) && !fullyCoveredDates.has(x.date))
       .filter((x) => matchesSelectedUserEntry(x))
       .filter((x) => !isUserHiddenOn(x.date, x.userId))
+      .filter(matchesTaskFocusFilter)
       .filter(matchesColorFilter)
       .map(narrowAssigneesForSelectedUser)
     const external = commonData.external
@@ -3631,7 +3643,7 @@ export default function CommonViewPage() {
       fullyCoveredDates,
       hiddenUsersByDate,
     }
-  }, [colorFilter, commonData, selectedCommonUserId, selectedDates, users, weekISOs])
+  }, [colorFilter, commonData, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
 
   const allUsersLeaveByDate = React.useMemo(() => {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
@@ -4452,6 +4464,7 @@ export default function CommonViewPage() {
   }
 
   const showCard = (type: CommonType) => {
+    if (taskFocusFilter !== "all" && !isFastTaskRowId(type)) return false
     const matchesType = typeFilters.size === 0 || typeFilters.has(type) || (isOneHSlotRowId(type) && typeFilters.has("oneH"))
     if (!matchesType) return false
     if (colorFilter === "all") return true
@@ -9378,6 +9391,26 @@ export default function CommonViewPage() {
               <input type="checkbox" checked={typeMultiMode} onChange={(e) => setTypeMultiMode(e.target.checked)} />
               Multi-select (Types)
             </label>
+          </div>
+          <div className="toolbar-group">
+            <div className="chip-row" aria-label="Task filters">
+              {([
+                ["new", "Detyrat e reja"],
+                ["eightAm", "08:00"],
+                ["deadline", "Me deadline"],
+              ] as const).map(([value, label]) => (
+                <button
+                  key={value}
+                  className={`chip ${taskFocusFilter === value ? "active" : ""}`}
+                  type="button"
+                  aria-pressed={taskFocusFilter === value}
+                  onClick={() => setTaskFocusFilter((current) => current === value ? "all" : value)}
+                  title={taskFocusFilter === value ? "Kliko përsëri për ta hequr filtrin" : undefined}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
           </div>
           <div className="toolbar-group">
             <div className="chip-row" aria-label="Filter by color">
