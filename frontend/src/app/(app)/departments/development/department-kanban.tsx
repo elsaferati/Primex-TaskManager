@@ -636,6 +636,12 @@ function formatMeetingLabel(meeting: Meeting) {
 }
 
 function formatMeetingDateTime(meeting: Meeting): string {
+  const dateLabel = formatMeetingDate(meeting)
+  const timeLabel = formatMeetingTime(meeting)
+  return dateLabel === "-" || timeLabel === "-" ? "-" : `${dateLabel} ${timeLabel}`
+}
+
+function formatMeetingDate(meeting: Meeting): string {
   const date = resolveMeetingDisplayDate(meeting)
   if (!date) return "-"
   if (Number.isNaN(date.getTime())) return "-"
@@ -647,8 +653,13 @@ function formatMeetingDateTime(meeting: Meeting): string {
   const dateLabel = sameDay
     ? "Today"
     : date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" })
-  const timeLabel = date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
-  return `${dateLabel} ${timeLabel}`
+  return dateLabel
+}
+
+function formatMeetingTime(meeting: Meeting): string {
+  const date = resolveMeetingDisplayDate(meeting)
+  if (!date || Number.isNaN(date.getTime())) return "-"
+  return date.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit" })
 }
 
 function formatMsEventWindow(event: MicrosoftEvent) {
@@ -1335,7 +1346,7 @@ export default function DepartmentKanban() {
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
   const [pendingProjectTitle, setPendingProjectTitle] = React.useState("")
   const [meetingTitle, setMeetingTitle] = React.useState("")
-  const [meetingTimeFilter, setMeetingTimeFilter] = React.useState<"today" | "next" | "past">("today")
+  const [meetingTimeFilter, setMeetingTimeFilter] = React.useState<"today" | "tomorrow" | "this_week" | "next_week" | "future">("today")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
   const [meetingStartTime, setMeetingStartTime] = React.useState("")
@@ -2836,50 +2847,51 @@ export default function DepartmentKanban() {
     () => visibleInternalMeetings.filter((m) => todayMeetings.some((meeting) => meeting.id === m.id)),
     [todayMeetings, visibleInternalMeetings]
   )
-  const filteredExternalMeetings = React.useMemo(() => {
-    if (meetingTimeFilter === "today") return todayExternalMeetings
-
+  const filteredMeetings = React.useMemo(() => {
     const startOfToday = new Date(todayDate)
     startOfToday.setHours(0, 0, 0, 0)
     const startOfTomorrow = new Date(startOfToday)
     startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
+    const startOfThisWeek = startOfWeekMonday(startOfToday)
+    const startOfNextWeek = new Date(startOfThisWeek)
+    startOfNextWeek.setDate(startOfNextWeek.getDate() + 7)
+    const startOfFuture = new Date(startOfNextWeek)
+    startOfFuture.setDate(startOfFuture.getDate() + 7)
 
-    return visibleExternalMeetings
+    return visibleMeetings
       .filter((meeting) => {
         const meetingDate = resolveMeetingDisplayDate(meeting)
         if (!meetingDate || Number.isNaN(meetingDate.getTime())) return false
-        return meetingTimeFilter === "next"
-          ? meetingDate >= startOfTomorrow
-          : meetingDate < startOfToday
+        if (meetingTimeFilter === "today") {
+          return meetingDate >= startOfToday && meetingDate < startOfTomorrow
+        }
+        if (meetingTimeFilter === "tomorrow") {
+          const startOfDayAfterTomorrow = new Date(startOfTomorrow)
+          startOfDayAfterTomorrow.setDate(startOfDayAfterTomorrow.getDate() + 1)
+          return meetingDate >= startOfTomorrow && meetingDate < startOfDayAfterTomorrow
+        }
+        if (meetingTimeFilter === "this_week") {
+          return meetingDate >= startOfThisWeek && meetingDate < startOfNextWeek
+        }
+        if (meetingTimeFilter === "next_week") {
+          return meetingDate >= startOfNextWeek && meetingDate < startOfFuture
+        }
+        return meetingDate >= startOfFuture
       })
       .sort((a, b) => {
         const aTime = resolveMeetingDisplayDate(a)?.getTime() ?? 0
         const bTime = resolveMeetingDisplayDate(b)?.getTime() ?? 0
-        return meetingTimeFilter === "next" ? aTime - bTime : bTime - aTime
+        return aTime - bTime
       })
-  }, [meetingTimeFilter, todayDate, todayExternalMeetings, visibleExternalMeetings])
-  const filteredInternalMeetings = React.useMemo(() => {
-    if (meetingTimeFilter === "today") return todayInternalMeetings
-
-    const startOfToday = new Date(todayDate)
-    startOfToday.setHours(0, 0, 0, 0)
-    const startOfTomorrow = new Date(startOfToday)
-    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
-
-    return visibleInternalMeetings
-      .filter((meeting) => {
-        const meetingDate = resolveMeetingDisplayDate(meeting)
-        if (!meetingDate || Number.isNaN(meetingDate.getTime())) return false
-        return meetingTimeFilter === "next"
-          ? meetingDate >= startOfTomorrow
-          : meetingDate < startOfToday
-      })
-      .sort((a, b) => {
-        const aTime = resolveMeetingDisplayDate(a)?.getTime() ?? 0
-        const bTime = resolveMeetingDisplayDate(b)?.getTime() ?? 0
-        return meetingTimeFilter === "next" ? aTime - bTime : bTime - aTime
-      })
-  }, [meetingTimeFilter, todayDate, todayInternalMeetings, visibleInternalMeetings])
+  }, [meetingTimeFilter, todayDate, visibleMeetings])
+  const filteredExternalMeetings = React.useMemo(
+    () => filteredMeetings.filter((meeting) => (meeting.meeting_type || "external") === "external"),
+    [filteredMeetings]
+  )
+  const filteredInternalMeetings = React.useMemo(
+    () => filteredMeetings.filter((meeting) => meeting.meeting_type === "internal"),
+    [filteredMeetings]
+  )
   const dailyReportFastTasks = React.useMemo(() => {
     const reportDayKey = dayKey(selectedAllReportDate)
     const targetUserId =
@@ -9706,8 +9718,10 @@ export default function DepartmentKanban() {
                   <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
                     {([
                       ["today", "Sot"],
-                      ["next", "Next"],
-                      ["past", "Të kaluara"],
+                      ["tomorrow", "Nesër"],
+                      ["this_week", "This Week"],
+                      ["next_week", "Next Week"],
+                      ["future", "Future"],
                     ] as const).map(([value, label]) => (
                       <button
                         key={value}
@@ -9730,27 +9744,20 @@ export default function DepartmentKanban() {
                     <Table>
                       <TableHeader>
                         <TableRow>
-                          <TableHead className="w-[20%] uppercase">Title</TableHead>
-                          <TableHead className="w-[12%] uppercase">Platform</TableHead>
-                          <TableHead className="w-[18%] uppercase">Date & Time</TableHead>
-                          <TableHead className="w-[15%] uppercase">Project</TableHead>
-                          <TableHead className="w-[10%] uppercase">Link</TableHead>
-                          <TableHead className="w-[10%] uppercase">Repeat</TableHead>
-                          <TableHead className="w-[10%] uppercase">Users</TableHead>
-                          {!isReadOnly ? <TableHead className="w-[5%] text-right uppercase">Actions</TableHead> : null}
+                          <TableHead className="uppercase">Title</TableHead>
+                          <TableHead className="w-[150px] uppercase">Date</TableHead>
+                          <TableHead className="w-[110px] uppercase">Time</TableHead>
+                          {!isReadOnly ? <TableHead className="w-[90px] text-right uppercase">Actions</TableHead> : null}
                         </TableRow>
                       </TableHeader>
                       <TableBody>
                         {filteredExternalMeetings.map((meeting) => {
-                          const project = meeting.project_id
-                            ? projects.find((p) => p.id === meeting.project_id) || null
-                            : null
                           const isEditing = !isReadOnly && editingMeetingId === meeting.id
                           return (
                             <TableRow key={meeting.id}>
                               {isEditing ? (
                                 <>
-                                  <TableCell colSpan={!isReadOnly ? 8 : 7}>
+                                  <TableCell colSpan={!isReadOnly ? 4 : 3}>
                                     <div className="space-y-3">
                                       <Input
                                         value={editMeetingTitle}
@@ -9921,59 +9928,8 @@ export default function DepartmentKanban() {
                               ) : (
                                 <>
                                   <TableCell className="font-medium">{meeting.title}</TableCell>
-                                  <TableCell>{meeting.platform || "-"}</TableCell>
-                                  <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
-                                  <TableCell>{project ? resolveProjectTitle(project) : "-"}</TableCell>
-                                  <TableCell>
-                                    {meeting.meeting_url ? (
-                                      <a
-                                        href={meeting.meeting_url}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="text-blue-600 hover:underline text-sm"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
-                                        🔗 Join
-                                      </a>
-                                    ) : (
-                                      <span className="text-slate-400 text-sm">-</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {meeting.recurrence_type && meeting.recurrence_type !== "none" ? (
-                                      <span className="text-slate-600 text-sm">
-                                        {meeting.recurrence_type === "weekly" && meeting.recurrence_days_of_week && meeting.recurrence_days_of_week.length > 0
-                                          ? `W: ${meeting.recurrence_days_of_week.map(d => ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"][d]).join(", ")}`
-                                          : meeting.recurrence_type === "monthly" && meeting.recurrence_days_of_month && meeting.recurrence_days_of_month.length > 0
-                                            ? `M: ${meeting.recurrence_days_of_month.join(", ")}`
-                                            : meeting.recurrence_type === "weekly" ? "W" : meeting.recurrence_type === "monthly" ? "M" : "-"}
-                                      </span>
-                                    ) : (
-                                      <span className="text-slate-400 text-sm">-</span>
-                                    )}
-                                  </TableCell>
-                                  <TableCell>
-                                    {meeting.participant_ids && Array.isArray(meeting.participant_ids) && meeting.participant_ids.length > 0 ? (
-                                      <div className="text-xs font-semibold text-slate-700">
-                                        {meeting.participant_ids
-                                          .map(pid => {
-                                            const participant = users.find(u => u.id === pid)
-                                            if (!participant) return null
-                                            const name = participant.full_name || participant.username || "-"
-                                            return { pid, name, initials: initials(name) }
-                                          })
-                                          .filter(Boolean)
-                                          .map((item, index, array) => (
-                                            <span key={item.pid} title={item.name}>
-                                              {item.initials}
-                                              {index < array.length - 1 && ", "}
-                                            </span>
-                                          ))}
-                                      </div>
-                                    ) : (
-                                      <span className="text-slate-400 text-sm">-</span>
-                                    )}
-                                  </TableCell>
+                                  <TableCell>{formatMeetingDate(meeting)}</TableCell>
+                                  <TableCell>{formatMeetingTime(meeting)}</TableCell>
                                   {!isReadOnly ? (
                                     <TableCell className="text-right">
                                       <div className="flex items-center justify-end gap-1">
@@ -10021,16 +9977,92 @@ export default function DepartmentKanban() {
                         <TableHeader>
                           <TableRow>
                             <TableHead className="uppercase">Title</TableHead>
-                            <TableHead className="uppercase">Date & Time</TableHead>
+                            <TableHead className="w-[150px] uppercase">Date</TableHead>
+                            <TableHead className="w-[110px] uppercase">Time</TableHead>
+                            {!isReadOnly ? <TableHead className="w-[90px] text-right uppercase">Actions</TableHead> : null}
                           </TableRow>
                         </TableHeader>
                         <TableBody>
-                          {filteredInternalMeetings.map((meeting) => (
-                            <TableRow key={meeting.id}>
-                              <TableCell className="font-medium">{meeting.title || "Internal meeting"}</TableCell>
-                              <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
-                            </TableRow>
-                          ))}
+                          {filteredInternalMeetings.map((meeting) => {
+                            const isEditing = !isReadOnly && editingMeetingId === meeting.id
+                            return (
+                              <TableRow key={meeting.id}>
+                                {isEditing ? (
+                                  <TableCell colSpan={!isReadOnly ? 4 : 3}>
+                                    <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_220px_auto]">
+                                      <Input
+                                        value={editMeetingTitle}
+                                        onChange={(e) => setEditMeetingTitle(e.target.value)}
+                                        placeholder="Meeting title"
+                                      />
+                                      {editMeetingRecurrenceType === "none" ? (
+                                        <Input
+                                          type="datetime-local"
+                                          value={editMeetingStartsAt}
+                                          onChange={(e) => setEditMeetingStartsAt(e.target.value)}
+                                        />
+                                      ) : (
+                                        <Input
+                                          type="time"
+                                          value={editMeetingStartTime}
+                                          onChange={(e) => setEditMeetingStartTime(e.target.value)}
+                                        />
+                                      )}
+                                      <div className="flex gap-2">
+                                        <Button
+                                          type="button"
+                                          variant="outline"
+                                          onClick={cancelEditMeeting}
+                                          disabled={savingMeeting}
+                                        >
+                                          Cancel
+                                        </Button>
+                                        <Button
+                                          type="button"
+                                          onClick={() => void saveMeeting(meeting.id)}
+                                          disabled={!editMeetingTitle.trim() || savingMeeting}
+                                        >
+                                          {savingMeeting ? "Saving..." : "Save"}
+                                        </Button>
+                                      </div>
+                                    </div>
+                                  </TableCell>
+                                ) : (
+                                  <>
+                                    <TableCell className="font-medium">{meeting.title || "Internal meeting"}</TableCell>
+                                    <TableCell>{formatMeetingDate(meeting)}</TableCell>
+                                    <TableCell>{formatMeetingTime(meeting)}</TableCell>
+                                    {!isReadOnly ? (
+                                      <TableCell className="text-right">
+                                        <div className="flex items-center justify-end gap-1">
+                                          <Button
+                                            variant="outline"
+                                            size="icon"
+                                            onClick={() => startEditMeeting(meeting)}
+                                            aria-label="Edit internal meeting"
+                                            title="Edit"
+                                            className="h-7 w-7"
+                                          >
+                                            <Pencil className="h-3.5 w-3.5" />
+                                          </Button>
+                                          <Button
+                                            variant="outline"
+                                            size="icon"
+                                            onClick={() => void deleteMeeting(meeting.id)}
+                                            aria-label="Delete internal meeting"
+                                            title="Delete"
+                                            className="h-7 w-7 border-red-200 text-red-600 hover:bg-red-50"
+                                          >
+                                            <Trash2 className="h-3.5 w-3.5" />
+                                          </Button>
+                                        </div>
+                                      </TableCell>
+                                    ) : null}
+                                  </>
+                                )}
+                              </TableRow>
+                            )
+                          })}
                         </TableBody>
                       </Table>
                     </div>
