@@ -592,7 +592,15 @@ export function PrimeflowQuestionsPage() {
                         title={canViewHistory ? "View status history" : undefined}
                       >
                         {question.statuses.length ? question.statuses.map((item) => (
-                          <Badge key={item.user_id} variant="outline" className="bg-white" title={`${item.full_name}: ${item.status}`}>
+                          <Badge
+                            key={item.user_id}
+                            variant="outline"
+                            className={cn(
+                              "bg-white",
+                              canViewHistory && "border-emerald-300 bg-emerald-50 text-emerald-800"
+                            )}
+                            title={`${item.full_name}: ${item.status}`}
+                          >
                             {initials(item.full_name)} <StatusIcon status={item.status} className="size-3" />
                           </Badge>
                         )) : <span className="text-muted-foreground">-</span>}
@@ -609,7 +617,7 @@ export function PrimeflowQuestionsPage() {
                               <Badge
                                 key={item.id}
                                 variant="outline"
-                                className="bg-white font-normal"
+                                className="border-red-300 bg-red-50 font-normal text-red-700"
                                 title={item.full_name || "Pa emër"}
                               >
                                 {initials(item.full_name || "")}
