@@ -2531,7 +2531,6 @@ async def export_open_tasks_xlsx(
         "BZ ME",
         "TITLE",
         "PROJECT",
-        "DESCRIPTION",
         "WHEN",
         "STATUS",
         "KOMENT",
@@ -2583,7 +2582,6 @@ async def export_open_tasks_xlsx(
             bz_me_label(task),
             _strip_html(task.title) or "",
             project.title if project else "",
-            _strip_html_keep_breaks(task.description),
             "",
             "",
             "",
@@ -2612,10 +2610,9 @@ async def export_open_tasks_xlsx(
         13: 14,
         14: 44,
         15: 34,
-        16: 44,
+        16: 16,
         17: 16,
-        18: 16,
-        19: 34,
+        18: 34,
     }
     for col_idx in range(1, last_col + 1):
         ws.column_dimensions[get_column_letter(col_idx)].width = widths.get(col_idx, 16)
@@ -2625,8 +2622,8 @@ async def export_open_tasks_xlsx(
         status_validation = DataValidation(type="list", formula1='"PERSONAL,1H,BLLOK,R1"', allow_blank=True)
         ws.add_data_validation(when_validation)
         ws.add_data_validation(status_validation)
-        when_validation.add(f"{get_column_letter(17)}5:{get_column_letter(17)}{data_row - 1}")
-        status_validation.add(f"{get_column_letter(18)}5:{get_column_letter(18)}{data_row - 1}")
+        when_validation.add(f"{get_column_letter(16)}5:{get_column_letter(16)}{data_row - 1}")
+        status_validation.add(f"{get_column_letter(17)}5:{get_column_letter(17)}{data_row - 1}")
 
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
     ws.freeze_panes = "B5"
