@@ -2251,6 +2251,7 @@ export default function CommonViewPage() {
               ? (item.fastTaskOrder ?? item.fast_task_order)
               : undefined,
           finishPeriod: item.finishPeriod || item.finish_period || null,
+          oneHReportSlot: normalizeOneHReportSlot(item.oneHReportSlot || item.one_h_report_slot),
           isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
           dueDate: item.dueDate || item.due_date || null,
           startDate: item.startDate || item.start_date || null,
@@ -3374,9 +3375,9 @@ export default function CommonViewPage() {
     [canReorderFastTask, moveFastTaskEntry, reorderingTaskId]
   )
   const renderOneHReportSlotControl = React.useCallback(
-    (entry: OneHItem | SwimlaneCell) => {
+    (entry: OneHItem | R1Item | SwimlaneCell) => {
       return (
-        <span className="oneh-slot-indicator" title="1H report time">
+        <span className="oneh-slot-indicator" title="Report time">
           {getOneHReportSlotLabel(entry.oneHReportSlot)}
         </span>
       )
@@ -5656,6 +5657,7 @@ export default function CommonViewPage() {
       userId: x.userId,
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
+      oneHReportSlot: x.oneHReportSlot,
       entryDate: x.date,
       isDeadlineImportant: x.isDeadlineImportant,
       dueDate: x.dueDate,
@@ -11562,8 +11564,8 @@ export default function CommonViewPage() {
                             <div className="week-table-entry-main">
                                   <span>
                                   <span className="week-table-line-number">{idx + 1}.</span>
-                                  {isOneHSlotRowId(row.id) ? (
-                                    <span className="oneh-slot-indicator">{getOneHReportSlotLabel((e as OneHItem).oneHReportSlot)}</span>
+                                  {isOneHSlotRowId(row.id) || row.id === "r1" ? (
+                                    <span className="oneh-slot-indicator">{getOneHReportSlotLabel((e as OneHItem | R1Item).oneHReportSlot)}</span>
                                   ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
@@ -11627,6 +11629,7 @@ export default function CommonViewPage() {
                             <div className="week-table-entry-main">
                                   <span>
                                   <span className="week-table-line-number">{idx + 1}.</span>
+                                  <span className="oneh-slot-indicator">{getOneHReportSlotLabel(e.oneHReportSlot)}</span>
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
@@ -12146,7 +12149,7 @@ export default function CommonViewPage() {
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
                                           <span className="fast-task-order-badge">{cell.number}</span>
                                         ) : null}
-                                        {isOneHSlotRowId(row.id) ? renderOneHReportSlotControl(cell) : null}
+                                        {isOneHSlotRowId(row.id) || row.id === "r1" ? renderOneHReportSlotControl(cell) : null}
                                         {isFastTaskRowId(row.id) ? (
                                           <span className="period-indicator" title={`${getCommonTaskPeriodLabel(cell.finishPeriod)} task`}>
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}
@@ -12176,7 +12179,7 @@ export default function CommonViewPage() {
                                         {isFastTaskRowId(row.id) && typeof cell.number === "number" ? (
                                           <span className="fast-task-order-badge">{cell.number}</span>
                                         ) : null}
-                                        {isOneHSlotRowId(row.id) ? renderOneHReportSlotControl(cell) : null}
+                                        {isOneHSlotRowId(row.id) || row.id === "r1" ? renderOneHReportSlotControl(cell) : null}
                                         {isFastTaskRowId(row.id) ? (
                                           <span className="period-indicator" title={`${getCommonTaskPeriodLabel(cell.finishPeriod)} task`}>
                                             {getCommonTaskPeriodLabel(cell.finishPeriod)}

@@ -169,6 +169,11 @@ export function TaskEditDialog({
         : isProjectTask(task)
           ? projectTaskType === "1H"
           : Boolean(task.is_1h_report)
+      const nextIsR1 = isFastTask(task)
+        ? fastTaskType === "R1"
+        : isProjectTask(task)
+          ? projectTaskType === "R1"
+          : Boolean(task.is_r1)
       const res = await apiFetch(`/tasks/${task.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
@@ -179,7 +184,8 @@ export function TaskEditDialog({
           start_date: startDate || null,
           due_date: dueDate || null,
           finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
-          one_h_report_slot: nextIsOneH && oneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE ? oneHReportSlot : null,
+          one_h_report_slot:
+            (nextIsOneH || nextIsR1) && oneHReportSlot !== ONE_H_REPORT_SLOT_NONE_VALUE ? oneHReportSlot : null,
           ...(isFastTask(task) && fastTaskType !== currentFastTaskType
             ? {
                 is_bllok: fastTaskType === "BLL",
@@ -373,9 +379,10 @@ export function TaskEditDialog({
               </Select>
             </div>
 
-            {((isFastTask(task) && fastTaskType === "1H") || (isProjectTask(task) && projectTaskType === "1H")) ? (
+            {((isFastTask(task) && (fastTaskType === "1H" || fastTaskType === "R1"))
+              || (isProjectTask(task) && (projectTaskType === "1H" || projectTaskType === "R1"))) ? (
               <div className="space-y-2">
-                <Label>1H report time</Label>
+                <Label>{fastTaskType === "R1" || projectTaskType === "R1" ? "R1 report time" : "1H report time"}</Label>
                 <Select value={oneHReportSlot} onValueChange={setOneHReportSlot}>
                   <SelectTrigger disabled={saving}>
                     <SelectValue placeholder="Select time" />

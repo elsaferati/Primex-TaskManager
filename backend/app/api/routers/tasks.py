@@ -1373,7 +1373,7 @@ async def create_task(
                     is_deadline_important=payload.is_deadline_important or False,
                     is_bllok=payload.is_bllok or False,
                     is_1h_report=payload.is_1h_report or False,
-                    one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
+                    one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                     is_r1=payload.is_r1 or False,
                     is_personal=payload.is_personal or False,
                     fast_task_order=fast_task_order_value,
@@ -1505,7 +1505,7 @@ async def create_task(
                             is_deadline_important=payload.is_deadline_important or False,
                             is_bllok=payload.is_bllok or False,
                             is_1h_report=payload.is_1h_report or False,
-                            one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
+                            one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                             is_r1=payload.is_r1 or False,
                             is_personal=payload.is_personal or False,
                             fast_task_order=fast_task_order_value,
@@ -1617,7 +1617,7 @@ async def create_task(
                 is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
-                one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
+                one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                 is_r1=payload.is_r1 or False,
                 is_personal=payload.is_personal or False,
                 fast_task_order=fast_task_order_value,
@@ -1718,7 +1718,7 @@ async def create_task(
                 is_deadline_important=payload.is_deadline_important or False,
                 is_bllok=payload.is_bllok or False,
                 is_1h_report=payload.is_1h_report or False,
-                one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
+                one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
                 is_r1=payload.is_r1 or False,
                 is_personal=payload.is_personal or False,
                 fast_task_order=fast_task_order_value,
@@ -1815,7 +1815,7 @@ async def create_task(
         is_deadline_important=payload.is_deadline_important or False,
         is_bllok=payload.is_bllok or False,
         is_1h_report=payload.is_1h_report or False,
-        one_h_report_slot=payload.one_h_report_slot if payload.is_1h_report else None,
+        one_h_report_slot=payload.one_h_report_slot if (payload.is_1h_report or payload.is_r1) else None,
         is_r1=payload.is_r1 or False,
         is_personal=payload.is_personal or False,
         fast_task_order=fast_task_order_value,
@@ -2371,7 +2371,9 @@ async def update_task(
             task.one_h_report_slot = None
     if _payload_has_field(payload, "one_h_report_slot"):
         if payload.one_h_report_slot is not None:
-            task.is_1h_report = True
+            # R1 uses the same report slots without changing the task type to 1H.
+            if not task.is_r1 and payload.is_r1 is not True:
+                task.is_1h_report = True
             task.one_h_report_slot = payload.one_h_report_slot
         else:
             task.one_h_report_slot = None
@@ -2770,7 +2772,7 @@ async def update_task_one_h_report_slot(
     slot_date = effective_slot_date(payload.report_date)
 
     task.one_h_report_slot = next_slot
-    if next_slot is not None:
+    if next_slot is not None and not task.is_r1:
         task.is_1h_report = True
 
     existing = (

@@ -154,7 +154,7 @@ const buildDailyReportOneHSlotMap = (report: DailyReportResponse | null) => {
   const items = [...(report?.tasks_today || []), ...(report?.tasks_overdue || [])]
   for (const item of items) {
     const task = item.task
-    if (task?.id && task.is_1h_report) {
+    if (task?.id && (task.is_1h_report || task.is_r1)) {
       map[task.id] = normalizeOneHReportSlot(task.one_h_report_slot)
     }
   }
@@ -1335,6 +1335,7 @@ export default function DepartmentKanban() {
   const [showTitleWarning, setShowTitleWarning] = React.useState(false)
   const [pendingProjectTitle, setPendingProjectTitle] = React.useState("")
   const [meetingTitle, setMeetingTitle] = React.useState("")
+  const [meetingTimeFilter, setMeetingTimeFilter] = React.useState<"today" | "next" | "past">("today")
   const [meetingPlatform, setMeetingPlatform] = React.useState("")
   const [meetingStartsAt, setMeetingStartsAt] = React.useState("")
   const [meetingStartTime, setMeetingStartTime] = React.useState("")
@@ -2835,6 +2836,50 @@ export default function DepartmentKanban() {
     () => visibleInternalMeetings.filter((m) => todayMeetings.some((meeting) => meeting.id === m.id)),
     [todayMeetings, visibleInternalMeetings]
   )
+  const filteredExternalMeetings = React.useMemo(() => {
+    if (meetingTimeFilter === "today") return todayExternalMeetings
+
+    const startOfToday = new Date(todayDate)
+    startOfToday.setHours(0, 0, 0, 0)
+    const startOfTomorrow = new Date(startOfToday)
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
+
+    return visibleExternalMeetings
+      .filter((meeting) => {
+        const meetingDate = resolveMeetingDisplayDate(meeting)
+        if (!meetingDate || Number.isNaN(meetingDate.getTime())) return false
+        return meetingTimeFilter === "next"
+          ? meetingDate >= startOfTomorrow
+          : meetingDate < startOfToday
+      })
+      .sort((a, b) => {
+        const aTime = resolveMeetingDisplayDate(a)?.getTime() ?? 0
+        const bTime = resolveMeetingDisplayDate(b)?.getTime() ?? 0
+        return meetingTimeFilter === "next" ? aTime - bTime : bTime - aTime
+      })
+  }, [meetingTimeFilter, todayDate, todayExternalMeetings, visibleExternalMeetings])
+  const filteredInternalMeetings = React.useMemo(() => {
+    if (meetingTimeFilter === "today") return todayInternalMeetings
+
+    const startOfToday = new Date(todayDate)
+    startOfToday.setHours(0, 0, 0, 0)
+    const startOfTomorrow = new Date(startOfToday)
+    startOfTomorrow.setDate(startOfTomorrow.getDate() + 1)
+
+    return visibleInternalMeetings
+      .filter((meeting) => {
+        const meetingDate = resolveMeetingDisplayDate(meeting)
+        if (!meetingDate || Number.isNaN(meetingDate.getTime())) return false
+        return meetingTimeFilter === "next"
+          ? meetingDate >= startOfTomorrow
+          : meetingDate < startOfToday
+      })
+      .sort((a, b) => {
+        const aTime = resolveMeetingDisplayDate(a)?.getTime() ?? 0
+        const bTime = resolveMeetingDisplayDate(b)?.getTime() ?? 0
+        return meetingTimeFilter === "next" ? aTime - bTime : bTime - aTime
+      })
+  }, [meetingTimeFilter, todayDate, todayInternalMeetings, visibleInternalMeetings])
   const dailyReportFastTasks = React.useMemo(() => {
     const reportDayKey = dayKey(selectedAllReportDate)
     const targetUserId =
@@ -3704,7 +3749,7 @@ export default function DepartmentKanban() {
             sortDate: task.due_date || task.start_date || task.created_at,
             startDate: task.start_date || null,
             dueDate: task.due_date || null,
-            oneHReportSlot: task.is_1h_report
+            oneHReportSlot: task.is_1h_report || task.is_r1
               ? dailyReportOneHSlots[task.id] ?? normalizeOneHReportSlot(task.one_h_report_slot)
               : null,
           })
@@ -3735,7 +3780,7 @@ export default function DepartmentKanban() {
               sortDate: task.due_date || task.start_date || task.created_at,
               startDate: task.start_date || null,
               dueDate: task.due_date || null,
-              oneHReportSlot: task.is_1h_report
+              oneHReportSlot: task.is_1h_report || task.is_r1
                 ? dailyReportOneHSlots[task.id] ?? normalizeOneHReportSlot(task.one_h_report_slot)
                 : null,
             },
@@ -5040,7 +5085,6 @@ export default function DepartmentKanban() {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              is_1h_report: nextSlot !== null ? true : undefined,
               one_h_report_slot: nextSlot,
             }),
           })
@@ -7437,7 +7481,7 @@ export default function DepartmentKanban() {
                                 {dailyReportStatusDisplay(row.status)}
                               </td>
                               <td className="border border-slate-200 px-2 py-2 align-top">
-                                {row.subtype === "1H" && row.taskId ? (
+                                {(row.subtype === "1H" || row.subtype === "R1") && row.taskId ? (
                                   <select
                                     className="h-7 w-full rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-semibold text-amber-900 shadow-sm outline-none focus:border-amber-500"
                                     value={normalizeOneHReportSlot(row.oneHReportSlot) || ONE_H_REPORT_SLOT_NONE_VALUE}
@@ -9657,8 +9701,31 @@ export default function DepartmentKanban() {
             <div className="text-lg sm:text-xl font-semibold">Meetings</div>
             <div className="grid gap-4 grid-cols-1 lg:grid-cols-2">
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
-                <div className="text-sm font-semibold">External Meetings</div>
-                {visibleExternalMeetings.length ? (
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div className="text-sm font-semibold">External Meetings</div>
+                  <div className="inline-flex rounded-lg border border-slate-200 bg-slate-50 p-1">
+                    {([
+                      ["today", "Sot"],
+                      ["next", "Next"],
+                      ["past", "Të kaluara"],
+                    ] as const).map(([value, label]) => (
+                      <button
+                        key={value}
+                        type="button"
+                        onClick={() => setMeetingTimeFilter(value)}
+                        className={[
+                          "rounded-md px-3 py-1.5 text-xs font-medium transition-colors",
+                          meetingTimeFilter === value
+                            ? "bg-white text-slate-900 shadow-sm"
+                            : "text-slate-500 hover:text-slate-900",
+                        ].join(" ")}
+                      >
+                        {label}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                {filteredExternalMeetings.length ? (
                   <div className="rounded-md border border-slate-200">
                     <Table>
                       <TableHeader>
@@ -9674,7 +9741,7 @@ export default function DepartmentKanban() {
                         </TableRow>
                       </TableHeader>
                       <TableBody>
-                        {visibleExternalMeetings.map((meeting) => {
+                        {filteredExternalMeetings.map((meeting) => {
                           const project = meeting.project_id
                             ? projects.find((p) => p.id === meeting.project_id) || null
                             : null
@@ -9943,9 +10010,36 @@ export default function DepartmentKanban() {
                   </div>
                 ) : (
                   <div className="text-sm text-muted-foreground">
-                    {loadingExtras ? "Loading meetings..." : "No external meetings yet."}
+                    {loadingExtras ? "Loading meetings..." : "No external meetings for this filter."}
                   </div>
                 )}
+                <div className="space-y-3 border-t border-slate-200 pt-4">
+                  <div className="text-sm font-semibold">Internal Meetings</div>
+                  {filteredInternalMeetings.length ? (
+                    <div className="rounded-md border border-slate-200">
+                      <Table>
+                        <TableHeader>
+                          <TableRow>
+                            <TableHead className="uppercase">Title</TableHead>
+                            <TableHead className="uppercase">Date & Time</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody>
+                          {filteredInternalMeetings.map((meeting) => (
+                            <TableRow key={meeting.id}>
+                              <TableCell className="font-medium">{meeting.title || "Internal meeting"}</TableCell>
+                              <TableCell>{formatMeetingDateTime(meeting)}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  ) : (
+                    <div className="text-sm text-muted-foreground">
+                      {loadingExtras ? "Loading meetings..." : "No internal meetings for this filter."}
+                    </div>
+                  )}
+                </div>
                 {!isReadOnly ? (
                   <div className="border-t border-slate-200 pt-4">
                     {!showAddMeetingForm ? (
@@ -10201,8 +10295,7 @@ export default function DepartmentKanban() {
               </Card>
 
               <Card className="rounded-2xl border-slate-200 bg-white p-5 shadow-sm space-y-4">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="text-sm font-semibold">Internal Meetings</div>
+                <div className="flex flex-wrap items-center justify-end gap-2">
                   <Button
                     type="button"
                     variant="outline"

@@ -165,7 +165,7 @@ const buildDailyReportOneHSlotMap = (report: DailyReportResponse | null) => {
   const items = [...(report?.tasks_today || []), ...(report?.tasks_overdue || [])]
   for (const item of items) {
     const task = item.task
-    if (task?.id && task.is_1h_report) {
+    if (task?.id && (task.is_1h_report || task.is_r1)) {
       map[task.id] = normalizeOneHReportSlot(task.one_h_report_slot)
     }
   }
@@ -3317,7 +3317,7 @@ export default function DepartmentKanban() {
             sortDate: task.due_date || task.start_date || task.created_at,
             startDate: task.start_date || null,
             dueDate: task.due_date || null,
-            oneHReportSlot: task.is_1h_report
+            oneHReportSlot: task.is_1h_report || task.is_r1
               ? dailyReportOneHSlots[task.id] ?? normalizeOneHReportSlot(task.one_h_report_slot)
               : null,
           })
@@ -3346,7 +3346,7 @@ export default function DepartmentKanban() {
               sortDate: task.due_date || task.start_date || task.created_at,
               startDate: task.start_date || null,
               dueDate: task.due_date || null,
-              oneHReportSlot: task.is_1h_report
+              oneHReportSlot: task.is_1h_report || task.is_r1
                 ? dailyReportOneHSlots[task.id] ?? normalizeOneHReportSlot(task.one_h_report_slot)
                 : null,
             },
@@ -3683,7 +3683,6 @@ export default function DepartmentKanban() {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
-              is_1h_report: nextSlot !== null ? true : undefined,
               one_h_report_slot: nextSlot,
             }),
           })
@@ -6398,7 +6397,7 @@ export default function DepartmentKanban() {
                                     {dailyReportStatusDisplay(row.status)}
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">
-                                    {row.subtype === "1H" && row.taskId ? (
+                                    {(row.subtype === "1H" || row.subtype === "R1") && row.taskId ? (
                                       <select
                                         className="h-7 w-full rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-semibold text-amber-900 shadow-sm outline-none focus:border-amber-500"
                                         value={normalizeOneHReportSlot(row.oneHReportSlot) || ONE_H_REPORT_SLOT_NONE_VALUE}

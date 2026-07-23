@@ -751,7 +751,7 @@ export default function DepartmentKanban() {
                           <Badge variant="outline">{row.typeLabel}</Badge>
                         </TableCell>
                         <TableCell className="w-28 min-w-28 px-1 text-center">
-                          {row.task.is_1h_report || row.oneHReportSlot ? (
+                          {row.task.is_1h_report || row.task.is_r1 || row.oneHReportSlot ? (
                             row.canEdit ? (
                               <select
                                 className="h-7 w-full rounded-md border border-amber-300 bg-amber-50 px-2 text-[11px] font-semibold text-amber-900 shadow-sm outline-none focus:border-amber-500 disabled:cursor-not-allowed disabled:opacity-60"
