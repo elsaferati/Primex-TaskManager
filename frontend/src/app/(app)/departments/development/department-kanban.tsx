@@ -1993,7 +1993,12 @@ export default function DepartmentKanban() {
     return `${editTaskAssignees.length} selected`
   }, [users, editTaskAssignees])
   const editingGaTask = Boolean(
-    editingTaskId && noProjectTasks.some((task) => task.id === editingTaskId && task.ga_note_origin_id)
+    editingTaskId && noProjectTasks.some(
+      (task) => task.id === editingTaskId && (task.ga_note_origin_id || task.plan_note_origin_id)
+    )
+  )
+  const editingPlanTask = Boolean(
+    editingTaskId && noProjectTasks.some((task) => task.id === editingTaskId && task.plan_note_origin_id)
   )
   const todayDate = React.useMemo(() => new Date(), [])
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
@@ -5612,7 +5617,7 @@ export default function DepartmentKanban() {
       const assigneesChanged = !sameIdSet(editTaskAssignees, editTaskInitialAssignees)
       let gaMembershipChanged = false
       let removedEditingCopy = false
-      const payload: Record<string, unknown> = editingTask?.ga_note_origin_id
+      const payload: Record<string, unknown> = (editingTask?.ga_note_origin_id || editingTask?.plan_note_origin_id)
         ? {
             status: editTaskStatus,
             start_date: startDateValue,
@@ -5659,6 +5664,9 @@ export default function DepartmentKanban() {
         removedEditingCopy = Boolean(
           editingTask.assigned_to && !editTaskAssignees.includes(editingTask.assigned_to)
         )
+      } else if (assigneesChanged && editingTask?.plan_note_origin_id) {
+        toast.error("Change PX JAV task assignees from PX JAV")
+        return
       } else if (assigneesChanged) {
         payload.assignees = editTaskAssignees
         payload.assigned_to = editTaskAssignees.length > 0 ? editTaskAssignees[0] : null
@@ -5711,7 +5719,7 @@ export default function DepartmentKanban() {
     setAllTodayEditType(getAllTodayTaskType(task))
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
-      task.ga_note_origin_id && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)
+      (task.ga_note_origin_id || task.plan_note_origin_id) && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)
         ? "TODO"
         : ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
         ? statusValue
@@ -5744,8 +5752,8 @@ export default function DepartmentKanban() {
       toast.error("You do not have permission to edit this task")
       return
     }
-    const isGaOriginTask = Boolean(editingTask?.ga_note_origin_id)
-    const confirmationValidation = isGaOriginTask
+    const isNoteOriginTask = Boolean(editingTask?.ga_note_origin_id || editingTask?.plan_note_origin_id)
+    const confirmationValidation = isNoteOriginTask
       ? null
       : validateWaitingConfirmation(allTodayEditStatus, allTodayEditConfirmationAssigneeId)
     if (confirmationValidation) {
@@ -5761,7 +5769,7 @@ export default function DepartmentKanban() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(
-          isGaOriginTask
+          isNoteOriginTask
             ? {
                 status: allTodayEditStatus,
                 start_date: startDateValue,
@@ -6905,6 +6913,7 @@ export default function DepartmentKanban() {
                             <Button
                               type="button"
                               variant="outline"
+                              disabled={editingPlanTask}
                               className="w-full justify-start border-slate-200 focus:border-slate-400 rounded-xl"
                             >
                               {projectMemberIds.length === 0
@@ -7878,7 +7887,9 @@ export default function DepartmentKanban() {
                                 <span>
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
-                                {isGaTask(task) ? (
+                                {task.plan_note_origin_id ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>PX JAV</Badge>
+                                ) : isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
                                 {task.is_1h_report ? (
@@ -8007,7 +8018,9 @@ export default function DepartmentKanban() {
                                 <span>
                                   {renderAllTodayTaskTitle(task)}
                                 </span>
-                                {isGaTask(task) ? (
+                                {task.plan_note_origin_id ? (
+                                  <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>PX JAV</Badge>
+                                ) : isGaTask(task) ? (
                                   <Badge className={`text-[10px] px-1.5 py-0 ${GA_BADGE_CLASSES}`}>GA</Badge>
                                 ) : null}
                               </div>
@@ -8165,16 +8178,16 @@ export default function DepartmentKanban() {
                     <DialogTitle className="text-slate-800">Edit Task</DialogTitle>
                   </DialogHeader>
                   <div className="space-y-4">
-                    {allTodayEditingTask?.ga_note_origin_id ? (
+                    {allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id ? (
                       <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                        This is your independent GA copy. Edit its status and scheduling here; shared details are managed in GA Notes.
+                        This is your independent note task copy. Edit its status and scheduling here; shared details are managed in {allTodayEditingTask?.plan_note_origin_id ? "PX JAV" : "GA Notes"}.
                       </div>
                     ) : null}
                     <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
                       <Textarea
                         value={allTodayEditTitle}
-                        disabled={Boolean(allTodayEditingTask?.ga_note_origin_id)}
+                        disabled={Boolean(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id)}
                         onChange={(e) => setAllTodayEditTitle(e.target.value)}
                         rows={3}
                         className="h-24 min-h-24 max-h-24 resize-none overflow-y-auto whitespace-pre-wrap [overflow-wrap:anywhere] border-slate-200 focus:border-slate-400 rounded-xl"
@@ -8182,7 +8195,7 @@ export default function DepartmentKanban() {
                     </div>
                     <div className="space-y-2">
                       <Label className="text-slate-700">Description</Label>
-                      {allTodayEditingTask?.ga_note_origin_id ? (
+                      {allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id ? (
                         <div className="h-32 overflow-y-auto rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-700">
                           {allTodayEditDescription || "—"}
                         </div>
@@ -8221,7 +8234,7 @@ export default function DepartmentKanban() {
                           </SelectTrigger>
                           <SelectContent>
                             {ALL_TODAY_TASK_STATUS_OPTIONS.filter((value) =>
-                              !allTodayEditingTask?.ga_note_origin_id || value === "TODO" || value === "IN_PROGRESS" || value === "DONE"
+                              !(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) || value === "TODO" || value === "IN_PROGRESS" || value === "DONE"
                             ).map((value) => (
                               <SelectItem key={value} value={value}>
                                 {reportStatusLabel(value)}
@@ -8231,7 +8244,7 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                     </div>
-                    {!allTodayEditingTask?.ga_note_origin_id && isWaitingConfirmation(allTodayEditStatus) ? (
+                    {!(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) && isWaitingConfirmation(allTodayEditStatus) ? (
                       <div className="space-y-2">
                         <Label className="text-slate-700">Confirm by (Manager/Admin)</Label>
                         <Select
@@ -8308,10 +8321,10 @@ export default function DepartmentKanban() {
                       </Button>
                       <Button
                         disabled={
-                          (!allTodayEditingTask?.ga_note_origin_id && !allTodayEditTitle.trim()) ||
+                          (!(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) && !allTodayEditTitle.trim()) ||
                           !allTodayEditStatus ||
                           allTodayUpdating ||
-                          (!allTodayEditingTask?.ga_note_origin_id && isWaitingConfirmation(allTodayEditStatus) && !allTodayEditConfirmationAssigneeId) ||
+                          (!(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) && isWaitingConfirmation(allTodayEditStatus) && !allTodayEditConfirmationAssigneeId) ||
                           !canEditAllTodayTask(allTodayEditingTask)
                         }
                         onClick={() => void updateAllTodayTask()}
@@ -8821,7 +8834,7 @@ export default function DepartmentKanban() {
                     <div className="space-y-4">
                       {editingGaTask ? (
                         <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                          This is an independent GA copy. Edit its status and scheduling here; shared details are managed in GA Notes.
+                          This is an independent note task copy. Edit its status and scheduling here; shared details are managed in {editingPlanTask ? "PX JAV" : "GA Notes"}.
                         </div>
                       ) : null}
                       <div className="space-y-2">
@@ -9127,7 +9140,11 @@ export default function DepartmentKanban() {
                                     </div>
                                   </div>
                                 <div className="sm:px-3 flex items-start">
-                                  {t.ga_note_origin_id ? (
+                                  {t.plan_note_origin_id ? (
+                                    <Badge className="bg-indigo-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
+                                      PX JAV
+                                    </Badge>
+                                  ) : t.ga_note_origin_id ? (
                                     <Badge className="bg-red-500 text-white border-0 text-[9px] px-1.5 py-0.5 font-semibold">
                                       GA
                                     </Badge>

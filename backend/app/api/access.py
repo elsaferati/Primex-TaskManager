@@ -42,7 +42,10 @@ def ensure_task_editor(user: User, task: "Task") -> None:
 
     if user.role in (UserRole.ADMIN, UserRole.MANAGER):
         return
-    if getattr(task, "ga_note_origin_id", None) is not None:
+    if (
+        getattr(task, "ga_note_origin_id", None) is not None
+        or getattr(task, "plan_note_origin_id", None) is not None
+    ):
         return
     if task.created_by and task.created_by == user.id:
         return

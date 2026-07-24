@@ -2263,7 +2263,7 @@ async def export_all_tasks_report_xlsx(
 
 
 def _open_task_source_label(task: Task) -> str:
-    if task.ga_note_origin_id:
+    if task.ga_note_origin_id or task.plan_note_origin_id:
         return "GA/KA"
     if task.system_template_origin_id:
         return "SYSTEM"
@@ -2503,7 +2503,7 @@ async def export_open_tasks_xlsx(
             continue
         if normalized_filter == "in_progress" and task_status != TaskStatusEnum.IN_PROGRESS.value:
             continue
-        if normalized_filter == "ga" and not task.ga_note_origin_id:
+        if normalized_filter == "ga" and not (task.ga_note_origin_id or task.plan_note_origin_id):
             continue
         if normalized_filter == "plan" and not task.plan_note_origin_id:
             continue

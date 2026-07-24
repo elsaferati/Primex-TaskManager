@@ -393,6 +393,7 @@ def _task_to_out(t: Task, assignees: list[TaskAssigneeOut] | None = None) -> Tas
         assignees=assignees or [],
         created_by=t.created_by,
         ga_note_origin_id=t.ga_note_origin_id,
+        plan_note_origin_id=t.plan_note_origin_id,
         system_template_origin_id=t.system_template_origin_id,
         status=status_enum,
         priority=priority_enum,
@@ -958,6 +959,8 @@ def _flatten_weekly_department_tasks(
             row["_tags"].add("P:")
         if task_entry.get("ga_note_origin_id"):
             row["_tags"].add("GA")
+        if task_entry.get("plan_note_origin_id"):
+            row["_tags"].add("PX JAV")
         if task_entry.get("fast_task_type"):
             row["_tags"].add(str(task_entry.get("fast_task_type")).strip().upper())
 
@@ -2486,6 +2489,8 @@ async def weekly_table_planner(
             return "1H"
         if task.ga_note_origin_id is not None:
             return "GA"
+        if task.plan_note_origin_id is not None:
+            return "PX JAV"
         if task.is_personal:
             return "P:"
         return None
@@ -2722,6 +2727,7 @@ async def weekly_table_planner(
                             is_personal=False,
                             is_deadline_important=system_task.is_deadline_important,
                             ga_note_origin_id=None,
+                            plan_note_origin_id=None,
                         )
                         
                         if is_both:
@@ -2772,6 +2778,7 @@ async def weekly_table_planner(
                             is_personal=task.is_personal,
                             is_deadline_important=task.is_deadline_important,
                             ga_note_origin_id=task.ga_note_origin_id,
+                            plan_note_origin_id=task.plan_note_origin_id,
                         )
                         if is_both:
                             # Add to both AM and PM
@@ -2881,6 +2888,7 @@ async def weekly_table_planner(
                                 is_personal=t.is_personal,
                                 is_deadline_important=t.is_deadline_important,
                                 ga_note_origin_id=t.ga_note_origin_id,
+                                plan_note_origin_id=t.plan_note_origin_id,
                             )
                         )
                     am_projects.append(
@@ -2946,6 +2954,7 @@ async def weekly_table_planner(
                                 is_personal=t.is_personal,
                                 is_deadline_important=t.is_deadline_important,
                                 ga_note_origin_id=t.ga_note_origin_id,
+                                plan_note_origin_id=t.plan_note_origin_id,
                             )
                         )
                     pm_projects.append(

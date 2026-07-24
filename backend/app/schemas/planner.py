@@ -52,6 +52,7 @@ class WeeklyTableProjectTaskEntry(BaseModel):
     is_personal: bool = False
     is_deadline_important: bool = False
     ga_note_origin_id: uuid.UUID | None = None
+    plan_note_origin_id: uuid.UUID | None = None
 
 
 class WeeklyTableProjectEntry(BaseModel):
@@ -84,6 +85,7 @@ class WeeklyTableTaskEntry(BaseModel):
     is_personal: bool = False
     is_deadline_important: bool = False
     ga_note_origin_id: uuid.UUID | None = None
+    plan_note_origin_id: uuid.UUID | None = None
 
 
 class WeeklyTableUserDay(BaseModel):

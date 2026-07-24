@@ -340,6 +340,7 @@ export default function OpenTasksPage() {
   )
 
   const sourceLabel = React.useCallback((task: Task) => {
+    if (task.ga_note_origin_id || task.plan_note_origin_id) return "GA/KA"
     if (task.system_template_origin_id) return "System"
     if (task.project_id) return "Project"
     if (task.is_bllok) return "BLL"
@@ -506,9 +507,9 @@ export default function OpenTasksPage() {
 
   const saveTask = async () => {
     if (!selectedTask) return
-    const isGaOriginTask = Boolean(selectedTask.ga_note_origin_id)
+    const isNoteOriginTask = Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)
     const nextTitle = taskTitle.trim()
-    if (!isGaOriginTask && nextTitle.length < 2) {
+    if (!isNoteOriginTask && nextTitle.length < 2) {
       toast.error("Title must be at least 2 characters.")
       return
     }
@@ -516,15 +517,15 @@ export default function OpenTasksPage() {
       toast.error("Start date cannot be after due date.")
       return
     }
-    if (!isGaOriginTask && taskStatus === "WAITING_CONFIRMATION" && !selectedTask.confirmation_assignee_id) {
+    if (!isNoteOriginTask && taskStatus === "WAITING_CONFIRMATION" && !selectedTask.confirmation_assignee_id) {
       toast.error("This task needs a confirmation assignee before it can use Waiting Confirmation.")
       return
     }
     setSaving(true)
     try {
-      const updatePayload = isGaOriginTask
+      const updatePayload = isNoteOriginTask
         ? {
-            // Shared GA task definition and membership are controlled from GA Notes.
+            // Shared note definition and membership are controlled from GA Notes / PX JAV.
             // Execution status and scheduling belong to this person's copy.
             status: taskStatus,
             start_date: startDate ? new Date(startDate).toISOString() : null,
@@ -801,16 +802,18 @@ export default function OpenTasksPage() {
           </DialogHeader>
           {selectedTask ? (
             <div className="space-y-4">
-              {selectedTask.ga_note_origin_id ? (
+              {selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id ? (
                 <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                  This is your independent GA task copy. Edit its status and scheduling here; shared details and assignees are managed in GA Notes.
+                  {selectedTask.plan_note_origin_id
+                    ? "This is your independent PX JAV task copy. Edit its status and scheduling here; source details come from PX JAV and assignees are fixed from creation."
+                    : "This is your independent GA task copy. Edit its status and scheduling here; shared details and assignees are managed in GA Notes."}
                 </div>
               ) : null}
               <div className="space-y-2">
                 <Label>Title</Label>
                 <Textarea
                   value={taskTitle}
-                  disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
+                  disabled={saving || Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)}
                   onChange={(event) => setTaskTitle(event.target.value)}
                   className="min-h-[72px]"
                 />
@@ -819,7 +822,7 @@ export default function OpenTasksPage() {
                 <Label>Description</Label>
                 <Textarea
                   value={taskDescription}
-                  disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
+                  disabled={saving || Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)}
                   onChange={(event) => setTaskDescription(event.target.value)}
                   className="min-h-[72px]"
                 />
@@ -842,7 +845,7 @@ export default function OpenTasksPage() {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       {TASK_STATUS_OPTIONS.filter((option) =>
-                        !selectedTask.ga_note_origin_id || ["TODO", "IN_PROGRESS", "DONE"].includes(option.value)
+                        !(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id) || ["TODO", "IN_PROGRESS", "DONE"].includes(option.value)
                       ).map((option) => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}
@@ -885,7 +888,7 @@ export default function OpenTasksPage() {
                   <Label>Department</Label>
                   <Select
                     value={taskDepartmentId}
-                    disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
+                    disabled={saving || Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)}
                     onValueChange={(value) => {
                       setTaskDepartmentId(value)
                       setTaskProjectId(PROJECT_NONE_VALUE)
@@ -906,7 +909,7 @@ export default function OpenTasksPage() {
                   <Label>Project</Label>
                   <Select
                     value={taskProjectId}
-                    disabled={saving || Boolean(selectedTask.ga_note_origin_id)}
+                    disabled={saving || Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)}
                     onValueChange={(value) => {
                       setTaskProjectId(value)
                       const project = projects.find((item) => item.id === value)
@@ -930,13 +933,13 @@ export default function OpenTasksPage() {
                     {assigneeIds.length ? assigneeIds.map((id) => {
                       const person = userById.get(id)
                       return (
-                        <button key={id} type="button" disabled={saving || Boolean(selectedTask.ga_note_origin_id)} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs" onClick={() => setAssigneeIds((prev) => prev.filter((item) => item !== id))}>
+                        <button key={id} type="button" disabled={saving || Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id)} className="rounded-full bg-slate-100 px-2 py-0.5 text-xs" onClick={() => setAssigneeIds((prev) => prev.filter((item) => item !== id))}>
                           {person?.full_name || person?.username || id} <span className="text-slate-500">x</span>
                         </button>
                       )
                     }) : <span className="text-xs text-slate-500">No assignees selected.</span>}
                   </div>
-                  <Select value="__picker__" disabled={saving || Boolean(selectedTask.ga_note_origin_id) || dialogAssigneeOptions.length === 0} onValueChange={(value) => {
+                  <Select value="__picker__" disabled={saving || Boolean(selectedTask.ga_note_origin_id || selectedTask.plan_note_origin_id) || dialogAssigneeOptions.length === 0} onValueChange={(value) => {
                     if (value === "__picker__") return
                     setAssigneeIds((prev) => (prev.includes(value) ? prev : [...prev, value]))
                     const person = users.find((item) => item.id === value)

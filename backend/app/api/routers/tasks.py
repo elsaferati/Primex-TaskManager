@@ -805,6 +805,44 @@ async def _clear_ga_note_conversion_if_no_active_tasks(
     )
 
 
+async def _clear_plan_note_conversion_if_no_active_tasks(
+    db: AsyncSession,
+    *,
+    note_id: uuid.UUID | None,
+    deleting_task_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None = None,
+) -> None:
+    if note_id is None:
+        return
+
+    remaining_active_count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Task)
+            .where(Task.plan_note_origin_id == note_id)
+            .where(Task.id != deleting_task_id)
+            .where(Task.is_active.is_(True))
+        )
+    ).scalar_one()
+    if remaining_active_count > 0:
+        return
+
+    note = (await db.execute(select(PlanNote).where(PlanNote.id == note_id))).scalar_one_or_none()
+    if note is None or not note.is_converted_to_task:
+        return
+
+    note.is_converted_to_task = False
+    add_audit_log(
+        db=db,
+        actor_user_id=actor_user_id,
+        entity_type="plan_note",
+        entity_id=note.id,
+        action="task_conversion_cleared",
+        before={"is_converted_to_task": True},
+        after={"is_converted_to_task": False},
+    )
+
+
 @router.get("", response_model=list[TaskOut])
 async def list_tasks(
     department_id: uuid.UUID | None = None,
@@ -1214,7 +1252,11 @@ async def create_task(
 
     if payload.plan_note_origin_id is not None:
         plan_note = (
-            await db.execute(select(PlanNote).where(PlanNote.id == payload.plan_note_origin_id))
+            await db.execute(
+                select(PlanNote)
+                .where(PlanNote.id == payload.plan_note_origin_id)
+                .with_for_update()
+            )
         ).scalar_one_or_none()
         if plan_note is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan note not found")
@@ -1246,6 +1288,31 @@ async def create_task(
                         )
         if plan_note.project_id is not None and plan_note.project_id != payload.project_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Plan note project mismatch")
+        existing_plan_note_task = (
+            await db.execute(
+                select(Task)
+                .where(Task.plan_note_origin_id == payload.plan_note_origin_id)
+                .where(Task.is_active.is_(True))
+                .order_by(Task.created_at.asc(), Task.id.asc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if existing_plan_note_task is not None:
+            if not plan_note.is_converted_to_task:
+                plan_note.is_converted_to_task = True
+                await db.commit()
+                await db.refresh(existing_plan_note_task)
+
+            assignee_map = await _assignees_for_tasks(db, [existing_plan_note_task.id])
+            dto = _task_to_out(existing_plan_note_task, assignee_map.get(existing_plan_note_task.id, []))
+            rows = (
+                await db.execute(
+                    select(TaskAlignmentUser.user_id).where(TaskAlignmentUser.task_id == existing_plan_note_task.id)
+                )
+            ).scalars().all()
+            dto.alignment_user_ids = list(rows) if rows else None
+            return dto
+        plan_note.is_converted_to_task = True
 
     assignee_ids: list[uuid.UUID] | None = None
     assignee_users: list[User] = []
@@ -1262,10 +1329,10 @@ async def create_task(
     elif payload.assigned_to is not None:
         assignee_ids = [payload.assigned_to]
 
-    if payload.ga_note_origin_id is not None and not assignee_ids:
+    if (payload.ga_note_origin_id is not None or payload.plan_note_origin_id is not None) and not assignee_ids:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Select at least one assignee for a GA task",
+            detail="Select at least one assignee for a note task",
         )
 
     if assignee_ids is not None:
@@ -1334,7 +1401,11 @@ async def create_task(
     # GA-origin tasks always use one independent row per assignee. Development
     # project tasks already use the same storage model.
     if project is not None and assignee_ids is not None and len(assignee_ids) > 1:
-        if is_development_project or payload.ga_note_origin_id is not None:
+        if (
+            is_development_project
+            or payload.ga_note_origin_id is not None
+            or payload.plan_note_origin_id is not None
+        ):
             created_tasks: list[Task] = []
             created_notifications: list[Notification] = []
 
@@ -1968,13 +2039,13 @@ async def update_task(
             task.status = normalized_status
 
     if (
-        task.ga_note_origin_id is not None
+        (task.ga_note_origin_id is not None or task.plan_note_origin_id is not None)
         and payload.status is not None
         and payload.status.value not in _GA_NOTE_VALID_STATUSES
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="GA task status must be TODO, IN_PROGRESS, or DONE",
+            detail="Note task status must be TODO, IN_PROGRESS, or DONE",
         )
 
     # Prevent DB constraint failures when updating legacy/system tasks.
@@ -2114,21 +2185,21 @@ async def update_task(
                 raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
         task.confirmation_assignee_id = payload.confirmation_assignee_id
 
-    if task.ga_note_origin_id is not None and (
+    if (task.ga_note_origin_id is not None or task.plan_note_origin_id is not None) and (
         payload.assignees is not None or _payload_has_field(payload, "assigned_to")
     ):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Change GA task membership from GA Notes",
+            detail="Change note task membership from its source note",
         )
 
-    if task.ga_note_origin_id is not None:
+    if task.ga_note_origin_id is not None or task.plan_note_origin_id is not None:
         payload_fields = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
         shared_fields = sorted(_GA_NOTE_SHARED_TASK_FIELDS.intersection(payload_fields))
         if shared_fields:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST,
-                detail="Change shared GA task fields from GA Notes: " + ", ".join(shared_fields),
+                detail="Change shared note task fields from its source note: " + ", ".join(shared_fields),
             )
 
     if payload.assignees is not None:
@@ -2656,6 +2727,22 @@ async def update_task(
 
     await ensure_ko_user_is_task_assignee(db, task=task)
 
+    # Keep the source-note conversion flag consistent whenever an active note
+    # task is edited. This also repairs older rows whose flag was cleared while
+    # the linked task remained active.
+    if task.is_active and task.ga_note_origin_id is not None:
+        source_note = (
+            await db.execute(select(GaNote).where(GaNote.id == task.ga_note_origin_id))
+        ).scalar_one_or_none()
+        if source_note is not None:
+            source_note.is_converted_to_task = True
+    if task.is_active and task.plan_note_origin_id is not None:
+        source_plan_note = (
+            await db.execute(select(PlanNote).where(PlanNote.id == task.plan_note_origin_id))
+        ).scalar_one_or_none()
+        if source_plan_note is not None:
+            source_plan_note.is_converted_to_task = True
+
     after = {
         "title": task.title,
         "description": task.description,
@@ -2958,6 +3045,12 @@ async def delete_task(
             deleting_task_id=task.id,
             actor_user_id=user.id,
         )
+        await _clear_plan_note_conversion_if_no_active_tasks(
+            db,
+            note_id=task.plan_note_origin_id,
+            deleting_task_id=task.id,
+            actor_user_id=user.id,
+        )
         await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
         await db.execute(delete(TaskAlignmentUser).where(TaskAlignmentUser.task_id == task.id))
         await db.execute(delete(TaskUserComment).where(TaskUserComment.task_id == task.id))
@@ -2972,6 +3065,12 @@ async def delete_task(
     await _clear_ga_note_conversion_if_no_active_tasks(
         db,
         note_id=task.ga_note_origin_id,
+        deleting_task_id=task.id,
+        actor_user_id=user.id,
+    )
+    await _clear_plan_note_conversion_if_no_active_tasks(
+        db,
+        note_id=task.plan_note_origin_id,
         deleting_task_id=task.id,
         actor_user_id=user.id,
     )

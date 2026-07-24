@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 import uuid
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
@@ -15,7 +15,7 @@ from app.api.access import ensure_department_access, ensure_task_editor
 from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
-from app.models.enums import GaNoteStatus, GaNoteType, TaskStatus, UserRole
+from app.models.enums import GaNoteStatus, GaNoteType, NotificationType, TaskStatus, UserRole
 from app.models.plan_note import PlanNote
 from app.models.plan_note_attachment import PlanNoteAttachment
 from app.models.project import Project
@@ -24,10 +24,19 @@ from app.schemas.plan_note import (
     PlanNoteAttachmentOut,
     PlanNoteCreate,
     PlanNoteOut,
+    PlanNoteTaskBundleResponse,
+    PlanNoteTaskBundleUpdate,
     PlanNoteTaskDeadlineUpdate,
     PlanNoteUpdate,
 )
 from app.services.audit import add_audit_log
+from app.services.ga_note_task_instances import (
+    GaNoteAssigneeExecutionState,
+    apply_ga_note_assignee_execution_states,
+    apply_ga_note_shared_task_fields,
+    reconcile_plan_note_task_assignees,
+)
+from app.services.notifications import add_notification, publish_notification
 
 router = APIRouter()
 
@@ -323,6 +332,169 @@ async def update_plan_note(
     await db.commit()
     await db.refresh(note)
     return _note_out(note)
+
+
+def _same_timestamp(left: datetime, right: datetime) -> bool:
+    def as_utc(value: datetime) -> datetime:
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
+
+    return abs((as_utc(left) - as_utc(right)).total_seconds()) < 0.001
+
+
+@router.patch("/{note_id}/task-bundle", response_model=PlanNoteTaskBundleResponse)
+async def update_plan_note_task_bundle(
+    note_id: uuid.UUID,
+    payload: PlanNoteTaskBundleUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> PlanNoteTaskBundleResponse:
+    """Atomically edit a PX JAV note and all independent assignee task copies."""
+
+    note = (
+        await db.execute(
+            select(PlanNote)
+            .options(selectinload(PlanNote.attachments))
+            .where(PlanNote.id == note_id)
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if note is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Plan note not found")
+    await _ensure_note_access(note, user, db)
+
+    if (
+        payload.expected_updated_at is not None
+        and note.updated_at is not None
+        and not _same_timestamp(payload.expected_updated_at, note.updated_at)
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="This PX JAV note was changed by another user. Reload it before saving.",
+        )
+
+    fields_set = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
+    old_content = note.content
+    if "content" in fields_set:
+        cleaned_content = (payload.content or "").strip()
+        if not cleaned_content:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Note text cannot be empty")
+        note.content = cleaned_content
+
+    if payload.assignee_ids is not None:
+        if not payload.assignee_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A converted PX JAV note must keep at least one task assignee",
+            )
+        try:
+            reconcile_result = await reconcile_plan_note_task_assignees(
+                db,
+                note=note,
+                desired_assignee_ids=payload.assignee_ids,
+                actor_user_id=user.id,
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+        active_tasks = reconcile_result.active_tasks
+    else:
+        active_tasks = (
+            await db.execute(
+                select(Task)
+                .where(Task.plan_note_origin_id == note.id, Task.is_active.is_(True))
+                .order_by(Task.created_at.asc(), Task.id.asc())
+                .with_for_update()
+            )
+        ).scalars().all()
+        for task in active_tasks:
+            task.fast_task_group_id = None
+        reconcile_result = None
+
+    description_is_set = "description" in fields_set
+    updated_count = apply_ga_note_shared_task_fields(
+        active_tasks,
+        title=_plan_note_task_title(note.content) if "content" in fields_set else None,
+        description_is_set=description_is_set,
+        description=payload.description,
+    )
+
+    if payload.assignee_states is not None:
+        try:
+            updated_count += apply_ga_note_assignee_execution_states(
+                active_tasks,
+                [
+                    GaNoteAssigneeExecutionState(
+                        assignee_id=item.assignee_id,
+                        status=item.status,
+                        start_date=item.start_date,
+                        due_date=item.due_date,
+                        finish_period=item.finish_period,
+                        is_deadline_important=item.is_deadline_important,
+                        priority=item.priority,
+                        is_bllok=item.is_bllok,
+                        is_1h_report=item.is_1h_report,
+                        is_r1=item.is_r1,
+                        is_personal=item.is_personal,
+                    )
+                    for item in payload.assignee_states
+                ],
+            )
+        except ValueError as exc:
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    if "content" in fields_set and not description_is_set:
+        old_default = _plan_note_default_task_description(old_content)
+        new_default = _plan_note_default_task_description(note.content)
+        for task in active_tasks:
+            if task.description == old_default and task.description != new_default:
+                task.description = new_default
+                updated_count += 1
+
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="plan_note",
+        entity_id=note.id,
+        action="task_bundle_updated",
+        before={"content": old_content},
+        after={
+            "content": note.content,
+            "assignees": [str(task.assigned_to) for task in active_tasks if task.assigned_to],
+        },
+    )
+
+    created_notifications = []
+    if reconcile_result is not None:
+        for created_task in reconcile_result.created_tasks:
+            if created_task.assigned_to is not None:
+                created_notifications.append(
+                    add_notification(
+                        db=db,
+                        user_id=created_task.assigned_to,
+                        type=NotificationType.assignment,
+                        title="Task assigned",
+                        body=created_task.title,
+                        data={"task_id": str(created_task.id)},
+                    )
+                )
+
+    await db.commit()
+    for notification in created_notifications:
+        try:
+            await publish_notification(user_id=notification.user_id, notification=notification)
+        except Exception:
+            pass
+    await db.refresh(note)
+    return PlanNoteTaskBundleResponse(
+        note=_note_out(note),
+        active_task_ids=[task.id for task in active_tasks],
+        assignee_ids=[task.assigned_to for task in active_tasks if task.assigned_to is not None],
+        created_count=reconcile_result.created_count if reconcile_result else 0,
+        deactivated_count=reconcile_result.deactivated_count if reconcile_result else 0,
+        deduplicated_count=reconcile_result.deduplicated_count if reconcile_result else 0,
+        updated_count=updated_count,
+    )
 
 
 @router.patch("/{note_id}/task-deadline", response_model=PlanNoteTaskDeadlineResponse)

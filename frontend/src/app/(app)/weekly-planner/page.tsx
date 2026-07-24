@@ -67,6 +67,7 @@ type WeeklyTableProjectTaskEntry = {
   is_personal: boolean
   is_deadline_important?: boolean
   ga_note_origin_id: string | null
+  plan_note_origin_id?: string | null
 }
 
 type WeeklyTableProjectEntry = {
@@ -96,6 +97,7 @@ type WeeklyTableTaskEntry = {
   is_personal: boolean
   is_deadline_important?: boolean
   ga_note_origin_id: string | null
+  plan_note_origin_id?: string | null
 }
 
 type WeeklyTableUserDay = {
@@ -1160,6 +1162,7 @@ export default function WeeklyPlannerPage() {
 
   const taskSourceLabel = React.useCallback(
     (task: Task) => {
+      if (task.ga_note_origin_id || task.plan_note_origin_id) return "GA/KA"
       if (task.system_template_origin_id) return "System"
       if (task.project_id) return "Project"
       if (task.is_bllok) return "BLL"
@@ -1178,7 +1181,7 @@ export default function WeeklyPlannerPage() {
     const query = planningSearch.trim().toLowerCase()
     return planningTasks.filter((task) => {
       const planned = isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)
-      const isGa = Boolean(task.ga_note_origin_id)
+      const isGa = Boolean(task.ga_note_origin_id || task.plan_note_origin_id)
       const isFast = isFastPlannerTask(task)
       const ids = taskAssigneeIds(task)
 
@@ -1223,15 +1226,15 @@ export default function WeeklyPlannerPage() {
   ])
 
   const gaPlanningTasks = React.useMemo(
-    () => filteredPlanningTasks.filter((task) => task.ga_note_origin_id),
+    () => filteredPlanningTasks.filter((task) => task.ga_note_origin_id || task.plan_note_origin_id),
     [filteredPlanningTasks]
   )
   const plannedNextWeekTasks = React.useMemo(
-    () => filteredPlanningTasks.filter((task) => !task.ga_note_origin_id && isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)),
+    () => filteredPlanningTasks.filter((task) => !(task.ga_note_origin_id || task.plan_note_origin_id) && isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)),
     [filteredPlanningTasks, plannerWeekEnd, plannerWeekStart]
   )
   const openBacklogTasks = React.useMemo(
-    () => filteredPlanningTasks.filter((task) => !task.ga_note_origin_id && !isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)),
+    () => filteredPlanningTasks.filter((task) => !(task.ga_note_origin_id || task.plan_note_origin_id) && !isTaskPlannedForWeek(task, plannerWeekStart, plannerWeekEnd)),
     [filteredPlanningTasks, plannerWeekEnd, plannerWeekStart]
   )
 
@@ -1272,7 +1275,7 @@ export default function WeeklyPlannerPage() {
           start_date: plannerTaskStartDate ? new Date(plannerTaskStartDate).toISOString() : null,
           due_date: new Date(plannerTaskDueDate).toISOString(),
           finish_period: plannerTaskFinishPeriod === "__none__" ? null : plannerTaskFinishPeriod,
-          ...(plannerTask.ga_note_origin_id
+          ...(plannerTask.ga_note_origin_id || plannerTask.plan_note_origin_id
             ? {}
             : {
                 assigned_to: plannerTaskAssigneeIds[0] ?? null,
@@ -1684,6 +1687,7 @@ export default function WeeklyPlannerPage() {
     is_r1?: boolean
     is_personal?: boolean
     ga_note_origin_id?: string | null
+    plan_note_origin_id?: string | null
     fast_task_type?: string | null
     is_deadline_important?: boolean
     status?: string | null
@@ -1706,6 +1710,12 @@ export default function WeeklyPlannerPage() {
     }
     if (task.is_personal) {
       return { label: "P:", className: "border-emerald-200 bg-emerald-50 text-emerald-700" }
+    }
+    if (task.plan_note_origin_id) {
+      return { label: "PX JAV", className: "border-indigo-200 bg-indigo-50 text-indigo-700" }
+    }
+    if (task.ga_note_origin_id) {
+      return { label: "GA", className: "border-blue-200 bg-blue-50 text-blue-700" }
     }
     return { label: "N", className: "border-slate-200 bg-slate-50 text-slate-700" }
   }, [getStatusValueForDay])
@@ -1739,9 +1749,9 @@ export default function WeeklyPlannerPage() {
   }, [])
 
   const getPlannerTaskDisplayTitle = React.useCallback(
-    (task: { ga_note_origin_id?: string | null; title?: string | null; task_title?: string | null }) => {
+    (task: { ga_note_origin_id?: string | null; plan_note_origin_id?: string | null; title?: string | null; task_title?: string | null }) => {
       const rawTitle = task.task_title ?? task.title ?? ""
-      const cleanedTitle = task.ga_note_origin_id
+      const cleanedTitle = task.ga_note_origin_id || task.plan_note_origin_id
         ? rawTitle
         .replace(/\[\[added\]\]/gi, "")
         .replace(/\[\[\/added\]\]/gi, "")
@@ -1769,6 +1779,7 @@ export default function WeeklyPlannerPage() {
     is_r1?: boolean
     is_personal?: boolean
     ga_note_origin_id?: string | null
+    plan_note_origin_id?: string | null
     fast_task_type?: string | null
     is_deadline_important?: boolean
     status?: string | null
@@ -1801,6 +1812,7 @@ export default function WeeklyPlannerPage() {
     is_r1?: boolean
     is_personal?: boolean
     ga_note_origin_id?: string | null
+    plan_note_origin_id?: string | null
     fast_task_type?: string | null
   }) => {
     const badge = getFastTaskBadge(task)
@@ -2653,6 +2665,7 @@ export default function WeeklyPlannerPage() {
       if (label === "R1") return "badge-r1"
       if (label === "1H") return "badge-1h"
       if (label === "GA") return "badge-ga"
+      if (label === "PX JAV") return "badge-ga"
       if (label === "P:") return "badge-p"
       if (label === "N") return "badge-n"
       if (label === "DL") return "badge-dl"
@@ -3617,6 +3630,11 @@ export default function WeeklyPlannerPage() {
               <span className="rounded-full border border-slate-200 bg-slate-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-slate-700">
                 {source}
               </span>
+              {task.plan_note_origin_id ? (
+                <span className="rounded-full border border-indigo-200 bg-indigo-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-indigo-700">
+                  PX JAV
+                </span>
+              ) : null}
               {planned ? (
                 <span className="rounded-full border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-[10px] font-semibold uppercase text-emerald-700">
                   Planned
@@ -3664,9 +3682,9 @@ export default function WeeklyPlannerPage() {
               {plannerTaskClearingId === task.id ? "Removing..." : "Remove from plan"}
             </Button>
           ) : null}
-          {task.ga_note_origin_id ? (
+          {task.ga_note_origin_id || task.plan_note_origin_id ? (
             <Button asChild size="sm" variant="outline" className="h-7 px-2 text-xs">
-              <Link href={`/ga-ka-notes${task.department_id ? `?department_id=${task.department_id}` : ""}`}>
+              <Link href={task.plan_note_origin_id ? "/next-week-plan" : `/ga-ka-notes${task.department_id ? `?department_id=${task.department_id}` : ""}`}>
                 Open source note
               </Link>
             </Button>
@@ -4322,9 +4340,11 @@ export default function WeeklyPlannerPage() {
                 <div className="line-clamp-2 text-sm font-semibold text-slate-900">{plannerTask.title}</div>
               </div>
             ) : null}
-            {plannerTask?.ga_note_origin_id ? (
+            {plannerTask?.ga_note_origin_id || plannerTask?.plan_note_origin_id ? (
               <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                You are planning this person&apos;s independent GA copy. Membership is managed in GA Notes.
+                {plannerTask.plan_note_origin_id
+                  ? "You are planning this person’s independent PX JAV task copy. Assignees are fixed from creation."
+                  : "You are planning this person’s independent GA task copy. Membership is managed in GA Notes."}
               </div>
             ) : null}
 
@@ -4364,7 +4384,7 @@ export default function WeeklyPlannerPage() {
               </Select>
             </div>
 
-            {!plannerTask?.ga_note_origin_id ? <div className="space-y-2">
+            {!(plannerTask?.ga_note_origin_id || plannerTask?.plan_note_origin_id) ? <div className="space-y-2">
               <Label>Members</Label>
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>

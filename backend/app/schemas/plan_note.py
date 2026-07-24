@@ -5,7 +5,14 @@ from datetime import date, datetime
 
 from pydantic import BaseModel
 
-from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType
+from app.models.enums import (
+    GaNotePriority,
+    GaNoteStatus,
+    GaNoteType,
+    TaskFinishPeriod,
+    TaskPriority,
+    TaskStatus,
+)
 
 
 class PlanNoteAttachmentOut(BaseModel):
@@ -74,3 +81,35 @@ class PlanNoteTaskDeadlineUpdate(BaseModel):
     due_date: datetime | None = None
     is_deadline_important: bool | None = None
     clear: bool = False
+
+
+class PlanNoteTaskAssigneeStateUpdate(BaseModel):
+    assignee_id: uuid.UUID
+    status: TaskStatus
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    finish_period: TaskFinishPeriod | None = None
+    is_deadline_important: bool = False
+    priority: TaskPriority = TaskPriority.NORMAL
+    is_bllok: bool = False
+    is_1h_report: bool = False
+    is_r1: bool = False
+    is_personal: bool = False
+
+
+class PlanNoteTaskBundleUpdate(BaseModel):
+    content: str | None = None
+    description: str | None = None
+    assignee_ids: list[uuid.UUID] | None = None
+    assignee_states: list[PlanNoteTaskAssigneeStateUpdate] | None = None
+    expected_updated_at: datetime | None = None
+
+
+class PlanNoteTaskBundleResponse(BaseModel):
+    note: PlanNoteOut
+    active_task_ids: list[uuid.UUID]
+    assignee_ids: list[uuid.UUID]
+    created_count: int = 0
+    deactivated_count: int = 0
+    deduplicated_count: int = 0
+    updated_count: int = 0

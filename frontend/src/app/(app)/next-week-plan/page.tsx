@@ -1818,6 +1818,10 @@ export default function NextWeekPlanPage() {
       toast.error("Task title is required")
       return
     }
+    if (taskAssigneeIds.length === 0) {
+      toast.error("Select at least one assignee before creating a task")
+      return
+    }
     const effectiveDepartments =
       taskDepartmentIds.length > 0
         ? taskDepartmentIds
@@ -3728,7 +3732,7 @@ export default function NextWeekPlanPage() {
                 <Button variant="outline" onClick={() => setTaskDialogNoteId(null)}>
                   Cancel
                 </Button>
-                <Button disabled={creatingTask} onClick={() => void createTaskFromNote(taskDialogNote)}>
+                <Button disabled={creatingTask || taskAssigneeIds.length === 0} onClick={() => void createTaskFromNote(taskDialogNote)}>
                   {creatingTask ? "Creating..." : "Create task"}
                 </Button>
               </div>

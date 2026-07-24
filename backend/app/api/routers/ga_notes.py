@@ -368,6 +368,11 @@ async def update_ga_note_task_bundle(
         note.content = cleaned_content
 
     if payload.assignee_ids is not None:
+        if not payload.assignee_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="A converted GA note must keep at least one task assignee",
+            )
         try:
             reconcile_result = await reconcile_ga_note_task_assignees(
                 db,

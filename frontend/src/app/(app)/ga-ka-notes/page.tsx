@@ -24,7 +24,7 @@ import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
-import type { Department, GaNote, GaNoteAttachment, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -78,6 +78,7 @@ type TextMarkRange = { start: number; end: number }
 type DoneMarkRange = TextMarkRange
 type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "DONE"
 type GaAssigneeTaskType = "NORMAL" | "HIGH" | "1H" | "R1" | "PERSONAL" | "BLLOK"
+type GaNotesTableNote = GaNote & { source?: "GA_KA" | "PX_JAV" }
 type GaAssigneeTaskState = {
   taskId: string | null
   type: GaAssigneeTaskType
@@ -796,7 +797,7 @@ export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
   const confirm = useConfirm()
   const searchParams = useSearchParams()
-  const [notes, setNotes] = React.useState<GaNote[]>([])
+  const [notes, setNotes] = React.useState<GaNotesTableNote[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
@@ -967,19 +968,34 @@ export default function GaKaNotesPage() {
     if (!user) return
     setLoading(true)
     try {
-      let url = "/ga-notes"
+      let gaUrl = "/ga-notes"
+      let planUrl = "/plan-notes"
       const params = new URLSearchParams()
       if (projectId !== "NONE") {
         params.set("project_id", projectId)
       } else if (departmentId !== "ALL") {
         params.set("department_id", departmentId)
       }
-      url += params.toString() ? `?${params}` : ""
-      const res = await apiFetch(url)
-      if (res?.ok) {
-        setNotes((await res.json()) as GaNote[])
+      const query = params.toString() ? `?${params}` : ""
+      gaUrl += query
+      planUrl += query
+      const [gaRes, planRes] = await Promise.all([apiFetch(gaUrl), apiFetch(planUrl)])
+      if (gaRes?.ok && planRes?.ok) {
+        const gaNotes = (await gaRes.json()) as GaNote[]
+        const planNotes = (await planRes.json()) as PlanNote[]
+        const combined: GaNotesTableNote[] = [
+          ...gaNotes.map((note) => ({ ...note, source: "GA_KA" as const })),
+          ...planNotes
+            .filter((note) => note.is_converted_to_task)
+            .map((note) => ({
+              ...note,
+              source: "PX_JAV" as const,
+              attachments: [],
+            })),
+        ]
+        setNotes(combined)
       } else {
-        toast.error("Could not load GA/KA notes")
+        toast.error("Could not load GA/KA and PX JAV notes")
       }
     } finally {
       setLoading(false)
@@ -1015,25 +1031,45 @@ export default function GaKaNotesPage() {
   }, [fetchNotes])
 
   const loadNoteTasks = React.useCallback(async (noteIdsOverride?: string[]) => {
-    const noteIds = noteIdsOverride ?? notes.map((note) => note.id).filter(Boolean)
+    const selectedNotes = noteIdsOverride
+      ? notes.filter((note) => noteIdsOverride.includes(note.id))
+      : notes
+    const gaNoteIds = selectedNotes.filter((note) => note.source !== "PX_JAV").map((note) => note.id)
+    const planNoteIds = selectedNotes.filter((note) => note.source === "PX_JAV").map((note) => note.id)
+    const noteIds = [...gaNoteIds, ...planNoteIds]
     if (!noteIds.length) {
       if (!noteIdsOverride) {
         setNoteTaskInfo(new Map())
       }
       return
     }
-    const res = await apiFetch("/tasks/by-ga-notes", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        ga_note_origin_ids: noteIds,
-        include_done: true,
-        include_all_done: true,
-      }),
-    })
-    if (!res?.ok) return
-
-    const data = (await res.json()) as Task[]
+    const taskRequests: Promise<Response>[] = []
+    if (gaNoteIds.length) {
+      taskRequests.push(
+        apiFetch("/tasks/by-ga-notes", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ga_note_origin_ids: gaNoteIds,
+            include_done: true,
+            include_all_done: true,
+          }),
+        })
+      )
+    }
+    if (planNoteIds.length) {
+      const planParams = new URLSearchParams({
+        include_done: "true",
+        include_all_departments: "true",
+      })
+      planNoteIds.forEach((id) => planParams.append("plan_note_origin_ids", id))
+      taskRequests.push(apiFetch(`/tasks?${planParams.toString()}`))
+    }
+    const taskResponses = await Promise.all(taskRequests)
+    if (taskResponses.some((response) => !response.ok)) return
+    const data = (
+      await Promise.all(taskResponses.map(async (response) => (await response.json()) as Task[]))
+    ).flat()
 
     const map = new Map<string, NoteTaskInfo>()
     const userMapById = new Map(users.map((person) => [person.id, person]))
@@ -1056,7 +1092,8 @@ export default function GaKaNotesPage() {
       return result
     }
     for (const t of data) {
-      if (!t.ga_note_origin_id) continue
+      const sourceNoteId = t.ga_note_origin_id || t.plan_note_origin_id
+      if (!sourceNoteId) continue
       let assignees: TaskAssignee[] = []
       if (t.assigned_to) {
         const explicitOwner = t.assignees?.find((assignee) => assignee.id === t.assigned_to)
@@ -1071,7 +1108,7 @@ export default function GaKaNotesPage() {
               department_id: owner?.department_id ?? null,
             }]
       }
-      const existing = map.get(t.ga_note_origin_id)
+      const existing = map.get(sourceNoteId)
       const normalizedStatus = normalizeTaskStatus(t.status)
       const assigneeState: Record<string, GaAssigneeTaskState> = t.assigned_to
         ? {
@@ -1086,7 +1123,7 @@ export default function GaKaNotesPage() {
             },
           }
         : {}
-      map.set(t.ga_note_origin_id, {
+      map.set(sourceNoteId, {
         assignees: mergeAssignees(existing?.assignees ?? [], assignees),
         description: existing?.description ?? t.description ?? null,
         taskId: existing?.taskId ?? t.id,
@@ -1623,7 +1660,8 @@ export default function GaKaNotesPage() {
 
     setMarkingSelectedNoteId(note.id)
     try {
-      const res = await apiFetch(`/ga-notes/${note.id}`, {
+      const source = notes.find((item) => item.id === note.id)?.source
+      const res = await apiFetch(`/${source === "PX_JAV" ? "plan-notes" : "ga-notes"}/${note.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -1635,7 +1673,9 @@ export default function GaKaNotesPage() {
         return
       }
       const updated = (await res.json()) as GaNote
-      setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)))
+      setNotes((prev) =>
+        prev.map((n) => (n.id === updated.id ? { ...updated, source: n.source } : n))
+      )
     } catch (error) {
       console.error("Failed to mark selected note text done:", error)
       toast.error("Failed to mark selected text done")
@@ -1664,9 +1704,14 @@ export default function GaKaNotesPage() {
       const serializedContent = serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim()
       const taskInfo = noteTaskInfo.get(editNoteId)
       const currentNote = notes.find((note) => note.id === editNoteId) || null
+      if (taskInfo?.taskId && editTaskAssigneeIds.length === 0) {
+        toast.error("A task must keep at least one assignee")
+        return
+      }
+      const noteBasePath = currentNote?.source === "PX_JAV" ? "plan-notes" : "ga-notes"
       const endpoint = taskInfo?.taskId
-        ? `/ga-notes/${editNoteId}/task-bundle`
-        : `/ga-notes/${editNoteId}`
+        ? `/${noteBasePath}/${editNoteId}/task-bundle`
+        : `/${noteBasePath}/${editNoteId}`
       const body = taskInfo?.taskId
         ? {
             content: serializedContent,
@@ -1700,7 +1745,9 @@ export default function GaKaNotesPage() {
       if (res?.ok) {
         const payload = (await res.json()) as GaNote | { note: GaNote }
         const updated = "note" in payload ? payload.note : payload
-        setNotes((prev) => prev.map((n) => (n.id === updated.id ? updated : n)))
+        setNotes((prev) =>
+          prev.map((n) => (n.id === updated.id ? { ...updated, source: n.source } : n))
+        )
         if (taskInfo?.taskId) {
           await loadNoteTasks([editNoteId])
         }
@@ -1913,14 +1960,17 @@ export default function GaKaNotesPage() {
   }
 
   const markNoteDiscussed = async (id: string) => {
-    const res = await apiFetch(`/ga-notes/${id}`, {
+    const source = notes.find((note) => note.id === id)?.source
+    const res = await apiFetch(`/${source === "PX_JAV" ? "plan-notes" : "ga-notes"}/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ is_discussed: true }),
     })
     if (res?.ok) {
       const updated = (await res.json()) as GaNote
-      setNotes((prev) => prev.map((n) => (n.id === id ? updated : n)))
+      setNotes((prev) =>
+        prev.map((n) => (n.id === id ? { ...updated, source: n.source } : n))
+      )
     } else {
       toast.error("Failed to mark note discussed")
     }
@@ -2839,6 +2889,7 @@ export default function GaKaNotesPage() {
                   </thead>
                   <tbody>
                   {visibleNotes.map((note, idx) => {
+                    const isPxJavNote = note.source === "PX_JAV"
                     const creator = note.created_by ? userMap.get(note.created_by) : null
                     const creatorLabel =
                       creator?.full_name || creator?.username || "Unknown user"
@@ -2870,7 +2921,7 @@ export default function GaKaNotesPage() {
                     const isDevLinked = isDevProject || isDevNote
                     const hasProject = Boolean(projectId)
                     const assignees = taskInfo?.assignees ?? []
-                    const attachments = note.attachments ?? []
+                    const attachments = isPxJavNote ? [] : (note.attachments ?? [])
                     const isClosed =
                       note.status === "CLOSED" ||
                       (note as { isClosed?: boolean }).isClosed === true ||
@@ -2888,12 +2939,12 @@ export default function GaKaNotesPage() {
                         : normalizeTaskStatus(taskInfo?.taskStatus)
                     const hasTask = Boolean(note.is_converted_to_task || taskInfo?.taskId)
                     const taskTypeLabels = taskInfo?.taskTypeLabels ?? []
-                    const canAddAttachments = !isClosed && aggregatedStatus !== "DONE"
+                    const canAddAttachments = !isPxJavNote && !isClosed && aggregatedStatus !== "DONE"
                     const editDisabled = isClosed
                     const editDisabledTitle = isClosed
                       ? "Edit disabled when note is closed"
                       : "Edit"
-                    const canCreateTask = !isClosed && (!hasProject || isDevLinked)
+                    const canCreateTask = !isPxJavNote && !isClosed && (!hasProject || isDevLinked)
                     const showManualOnly = hasProject && !isDevLinked
                     const shenimiCellClass = isClosed
                       ? "bg-slate-300 opacity-70"
@@ -3049,6 +3100,15 @@ export default function GaKaNotesPage() {
                               {note.priority ? (
                                 <Badge className={`text-[10px] px-1.5 py-0 ${PRIORITY_BADGE[note.priority as Exclude<NotePriority, "NONE">]}`}>
                                   {note.priority}
+                                </Badge>
+                              ) : null}
+                              {isPxJavNote ? (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[10px] px-1.5 py-0 bg-indigo-50 text-indigo-700 border-indigo-200 font-semibold"
+                                  title="Task created from PX JAV"
+                                >
+                                  PX JAV
                                 </Badge>
                               ) : null}
                               {hasTask

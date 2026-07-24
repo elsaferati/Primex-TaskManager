@@ -192,7 +192,7 @@ export default function TaskDetailsPage() {
     setTitle(getPlainMarkedText(task.title))
     setDescription(task.description || "")
     setStatusValue(
-      task.ga_note_origin_id && !["TODO", "IN_PROGRESS", "DONE"].includes(task.status || "")
+      (task.ga_note_origin_id || task.plan_note_origin_id) && !["TODO", "IN_PROGRESS", "DONE"].includes(task.status || "")
         ? "TODO"
         : (task.status || "")
     )
@@ -318,19 +318,22 @@ export default function TaskDetailsPage() {
     }
   }
 
+  const isNoteOriginTask = Boolean(task?.ga_note_origin_id || task?.plan_note_origin_id)
   const canAssign =
-    user?.role === "ADMIN" ||
-    user?.role === "MANAGER" ||
-    Boolean(task?.ga_note_origin_id) ||
-    (task && user?.department_id && task.department_id === user.department_id)
+    !task?.plan_note_origin_id &&
+    (
+      user?.role === "ADMIN" ||
+      user?.role === "MANAGER" ||
+      Boolean(task?.ga_note_origin_id) ||
+      (task && user?.department_id && task.department_id === user.department_id)
+    )
 
   const save = async () => {
     if (!task) return
     setSaving(true)
     try {
-      const isGaOriginTask = Boolean(task.ga_note_origin_id)
       const trimmedTitle = title.trim()
-      if (!isGaOriginTask && trimmedTitle.length < 2) {
+      if (!isNoteOriginTask && trimmedTitle.length < 2) {
         toast.error("Title must be at least 2 characters")
         return
       }
@@ -339,7 +342,7 @@ export default function TaskDetailsPage() {
         return
       }
 
-      const payload: Record<string, unknown> = isGaOriginTask
+      const payload: Record<string, unknown> = isNoteOriginTask
         ? { reminder_enabled: reminder }
         : {
             title: buildMarkedAppendOnlyText(task.title, trimmedTitle),
@@ -349,18 +352,18 @@ export default function TaskDetailsPage() {
       let gaMembershipChanged = false
       let removedCurrentCopy = false
       if (statusValue) payload.status = statusValue
-      if (isGaOriginTask && statusValue && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)) {
-        toast.error("GA task status must be To Do, In Progress, or Done")
+      if (isNoteOriginTask && statusValue && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)) {
+        toast.error("Note task status must be To Do, In Progress, or Done")
         return
       }
-      const confirmationValidation = isGaOriginTask
+      const confirmationValidation = isNoteOriginTask
         ? null
         : validateWaitingConfirmation(statusValue || null, confirmationAssigneeId)
       if (confirmationValidation) {
         toast.error(confirmationValidation)
         return
       }
-      if (!isGaOriginTask && isWaitingConfirmation(statusValue || null)) {
+      if (!isNoteOriginTask && isWaitingConfirmation(statusValue || null)) {
         payload.confirmation_assignee_id = confirmationAssigneeId
       }
       if (canAssign) {
@@ -573,9 +576,9 @@ export default function TaskDetailsPage() {
               <CardTitle className="text-sm">Update Task</CardTitle>
             </CardHeader>
             <CardContent className="space-y-4">
-              {task.ga_note_origin_id ? (
+              {isNoteOriginTask ? (
                 <div className="rounded-md border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
-                  This is your independent GA copy. Edit its status and scheduling here; shared details are managed in GA Notes.
+                  This is your independent note task copy. Edit its status and scheduling here; shared details are managed in {task.plan_note_origin_id ? "PX JAV" : "GA Notes"}.
                 </div>
               ) : null}
               <div className="space-y-2">
@@ -583,7 +586,7 @@ export default function TaskDetailsPage() {
                 <Input
                   id="task-title"
                   value={title}
-                  disabled={Boolean(task.ga_note_origin_id)}
+                  disabled={isNoteOriginTask}
                   onChange={(e) => setTitle(e.target.value)}
                   placeholder="Task title"
                 />
@@ -602,7 +605,7 @@ export default function TaskDetailsPage() {
                   </SelectTrigger>
                   <SelectContent>
                     {TASK_STATUS_OPTIONS.filter((option) =>
-                      !task.ga_note_origin_id || ["TODO", "IN_PROGRESS", "DONE"].includes(option.value)
+                      !isNoteOriginTask || ["TODO", "IN_PROGRESS", "DONE"].includes(option.value)
                     ).map((option) => (
                       <SelectItem key={option.value} value={option.value}>
                         {option.label}
@@ -634,7 +637,7 @@ export default function TaskDetailsPage() {
 
               <div className="space-y-2">
                 <Label>Description</Label>
-                {task.ga_note_origin_id ? (
+                {isNoteOriginTask ? (
                   <div className="min-h-[44px] rounded-md border bg-slate-50 px-3 py-2 text-sm text-slate-700">
                     {description || "—"}
                   </div>
@@ -709,7 +712,7 @@ export default function TaskDetailsPage() {
                 </div>
               ) : null}
 
-              {task.ga_note_origin_id && canAssign && isProjectTask(task) ? (
+              {isNoteOriginTask && canAssign && isProjectTask(task) ? (
                 <div className="space-y-2">
                   <Label>Finish period</Label>
                   <Select

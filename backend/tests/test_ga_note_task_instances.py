@@ -15,6 +15,7 @@ from app.services.ga_note_task_instances import (
     apply_ga_note_assignee_execution_states,
     apply_ga_note_shared_task_fields,
     reconcile_ga_note_task_assignees,
+    reconcile_plan_note_task_assignees,
 )
 
 
@@ -130,6 +131,32 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.created_count, 0)
         self.assertEqual(result.deactivated_count, 0)
         self.assertEqual([task.id for task in result.active_tasks], [task_a.id, task_b.id])
+
+    async def test_plan_note_reconcile_creates_independent_px_jav_copy(self) -> None:
+        note_id = uuid.uuid4()
+        owner_a, owner_b = uuid.uuid4(), uuid.uuid4()
+        template = _task(note_id, owner_a, TaskStatus.IN_PROGRESS)
+        template.ga_note_origin_id = None
+        template.plan_note_origin_id = note_id
+        note = SimpleNamespace(id=note_id, department_id=uuid.uuid4(), is_converted_to_task=True)
+        users = [
+            SimpleNamespace(id=value, department_id=uuid.uuid4(), is_active=True)
+            for value in (owner_a, owner_b)
+        ]
+        session = _FakeSession([[template], users])
+
+        result = await reconcile_plan_note_task_assignees(
+            session,
+            note=note,
+            desired_assignee_ids=[owner_a, owner_b],
+            actor_user_id=uuid.uuid4(),
+        )
+
+        copy = next(task for task in result.active_tasks if task.assigned_to == owner_b)
+        self.assertEqual(result.created_count, 1)
+        self.assertEqual(copy.status, TaskStatus.TODO)
+        self.assertEqual(copy.plan_note_origin_id, note_id)
+        self.assertIsNone(copy.ga_note_origin_id)
 
     async def test_duplicate_active_copy_is_deactivated_without_replacing_owner_copy(self) -> None:
         note_id = uuid.uuid4()

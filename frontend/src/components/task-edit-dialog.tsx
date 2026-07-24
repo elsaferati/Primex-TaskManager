@@ -109,6 +109,7 @@ export function TaskEditDialog({
   showDescriptionField?: boolean
 }) {
   const { apiFetch } = useAuth()
+  const isNoteOriginTask = Boolean(task?.ga_note_origin_id || task?.plan_note_origin_id)
   const [title, setTitle] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [statusValue, setStatusValue] = React.useState<TaskStatusValue>("TODO")
@@ -136,10 +137,11 @@ export function TaskEditDialog({
   const statusOptions = React.useMemo(() => {
     if (!task) return TASK_STATUS_OPTIONS
     return TASK_STATUS_OPTIONS.filter((option) => {
+      if (isNoteOriginTask) return option.value !== "WAITING_CONFIRMATION"
       if (option.value !== "WAITING_CONFIRMATION") return true
       return Boolean(task.confirmation_assignee_id || task.status === "WAITING_CONFIRMATION")
     })
-  }, [task])
+  }, [isNoteOriginTask, task])
 
   const closeDialog = React.useCallback(() => {
     if (saving) return
@@ -150,12 +152,12 @@ export function TaskEditDialog({
     if (!task) return
 
     const nextTitle = title.trim()
-    if (nextTitle.length < 2) {
+    if (!isNoteOriginTask && nextTitle.length < 2) {
       toast.error("Title must be at least 2 characters.")
       return
     }
 
-    if (statusValue === "WAITING_CONFIRMATION" && !task.confirmation_assignee_id) {
+    if (!isNoteOriginTask && statusValue === "WAITING_CONFIRMATION" && !task.confirmation_assignee_id) {
       toast.error("This task needs a confirmation assignee before it can use Waiting Confirmation.")
       return
     }
@@ -192,7 +194,7 @@ export function TaskEditDialog({
       // updates and keeps restricted GA-note fields (such as title) out of a
       // date/type-only edit.
       const updates: Record<string, unknown> = {
-        ...(title !== (task.title || "") ? { title: nextTitle } : {}),
+        ...(!isNoteOriginTask && title !== (task.title || "") ? { title: nextTitle } : {}),
         ...(showDescriptionField && description !== (task.description || "")
           ? { description: nextDescription }
           : {}),
@@ -258,6 +260,7 @@ export function TaskEditDialog({
     dueDate,
     fastTaskType,
     finishPeriod,
+    isNoteOriginTask,
     oneHReportSlot,
     onOpenChange,
     onUpdated,
@@ -292,7 +295,7 @@ export function TaskEditDialog({
                 autoResize
                 rows={2}
                 className="min-h-[72px] resize-none whitespace-pre-wrap [overflow-wrap:anywhere]"
-                disabled={saving}
+                disabled={saving || isNoteOriginTask}
               />
             </div>
 
