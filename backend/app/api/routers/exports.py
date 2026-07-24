@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import re
+import textwrap
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
@@ -2314,6 +2315,33 @@ def _open_task_due_bucket(task: Task, this_week_start: date, this_week_end: date
     return "FUTURE"
 
 
+def _open_task_wrapped_line_count(value: object, column_width: float) -> int:
+    """Estimate Excel's wrapped lines so exported task text is not clipped."""
+    if value is None:
+        return 1
+
+    # Excel column widths are approximately character counts. Reserving two
+    # characters accounts for cell padding and avoids underestimating wrapping.
+    usable_width = max(1, int(column_width) - 2)
+    logical_lines = str(value).expandtabs(4).split("\n")
+    return sum(
+        max(
+            1,
+            len(
+                textwrap.wrap(
+                    line,
+                    width=usable_width,
+                    break_long_words=True,
+                    break_on_hyphens=False,
+                    replace_whitespace=False,
+                    drop_whitespace=True,
+                )
+            ),
+        )
+        for line in logical_lines
+    )
+
+
 @router.get("/open-tasks.xlsx")
 async def export_open_tasks_xlsx(
     department_id: uuid.UUID | None = Query(default=None),
@@ -2588,7 +2616,7 @@ async def export_open_tasks_xlsx(
         ]
         for col_idx, value in enumerate(values, start=1):
             cell = ws.cell(row=data_row, column=col_idx, value=value)
-            cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+            cell.alignment = Alignment(horizontal="left", vertical="top", wrap_text=True, readingOrder=1)
             if col_idx == 1:
                 cell.font = Font(bold=True)
         data_row += 1
@@ -2670,9 +2698,12 @@ async def export_open_tasks_xlsx(
             )
             value = cell.value
             if r_idx > header_row and value is not None:
-                max_lines = max(max_lines, str(value).count("\n") + 1)
+                column_width = widths.get(c_idx, 16)
+                max_lines = max(max_lines, _open_task_wrapped_line_count(value, column_width))
         if r_idx > header_row:
-            ws.row_dimensions[r_idx].height = max(18, min(180, 14 * max_lines))
+            # Excel supports row heights up to 409 points. The small padding
+            # keeps the first and last wrapped lines fully visible.
+            ws.row_dimensions[r_idx].height = max(18, min(409, 15 * max_lines + 3))
 
     bio = io.BytesIO()
     wb.save(bio)
