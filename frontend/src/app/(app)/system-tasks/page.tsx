@@ -300,44 +300,144 @@ function getFirstWorkingDayOfMonth(year: number, monthIndex: number) {
 }
 
 function matchesTemplateDayOfWeek(template: SystemTaskTemplateDefinition, targetDay: number) {
-  if (template.days_of_week && template.days_of_week.length) {
-    return template.days_of_week.includes(targetDay)
+  const configuredDays =
+    template.days_of_week && template.days_of_week.length
+      ? template.days_of_week
+      : template.day_of_week != null
+        ? [template.day_of_week]
+        : []
+  const effectiveDays = configuredDays.map((day) => (day > 4 ? 4 : day))
+  return effectiveDays.includes(targetDay)
+}
+
+function scheduledDateForMonth(
+  template: SystemTaskTemplateDefinition,
+  year: number,
+  monthIndex: number
+) {
+  const firstOfMonth = new Date(year, monthIndex, 1)
+  const resolvedYear = firstOfMonth.getFullYear()
+  const resolvedMonth = firstOfMonth.getMonth()
+  const lastDay = new Date(resolvedYear, resolvedMonth + 1, 0).getDate()
+  const templateDay = template.day_of_month
+  if (templateDay == null) return null
+
+  const resolvedDay =
+    templateDay === 0
+      ? lastDay
+      : templateDay === -1
+        ? getFirstWorkingDayOfMonth(resolvedYear, resolvedMonth)
+        : Math.min(templateDay, lastDay)
+  const scheduled = new Date(resolvedYear, resolvedMonth, resolvedDay)
+  const weekday = scheduled.getDay()
+  if (weekday === 6) scheduled.setDate(scheduled.getDate() - 1)
+  if (weekday === 0) scheduled.setDate(scheduled.getDate() - 2)
+  return scheduled
+}
+
+function sameLocalDate(left: Date | null, right: Date) {
+  return Boolean(
+    left &&
+      left.getFullYear() === right.getFullYear() &&
+      left.getMonth() === right.getMonth() &&
+      left.getDate() === right.getDate()
+  )
+}
+
+function matchesMonthCycle(template: SystemTaskTemplateDefinition, nominalMonth: number) {
+  if (template.month_of_year == null) return true
+  if (template.frequency === "3_MONTHS") {
+    return (nominalMonth - template.month_of_year + 12) % 3 === 0
   }
-  if (template.day_of_week != null) return template.day_of_week === targetDay
-  return false
+  if (template.frequency === "6_MONTHS") {
+    return (nominalMonth - template.month_of_year + 12) % 6 === 0
+  }
+  return true
+}
+
+function templateIntervalMatches(
+  template: SystemTaskTemplateDefinition,
+  target: Date,
+  nominalYear = target.getFullYear(),
+  nominalMonthIndex = target.getMonth()
+) {
+  const interval = Math.max(template.interval || 1, 1)
+  if (interval === 1) return true
+  const anchorValue = template.apply_from || template.created_at
+  if (!anchorValue) return true
+  const anchor = new Date(anchorValue)
+  if (Number.isNaN(anchor.getTime())) return true
+
+  if (template.frequency === "DAILY") {
+    const anchorDay = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate())
+    const targetDay = new Date(target.getFullYear(), target.getMonth(), target.getDate())
+    const days = Math.round((targetDay.getTime() - anchorDay.getTime()) / 86_400_000)
+    return days >= 0 && days % interval === 0
+  }
+  if (template.frequency === "WEEKLY") {
+    const anchorDay = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate())
+    const targetDay = new Date(target.getFullYear(), target.getMonth(), target.getDate())
+    const days = Math.round((targetDay.getTime() - anchorDay.getTime()) / 86_400_000)
+    return days >= 0 && Math.floor(days / 7) % interval === 0
+  }
+  if (template.frequency === "MONTHLY") {
+    const months = (nominalYear - anchor.getFullYear()) * 12 + nominalMonthIndex - anchor.getMonth()
+    return months >= 0 && months % interval === 0
+  }
+  if (template.frequency === "YEARLY") {
+    const years = nominalYear - anchor.getFullYear()
+    return years >= 0 && years % interval === 0
+  }
+  return true
 }
 
 function matchesTemplateDate(template: SystemTaskTemplateDefinition, date: Date) {
   const dayOfWeek = getMondayBasedDay(date)
-  const dayOfMonth = date.getDate()
   const monthIndex = date.getMonth()
   const year = date.getFullYear()
-  const lastDay = new Date(year, monthIndex + 1, 0).getDate()
 
-  if (template.frequency === "DAILY") return dayOfWeek <= 4
+  if (template.frequency === "DAILY") {
+    return dayOfWeek <= 4 && templateIntervalMatches(template, date)
+  }
   if (template.frequency === "WEEKLY") {
-    return matchesTemplateDayOfWeek(template, dayOfWeek)
+    return (
+      matchesTemplateDayOfWeek(template, dayOfWeek) &&
+      templateIntervalMatches(template, date)
+    )
   }
 
-  const templateDay = template.day_of_month
-  const resolvedDay =
-    templateDay == null
-      ? null
-      : templateDay === 0
-        ? lastDay
-        : templateDay === -1
-          ? getFirstWorkingDayOfMonth(year, monthIndex)
-          : templateDay
-
   if (template.frequency === "MONTHLY" || template.frequency === "3_MONTHS" || template.frequency === "6_MONTHS") {
-    return resolvedDay == null ? true : resolvedDay === dayOfMonth
+    const currentMonthDate = scheduledDateForMonth(template, year, monthIndex)
+    if (
+      sameLocalDate(currentMonthDate, date) &&
+      matchesMonthCycle(template, monthIndex + 1) &&
+      templateIntervalMatches(template, date, year, monthIndex)
+    ) {
+      return true
+    }
+    const nextMonthDate = scheduledDateForMonth(template, year, monthIndex + 1)
+    const nextNominalDate = new Date(year, monthIndex + 1, 1)
+    return (
+      sameLocalDate(nextMonthDate, date) &&
+      matchesMonthCycle(template, nextNominalDate.getMonth() + 1) &&
+      templateIntervalMatches(
+        template,
+        date,
+        nextNominalDate.getFullYear(),
+        nextNominalDate.getMonth()
+      )
+    )
   }
 
   if (template.frequency === "YEARLY") {
-    const matchesMonth =
-      template.month_of_year == null ? true : template.month_of_year === monthIndex + 1
-    const matchesDay = resolvedDay == null ? true : resolvedDay === dayOfMonth
-    return matchesMonth && matchesDay
+    if (template.month_of_year == null) return false
+    const nominalMonthIndex = template.month_of_year - 1
+    return (
+      (sameLocalDate(scheduledDateForMonth(template, year, nominalMonthIndex), date) &&
+        templateIntervalMatches(template, date, year, nominalMonthIndex)) ||
+      (sameLocalDate(scheduledDateForMonth(template, year + 1, nominalMonthIndex), date) &&
+        templateIntervalMatches(template, date, year + 1, nominalMonthIndex))
+    )
   }
 
   return true
