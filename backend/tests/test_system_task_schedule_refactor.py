@@ -10,6 +10,17 @@ from app.services.system_task_schedule import first_run_at, matches_template_dat
 
 
 class TestSystemTaskScheduleRefactor(TestCase):
+    def test_daily_first_run_is_today_when_before_due_time(self) -> None:
+        tmpl = SimpleNamespace(
+            frequency=FrequencyType.DAILY,
+            timezone="Europe/Budapest",
+            due_time=time(9, 0),
+            interval=1,
+            created_at=datetime(2026, 3, 1, 8, 0, tzinfo=timezone.utc),
+        )
+        run_at = first_run_at(tmpl, datetime(2026, 3, 3, 7, 0, tzinfo=timezone.utc))
+        self.assertEqual(run_at.isoformat(), "2026-03-03T08:00:00+00:00")
+
     def test_daily_first_run_is_tomorrow_when_after_due_time(self) -> None:
         tmpl = SimpleNamespace(
             frequency=FrequencyType.DAILY,

@@ -6,9 +6,10 @@ from unittest.mock import AsyncMock, patch
 
 from app.api.routers.system_tasks import (
     _reset_template_slots_next_run_at,
+    approve_system_task_template,
     update_system_task_template,
 )
-from app.models.enums import FrequencyType, SystemTaskScope
+from app.models.enums import CommonApprovalStatus, FrequencyType, SystemTaskScope, UserRole
 from app.schemas.system_task_template import SystemTaskTemplateUpdate
 
 
@@ -43,6 +44,53 @@ class _FakeSession:
 
 
 class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
+    async def test_approval_resets_pending_cursor_and_generates_forward_only(self) -> None:
+        template = SimpleNamespace(
+            id=uuid.uuid4(),
+            approval_status=CommonApprovalStatus.pending,
+            timezone="Europe/Budapest",
+        )
+        approved_at = datetime(2026, 3, 3, 7, 0, tzinfo=timezone.utc)
+        user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.MANAGER)
+        db = _FakeSession([_ScalarResult(template)])
+
+        with (
+            patch("app.api.routers.system_tasks.datetime") as datetime_mock,
+            patch(
+                "app.api.routers.system_tasks._reset_template_slots_next_run_at",
+                new=AsyncMock(),
+            ) as reset_slots,
+            patch(
+                "app.api.routers.system_tasks.generate_system_task_instances",
+                new=AsyncMock(return_value=5),
+            ) as generate_instances,
+            patch(
+                "app.api.routers.system_tasks._template_definition_to_out",
+                new=AsyncMock(return_value={"id": str(template.id)}),
+            ),
+        ):
+            datetime_mock.now.return_value = approved_at
+            result = await approve_system_task_template(
+                template_id=template.id,
+                db=db,
+                user=user,
+            )
+
+        self.assertEqual(template.approval_status, CommonApprovalStatus.approved)
+        self.assertEqual(template.approved_at, approved_at)
+        reset_slots.assert_awaited_once_with(db, template=template, now=approved_at)
+        generate_instances.assert_awaited_once_with(
+            db=db,
+            now_utc=approved_at,
+            start=approved_at.date(),
+            end=approved_at.date().replace(day=10),
+            template_ids=[template.id],
+        )
+        db.flush.assert_awaited_once()
+        db.commit.assert_awaited_once()
+        db.refresh.assert_awaited_once_with(template)
+        self.assertEqual(result, {"id": str(template.id)})
+
     async def test_reset_template_slots_next_run_at_uses_updated_monthly_schedule(self) -> None:
         template = SimpleNamespace(
             id=uuid.uuid4(),

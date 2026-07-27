@@ -52,9 +52,11 @@ from app.services.system_task_schedule import (
     next_occurrence_date,
     previous_occurrence_date,
     should_reopen_system_task,
+    template_tz,
 )
 from app.services.system_task_instances import (
     ensure_slots_initialized,
+    generate_system_task_instances,
 )
 from app.services.meeting_system_tasks import (
     EXTERNAL_MEETING_TASK_KIND,
@@ -1403,12 +1405,27 @@ async def approve_system_task_template(
     if _template_approval_status(template) != CommonApprovalStatus.pending:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="System task already processed")
 
+    approved_at = datetime.now(timezone.utc)
     template.approval_status = CommonApprovalStatus.approved
     template.approved_by_user_id = user.id
-    template.approved_at = datetime.now(timezone.utc)
+    template.approved_at = approved_at
     template.rejected_by_user_id = None
     template.rejected_at = None
     template.rejection_reason = None
+
+    # Approval is the creation boundary. Reset any cursor saved while the
+    # template was pending, then generate only this template from today
+    # forward. This prevents late approval from backfilling earlier days.
+    await db.flush()
+    await _reset_template_slots_next_run_at(db, template=template, now=approved_at)
+    approval_day = approved_at.astimezone(template_tz(template)).date()
+    await generate_system_task_instances(
+        db=db,
+        now_utc=approved_at,
+        start=approval_day,
+        end=approval_day + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)),
+        template_ids=[template.id],
+    )
 
     await db.commit()
     await db.refresh(template)

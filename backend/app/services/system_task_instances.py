@@ -240,23 +240,26 @@ async def generate_system_task_instances(
     now_utc: datetime | None = None,
     start: date | None = None,
     end: date | None = None,
+    template_ids: list[uuid.UUID] | set[uuid.UUID] | None = None,
 ) -> int:
     now_utc = now_utc or datetime.now(timezone.utc)
     if start is not None and end is not None and end < start:
         return 0
+    if template_ids is not None and not template_ids:
+        return 0
 
     await ensure_slots_initialized(db)
-    slot_rows = (
-        await db.execute(
-            select(SystemTaskTemplateAssigneeSlot, SystemTaskTemplate)
-            .join(SystemTaskTemplate, SystemTaskTemplateAssigneeSlot.template_id == SystemTaskTemplate.id)
-            .where(SystemTaskTemplateAssigneeSlot.is_active.is_(True))
-            .where(SystemTaskTemplate.is_active.is_(True))
-            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
-            .where(SystemTaskTemplate.trigger_type.is_(None))
-            .with_for_update(skip_locked=True)
-        )
-    ).all()
+    slot_stmt = (
+        select(SystemTaskTemplateAssigneeSlot, SystemTaskTemplate)
+        .join(SystemTaskTemplate, SystemTaskTemplateAssigneeSlot.template_id == SystemTaskTemplate.id)
+        .where(SystemTaskTemplateAssigneeSlot.is_active.is_(True))
+        .where(SystemTaskTemplate.is_active.is_(True))
+        .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
+        .where(SystemTaskTemplate.trigger_type.is_(None))
+    )
+    if template_ids is not None:
+        slot_stmt = slot_stmt.where(SystemTaskTemplateAssigneeSlot.template_id.in_(template_ids))
+    slot_rows = (await db.execute(slot_stmt.with_for_update(skip_locked=True))).all()
     if not slot_rows:
         return 0
 
