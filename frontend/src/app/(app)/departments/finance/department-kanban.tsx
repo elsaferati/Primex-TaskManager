@@ -40,6 +40,7 @@ type RowView = {
   systemFrequency: string
   systemFrequencyLabel: string
   systemFrequencyDisplayLabel: string
+  occurrenceDateIso: string
   startDateIso: string
   dueDateIso: string
   priority: string
@@ -192,6 +193,13 @@ function isoOrEmpty(value?: string | null) {
   return toDateInputValue(value || null)
 }
 
+function endOfCurrentWeekIso(referenceDate: Date) {
+  const weekEnd = new Date(referenceDate)
+  const mondayBasedDay = (weekEnd.getDay() + 6) % 7
+  weekEnd.setDate(weekEnd.getDate() + (6 - mondayBasedDay))
+  return toDateInputValue(weekEnd)
+}
+
 function taskAssigneeInfo(task: Task, usersById: Map<string, User>) {
   const seen = new Set<string>()
   const ids: string[] = []
@@ -286,6 +294,7 @@ export default function DepartmentKanban() {
   const [viewingDescriptionTask, setViewingDescriptionTask] = React.useState<Task | null>(null)
   const [systemTaskFrequencyByTemplateId, setSystemTaskFrequencyByTemplateId] = React.useState<Record<string, string>>({})
   const todayIso = React.useMemo(() => toDateInputValue(new Date()), [])
+  const currentWeekEndIso = React.useMemo(() => endOfCurrentWeekIso(new Date()), [])
 
   const loadData = React.useCallback(async () => {
     setLoading(true)
@@ -379,6 +388,7 @@ export default function DepartmentKanban() {
           systemFrequency,
           systemFrequencyLabel: systemFrequencyShortLabel(systemFrequency),
           systemFrequencyDisplayLabel: systemFrequencyDisplayLabel(systemFrequency),
+          occurrenceDateIso: isoOrEmpty(task.origin_run_at || task.start_date || task.due_date),
           startDateIso: isoOrEmpty(task.start_date),
           dueDateIso: isoOrEmpty(task.due_date),
           priority: task.priority || "NORMAL",
@@ -424,6 +434,14 @@ export default function DepartmentKanban() {
 
   const filteredRows = React.useMemo(() => {
     const visibleRows = rows.filter((row) => {
+      if (
+        row.task.system_template_origin_id &&
+        row.occurrenceDateIso &&
+        row.occurrenceDateIso > currentWeekEndIso
+      ) {
+        return false
+      }
+
       if (selectedUserId !== ALL_USERS_VALUE && !row.assigneeIds.includes(selectedUserId)) {
         return false
       }
@@ -448,7 +466,7 @@ export default function DepartmentKanban() {
     if (!showDone) return openRows
     const doneRows = visibleRows.filter((row) => row.status === "DONE")
     return [...openRows, ...doneRows]
-  }, [dateFrom, dateTo, rows, selectedUserId, showDone, todayIso, viewFilter])
+  }, [currentWeekEndIso, dateFrom, dateTo, rows, selectedUserId, showDone, todayIso, viewFilter])
 
   const selectedUserLabel = React.useMemo(() => {
     if (selectedUserId === ALL_USERS_VALUE) return "All people"
