@@ -5726,6 +5726,7 @@ export default function DepartmentKanban() {
       const updated = (await res.json()) as Task
       setDepartmentTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
       setNoProjectTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
+      setSystemCreatedTasks((prev) => prev.map((t) => (t.id === allTodayEditingTaskId ? updated : t)))
       setCrossDepartmentConfirmTasks((prev) => {
         const exists = prev.some((t) => t.id === updated.id)
         if (!exists) return prev
@@ -5734,6 +5735,7 @@ export default function DepartmentKanban() {
         }
         return prev.map((t) => (t.id === updated.id ? updated : t))
       })
+      await refreshDailyReport()
       cancelAllTodayTaskEdit()
       toast.success("Task updated")
     } finally {
