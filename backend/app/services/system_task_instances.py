@@ -304,7 +304,8 @@ async def generate_system_task_instances(
                     leave_by_user,
                     all_users_ranges,
                 )
-                effective_origin_run_at = shifted_occurrence_local.astimezone(timezone.utc)
+                if range_start is None or shifted_occurrence_local.date() >= range_start:
+                    effective_origin_run_at = shifted_occurrence_local.astimezone(timezone.utc)
                 can_shift_next_occurrence = False
 
             due_local = _adjust_due_datetime_local(

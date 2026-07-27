@@ -44,21 +44,64 @@ def _resolved_day_of_month(template_day: int | None, target: date) -> int | None
 
 
 def resolved_occurrence_date(template: SystemTaskTemplate, target: date) -> date | None:
-    template_day = _resolved_day_of_month(template.day_of_month, target)
+    return _resolved_occurrence_date_for_month(template, target.year, target.month)
+
+
+def _resolved_occurrence_date_for_month(
+    template: SystemTaskTemplate,
+    year: int,
+    month: int,
+) -> date | None:
+    nominal_month = date(year, month, 1)
+    template_day = _resolved_day_of_month(template.day_of_month, nominal_month)
     if template_day is None:
         return None
-    month_last_day = calendar.monthrange(target.year, target.month)[1]
-    candidate = date(target.year, target.month, min(template_day, month_last_day))
+    month_last_day = calendar.monthrange(year, month)[1]
+    candidate = date(year, month, min(template_day, month_last_day))
     return _previous_working_day(candidate)
 
 
+def _template_weekdays(template: SystemTaskTemplate) -> set[int]:
+    configured = set(template.days_of_week or [])
+    if not configured and template.day_of_week is not None:
+        configured.add(template.day_of_week)
+    # Weekend schedules run on the previous working day (Friday).
+    return {4 if day > 4 else day for day in configured}
+
+
 def _matches_template_day_of_week(template: SystemTaskTemplate, target: date) -> bool:
-    target_day = target.weekday()
-    if template.days_of_week:
-        return target_day in template.days_of_week
-    if template.day_of_week is not None:
-        return template.day_of_week == target_day
-    return False
+    return target.weekday() in _template_weekdays(template)
+
+
+def _next_month(year: int, month: int) -> tuple[int, int]:
+    return (year + 1, 1) if month == 12 else (year, month + 1)
+
+
+def _matching_nominal_month(
+    template: SystemTaskTemplate,
+    target: date,
+) -> tuple[int, int] | None:
+    candidates = [(target.year, target.month), _next_month(target.year, target.month)]
+    for year, month in candidates:
+        if _resolved_occurrence_date_for_month(template, year, month) == target:
+            return year, month
+    return None
+
+
+def _matching_nominal_year(
+    template: SystemTaskTemplate,
+    target: date,
+) -> int | None:
+    month_of_year = getattr(template, "month_of_year", None)
+    if month_of_year is None:
+        return None
+    for year in (target.year, target.year + 1):
+        if (
+            _resolved_occurrence_date_for_month(template, year, month_of_year)
+            == target
+        ):
+            return year
+    return None
 
 
 def _matches_month_cycle(
@@ -73,7 +116,7 @@ def _matches_month_cycle(
     return True
 
 
-def matches_template_date(template: SystemTaskTemplate, target: date) -> bool:
+def _matches_base_template_date(template: SystemTaskTemplate, target: date) -> bool:
     frequency = template.frequency
     if frequency == FrequencyType.DAILY:
         return _is_working_day(target)
@@ -81,18 +124,25 @@ def matches_template_date(template: SystemTaskTemplate, target: date) -> bool:
         return _matches_template_day_of_week(template, target)
 
     if frequency in (FrequencyType.MONTHLY, FrequencyType.THREE_MONTHS, FrequencyType.SIX_MONTHS):
-        resolved = resolved_occurrence_date(template, target)
-        if resolved is None or resolved != target:
+        nominal = _matching_nominal_month(template, target)
+        if nominal is None:
             return False
-        return _matches_month_cycle(frequency, target.month, template.month_of_year)
+        _, nominal_month = nominal
+        return _matches_month_cycle(
+            frequency,
+            nominal_month,
+            getattr(template, "month_of_year", None),
+        )
 
     if frequency == FrequencyType.YEARLY:
-        if template.month_of_year is not None and template.month_of_year != target.month:
-            return False
-        resolved = resolved_occurrence_date(template, target)
-        return resolved is None or resolved == target
+        return _matching_nominal_year(template, target) is not None
 
     return True
+
+
+def matches_template_date(template: SystemTaskTemplate, target: date) -> bool:
+    """Return whether the complete recurrence, including interval, runs on target."""
+    return _matches_template_datetime(template, target)
 
 
 def template_tz(template: SystemTaskTemplate) -> ZoneInfo:
@@ -163,18 +213,26 @@ def _matches_interval(template: SystemTaskTemplate, target: date) -> bool:
 def _matches_template_datetime(template: SystemTaskTemplate, target_local_date: date) -> bool:
     frequency = getattr(template, "frequency", None)
     if frequency == FrequencyType.MONTHLY:
-        resolved = resolved_occurrence_date(template, target_local_date)
-        if resolved is None or resolved != target_local_date:
+        nominal = _matching_nominal_month(template, target_local_date)
+        if nominal is None:
             return False
-        return _matches_interval(template, target_local_date)
+        nominal_year, nominal_month = nominal
+        return _matches_interval(
+            template,
+            date(nominal_year, nominal_month, 1),
+        )
     if frequency == FrequencyType.YEARLY:
-        if template.month_of_year and target_local_date.month != template.month_of_year:
+        nominal_year = _matching_nominal_year(template, target_local_date)
+        if nominal_year is None:
             return False
-        resolved = resolved_occurrence_date(template, target_local_date)
-        if resolved is not None and resolved != target_local_date:
-            return False
-        return _matches_interval(template, target_local_date)
-    return matches_template_date(template, target_local_date) and _matches_interval(template, target_local_date)
+        return _matches_interval(
+            template,
+            date(nominal_year, template.month_of_year or 1, 1),
+        )
+    return _matches_base_template_date(template, target_local_date) and _matches_interval(
+        template,
+        target_local_date,
+    )
 
 
 def first_run_at(template: SystemTaskTemplate, from_dt: datetime) -> datetime:
@@ -183,9 +241,9 @@ def first_run_at(template: SystemTaskTemplate, from_dt: datetime) -> datetime:
     if from_dt.tzinfo is None:
         from_dt = from_dt.replace(tzinfo=timezone.utc)
     local_from = from_dt.astimezone(tz)
-    candidate_date = local_from.date()
+    candidate_date = max(local_from.date(), _local_anchor_date(template))
     candidate = datetime.combine(candidate_date, due, tzinfo=tz)
-    if local_from > candidate:
+    if candidate_date == local_from.date() and local_from > candidate:
         candidate_date = candidate_date + timedelta(days=1)
     # Keep search bounded but practical.
     for _ in range(3700):
