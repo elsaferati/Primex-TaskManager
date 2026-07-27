@@ -3236,7 +3236,7 @@ export default function DepartmentKanban() {
           comment: task.user_comment ?? null,
           taskId: task.id,
           sortDate: task.due_date || task.start_date || task.planned_for || task.created_at,
-          oneHReportSlot: task.is_1h_report
+          oneHReportSlot: task.is_1h_report || task.is_r1
             ? dailyReportOneHSlots[task.id] ?? null
             : null,
         },
@@ -3277,7 +3277,7 @@ export default function DepartmentKanban() {
         comment: task.user_comment ?? null,
         taskId: task.id,
         sortDate: task.due_date || task.start_date || task.created_at,
-        oneHReportSlot: task.is_1h_report
+        oneHReportSlot: task.is_1h_report || task.is_r1
           ? dailyReportOneHSlots[task.id] ?? null
           : null,
       })
