@@ -62,7 +62,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "7"
+COMMON_VIEW_CACHE_VERSION = "8"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -871,11 +871,13 @@ async def get_common_view(
                             "id": f"task:{t.id}:{task_date.isoformat()}",
                             "task_id": str(t.id),
                             "title": display_title,
+                            "task_title": t.title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
                             "user_id": str(assignee_id) if assignee_id else None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
+                            "description": t.description,
                             "status": task_status,
                             "isDone": is_done,
                             "fast_task_order": t.fast_task_order,
@@ -893,11 +895,13 @@ async def get_common_view(
                             "id": f"task:{t.id}:{task_date.isoformat()}",
                             "task_id": str(t.id),
                             "title": display_title,
+                            "task_title": t.title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
                             "user_id": str(assignee_id) if assignee_id else None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
+                            "description": t.description,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
                             "isDone": is_done,
@@ -918,11 +922,13 @@ async def get_common_view(
                             "id": f"task:{t.id}:{task_date.isoformat()}",
                             "task_id": str(t.id),
                             "title": display_title,
+                            "task_title": t.title,
                             "person": owner_label,
                             "assignees": assignee_names or None,
                             "user_id": str(assignee_id) if assignee_id else None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
+                            "description": t.description,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
                             "isDone": is_done,
@@ -941,11 +947,13 @@ async def get_common_view(
                             "id": f"task:{t.id}:{task_date.isoformat()}",
                             "task_id": str(t.id),
                             "title": display_title,
+                            "task_title": t.title,
                             "date": task_date.isoformat(),
                             "owner": owner_label,
                             "assignees": assignee_names or None,
                             "user_id": str(assignee_id) if assignee_id else None,
                             "note": t.description or None,
+                            "description": t.description,
                             "department_id": str(dept_id) if dept_id else None,
                             "status": task_status,
                             "isDone": is_done,

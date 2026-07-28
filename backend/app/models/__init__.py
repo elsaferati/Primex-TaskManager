@@ -23,6 +23,7 @@ from app.models.meeting import Meeting
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
 from app.models.project import Project
+from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project_member import ProjectMember
@@ -83,6 +84,7 @@ __all__ = [
     "MicrosoftToken",
     "Notification",
     "Project",
+    "PrimeFlowReportDeliveryRun",
     "ProjectPlannerExclusion",
     "ProjectPhaseChecklistItem",
     "ProjectMember",

@@ -80,6 +80,10 @@ jobs:
           PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
           PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
           PRIMEFLOW_READONLY_DATABASE_URL: ${{ secrets.PRIMEFLOW_READONLY_DATABASE_URL }}
+          PRIMEFLOW_REPORT_GMAIL_CLIENT_ID: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_CLIENT_ID }}
+          PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET }}
+          PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN }}
+          PRIMEFLOW_REPORT_GMAIL_SENDER: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_SENDER }}
         run: |
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
@@ -101,6 +105,12 @@ jobs:
           echo PRIMEFLOW_EMAIL=%PRIMEFLOW_MCP_EMAIL% >> backend\.env
           echo PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD% >> backend\.env
           echo PRIMEFLOW_READONLY_DATABASE_URL=%PRIMEFLOW_READONLY_DATABASE_URL% >> backend\.env
+          echo PRIMEFLOW_REPORT_TIMEZONE=Europe/Tirane >> backend\.env
+          echo PRIMEFLOW_REPORT_RECIPIENTS=130primex.eu@gmail.com,ga@primexeu.com >> backend\.env
+          echo PRIMEFLOW_REPORT_GMAIL_CLIENT_ID=%PRIMEFLOW_REPORT_GMAIL_CLIENT_ID% >> backend\.env
+          echo PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET=%PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET% >> backend\.env
+          echo PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN=%PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN% >> backend\.env
+          echo PRIMEFLOW_REPORT_GMAIL_SENDER=%PRIMEFLOW_REPORT_GMAIL_SENDER% >> backend\.env
  
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}
@@ -111,6 +121,13 @@ jobs:
       - name: Update Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
+        env:
+          PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
+          PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
+          PRIMEFLOW_REPORT_GMAIL_CLIENT_ID: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_CLIENT_ID }}
+          PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET }}
+          PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN }}
+          PRIMEFLOW_REPORT_GMAIL_SENDER: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_SENDER }}
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
@@ -131,10 +148,15 @@ jobs:
           set REDIS_URL=redis://127.0.0.1:6379/0
           set APP_TIMEZONE=Europe/Budapest
           set APP_BUILD_SHA=${{ github.sha }}
+          set PRIMEFLOW_EMAIL=%PRIMEFLOW_MCP_EMAIL%
+          set PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD%
+          set PRIMEFLOW_REPORT_TIMEZONE=Europe/Tirane
+          set PRIMEFLOW_REPORT_RECIPIENTS=130primex.eu@gmail.com,ga@primexeu.com
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
           call pm2 delete primex-backend || ver > NUL
           call pm2 delete primeflow-mcp || ver > NUL
+          call pm2 delete primeflow-report-scheduler || ver > NUL
 
           REM Kill any orphaned process still holding port 8000 (a squatter outside PM2
           REM keeps serving stale code and makes health checks pass against old builds).
@@ -143,8 +165,10 @@ jobs:
 
           call pm2 start ecosystem.config.cjs --only primex-backend --update-env
           call pm2 start ecosystem.config.cjs --only primeflow-mcp --update-env
+          call pm2 start ecosystem.config.cjs --only primeflow-report-scheduler --update-env
           call pm2 describe primex-backend | findstr /I "status"
           call pm2 describe primeflow-mcp | findstr /I "status"
+          call pm2 describe primeflow-report-scheduler | findstr /I "status"
           echo PM2 backend restart/start completed.
  
       - name: Wait for Backend Readiness
@@ -203,6 +227,31 @@ jobs:
             exit 1
           }
           Write-Host "Primeflow MCP readiness: OK"
+
+      - name: Functional MCP and Scheduler Readiness
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          Set-Location backend
+          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+          & $python scripts\check_mcp.py --url http://127.0.0.1:8010/sse --call-common-view
+          if ($LASTEXITCODE -ne 0) {
+            cmd /c "pm2 logs primeflow-mcp --lines 100 --nostream || ver > NUL"
+            exit 1
+          }
+          $scheduler = cmd /c "pm2 jlist" | ConvertFrom-Json | Where-Object { $_.name -eq "primeflow-report-scheduler" }
+          if (-not $scheduler -or $scheduler.pm2_env.status -ne "online") {
+            cmd /c "pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL"
+            Write-Error "PrimeFlow report scheduler is not online."
+            exit 1
+          }
+          $logs = cmd /c "pm2 logs primeflow-report-scheduler --lines 100 --nostream"
+          if ($logs -notmatch "scheduler_ready jobs=5") {
+            Write-Error "PrimeFlow report scheduler did not load all five jobs."
+            exit 1
+          }
+          & $python scripts\check_report_scheduler.py
+          if ($LASTEXITCODE -ne 0) { exit 1 }
  
       - name: Replace Public API Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
