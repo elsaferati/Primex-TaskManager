@@ -27,6 +27,7 @@ from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.ga_note import GaNote
 from app.models.meeting import Meeting
 from app.models.project import Project
+from app.services.project_classification import has_mst_identity, is_vs_or_vl_project
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
@@ -999,9 +1000,8 @@ async def get_common_view(
             project = projects.get(project_id)
             if not project:
                 continue
-            title_upper = (project.title or "").upper()
-            is_mst = project.project_type == "MST" or "MST" in title_upper
-            is_vs_vl = "VS" in title_upper or "VL" in title_upper
+            is_mst = has_mst_identity(project)
+            is_vs_vl = is_vs_or_vl_project(project)
             is_product_content = project.department_id == product_content_dept_id
 
             dates_to_use: list[date] = []

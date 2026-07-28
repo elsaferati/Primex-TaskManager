@@ -25,6 +25,7 @@ import { renderMarkedNoteContent } from "@/lib/note-markup"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import type { ChecklistItem, ChecklistWithItems, GaNote, Meeting, Project, ProjectPrompt, Task, TaskFinishPeriod, TaskPriority, User } from "@/lib/types"
 import { VsWorkflow } from "@/components/projects/vs-workflow"
+import { isMstOrTtProject, isTtProjectTitle } from "@/lib/pcm-project-classification"
 
 
 // PCM phases (English labels)
@@ -630,16 +631,6 @@ function formatDateDisplay(value?: string | null) {
   return formatted || null
 }
 
-function isTtProjectTitle(title: string) {
-  const normalized = title.toUpperCase().trim()
-  return normalized === "TT" || normalized.startsWith("TT ") || normalized.startsWith("TT-") || normalized.startsWith("TT:")
-}
-
-function isMstProject(project?: Project | null) {
-  if (!project) return false
-  const title = (project.title || project.name || "").toUpperCase().trim()
-  return project.project_type === "MST" || title.includes("MST") || isTtProjectTitle(title)
-}
 function mstBadgeLabel(project?: Project | null) {
   if (!project) return "MST"
   const title = (project.title || project.name || "").toUpperCase().trim()
@@ -1395,7 +1386,7 @@ export default function PcmProjectPage() {
       const isTtProject = isTtProjectTitle(pTitleUpper)
       const productTemplateGroupKey = isTtProject ? TT_PRODUCT_TEMPLATE_GROUP_KEY : MST_PRODUCT_TEMPLATE_GROUP_KEY
       const fallbackProductTemplateGroupKey = isTtProject ? MST_PRODUCT_TEMPLATE_GROUP_KEY : null
-      const shouldLoadMstTemplate = isMstProject(p) || isTtProject
+      const shouldLoadMstTemplate = isMstOrTtProject(p)
 
       const [tRes, mRes, cRes, gRes, prRes, usersRes, meetingsRes, mstTemplateRes, fallbackMstTemplateRes] = await Promise.all([
         apiFetch(`/tasks?project_id=${p.id}&include_done=true`),
@@ -1447,7 +1438,7 @@ export default function PcmProjectPage() {
           }
 
           // Initialize MST checklist items only if none exist yet
-          if (isMstProject(p) || isTtProject) {
+          if (isMstOrTtProject(p)) {
             const hasMstItems = items.some((item) => {
               if (item.item_type !== "CHECKBOX") return false
               if (!item.path || !item.title) return false
@@ -1484,7 +1475,7 @@ export default function PcmProjectPage() {
         setAllUsers(users)
         setDepartmentUsers(users.filter((u) => u.department_id === p.department_id))
       }
-      if (isMstProject(p) || isTtProject) {
+      if (isMstOrTtProject(p)) {
         setMstPhase(MST_PHASES[0])
       }
       if (isVsVlProject(p)) {
@@ -1499,7 +1490,7 @@ export default function PcmProjectPage() {
     if (project?.current_phase) setViewedPhase(project.current_phase)
   }, [project?.current_phase])
 
-  const isMst = React.useMemo(() => isMstProject(project), [project])
+  const isMst = React.useMemo(() => isMstOrTtProject(project), [project])
   const titleUpper = (project?.title || project?.name || "").toUpperCase()
   const isTtProject = isTtProjectTitle(titleUpper)
   const isMstLike = isMst || isTtProject
@@ -3435,7 +3426,7 @@ export default function PcmProjectPage() {
 
   const backendDisplayTitle = project.display_title?.trim()
   const baseTitle = project.title || project.name || "Project"
-  const isTtOrMst = isMstProject(project)
+  const isTtOrMst = isMstOrTtProject(project)
   const controlTasks = tasks.filter((task) => task.phase === "CONTROL")
   const hasControlTasks = controlTasks.length > 0
   const fallbackControlTotals = controlTasks

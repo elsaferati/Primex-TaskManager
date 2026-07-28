@@ -292,17 +292,18 @@ export default function ReviewsPage() {
               <Table className="w-full min-w-[900px] table-fixed">
                 <TableHeader>
                   <TableRow>
-                    <TableHead className="w-[34%]">Task</TableHead>
+                    <TableHead className="w-[5%]">Nr.</TableHead>
+                    <TableHead className="w-[39%]">Task</TableHead>
                     <TableHead className="w-[14%]">User</TableHead>
                     <TableHead className="w-[12%]">Completed</TableHead>
-                    <TableHead className="w-[10%]">Timing</TableHead>
                     <TableHead className="w-[18%]">Review</TableHead>
                     <TableHead className="w-[12%] text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {overview.rows.map((row) => (
+                  {overview.rows.map((row, index) => (
                     <TableRow key={`${row.task_id}:${row.reviewee_user_id}`}>
+                      <TableCell className="align-top tabular-nums text-muted-foreground">{index + 1}</TableCell>
                       <TableCell className="max-w-0 align-top">
                         <Link
                           href={`/tasks/${row.task_id}?returnTo=${encodeURIComponent("/reviews")}`}
@@ -319,11 +320,6 @@ export default function ReviewsPage() {
                       </TableCell>
                       <TableCell className="truncate align-top" title={row.reviewee_name}>{row.reviewee_name}</TableCell>
                       <TableCell className="whitespace-nowrap">{formatDateDMY(row.completed_at)}</TableCell>
-                      <TableCell>
-                        <Badge variant={row.is_late ? "destructive" : "secondary"}>
-                          {row.is_late ? "Late" : "On time"}
-                        </Badge>
-                      </TableCell>
                       <TableCell>
                         {row.review ? (
                           <div>

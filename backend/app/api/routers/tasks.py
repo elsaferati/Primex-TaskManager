@@ -16,7 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
 from app.api.deps import get_current_user
 from app.db import get_db
-from app.models.enums import NotificationType, ProjectPhaseStatus, ProjectType, TaskPriority, TaskStatus, UserRole
+from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
 from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
@@ -41,6 +41,10 @@ from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 from app.services.daily_report_logic import business_days_between, parse_ko_user_id
+from app.services.project_classification import (
+    is_mst_or_tt_project as _is_mst_or_tt_project,
+    is_mst_project,
+)
 
 
 router = APIRouter()
@@ -123,12 +127,6 @@ def _as_local_date(value: datetime | date | None) -> date | None:
             return value.astimezone(tz).date()
         return value.date()
     return value
-
-
-def _is_mst_or_tt_project(project: Project) -> bool:
-    title = (project.title or "").upper().strip()
-    is_tt = title == "TT" or title.startswith(("TT ", "TT-", "TT:"))
-    return project.project_type == ProjectType.MST.value or ("MST" in title) or is_tt
 
 
 def _is_development_department(department: Department | None) -> bool:
@@ -1515,10 +1513,7 @@ async def create_task(
 
     # MST Graphic Design cross-department project tasks: create per-assignee copies.
     if project is not None and assignee_ids is not None and len(assignee_ids) > 1:
-        title_upper = (project.title or "").upper().strip()
-        is_tt = title_upper == "TT" or title_upper.startswith(("TT ", "TT-", "TT:"))
-        is_mst = project.project_type == ProjectType.MST.value or ("MST" in title_upper)
-        if is_mst and not is_tt:
+        if is_mst_project(project):
             project_department = None
             if project.department_id is not None:
                 project_department = (

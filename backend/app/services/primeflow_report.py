@@ -262,9 +262,10 @@ def render_html(document: ReportDocument) -> str:
                 f"<div class='employee'><div class='employee-name'>{employee_index}. {html.escape(employee.name)}</div>"
                 f"{''.join(task_cards)}</div>"
             )
+        employee_html = "".join(employees) or '<div class="empty">(Asnjë detyrë)</div>'
         sections.append(
             f"<section><div class='section-title'>{html.escape(section.title)}</div>"
-            f"{''.join(employees) or '<div class=\"empty\">(Asnjë detyrë)</div>'}</section>"
+            f"{employee_html}</section>"
         )
     return (
         "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
