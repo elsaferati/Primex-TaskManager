@@ -70,6 +70,7 @@ export default function ReportManagementPage() {
       const data=await res.json()
       if(res.status===409){toast.warning("Duplicate prevented",{description:`Existing Gmail ID: ${data.detail?.gmail_message_id||"unknown"}`});return}
       if(!res.ok) throw new Error(JSON.stringify(data))
+      if(!["SENT","ALREADY_SENT"].includes(data.status)||!data.gmail_message_id) throw new Error(`Gmail delivery was not verified (status: ${data.status||"unknown"})`)
       toast.success("Report sent and verified",{description:`Gmail ID: ${data.gmail_message_id}`});setSendOpen(false);setPreview(null);await load()
     }catch(e){toast.error("Manual send failed",{description:String(e)})}finally{setSending(false)}
   }
