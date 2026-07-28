@@ -482,7 +482,11 @@ class GmailService:
         # in the delivery service provide the idempotency guard for SMTP sends.
         return None
 
-    async def send_verified(self, subject: str, recipients: list[str] | dict[str, list[str]], body: str, html_body: str | None = None) -> dict[str, Any]:
+    async def send_verified(
+        self, subject: str, recipients: list[str] | dict[str, list[str]], body: str,
+        html_body: str | None = None,
+        attachments: list[tuple[str, bytes, str]] | None = None,
+    ) -> dict[str, Any]:
         recipient_map = recipients if isinstance(recipients, dict) else {"to": recipients, "cc": [], "bcc": []}
         all_recipients = sum(recipient_map.values(), [])
         if not recipient_map["to"]:
@@ -500,6 +504,9 @@ class GmailService:
         message.set_content(body)
         if html_body:
             message.add_alternative(html_body, subtype="html")
+        for filename, content, mime_type in attachments or []:
+            maintype, subtype = mime_type.split("/", 1)
+            message.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)
 
         def send_smtp() -> None:
             context = ssl.create_default_context()
