@@ -86,12 +86,33 @@ class PrimeFlowReportTests(unittest.TestCase):
             {"id": "t", "date": "2026-07-28", "slot": "10:00", "employee": "Besa", "title": "TODO exact", "description": "1. Erst\n2. Zweit", "status": "TODO"},
         ]
         body = build_report({"generated_at": "2026-07-28T08:59:00+02:00", "guardrails": {"truncated": {}}, "items": {"oneH": tasks}}, date(2026, 7, 28), "10:00")
-        self.assertLess(body.index(STATUS_MARKERS["IN_PROGRESS"]), body.index(STATUS_MARKERS["TODO"]))
-        self.assertLess(body.index(STATUS_MARKERS["TODO"]), body.index(STATUS_MARKERS["DONE"]))
-        self.assertIn("1.1 🟡 IN PROGRESS in progress exact", body)
+        self.assertLess(body.index("in progress exact"), body.index("TODO exact"))
+        self.assertLess(body.index("TODO exact"), body.index("Done EXACT"))
+        self.assertNotIn("IN PROGRESS", body)
+        self.assertNotIn("1.1", body)
         self.assertIn("Zeile 1\n\nZeile 3", body)
         self.assertIn("1. Erst\n2. Zweit", body)
         self.assertNotIn("[[added]]", body)
+
+    def test_report_splits_numbered_details_and_preserves_done_marks(self) -> None:
+        data = {
+            "generated_at": "2026-07-28T08:59:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [{
+                "id": "marked", "date": "2026-07-28", "one_h_report_slot": "10:00",
+                "person": "Anisa", "status": "TODO",
+                "task_title": "PF ASSISTANT 1. First item 2. [[done]]Finished item[[/done]] 3. Third item",
+                "description": "",
+            }]},
+        }
+        document = build_report_document(data, date(2026, 7, 28), "10:00")
+        html = render_html(document)
+        self.assertIn("<div class='task-title'>PF ASSISTANT</div>", html)
+        self.assertIn("<div class='numbered'>1. First item</div>", html)
+        self.assertIn("<span class='done'>Finished item</span>", html)
+        self.assertNotIn("Përshkrimi:", html)
+        self.assertNotIn("Pa përshkrim", html)
+        self.assertNotIn("TODO", html)
 
     def test_truncation_blocks_report(self) -> None:
         with self.assertRaisesRegex(ValueError, "truncated"):
