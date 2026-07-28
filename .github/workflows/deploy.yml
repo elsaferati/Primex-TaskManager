@@ -252,13 +252,11 @@ jobs:
             Write-Error "PrimeFlow report scheduler is not online."
             exit 1
           }
-          $logs = cmd /c "pm2 logs primeflow-report-scheduler --lines 100 --nostream"
-          if ($logs -notmatch "scheduler_ready jobs=5") {
-            Write-Error "PrimeFlow report scheduler did not load all five jobs."
+          & $python scripts\check_report_scheduler.py
+          if ($LASTEXITCODE -ne 0) {
+            cmd /c "pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL"
             exit 1
           }
-          & $python scripts\check_report_scheduler.py
-          if ($LASTEXITCODE -ne 0) { exit 1 }
  
       - name: Replace Public API Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
