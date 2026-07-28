@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -13,6 +13,7 @@ from app.models.enums import UserRole
 from app.models.question_library import (
     QuestionCategory,
     QuestionDefinition,
+    QuestionEditEvent,
     QuestionStatusEvent,
     QuestionUserStatus,
 )
@@ -24,6 +25,7 @@ from app.schemas.question_library import (
     QuestionDefinitionCreate,
     QuestionDefinitionOut,
     QuestionDefinitionUpdate,
+    QuestionEditHistoryOut,
     QuestionStatusHistoryOut,
     QuestionStatusSummary,
     QuestionStatusUpdate,
@@ -108,6 +110,7 @@ async def _question_out(
         text=question.text,
         guidance=question.guidance,
         sort_order=question.sort_order,
+        edit_count=question.edit_count,
         current_user_status=own,
         statuses=summaries,
         created_at=question.created_at,
@@ -126,6 +129,7 @@ def _question_out_from_summaries(
         text=question.text,
         guidance=question.guidance,
         sort_order=question.sort_order,
+        edit_count=question.edit_count,
         current_user_status=next(
             (item.status for item in summaries if item.user_id == current_user_id),
             None,
@@ -345,11 +349,51 @@ async def update_question_definition(
             siblings[target_index].sort_order,
             siblings[current_index].sort_order,
         )
-    question.text = _clean_required(payload.text)
-    question.guidance = _clean_optional(payload.guidance)
+    updated_text = _clean_required(payload.text)
+    updated_guidance = _clean_optional(payload.guidance)
+    content_changed = question.text != updated_text or question.guidance != updated_guidance
+    question.text = updated_text
+    question.guidance = updated_guidance
+    if content_changed:
+        question.edit_count += 1
+        db.add(
+            QuestionEditEvent(
+                question_id=question.id,
+                user_id=current_user.id,
+                user_full_name=current_user.full_name,
+            )
+        )
+        await db.execute(
+            delete(QuestionUserStatus).where(QuestionUserStatus.question_id == question.id)
+        )
     await db.commit()
     await db.refresh(question)
     return await _question_out(db, question, current_user)
+
+
+@router.get("/questions/{question_id}/edit-history", response_model=list[QuestionEditHistoryOut])
+async def list_question_edit_history(
+    question_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[QuestionEditHistoryOut]:
+    await _question_or_404(db, question_id)
+    events = (
+        await db.execute(
+            select(QuestionEditEvent)
+            .where(QuestionEditEvent.question_id == question_id)
+            .order_by(QuestionEditEvent.edited_at.desc(), QuestionEditEvent.id.desc())
+        )
+    ).scalars().all()
+    return [
+        QuestionEditHistoryOut(
+            id=event.id,
+            user_id=event.user_id,
+            full_name=event.user_full_name,
+            edited_at=event.edited_at,
+        )
+        for event in events
+    ]
 
 
 @router.delete("/questions/{question_id}", status_code=status.HTTP_204_NO_CONTENT, response_class=Response)
