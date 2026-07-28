@@ -19,7 +19,7 @@ from app.services.ga_note_task import ga_note_default_task_description, ga_note_
 
 
 ENV_FILE = Path(__file__).resolve().with_name(".env")
-load_dotenv(ENV_FILE, override=True)
+load_dotenv(ENV_FILE, override=False)
 
 API_BASE_URL = os.getenv("PRIMEFLOW_API_BASE_URL", "http://127.0.0.1:8000").rstrip("/")
 WEB_BASE_URL = os.getenv("PRIMEFLOW_WEB_BASE_URL", "http://127.0.0.1:3000").rstrip("/")
@@ -175,16 +175,30 @@ def _api_error_detail(response: httpx.Response) -> str:
 async def _request(method: str, path: str, *, params: dict[str, Any] | None = None, json: Any = None) -> Any:
     clean_params = {key: value for key, value in (params or {}).items() if value is not None}
     response: httpx.Response | None = None
-    for attempt in range(2):
+    transient = {429, 500, 502, 503, 504}
+    delays = (0, 2, 5)
+    refreshed = False
+    last_error: Exception | None = None
+    for attempt, delay in enumerate(delays, 1):
+        if delay:
+            await asyncio.sleep(delay)
         try:
             async with httpx.AsyncClient(base_url=API_BASE_URL, timeout=REQUEST_TIMEOUT, headers=await _headers()) as client:
                 response = await client.request(method, path, params=clean_params, json=json)
-        except httpx.RequestError as exc:
-            raise RuntimeError(f"Primeflow API is unreachable for {method.upper()} {path}: {exc}") from exc
-        if response.status_code != 401 or attempt == 1:
+        except (httpx.ConnectError, httpx.ConnectTimeout, httpx.ReadTimeout, httpx.RemoteProtocolError) as exc:
+            last_error = exc
+            print(f"Primeflow API transient failure method={method.upper()} path={path} attempt={attempt}")
+            continue
+        if response.status_code == 401 and not refreshed:
+            refreshed = True
+            _token_cache["access_token"] = None
+            _token_cache["expires_at"] = 0
+            continue
+        if response.status_code not in transient:
             break
-        _token_cache["access_token"] = None
-        _token_cache["expires_at"] = 0
+        print(f"Primeflow API transient HTTP status={response.status_code} method={method.upper()} path={path} attempt={attempt}")
+    if response is None:
+        raise RuntimeError(f"Primeflow API is unreachable for {method.upper()} {path} after 3 attempts: {type(last_error).__name__}") from last_error
     assert response is not None
     if response.is_error:
         detail = _api_error_detail(response)
@@ -197,6 +211,20 @@ async def _request(method: str, path: str, *, params: dict[str, Any] | None = No
         raise RuntimeError(
             f"Primeflow API {method.upper()} {path} returned non-JSON content ({response.headers.get('content-type', 'unknown')})."
         ) from exc
+
+
+def _validate_startup_configuration() -> None:
+    missing = []
+    if not API_BASE_URL:
+        missing.append("PRIMEFLOW_API_BASE_URL")
+    if not (ACCESS_TOKEN or (os.getenv("PRIMEFLOW_EMAIL") and os.getenv("PRIMEFLOW_PASSWORD"))):
+        missing.append("PRIMEFLOW_EMAIL/PRIMEFLOW_PASSWORD or PRIMEFLOW_ACCESS_TOKEN")
+    if not MCP_HOST:
+        missing.append("PRIMEFLOW_MCP_HOST")
+    if not MCP_PORT:
+        missing.append("PRIMEFLOW_MCP_PORT")
+    if missing:
+        raise RuntimeError("Missing MCP configuration: " + ", ".join(missing))
 
 
 def _db_url() -> str:
@@ -2548,7 +2576,35 @@ async def export_report(
     }
 
 
+@mcp.tool()
+async def health_check() -> dict[str, Any]:
+    """Read-only functional health check for MCP, authentication, and Common View."""
+    result: dict[str, Any] = {
+        "status": "degraded",
+        "mcp_server_time": datetime.now(timezone.utc).isoformat(),
+        "api_host": API_BASE_URL,
+        "authentication_status": "failed",
+        "primeflow_api_health": "failed",
+        "common_view_reachable": False,
+        "build_sha": os.getenv("APP_BUILD_SHA", "unknown"),
+        "application_timezone": APP_TIMEZONE,
+        "report_timezone": os.getenv("PRIMEFLOW_REPORT_TIMEZONE", "Europe/Tirane"),
+    }
+    try:
+        await _access_token()
+        result["authentication_status"] = "ok"
+        health = await _request("GET", "/health")
+        result["primeflow_api_health"] = "ok" if health else "failed"
+        view = await _request("GET", "/api/common-view", params={"include": "tasks", "max_items_per_bucket": 1})
+        result["common_view_reachable"] = isinstance(view, dict)
+        result["status"] = "ok" if result["common_view_reachable"] else "degraded"
+    except Exception as exc:
+        result["error"] = f"{type(exc).__name__}: {str(exc)[:300]}"
+    return result
+
+
 if __name__ == "__main__":
+    _validate_startup_configuration()
     transport = os.getenv("PRIMEFLOW_MCP_TRANSPORT", "stdio")
     if transport == "sse":
         mcp.run(transport="sse")

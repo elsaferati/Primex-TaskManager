@@ -1,0 +1,175 @@
+from __future__ import annotations
+
+import hashlib
+import json
+import logging
+import os
+from pathlib import Path
+from datetime import date, datetime, timedelta
+
+from sqlalchemy import select, text
+from dotenv import load_dotenv
+
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
+
+from app.db import SessionLocal
+from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
+from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
+from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
+from app.services.primeflow_report import (
+    GmailService, GmailVerificationError, PrimeFlowClient, ReportDocument, build_report_document,
+    predecessor, render_html, render_plain_text, report_subject, report_timezone,
+)
+
+logger = logging.getLogger(__name__)
+TERMINAL = {"SENT", "ALREADY_SENT"}
+
+
+def _environment_recipients() -> list[str]:
+    raw = os.getenv("PRIMEFLOW_REPORT_RECIPIENTS", "130primex.eu@gmail.com,ga@primexeu.com")
+    return [value.strip() for value in raw.split(",") if value.strip()]
+
+
+def validate_report_config(*, require_gmail: bool = True) -> None:
+    required = ["DATABASE_URL", "PRIMEFLOW_API_BASE_URL", "PRIMEFLOW_REPORT_TIMEZONE"]
+    if not os.getenv("PRIMEFLOW_ACCESS_TOKEN"):
+        required.extend(["PRIMEFLOW_EMAIL", "PRIMEFLOW_PASSWORD"])
+    if require_gmail:
+        required.extend([
+            "PRIMEFLOW_REPORT_GMAIL_CLIENT_ID", "PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET",
+            "PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN", "PRIMEFLOW_REPORT_GMAIL_SENDER",
+        ])
+    missing = sorted({name for name in required if not os.getenv(name)})
+    if missing:
+        raise RuntimeError("Missing required report configuration: " + ", ".join(missing))
+    report_timezone()
+
+
+async def configured_recipients() -> dict[str, list[str]]:
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            select(PrimeFlowReportRecipient)
+            .where(PrimeFlowReportRecipient.is_active.is_(True))
+            .order_by(PrimeFlowReportRecipient.sort_order, PrimeFlowReportRecipient.email)
+        )).scalars().all()
+    if not rows:
+        return {"to": _environment_recipients(), "cc": [], "bcc": []}
+    result = {"to": [], "cc": [], "bcc": []}
+    for row in rows:
+        result[row.recipient_type.lower()].append(row.email)
+    return result
+
+
+async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] | None = None) -> ReportDocument:
+    client = PrimeFlowClient(
+        os.environ["PRIMEFLOW_API_BASE_URL"].rstrip("/"),
+        os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
+    )
+    data = await client.common_view(day)
+    return build_report_document(data, day, slot, recipients or await configured_recipients())
+
+
+async def deliver_report(
+    day: date, slot: str, *, send: bool = True, scheduled_for: datetime | None = None,
+    recipient_map: dict[str, list[str]] | None = None, trigger_type: str = "SCHEDULED",
+    triggered_by_user_id=None, manual_reason: str | None = None, schedule_id=None,
+    schedule_version: int | None = None, recipient_group: str = "default",
+) -> PrimeFlowReportDeliveryRun:
+    recipient_map = recipient_map or await configured_recipients()
+    recipients = sum(recipient_map.values(), [])
+    subject = report_subject(day, slot)
+    now = datetime.now(report_timezone())
+    async with SessionLocal() as db:
+        async with db.begin():
+            # Serialize even the first insert; the unique constraint remains the
+            # final guard if another application bypasses this service.
+            lock_key = f"primeflow_1h|{day.isoformat()}|{slot}|{recipient_group}"
+            await db.execute(text("SELECT pg_advisory_xact_lock(hashtext(:key))"), {"key": lock_key})
+            run = (await db.execute(
+                select(PrimeFlowReportDeliveryRun)
+                .where(
+                    PrimeFlowReportDeliveryRun.report_type == "primeflow_1h",
+                    PrimeFlowReportDeliveryRun.report_date == day,
+                    PrimeFlowReportDeliveryRun.report_slot == slot,
+                    PrimeFlowReportDeliveryRun.recipient_group == recipient_group,
+                ).with_for_update()
+            )).scalar_one_or_none()
+            if run is None:
+                run = PrimeFlowReportDeliveryRun(
+                    report_date=day, report_slot=slot, recipient_group=recipient_group,
+                    subject=subject, recipients=json.dumps(recipients), status="PENDING",
+                    scheduled_for=scheduled_for, trigger_type=trigger_type,
+                    triggered_by_user_id=triggered_by_user_id, manual_reason=manual_reason,
+                    schedule_id=schedule_id, schedule_version=schedule_version,
+                    scheduled_execution_time=scheduled_for,
+                )
+                db.add(run)
+                await db.flush()
+            if run.status in TERMINAL:
+                return run
+            if run.status == "RUNNING" and run.started_at and run.started_at > now - timedelta(minutes=30):
+                return run
+            run.status, run.started_at, run.attempt_count = "RUNNING", now, run.attempt_count + 1
+
+        gmail = GmailService() if send else None
+        try:
+            if gmail:
+                existing = await gmail.find_exact(subject, recipients)
+                if existing:
+                    run.status = "ALREADY_SENT"
+                    run.gmail_message_id, run.gmail_thread_id = existing.get("id"), existing.get("threadId")
+                    run.finished_at = datetime.now(report_timezone())
+                    await db.commit()
+                    return run
+            document = await generate_fresh(day, slot, recipient_map)
+            body = render_plain_text(document)
+            html_body = render_html(document)
+            run.body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            run.data_generated_at = document.source_generated_at
+            snapshot = (await db.execute(
+                select(PrimeFlowReportSnapshot).where(PrimeFlowReportSnapshot.delivery_run_id == run.id)
+            )).scalar_one_or_none()
+            if snapshot is None:
+                snapshot = PrimeFlowReportSnapshot(
+                    delivery_run_id=run.id,
+                    normalized_report_json=document.model_dump(mode="json"),
+                    plain_text_body=body,
+                    html_body=html_body,
+                    content_version=1,
+                )
+                db.add(snapshot)
+            if not send:
+                run.status, run.finished_at = "PENDING", datetime.now(report_timezone())
+                await db.commit()
+                setattr(run, "dry_run_body", body)
+                return run
+            message = await gmail.send_verified(subject, recipient_map, body, html_body)
+            run.status = "SENT"
+            run.gmail_message_id, run.gmail_thread_id = message.get("id"), message.get("threadId")
+        except ValueError as exc:
+            run.status, run.error_code, run.error_message = "FAILED_DATA", type(exc).__name__, str(exc)[:2000]
+        except GmailVerificationError as exc:
+            run.status, run.error_code, run.error_message = "FAILED_VERIFICATION", type(exc).__name__, str(exc)[:2000]
+            run.gmail_message_id = exc.response.get("id")
+            run.gmail_thread_id = exc.response.get("threadId")
+        except Exception as exc:
+            run.status, run.error_code, run.error_message = "FAILED_EMAIL", type(exc).__name__, str(exc)[:2000]
+        run.finished_at = datetime.now(report_timezone())
+        await db.commit()
+        logger.info("primeflow_report_run run_id=%s report_date=%s report_slot=%s final_status=%s", run.id, day, slot, run.status)
+        return run
+
+
+async def execute_chain(
+    day: date, slot: str, *, schedule_id=None, schedule_version: int | None = None,
+    scheduled_for: datetime | None = None,
+) -> list[PrimeFlowReportDeliveryRun]:
+    if day.weekday() >= 5:
+        return []
+    preceding_day, preceding_slot = predecessor(day, slot)
+    first = await deliver_report(preceding_day, preceding_slot, trigger_type="BACKFILL")
+    second = await deliver_report(
+        day, slot, schedule_id=schedule_id, schedule_version=schedule_version,
+        scheduled_for=scheduled_for, trigger_type="SCHEDULED",
+    )
+    return [first, second]
