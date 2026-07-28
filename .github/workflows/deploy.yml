@@ -244,7 +244,9 @@ jobs:
           # such as `username` and `USERNAME` make PowerShell reject valid JSON.
           $schedulerDescription = cmd /c "pm2 describe primeflow-report-scheduler"
           $schedulerDescribeExit = $LASTEXITCODE
-          $schedulerOnline = $schedulerDescription -match "(?im)status\s*[│:]\s*online"
+          # ASCII-only expression: GitHub's Windows runner can transcode PM2's
+          # Unicode table separator while materializing this PowerShell script.
+          $schedulerOnline = $schedulerDescription -match '(?im)status.*online'
           if ($schedulerDescribeExit -ne 0 -or -not $schedulerOnline) {
             cmd /c "pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL"
             Write-Error "PrimeFlow report scheduler is not online."
