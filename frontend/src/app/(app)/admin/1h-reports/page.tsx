@@ -24,6 +24,7 @@ const slots = ["10:00","11:00","11:50","14:20","16:00"]
 
 export default function ReportManagementPage() {
   const { apiFetch, user } = useAuth()
+  const canAccess = user?.role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const [recipients,setRecipients] = React.useState<Recipient[]>([])
   const [schedules,setSchedules] = React.useState<Schedule[]>([])
   const [runs,setRuns] = React.useState<Run[]>([])
@@ -51,7 +52,7 @@ export default function ReportManagementPage() {
     } catch { toast.error("Unable to load 1H report management data") } finally { setLoading(false) }
   },[apiFetch])
   React.useEffect(()=>{void load()},[load])
-  React.useEffect(()=>{if(user && user.role!=="ADMIN") toast.error("Admin access required")},[user])
+  React.useEffect(()=>{if(user && !canAccess) toast.error("Report management access required")},[user,canAccess])
 
   const previewReport = async(format="json")=>{
     setPreviewing(true)
@@ -68,10 +69,9 @@ export default function ReportManagementPage() {
     try{
       const res=await apiFetch(`${API}/send`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({report_date:date,report_slot:slot,format:"json",use_default_recipients:true,to:[],cc:[],bcc:[],reason,force:false})})
       const data=await res.json()
-      if(res.status===409){toast.warning("Duplicate prevented",{description:`Existing Gmail ID: ${data.detail?.gmail_message_id||"unknown"}`});return}
       if(!res.ok) throw new Error(JSON.stringify(data))
-      if(!["SENT","ALREADY_SENT"].includes(data.status)||!data.gmail_message_id) throw new Error(`Gmail delivery was not verified (status: ${data.status||"unknown"})`)
-      toast.success("Report sent and verified",{description:`Gmail ID: ${data.gmail_message_id}`});setSendOpen(false);setPreview(null);await load()
+      if(data.status!=="SENT"||!data.gmail_message_id) throw new Error(`Gmail delivery failed (status: ${data.status||"unknown"})`)
+      toast.success("Report sent",{description:`Message ID: ${data.gmail_message_id}`});setSendOpen(false);setPreview(null);await load()
     }catch(e){toast.error("Manual send failed",{description:String(e)})}finally{setSending(false)}
   }
   const addRecipient=async()=>{
@@ -101,7 +101,7 @@ export default function ReportManagementPage() {
     if(!res.ok){toast.error("Download unavailable",{description:await res.text()});return}
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${run.report_date}_${run.report_slot.replace(":","-")}.${format}`;a.click();URL.revokeObjectURL(url)
   }
-  if(user?.role!=="ADMIN") return <div className="rounded-lg border p-8">Admin access required.</div>
+  if(!canAccess) return <div className="rounded-lg border p-8">Report management access required.</div>
 
   const active=recipients.filter(r=>r.is_active)
   return <div className="mx-auto max-w-[1500px] space-y-5">
@@ -116,7 +116,7 @@ export default function ReportManagementPage() {
       <TabsContent value="history"><div className="rounded-xl border"><Table><TableHeader><TableRow>{["Date","Slot","Trigger","Status","Subject","Attempts","Gmail","Error","Downloads"].map(x=><TableHead key={x}>{x}</TableHead>)}</TableRow></TableHeader><TableBody>{runs.map(r=><TableRow key={r.id}><TableCell>{r.report_date}</TableCell><TableCell>{r.report_slot}</TableCell><TableCell>{r.trigger_type}</TableCell><TableCell>{r.status}</TableCell><TableCell className="max-w-xs truncate">{r.subject}</TableCell><TableCell>{r.attempt_count}</TableCell><TableCell>{r.gmail_message_id||"—"}</TableCell><TableCell className="max-w-xs truncate">{r.error_message||"—"}</TableCell><TableCell><div className="flex gap-1">{(["docx","png","txt"] as const).map(f=><Button key={f} size="sm" variant="ghost" onClick={()=>void downloadRun(r,f)}>{f.toUpperCase()}</Button>)}</div></TableCell></TableRow>)}</TableBody></Table></div></TabsContent>
       <TabsContent value="settings"><div className="rounded-xl border p-5"><h2 className="font-semibold">Configuration audit</h2><div className="mt-4 space-y-2">{audit.map(a=><div className="rounded-lg border p-3 text-sm" key={a.id}><b>{a.action}</b> · {a.entity_type}<span className="float-right text-muted-foreground">{a.created_at}</span></div>)}</div></div></TabsContent>
     </Tabs>
-    <Dialog open={sendOpen} onOpenChange={setSendOpen}><DialogContent><DialogHeader><DialogTitle>Send report immediately?</DialogTitle></DialogHeader>{preview&&<div className="space-y-3 text-sm"><p><b>{preview.document.subject}</b></p><p>{preview.task_count} tasks · Generated {preview.document.generated_at}</p><p>Recipients: {Object.values(preview.document.recipients).flat().join(", ")}</p><p className="rounded bg-amber-50 p-3 text-amber-800">This email will be sent immediately and verified in Gmail Sent Mail.</p><div><Label>Reason</Label><Input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Operational reason for manual send"/></div><Button className="w-full" disabled={sending||reason.trim().length<3} onClick={()=>void sendNow()}>{sending?<RefreshCw className="animate-spin"/>:<Send/>}Confirm and send</Button></div>}</DialogContent></Dialog>
+    <Dialog open={sendOpen} onOpenChange={setSendOpen}><DialogContent><DialogHeader><DialogTitle>Send report immediately?</DialogTitle></DialogHeader>{preview&&<div className="space-y-3 text-sm"><p><b>{preview.document.subject}</b></p><p>{preview.task_count} tasks · Generated {preview.document.generated_at}</p><p>Recipients: {Object.values(preview.document.recipients).flat().join(", ")}</p><p className="rounded bg-amber-50 p-3 text-amber-800">This email will be sent immediately. Manual reports can be sent again whenever needed.</p><div><Label>Reason</Label><Input value={reason} onChange={e=>setReason(e.target.value)} placeholder="Operational reason for manual send"/></div><Button className="w-full" disabled={sending||reason.trim().length<3} onClick={()=>void sendNow()}>{sending?<RefreshCw className="animate-spin"/>:<Send/>}Confirm and send</Button></div>}</DialogContent></Dialog>
     <Dialog open={scheduleOpen} onOpenChange={setScheduleOpen}><DialogContent><DialogHeader><DialogTitle>{editingScheduleId?"Edit":"Add"} delivery schedule</DialogTitle></DialogHeader><div className="space-y-3"><div><Label>Name</Label><Input value={scheduleForm.name} onChange={e=>setScheduleForm({...scheduleForm,name:e.target.value})}/></div><div className="grid grid-cols-2 gap-3"><div><Label>Report slot</Label><Select value={scheduleForm.report_slot} onValueChange={v=>setScheduleForm({...scheduleForm,report_slot:v})}><SelectTrigger><SelectValue/></SelectTrigger><SelectContent>{slots.map(v=><SelectItem key={v} value={v}>{v}</SelectItem>)}</SelectContent></Select></div><div><Label>Execution time</Label><Input type="time" value={scheduleForm.execution_time} onChange={e=>setScheduleForm({...scheduleForm,execution_time:e.target.value})}/></div></div><p className="text-xs text-muted-foreground">{editingScheduleId?"Saving increments the schedule version and hot-reloads the scheduler.":"New schedules start disabled so they can be reviewed before activation."}</p><Button className="w-full" onClick={()=>void addSchedule()}><Settings2/>Save schedule</Button></div></DialogContent></Dialog>
   </div>
 }

@@ -48,12 +48,20 @@ class QuestionStatusHistoryOut(BaseModel):
     created_at: datetime
 
 
+class QuestionEditHistoryOut(BaseModel):
+    id: uuid.UUID
+    user_id: uuid.UUID | None
+    full_name: str
+    edited_at: datetime
+
+
 class QuestionDefinitionOut(BaseModel):
     id: uuid.UUID
     category_id: uuid.UUID
     text: str
     guidance: str | None
     sort_order: int
+    edit_count: int
     current_user_status: QuestionStatusValue | None
     statuses: list[QuestionStatusSummary]
     created_at: datetime

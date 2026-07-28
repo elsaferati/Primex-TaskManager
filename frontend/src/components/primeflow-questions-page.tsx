@@ -53,6 +53,7 @@ type QuestionDefinition = {
   text: string
   guidance: string | null
   sort_order: number
+  edit_count: number
   current_user_status: QuestionStatus | null
   statuses: QuestionStatusSummary[]
   created_at: string
@@ -76,6 +77,13 @@ type QuestionStatusEvent = {
   created_at: string
 }
 
+type QuestionEditEvent = {
+  id: string
+  user_id: string | null
+  full_name: string
+  edited_at: string
+}
+
 type QuestionLibraryUser = {
   id: string
   full_name: string | null
@@ -85,6 +93,8 @@ const STATUS_OPTIONS: Array<{ value: QuestionStatus | null; label: string }> = [
   { value: "DONE", label: "Done" },
   { value: "X", label: "X" },
 ]
+
+const NEW_QUESTION_DURATION_MS = 24 * 60 * 60 * 1000
 
 function initials(fullName: string) {
   return fullName
@@ -169,8 +179,12 @@ export function PrimeflowQuestionsPage() {
   const [historyQuestion, setHistoryQuestion] = React.useState<QuestionDefinition | null>(null)
   const [history, setHistory] = React.useState<QuestionStatusEvent[]>([])
   const [historyLoading, setHistoryLoading] = React.useState(false)
+  const [editHistoryQuestion, setEditHistoryQuestion] = React.useState<QuestionDefinition | null>(null)
+  const [editHistory, setEditHistory] = React.useState<QuestionEditEvent[]>([])
+  const [editHistoryLoading, setEditHistoryLoading] = React.useState(false)
   const [statusUsers, setStatusUsers] = React.useState<QuestionLibraryUser[]>([])
   const [statusUsersLoaded, setStatusUsersLoaded] = React.useState(false)
+  const [currentTime, setCurrentTime] = React.useState(() => Date.now())
 
   const loadCategories = React.useCallback(async (preferredCategoryId?: string) => {
     try {
@@ -192,6 +206,11 @@ export function PrimeflowQuestionsPage() {
   React.useEffect(() => {
     void loadCategories()
   }, [loadCategories])
+
+  React.useEffect(() => {
+    const timer = window.setInterval(() => setCurrentTime(Date.now()), 60_000)
+    return () => window.clearInterval(timer)
+  }, [])
 
   React.useEffect(() => {
     if (!canViewHistory) {
@@ -403,6 +422,22 @@ export function PrimeflowQuestionsPage() {
     }
   }
 
+  const openEditHistory = async (question: QuestionDefinition) => {
+    if (!canDelete) return
+    setEditHistoryQuestion(question)
+    setEditHistory([])
+    setEditHistoryLoading(true)
+    try {
+      const response = await apiFetch(`/question-library/questions/${question.id}/edit-history`)
+      if (!response.ok) throw new Error(await responseError(response, "Failed to load edit history"))
+      setEditHistory((await response.json()) as QuestionEditEvent[])
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to load edit history")
+    } finally {
+      setEditHistoryLoading(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[420px] items-center justify-center">
@@ -516,28 +551,48 @@ export function PrimeflowQuestionsPage() {
         </div>
 
         <div className="mt-4 overflow-x-auto border border-[#183b68]">
-          <table className={cn("w-full table-fixed border-collapse text-sm", canViewHistory ? "min-w-[1040px]" : "min-w-[820px]")}>
+          <table
+            className={cn(
+              "w-full table-fixed border-collapse text-sm",
+              canDelete ? "min-w-[1280px]" : canViewHistory ? "min-w-[1200px]" : "min-w-[820px]"
+            )}
+          >
             <thead className="bg-[#e7edf5] text-xs uppercase text-[#071126]">
               <tr>
                 <th className="w-14 border-r border-[#183b68] px-2 py-3 text-center">NR</th>
                 <th className="border-r border-[#183b68] px-3 py-3 text-left">{activeCategory?.name || "Pyetje"}</th>
-                <th className="w-56 border-r border-[#183b68] px-3 py-3 text-center">Users</th>
-                {canViewHistory && <th className="w-56 border-r border-[#183b68] px-3 py-3 text-center">Pending</th>}
+                {canViewHistory ? (
+                  <>
+                    <th className="w-48 border-r border-[#183b68] px-3 py-3 text-center">Understood</th>
+                    <th className="w-48 border-r border-[#183b68] px-3 py-3 text-center">Not understood</th>
+                    <th className="w-56 border-r border-[#183b68] px-3 py-3 text-center">Waiting</th>
+                  </>
+                ) : (
+                  <th className="w-56 border-r border-[#183b68] px-3 py-3 text-center">Users</th>
+                )}
+                {canDelete && <th className="w-24 border-r border-[#183b68] px-3 py-3 text-center">Editime</th>}
                 <th className="w-44 border-r border-[#183b68] px-3 py-3 text-center">Status</th>
                 {canManage && <th className="w-28 px-3 py-3 text-center">Edit / Fshi</th>}
               </tr>
             </thead>
             <tbody>
               {!activeCategory || activeCategory.questions.length === 0 ? (
-                <tr><td colSpan={4 + Number(canViewHistory) + Number(canManage)} className="px-4 py-10 text-center text-muted-foreground">Nuk ka pyetje të definuara për këtë kategori.</td></tr>
+                <tr><td colSpan={3 + (canViewHistory ? 3 : 1) + Number(canDelete) + Number(canManage)} className="px-4 py-10 text-center text-muted-foreground">Nuk ka pyetje të definuara për këtë kategori.</td></tr>
               ) : activeCategory.questions.map((question, index) => {
                 const isEditing = editingQuestion?.id === question.id
+                const questionAge = currentTime - new Date(question.created_at).getTime()
+                const isNewQuestion = questionAge >= 0 && questionAge < NEW_QUESTION_DURATION_MS
+                const understoodUsers = question.statuses.filter((item) => item.status === "DONE")
+                const notUnderstoodUsers = question.statuses.filter((item) => item.status === "X")
                 const usersWithStatus = new Set(question.statuses.map((item) => item.user_id))
                 const pendingUsers = statusUsers.filter(
                   (item) =>
                     !["GA", "KA"].includes(initials(item.full_name || "")) &&
                     !usersWithStatus.has(item.id)
                 )
+                const isQuestionDone = canViewHistory
+                  ? statusUsersLoaded && pendingUsers.length === 0
+                  : question.current_user_status !== null
                 return (
                   <tr key={question.id} className="border-t border-[#183b68] bg-[#f7fbff] align-middle">
                     <td className="border-r border-[#183b68] px-2 py-3 text-center">
@@ -578,55 +633,108 @@ export function PrimeflowQuestionsPage() {
                         </div>
                       ) : (
                         <div className="grid gap-1">
-                          <span className="whitespace-pre-wrap">{question.text}</span>
+                          <div className="flex flex-wrap items-start gap-2">
+                            <span className="whitespace-pre-wrap">{question.text}</span>
+                            {isNewQuestion && (
+                              <Badge
+                                variant="outline"
+                                className="border-sky-300 bg-sky-50 text-[10px] font-bold text-sky-800"
+                                title="Pyetje e re, e shtuar brenda 24 orëve"
+                              >
+                                NEW
+                              </Badge>
+                            )}
+                            {isQuestionDone && (
+                              <Badge
+                                variant="outline"
+                                className="border-emerald-300 bg-emerald-50 text-[10px] font-bold text-emerald-800"
+                                title={canViewHistory ? "Të gjithë përdoruesit janë përgjigjur" : "Ti je përgjigjur"}
+                              >
+                                <Check className="size-3" /> DONE
+                              </Badge>
+                            )}
+                          </div>
                           {question.guidance && <span className="whitespace-pre-wrap text-xs font-normal text-muted-foreground">{question.guidance}</span>}
                         </div>
                       )}
                     </td>
-                    <td className="border-r border-[#183b68] px-3 py-3 text-center">
-                      <button
-                        type="button"
-                        disabled={!canViewHistory}
-                        onClick={() => void openHistory(question)}
-                        className={cn("inline-flex min-h-8 max-w-full flex-wrap items-center justify-center gap-1.5 rounded-md px-1", canViewHistory && "hover:bg-muted")}
-                        title={canViewHistory ? "View status history" : undefined}
-                      >
-                        {question.statuses.length ? question.statuses.map((item) => (
-                          <Badge
-                            key={item.user_id}
-                            variant="outline"
-                            className={cn(
-                              "bg-white",
-                              canViewHistory && "border-emerald-300 bg-emerald-50 text-emerald-800"
-                            )}
-                            title={`${item.full_name}: ${item.status}`}
-                          >
-                            {initials(item.full_name)} <StatusIcon status={item.status} className="size-3" />
-                          </Badge>
-                        )) : <span className="text-muted-foreground">-</span>}
-                        {canViewHistory && <History className="size-3.5 text-muted-foreground" />}
-                      </button>
-                    </td>
-                    {canViewHistory && (
-                      <td className="border-r border-[#183b68] px-3 py-3 text-center">
-                        {!statusUsersLoaded ? (
-                          <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" />
-                        ) : pendingUsers.length ? (
-                          <div className="flex flex-wrap justify-center gap-1">
-                            {pendingUsers.map((item) => (
+                    {canViewHistory ? (
+                      <>
+                        <td className="border-r border-[#183b68] px-3 py-3 text-center">
+                          <div className="flex min-h-8 flex-wrap items-center justify-center gap-1">
+                            {understoodUsers.length ? understoodUsers.map((item) => (
                               <Badge
-                                key={item.id}
+                                key={item.user_id}
                                 variant="outline"
-                                className="border-red-300 bg-red-50 font-normal text-red-700"
-                                title={item.full_name || "Pa emër"}
+                                className="border-emerald-300 bg-emerald-50 text-emerald-800"
+                                title={item.full_name}
                               >
-                                {initials(item.full_name || "")}
+                                {initials(item.full_name)} <Check className="size-3" />
+                              </Badge>
+                            )) : <span className="text-muted-foreground">-</span>}
+                          </div>
+                        </td>
+                        <td className="border-r border-[#183b68] px-3 py-3 text-center">
+                          {notUnderstoodUsers.length ? (
+                            <div className="flex flex-wrap justify-center gap-1">
+                              {notUnderstoodUsers.map((item) => (
+                                <Badge
+                                  key={item.user_id}
+                                  variant="outline"
+                                  className="border-red-300 bg-red-50 text-red-700"
+                                  title={item.full_name}
+                                >
+                                  {initials(item.full_name)} <X className="size-3" />
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : <span className="text-muted-foreground">-</span>}
+                        </td>
+                        <td className="border-r border-[#183b68] px-3 py-3 text-center">
+                          {!statusUsersLoaded ? (
+                            <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" />
+                          ) : pendingUsers.length ? (
+                            <div className="flex flex-wrap justify-center gap-1">
+                              {pendingUsers.map((item) => (
+                                <Badge
+                                  key={item.id}
+                                  variant="outline"
+                                  className="border-amber-300 bg-amber-50 font-normal text-amber-800"
+                                  title={item.full_name || "Pa emër"}
+                                >
+                                  {initials(item.full_name || "")}
+                                </Badge>
+                              ))}
+                            </div>
+                          ) : <span className="text-muted-foreground">-</span>}
+                        </td>
+                      </>
+                    ) : (
+                      <td className="border-r border-[#183b68] px-3 py-3 text-center">
+                        {question.statuses.length ? (
+                          <div className="flex flex-wrap justify-center gap-1">
+                            {question.statuses.map((item) => (
+                              <Badge key={item.user_id} variant="outline" className="bg-white" title={`${item.full_name}: ${item.status}`}>
+                                {initials(item.full_name)} <StatusIcon status={item.status} className="size-3" />
                               </Badge>
                             ))}
                           </div>
-                        ) : (
-                          <span className="text-muted-foreground">-</span>
-                        )}
+                        ) : <span className="text-muted-foreground">-</span>}
+                      </td>
+                    )}
+                    {canDelete && (
+                      <td className="border-r border-[#183b68] px-3 py-3 text-center">
+                        <button
+                          type="button"
+                          onClick={() => void openEditHistory(question)}
+                          disabled={question.edit_count === 0}
+                          className="inline-flex h-8 min-w-12 items-center justify-center gap-1.5 rounded-md border bg-white px-2 font-semibold tabular-nums transition-colors hover:bg-muted disabled:cursor-default disabled:text-muted-foreground disabled:hover:bg-white"
+                          title={question.edit_count ? `Edituar ${question.edit_count} herë` : "Nuk ka editime të regjistruara"}
+                          aria-label={`Shiko ${question.edit_count} editime`}
+                        >
+                          <History className="size-3.5 text-muted-foreground" />
+                          {question.edit_count}
+                        </button>
                       </td>
                     )}
                     <td className="border-r border-[#183b68] px-3 py-3 text-center">
@@ -713,6 +821,38 @@ export function PrimeflowQuestionsPage() {
                       <td className="px-3 py-2 font-medium">{event.full_name}</td>
                       <td className="px-3 py-2"><span className="inline-flex items-center gap-2"><StatusIcon status={event.status} className="size-4" />{event.status || "Cleared"}</span></td>
                       <td className="px-3 py-2 text-muted-foreground">{new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.created_at))}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={Boolean(editHistoryQuestion)} onOpenChange={(open) => { if (!open) setEditHistoryQuestion(null) }}>
+        <DialogContent className="sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Historia e editimeve</DialogTitle>
+            <DialogDescription className="line-clamp-2">{editHistoryQuestion?.text}</DialogDescription>
+          </DialogHeader>
+          <div className="max-h-[55vh] overflow-y-auto border">
+            {editHistoryLoading ? (
+              <div className="flex min-h-32 items-center justify-center"><Loader2 className="size-5 animate-spin" /></div>
+            ) : editHistory.length === 0 ? (
+              <div className="p-8 text-center text-sm text-muted-foreground">Nuk ka editime të regjistruara.</div>
+            ) : (
+              <table className="w-full text-sm">
+                <thead className="sticky top-0 bg-muted text-left text-xs uppercase">
+                  <tr><th className="px-3 py-2">Kush</th><th className="px-3 py-2">Kur</th></tr>
+                </thead>
+                <tbody>
+                  {editHistory.map((event) => (
+                    <tr key={event.id} className="border-t">
+                      <td className="px-3 py-2 font-medium">{event.full_name}</td>
+                      <td className="px-3 py-2 text-muted-foreground">
+                        {new Intl.DateTimeFormat("sq-AL", { dateStyle: "medium", timeStyle: "short" }).format(new Date(event.edited_at))}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

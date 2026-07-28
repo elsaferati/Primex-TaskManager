@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import os
+import uuid
 from pathlib import Path
 from datetime import date, datetime, timedelta
 
@@ -72,6 +73,8 @@ async def deliver_report(
     triggered_by_user_id=None, manual_reason: str | None = None, schedule_id=None,
     schedule_version: int | None = None, recipient_group: str = "default",
 ) -> PrimeFlowReportDeliveryRun:
+    if trigger_type == "MANUAL" and recipient_group == "default":
+        recipient_group = f"manual-{uuid.uuid4().hex}"
     recipient_map = recipient_map or await configured_recipients()
     recipients = sum(recipient_map.values(), [])
     subject = report_subject(day, slot)

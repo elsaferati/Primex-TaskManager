@@ -27,6 +27,9 @@ SCHEDULES = {"10:00": "09:00", "11:00": "10:50", "11:50": "11:40", "14:20": "14:
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
 TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
+ADDED_TAGS = re.compile(r"\[\[\s*/?\s*added\s*\]\]", re.IGNORECASE)
+DONE_BLOCK = re.compile(r"\[\[\s*done\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]", re.IGNORECASE | re.DOTALL)
+NUMBERED_ITEM = re.compile(r"(?<!\S)(\d+)\.\s*")
 TRANSIENT_CODES = {429, 500, 502, 503, 504}
 STATUS_COLORS = {
     "TODO": ("#fbcfe8", "#111827", "#ec4899"),
@@ -44,6 +47,8 @@ class GmailVerificationError(RuntimeError):
 class ReportTask(BaseModel):
     title: str
     description: str
+    marked_title: str = ""
+    marked_description: str = ""
     status: str
     marker: str
 
@@ -104,6 +109,34 @@ def clean_title(value: str | None) -> str:
     return clean_description(value)
 
 
+def preserve_done_marks(value: str | None) -> str:
+    return ADDED_TAGS.sub("", value or "").strip()
+
+
+def split_numbered_text(value: str) -> tuple[str, list[str]]:
+    matches = list(NUMBERED_ITEM.finditer(value))
+    if not matches:
+        return value.strip(), []
+    heading = value[:matches[0].start()].strip()
+    items = [
+        value[match.start():matches[index + 1].start() if index + 1 < len(matches) else len(value)].strip()
+        for index, match in enumerate(matches)
+    ]
+    return heading, items
+
+
+def done_ranges(value: str, marked_source: str) -> list[tuple[int, int]]:
+    ranges = []
+    cursor = 0
+    for match in DONE_BLOCK.finditer(marked_source):
+        selected = TECHNICAL_TAGS.sub("", match.group(1))
+        start = value.find(selected, cursor)
+        if start >= 0:
+            ranges.append((start, start + len(selected)))
+            cursor = start + len(selected)
+    return ranges
+
+
 def _task_date(item: dict[str, Any]) -> date | None:
     raw = item.get("report_date") or item.get("date") or item.get("day")
     if not raw:
@@ -123,6 +156,11 @@ def _employee(item: dict[str, Any]) -> str:
         item.get("employee") or item.get("person") or item.get("owner")
         or item.get("user_name") or item.get("assignee_name") or item.get("user") or ""
     ).strip()
+
+
+def employee_initials(name: str) -> str:
+    parts = re.findall(r"[^\W\d_]+", name, flags=re.UNICODE)
+    return "".join(part[0] for part in parts).upper()
 
 
 def filter_tasks(items: list[dict[str, Any]], day: date, slot: str | None = None) -> list[dict[str, Any]]:
@@ -176,11 +214,15 @@ def _document_section(title: str, tasks: list[dict[str, Any]]) -> ReportSection:
             str(x.get("task_title") or x.get("title") or x.get("task")),
         ))
         employees.append(ReportEmployee(
-            name=employee,
+            name=employee_initials(employee),
             tasks=[
                 ReportTask(
                     title=clean_title(str(task.get("task_title") or task.get("title") or task.get("task"))),
                     description=clean_description(task.get("description") if "description" in task else task.get("note")),
+                    marked_title=preserve_done_marks(str(task.get("task_title") or task.get("title") or task.get("task"))),
+                    marked_description=preserve_done_marks(
+                        task.get("description") if "description" in task else task.get("note")
+                    ),
                     status=str(task.get("status")).upper(),
                     marker=STATUS_MARKERS[str(task.get("status")).upper()],
                 )
@@ -201,18 +243,22 @@ def build_report_document(
     one_h = items.get("oneH") or data.get("tasks") or []
     definitions: list[tuple[str, list[dict[str, Any]]]] = []
     if slot == "10:00":
-        prev = previous_working_day(report_day)
-        definitions.append((f"SLOTI {prev:%d.%m.%Y} 16:00", filter_tasks(one_h, prev, "16:00")))
-    current_index = SLOTS.index(slot)
-    start_index = current_index if current_index == 0 else current_index - 1
-    for candidate in SLOTS[start_index:]:
-        definitions.append((f"SLOTI {report_day:%d.%m.%Y} {candidate}", filter_tasks(one_h, report_day, candidate)))
-    definitions.extend([
-        ("DETYRA PA SLOT – E GJITHË DITA", [t for t in filter_tasks(one_h, report_day, None) if _slot(t) is None]),
-        ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
-        ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
-        ("R1 = 1H", filter_tasks(items.get("r1") or [], report_day)),
-    ])
+        for candidate in SLOTS:
+            definitions.append(
+                (f"SLOTI {report_day:%d.%m.%Y} {candidate}", filter_tasks(one_h, report_day, candidate))
+            )
+        definitions.extend([
+            ("DETYRA PA SLOT – E GJITHË DITA", [
+                task for task in filter_tasks(one_h, report_day, None) if _slot(task) is None
+            ]),
+            ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
+            ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
+            ("R1 = 1H", filter_tasks(items.get("r1") or [], report_day)),
+        ])
+    else:
+        definitions.append(
+            (f"SLOTI {report_day:%d.%m.%Y} {slot}", filter_tasks(one_h, report_day, slot))
+        )
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
     source_generated = datetime.fromisoformat(str(generated_value).replace("Z", "+00:00"))
     return ReportDocument(
@@ -232,34 +278,54 @@ def render_plain_text(document: ReportDocument) -> str:
         lines = [section.title]
         if not section.employees:
             lines.append("(Asnjë detyrë)")
-        for employee_index, employee in enumerate(section.employees, 1):
-            lines.append(f"{employee_index}. {employee.name}")
-            for task_index, task in enumerate(employee.tasks, 1):
-                lines.extend([
-                    f"{employee_index}.{task_index} {task.marker} {task.title}",
-                    "Përshkrimi:",
-                    task.description,
-                ])
+        for employee in section.employees:
+            lines.append(employee.name)
+            for task in employee.tasks:
+                heading, numbered_items = split_numbered_text(task.title)
+                if heading:
+                    lines.append(heading)
+                lines.extend(numbered_items)
+                if task.description:
+                    lines.append(task.description)
         blocks.append("\n".join(lines))
     return "\n\n".join(blocks)
 
 
 def render_html(document: ReportDocument) -> str:
+    def marked_html(value: str, marked_source: str) -> str:
+        ranges = done_ranges(value, marked_source)
+        boundaries = sorted({0, len(value), *(point for item in ranges for point in item)})
+        parts = []
+        for start, end in zip(boundaries, boundaries[1:]):
+            content = html.escape(value[start:end]).replace(chr(10), "<br>")
+            if any(left <= start and right >= end for left, right in ranges):
+                content = f"<span class='done'>{content}</span>"
+            parts.append(content)
+        return "".join(parts)
+
     sections = []
     for section in document.sections:
         employees = []
         for employee_index, employee in enumerate(section.employees, 1):
             task_cards = []
-            for task_index, task in enumerate(employee.tasks, 1):
+            for task in employee.tasks:
                 background, foreground, accent = STATUS_COLORS[task.status]
-                description = html.escape(task.description).replace(chr(10), "<br>") or "Pa përshkrim"
+                heading, numbered_items = split_numbered_text(task.title)
+                detail_html = "".join(
+                    f"<div class='numbered'>{marked_html(item, task.marked_title)}</div>"
+                    for item in numbered_items
+                )
+                description = (
+                    f"<div class='description'>{marked_html(task.description, task.marked_description)}</div>"
+                    if task.description else ""
+                )
                 task_cards.append(
                     f"<article class='task' style='background:{background};color:{foreground};border-color:{accent}'>"
-                    f"<div class='task-title'>{employee_index}.{task_index} {html.escape(task.marker)} {html.escape(task.title)}</div>"
-                    f"<div class='description'><strong>Përshkrimi:</strong>{description}</div></article>"
+                    f"<div class='task-title'>{marked_html(heading or task.title, task.marked_title)}</div>"
+                    f"{detail_html}{description}</article>"
                 )
             employees.append(
-                f"<div class='employee'><div class='employee-name'>{employee_index}. {html.escape(employee.name)}</div>"
+                f"<div class='employee'><div class='employee-name'>{html.escape(employee.name)}</div>"
                 f"{''.join(task_cards)}</div>"
             )
         employee_html = "".join(employees) or '<div class="empty">(Asnjë detyrë)</div>'
@@ -275,8 +341,8 @@ def render_html(document: ReportDocument) -> str:
         "section{margin:0 0 24px}.section-title{background:#eef2ff;border-left:5px solid #2563eb;padding:11px 14px;font-size:18px;font-weight:800}"
         ".employee{margin:14px 0}.employee-name{font-size:16px;font-weight:800;margin:0 0 8px}"
         ".task{border:1px solid;border-left-width:5px;border-radius:7px;padding:12px 14px;margin:8px 0;box-sizing:border-box}"
-        ".task-title{font-weight:800;font-size:14px;word-break:break-word}.description{font-size:13px;margin-top:8px;word-break:break-word}"
-        ".description strong{display:block;margin-bottom:3px}.empty{color:#64748b;padding:12px}"
+        ".task-title{font-weight:800;font-size:14px;color:#050505;word-break:break-word}.numbered,.description{font-size:13px;color:#64748b;font-weight:400;margin-top:5px;word-break:break-word}"
+        ".done{text-decoration:line-through;text-decoration-thickness:2px}.empty{color:#64748b;padding:12px}"
         "@media(max-width:600px){.shell{padding:0}.header{border-radius:0;padding:16px}.header h1{font-size:20px}"
         ".content{padding:12px}.section-title{font-size:16px}.task{padding:10px}.task-title{font-size:13px}}</style>"
         "</head><body><div class='shell'>"
@@ -295,6 +361,16 @@ def render_docx(document: ReportDocument) -> bytes:
         fill = OxmlElement("w:shd")
         fill.set(qn("w:fill"), color.lstrip("#"))
         cell._tc.get_or_add_tcPr().append(fill)
+
+    def add_marked_runs(paragraph: Any, value: str, marked_source: str, *, bold: bool, color: str) -> None:
+        ranges = done_ranges(value, marked_source)
+        boundaries = sorted({0, len(value), *(point for item in ranges for point in item)})
+        for start, end in zip(boundaries, boundaries[1:]):
+            run = paragraph.add_run(value[start:end])
+            run.bold = bold
+            run.font.strike = any(left <= start and right >= end for left, right in ranges)
+            run.font.size = Pt(9.5 if bold else 9)
+            run.font.color.rgb = RGBColor.from_string(color.lstrip("#"))
 
     output = io.BytesIO()
     doc = Document()
@@ -318,28 +394,28 @@ def render_docx(document: ReportDocument) -> bytes:
         section_run.font.size = Pt(13)
         if not section.employees:
             doc.add_paragraph("(Asnjë detyrë)")
-        for employee_index, employee in enumerate(section.employees, 1):
+        for employee in section.employees:
             employee_paragraph = doc.add_paragraph()
             employee_paragraph.paragraph_format.space_before = Pt(8)
             employee_paragraph.paragraph_format.space_after = Pt(3)
-            employee_run = employee_paragraph.add_run(f"{employee_index}. {employee.name}")
+            employee_run = employee_paragraph.add_run(employee.name)
             employee_run.bold = True
             employee_run.font.size = Pt(11)
-            for task_index, task in enumerate(employee.tasks, 1):
-                background, foreground, _ = STATUS_COLORS[task.status]
+            for task in employee.tasks:
+                background, _, _ = STATUS_COLORS[task.status]
                 card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
                 shade(card_cell, background)
-                task_run = card_cell.paragraphs[0].add_run(f"{employee_index}.{task_index} {task.marker} {task.title}")
-                task_run.bold = True
-                task_run.font.size = Pt(9.5)
-                task_run.font.color.rgb = RGBColor.from_string(foreground.lstrip("#"))
-                description = card_cell.add_paragraph()
-                label = description.add_run("Përshkrimi:\n")
-                label.bold = True
-                description.add_run(task.description or "Pa përshkrim")
-                for run in description.runs:
-                    run.font.size = Pt(9)
-                    run.font.color.rgb = RGBColor.from_string(foreground.lstrip("#"))
+                heading, numbered_items = split_numbered_text(task.title)
+                add_marked_runs(card_cell.paragraphs[0], heading or task.title, task.marked_title, bold=True, color="#050505")
+                for item in numbered_items:
+                    detail = card_cell.add_paragraph()
+                    detail.paragraph_format.space_after = Pt(2)
+                    add_marked_runs(detail, item, task.marked_title, bold=False, color="#64748b")
+                if task.description:
+                    description = card_cell.add_paragraph()
+                    add_marked_runs(
+                        description, task.description, task.marked_description, bold=False, color="#64748b"
+                    )
                 doc.add_paragraph().paragraph_format.space_after = Pt(0)
     doc.save(output)
     return output.getvalue()
@@ -357,6 +433,15 @@ def render_png(document: ReportDocument) -> bytes:
     except OSError:
         font = bold = heading = ImageFont.load_default()
     import textwrap
+
+    def draw_line_with_marks(x: int, line_y: int, line: str, marked_source: str, line_font: Any, color: str) -> None:
+        draw.text((x, line_y), line, fill=color, font=line_font)
+        selected_values = [TECHNICAL_TAGS.sub("", match.group(1)).strip() for match in DONE_BLOCK.finditer(marked_source)]
+        if any(line.strip() in selected or selected in line for selected in selected_values if selected):
+            bounds = draw.textbbox((x, line_y), line, font=line_font)
+            strike_y = (bounds[1] + bounds[3]) // 2
+            draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
+
     estimated_lines = 8 + len(document.sections) * 3 + sum(
         3 + sum(4 + len(textwrap.wrap(task.title, 85)) + len(textwrap.wrap(task.description, 90))
                 for task in employee.tasks)
@@ -377,24 +462,30 @@ def render_png(document: ReportDocument) -> bytes:
         if not section.employees:
             draw.text((margin + 18, y), "(Asnjë detyrë)", fill="#64748b", font=font)
             y += 40
-        for employee_index, employee in enumerate(section.employees, 1):
-            draw.text((margin + 5, y), f"{employee_index}. {employee.name}", fill="#0f172a", font=bold)
+        for employee in section.employees:
+            draw.text((margin + 5, y), employee.name, fill="#0f172a", font=bold)
             y += 38
-            for task_index, task in enumerate(employee.tasks, 1):
-                background, foreground, accent = STATUS_COLORS[task.status]
-                title_lines = textwrap.wrap(f"{employee_index}.{task_index} {task.marker} {task.title}", 95) or [""]
-                description_lines = textwrap.wrap(task.description or "Pa përshkrim", 105) or [""]
-                card_height = 35 + 28 * (len(title_lines) + len(description_lines))
+            for task in employee.tasks:
+                background, _, accent = STATUS_COLORS[task.status]
+                task_heading, numbered_items = split_numbered_text(task.title)
+                title_lines = textwrap.wrap(task_heading or task.title, 95) or [""]
+                numbered_lines = [
+                    line for item in numbered_items
+                    for line in (textwrap.wrap(item, 105, subsequent_indent="   ") or [""])
+                ]
+                description_lines = textwrap.wrap(task.description, 105) if task.description else []
+                card_height = 25 + 28 * (len(title_lines) + len(numbered_lines) + len(description_lines))
                 draw.rounded_rectangle((margin + 5, y, width - margin, y + card_height), radius=8, fill=background, outline=accent, width=2)
                 draw.rectangle((margin + 5, y + 4, margin + 11, y + card_height - 4), fill=accent)
                 line_y = y + 12
                 for line in title_lines:
-                    draw.text((margin + 25, line_y), line, fill=foreground, font=bold)
+                    draw_line_with_marks(margin + 25, line_y, line, task.marked_title, bold, "#050505")
                     line_y += 28
-                draw.text((margin + 25, line_y + 2), "Përshkrimi:", fill=foreground, font=bold)
-                line_y += 30
+                for line in numbered_lines:
+                    draw_line_with_marks(margin + 25, line_y, line, task.marked_title, font, "#64748b")
+                    line_y += 28
                 for line in description_lines:
-                    draw.text((margin + 25, line_y), line, fill=foreground, font=font)
+                    draw_line_with_marks(margin + 25, line_y, line, task.marked_description, font, "#64748b")
                     line_y += 28
                 y += card_height + 12
         y += 14
