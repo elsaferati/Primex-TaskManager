@@ -97,8 +97,8 @@ export default function ReviewsPage() {
         date_to: dateTo,
         review_status: reviewStatus,
       })
-      if (canManage && departmentId !== ALL) query.set("department_id", departmentId)
-      if (canManage && revieweeId !== ALL) query.set("reviewee_user_id", revieweeId)
+      if (departmentId !== ALL) query.set("department_id", departmentId)
+      if (revieweeId !== ALL) query.set("reviewee_user_id", revieweeId)
       const res = await apiFetch(`/task-reviews/overview?${query.toString()}`)
       if (!res.ok) {
         let detail = "Failed to load reviews."
@@ -117,7 +117,7 @@ export default function ReviewsPage() {
     } finally {
       setLoading(false)
     }
-  }, [apiFetch, canManage, dateFrom, dateTo, departmentId, reviewStatus, revieweeId])
+  }, [apiFetch, dateFrom, dateTo, departmentId, reviewStatus, revieweeId])
 
   React.useEffect(() => {
     void loadOverview()
@@ -216,8 +216,7 @@ export default function ReviewsPage() {
             <Label htmlFor="review-date-to">To</Label>
             <Input id="review-date-to" type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} />
           </div>
-          {canManage ? (
-            <div className="space-y-2">
+          <div className="space-y-2">
               <Label>Department</Label>
               <Select
                 value={departmentId}
@@ -234,10 +233,8 @@ export default function ReviewsPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-          ) : null}
-          {canManage ? (
-            <div className="space-y-2">
+          </div>
+          <div className="space-y-2">
               <Label>User</Label>
               <Select value={revieweeId} onValueChange={setRevieweeId}>
                 <SelectTrigger><SelectValue placeholder="All users" /></SelectTrigger>
@@ -250,8 +247,7 @@ export default function ReviewsPage() {
                   ))}
                 </SelectContent>
               </Select>
-            </div>
-          ) : null}
+          </div>
           <div className="space-y-2">
             <Label>Review status</Label>
             <Select value={reviewStatus} onValueChange={(value) => setReviewStatus(value as typeof reviewStatus)}>
@@ -300,8 +296,8 @@ export default function ReviewsPage() {
                     <TableHead className="w-[14%]">User</TableHead>
                     <TableHead className="w-[12%]">Completed</TableHead>
                     <TableHead className="w-[10%]">Timing</TableHead>
-                    <TableHead className={canManage ? "w-[18%]" : "w-[30%]"}>Review</TableHead>
-                    {canManage ? <TableHead className="w-[12%] text-right">Action</TableHead> : null}
+                    <TableHead className="w-[18%]">Review</TableHead>
+                    <TableHead className="w-[12%] text-right">Action</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -346,16 +342,17 @@ export default function ReviewsPage() {
                           <span className="text-sm text-muted-foreground">Not reviewed</span>
                         )}
                       </TableCell>
-                      {canManage ? (
-                        <TableCell className="text-right">
+                      <TableCell className="text-right">
                           {row.reviewee_user_id === user?.id ? (
                             <span className="text-xs text-muted-foreground">Self-review disabled</span>
                           ) : (
                             <div className="flex justify-end gap-2">
-                              <Button variant={row.review ? "outline" : "default"} size="sm" onClick={() => setSelectedRow(row)}>
-                                {row.review ? "Edit" : "Review"}
-                              </Button>
-                              {row.review ? (
+                              {!row.review || canManage ? (
+                                <Button variant={row.review ? "outline" : "default"} size="sm" onClick={() => setSelectedRow(row)}>
+                                  {row.review ? "Edit" : "Review"}
+                                </Button>
+                              ) : null}
+                              {row.review && canManage ? (
                                 <Button
                                   variant="destructive"
                                   size="sm"
@@ -367,8 +364,7 @@ export default function ReviewsPage() {
                               ) : null}
                             </div>
                           )}
-                        </TableCell>
-                      ) : null}
+                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>

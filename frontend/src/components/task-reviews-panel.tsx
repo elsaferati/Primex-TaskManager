@@ -26,10 +26,7 @@ export function TaskReviewsPanel({ task }: { task: Task }) {
     }
     return []
   }, [task.assigned_to, task.assignees])
-  const visibleAssignees = React.useMemo(
-    () => (canManage ? assignees : assignees.filter((assignee) => assignee.id === user?.id)),
-    [assignees, canManage, user?.id]
-  )
+  const visibleAssignees = assignees
 
   const load = React.useCallback(async () => {
     setLoading(true)
@@ -112,7 +109,7 @@ export function TaskReviewsPanel({ task }: { task: Task }) {
                   {review ? (
                     <p className="mt-1 text-xs text-muted-foreground">By {review.reviewer_name}</p>
                   ) : null}
-                  {canManage && task.status === "DONE" && assignee.id !== user?.id ? (
+                  {task.status === "DONE" && assignee.id !== user?.id && (!review || canManage) ? (
                     <div className="mt-3 flex gap-2">
                       <Button
                         variant="outline"
@@ -121,7 +118,7 @@ export function TaskReviewsPanel({ task }: { task: Task }) {
                       >
                         {review ? "Edit review" : "Review task"}
                       </Button>
-                      {review ? (
+                      {review && canManage ? (
                         <Button
                           variant="destructive"
                           size="sm"

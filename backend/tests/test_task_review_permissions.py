@@ -2,7 +2,13 @@ import unittest
 import uuid
 from datetime import datetime, timezone
 
-from app.api.routers.task_reviews import _is_completed_late, can_manage_task_reviews, can_view_review_for_user
+from app.api.routers.task_reviews import (
+    _is_completed_late,
+    can_create_task_reviews,
+    can_manage_task_reviews,
+    can_view_global_review_overview,
+    can_view_review_for_user,
+)
 from app.models.enums import UserRole
 from app.schemas.task_review import TaskReviewCreate
 from pydantic import ValidationError
@@ -16,15 +22,25 @@ class TestTaskReviewPermissions(unittest.TestCase):
     def test_staff_cannot_manage_reviews(self) -> None:
         self.assertFalse(can_manage_task_reviews(UserRole.STAFF))
 
-    def test_staff_can_only_view_own_reviews(self) -> None:
+    def test_staff_can_view_everyones_reviews(self) -> None:
         current = uuid.uuid4()
         self.assertTrue(can_view_review_for_user(UserRole.STAFF, current, current))
-        self.assertFalse(can_view_review_for_user(UserRole.STAFF, current, uuid.uuid4()))
+        self.assertTrue(can_view_review_for_user(UserRole.STAFF, current, uuid.uuid4()))
+
+    def test_staff_can_create_reviews(self) -> None:
+        self.assertTrue(can_create_task_reviews(UserRole.STAFF))
 
     def test_manager_can_view_another_users_reviews(self) -> None:
         self.assertTrue(
             can_view_review_for_user(UserRole.MANAGER, uuid.uuid4(), uuid.uuid4())
         )
+
+    def test_awarded_diamond_overview_is_global_for_staff(self) -> None:
+        self.assertTrue(can_view_global_review_overview(UserRole.STAFF, "reviewed"))
+
+    def test_all_review_overviews_are_global_for_staff(self) -> None:
+        self.assertTrue(can_view_global_review_overview(UserRole.STAFF, "all"))
+        self.assertTrue(can_view_global_review_overview(UserRole.STAFF, "unreviewed"))
 
     def test_every_review_has_exactly_one_diamond(self) -> None:
         common = {"task_id": uuid.uuid4(), "reviewee_user_id": uuid.uuid4()}

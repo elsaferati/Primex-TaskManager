@@ -12502,14 +12502,15 @@ export default function CommonViewPage() {
                             const isNoteOpen = openSwimlaneNoteId === noteKey
                             const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
                             const isTitleExpandable = TITLE_EXPANDABLE_SWIMLANE_ROWS.includes(row.id)
-                            const canReviewCell =
-                              canManageTaskReviews &&
-                              !cell.placeholder &&
-                              Boolean(cell.taskId && cell.userId && cell.isDone) &&
-                              isFastTaskRowId(row.id)
                             const existingReview = cell.taskId && cell.userId
                               ? diamondReviewByTaskUser.get(`${cell.taskId}:${cell.userId}`)
                               : null
+                            const canReviewCell =
+                              !cell.placeholder &&
+                              Boolean(cell.taskId && cell.userId && cell.isDone) &&
+                              cell.userId !== userId &&
+                              isFastTaskRowId(row.id) &&
+                              (!existingReview || canManageTaskReviews)
                             const reviewButton = canReviewCell ? (
                               <button
                                 type="button"

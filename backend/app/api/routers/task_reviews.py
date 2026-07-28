@@ -38,8 +38,16 @@ def can_manage_task_reviews(role: UserRole) -> bool:
     return role in (UserRole.ADMIN, UserRole.MANAGER)
 
 
+def can_create_task_reviews(role: UserRole) -> bool:
+    return role in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF)
+
+
 def can_view_review_for_user(role: UserRole, current_user_id: uuid.UUID, reviewee_user_id: uuid.UUID) -> bool:
-    return can_manage_task_reviews(role) or current_user_id == reviewee_user_id
+    return role in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF)
+
+
+def can_view_global_review_overview(role: UserRole, review_status: TaskReviewStatusFilter) -> bool:
+    return role in (UserRole.ADMIN, UserRole.MANAGER, UserRole.STAFF)
 
 
 def _clean_comment(value: str | None) -> str | None:
@@ -114,12 +122,8 @@ async def review_overview(
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="date_to must be on or after date_from")
     if date_to - date_from > timedelta(days=366):
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Date range cannot exceed 366 days")
-
-    if not can_manage_task_reviews(current_user.role):
-        if reviewee_user_id is not None and reviewee_user_id != current_user.id:
-            raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
-        reviewee_user_id = current_user.id
-        department_id = current_user.department_id
+    if not can_view_global_review_overview(current_user.role, review_status):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
     app_timezone = _app_timezone()
     start_at = datetime.combine(date_from, time.min, tzinfo=app_timezone).astimezone(timezone.utc)
@@ -270,8 +274,8 @@ async def create_review(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> TaskReviewOut:
-    if not can_manage_task_reviews(current_user.role):
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managers and admins can give reviews")
+    if not can_create_task_reviews(current_user.role):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     if payload.reviewee_user_id == current_user.id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="You cannot review yourself")
 
