@@ -35,10 +35,7 @@ def validate_report_config(*, require_gmail: bool = True) -> None:
     if not os.getenv("PRIMEFLOW_ACCESS_TOKEN"):
         required.extend(["PRIMEFLOW_EMAIL", "PRIMEFLOW_PASSWORD"])
     if require_gmail:
-        required.extend([
-            "PRIMEFLOW_REPORT_GMAIL_CLIENT_ID", "PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET",
-            "PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN", "PRIMEFLOW_REPORT_GMAIL_SENDER",
-        ])
+        required.extend(["EMAIL_USER", "EMAIL_PASSWORD"])
     missing = sorted({name for name in required if not os.getenv(name)})
     if missing:
         raise RuntimeError("Missing required report configuration: " + ", ".join(missing))

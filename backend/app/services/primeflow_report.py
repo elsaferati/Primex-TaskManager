@@ -7,11 +7,14 @@ import json
 import logging
 import os
 import re
+import smtplib
+import ssl
 import html
 import io
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from email.message import EmailMessage
+from email.utils import make_msgid
 from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
@@ -378,79 +381,46 @@ class PrimeFlowClient:
 
 class GmailService:
     def __init__(self) -> None:
-        self.client_id = os.environ["PRIMEFLOW_REPORT_GMAIL_CLIENT_ID"]
-        self.client_secret = os.environ["PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET"]
-        self.refresh_token = os.environ["PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN"]
-        self.sender = os.environ["PRIMEFLOW_REPORT_GMAIL_SENDER"]
-
-    async def _access_token(self, client: httpx.AsyncClient) -> str:
-        response = await client.post("https://oauth2.googleapis.com/token", data={
-            "client_id": self.client_id, "client_secret": self.client_secret,
-            "refresh_token": self.refresh_token, "grant_type": "refresh_token",
-        })
-        response.raise_for_status()
-        return response.json()["access_token"]
+        self.sender = os.environ["EMAIL_USER"].strip()
+        self.password = os.environ["EMAIL_PASSWORD"].replace(" ", "")
+        self.host = os.getenv("EMAIL_HOST", "smtp.gmail.com").strip()
+        self.port = int(os.getenv("EMAIL_PORT", "587"))
 
     async def find_exact(self, subject: str, recipients: list[str] | None = None) -> dict[str, Any] | None:
-        async with httpx.AsyncClient(timeout=30) as client:
-            token = await self._access_token(client)
-            headers = {"Authorization": f"Bearer {token}"}
-            found = await client.get("https://gmail.googleapis.com/gmail/v1/users/me/messages", params={"q": f'in:sent subject:"{subject}"'}, headers=headers)
-            found.raise_for_status()
-            for item in found.json().get("messages", []):
-                detail = await client.get(
-                    f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{item['id']}",
-                    params=[("format", "metadata"), ("metadataHeaders", "Subject"), ("metadataHeaders", "To"), ("metadataHeaders", "Cc"), ("metadataHeaders", "Bcc")],
-                    headers=headers,
-                )
-                detail.raise_for_status()
-                message = detail.json()
-                metadata = message.get("payload", {}).get("headers", [])
-                recipient_headers = " ".join(
-                    h.get("value", "") for h in metadata if h.get("name", "").lower() in {"to", "cc", "bcc"}
-                )
-                recipient_match = not recipients or all(address.casefold() in recipient_headers.casefold() for address in recipients)
-                if exact_subject(metadata, subject) and recipient_match:
-                    return message
+        # SMTP has no mailbox-search operation. Database uniqueness and row locks
+        # in the delivery service provide the idempotency guard for SMTP sends.
         return None
 
     async def send_verified(self, subject: str, recipients: list[str] | dict[str, list[str]], body: str, html_body: str | None = None) -> dict[str, Any]:
         recipient_map = recipients if isinstance(recipients, dict) else {"to": recipients, "cc": [], "bcc": []}
         all_recipients = sum(recipient_map.values(), [])
-        send_accepted = False
-        send_response: dict[str, Any] | None = None
-        for attempt in range(1, 4):
-            existing = await self.find_exact(subject, all_recipients)
-            if existing:
-                return existing
-            try:
-                async with httpx.AsyncClient(timeout=30) as client:
-                    token = await self._access_token(client)
-                    message = EmailMessage()
-                    message["From"], message["To"], message["Subject"] = self.sender, ", ".join(recipient_map["to"]), subject
-                    if recipient_map["cc"]:
-                        message["Cc"] = ", ".join(recipient_map["cc"])
-                    if recipient_map["bcc"]:
-                        message["Bcc"] = ", ".join(recipient_map["bcc"])
-                    message.set_content(body)
-                    if html_body:
-                        message.add_alternative(html_body, subtype="html")
-                    raw = base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
-                    response = await client.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", json={"raw": raw}, headers={"Authorization": f"Bearer {token}"})
-                    response.raise_for_status()
-                    send_accepted = True
-                    send_response = response.json()
-                verified = await self.find_exact(subject, all_recipients)
-                if verified:
-                    return verified
-            except (httpx.RequestError, httpx.HTTPStatusError):
-                logger.warning("gmail_send_failure attempt=%s subject=%s", attempt, subject)
-        final = await self.find_exact(subject, all_recipients)
-        if final:
-            return final
-        if send_accepted:
-            raise GmailVerificationError("Gmail accepted the message but exact Sent Mail verification failed", send_response)
-        raise RuntimeError("Gmail send or exact Sent Mail verification failed")
+        if not recipient_map["to"]:
+            raise ValueError("At least one To recipient is required")
+        message = EmailMessage()
+        message_id = make_msgid(domain=self.sender.rsplit("@", 1)[-1])
+        message["From"] = self.sender
+        message["To"] = ", ".join(recipient_map["to"])
+        message["Subject"] = subject
+        message["Message-ID"] = message_id
+        if recipient_map["cc"]:
+            message["Cc"] = ", ".join(recipient_map["cc"])
+        if recipient_map["bcc"]:
+            message["Bcc"] = ", ".join(recipient_map["bcc"])
+        message.set_content(body)
+        if html_body:
+            message.add_alternative(html_body, subtype="html")
+
+        def send_smtp() -> None:
+            context = ssl.create_default_context()
+            with smtplib.SMTP(self.host, self.port, timeout=30) as smtp:
+                smtp.ehlo()
+                smtp.starttls(context=context)
+                smtp.ehlo()
+                smtp.login(self.sender, self.password)
+                smtp.send_message(message, from_addr=self.sender, to_addrs=all_recipients)
+
+        await asyncio.to_thread(send_smtp)
+        return {"id": message_id.strip("<>"), "threadId": None}
 
 
 def predecessor(day: date, slot: str) -> tuple[date, str]:

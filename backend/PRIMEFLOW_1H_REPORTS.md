@@ -8,12 +8,10 @@ Five weekday jobs run in `Europe/Tirane`: 09:00→10:00, 10:50→11:00, 11:40→
 
 ## Configuration
 
-Set all variables documented in `.env.example`. Gmail OAuth requires both
-`https://www.googleapis.com/auth/gmail.send` and
-`https://www.googleapis.com/auth/gmail.readonly`; the latter is required for
-the exact Sent Mail search used to verify delivery. The sender must be the
-OAuth account (or an authorized alias). Secrets must remain in GitHub/PM2
-configuration.
+Set all variables documented in `.env.example`. Delivery authenticates directly
+to `smtp.gmail.com:587` with STARTTLS. `EMAIL_USER` is used as both the SMTP
+login and the message/envelope sender; `EMAIL_PASSWORD` must be a Google app
+password. Secrets must remain in GitHub/PM2 configuration.
 
 ## Migration and deployment
 
