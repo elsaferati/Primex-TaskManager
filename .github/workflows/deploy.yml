@@ -80,10 +80,8 @@ jobs:
           PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
           PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
           PRIMEFLOW_READONLY_DATABASE_URL: ${{ secrets.PRIMEFLOW_READONLY_DATABASE_URL }}
-          PRIMEFLOW_REPORT_GMAIL_CLIENT_ID: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_CLIENT_ID }}
-          PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET }}
-          PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN }}
-          PRIMEFLOW_REPORT_GMAIL_SENDER: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_SENDER }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
@@ -107,10 +105,10 @@ jobs:
           echo PRIMEFLOW_READONLY_DATABASE_URL=%PRIMEFLOW_READONLY_DATABASE_URL% >> backend\.env
           echo PRIMEFLOW_REPORT_TIMEZONE=Europe/Tirane >> backend\.env
           echo PRIMEFLOW_REPORT_RECIPIENTS=130primex.eu@gmail.com,ga@primexeu.com >> backend\.env
-          echo PRIMEFLOW_REPORT_GMAIL_CLIENT_ID=%PRIMEFLOW_REPORT_GMAIL_CLIENT_ID% >> backend\.env
-          echo PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET=%PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET% >> backend\.env
-          echo PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN=%PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN% >> backend\.env
-          echo PRIMEFLOW_REPORT_GMAIL_SENDER=%PRIMEFLOW_REPORT_GMAIL_SENDER% >> backend\.env
+          echo EMAIL_HOST=smtp.gmail.com >> backend\.env
+          echo EMAIL_PORT=587 >> backend\.env
+          echo EMAIL_USER=%EMAIL_USER% >> backend\.env
+          echo EMAIL_PASSWORD=%EMAIL_PASSWORD% >> backend\.env
  
       - name: Database Migration Notice
         if: ${{ steps.changes.outputs.migration_changed == 'true' }}
@@ -124,10 +122,8 @@ jobs:
         env:
           PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
           PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
-          PRIMEFLOW_REPORT_GMAIL_CLIENT_ID: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_CLIENT_ID }}
-          PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET }}
-          PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN }}
-          PRIMEFLOW_REPORT_GMAIL_SENDER: ${{ secrets.PRIMEFLOW_REPORT_GMAIL_SENDER }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt

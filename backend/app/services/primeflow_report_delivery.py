@@ -18,7 +18,7 @@ from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
 from app.services.primeflow_report import (
     GmailService, GmailVerificationError, PrimeFlowClient, ReportDocument, build_report_document,
-    predecessor, render_html, render_plain_text, report_subject, report_timezone,
+    predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
 
 logger = logging.getLogger(__name__)
@@ -35,10 +35,7 @@ def validate_report_config(*, require_gmail: bool = True) -> None:
     if not os.getenv("PRIMEFLOW_ACCESS_TOKEN"):
         required.extend(["PRIMEFLOW_EMAIL", "PRIMEFLOW_PASSWORD"])
     if require_gmail:
-        required.extend([
-            "PRIMEFLOW_REPORT_GMAIL_CLIENT_ID", "PRIMEFLOW_REPORT_GMAIL_CLIENT_SECRET",
-            "PRIMEFLOW_REPORT_GMAIL_REFRESH_TOKEN", "PRIMEFLOW_REPORT_GMAIL_SENDER",
-        ])
+        required.extend(["EMAIL_USER", "EMAIL_PASSWORD"])
     missing = sorted({name for name in required if not os.getenv(name)})
     if missing:
         raise RuntimeError("Missing required report configuration: " + ", ".join(missing))
@@ -143,7 +140,18 @@ async def deliver_report(
                 await db.commit()
                 setattr(run, "dry_run_body", body)
                 return run
-            message = await gmail.send_verified(subject, recipient_map, body, html_body)
+            filename_stem = f"PrimeFlow-1H-{day:%Y-%m-%d}-{slot.replace(':', '')}"
+            attachments = [
+                (
+                    f"{filename_stem}.docx",
+                    render_docx(document),
+                    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                ),
+                (f"{filename_stem}.png", render_png(document), "image/png"),
+            ]
+            message = await gmail.send_verified(
+                subject, recipient_map, body, html_body, attachments=attachments,
+            )
             run.status = "SENT"
             run.gmail_message_id, run.gmail_thread_id = message.get("id"), message.get("threadId")
         except ValueError as exc:

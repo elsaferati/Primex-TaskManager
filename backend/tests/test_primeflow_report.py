@@ -2,17 +2,63 @@ from __future__ import annotations
 
 import unittest
 import io
+import os
 import zipfile
+import asyncio
 from datetime import date
+from unittest.mock import patch
 
 from app.services.primeflow_report import (
-    STATUS_MARKERS, build_report, clean_description, exact_subject, filter_tasks,
+    GmailService, STATUS_MARKERS, build_report, clean_description, clean_title, exact_subject, filter_tasks,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
     render_plain_text, render_png, report_subject,
 )
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_smtp_message_contains_word_and_png_attachments(self) -> None:
+        sent_messages = []
+
+        class FakeSmtp:
+            def __init__(self, *args, **kwargs):
+                pass
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *args):
+                pass
+
+            def ehlo(self):
+                pass
+
+            def starttls(self, **kwargs):
+                pass
+
+            def login(self, *args):
+                pass
+
+            def send_message(self, message, **kwargs):
+                sent_messages.append(message)
+
+        with patch.dict(os.environ, {"EMAIL_USER": "sender@example.com", "EMAIL_PASSWORD": "app-password"}):
+            with patch("app.services.primeflow_report.smtplib.SMTP", FakeSmtp):
+                asyncio.run(GmailService().send_verified(
+                    "Report", ["recipient@example.com"], "Plain", "<strong>HTML</strong>",
+                    attachments=[
+                        ("report.docx", b"word", "application/vnd.openxmlformats-officedocument.wordprocessingml.document"),
+                        ("report.png", b"png", "image/png"),
+                    ],
+                ))
+
+        self.assertEqual(len(sent_messages), 1)
+        attachments = list(sent_messages[0].iter_attachments())
+        self.assertEqual([item.get_filename() for item in attachments], ["report.docx", "report.png"])
+        self.assertEqual(
+            [item.get_content_type() for item in attachments],
+            ["application/vnd.openxmlformats-officedocument.wordprocessingml.document", "image/png"],
+        )
+
     def test_previous_working_day_and_subject(self) -> None:
         self.assertEqual(previous_working_day(date(2026, 7, 27)), date(2026, 7, 24))
         self.assertEqual(previous_working_day(date(2026, 7, 28)), date(2026, 7, 27))
@@ -26,6 +72,7 @@ class PrimeFlowReportTests(unittest.TestCase):
     def test_description_removes_only_technical_tags(self) -> None:
         original = "[[added]]1. Çdo Überprüfung\n\nMiSSpelled TEXT[[/added]]\n[[done]]2. Përfundo[[/done]]"
         self.assertEqual(clean_description(original), "1. Çdo Überprüfung\n\nMiSSpelled TEXT\n2. Përfundo")
+        self.assertEqual(clean_title("[[added]] [[ADDED]]Exact[[/added]] [[ / added ]]"), "Exact")
 
     def test_filtering_deduplicates_and_requires_exact_date_slot_and_user(self) -> None:
         base = {"id": "1", "date": "2026-07-28", "slot": "10:00", "employee": "Elsa", "title": "Exact", "status": "TODO"}
@@ -78,10 +125,13 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn(exact_title, plain)
         self.assertIn("1. Zeile\n\n2. Përshkrim EXACT", plain)
         self.assertIn(exact_title, html)
+        self.assertIn("@media(max-width:600px)", html)
+        self.assertIn("#fef3c7", html)
         with zipfile.ZipFile(io.BytesIO(docx)) as archive:
             xml = archive.read("word/document.xml").decode("utf-8")
         self.assertIn(exact_title, xml)
         self.assertIn("Përshkrim EXACT", xml)
+        self.assertIn('w:fill="fef3c7"', xml)
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(document.task_count, 0)
 
