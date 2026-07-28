@@ -239,8 +239,13 @@ jobs:
             cmd /c "pm2 logs primeflow-mcp --lines 100 --nostream || ver > NUL"
             exit 1
           }
-          $scheduler = cmd /c "pm2 jlist" | ConvertFrom-Json | Where-Object { $_.name -eq "primeflow-report-scheduler" }
-          if (-not $scheduler -or $scheduler.pm2_env.status -ne "online") {
+          # Do not pipe `pm2 jlist` through ConvertFrom-Json. PM2 includes the
+          # Windows environment in that payload, where case-insensitive keys
+          # such as `username` and `USERNAME` make PowerShell reject valid JSON.
+          $schedulerDescription = cmd /c "pm2 describe primeflow-report-scheduler"
+          $schedulerDescribeExit = $LASTEXITCODE
+          $schedulerOnline = $schedulerDescription -match "(?im)status\s*[│:]\s*online"
+          if ($schedulerDescribeExit -ne 0 -or -not $schedulerOnline) {
             cmd /c "pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL"
             Write-Error "PrimeFlow report scheduler is not online."
             exit 1
