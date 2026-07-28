@@ -24,6 +24,7 @@ import {
   DollarSign,
   FolderLock,
   Clock3,
+  MailCheck,
   Shield,
   PanelLeftClose,
   type LucideIcon
@@ -159,6 +160,12 @@ const items: NavItem[] = [
     href: "/file-access",
     label: "File Access",
     icon: FolderLock,
+  },
+  {
+    href: "/admin/1h-reports",
+    label: "1H Report Management",
+    icon: MailCheck,
+    roles: ["ADMIN"],
   },
   { 
     href: "/users", 

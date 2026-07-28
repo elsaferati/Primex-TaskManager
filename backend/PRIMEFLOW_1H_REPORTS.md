@@ -12,7 +12,12 @@ Set all variables documented in `.env.example`. Gmail OAuth requires the `gmail.
 
 ## Migration and deployment
 
-Migrations remain manual. Review and apply `alembic upgrade 0072_add_primeflow_report_delivery_runs` before starting the scheduler. The rollback is `alembic downgrade 0071_add_ga_note_discussed`; the equivalent destructive SQL is provided separately.
+Migrations remain manual. Apply them in order:
+
+1. `alembic upgrade 0072_add_primeflow_report_delivery_runs`
+2. `alembic upgrade 0073_add_primeflow_report_management`
+
+`0073` idempotently seeds the two default recipients and five default schedules. Roll back in reverse order. Stop `primeflow-report-scheduler` before downgrading; preserve/export snapshots and audit history first because rollback removes management configuration and exact sent-content snapshots.
 
 Deploy the branch through review. Confirm the MCP functional check completes, PM2 reports `primeflow-report-scheduler` online, and its log contains `scheduler_ready jobs=5 timezone=Europe/Tirane`. Deployment health checks never send email.
 
@@ -29,6 +34,12 @@ Explicit send/backfill:
 Inspect authenticated history:
 
 `GET /api/admin/report-delivery-runs?date=2026-07-28&slot=10:00&status=SENT`
+
+Management Center:
+
+`/admin/1h-reports`
+
+It is ADMIN-only and provides fresh HTML/text preview, DOCX/PNG downloads, confirmed manual send, database recipients, schedule editing/hot reload, exact snapshots, and configuration audit. Automatic delivery uses active database recipients; environment recipients are only a migration/bootstrap fallback.
 
 Example body structure:
 

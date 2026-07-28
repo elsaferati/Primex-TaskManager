@@ -32,6 +32,7 @@ from app.api.routers.speech import router as speech_router
 from app.api.routers.public import router as public_router
 from app.api.routers.question_library import router as question_library_router
 from app.api.routers.report_delivery_runs import router as report_delivery_runs_router
+from app.api.routers.primeflow_1h_reports import router as primeflow_1h_reports_router
 
 
 api_router = APIRouter()
@@ -67,4 +68,5 @@ api_router.include_router(speech_router, prefix="/speech", tags=["speech"])
 api_router.include_router(public_router, prefix="/public", tags=["public"])
 api_router.include_router(question_library_router, prefix="/question-library", tags=["question-library"])
 api_router.include_router(report_delivery_runs_router, prefix="/admin/report-delivery-runs", tags=["admin"])
+api_router.include_router(primeflow_1h_reports_router, prefix="/admin/primeflow-1h-reports", tags=["admin", "primeflow-1h-reports"])
 
