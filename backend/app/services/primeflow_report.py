@@ -158,6 +158,11 @@ def _employee(item: dict[str, Any]) -> str:
     ).strip()
 
 
+def employee_initials(name: str) -> str:
+    parts = re.findall(r"[^\W\d_]+", name, flags=re.UNICODE)
+    return "".join(part[0] for part in parts).upper()
+
+
 def filter_tasks(items: list[dict[str, Any]], day: date, slot: str | None = None) -> list[dict[str, Any]]:
     seen: set[str] = set()
     result = []
@@ -209,7 +214,7 @@ def _document_section(title: str, tasks: list[dict[str, Any]]) -> ReportSection:
             str(x.get("task_title") or x.get("title") or x.get("task")),
         ))
         employees.append(ReportEmployee(
-            name=employee,
+            name=employee_initials(employee),
             tasks=[
                 ReportTask(
                     title=clean_title(str(task.get("task_title") or task.get("title") or task.get("task"))),
@@ -238,18 +243,22 @@ def build_report_document(
     one_h = items.get("oneH") or data.get("tasks") or []
     definitions: list[tuple[str, list[dict[str, Any]]]] = []
     if slot == "10:00":
-        prev = previous_working_day(report_day)
-        definitions.append((f"SLOTI {prev:%d.%m.%Y} 16:00", filter_tasks(one_h, prev, "16:00")))
-    current_index = SLOTS.index(slot)
-    start_index = current_index if current_index == 0 else current_index - 1
-    for candidate in SLOTS[start_index:]:
-        definitions.append((f"SLOTI {report_day:%d.%m.%Y} {candidate}", filter_tasks(one_h, report_day, candidate)))
-    definitions.extend([
-        ("DETYRA PA SLOT – E GJITHË DITA", [t for t in filter_tasks(one_h, report_day, None) if _slot(t) is None]),
-        ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
-        ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
-        ("R1 = 1H", filter_tasks(items.get("r1") or [], report_day)),
-    ])
+        for candidate in SLOTS:
+            definitions.append(
+                (f"SLOTI {report_day:%d.%m.%Y} {candidate}", filter_tasks(one_h, report_day, candidate))
+            )
+        definitions.extend([
+            ("DETYRA PA SLOT – E GJITHË DITA", [
+                task for task in filter_tasks(one_h, report_day, None) if _slot(task) is None
+            ]),
+            ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
+            ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
+            ("R1 = 1H", filter_tasks(items.get("r1") or [], report_day)),
+        ])
+    else:
+        definitions.append(
+            (f"SLOTI {report_day:%d.%m.%Y} {slot}", filter_tasks(one_h, report_day, slot))
+        )
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
     source_generated = datetime.fromisoformat(str(generated_value).replace("Z", "+00:00"))
     return ReportDocument(
