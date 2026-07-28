@@ -36,6 +36,7 @@ class SystemTaskTemplateOut(BaseModel):
     finish_period: TaskFinishPeriod | None = None
     requires_alignment: bool = False
     alignment_time: time | None = None
+    show_in_weekly_planner: bool = False
     alignment_roles: list[str] | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool
@@ -73,6 +74,7 @@ class SystemTaskTemplateCreate(BaseModel):
     finish_period: TaskFinishPeriod | None = None
     requires_alignment: bool | None = None
     alignment_time: time | None = None
+    show_in_weekly_planner: bool | None = None
     alignment_roles: list[str] | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None
@@ -102,6 +104,7 @@ class SystemTaskTemplateUpdate(BaseModel):
     finish_period: TaskFinishPeriod | None = None
     requires_alignment: bool | None = None
     alignment_time: time | None = None
+    show_in_weekly_planner: bool | None = None
     alignment_roles: list[str] | None = None
     alignment_user_ids: list[uuid.UUID] | None = None
     is_active: bool | None = None

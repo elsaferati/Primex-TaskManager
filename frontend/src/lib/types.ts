@@ -52,6 +52,7 @@ export interface SystemTaskTemplateDefinition {
   finish_period?: TaskFinishPeriod | null
   requires_alignment?: boolean | null
   alignment_time?: string | null
+  show_in_weekly_planner?: boolean | null
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
   is_active: boolean
@@ -92,6 +93,7 @@ export interface SystemTaskTemplate {
   due_date?: string | null
   requires_alignment?: boolean | null
   alignment_time?: string | null
+  show_in_weekly_planner?: boolean | null
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
   status?: string | null
@@ -130,6 +132,7 @@ export interface SystemTaskOut {
   user_comment?: string | null
   requires_alignment?: boolean | null
   alignment_time?: string | null
+  show_in_weekly_planner?: boolean | null
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
   created_by?: string | null
@@ -279,6 +282,55 @@ export interface Task {
   alignment_user_ids?: string[] | null
   created_at: string
   updated_at: string
+}
+
+export interface TaskReview {
+  id: string
+  task_id?: string | null
+  reviewee_user_id: string
+  reviewee_name: string
+  reviewer_user_id?: string | null
+  reviewer_name: string
+  diamond_score: number
+  comment?: string | null
+  is_sample?: boolean
+  task_title: string
+  project_title?: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface TaskReviewOverviewRow {
+  task_id: string
+  task_title: string
+  project_id?: string | null
+  project_title?: string | null
+  department_id?: string | null
+  reviewee_user_id: string
+  reviewee_name: string
+  completed_at: string
+  due_date?: string | null
+  is_late: boolean
+  review?: TaskReview | null
+}
+
+export interface TaskReviewUserSummary {
+  user_id: string
+  user_name: string
+  completed_count: number
+  reviewed_count: number
+  unreviewed_count: number
+  late_count: number
+  diamonds_total: number
+}
+
+export interface TaskReviewOverview {
+  completed_count: number
+  reviewed_count: number
+  unreviewed_count: number
+  diamonds_total: number
+  users: TaskReviewUserSummary[]
+  rows: TaskReviewOverviewRow[]
 }
 
 export type DailyReportSystemOccurrenceStatus = "OPEN" | "DONE" | "NOT_DONE" | "SKIPPED"

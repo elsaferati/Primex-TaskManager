@@ -574,6 +574,7 @@ export function SystemTasksView({
   const [dayOfMonth, setDayOfMonth] = React.useState("")
   const [monthOfYear, setMonthOfYear] = React.useState(EMPTY_VALUE)
   const [isActive, setIsActive] = React.useState(true)
+  const [showInWeeklyPlanner, setShowInWeeklyPlanner] = React.useState(false)
   const [requiresAlignment, setRequiresAlignment] = React.useState(false)
   const [alignmentTime, setAlignmentTime] = React.useState("")
   const [alignmentManagerIds, setAlignmentManagerIds] = React.useState<string[]>([])
@@ -596,6 +597,7 @@ export function SystemTasksView({
   const [editDayOfMonth, setEditDayOfMonth] = React.useState("")
   const [editMonthOfYear, setEditMonthOfYear] = React.useState(EMPTY_VALUE)
   const [editIsActive, setEditIsActive] = React.useState(true)
+  const [editShowInWeeklyPlanner, setEditShowInWeeklyPlanner] = React.useState(false)
   const [editRequiresAlignment, setEditRequiresAlignment] = React.useState(false)
   const [editAlignmentTime, setEditAlignmentTime] = React.useState("")
   const [editAlignmentManagerIds, setEditAlignmentManagerIds] = React.useState<string[]>([])
@@ -770,6 +772,7 @@ export function SystemTasksView({
         : EMPTY_VALUE
     )
     setEditIsActive(editTemplate.is_active)
+    setEditShowInWeeklyPlanner(Boolean(editTemplate.show_in_weekly_planner))
     setEditRequiresAlignment(Boolean(editTemplate.requires_alignment))
     setEditAlignmentTime(timeInputValue(editTemplate.alignment_time))
     setEditAlignmentManagerIds(editTemplate.alignment_user_ids ?? [])
@@ -1172,6 +1175,7 @@ export function SystemTasksView({
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
         internal_notes: buildInternalNotes(internalNotes),
         requires_alignment: requiresAlignment,
+        show_in_weekly_planner: showInWeeklyPlanner,
         alignment_time: requiresAlignment ? alignmentTime : null,
         alignment_roles: requiresAlignment ? ["MANAGER"] : [],
         alignment_user_ids: requiresAlignment ? alignmentManagerIds : [],
@@ -1213,6 +1217,7 @@ export function SystemTasksView({
       setFinishPeriod(FINISH_PERIOD_NONE_VALUE)
       setInternalNotes({})
       setIsActive(true)
+      setShowInWeeklyPlanner(false)
       setRequiresAlignment(false)
       setAlignmentTime("")
       setAlignmentManagerIds([])
@@ -1308,6 +1313,7 @@ export function SystemTasksView({
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
         internal_notes: buildInternalNotes(editInternalNotes),
         requires_alignment: editRequiresAlignment,
+        show_in_weekly_planner: editShowInWeeklyPlanner,
         alignment_time: editRequiresAlignment ? editAlignmentTime : null,
         alignment_roles: editRequiresAlignment ? ["MANAGER"] : [],
         alignment_user_ids: editRequiresAlignment ? editAlignmentManagerIds : [],
@@ -3040,6 +3046,18 @@ export function SystemTasksView({
                       <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(Boolean(value))} />
                       <span className="text-base">Active</span>
                     </div>
+                    <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4">
+                      <Checkbox
+                        checked={showInWeeklyPlanner}
+                        onCheckedChange={(value) => setShowInWeeklyPlanner(Boolean(value))}
+                      />
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">Show in Weekly Planner</div>
+                        <div className="text-xs text-slate-500">
+                          Display generated occurrences in the assigned user&apos;s SYS row.
+                        </div>
+                      </div>
+                    </div>
                     <div className="sticky bottom-0 z-10 -mx-6 mt-6 flex items-center justify-end gap-2 border-t border-border/60 bg-white/90 px-6 py-3 backdrop-blur">
                       <Button variant="outline" onClick={() => setCreateOpen(false)}>
                         Cancel
@@ -3444,6 +3462,18 @@ export function SystemTasksView({
                     <div className="flex items-center gap-3">
                       <Checkbox checked={editIsActive} onCheckedChange={(value) => setEditIsActive(Boolean(value))} />
                       <span className="text-base">Active</span>
+                    </div>
+                    <div className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-4">
+                      <Checkbox
+                        checked={editShowInWeeklyPlanner}
+                        onCheckedChange={(value) => setEditShowInWeeklyPlanner(Boolean(value))}
+                      />
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">Show in Weekly Planner</div>
+                        <div className="text-xs text-slate-500">
+                          Display generated occurrences in the assigned user&apos;s SYS row.
+                        </div>
+                      </div>
                     </div>
                     <div className="sticky bottom-0 z-10 -mx-6 mt-6 flex items-center justify-end gap-2 border-t border-border/60 bg-white/90 px-6 py-3 backdrop-blur">
                       <Button variant="outline" onClick={() => setEditOpen(false)}>

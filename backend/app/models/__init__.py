@@ -45,6 +45,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_alignment_user import TaskAlignmentUser
 from app.models.task_planner_exclusion import TaskPlannerExclusion
+from app.models.task_review import TaskReview
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.task_status import TaskStatus
@@ -103,6 +104,7 @@ __all__ = [
     "TaskAssignee",
     "TaskAlignmentUser",
     "TaskPlannerExclusion",
+    "TaskReview",
     "TaskDailyProgress",
     "TaskOneHReportSlot",
     "TaskStatus",

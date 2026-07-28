@@ -4,13 +4,25 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
+import { DiamondAward, TaskReviewDialog } from "@/components/task-review-dialog"
 import { useAuth } from "@/lib/auth"
 import { COMMON_VIEW_AGGREGATE_ENABLED } from "@/lib/config"
 import { formatDateDMY, formatDateTimeDMY } from "@/lib/dates"
 import { getPlainMarkedText, parseMarkedNoteContent, renderMarkedNoteContent } from "@/lib/note-markup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
-import type { User, Task, CommonEntry, Project, Meeting, Department, SystemTaskTemplate } from "@/lib/types"
+import type {
+  User,
+  Task,
+  CommonEntry,
+  Project,
+  Meeting,
+  Department,
+  SystemTaskTemplate,
+  TaskReview,
+  TaskReviewOverview,
+  TaskReviewOverviewRow,
+} from "@/lib/types"
 
 function canCreateAgentTestTaskForMeeting(meeting: Meeting): boolean {
   if (meeting.external_agent_test_task_requested) return false
@@ -39,6 +51,7 @@ type CommonType =
   | "problem"
   | "feedback"
   | "priority"
+  | "diamond"
   | "bz"
 
 const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1600", "oneHNoSlot", "r1", "personal"]
@@ -62,6 +75,7 @@ const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
   "r1",
   "personal",
   "priority",
+  "diamond",
   "problem",
   "feedback",
 ]
@@ -209,6 +223,15 @@ type BzItem = {
   bzWithLabel?: string
   taskId?: string
 }
+type DiamondItem = {
+  reviewId: string
+  taskId: string
+  userId: string
+  person: string
+  taskTitle: string
+  date: string
+  review: TaskReview
+}
 
 type CommonBucket =
   | "late"
@@ -243,6 +266,7 @@ type CommonWeekTableEntry =
   | ProblemItem
   | FeedbackItem
   | PriorityItem
+  | DiamondItem
 type CommonViewCounts = Record<CommonBucket, number>
 type CommonViewGuardrails = {
   max_items_per_bucket: number
@@ -320,7 +344,7 @@ const isCommonTaskStartingOnDate = (entry: { startDate?: string | null; date?: s
   return Boolean(startDate && targetDate && startDate === targetDate)
 }
 
-const isCommonTaskCreatedInTargetWeek = (entry: {
+const isCommonTaskCreatedDayBeforeTarget = (entry: {
   createdAt?: string | null
   date?: string | null
   entryDate?: string | null
@@ -329,22 +353,53 @@ const isCommonTaskCreatedInTargetWeek = (entry: {
   const targetDate = normalizeCommonDateOnly(entry.date ?? entry.entryDate)
   if (!createdDate || !targetDate) return false
 
-  const startOfWeek = (value: string) => {
-    const parsed = new Date(`${value}T12:00:00`)
-    const day = parsed.getDay()
-    parsed.setDate(parsed.getDate() - (day === 0 ? 6 : day - 1))
-    return normalizeCommonDateOnly(parsed.toISOString())
-  }
-
-  return startOfWeek(createdDate) === startOfWeek(targetDate)
+  const previousDay = new Date(`${targetDate}T12:00:00`)
+  previousDay.setDate(previousDay.getDate() - 1)
+  return createdDate === normalizeCommonDateOnly(previousDay.toISOString())
 }
 
-const isCommonTaskNewOnStartDate = (entry: {
+const getCommonWeekStart = (value?: string | null) => {
+  const normalized = normalizeCommonDateOnly(value)
+  if (!normalized) return null
+  const parsed = new Date(`${normalized}T12:00:00`)
+  const day = parsed.getDay()
+  parsed.setDate(parsed.getDate() - (day === 0 ? 6 : day - 1))
+  return normalizeCommonDateOnly(parsed.toISOString())
+}
+
+type CommonTaskNewCategory = "created-day-before" | "created-this-week" | "created-last-week"
+
+const COMMON_TASK_NEW_CATEGORY_OPTIONS: ReadonlyArray<{
+  value: CommonTaskNewCategory
+  label: string
+}> = [
+  { value: "created-day-before", label: "Dje" },
+  { value: "created-this-week", label: "Këtë javë" },
+  { value: "created-last-week", label: "Javën e kaluar" },
+]
+
+const getCommonTaskNewCategory = (entry: {
   startDate?: string | null
   createdAt?: string | null
   date?: string | null
   entryDate?: string | null
-}) => isCommonTaskStartingOnDate(entry) && isCommonTaskCreatedInTargetWeek(entry)
+}): CommonTaskNewCategory | null => {
+  if (!isCommonTaskStartingOnDate(entry)) return null
+  if (isCommonTaskCreatedDayBeforeTarget(entry)) return "created-day-before"
+
+  const createdWeekStart = getCommonWeekStart(entry.createdAt)
+  const targetWeekStart = getCommonWeekStart(entry.date ?? entry.entryDate)
+  if (!createdWeekStart || !targetWeekStart) return null
+  if (createdWeekStart === targetWeekStart) return "created-this-week"
+
+  const previousWeekStart = new Date(`${targetWeekStart}T12:00:00`)
+  previousWeekStart.setDate(previousWeekStart.getDate() - 7)
+  if (createdWeekStart === normalizeCommonDateOnly(previousWeekStart.toISOString())) {
+    return "created-last-week"
+  }
+
+  return null
+}
 
 const isCommonTaskDueOnDate = (entry: {
   isDeadlineImportant?: boolean
@@ -366,7 +421,13 @@ const commonTaskHighlightClassName = (entry: {
   date?: string | null
   entryDate?: string | null
 }) => {
-  if (isCommonTaskNewOnStartDate(entry)) return "starts-selected-day"
+  const newCategory = getCommonTaskNewCategory(entry)
+  if (newCategory) {
+    return [
+      "new-task-emphasis",
+      newCategory,
+    ].filter(Boolean).join(" ")
+  }
   if (isCommonTaskDueOnDate(entry)) return "deadline-important"
   return ""
 }
@@ -833,6 +894,7 @@ export default function CommonViewPage() {
   const isAdmin = user?.role === "ADMIN"
   const isManager = user?.role === "MANAGER"
   const isStaff = user?.role === "STAFF"
+  const canManageTaskReviews = Boolean(isAdmin || isManager)
   const canEditMeetingTemplates = Boolean(isAdmin || isManager)
   const canDeleteCommon = Boolean(isAdmin || isManager || isStaff)
   // Common view should show all data for all roles (same as admin)
@@ -1142,6 +1204,9 @@ export default function CommonViewPage() {
   // State
   const [users, setUsers] = React.useState<User[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
+  const [diamondItems, setDiamondItems] = React.useState<DiamondItem[]>([])
+  const [commonReviewRow, setCommonReviewRow] = React.useState<TaskReviewOverviewRow | null>(null)
+  const [commonReviewOpen, setCommonReviewOpen] = React.useState(false)
   const [commonData, setCommonData] = React.useState({
     late: [] as LateItem[],
     absent: [] as AbsentItem[],
@@ -1173,6 +1238,9 @@ export default function CommonViewPage() {
   const [typeMultiMode, setTypeMultiMode] = React.useState(false)
   const [colorFilter, setColorFilter] = React.useState<CommonColorFilter>("all")
   const [taskFocusFilter, setTaskFocusFilter] = React.useState<CommonTaskFocusFilter>("all")
+  const [newTaskCategoryFilters, setNewTaskCategoryFilters] = React.useState<Set<CommonTaskNewCategory>>(
+    () => new Set(COMMON_TASK_NEW_CATEGORY_OPTIONS.map((option) => option.value))
+  )
   const [freezeOneHSlots, setFreezeOneHSlots] = React.useState(() => {
     if (typeof window === "undefined") return false
     return window.localStorage.getItem(COMMON_VIEW_FREEZE_ONE_H_SLOTS_KEY) === "true"
@@ -1491,6 +1559,53 @@ export default function CommonViewPage() {
 
   // Derived
   const weekISOs = React.useMemo(() => getWeekdays(weekStart).map(toISODate), [weekStart])
+  const loadDiamonds = React.useCallback(async (options: { active?: () => boolean } = {}) => {
+      if (authLoading || !userId || !weekISOs.length) return
+      const params = new URLSearchParams({
+        date_from: weekISOs[0],
+        date_to: weekISOs[weekISOs.length - 1],
+        review_status: "reviewed",
+      })
+
+      try {
+        const res = await apiFetch(`/task-reviews/overview?${params.toString()}`)
+        if (!res?.ok) {
+          if (options.active?.() ?? true) setDiamondItems([])
+          return
+        }
+        const payload = (await res.json()) as TaskReviewOverview
+        const items = payload.rows.flatMap((row): DiamondItem[] => {
+          if (!row.review) return []
+          const completedAt = new Date(row.completed_at)
+          if (Number.isNaN(completedAt.getTime())) return []
+          return [{
+            reviewId: row.review.id,
+            taskId: row.task_id,
+            userId: row.reviewee_user_id,
+            person: row.reviewee_name,
+            taskTitle: getPlainMarkedText(row.task_title).trim() || "Untitled task",
+            date: [
+              completedAt.getFullYear(),
+              String(completedAt.getMonth() + 1).padStart(2, "0"),
+              String(completedAt.getDate()).padStart(2, "0"),
+            ].join("-"),
+            review: row.review,
+          }]
+        })
+        if (options.active?.() ?? true) setDiamondItems(items)
+      } catch {
+        if (options.active?.() ?? true) setDiamondItems([])
+      }
+    }, [apiFetch, authLoading, userId, weekISOs])
+
+  React.useEffect(() => {
+    let active = true
+
+    void loadDiamonds({ active: () => active })
+    return () => {
+      active = false
+    }
+  }, [loadDiamonds])
   const allDaysSelected = React.useMemo(() => {
     if (selectedDates.size !== weekISOs.length) return false
     return weekISOs.every((iso) => selectedDates.has(iso))
@@ -3503,7 +3618,10 @@ export default function CommonViewPage() {
     const matchesColorFilter = (entry: FastTaskEntry) =>
       colorFilter === "all" || getCommonTaskColor(entry) === colorFilter
     const matchesTaskFocusFilter = (entry: FastTaskEntry) => {
-      if (taskFocusFilter === "new") return isCommonTaskNewOnStartDate(entry)
+      if (taskFocusFilter === "new") {
+        const category = getCommonTaskNewCategory(entry)
+        return Boolean(category && newTaskCategoryFilters.has(category))
+      }
       if (taskFocusFilter === "eightAm") return hasEightAmIndicator(entry.title)
       if (taskFocusFilter === "deadline") return Boolean(entry.isDeadlineImportant)
       return true
@@ -3643,7 +3761,7 @@ export default function CommonViewPage() {
       fullyCoveredDates,
       hiddenUsersByDate,
     }
-  }, [colorFilter, commonData, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
+  }, [colorFilter, commonData, newTaskCategoryFilters, selectedCommonUserId, selectedDates, taskFocusFilter, users, weekISOs])
 
   const allUsersLeaveByDate = React.useMemo(() => {
     const datesToUse = selectedDates.size ? Array.from(selectedDates) : weekISOs
@@ -3686,6 +3804,50 @@ export default function CommonViewPage() {
     if (selectedCommonUserId === "__all__") return "All users"
     return commonUserFilterOptions.find((option) => option.id === selectedCommonUserId)?.label || "All users"
   }, [commonUserFilterOptions, selectedCommonUserId])
+  const filteredDiamondItems = React.useMemo(
+    () =>
+      diamondItems.filter(
+        (item) =>
+          (selectedCommonUserId === "__all__" || item.userId === selectedCommonUserId) &&
+          (selectedDates.size === 0 || selectedDates.has(item.date))
+      ),
+    [diamondItems, selectedCommonUserId, selectedDates]
+  )
+  const diamondReviewByTaskUser = React.useMemo(() => {
+    const map = new Map<string, TaskReview>()
+    diamondItems.forEach((item) => {
+      map.set(`${item.taskId}:${item.userId}`, item.review)
+    })
+    return map
+  }, [diamondItems])
+  const openCommonTaskReview = React.useCallback((cell: SwimlaneCell) => {
+    if (!cell.taskId || !cell.userId || !cell.isDone) return
+    const reviewee = users.find((entry) => entry.id === cell.userId)
+    const revieweeName =
+      reviewee?.full_name ||
+      reviewee?.username ||
+      reviewee?.email ||
+      cell.assignees?.[0] ||
+      "Unknown"
+    const completedAt =
+      cell.completedAt ||
+      (cell.entryDate ? `${cell.entryDate}T00:00:00.000Z` : new Date().toISOString())
+
+    setCommonReviewRow({
+      task_id: cell.taskId,
+      task_title: cell.title,
+      reviewee_user_id: cell.userId,
+      reviewee_name: revieweeName,
+      completed_at: completedAt,
+      due_date: cell.dueDate || null,
+      is_late: false,
+      review: diamondReviewByTaskUser.get(`${cell.taskId}:${cell.userId}`) || null,
+    })
+    setCommonReviewOpen(true)
+  }, [diamondReviewByTaskUser, users])
+  const handleCommonReviewSaved = React.useCallback(async () => {
+    await loadDiamonds()
+  }, [loadDiamonds])
 
   const isMultiDate = selectedDates.size > 1
 
@@ -5354,7 +5516,28 @@ export default function CommonViewPage() {
     problem: "Probleme",
     feedback: "Feedback Note",
     priority: "Projektet me prioritet- qe kane taska",
+    diamond: "Review-t e përfunduara me diamant",
     bz: "Barazime - AM: 08:00-09:00/ 10:00-10:30/ 11:30-12:15 / PM:13:30-14:00/ 14:30-15:00 (VETEM PER URGJENCA)",
+  }
+
+  const toggleNewTaskCategoryFilter = (category: CommonTaskNewCategory) => {
+    if (taskFocusFilter !== "new") {
+      setNewTaskCategoryFilters(new Set([category]))
+      setTaskFocusFilter("new")
+      return
+    }
+
+    setTaskFocusFilter("new")
+    setNewTaskCategoryFilters((previous) => {
+      const next = new Set(previous)
+      if (next.has(category)) {
+        // Keep at least one category selected so the active filter never shows an accidental empty view.
+        if (next.size > 1) next.delete(category)
+      } else {
+        next.add(category)
+      }
+      return next
+    })
   }
 
   const swimlaneHeaderSubtext: Partial<Record<CommonType, string>> = {
@@ -5722,6 +5905,17 @@ export default function CommonViewPage() {
       number: idx + 1,
       dateLabel: formatDateHuman(p.date),
     }))
+    const diamondSource = isMultiDate
+      ? sortByDate(filteredDiamondItems, (x) => x.date, (x) => x.person)
+      : filteredDiamondItems
+    const diamondCells: SwimlaneCell[] = diamondSource.map((item) => ({
+      title: `${item.person} — ${item.taskTitle}`,
+      dateLabel: formatDateHuman(item.date),
+      accentClass: "swimlane-accent diamond",
+      taskId: item.taskId,
+      userId: item.userId,
+      entryDate: item.date,
+    }))
 
     const buildFastHeaderBreakdown = (items: SwimlaneCell[]) => {
       const eightAmCount = items.filter((item) => hasEightAmIndicator(item.title)).length
@@ -5862,6 +6056,14 @@ export default function CommonViewPage() {
         items: priorityItems,
       },
       {
+        id: "diamond",
+        label: "DIAMANT",
+        count: diamondCells.length,
+        headerClass: "swimlane-header diamond",
+        badgeClass: "swimlane-badge diamond",
+        items: diamondCells,
+      },
+      {
         id: "problem",
         label: "PRBL",
         count: filtered.problems.length,
@@ -5878,7 +6080,7 @@ export default function CommonViewPage() {
         items: feedbackItems,
       },
     ]
-  }, [filtered, isMultiDate, sortByDate, sortByDateTime, sortByTime, selectedDates, typeFilters, weekISOs])
+  }, [filtered, filteredDiamondItems, isMultiDate, sortByDate, sortByDateTime, sortByTime, selectedDates, typeFilters, weekISOs])
 
   const swimlaneColumnCount = React.useMemo(() => {
     if (!swimlaneRows.length) return 3
@@ -5908,6 +6110,7 @@ export default function CommonViewPage() {
       problems: ProblemItem[]
       feedback: FeedbackItem[]
       priority: PriorityItem[]
+      diamond: DiamondItem[]
     }> = {}
     const dailyFeedback = filtered.feedback.filter((x) => x.everyday)
     const dailyProblems = filtered.problems.filter((x) => x.everyday)
@@ -5938,6 +6141,7 @@ export default function CommonViewPage() {
           problems: dailyProblems,
           feedback: dailyFeedback,
           priority: [],
+          diamond: filteredDiamondItems.filter((x) => x.date === iso),
         }
         return
       }
@@ -5962,11 +6166,12 @@ export default function CommonViewPage() {
           ...dailyFeedback,
         ],
         priority: filtered.priority.filter((x) => x.date === iso),
+        diamond: filteredDiamondItems.filter((x) => x.date === iso),
       }
     })
     
     return dataByDay
-  }, [allDaysSelected, weekISOs, filtered, sortByTime, sortTasksByOrder])
+  }, [allDaysSelected, weekISOs, filtered, filteredDiamondItems, sortByTime, sortTasksByOrder])
 
   const swimlaneRowRefs = React.useRef<Record<string, HTMLDivElement | null>>({})
   const scrollSwimlaneRow = React.useCallback((rowId: CommonType, direction: "left" | "right") => {
@@ -6267,6 +6472,8 @@ export default function CommonViewPage() {
           --externalHoliday-accent: #ec4899;
           --priority-bg: #fef3c7;
           --priority-accent: #d97706;
+          --diamond-bg: #cffafe;
+          --diamond-accent: #0891b2;
           --cell-bg: #ffffff;
           --cell-tint: #f9fafb;
           --swim-col-width: 280px;
@@ -6422,7 +6629,8 @@ export default function CommonViewPage() {
           }
           .no-print { display: none !important; }
           .hide-in-print { display: none !important; }
-          .swimlane-delete { display: none !important; }
+          .swimlane-delete,
+          .swimlane-review-btn { display: none !important; }
           .week-table-delete { display: none !important; }
           aside, header, .command-palette, .top-header, .common-toolbar, .meeting-panel, .modal {
             display: none !important;
@@ -6736,6 +6944,7 @@ export default function CommonViewPage() {
           .swimlane-header.problem { background: var(--problem-bg) !important; color: #0e7490 !important; }
           .swimlane-header.feedback { background: var(--feedback-bg) !important; color: #475569 !important; }
           .swimlane-header.priority { background: var(--priority-bg) !important; color: #b45309 !important; }
+          .swimlane-header.diamond { background: var(--diamond-bg) !important; color: #0e7490 !important; }
           .swimlane-badge.delay { border-color: var(--delay-accent) !important; color: #c2410c !important; }
           .swimlane-badge.absence { border-color: var(--absence-accent) !important; color: #b91c1c !important; }
           .swimlane-badge.leave { border-color: var(--leave-accent) !important; color: #15803d !important; }
@@ -6750,6 +6959,7 @@ export default function CommonViewPage() {
           .swimlane-badge.problem { border-color: var(--problem-accent) !important; color: #0e7490 !important; }
           .swimlane-badge.feedback { border-color: var(--feedback-accent) !important; color: #475569 !important; }
           .swimlane-badge.priority { border-color: var(--priority-accent) !important; color: #b45309 !important; }
+          .swimlane-badge.diamond { border-color: var(--diamond-accent) !important; color: #0e7490 !important; }
           .swimlane-header,
           .swimlane-cell {
             border-color: #111827 !important;
@@ -7650,6 +7860,48 @@ export default function CommonViewPage() {
           border: 2px solid #2563eb;
           box-shadow: inset 0 0 0 1px rgba(37, 99, 235, 0.14);
         }
+        .swimlane-cell.new-task-emphasis {
+          padding-top: 36px;
+        }
+        .swimlane-cell.new-task-emphasis::after,
+        .week-table-entry.new-task-emphasis::after {
+          content: "E RE";
+          position: absolute;
+          top: 7px;
+          right: 7px;
+          padding: 2px 6px;
+          border: 1px solid #93c5fd;
+          border-radius: 999px;
+          background: #dbeafe;
+          color: #1e3a8a;
+          font-size: 9px;
+          font-weight: 800;
+          line-height: 1.2;
+          letter-spacing: 0.04em;
+          white-space: nowrap;
+          z-index: 2;
+        }
+        .swimlane-cell.created-day-before::after,
+        .week-table-entry.created-day-before::after {
+          content: "DJE";
+          border-color: #93c5fd;
+          background: #dbeafe;
+          color: #1e3a8a;
+        }
+        .swimlane-cell.created-this-week::after,
+        .week-table-entry.created-this-week::after {
+          content: "KËTË JAVË";
+          border-color: #2563eb;
+          background: #3b82f6;
+          color: #ffffff;
+        }
+        .swimlane-cell.created-last-week::after,
+        .week-table-entry.created-last-week::after {
+          content: "JAVA E KALUAR";
+          border-color: #172554;
+          background: #1e3a8a;
+          color: #ffffff;
+        }
         .swimlane-cell.eight-am-task {
           border: 2px solid #dc2626;
         }
@@ -7774,6 +8026,34 @@ export default function CommonViewPage() {
           background: #1d4ed8;
           border-color: #1d4ed8;
           color: #ffffff;
+        }
+        .swimlane-review-btn {
+          flex: 0 0 auto;
+          width: 24px;
+          height: 24px;
+          border: 1px solid #a5f3fc;
+          border-radius: 999px;
+          background: #ffffff;
+          color: #0891b2;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          padding: 0;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+        }
+        .swimlane-review-btn svg {
+          width: 16px;
+          height: 16px;
+        }
+        .swimlane-review-btn:hover {
+          background: #ecfeff;
+          border-color: #67e8f9;
+          transform: translateY(-1px);
+        }
+        .swimlane-review-btn.reviewed {
+          background: #cffafe;
+          border-color: #0891b2;
         }
         .swimlane-date {
           font-size: 12px;
@@ -7978,6 +8258,23 @@ export default function CommonViewPage() {
         }
         .week-table-row.priority .week-table-label {
           background: var(--priority-bg);
+        }
+        .week-table-row.diamond .week-table-label {
+          background: var(--diamond-bg);
+          color: #0e7490;
+        }
+        .diamond-mark {
+          display: inline-flex;
+          align-items: center;
+          vertical-align: middle;
+          flex: 0 0 auto;
+          color: var(--diamond-accent);
+          font-size: 11px;
+          line-height: 1;
+          margin-right: 4px;
+        }
+        .diamond-mark > span {
+          display: inline-flex;
         }
         .week-table-cell {
           min-height: 30px;
@@ -8255,6 +8552,35 @@ export default function CommonViewPage() {
           background: linear-gradient(90deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.98)) !important;
           border: 2px solid #2563eb;
         }
+        @media screen {
+          .week-table-entry.new-task-emphasis,
+          .week-table-view.neutral-all-days .week-table-entry.new-task-emphasis {
+            position: relative;
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) auto auto;
+            align-items: center;
+            column-gap: 5px;
+            padding: 4px 6px;
+          }
+          .week-table-entry.new-task-emphasis > .week-table-entry-main,
+          .week-table-entry.new-task-emphasis > span:first-child {
+            grid-column: 1;
+            min-width: 0;
+          }
+          .week-table-entry.new-task-emphasis > .week-table-avatars {
+            grid-column: 2;
+            margin-top: 0;
+          }
+          .week-table-entry.new-task-emphasis::after {
+            position: static;
+            grid-column: 3;
+            grid-row: 1;
+            justify-self: end;
+            transform: none;
+            padding: 2px 5px;
+            font-size: 8px;
+          }
+        }
         .week-table-entry.eight-am-task {
           border: 2px solid #dc2626;
         }
@@ -8468,6 +8794,7 @@ export default function CommonViewPage() {
         .swimlane-header.problem { background: var(--problem-bg); color: #0e7490; }
         .swimlane-header.feedback { background: var(--feedback-bg); color: #475569; }
         .swimlane-header.priority { background: var(--priority-bg); color: #b45309; }
+        .swimlane-header.diamond { background: var(--diamond-bg); color: #0e7490; }
         .swimlane-badge.delay { border-color: var(--delay-accent); color: #c2410c; }
         .swimlane-badge.absence { border-color: var(--absence-accent); color: #b91c1c; }
         .swimlane-badge.leave { border-color: var(--leave-accent); color: #15803d; }
@@ -8482,6 +8809,7 @@ export default function CommonViewPage() {
         .swimlane-badge.problem { border-color: var(--problem-accent); color: #0e7490; }
         .swimlane-badge.feedback { border-color: var(--feedback-accent); color: #475569; }
         .swimlane-badge.priority { border-color: var(--priority-accent); color: #b45309; }
+        .swimlane-badge.diamond { border-color: var(--diamond-accent); color: #0e7490; }
         .swimlane-accent.delay { border-left: 4px solid var(--delay-accent); }
         .swimlane-accent.absence { border-left: 4px solid var(--absence-accent); }
         .swimlane-accent.leave { border-left: 4px solid var(--leave-accent); }
@@ -8496,6 +8824,7 @@ export default function CommonViewPage() {
         .swimlane-accent.problem { border-left: 4px solid var(--problem-accent); }
         .swimlane-accent.feedback { border-left: 4px solid var(--feedback-accent); }
         .swimlane-accent.priority { border-left: 4px solid var(--priority-accent); }
+        .swimlane-accent.diamond { border-left: 4px solid var(--diamond-accent); }
         .swimlane-cell.one-time-meeting {
           border-color: #dc2626;
         }
@@ -8569,6 +8898,26 @@ export default function CommonViewPage() {
           display: flex;
           align-items: center;
           gap: 8px;
+        }
+        .task-focus-filter-group {
+          align-items: flex-start;
+        }
+        .new-task-filter-stack {
+          display: inline-flex;
+          flex-direction: column;
+          align-items: stretch;
+          gap: 4px;
+        }
+        .new-task-category-row {
+          justify-content: center;
+          padding: 3px;
+          margin-right: 0;
+          background: #eff6ff;
+          border: 1px solid #dbeafe;
+        }
+        .new-task-category-row .chip {
+          padding: 3px 7px;
+          font-size: 10px;
         }
         .user-filter-control {
           position: relative;
@@ -9392,24 +9741,39 @@ export default function CommonViewPage() {
               Multi-select (Types)
             </label>
           </div>
-          <div className="toolbar-group">
-            <div className="chip-row" aria-label="Task filters">
-              {([
-                ["new", "Detyrat e reja"],
-                ["eightAm", "08:00"],
-                ["deadline", "Me deadline"],
-              ] as const).map(([value, label]) => (
-                <button
-                  key={value}
-                  className={`chip ${taskFocusFilter === value ? "active" : ""}`}
-                  type="button"
-                  aria-pressed={taskFocusFilter === value}
-                  onClick={() => setTaskFocusFilter((current) => current === value ? "all" : value)}
-                  title={taskFocusFilter === value ? "Kliko përsëri për ta hequr filtrin" : undefined}
-                >
-                  {label}
-                </button>
-              ))}
+          <div className="toolbar-group task-focus-filter-group">
+            <div className="new-task-filter-stack">
+              <div className="chip-row" aria-label="Task filters">
+                {([
+                  ["new", "Detyrat e reja"],
+                  ["eightAm", "08:00"],
+                  ["deadline", "Me deadline"],
+                ] as const).map(([value, label]) => (
+                  <button
+                    key={value}
+                    className={`chip ${taskFocusFilter === value ? "active" : ""}`}
+                    type="button"
+                    aria-pressed={taskFocusFilter === value}
+                    onClick={() => setTaskFocusFilter((current) => current === value ? "all" : value)}
+                    title={taskFocusFilter === value ? "Kliko përsëri për ta hequr filtrin" : undefined}
+                  >
+                    {label}
+                  </button>
+                ))}
+              </div>
+              <div className="chip-row new-task-category-row" aria-label="Llojet e detyrave të reja">
+                {COMMON_TASK_NEW_CATEGORY_OPTIONS.map((option) => (
+                  <button
+                    key={option.value}
+                    className={`chip ${taskFocusFilter === "new" && newTaskCategoryFilters.has(option.value) ? "active" : ""}`}
+                    type="button"
+                    aria-pressed={taskFocusFilter === "new" && newTaskCategoryFilters.has(option.value)}
+                    onClick={() => toggleNewTaskCategoryFilter(option.value)}
+                  >
+                    {option.label}
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
           <div className="toolbar-group">
@@ -11438,6 +11802,7 @@ export default function CommonViewPage() {
                       else if (row.id === "problem") dayEntries[iso] = dayData?.problems || []
                       else if (row.id === "feedback") dayEntries[iso] = dayData?.feedback || []
                       else if (row.id === "priority") dayEntries[iso] = dayData?.priority || []
+                      else if (row.id === "diamond") dayEntries[iso] = dayData?.diamond || []
                     })
                     const repeatedTaskFirstDateById = buildRepeatedTaskFirstDateMap(
                       weekISOs,
@@ -11462,6 +11827,7 @@ export default function CommonViewPage() {
                       if (rowId === "problem") return "problem"
                       if (rowId === "feedback") return "feedback"
                       if (rowId === "priority") return "priority"
+                      if (rowId === "diamond") return "diamond"
                       return ""
                     }
                     const weekRowClass = getWeekRowClass(row.id)
@@ -11826,6 +12192,20 @@ export default function CommonViewPage() {
                             ) : null}
                           </React.Fragment>
                         ))
+                      } else if (row.id === "diamond") {
+                        return (entries as DiamondItem[]).map((entry, idx) => (
+                          <div key={entry.reviewId} className="week-table-entry diamond-entry">
+                            <div className="week-table-entry-main">
+                              <span>
+                                <span className="week-table-line-number">{idx + 1}.</span>
+                                <span className="diamond-mark">
+                                  <DiamondAward compact />
+                                </span>
+                                <strong>{entry.person}</strong> — {entry.taskTitle}
+                              </span>
+                            </div>
+                          </div>
+                        ))
                       }
                       return null
                     }
@@ -11846,7 +12226,7 @@ export default function CommonViewPage() {
                       })
                       return items
                     }
-                    
+
                     const rowLabel = row.label.toUpperCase()
                     const rowSubtext = getCommonPrintRowSubtext(row.id)
                     if (row.id === "feedback") {
@@ -12122,6 +12502,28 @@ export default function CommonViewPage() {
                             const isNoteOpen = openSwimlaneNoteId === noteKey
                             const isTitleRowOpen = openSwimlaneTitleRows.has(row.id)
                             const isTitleExpandable = TITLE_EXPANDABLE_SWIMLANE_ROWS.includes(row.id)
+                            const canReviewCell =
+                              canManageTaskReviews &&
+                              !cell.placeholder &&
+                              Boolean(cell.taskId && cell.userId && cell.isDone) &&
+                              isFastTaskRowId(row.id)
+                            const existingReview = cell.taskId && cell.userId
+                              ? diamondReviewByTaskUser.get(`${cell.taskId}:${cell.userId}`)
+                              : null
+                            const reviewButton = canReviewCell ? (
+                              <button
+                                type="button"
+                                className={[
+                                  "swimlane-review-btn",
+                                  existingReview ? "reviewed" : "",
+                                ].filter(Boolean).join(" ")}
+                                onClick={() => openCommonTaskReview(cell)}
+                                aria-label={existingReview ? "Edit diamond review" : "Add diamond review"}
+                                title={existingReview ? "Edit diamond review" : "Add diamond review"}
+                              >
+                                <DiamondAward compact />
+                              </button>
+                            ) : null
                             return (
                               <div
                                 key={`${row.id}-${index}`}
@@ -12201,6 +12603,7 @@ export default function CommonViewPage() {
                                         {isFastTaskRowId(row.id)
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
+                                        {reviewButton}
                                       </div>
                                     ) : !cell.placeholder && cell.assigneeLabels?.length ? (
                                       <div className="swimlane-assignees">
@@ -12231,7 +12634,17 @@ export default function CommonViewPage() {
                                         {isFastTaskRowId(row.id)
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
+                                        {reviewButton}
                                       </div>
+                                    ) : reviewButton ? (
+                                      <div className="swimlane-assignees">
+                                        {reviewButton}
+                                      </div>
+                                    ) : null}
+                                    {row.id === "diamond" ? (
+                                      <span className="diamond-mark">
+                                        <DiamondAward compact />
+                                      </span>
                                     ) : null}
                                     <div className="swimlane-title">
                                       <span className="swimlane-print-title">
@@ -12648,6 +13061,12 @@ export default function CommonViewPage() {
           </div>
         </div>
       )}
+      <TaskReviewDialog
+        row={commonReviewRow}
+        open={commonReviewOpen}
+        onOpenChange={setCommonReviewOpen}
+        onSaved={handleCommonReviewSaved}
+      />
     </div>
   )
 }

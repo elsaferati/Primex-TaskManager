@@ -4877,9 +4877,11 @@ export default function WeeklyPlannerPage() {
                                 {/* System Tasks */}
                                 {systemTasksList.length > 0 && (
                                   <div className="space-y-1">
-                                    <div className="text-[11px] font-semibold text-slate-900 mb-1">System Tasks</div>
                                       {systemTasksList.map((task, idx) => {
-                                        const statusBadge = getTaskStatusBadge({ ...task, day_date: dayDate })
+                                        const statusBadge = {
+                                          label: "S",
+                                          className: "border-sky-200 bg-sky-50 text-sky-700",
+                                        }
                                         const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                         const displayTitle = getPlannerTaskDisplayTitle(task)
                                         const taskStatusValue = getStatusValueForDay(task.status, task.completed_at, dayDate, task.daily_status)
@@ -5010,16 +5012,6 @@ export default function WeeklyPlannerPage() {
                       )
                           }
 
-                          const renderProjectsAndSystem = (
-                            projects: WeeklyTableProjectEntry[],
-                            systemTasks: WeeklyTableTaskEntry[],
-                            dayDate: string,
-                            timeSlot: "am" | "pm",
-                            userId: string
-                          ) => (
-                            renderCellContent(projects, systemTasks, [], timeSlot, dayDate, userId)
-                          )
-
                           const renderFastOnly = (
                             fastTasks: WeeklyTableTaskEntry[],
                             dayDate: string,
@@ -5039,7 +5031,26 @@ export default function WeeklyPlannerPage() {
                           )
 
                           const isGADepartment = dept.department_name === "GA"
-                          const rowSpan = isGADepartment ? 6 : 4
+                          const hasAmSystemTasks = allUsers.some((visibleUser) => {
+                            const userDay = day.users.find((entry) => entry.user_id === visibleUser.user_id)
+                            return Boolean(userDay?.am_system_tasks?.length)
+                          })
+                          const hasPmSystemTasks = allUsers.some((visibleUser) => {
+                            const userDay = day.users.find((entry) => entry.user_id === visibleUser.user_id)
+                            return Boolean(userDay?.pm_system_tasks?.length)
+                          })
+                          const rowSpan = 4 + Number(hasAmSystemTasks) + Number(hasPmSystemTasks)
+                          const renderDayCell = () => (
+                            <TableCell
+                              className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
+                              rowSpan={rowSpan}
+                            >
+                              <div className="flex flex-col">
+                                <div className="font-bold text-slate-900">{DAY_NAMES[dayIndex]}</div>
+                                <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
+                              </div>
+                            </TableCell>
+                          )
 
                           return (
                             <React.Fragment key={day.date}>
@@ -5047,16 +5058,8 @@ export default function WeeklyPlannerPage() {
                                 <>
                                   {/* GA Department: SYS, FT, PRJK order */}
                                   {/* AM SYS Row */}
-                                  <TableRow className={dayIndex > 0 ? "border-t-3 border-gray-500" : undefined}>
-                                    <TableCell
-                                      className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
-                                      rowSpan={rowSpan}
-                                    >
-                                      <div className="flex flex-col">
-                                        <div className="font-bold text-slate-900">{DAY_NAMES[dayIndex]}</div>
-                                        <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
-                                      </div>
-                                    </TableCell>
+                                  {hasAmSystemTasks ? <TableRow className={dayIndex > 0 ? "border-t-3 border-gray-500" : undefined}>
+                                    {renderDayCell()}
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">AM</div>
                                     </TableCell>
@@ -5078,10 +5081,11 @@ export default function WeeklyPlannerPage() {
                                         </TableCell>
                                       )
                                     })}
-                                  </TableRow>
+                                  </TableRow> : null}
 
                                   {/* AM FT Row */}
-                                  <TableRow className="border-t border-border">
+                                  <TableRow className={hasAmSystemTasks ? "border-t border-border" : dayIndex > 0 ? "border-t-3 border-gray-500" : undefined}>
+                                    {!hasAmSystemTasks ? renderDayCell() : null}
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">AM</div>
                                     </TableCell>
@@ -5133,7 +5137,7 @@ export default function WeeklyPlannerPage() {
                                   </TableRow>
 
                                   {/* PM SYS Row */}
-                                  <TableRow className="border-t-2 border-border">
+                                  {hasPmSystemTasks ? <TableRow className="border-t-2 border-border">
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">PM</div>
                                     </TableCell>
@@ -5155,10 +5159,10 @@ export default function WeeklyPlannerPage() {
                                         </TableCell>
                                       )
                                     })}
-                                  </TableRow>
+                                  </TableRow> : null}
 
                                   {/* PM FT Row */}
-                                  <TableRow className="border-t border-border">
+                                  <TableRow className={hasPmSystemTasks ? "border-t border-border" : "border-t-2 border-border"}>
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">PM</div>
                                     </TableCell>
@@ -5211,18 +5215,36 @@ export default function WeeklyPlannerPage() {
                                 </>
                               ) : (
                                 <>
-                                  {/* Other Departments: PRJK, FT order (original) */}
-                                  {/* AM PRJK Row */}
-                                  <TableRow className={dayIndex > 0 ? "border-t-3 border-gray-500 border-b-0" : "border-b-0"}>
-                                    <TableCell
-                                      className="font-medium sticky left-0 bg-background z-10 align-top w-24 min-w-24"
-                                      rowSpan={rowSpan}
-                                    >
-                                      <div className="flex flex-col">
-                                        <div className="font-bold text-slate-900">{DAY_NAMES[dayIndex]}</div>
-                                        <div className="text-xs font-semibold text-slate-900 mt-1">{formatDate(day.date)}</div>
-                                      </div>
+                                  {/* Other Departments: keep system tasks in dedicated SYS rows. */}
+                                  {/* AM SYS Row */}
+                                  {hasAmSystemTasks ? <TableRow className={dayIndex > 0 ? "border-t-3 border-gray-500 border-b-0" : "border-b-0"}>
+                                    {renderDayCell()}
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">AM</div>
                                     </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      SYS
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-am-sys`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderSystemOnly(
+                                              userDay.am_system_tasks || [],
+                                              day.date,
+                                              "am",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow> : null}
+
+                                  {/* AM PRJK Row */}
+                                  <TableRow className={hasAmSystemTasks ? "border-t border-t-slate-200/60 border-b-0" : dayIndex > 0 ? "border-t-3 border-gray-500 border-b-0" : "border-b-0"}>
+                                    {!hasAmSystemTasks ? renderDayCell() : null}
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">AM</div>
                                     </TableCell>
@@ -5234,11 +5256,12 @@ export default function WeeklyPlannerPage() {
                                       return (
                                         <TableCell key={`${user.user_id}-am-prjk`} className="align-top w-56 min-w-56">
                                           {userDay
-                                            ? renderProjectsAndSystem(
+                                            ? renderCellContent(
                                               userDay.am_projects || [],
-                                              userDay.am_system_tasks || [],
-                                              day.date,
+                                              [],
+                                              [],
                                               "am",
+                                              day.date,
                                               user.user_id
                                             )
                                             : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
@@ -5272,8 +5295,33 @@ export default function WeeklyPlannerPage() {
                                     })}
                                   </TableRow>
 
+                                  {/* PM SYS Row */}
+                                  {hasPmSystemTasks ? <TableRow className="border-t-2 border-t-gray-500 border-b-0">
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
+                                      <div className="text-xs font-medium text-primary">PM</div>
+                                    </TableCell>
+                                    <TableCell className="w-10 min-w-10 align-top sticky left-34 bg-background z-10 text-center text-xs font-bold uppercase">
+                                      SYS
+                                    </TableCell>
+                                    {allUsers.map((user) => {
+                                      const userDay = day.users.find((u) => u.user_id === user.user_id)
+                                      return (
+                                        <TableCell key={`${user.user_id}-pm-sys`} className="align-top w-56 min-w-56">
+                                          {userDay
+                                            ? renderSystemOnly(
+                                              userDay.pm_system_tasks || [],
+                                              day.date,
+                                              "pm",
+                                              user.user_id
+                                            )
+                                            : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}
+                                        </TableCell>
+                                      )
+                                    })}
+                                  </TableRow> : null}
+
                                   {/* PM PRJK Row */}
-                                  <TableRow className="border-t-2 border-t-gray-500 border-b-0">
+                                  <TableRow className={hasPmSystemTasks ? "border-t border-t-slate-200/60 border-b-0" : "border-t-2 border-t-gray-500 border-b-0"}>
                                     <TableCell className="w-10 min-w-10 align-top sticky left-24 bg-background z-10 text-center">
                                       <div className="text-xs font-medium text-primary">PM</div>
                                     </TableCell>
@@ -5285,11 +5333,12 @@ export default function WeeklyPlannerPage() {
                                       return (
                                         <TableCell key={`${user.user_id}-pm-prjk`} className="align-top w-56 min-w-56">
                                           {userDay
-                                            ? renderProjectsAndSystem(
+                                            ? renderCellContent(
                                               userDay.pm_projects || [],
-                                              userDay.pm_system_tasks || [],
-                                              day.date,
+                                              [],
+                                              [],
                                               "pm",
+                                              day.date,
                                               user.user_id
                                             )
                                             : <div className="min-h-20 text-xs text-muted-foreground/50">—</div>}

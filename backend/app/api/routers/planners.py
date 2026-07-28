@@ -2523,19 +2523,45 @@ async def weekly_table_planner(
             if effective_ids.intersection(dept_user_ids):
                 dept_tasks.append(t)
                 continue
+
+        # Load opted-in generated system-task occurrences once for this department/week.
+        system_rows_by_user_day: dict[
+            tuple[uuid.UUID, date], list[tuple[Task, SystemTaskTemplate]]
+        ] = {}
+        if dept_user_ids:
+            system_task_local_day = cast(
+                func.timezone(
+                    func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE),
+                    func.coalesce(Task.due_date, Task.origin_run_at),
+                ),
+                Date,
+            )
+            weekly_system_rows = (
+                await db.execute(
+                    select(Task, SystemTaskTemplate, system_task_local_day.label("local_day"))
+                    .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+                    .where(Task.assigned_to.in_(dept_user_ids))
+                    .where(Task.system_template_origin_id.is_not(None))
+                    .where(Task.is_active.is_(True))
+                    .where(system_task_local_day >= working_days[0])
+                    .where(system_task_local_day <= working_days[-1])
+                    .where(SystemTaskTemplate.is_active.is_(True))
+                    .where(SystemTaskTemplate.show_in_weekly_planner.is_(True))
+                    .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
+                    .order_by(SystemTaskTemplate.title, Task.created_at.desc())
+                )
+            ).all()
+            for system_task, template, local_day in weekly_system_rows:
+                if system_task.assigned_to is None:
+                    continue
+                system_rows_by_user_day.setdefault(
+                    (system_task.assigned_to, local_day), []
+                ).append((system_task, template))
         
         # Organize tasks by day and user
         days_data: list[WeeklyTableDay] = []
         
         # Keep weekly planner read-only: do not generate system tasks during page loads.
-        is_ga_dept = dept.name == "GA"
-        gane_arifaj_user = None
-        if is_ga_dept:
-            for u in dept_users:
-                if u.username and u.username.lower() == "gane.arifaj":
-                    gane_arifaj_user = u
-                    break
-        
         for day_date in working_days:
             users_day_data: list[WeeklyTableUserDay] = []
             
@@ -2658,85 +2684,60 @@ async def weekly_table_planner(
                 am_fast_tasks: list[WeeklyTableTaskEntry] = []
                 pm_fast_tasks: list[WeeklyTableTaskEntry] = []
                 
-                # Fetch system tasks for GA department and GANE ARIFAJ user only
-                is_gane_arifaj = dept_user.username and dept_user.username.lower() == "gane.arifaj"
-                
-                if is_ga_dept and is_gane_arifaj:
-                    # Query generated system task rows for this user on this day.
-                    task_local_day = cast(
-                        func.timezone(
-                            func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE),
-                            func.coalesce(Task.due_date, Task.origin_run_at),
-                        ),
-                        Date,
-                    )
-                    system_rows = (
-                        await db.execute(
-                            select(Task, SystemTaskTemplate)
-                            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
-                            .where(Task.assigned_to == dept_user.id)
-                            .where(Task.system_template_origin_id.is_not(None))
-                            .where(Task.is_active.is_(True))
-                            .where(task_local_day == day_date)
-                            .where(SystemTaskTemplate.is_active.is_(True))
-                            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
-                            .order_by(SystemTaskTemplate.title, Task.created_at.desc())
-                        )
-                    ).all()
-                    
-                    # Debug logging
-                    if system_rows:
-                        logger.debug(f"[SYSTEM TASKS] Found {len(system_rows)} system tasks for GANE ARIFAJ on {day_date}")
-                    else:
-                        logger.debug(f"[SYSTEM TASKS] No system tasks found for GANE ARIFAJ on {day_date}")
-                    
-                    # Convert task rows to WeeklyTableTaskEntry.
-                    for system_task, tmpl in system_rows:
-                        if system_task.status == TaskStatus.DONE:
-                            task_status = TaskStatus.DONE
-                            completed_at = system_task.completed_at
-                        else:
-                            task_status = TaskStatus.TODO
-                            completed_at = None
+                # Fetch generated occurrences only for templates explicitly opted into the weekly planner.
+                system_rows = system_rows_by_user_day.get((dept_user.id, day_date), [])
 
-                        finish_period_value = system_task.finish_period or tmpl.finish_period
-                        finish_period_upper = None
-                        if finish_period_value:
-                            finish_period_str = str(finish_period_value).strip()
-                            if finish_period_str:
-                                finish_period_upper = finish_period_str.upper()
-                        
-                        # Determine which time slot(s) this task should appear in
-                        is_pm = finish_period_upper == "PM"
-                        is_am = finish_period_upper == "AM"
-                        is_both = not finish_period_upper or finish_period_upper not in ("AM", "PM")
-                        
-                        entry = WeeklyTableTaskEntry(
-                            task_id=system_task.id,
-                            title=tmpl.title,
-                            status=task_status,
-                            daily_status=None,
-                            created_at=system_task.created_at,
-                            completed_at=completed_at,
-                            daily_products=None,
-                            finish_period=finish_period_value,
-                            fast_task_type=None,
-                            is_bllok=False,
-                            is_1h_report=False,
-                            is_r1=False,
-                            is_personal=False,
-                            is_deadline_important=system_task.is_deadline_important,
-                            ga_note_origin_id=None,
-                            plan_note_origin_id=None,
-                        )
-                        
-                        if is_both:
-                            am_system_tasks.append(entry)
-                            pm_system_tasks.append(entry)
-                        elif is_pm:
-                            pm_system_tasks.append(entry)
-                        else:
-                            am_system_tasks.append(entry)
+                if system_rows:
+                    logger.debug(
+                        f"[SYSTEM TASKS] Found {len(system_rows)} system tasks for "
+                        f"{dept_user.username} on {day_date}"
+                    )
+
+                # Convert task rows to WeeklyTableTaskEntry.
+                for system_task, tmpl in system_rows:
+                    if system_task.status == TaskStatus.DONE:
+                        task_status = TaskStatus.DONE
+                        completed_at = system_task.completed_at
+                    else:
+                        task_status = TaskStatus.TODO
+                        completed_at = None
+
+                    finish_period_value = system_task.finish_period or tmpl.finish_period
+                    finish_period_upper = None
+                    if finish_period_value:
+                        finish_period_str = str(finish_period_value).strip()
+                        if finish_period_str:
+                            finish_period_upper = finish_period_str.upper()
+
+                    is_pm = finish_period_upper == "PM"
+                    is_both = not finish_period_upper or finish_period_upper not in ("AM", "PM")
+
+                    entry = WeeklyTableTaskEntry(
+                        task_id=system_task.id,
+                        title=tmpl.title,
+                        status=task_status,
+                        daily_status=None,
+                        created_at=system_task.created_at,
+                        completed_at=completed_at,
+                        daily_products=None,
+                        finish_period=finish_period_value,
+                        fast_task_type=None,
+                        is_bllok=False,
+                        is_1h_report=False,
+                        is_r1=False,
+                        is_personal=False,
+                        is_deadline_important=system_task.is_deadline_important,
+                        ga_note_origin_id=None,
+                        plan_note_origin_id=None,
+                    )
+
+                    if is_both:
+                        am_system_tasks.append(entry)
+                        pm_system_tasks.append(entry)
+                    elif is_pm:
+                        pm_system_tasks.append(entry)
+                    else:
+                        am_system_tasks.append(entry)
 
                 for task in user_tasks:
                     # Handle finish_period: None or empty means both AM and PM

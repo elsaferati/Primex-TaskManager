@@ -26,6 +26,7 @@ import {
   Clock3,
   Shield,
   PanelLeftClose,
+  Gem,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -139,6 +140,11 @@ const items: NavItem[] = [
     href: "/open-tasks",
     label: "Open Tasks",
     icon: ListTodo,
+  },
+  {
+    href: "/reviews",
+    label: "Reviews",
+    icon: Gem,
   },
   { 
     href: "/monthly-planner", 

@@ -13,6 +13,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
+import { TaskReviewsPanel } from "@/components/task-reviews-panel"
 import { clearDepartmentBootstrapCacheByPrefix } from "@/lib/department-bootstrap-cache"
 import { formatDateDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { loadGaNoteTaskAssigneeIds, replaceGaNoteTaskAssignees } from "@/lib/ga-note-task-membership"
@@ -948,6 +949,7 @@ export default function TaskDetailsPage() {
               ) : null}
             </CardContent>
           </Card>
+          <TaskReviewsPanel task={task} />
         </div>
       </div>
     </div>

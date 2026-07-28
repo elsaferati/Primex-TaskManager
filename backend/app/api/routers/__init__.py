@@ -20,6 +20,7 @@ from app.api.routers.project_phase_checklists import router as project_phase_che
 from app.api.routers.projects import router as projects_router
 from app.api.routers.system_tasks import router as system_tasks_router
 from app.api.routers.tasks import router as tasks_router
+from app.api.routers.task_reviews import router as task_reviews_router
 from app.api.routers.users import router as users_router
 from app.api.routers.boards import router as boards_router
 from app.api.routers.common_entries import router as common_entries_router
@@ -53,6 +54,7 @@ api_router.include_router(project_members_router, prefix="/project-members", tag
 api_router.include_router(project_prompts_router, prefix="/project-prompts", tags=["project-prompts"])
 api_router.include_router(project_phase_checklists_router, tags=["project-phase-checklists"])
 api_router.include_router(tasks_router, prefix="/tasks", tags=["tasks"])
+api_router.include_router(task_reviews_router, prefix="/task-reviews", tags=["task-reviews"])
 api_router.include_router(system_tasks_router, prefix="/system-tasks", tags=["system-tasks"])
 api_router.include_router(users_router, prefix="/users", tags=["users"])
 api_router.include_router(boards_router, prefix="/boards", tags=["boards"])
