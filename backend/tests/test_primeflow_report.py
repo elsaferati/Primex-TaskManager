@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import unittest
+import io
+import zipfile
 from datetime import date
 
 from app.services.primeflow_report import (
     STATUS_MARKERS, build_report, clean_description, exact_subject, filter_tasks,
-    predecessor, previous_working_day, report_subject,
+    build_report_document, predecessor, previous_working_day, render_docx, render_html,
+    render_plain_text, render_png, report_subject,
 )
 
 
@@ -54,6 +57,33 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(positions, sorted(positions))
         self.assertEqual(predecessor(date(2026, 7, 28), "10:00"), (date(2026, 7, 27), "16:00"))
         self.assertEqual(predecessor(date(2026, 7, 28), "14:20"), (date(2026, 7, 28), "11:50"))
+
+    def test_all_formats_share_one_normalized_document(self) -> None:
+        exact_title = "ÄNDERUNG pa përmbledhje"
+        exact_description = "1. Zeile\n\n2. Përshkrim [[added]]EXACT[[/added]]"
+        data = {
+            "generated_at": "2026-07-28T08:59:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [{
+                "id": "x", "date": "2026-07-28", "one_h_report_slot": "10:00",
+                "person": "Besa", "task_title": exact_title, "description": exact_description,
+                "status": "IN_PROGRESS",
+            }]},
+        }
+        document = build_report_document(data, date(2026, 7, 28), "10:00", {"to": ["ga@primexeu.com"], "cc": [], "bcc": []})
+        plain = render_plain_text(document)
+        html = render_html(document)
+        docx = render_docx(document)
+        png = render_png(document)
+        self.assertIn(exact_title, plain)
+        self.assertIn("1. Zeile\n\n2. Përshkrim EXACT", plain)
+        self.assertIn(exact_title, html)
+        with zipfile.ZipFile(io.BytesIO(docx)) as archive:
+            xml = archive.read("word/document.xml").decode("utf-8")
+        self.assertIn(exact_title, xml)
+        self.assertIn("Përshkrim EXACT", xml)
+        self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
+        self.assertGreater(document.task_count, 0)
 
 
 if __name__ == "__main__":

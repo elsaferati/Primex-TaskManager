@@ -7,6 +7,8 @@ import json
 import logging
 import os
 import re
+import html
+import io
 from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 from email.message import EmailMessage
@@ -14,6 +16,7 @@ from typing import Any, Awaitable, Callable
 from zoneinfo import ZoneInfo
 
 import httpx
+from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
 SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
@@ -28,6 +31,38 @@ class GmailVerificationError(RuntimeError):
     def __init__(self, message: str, response: dict[str, Any] | None = None) -> None:
         super().__init__(message)
         self.response = response or {}
+
+
+class ReportTask(BaseModel):
+    title: str
+    description: str
+    status: str
+    marker: str
+
+
+class ReportEmployee(BaseModel):
+    name: str
+    tasks: list[ReportTask] = Field(default_factory=list)
+
+
+class ReportSection(BaseModel):
+    title: str
+    employees: list[ReportEmployee] = Field(default_factory=list)
+
+
+class ReportDocument(BaseModel):
+    subject: str
+    report_date: date
+    report_slot: str
+    generated_at: datetime
+    source_generated_at: datetime
+    recipients: dict[str, list[str]]
+    sections: list[ReportSection]
+    truncated: bool = False
+
+    @property
+    def task_count(self) -> int:
+        return sum(len(employee.tasks) for section in self.sections for employee in section.employees)
 
 
 def report_timezone() -> ZoneInfo:
@@ -117,29 +152,165 @@ def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def build_report(data: dict[str, Any], report_day: date, slot: str) -> str:
+def _document_section(title: str, tasks: list[dict[str, Any]]) -> ReportSection:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        grouped.setdefault(_employee(task), []).append(task)
+    employees = []
+    for employee in sorted(grouped, key=str.casefold):
+        ordered = sorted(grouped[employee], key=lambda x: (
+            STATUS_ORDER[str(x.get("status")).upper()],
+            str(x.get("task_title") or x.get("title") or x.get("task")),
+        ))
+        employees.append(ReportEmployee(
+            name=employee,
+            tasks=[
+                ReportTask(
+                    title=str(task.get("task_title") or task.get("title") or task.get("task")),
+                    description=clean_description(task.get("description") if "description" in task else task.get("note")),
+                    status=str(task.get("status")).upper(),
+                    marker=STATUS_MARKERS[str(task.get("status")).upper()],
+                )
+                for task in ordered
+            ],
+        ))
+    return ReportSection(title=title, employees=employees)
+
+
+def build_report_document(
+    data: dict[str, Any], report_day: date, slot: str, recipients: dict[str, list[str]] | None = None,
+) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
-    if any((guardrails.get("truncated") or {}).values()):
+    truncated = any((guardrails.get("truncated") or {}).values())
+    if truncated:
         raise ValueError("Common View contains truncated buckets")
     items = data.get("items") or {}
     one_h = items.get("oneH") or data.get("tasks") or []
-    sections: list[tuple[str, list[dict[str, Any]]]] = []
+    definitions: list[tuple[str, list[dict[str, Any]]]] = []
     if slot == "10:00":
         prev = previous_working_day(report_day)
-        sections.append((f"SLOTI {prev:%d.%m.%Y} 16:00", filter_tasks(one_h, prev, "16:00")))
+        definitions.append((f"SLOTI {prev:%d.%m.%Y} 16:00", filter_tasks(one_h, prev, "16:00")))
     current_index = SLOTS.index(slot)
     start_index = current_index if current_index == 0 else current_index - 1
     for candidate in SLOTS[start_index:]:
-        sections.append((f"SLOTI {report_day:%d.%m.%Y} {candidate}", filter_tasks(one_h, report_day, candidate)))
-    sections.extend([
-        ("DETYRA PA SLOT – E GJITHË DITA", filter_tasks(one_h, report_day, None)),
+        definitions.append((f"SLOTI {report_day:%d.%m.%Y} {candidate}", filter_tasks(one_h, report_day, candidate)))
+    definitions.extend([
+        ("DETYRA PA SLOT – E GJITHË DITA", [t for t in filter_tasks(one_h, report_day, None) if _slot(t) is None]),
         ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
         ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
         ("R1 = 1H", filter_tasks(items.get("r1") or [], report_day)),
     ])
-    # The no-slot section must not repeat slotted rows.
-    sections = [(name, [t for t in tasks if _slot(t) is None] if name.startswith("DETYRA PA SLOT") else tasks) for name, tasks in sections]
-    return "\n\n".join(_render_section(name, tasks) for name, tasks in sections)
+    generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
+    source_generated = datetime.fromisoformat(str(generated_value).replace("Z", "+00:00"))
+    return ReportDocument(
+        subject=report_subject(report_day, slot),
+        report_date=report_day,
+        report_slot=slot,
+        generated_at=datetime.now(report_timezone()),
+        source_generated_at=source_generated,
+        recipients=recipients or {"to": [], "cc": [], "bcc": []},
+        sections=[_document_section(title, tasks) for title, tasks in definitions],
+    )
+
+
+def render_plain_text(document: ReportDocument) -> str:
+    blocks = [document.subject, f"Generated: {document.generated_at.isoformat()}", ""]
+    for section in document.sections:
+        lines = [section.title]
+        if not section.employees:
+            lines.append("(Asnjë detyrë)")
+        for employee_index, employee in enumerate(section.employees, 1):
+            lines.append(f"{employee_index}. {employee.name}")
+            for task_index, task in enumerate(employee.tasks, 1):
+                lines.extend([
+                    f"{employee_index}.{task_index} {task.marker} {task.title}",
+                    "Përshkrimi:",
+                    task.description,
+                ])
+        blocks.append("\n".join(lines))
+    return "\n\n".join(blocks)
+
+
+def render_html(document: ReportDocument) -> str:
+    sections = []
+    for section in document.sections:
+        employees = []
+        for employee_index, employee in enumerate(section.employees, 1):
+            tasks = "".join(
+                f"<article class='task'><h4>{employee_index}.{task_index} {html.escape(task.marker)} {html.escape(task.title)}</h4>"
+                f"<strong>Përshkrimi:</strong><div class='description'>{html.escape(task.description).replace(chr(10), '<br>')}</div></article>"
+                for task_index, task in enumerate(employee.tasks, 1)
+            )
+            employees.append(f"<div class='employee'><h3>{employee_index}. {html.escape(employee.name)}</h3>{tasks}</div>")
+        sections.append(f"<section><h2>{html.escape(section.title)}</h2>{''.join(employees) or '<p>(Asnjë detyrë)</p>'}</section>")
+    return (
+        "<!doctype html><html><head><meta charset='utf-8'><style>"
+        "body{font-family:Arial,'Segoe UI Emoji',sans-serif;color:#172033;max-width:900px;margin:24px auto;line-height:1.45}"
+        "header{border-bottom:3px solid #3157d5;margin-bottom:24px}.meta{color:#64748b}.employee{margin:16px 0}"
+        "section{page-break-inside:avoid;margin:28px 0}h2{background:#eef2ff;padding:10px;border-left:4px solid #3157d5}"
+        ".task{border-left:2px solid #cbd5e1;padding-left:14px;margin:12px 0}.description{white-space:normal;margin-top:6px}"
+        "</style></head><body>"
+        f"<header><h1>{html.escape(document.subject)}</h1><p class='meta'>Generated {document.generated_at.isoformat()} · "
+        f"{document.task_count} tasks</p></header>{''.join(sections)}</body></html>"
+    )
+
+
+def render_docx(document: ReportDocument) -> bytes:
+    from docx import Document
+    from docx.shared import Pt
+    output = io.BytesIO()
+    doc = Document()
+    doc.add_heading(document.subject, 0)
+    doc.add_paragraph(f"Report date: {document.report_date.isoformat()}")
+    doc.add_paragraph(f"Report slot: {document.report_slot}")
+    doc.add_paragraph(f"Generated: {document.generated_at.isoformat()}")
+    doc.add_paragraph("Recipients: " + ", ".join(sum(document.recipients.values(), [])))
+    for section in document.sections:
+        doc.add_heading(section.title, level=1)
+        if not section.employees:
+            doc.add_paragraph("(Asnjë detyrë)")
+        for employee_index, employee in enumerate(section.employees, 1):
+            doc.add_heading(f"{employee_index}. {employee.name}", level=2)
+            for task_index, task in enumerate(employee.tasks, 1):
+                paragraph = doc.add_paragraph()
+                run = paragraph.add_run(f"{employee_index}.{task_index} {task.marker} {task.title}")
+                run.bold, run.font.size = True, Pt(10)
+                doc.add_paragraph("Përshkrimi:")
+                doc.add_paragraph(task.description)
+    doc.save(output)
+    return output.getvalue()
+
+
+def render_png(document: ReportDocument) -> bytes:
+    from PIL import Image, ImageDraw, ImageFont
+    width, margin, line_height = 1400, 70, 30
+    font_path = os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\seguiemj.ttf")
+    fallback = r"C:\Windows\Fonts\arial.ttf"
+    try:
+        font = ImageFont.truetype(font_path if os.path.exists(font_path) else fallback, 22)
+        heading = ImageFont.truetype(fallback, 30)
+    except OSError:
+        font = heading = ImageFont.load_default()
+    lines: list[tuple[str, Any]] = [(document.subject, heading), ("", font)]
+    max_chars = 95
+    import textwrap
+    for raw in render_plain_text(document).splitlines()[3:]:
+        wrapped = textwrap.wrap(raw, width=max_chars, replace_whitespace=False, drop_whitespace=False) or [""]
+        lines.extend((line, font) for line in wrapped)
+    height = max(500, margin * 2 + line_height * len(lines))
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    y = margin
+    for line, line_font in lines:
+        draw.text((margin, y), line, fill="#172033", font=line_font)
+        y += line_height + (8 if line_font == heading else 0)
+    output = io.BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def build_report(data: dict[str, Any], report_day: date, slot: str) -> str:
+    return render_plain_text(build_report_document(data, report_day, slot))
 
 
 async def retry(operation: Callable[[], Awaitable[Any]], *, delays: tuple[float, ...] = (0, 2, 5)) -> Any:
@@ -227,40 +398,54 @@ class GmailService:
             found = await client.get("https://gmail.googleapis.com/gmail/v1/users/me/messages", params={"q": f'in:sent subject:"{subject}"'}, headers=headers)
             found.raise_for_status()
             for item in found.json().get("messages", []):
-                detail = await client.get(f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{item['id']}", params={"format": "metadata", "metadataHeaders": ["Subject", "To"]}, headers=headers)
+                detail = await client.get(
+                    f"https://gmail.googleapis.com/gmail/v1/users/me/messages/{item['id']}",
+                    params=[("format", "metadata"), ("metadataHeaders", "Subject"), ("metadataHeaders", "To"), ("metadataHeaders", "Cc"), ("metadataHeaders", "Bcc")],
+                    headers=headers,
+                )
                 detail.raise_for_status()
                 message = detail.json()
                 metadata = message.get("payload", {}).get("headers", [])
-                to_value = next((h.get("value", "") for h in metadata if h.get("name", "").lower() == "to"), "")
-                recipient_match = not recipients or all(address.casefold() in to_value.casefold() for address in recipients)
+                recipient_headers = " ".join(
+                    h.get("value", "") for h in metadata if h.get("name", "").lower() in {"to", "cc", "bcc"}
+                )
+                recipient_match = not recipients or all(address.casefold() in recipient_headers.casefold() for address in recipients)
                 if exact_subject(metadata, subject) and recipient_match:
                     return message
         return None
 
-    async def send_verified(self, subject: str, recipients: list[str], body: str) -> dict[str, Any]:
+    async def send_verified(self, subject: str, recipients: list[str] | dict[str, list[str]], body: str, html_body: str | None = None) -> dict[str, Any]:
+        recipient_map = recipients if isinstance(recipients, dict) else {"to": recipients, "cc": [], "bcc": []}
+        all_recipients = sum(recipient_map.values(), [])
         send_accepted = False
         send_response: dict[str, Any] | None = None
         for attempt in range(1, 4):
-            existing = await self.find_exact(subject, recipients)
+            existing = await self.find_exact(subject, all_recipients)
             if existing:
                 return existing
             try:
                 async with httpx.AsyncClient(timeout=30) as client:
                     token = await self._access_token(client)
                     message = EmailMessage()
-                    message["From"], message["To"], message["Subject"] = self.sender, ", ".join(recipients), subject
+                    message["From"], message["To"], message["Subject"] = self.sender, ", ".join(recipient_map["to"]), subject
+                    if recipient_map["cc"]:
+                        message["Cc"] = ", ".join(recipient_map["cc"])
+                    if recipient_map["bcc"]:
+                        message["Bcc"] = ", ".join(recipient_map["bcc"])
                     message.set_content(body)
+                    if html_body:
+                        message.add_alternative(html_body, subtype="html")
                     raw = base64.urlsafe_b64encode(message.as_bytes()).decode().rstrip("=")
                     response = await client.post("https://gmail.googleapis.com/gmail/v1/users/me/messages/send", json={"raw": raw}, headers={"Authorization": f"Bearer {token}"})
                     response.raise_for_status()
                     send_accepted = True
                     send_response = response.json()
-                verified = await self.find_exact(subject, recipients)
+                verified = await self.find_exact(subject, all_recipients)
                 if verified:
                     return verified
             except (httpx.RequestError, httpx.HTTPStatusError):
                 logger.warning("gmail_send_failure attempt=%s subject=%s", attempt, subject)
-        final = await self.find_exact(subject, recipients)
+        final = await self.find_exact(subject, all_recipients)
         if final:
             return final
         if send_accepted:
