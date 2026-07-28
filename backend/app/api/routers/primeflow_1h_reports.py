@@ -213,6 +213,17 @@ async def manual_send(payload: SendRequest, db: AsyncSession = Depends(get_db), 
     )
     add_audit_log(db=db, actor_user_id=user.id, entity_type="primeflow_report_run", entity_id=run.id, action="MANUAL_SEND", after={"status": run.status, "reason": payload.reason})
     await db.commit()
+    if run.status not in {"SENT", "ALREADY_SENT"}:
+        raise HTTPException(
+            status_code=502,
+            detail={
+                "message": "Gmail delivery was not completed",
+                "run_id": str(run.id),
+                "status": run.status,
+                "error_code": run.error_code,
+                "error_message": run.error_message,
+            },
+        )
     return _run(run)
 
 
