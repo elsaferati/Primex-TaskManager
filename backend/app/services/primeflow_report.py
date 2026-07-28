@@ -26,8 +26,13 @@ SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
 SCHEDULES = {"10:00": "09:00", "11:00": "10:50", "11:50": "11:40", "14:20": "14:10", "16:00": "15:50"}
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
-TECHNICAL_TAGS = re.compile(r"\[\[/?(?:added|done)\]\]")
+TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
 TRANSIENT_CODES = {429, 500, 502, 503, 504}
+STATUS_COLORS = {
+    "TODO": ("#fbcfe8", "#111827", "#ec4899"),
+    "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
+    "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
+}
 
 
 class GmailVerificationError(RuntimeError):
@@ -91,7 +96,12 @@ def exact_subject(headers: list[dict[str, str]], expected: str) -> bool:
 
 
 def clean_description(value: str | None) -> str:
-    return TECHNICAL_TAGS.sub("", value or "")
+    cleaned = TECHNICAL_TAGS.sub("", value or "")
+    return re.sub(r"[ \t]+", " ", cleaned).strip()
+
+
+def clean_title(value: str | None) -> str:
+    return clean_description(value)
 
 
 def _task_date(item: dict[str, Any]) -> date | None:
@@ -147,7 +157,7 @@ def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
         ordered = sorted(grouped[employee], key=lambda x: (STATUS_ORDER[str(x.get("status")).upper()], str(x.get("task_title") or x.get("title") or x.get("task"))))
         for task_index, task in enumerate(ordered, 1):
             status = str(task.get("status")).upper()
-            title_value = str(task.get("task_title") or task.get("title") or task.get("task"))
+            title_value = clean_title(str(task.get("task_title") or task.get("title") or task.get("task")))
             description = clean_description(task.get("description") if "description" in task else task.get("note"))
             lines.extend([f"{employee_index}.{task_index} {STATUS_MARKERS[status]} {title_value}", "Përshkrimi:", description])
     if not grouped:
@@ -169,7 +179,7 @@ def _document_section(title: str, tasks: list[dict[str, Any]]) -> ReportSection:
             name=employee,
             tasks=[
                 ReportTask(
-                    title=str(task.get("task_title") or task.get("title") or task.get("task")),
+                    title=clean_title(str(task.get("task_title") or task.get("title") or task.get("task"))),
                     description=clean_description(task.get("description") if "description" in task else task.get("note")),
                     status=str(task.get("status")).upper(),
                     marker=STATUS_MARKERS[str(task.get("status")).upper()],
@@ -239,74 +249,155 @@ def render_html(document: ReportDocument) -> str:
     for section in document.sections:
         employees = []
         for employee_index, employee in enumerate(section.employees, 1):
-            tasks = "".join(
-                f"<article class='task'><h4>{employee_index}.{task_index} {html.escape(task.marker)} {html.escape(task.title)}</h4>"
-                f"<strong>Përshkrimi:</strong><div class='description'>{html.escape(task.description).replace(chr(10), '<br>')}</div></article>"
-                for task_index, task in enumerate(employee.tasks, 1)
+            task_cards = []
+            for task_index, task in enumerate(employee.tasks, 1):
+                background, foreground, accent = STATUS_COLORS[task.status]
+                description = html.escape(task.description).replace(chr(10), "<br>") or "Pa përshkrim"
+                task_cards.append(
+                    f"<article class='task' style='background:{background};color:{foreground};border-color:{accent}'>"
+                    f"<div class='task-title'>{employee_index}.{task_index} {html.escape(task.marker)} {html.escape(task.title)}</div>"
+                    f"<div class='description'><strong>Përshkrimi:</strong>{description}</div></article>"
+                )
+            employees.append(
+                f"<div class='employee'><div class='employee-name'>{employee_index}. {html.escape(employee.name)}</div>"
+                f"{''.join(task_cards)}</div>"
             )
-            employees.append(f"<div class='employee'><h3>{employee_index}. {html.escape(employee.name)}</h3>{tasks}</div>")
-        sections.append(f"<section><h2>{html.escape(section.title)}</h2>{''.join(employees) or '<p>(Asnjë detyrë)</p>'}</section>")
+        sections.append(
+            f"<section><div class='section-title'>{html.escape(section.title)}</div>"
+            f"{''.join(employees) or '<div class=\"empty\">(Asnjë detyrë)</div>'}</section>"
+        )
     return (
-        "<!doctype html><html><head><meta charset='utf-8'><style>"
-        "body{font-family:Arial,'Segoe UI Emoji',sans-serif;color:#172033;max-width:900px;margin:24px auto;line-height:1.45}"
-        "header{border-bottom:3px solid #3157d5;margin-bottom:24px}.meta{color:#64748b}.employee{margin:16px 0}"
-        "section{page-break-inside:avoid;margin:28px 0}h2{background:#eef2ff;padding:10px;border-left:4px solid #3157d5}"
-        ".task{border-left:2px solid #cbd5e1;padding-left:14px;margin:12px 0}.description{white-space:normal;margin-top:6px}"
-        "</style></head><body>"
-        f"<header><h1>{html.escape(document.subject)}</h1><p class='meta'>Generated {document.generated_at.isoformat()} · "
-        f"{document.task_count} tasks</p></header>{''.join(sections)}</body></html>"
+        "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
+        "<style>body{margin:0;background:#f8fafc;font-family:Arial,'Segoe UI Emoji',sans-serif;color:#0f172a;line-height:1.4}"
+        ".shell{max-width:980px;margin:0 auto;padding:20px}.header{background:#8799b2;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0}"
+        ".header h1{font-size:24px;margin:0 0 5px}.meta{font-size:13px;opacity:.95}.content{background:#fff;padding:20px}"
+        "section{margin:0 0 24px}.section-title{background:#eef2ff;border-left:5px solid #2563eb;padding:11px 14px;font-size:18px;font-weight:800}"
+        ".employee{margin:14px 0}.employee-name{font-size:16px;font-weight:800;margin:0 0 8px}"
+        ".task{border:1px solid;border-left-width:5px;border-radius:7px;padding:12px 14px;margin:8px 0;box-sizing:border-box}"
+        ".task-title{font-weight:800;font-size:14px;word-break:break-word}.description{font-size:13px;margin-top:8px;word-break:break-word}"
+        ".description strong{display:block;margin-bottom:3px}.empty{color:#64748b;padding:12px}"
+        "@media(max-width:600px){.shell{padding:0}.header{border-radius:0;padding:16px}.header h1{font-size:20px}"
+        ".content{padding:12px}.section-title{font-size:16px}.task{padding:10px}.task-title{font-size:13px}}</style>"
+        "</head><body><div class='shell'>"
+        f"<div class='header'><h1>{html.escape(document.subject)}</h1><div class='meta'>Generated {document.generated_at.isoformat()} · "
+        f"{document.task_count} tasks</div></div><div class='content'>{''.join(sections)}</div></div></body></html>"
     )
 
 
 def render_docx(document: ReportDocument) -> bytes:
     from docx import Document
-    from docx.shared import Pt
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Inches, Pt, RGBColor
+
+    def shade(cell: Any, color: str) -> None:
+        fill = OxmlElement("w:shd")
+        fill.set(qn("w:fill"), color.lstrip("#"))
+        cell._tc.get_or_add_tcPr().append(fill)
+
     output = io.BytesIO()
     doc = Document()
-    doc.add_heading(document.subject, 0)
-    doc.add_paragraph(f"Report date: {document.report_date.isoformat()}")
-    doc.add_paragraph(f"Report slot: {document.report_slot}")
-    doc.add_paragraph(f"Generated: {document.generated_at.isoformat()}")
-    doc.add_paragraph("Recipients: " + ", ".join(sum(document.recipients.values(), [])))
+    doc.sections[0].top_margin = doc.sections[0].bottom_margin = Inches(0.65)
+    doc.sections[0].left_margin = doc.sections[0].right_margin = Inches(0.7)
+    title_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+    shade(title_cell, "#8799b2")
+    title_run = title_cell.paragraphs[0].add_run(document.subject)
+    title_run.bold = True
+    title_run.font.size = Pt(20)
+    title_run.font.color.rgb = RGBColor(255, 255, 255)
+    meta = title_cell.add_paragraph(f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks")
+    meta.runs[0].font.size = Pt(9)
+    meta.runs[0].font.color.rgb = RGBColor(255, 255, 255)
     for section in document.sections:
-        doc.add_heading(section.title, level=1)
+        doc.add_paragraph()
+        section_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(section_cell, "#eef2ff")
+        section_run = section_cell.paragraphs[0].add_run(section.title)
+        section_run.bold = True
+        section_run.font.size = Pt(13)
         if not section.employees:
             doc.add_paragraph("(Asnjë detyrë)")
         for employee_index, employee in enumerate(section.employees, 1):
-            doc.add_heading(f"{employee_index}. {employee.name}", level=2)
+            employee_paragraph = doc.add_paragraph()
+            employee_paragraph.paragraph_format.space_before = Pt(8)
+            employee_paragraph.paragraph_format.space_after = Pt(3)
+            employee_run = employee_paragraph.add_run(f"{employee_index}. {employee.name}")
+            employee_run.bold = True
+            employee_run.font.size = Pt(11)
             for task_index, task in enumerate(employee.tasks, 1):
-                paragraph = doc.add_paragraph()
-                run = paragraph.add_run(f"{employee_index}.{task_index} {task.marker} {task.title}")
-                run.bold, run.font.size = True, Pt(10)
-                doc.add_paragraph("Përshkrimi:")
-                doc.add_paragraph(task.description)
+                background, foreground, _ = STATUS_COLORS[task.status]
+                card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+                shade(card_cell, background)
+                task_run = card_cell.paragraphs[0].add_run(f"{employee_index}.{task_index} {task.marker} {task.title}")
+                task_run.bold = True
+                task_run.font.size = Pt(9.5)
+                task_run.font.color.rgb = RGBColor.from_string(foreground.lstrip("#"))
+                description = card_cell.add_paragraph()
+                label = description.add_run("Përshkrimi:\n")
+                label.bold = True
+                description.add_run(task.description or "Pa përshkrim")
+                for run in description.runs:
+                    run.font.size = Pt(9)
+                    run.font.color.rgb = RGBColor.from_string(foreground.lstrip("#"))
+                doc.add_paragraph().paragraph_format.space_after = Pt(0)
     doc.save(output)
     return output.getvalue()
 
 
 def render_png(document: ReportDocument) -> bytes:
     from PIL import Image, ImageDraw, ImageFont
-    width, margin, line_height = 1400, 70, 30
+    width, margin = 1400, 55
     font_path = os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\seguiemj.ttf")
     fallback = r"C:\Windows\Fonts\arial.ttf"
     try:
-        font = ImageFont.truetype(font_path if os.path.exists(font_path) else fallback, 22)
-        heading = ImageFont.truetype(fallback, 30)
+        font = ImageFont.truetype(font_path if os.path.exists(font_path) else fallback, 20)
+        bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 21)
+        heading = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 30)
     except OSError:
-        font = heading = ImageFont.load_default()
-    lines: list[tuple[str, Any]] = [(document.subject, heading), ("", font)]
-    max_chars = 95
+        font = bold = heading = ImageFont.load_default()
     import textwrap
-    for raw in render_plain_text(document).splitlines()[3:]:
-        wrapped = textwrap.wrap(raw, width=max_chars, replace_whitespace=False, drop_whitespace=False) or [""]
-        lines.extend((line, font) for line in wrapped)
-    height = max(500, margin * 2 + line_height * len(lines))
+    estimated_lines = 8 + len(document.sections) * 3 + sum(
+        3 + sum(4 + len(textwrap.wrap(task.title, 85)) + len(textwrap.wrap(task.description, 90))
+                for task in employee.tasks)
+        for section in document.sections for employee in section.employees
+    )
+    height = max(650, 140 + estimated_lines * 30)
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
-    y = margin
-    for line, line_font in lines:
-        draw.text((margin, y), line, fill="#172033", font=line_font)
-        y += line_height + (8 if line_font == heading else 0)
+    draw.rounded_rectangle((margin, 35, width - margin, 135), radius=12, fill="#8799b2")
+    draw.text((margin + 24, 55), document.subject, fill="white", font=heading)
+    draw.text((margin + 24, 99), f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks", fill="white", font=font)
+    y = 160
+    for section in document.sections:
+        draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
+        draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
+        draw.text((margin + 18, y + 11), section.title, fill="#0f172a", font=bold)
+        y += 62
+        if not section.employees:
+            draw.text((margin + 18, y), "(Asnjë detyrë)", fill="#64748b", font=font)
+            y += 40
+        for employee_index, employee in enumerate(section.employees, 1):
+            draw.text((margin + 5, y), f"{employee_index}. {employee.name}", fill="#0f172a", font=bold)
+            y += 38
+            for task_index, task in enumerate(employee.tasks, 1):
+                background, foreground, accent = STATUS_COLORS[task.status]
+                title_lines = textwrap.wrap(f"{employee_index}.{task_index} {task.marker} {task.title}", 95) or [""]
+                description_lines = textwrap.wrap(task.description or "Pa përshkrim", 105) or [""]
+                card_height = 35 + 28 * (len(title_lines) + len(description_lines))
+                draw.rounded_rectangle((margin + 5, y, width - margin, y + card_height), radius=8, fill=background, outline=accent, width=2)
+                draw.rectangle((margin + 5, y + 4, margin + 11, y + card_height - 4), fill=accent)
+                line_y = y + 12
+                for line in title_lines:
+                    draw.text((margin + 25, line_y), line, fill=foreground, font=bold)
+                    line_y += 28
+                draw.text((margin + 25, line_y + 2), "Përshkrimi:", fill=foreground, font=bold)
+                line_y += 30
+                for line in description_lines:
+                    draw.text((margin + 25, line_y), line, fill=foreground, font=font)
+                    line_y += 28
+                y += card_height + 12
+        y += 14
+    image = image.crop((0, 0, width, y + margin))
     output = io.BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()

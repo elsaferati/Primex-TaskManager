@@ -6,7 +6,7 @@ import zipfile
 from datetime import date
 
 from app.services.primeflow_report import (
-    STATUS_MARKERS, build_report, clean_description, exact_subject, filter_tasks,
+    STATUS_MARKERS, build_report, clean_description, clean_title, exact_subject, filter_tasks,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
     render_plain_text, render_png, report_subject,
 )
@@ -26,6 +26,7 @@ class PrimeFlowReportTests(unittest.TestCase):
     def test_description_removes_only_technical_tags(self) -> None:
         original = "[[added]]1. Çdo Überprüfung\n\nMiSSpelled TEXT[[/added]]\n[[done]]2. Përfundo[[/done]]"
         self.assertEqual(clean_description(original), "1. Çdo Überprüfung\n\nMiSSpelled TEXT\n2. Përfundo")
+        self.assertEqual(clean_title("[[added]] [[ADDED]]Exact[[/added]] [[ / added ]]"), "Exact")
 
     def test_filtering_deduplicates_and_requires_exact_date_slot_and_user(self) -> None:
         base = {"id": "1", "date": "2026-07-28", "slot": "10:00", "employee": "Elsa", "title": "Exact", "status": "TODO"}
@@ -78,10 +79,13 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn(exact_title, plain)
         self.assertIn("1. Zeile\n\n2. Përshkrim EXACT", plain)
         self.assertIn(exact_title, html)
+        self.assertIn("@media(max-width:600px)", html)
+        self.assertIn("#fef3c7", html)
         with zipfile.ZipFile(io.BytesIO(docx)) as archive:
             xml = archive.read("word/document.xml").decode("utf-8")
         self.assertIn(exact_title, xml)
         self.assertIn("Përshkrim EXACT", xml)
+        self.assertIn('w:fill="fef3c7"', xml)
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(document.task_count, 0)
 
