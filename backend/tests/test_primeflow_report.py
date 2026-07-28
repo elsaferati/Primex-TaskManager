@@ -6,8 +6,10 @@ import os
 import zipfile
 import asyncio
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import (
     GmailService, STATUS_MARKERS, build_report, clean_description, clean_title, employee_initials,
     exact_subject, filter_tasks,
@@ -17,6 +19,14 @@ from app.services.primeflow_report import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_report_management_access_includes_laurent_hoxha(self) -> None:
+        laurent = SimpleNamespace(role=SimpleNamespace(value="STAFF"), full_name="Laurent Hoxha")
+        other_staff = SimpleNamespace(role=SimpleNamespace(value="STAFF"), full_name="Other Staff")
+        admin = SimpleNamespace(role=SimpleNamespace(value="ADMIN"), full_name="Admin User")
+        self.assertTrue(can_manage_reports(laurent))
+        self.assertTrue(can_manage_reports(admin))
+        self.assertFalse(can_manage_reports(other_staff))
+
     def test_smtp_message_contains_word_and_png_attachments(self) -> None:
         sent_messages = []
 

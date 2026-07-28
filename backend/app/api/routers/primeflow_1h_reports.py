@@ -13,7 +13,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from apscheduler.triggers.cron import CronTrigger
 
-from app.api.deps import require_admin
+from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.audit_log import AuditLog
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
@@ -22,10 +22,17 @@ from app.models.primeflow_report_schedule import PrimeFlowReportSchedule
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
 from app.models.user import User
 from app.services.audit import add_audit_log
+from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, render_html, render_plain_text, render_png
 from app.services.primeflow_report_delivery import configured_recipients, deliver_report, generate_fresh
 
 router = APIRouter()
+
+
+async def require_report_manager(user: User = Depends(get_current_user)) -> User:
+    if not can_manage_reports(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return user
 
 
 def _recipient(row: PrimeFlowReportRecipient) -> dict:
@@ -166,7 +173,7 @@ def _file_response(content: bytes, media_type: str, filename: str) -> Response:
 
 
 @router.get("/overview")
-async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> dict:
+async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)) -> dict:
     recipients = (await db.execute(select(PrimeFlowReportRecipient).order_by(PrimeFlowReportRecipient.sort_order))).scalars().all()
     schedules = (await db.execute(select(PrimeFlowReportSchedule).order_by(PrimeFlowReportSchedule.sort_order))).scalars().all()
     recent = (await db.execute(select(PrimeFlowReportDeliveryRun).order_by(PrimeFlowReportDeliveryRun.created_at.desc()).limit(10))).scalars().all()
@@ -174,7 +181,7 @@ async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(require
 
 
 @router.post("/preview")
-async def preview(payload: PreviewRequest, _: User = Depends(require_admin)):
+async def preview(payload: PreviewRequest, _: User = Depends(require_report_manager)):
     recipients = await _recipient_map(payload)
     document = await generate_fresh(payload.report_date, payload.report_slot, recipients)
     filename = f"PrimeFlow_1H_{payload.report_date:%d.%m.%Y}_{payload.report_slot.replace(':', '-')}"
@@ -194,7 +201,7 @@ async def preview(payload: PreviewRequest, _: User = Depends(require_admin)):
 
 
 @router.post("/send")
-async def manual_send(payload: SendRequest, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def manual_send(payload: SendRequest, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     recipients = await _recipient_map(payload)
     run = await deliver_report(
         payload.report_date, payload.report_slot, recipient_map=recipients, trigger_type="MANUAL",
@@ -226,13 +233,13 @@ def _run(row: PrimeFlowReportDeliveryRun) -> dict:
 
 
 @router.get("/runs")
-async def runs(limit: int = Query(100, ge=1, le=500), db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+async def runs(limit: int = Query(100, ge=1, le=500), db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
     rows = (await db.execute(select(PrimeFlowReportDeliveryRun).order_by(PrimeFlowReportDeliveryRun.created_at.desc()).limit(limit))).scalars().all()
     return [_run(row) for row in rows]
 
 
 @router.get("/runs/{run_id}")
-async def run_detail(run_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+async def run_detail(run_id: uuid.UUID, db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
     row = await db.get(PrimeFlowReportDeliveryRun, run_id)
     if not row:
         raise HTTPException(404, "Report run not found")
@@ -249,7 +256,7 @@ async def _snapshot(db: AsyncSession, run_id: uuid.UUID) -> tuple[PrimeFlowRepor
 
 
 @router.get("/runs/{run_id}/download.{format}")
-async def download(run_id: uuid.UUID, format: str, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+async def download(run_id: uuid.UUID, format: str, db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
     run, snapshot = await _snapshot(db, run_id)
     document = ReportDocument.model_validate(snapshot.normalized_report_json)
     base = f"PrimeFlow_1H_{run.report_date:%d.%m.%Y}_{run.report_slot.replace(':', '-')}"
@@ -263,13 +270,13 @@ async def download(run_id: uuid.UUID, format: str, db: AsyncSession = Depends(ge
 
 
 @router.get("/recipients")
-async def recipients(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+async def recipients(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
     rows = (await db.execute(select(PrimeFlowReportRecipient).order_by(PrimeFlowReportRecipient.sort_order, PrimeFlowReportRecipient.email))).scalars().all()
     return [_recipient(row) for row in rows]
 
 
 @router.post("/recipients", status_code=201)
-async def create_recipient(payload: RecipientCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def create_recipient(payload: RecipientCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     row = PrimeFlowReportRecipient(**payload.model_dump(mode="json"), created_by=user.id, updated_by=user.id)
     db.add(row)
     await db.flush()
@@ -280,7 +287,7 @@ async def create_recipient(payload: RecipientCreate, db: AsyncSession = Depends(
 
 
 @router.post("/recipients/restore-defaults")
-async def restore_default_recipients(db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def restore_default_recipients(db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     restored = []
     for order, email in enumerate(("130primex.eu@gmail.com", "ga@primexeu.com"), 1):
         row = (await db.execute(select(PrimeFlowReportRecipient).where(
@@ -305,7 +312,7 @@ async def _ensure_active_recipient(db: AsyncSession, excluding: uuid.UUID) -> No
 
 
 @router.patch("/recipients/{recipient_id}")
-async def update_recipient(recipient_id: uuid.UUID, payload: RecipientUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def update_recipient(recipient_id: uuid.UUID, payload: RecipientUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     row = await db.get(PrimeFlowReportRecipient, recipient_id)
     if not row:
         raise HTTPException(404, "Recipient not found")
@@ -327,7 +334,7 @@ async def update_recipient(recipient_id: uuid.UUID, payload: RecipientUpdate, db
 
 
 @router.delete("/recipients/{recipient_id}", status_code=204)
-async def delete_recipient(recipient_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def delete_recipient(recipient_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     row = await db.get(PrimeFlowReportRecipient, recipient_id)
     if not row:
         raise HTTPException(404, "Recipient not found")
@@ -341,7 +348,7 @@ async def delete_recipient(recipient_id: uuid.UUID, db: AsyncSession = Depends(g
 
 
 @router.get("/schedules")
-async def schedules(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+async def schedules(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
     rows = (await db.execute(select(PrimeFlowReportSchedule).order_by(PrimeFlowReportSchedule.sort_order))).scalars().all()
     return [_schedule(row) for row in rows]
 
@@ -369,7 +376,7 @@ async def _validate_schedule(db: AsyncSession, payload: SchedulePayload, row_id:
 
 
 @router.post("/schedules", status_code=201)
-async def create_schedule(payload: SchedulePayload, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def create_schedule(payload: SchedulePayload, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     await _validate_schedule(db, payload)
     values = payload.model_dump(exclude={"execution_time"})
     row = PrimeFlowReportSchedule(**values, execution_time=time.fromisoformat(payload.execution_time), created_by=user.id, updated_by=user.id)
@@ -382,7 +389,7 @@ async def create_schedule(payload: SchedulePayload, db: AsyncSession = Depends(g
 
 
 @router.patch("/schedules/{schedule_id}")
-async def update_schedule(schedule_id: uuid.UUID, payload: SchedulePayload, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def update_schedule(schedule_id: uuid.UUID, payload: SchedulePayload, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     row = await db.get(PrimeFlowReportSchedule, schedule_id)
     if not row:
         raise HTTPException(404, "Schedule not found")
@@ -398,7 +405,7 @@ async def update_schedule(schedule_id: uuid.UUID, payload: SchedulePayload, db: 
 
 
 @router.post("/schedules/restore-defaults")
-async def restore_default_schedules(db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def restore_default_schedules(db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     defaults = [
         ("1H 10:00", "10:00", "09:00"),
         ("1H 11:00", "11:00", "10:50"),
@@ -427,7 +434,7 @@ async def restore_default_schedules(db: AsyncSession = Depends(get_db), user: Us
 
 
 @router.post("/schedules/{schedule_id}/{action}")
-async def schedule_action(schedule_id: uuid.UUID, action: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
+async def schedule_action(schedule_id: uuid.UUID, action: str, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
     if action not in {"enable", "disable", "duplicate"}:
         raise HTTPException(404, "Unknown schedule action")
     row = await db.get(PrimeFlowReportSchedule, schedule_id)
@@ -464,7 +471,7 @@ async def schedule_action(schedule_id: uuid.UUID, action: str, db: AsyncSession 
 
 
 @router.get("/audit")
-async def audit(limit: int = Query(200, ge=1, le=500), db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)):
+async def audit(limit: int = Query(200, ge=1, le=500), db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
     rows = (await db.execute(select(AuditLog).where(AuditLog.entity_type.in_([
         "primeflow_report_recipient", "primeflow_report_schedule", "primeflow_report_run",
     ])).order_by(AuditLog.created_at.desc()).limit(limit))).scalars().all()
