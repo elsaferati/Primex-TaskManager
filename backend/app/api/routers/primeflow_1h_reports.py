@@ -196,17 +196,6 @@ async def preview(payload: PreviewRequest, _: User = Depends(require_admin)):
 @router.post("/send")
 async def manual_send(payload: SendRequest, db: AsyncSession = Depends(get_db), user: User = Depends(require_admin)):
     recipients = await _recipient_map(payload)
-    existing = (await db.execute(select(PrimeFlowReportDeliveryRun).where(
-        PrimeFlowReportDeliveryRun.report_date == payload.report_date,
-        PrimeFlowReportDeliveryRun.report_slot == payload.report_slot,
-        PrimeFlowReportDeliveryRun.status.in_(["SENT", "ALREADY_SENT"]),
-    ).order_by(PrimeFlowReportDeliveryRun.created_at.desc()))).scalars().first()
-    if existing and not payload.force:
-        raise HTTPException(status_code=409, detail={"message": "Exact report already sent", "run_id": str(existing.id), "gmail_message_id": existing.gmail_message_id})
-    if payload.force:
-        if payload.confirmation_phrase != "FORCE RESEND" or not payload.reason or not payload.source_run_id:
-            raise HTTPException(status_code=403, detail="Force resend requires FORCE RESEND, reason, and source_run_id")
-        raise HTTPException(status_code=501, detail="Force resend is reserved for Phase 3 and is not enabled")
     run = await deliver_report(
         payload.report_date, payload.report_slot, recipient_map=recipients, trigger_type="MANUAL",
         triggered_by_user_id=user.id, manual_reason=payload.reason,
