@@ -163,7 +163,9 @@ def employee_initials(name: str) -> str:
     return "".join(part[0] for part in parts).upper()
 
 
-def filter_tasks(items: list[dict[str, Any]], day: date, slot: str | None = None) -> list[dict[str, Any]]:
+def filter_tasks(
+    items: list[dict[str, Any]], day: date, slot: str | None = None,
+) -> list[dict[str, Any]]:
     seen: set[str] = set()
     result = []
     for item in items:
@@ -173,7 +175,7 @@ def filter_tasks(items: list[dict[str, Any]], day: date, slot: str | None = None
             continue
         if slot is not None and _slot(item) != slot:
             continue
-        key = str(item.get("id") or item.get("task_id") or json.dumps(item, sort_keys=True, default=str))
+        key = str(item.get("id") or json.dumps(item, sort_keys=True, default=str))
         if key in seen:
             continue
         seen.add(key)
@@ -245,7 +247,10 @@ def build_report_document(
     if slot == "10:00":
         for candidate in SLOTS:
             definitions.append(
-                (f"SLOTI {report_day:%d.%m.%Y} {candidate}", filter_tasks(one_h, report_day, candidate))
+                (
+                    f"SLOTI {report_day:%d.%m.%Y} {candidate}",
+                    filter_tasks(one_h, report_day, candidate),
+                )
             )
         definitions.extend([
             ("DETYRA PA SLOT – E GJITHË DITA", [
@@ -258,7 +263,10 @@ def build_report_document(
     else:
         previous_slot = SLOTS[SLOTS.index(slot) - 1]
         definitions.extend([
-            (f"SLOTI {report_day:%d.%m.%Y} {slot}", filter_tasks(one_h, report_day, slot)),
+            (
+                f"SLOTI {report_day:%d.%m.%Y} {slot}",
+                filter_tasks(one_h, report_day, slot),
+            ),
             (
                 f"SLOTI PARAPRAK {report_day:%d.%m.%Y} {previous_slot}",
                 filter_tasks(one_h, report_day, previous_slot),
@@ -542,16 +550,26 @@ class PrimeFlowClient:
     async def common_view(self, day: date) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=30) as client:
             async def retrieve(week_day: date) -> dict[str, Any]:
+                params = {
+                    "week_start": week_day.isoformat(),
+                    "include_all_departments": "true",
+                    "freeze_one_h_slots": "false",
+                    "max_items_per_bucket": 5000,
+                }
                 token = await self._token(client)
                 response = await client.get(
                     "/api/common-view",
-                    params={"week_start": week_day.isoformat(), "freeze_one_h_slots": "true", "max_items_per_bucket": 5000},
+                    params=params,
                     headers={"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"},
                 )
                 if response.status_code == 401:
                     self.access_token = None
                     token = await self._token(client)
-                    response = await client.get("/api/common-view", params={"week_start": week_day.isoformat(), "freeze_one_h_slots": "true", "max_items_per_bucket": 5000}, headers={"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"})
+                    response = await client.get(
+                        "/api/common-view",
+                        params=params,
+                        headers={"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"},
+                    )
                 response.raise_for_status()
                 payload = response.json()
                 if any((payload.get("guardrails", {}).get("truncated") or {}).values()):

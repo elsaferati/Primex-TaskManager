@@ -33,6 +33,16 @@ class QuestionStatusUpdate(BaseModel):
     status: QuestionStatusValue | None
 
 
+class QuestionDailySignoffUpdate(BaseModel):
+    signed: bool
+
+
+class QuestionDailySignoffSummary(BaseModel):
+    user_id: uuid.UUID
+    full_name: str
+    signed_at: datetime
+
+
 class QuestionStatusSummary(BaseModel):
     user_id: uuid.UUID
     full_name: str
@@ -64,6 +74,9 @@ class QuestionDefinitionOut(BaseModel):
     edit_count: int
     current_user_status: QuestionStatusValue | None
     statuses: list[QuestionStatusSummary]
+    is_done: bool
+    current_user_daily_signed: bool
+    daily_signoffs: list[QuestionDailySignoffSummary]
     created_at: datetime
     updated_at: datetime
 

@@ -66,6 +66,24 @@ class QuestionUserStatus(Base):
     )
 
 
+class QuestionDailySignoff(Base):
+    __tablename__ = "question_daily_signoffs"
+    __table_args__ = (
+        UniqueConstraint("question_id", "user_id", name="uq_question_daily_signoff"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    question_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("question_definitions.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    signed_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), index=True
+    )
+
+
 class QuestionEditEvent(Base):
     __tablename__ = "question_edit_events"
 

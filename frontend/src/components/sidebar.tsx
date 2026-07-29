@@ -28,6 +28,7 @@ import {
   Shield,
   PanelLeftClose,
   Gem,
+  Activity,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -146,6 +147,11 @@ const items: NavItem[] = [
     href: "/reviews",
     label: "Reviews",
     icon: Gem,
+  },
+  {
+    href: "/realization",
+    label: "Realizimi",
+    icon: Activity,
   },
   { 
     href: "/monthly-planner", 
