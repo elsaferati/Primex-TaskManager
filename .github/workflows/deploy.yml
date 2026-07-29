@@ -387,3 +387,4 @@ jobs:
         run: |
           call pm2 status
           call pm2 logs primex-backend --lines 50 --nostream || ver > NUL
+          call pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL
