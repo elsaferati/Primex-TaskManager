@@ -42,6 +42,11 @@ from app.models.department import Department
 from app.services.task_classification import is_fast_task as is_fast_task_model
 from app.services.system_task_schedule import matches_template_date
 from app.services.project_display_title import build_project_display_title_map
+from app.services.project_classification import (
+    is_mst_or_tt_project as _is_mst_or_tt_project,
+    is_mst_project as _is_mst_project,
+    is_tt_project as _is_tt_project,
+)
 from app.schemas.planner import (
     MonthlyPlannerResponse,
     MonthlyPlannerSummary,
@@ -87,21 +92,6 @@ from app.schemas.weekly_planner_snapshot import (
 
 
 router = APIRouter()
-
-
-def _is_tt_project(project: Project) -> bool:
-    title = (project.title or "").upper().strip()
-    return title == "TT" or title.startswith(("TT ", "TT-", "TT:"))
-
-
-def _is_mst_project(project: Project) -> bool:
-    title = (project.title or "").upper().strip()
-    is_mst = project.project_type == ProjectType.MST.value or ("MST" in title)
-    return is_mst and not _is_tt_project(project)
-
-
-def _is_mst_or_tt_project(project: Project) -> bool:
-    return _is_mst_project(project) or _is_tt_project(project)
 
 
 def _parse_ko_user_id(internal_notes: str | None) -> uuid.UUID | None:

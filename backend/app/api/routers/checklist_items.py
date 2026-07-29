@@ -19,6 +19,7 @@ from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project import Project
+from app.services.project_classification import has_mst_identity
 from app.models.project_member import ProjectMember
 from app.models.task import Task
 from app.models.user import User
@@ -804,11 +805,7 @@ async def _is_gd_mst_planning(db: AsyncSession, project: Project) -> bool:
     if dept is None or dept.code != "GD":
         return False
 
-    is_mst = project.project_type == "MST"
-    if not is_mst:
-        title = (project.title or "").upper()
-        is_mst = "MST" in title
-    if not is_mst:
+    if not has_mst_identity(project):
         return False
 
     phase = (project.current_phase or "").upper()

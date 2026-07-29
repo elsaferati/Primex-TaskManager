@@ -24,6 +24,7 @@ const slots = ["10:00","11:00","11:50","14:20","16:00"]
 
 export default function ReportManagementPage() {
   const { apiFetch, user } = useAuth()
+  const canAccess = user?.role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const [recipients,setRecipients] = React.useState<Recipient[]>([])
   const [schedules,setSchedules] = React.useState<Schedule[]>([])
   const [runs,setRuns] = React.useState<Run[]>([])
@@ -51,7 +52,7 @@ export default function ReportManagementPage() {
     } catch { toast.error("Unable to load 1H report management data") } finally { setLoading(false) }
   },[apiFetch])
   React.useEffect(()=>{void load()},[load])
-  React.useEffect(()=>{if(user && user.role!=="ADMIN") toast.error("Admin access required")},[user])
+  React.useEffect(()=>{if(user && !canAccess) toast.error("Report management access required")},[user,canAccess])
 
   const previewReport = async(format="json")=>{
     setPreviewing(true)
@@ -100,7 +101,7 @@ export default function ReportManagementPage() {
     if(!res.ok){toast.error("Download unavailable",{description:await res.text()});return}
     const blob=await res.blob(),url=URL.createObjectURL(blob),a=document.createElement("a");a.href=url;a.download=`PrimeFlow_1H_${run.report_date}_${run.report_slot.replace(":","-")}.${format}`;a.click();URL.revokeObjectURL(url)
   }
-  if(user?.role!=="ADMIN") return <div className="rounded-lg border p-8">Admin access required.</div>
+  if(!canAccess) return <div className="rounded-lg border p-8">Report management access required.</div>
 
   const active=recipients.filter(r=>r.is_active)
   return <div className="mx-auto max-w-[1500px] space-y-5">

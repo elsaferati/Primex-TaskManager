@@ -6,16 +6,27 @@ import os
 import zipfile
 import asyncio
 from datetime import date
+from types import SimpleNamespace
 from unittest.mock import patch
 
+from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import (
-    GmailService, STATUS_MARKERS, build_report, clean_description, clean_title, exact_subject, filter_tasks,
+    GmailService, STATUS_MARKERS, build_report, clean_description, clean_title, employee_initials,
+    exact_subject, filter_tasks,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
     render_plain_text, render_png, report_subject,
 )
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_report_management_access_includes_laurent_hoxha(self) -> None:
+        laurent = SimpleNamespace(role=SimpleNamespace(value="STAFF"), full_name="Laurent Hoxha")
+        other_staff = SimpleNamespace(role=SimpleNamespace(value="STAFF"), full_name="Other Staff")
+        admin = SimpleNamespace(role=SimpleNamespace(value="ADMIN"), full_name="Admin User")
+        self.assertTrue(can_manage_reports(laurent))
+        self.assertTrue(can_manage_reports(admin))
+        self.assertFalse(can_manage_reports(other_staff))
+
     def test_smtp_message_contains_word_and_png_attachments(self) -> None:
         sent_messages = []
 
@@ -120,11 +131,38 @@ class PrimeFlowReportTests(unittest.TestCase):
 
     def test_section_order_and_backfill_chain(self) -> None:
         body = build_report({"guardrails": {"truncated": {}}, "items": {}}, date(2026, 7, 28), "10:00")
-        headings = ["SLOTI 27.07.2026 16:00", "SLOTI 28.07.2026 10:00", "SLOTI 28.07.2026 11:00", "DETYRA PA SLOT", "DETYRAT E BLLOKUT", "P: PERSONALE", "R1 = 1H"]
+        headings = ["SLOTI 28.07.2026 10:00", "SLOTI 28.07.2026 11:00", "SLOTI 28.07.2026 16:00", "DETYRA PA SLOT", "DETYRAT E BLLOKUT", "P: PERSONALE", "R1 = 1H"]
         positions = [body.index(value) for value in headings]
         self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("SLOTI 27.07.2026", body)
         self.assertEqual(predecessor(date(2026, 7, 28), "10:00"), (date(2026, 7, 27), "16:00"))
         self.assertEqual(predecessor(date(2026, 7, 28), "14:20"), (date(2026, 7, 28), "11:50"))
+
+    def test_after_ten_only_current_slot_is_included(self) -> None:
+        common = {"date": "2026-07-28", "person": "Anisa Tërnava", "status": "TODO"}
+        data = {
+            "generated_at": "2026-07-28T13:59:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {
+                "oneH": [
+                    {**common, "id": "early", "slot": "11:50", "title": "Earlier"},
+                    {**common, "id": "current", "slot": "14:20", "title": "Current"},
+                    {**common, "id": "later", "slot": "16:00", "title": "Later"},
+                ],
+                "blocked": [{**common, "id": "blocked", "title": "Blocked"}],
+                "personal": [{**common, "id": "personal", "title": "Personal"}],
+                "r1": [{**common, "id": "r1", "title": "R1 task"}],
+            },
+        }
+        document = build_report_document(data, date(2026, 7, 28), "14:20")
+        self.assertEqual([section.title for section in document.sections], ["SLOTI 28.07.2026 14:20"])
+        self.assertEqual(document.task_count, 1)
+        self.assertEqual(document.sections[0].employees[0].name, "AT")
+        self.assertEqual(document.sections[0].employees[0].tasks[0].title, "Current")
+
+    def test_employee_names_are_uppercase_initials(self) -> None:
+        self.assertEqual(employee_initials("Anisa Tërnava"), "AT")
+        self.assertEqual(employee_initials("elsa ferati ahmedi"), "EFA")
 
     def test_all_formats_share_one_normalized_document(self) -> None:
         exact_title = "ÄNDERUNG pa përmbledhje"

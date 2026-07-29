@@ -9,23 +9,16 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import ProjectType, ProjectPhaseStatus
+from app.models.enums import ProjectPhaseStatus
 from app.models.project import Project
 from app.models.task import Task
 from app.models.task_daily_progress import TaskDailyProgress
+from app.services.project_classification import is_mst_or_tt_identity
 
 TOTAL_PRODUCTS_RE = re.compile(r"total_products[:=]\s*(\d+)", re.IGNORECASE)
 COMPLETED_PRODUCTS_RE = re.compile(r"completed_products[:=]\s*(\d+)", re.IGNORECASE)
 ORIGIN_TASK_ID_RE = re.compile(r"origin_task_id[:=]\s*([a-f0-9-]+)", re.IGNORECASE)
 TRAILING_TOTAL_RE = re.compile(r"\((\d+)\)\s*$")
-
-
-def _project_type_text(project_type: Any) -> str:
-    if project_type is None:
-        return ""
-    if hasattr(project_type, "value"):
-        return str(project_type.value or "")
-    return str(project_type or "")
 
 
 def _parse_int(pattern: re.Pattern[str], text: str | None) -> int | None:
@@ -54,11 +47,8 @@ def _parse_origin_task_id(text: str | None) -> uuid.UUID | None:
 
 
 def is_tt_or_mst(project_title: str | None, project_type: Any) -> bool:
-    title_upper = (project_title or "").strip().upper()
-    is_tt = title_upper == "TT" or title_upper.startswith(("TT ", "TT-", "TT:"))
-    type_upper = _project_type_text(project_type).strip().upper()
-    is_mst = type_upper == ProjectType.MST.value or "MST" in title_upper
-    return is_tt or is_mst
+    # Compatibility wrapper retained for callers/tests that pass title and type separately.
+    return is_mst_or_tt_identity(project_title, project_type)
 
 
 def normalize_base_title(raw_title: str, total: int | None) -> str:

@@ -29,6 +29,11 @@ import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmat
 import { weeklyPlanStatusBgClass } from "@/lib/weekly-plan-status"
 import { fetchProjectTitlesById } from "@/lib/project-title-lookup"
 import { resolveProjectTitle } from "@/lib/project-display-title"
+import {
+  isMstOrTtProject,
+  isTtProjectTitle,
+  isVsOrVlProjectTitle,
+} from "@/lib/pcm-project-classification"
 import type {
   ChecklistItem,
   DailyReportGaEntry,
@@ -74,23 +79,17 @@ const PHASE_LABELS: Record<string, string> = {
   CLOSED: "Closed",
 }
 
-function isTtProjectTitle(title: string) {
-  const normalized = title.toUpperCase().trim()
-  return normalized === "TT" || normalized.startsWith("TT ") || normalized.startsWith("TT-") || normalized.startsWith("TT:")
-}
-
 // Get project-specific phases based on project type
 function getProjectPhases(project: Project): string[] {
-  const projectType = project.project_type
-  const title = (resolveProjectTitle(project) || "").toUpperCase()
+  const title = resolveProjectTitle(project)
 
   // MST and TT projects (both use MST phases)
-  if (projectType === "MST" || title.includes("MST") || isTtProjectTitle(title)) {
+  if (isMstOrTtProject(project, title)) {
     return ["PLANNING", "PRODUCT", "CONTROL", "FINAL", "CLOSED"]
   }
 
   // VS/VL projects
-  if (title.includes("VS") || title.includes("VL")) {
+  if (isVsOrVlProjectTitle(title)) {
     return ["PLANNING", "AMAZON", "CHECK", "DREAMROBOT", "CLOSED"]
   }
 
@@ -882,13 +881,6 @@ function parseKoUserId(notes?: string | null): string | null {
   if (!notes) return null
   const match = notes.match(/ko_user_id[:=]\s*([a-f0-9-]+)/i)
   return match ? match[1] : null
-}
-
-function isMstOrTtProject(project: Project | null): boolean {
-  if (!project) return false
-  const projectType = project.project_type
-  const title = (resolveProjectTitle(project) || "").toUpperCase().trim()
-  return projectType === "MST" || title.includes("MST") || isTtProjectTitle(title)
 }
 
 function isPcmControlTaskOwnedByUser(task: Task, userId: string, project: Project | null): boolean {

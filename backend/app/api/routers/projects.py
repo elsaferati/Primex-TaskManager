@@ -35,6 +35,10 @@ from app.services.workflow_service import (
     dependency_item_ids_from_info,
 )
 from app.services.project_display_title import build_project_display_title_map
+from app.services.project_classification import (
+    has_mst_identity,
+    is_vs_or_vl_project,
+)
 from datetime import datetime, timedelta
 
 
@@ -121,7 +125,7 @@ async def _copy_tasks_from_template_project(
     project_title_upper = project.title.upper()
     
     # First, try to find an exact match or closest match
-    vs_vl_templates = [tp for tp in template_projects if "VS" in tp.title.upper() or "VL" in tp.title.upper()]
+    vs_vl_templates = [tp for tp in template_projects if is_vs_or_vl_project(tp)]
     
     if not vs_vl_templates:
         return
@@ -222,76 +226,6 @@ async def _copy_tasks_from_template_project(
                 await db.execute(insert(TaskAssignee), assignee_values)
     
     # Second pass: set dependencies using the mapping
-    for template_task in template_tasks:
-        if template_task.dependency_task_id and template_task.dependency_task_id in old_to_new_task_id:
-            new_task_id = old_to_new_task_id[template_task.id]
-            new_dependency_id = old_to_new_task_id[template_task.dependency_task_id]
-            await db.execute(
-                update(Task).where(Task.id == new_task_id).values(dependency_task_id=new_dependency_id)
-            )
-
-
-async def _copy_tasks_from_mst_template_project(
-    db: AsyncSession,
-    project: Project,
-    created_by_id: uuid.UUID,
-    template_project: Project | None = None,
-) -> None:
-    if project.is_template:
-        return
-    selected_template = template_project
-    if selected_template is None:
-        stmt = select(Project).where(Project.is_template == True)
-        if project.department_id is not None:
-            stmt = stmt.where(Project.department_id == project.department_id)
-        template_projects = (await db.execute(stmt.order_by(Project.created_at))).scalars().all()
-        if not template_projects:
-            return
-
-        selected_template = next(
-            (tp for tp in template_projects if tp.project_type == ProjectType.MST.value),
-            None,
-        )
-        if not selected_template:
-            for tp in template_projects:
-                title_upper = (tp.title or "").upper()
-                if "MST" in title_upper:
-                    selected_template = tp
-                    break
-    if not selected_template or selected_template.id == project.id:
-        return
-
-    template_tasks = (await db.execute(
-        select(Task).where(Task.project_id == selected_template.id).order_by(Task.created_at)
-    )).scalars().all()
-    if not template_tasks:
-        return
-
-    old_to_new_task_id: dict[uuid.UUID, uuid.UUID] = {}
-    for template_task in template_tasks:
-        new_task = Task(
-            title=template_task.title,
-            description=template_task.description,
-            internal_notes=template_task.internal_notes,
-            priority=template_task.priority or TaskPriority.NORMAL,
-            status=TaskStatus.TODO,
-            phase=template_task.phase or project.current_phase or ProjectPhaseStatus.PLANNING,
-            project_id=project.id,
-            department_id=project.department_id,
-            created_by=created_by_id,
-            finish_period=template_task.finish_period,
-            progress_percentage=template_task.progress_percentage or 0,
-            is_deadline_important=template_task.is_deadline_important,
-            is_bllok=template_task.is_bllok,
-            is_1h_report=template_task.is_1h_report,
-            is_r1=template_task.is_r1,
-            is_personal=template_task.is_personal,
-            is_active=template_task.is_active,
-        )
-        db.add(new_task)
-        await db.flush()
-        old_to_new_task_id[template_task.id] = new_task.id
-
     for template_task in template_tasks:
         if template_task.dependency_task_id and template_task.dependency_task_id in old_to_new_task_id:
             new_task_id = old_to_new_task_id[template_task.id]
@@ -508,11 +442,10 @@ def get_project_sequence(project: Project, department_name: str | None = None) -
         return DEV_PHASES
 
     # Legacy fallback based on title/department
-    title = project.title.upper()
     department_label = (department_name or "").upper()
-    if "VS" in title or "VL" in title:
+    if is_vs_or_vl_project(project):
         return VS_PHASES
-    if "MST" in title:
+    if has_mst_identity(project):
         return MST_PHASES
     if department_label in {"PROJECT CONTENT MANAGER", "GRAPHIC DESIGN", "PCM", "GD"}:
         return MST_PHASES
@@ -588,10 +521,9 @@ async def create_project(
             project_type_value = ProjectType.MST.value
         elif project_type_value != ProjectType.MST.value:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project requires MST type")
-        template_title = (template_project.title or "").upper()
         if template_project.project_type is not None and template_project.project_type != ProjectType.MST.value:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project must be MST type")
-        if template_project.project_type is None and "MST" not in template_title:
+        if template_project.project_type is None and not has_mst_identity(template_project):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Template project must be MST type")
     if project_type_value == ProjectType.GD_DEVELOPMENT.value and template_project is None:
         gd_template_stmt = select(Project).where(
@@ -628,7 +560,7 @@ async def create_project(
         await initialize_vs_workflow(db, project.id)
     
     # Copy tasks from template project if this is a VS/VL project
-    is_vs_vl_project = "VS" in title_upper or "VL" in title_upper
+    is_vs_vl_project = is_vs_or_vl_project(project)
     if is_vs_vl_project:
         await _copy_tasks_from_template_project(db, project, user.id)
     # Copy tasks from MST template project only if explicitly selected

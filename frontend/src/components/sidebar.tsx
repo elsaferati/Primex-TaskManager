@@ -195,7 +195,9 @@ const PRIORITY_PREFETCH_ROUTES = new Set([
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { apiFetch } = useAuth()
+  const { apiFetch, user } = useAuth()
+  const canAccessOneHReports =
+    role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
   const [resolvedProjectRoute, setResolvedProjectRoute] = React.useState<"dev" | "pcm" | "design" | null>(null)
@@ -303,7 +305,11 @@ export function Sidebar({ role }: { role: UserRole }) {
       {/* Navigation Links */}
       <nav className="w-64 flex-1 overflow-y-auto py-4 px-3 space-y-1">
         {items
-          .filter((i) => (!i.roles ? true : i.roles.includes(role)))
+          .filter((i) =>
+            i.href === "/admin/1h-reports"
+              ? canAccessOneHReports
+              : (!i.roles ? true : i.roles.includes(role))
+          )
           .map((item) => {
             const matchTargets = item.match || [item.href]
             const active =

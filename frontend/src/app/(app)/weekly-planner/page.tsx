@@ -23,6 +23,7 @@ import { formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/li
 import { fetchUsersLookupCached, invalidateUsersLookupCache } from "@/lib/users-cache"
 import { formatDepartmentName } from "@/lib/department-name"
 import { resolveProjectTitle } from "@/lib/project-display-title"
+import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -44,7 +45,7 @@ import {
 } from "@/components/weekly-planner-legend-table"
 import { WeeklyPlannerSnapshotsView } from "@/components/weekly-planner-snapshots-view"
 import { WeeklyPlanPerformanceView, type WeeklyPlanPerformanceResponse } from "@/components/weekly-plan-performance-view"
-import type { ChecklistItem, Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
+import type { Department, GaNote, Project, Task, UserLookup } from "@/lib/types"
 
 type WeeklyTableProjectTaskEntry = {
   task_id: string
@@ -155,13 +156,6 @@ type WeeklyPlannerBlock = {
 type WeeklyPrintUser = {
   user_id: string
   user_name: string
-}
-
-type TaskChecklist = {
-  id: string
-  title?: string | null
-  task_id?: string | null
-  items: ChecklistItem[]
 }
 
 type SelectedWeek = "last" | "this" | "next"
@@ -485,16 +479,8 @@ export default function WeeklyPlannerPage() {
 
   const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
   const [deletingProjectId, setDeletingProjectId] = React.useState<string | null>(null)
-  const [checklistDialogOpen, setChecklistDialogOpen] = React.useState(false)
-  const [checklistTaskId, setChecklistTaskId] = React.useState<string | null>(null)
-  const [checklistTaskTitle, setChecklistTaskTitle] = React.useState<string | null>(null)
-  const [taskChecklists, setTaskChecklists] = React.useState<Record<string, TaskChecklist | null>>({})
-  const [checklistLoading, setChecklistLoading] = React.useState<Record<string, boolean>>({})
-  const [fastTaskDescriptionDialogOpen, setFastTaskDescriptionDialogOpen] = React.useState(false)
-  const [fastTaskDescriptionTaskId, setFastTaskDescriptionTaskId] = React.useState<string | null>(null)
-  const [fastTaskDescriptionTitle, setFastTaskDescriptionTitle] = React.useState<string | null>(null)
-  const [fastTaskDescription, setFastTaskDescription] = React.useState<string | null>(null)
-  const [fastTaskDescriptionLoading, setFastTaskDescriptionLoading] = React.useState<boolean>(false)
+  const [taskTitleDialogOpen, setTaskTitleDialogOpen] = React.useState(false)
+  const [taskTitleDialogContent, setTaskTitleDialogContent] = React.useState<string | null>(null)
 
   const buildCurrentWeekParams = React.useCallback((deptId?: string) => {
     const qs = new URLSearchParams()
@@ -687,79 +673,11 @@ export default function WeeklyPlannerPage() {
     setOrderDirtyByDept((prev) => ({ ...prev, [deptId]: true }))
   }, [])
 
-  const loadTaskChecklist = React.useCallback(async (taskId: string) => {
-    if (!taskId || taskChecklists[taskId] !== undefined) return
-    setChecklistLoading((prev) => ({ ...prev, [taskId]: true }))
-    try {
-      const res = await apiFetch(`/checklists?task_id=${taskId}&include_items=true`)
-      if (!res.ok) {
-        let detail = "Failed to load checklist"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(typeof detail === "string" ? detail : "Failed to load checklist")
-        setTaskChecklists((prev) => ({ ...prev, [taskId]: null }))
-        return
-      }
-      const data = (await res.json()) as TaskChecklist[]
-      const checklist = data.length ? data[0] : null
-      setTaskChecklists((prev) => ({ ...prev, [taskId]: checklist }))
-    } catch (error) {
-      console.error("Failed to load task checklist", error)
-      toast.error("Failed to load checklist")
-      setTaskChecklists((prev) => ({ ...prev, [taskId]: null }))
-    } finally {
-      setChecklistLoading((prev) => ({ ...prev, [taskId]: false }))
-    }
-  }, [apiFetch, taskChecklists])
-
-  const openChecklistForTask = React.useCallback((taskId: string, taskTitle?: string | null) => {
-    if (!taskId) return
-    setChecklistTaskId(taskId)
-    setChecklistTaskTitle(taskTitle || null)
-    setChecklistDialogOpen(true)
-    void loadTaskChecklist(taskId)
-  }, [loadTaskChecklist])
-
-  const loadFastTaskDescription = React.useCallback(async (taskId: string) => {
-    if (!taskId) return
-    setFastTaskDescriptionLoading(true)
-    try {
-      const res = await apiFetch(`/tasks/${taskId}`)
-      if (!res.ok) {
-        let detail = "Failed to load task description"
-        try {
-          const data = (await res.json()) as { detail?: string }
-          if (data?.detail) detail = data.detail
-        } catch {
-          // ignore
-        }
-        toast.error(typeof detail === "string" ? detail : "Failed to load task description")
-        setFastTaskDescription(null)
-        return
-      }
-      const task = (await res.json()) as Task
-      setFastTaskDescription(task.description || null)
-    } catch (error) {
-      console.error("Failed to load fast task description", error)
-      toast.error("Failed to load task description")
-      setFastTaskDescription(null)
-    } finally {
-      setFastTaskDescriptionLoading(false)
-    }
-  }, [apiFetch])
-
-  const openFastTaskDescription = React.useCallback((taskId: string, taskTitle?: string | null) => {
-    if (!taskId) return
-    setFastTaskDescriptionTaskId(taskId)
-    setFastTaskDescriptionTitle(taskTitle || null)
-    setFastTaskDescriptionDialogOpen(true)
-    setFastTaskDescription(null)
-    void loadFastTaskDescription(taskId)
-  }, [loadFastTaskDescription])
+  const openTaskTitle = React.useCallback((taskTitle?: string | null) => {
+    if (!taskTitle?.trim()) return
+    setTaskTitleDialogContent(taskTitle)
+    setTaskTitleDialogOpen(true)
+  }, [])
 
   React.useEffect(() => {
     const boot = async () => {
@@ -1029,18 +947,6 @@ export default function WeeklyPlannerPage() {
   const availableDepartments = React.useMemo(() => {
     return departments.slice().sort((a, b) => a.name.localeCompare(b.name))
   }, [departments])
-
-  const checklistItems = React.useMemo(() => {
-    if (!checklistTaskId) return []
-    const checklist = taskChecklists[checklistTaskId]
-    if (!checklist?.items?.length) return []
-    return checklist.items
-      .filter((item) => item.item_type === "CHECKBOX")
-      .slice()
-      .sort((a, b) => (a.position ?? 0) - (b.position ?? 0))
-  }, [checklistTaskId, taskChecklists])
-
-  const checklistIsLoading = checklistTaskId ? checklistLoading[checklistTaskId] : false
 
   const pvFestByUserDate = React.useMemo(() => {
     const map = new Map<string, Map<string, WeeklyPlannerBlock[]>>()
@@ -1748,29 +1654,29 @@ export default function WeeklyPlannerPage() {
     return project.project_title || "Untitled project"
   }, [])
 
-  const getPlannerTaskDisplayTitle = React.useCallback(
-    (task: { ga_note_origin_id?: string | null; plan_note_origin_id?: string | null; title?: string | null; task_title?: string | null }) => {
+  const getPlannerTaskFullTitle = React.useCallback(
+    (task: { title?: string | null; task_title?: string | null }) => {
       const rawTitle = task.task_title ?? task.title ?? ""
-      const cleanedTitle = task.ga_note_origin_id || task.plan_note_origin_id
-        ? rawTitle
-        .replace(/\[\[added\]\]/gi, "")
-        .replace(/\[\[\/added\]\]/gi, "")
-        .replace(/\[\/added\]\]/gi, "")
-        .replace(/\[\[added\]/gi, "")
-        .replace(/\[added\]\]/gi, "")
-        .trim()
-        : rawTitle.trim()
-      const normalizedTitle = (cleanedTitle || rawTitle)
+      return rawTitle
         .replace(/<br\s*\/?>/gi, "\n")
         .replace(/<\/(div|p)>/gi, "\n")
         .replace(/<(div|p)[^>]*>/gi, "")
-      const firstLine = normalizedTitle
+        .trim()
+    },
+    []
+  )
+
+  const getPlannerTaskDisplayTitle = React.useCallback(
+    (task: { title?: string | null; task_title?: string | null }) => {
+      const fullTitle = getPlannerTaskFullTitle(task)
+      const plainTitle = getPlainMarkedText(fullTitle)
+      const firstLine = plainTitle
         .split(/\r?\n/)
         .map((line) => line.trim())
         .find(Boolean)
-      return firstLine || normalizedTitle.trim() || rawTitle
+      return firstLine || plainTitle.trim() || "Untitled task"
     },
-    []
+    [getPlannerTaskFullTitle]
   )
 
   const getFastTaskBadge = React.useCallback((task: {
@@ -3927,84 +3833,26 @@ export default function WeeklyPlannerPage() {
       </div>
 
       <Dialog
-        open={checklistDialogOpen}
+        open={taskTitleDialogOpen}
         onOpenChange={(open) => {
-          setChecklistDialogOpen(open)
+          setTaskTitleDialogOpen(open)
           if (!open) {
-            setChecklistTaskId(null)
-            setChecklistTaskTitle(null)
-          }
-        }}
-      >
-        <DialogContent className="sm:max-w-[520px] max-h-[75vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>
-              {checklistTaskTitle ? `Subtasks • ${checklistTaskTitle}` : "Subtasks"}
-            </DialogTitle>
-          </DialogHeader>
-          <div className="space-y-3">
-            {!checklistTaskId ? (
-              <div className="text-sm text-muted-foreground">Select a task to view subtasks.</div>
-            ) : checklistIsLoading ? (
-              <div className="text-sm text-muted-foreground">Loading subtasks...</div>
-            ) : checklistItems.length === 0 ? (
-              <div className="text-sm text-muted-foreground">No subtasks yet.</div>
-            ) : (
-              <div className="space-y-2">
-                {checklistItems.map((item) => {
-                  const isChecked = Boolean(item.is_checked)
-                  const label = item.title || item.comment || item.description || "Untitled subtask"
-                  return (
-                    <div key={item.id} className="flex items-start gap-2">
-                      <Checkbox checked={isChecked} disabled />
-                      <span className={["text-sm", isChecked ? "line-through text-muted-foreground" : "text-slate-900"].join(" ")}>
-                        {label}
-                      </span>
-                    </div>
-                  )
-                })}
-              </div>
-            )}
-          </div>
-        </DialogContent>
-      </Dialog>
-
-      <Dialog
-        open={fastTaskDescriptionDialogOpen}
-        onOpenChange={(open) => {
-          setFastTaskDescriptionDialogOpen(open)
-          if (!open) {
-            setFastTaskDescriptionTaskId(null)
-            setFastTaskDescriptionTitle(null)
-            setFastTaskDescription(null)
+            setTaskTitleDialogContent(null)
           }
         }}
       >
         <DialogContent className="sm:max-w-2xl z-[120]">
           <DialogHeader>
-            <DialogTitle className="text-slate-800">
-              {fastTaskDescriptionTitle || "Task Description"}
-            </DialogTitle>
+            <DialogTitle>Full task title</DialogTitle>
           </DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-2">
-              <Label className="text-slate-700">Description</Label>
-              {fastTaskDescriptionLoading ? (
-                <div className="text-sm text-muted-foreground">Loading description...</div>
-              ) : fastTaskDescription && fastTaskDescription.trim().length > 0 ? (
-                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 min-h-[100px] max-h-[400px] overflow-y-auto whitespace-pre-wrap text-sm text-slate-700">
-                  {fastTaskDescription}
-                </div>
-              ) : (
-                <div className="border border-slate-200 rounded-lg p-4 bg-slate-50 min-h-[100px] text-sm text-slate-500 italic">
-                  No description provided.
-                </div>
-              )}
+            <div className="max-h-[60vh] overflow-y-auto whitespace-pre-wrap break-words rounded-lg border border-slate-200 bg-slate-50 p-4 text-base font-semibold leading-relaxed text-slate-800">
+              {renderMarkedNoteContent(taskTitleDialogContent, "Untitled task")}
             </div>
             <div className="flex justify-end gap-2">
-              <Button 
-                variant="outline" 
-                onClick={() => setFastTaskDescriptionDialogOpen(false)}
+              <Button
+                variant="outline"
+                onClick={() => setTaskTitleDialogOpen(false)}
                 className="rounded-xl"
               >
                 Close
@@ -4800,6 +4648,7 @@ export default function WeeklyPlannerPage() {
                                               const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                               const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
                                               const displayTitle = getPlannerTaskDisplayTitle(task)
+                                              const fullTitle = getPlannerTaskFullTitle(task)
                                               const taskStatusValue = getStatusValueForDay(task.status, task.completed_at, dayDate, task.daily_status)
                                               const titleColorClass = task.is_deadline_important && taskStatusValue !== "DONE" ? "text-white" : "text-slate-900"
                                               return (
@@ -4812,7 +4661,7 @@ export default function WeeklyPlannerPage() {
                                               >
                                                   <button
                                                     type="button"
-                                                    onClick={() => openChecklistForTask(task.task_id, displayTitle)}
+                                                    onClick={() => openTaskTitle(fullTitle)}
                                                     className={[
                                                       "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
                                                       titleColorClass,
@@ -4884,6 +4733,7 @@ export default function WeeklyPlannerPage() {
                                         }
                                         const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                         const displayTitle = getPlannerTaskDisplayTitle(task)
+                                        const fullTitle = getPlannerTaskFullTitle(task)
                                         const taskStatusValue = getStatusValueForDay(task.status, task.completed_at, dayDate, task.daily_status)
                                         const titleColorClass = task.is_deadline_important && taskStatusValue !== "DONE" ? "text-white" : "text-slate-900"
                                         return (
@@ -4894,9 +4744,17 @@ export default function WeeklyPlannerPage() {
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
                                           ].join(" ")}
                                         >
-                                            <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")} title={`${idx + 1}. ${displayTitle}`}>
+                                            <button
+                                              type="button"
+                                              onClick={() => openTaskTitle(fullTitle)}
+                                              className={[
+                                                "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                                titleColorClass,
+                                              ].join(" ")}
+                                              title={`${idx + 1}. ${displayTitle}`}
+                                            >
                                               {idx + 1}. {displayTitle}
-                                            </span>
+                                            </button>
                                           <div className="flex shrink-0 items-center gap-1">
                                             {isNewTask && (
                                               <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
@@ -4942,6 +4800,7 @@ export default function WeeklyPlannerPage() {
                                     const statusBadge = getFastTaskBadge({ ...task, day_date: dayDate })
                                     const isNewTask = isTaskNewForWeek(task.created_at, data?.week_start)
                                     const displayTitle = getPlannerTaskDisplayTitle(task)
+                                    const fullTitle = getPlannerTaskFullTitle(task)
                                     const taskStatusValue = getStatusValueForDay(task.status, task.completed_at, dayDate, task.daily_status)
                                     const titleColorClass = task.is_deadline_important && taskStatusValue !== "DONE" ? "text-white" : "text-slate-900"
                                     return (
@@ -4952,23 +4811,17 @@ export default function WeeklyPlannerPage() {
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
                                           ].join(" ")}
                                         >
-                                        {task.task_id ? (
-                                          <button
-                                            type="button"
-                                            onClick={() => openFastTaskDescription(task.task_id!, displayTitle)}
-                                            className={[
-                                              "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
-                                              titleColorClass,
-                                            ].join(" ")}
-                                            title={`${idx + 1}. ${displayTitle}`}
-                                          >
-                                            {idx + 1}. {displayTitle}
-                                          </button>
-                                        ) : (
-                                          <span className={["min-w-0 flex-1 truncate whitespace-nowrap font-semibold", titleColorClass].join(" ")} title={`${idx + 1}. ${displayTitle}`}>
-                                            {idx + 1}. {displayTitle}
-                                          </span>
-                                        )}
+                                        <button
+                                          type="button"
+                                          onClick={() => openTaskTitle(fullTitle)}
+                                          className={[
+                                            "min-w-0 flex-1 truncate whitespace-nowrap font-semibold text-left hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/30 rounded",
+                                            titleColorClass,
+                                          ].join(" ")}
+                                          title={`${idx + 1}. ${displayTitle}`}
+                                        >
+                                          {idx + 1}. {displayTitle}
+                                        </button>
                                           <div className="flex shrink-0 items-center gap-1">
                                             {isNewTask && (
                                               <span className="inline-flex h-4 items-center justify-center rounded-full border border-blue-300 bg-blue-100 px-1 text-[9px] font-semibold tracking-tight text-blue-700">
