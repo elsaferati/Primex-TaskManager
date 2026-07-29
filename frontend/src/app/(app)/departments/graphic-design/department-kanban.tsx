@@ -2007,7 +2007,7 @@ export default function DepartmentKanban() {
 
   const filteredProjects = React.useMemo(() => {
     const base = showTemplates ? templateProjects : projects
-    let filtered = base.filter((p) => p.project_type !== "GENERAL")
+    let filtered = base
     if (viewMode === "mine" && user?.id) {
       filtered = filtered.filter((p) => {
         const members = projectMembers[p.id] || []
