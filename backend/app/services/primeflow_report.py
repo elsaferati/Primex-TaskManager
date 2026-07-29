@@ -147,23 +147,6 @@ def _task_date(item: dict[str, Any]) -> date | None:
         return None
 
 
-def _date_value(value: Any) -> date | None:
-    try:
-        return date.fromisoformat(str(value)[:10]) if value else None
-    except ValueError:
-        return None
-
-
-def _task_is_active_on(item: dict[str, Any], day: date) -> bool:
-    if _task_date(item) == day:
-        return True
-    start = _date_value(item.get("start_date") or item.get("planned_for"))
-    due = _date_value(item.get("due_date") or item.get("planned_for"))
-    if start and due:
-        return start <= day <= due
-    return bool((start and start == day) or (due and due == day))
-
-
 def _slot(item: dict[str, Any]) -> str | None:
     return item.get("one_h_report_slot") or item.get("slot") or item.get("time_slot")
 
@@ -181,21 +164,18 @@ def employee_initials(name: str) -> str:
 
 
 def filter_tasks(
-    items: list[dict[str, Any]], day: date, slot: str | None = None, *, include_spanning: bool = False,
+    items: list[dict[str, Any]], day: date, slot: str | None = None,
 ) -> list[dict[str, Any]]:
     seen: set[str] = set()
     result = []
-    ordered_items = sorted(items, key=lambda item: _task_date(item) != day) if include_spanning else items
-    for item in ordered_items:
+    for item in items:
         employee = _employee(item)
         title = item.get("task_title") or item.get("title") or item.get("task")
-        date_matches = _task_is_active_on(item, day) if include_spanning else _task_date(item) == day
-        if not employee or not str(title or "").strip() or not date_matches:
+        if not employee or not str(title or "").strip() or _task_date(item) != day:
             continue
         if slot is not None and _slot(item) != slot:
             continue
-        key_value = item.get("task_id") if include_spanning else None
-        key = str(key_value or item.get("id") or json.dumps(item, sort_keys=True, default=str))
+        key = str(item.get("id") or json.dumps(item, sort_keys=True, default=str))
         if key in seen:
             continue
         seen.add(key)
@@ -269,12 +249,12 @@ def build_report_document(
             definitions.append(
                 (
                     f"SLOTI {report_day:%d.%m.%Y} {candidate}",
-                    filter_tasks(one_h, report_day, candidate, include_spanning=True),
+                    filter_tasks(one_h, report_day, candidate),
                 )
             )
         definitions.extend([
             ("DETYRA PA SLOT – E GJITHË DITA", [
-                task for task in filter_tasks(one_h, report_day, None, include_spanning=True) if _slot(task) is None
+                task for task in filter_tasks(one_h, report_day, None) if _slot(task) is None
             ]),
             ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
             ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
@@ -285,11 +265,11 @@ def build_report_document(
         definitions.extend([
             (
                 f"SLOTI {report_day:%d.%m.%Y} {slot}",
-                filter_tasks(one_h, report_day, slot, include_spanning=True),
+                filter_tasks(one_h, report_day, slot),
             ),
             (
                 f"SLOTI PARAPRAK {report_day:%d.%m.%Y} {previous_slot}",
-                filter_tasks(one_h, report_day, previous_slot, include_spanning=True),
+                filter_tasks(one_h, report_day, previous_slot),
             ),
         ])
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
@@ -570,16 +550,26 @@ class PrimeFlowClient:
     async def common_view(self, day: date) -> dict[str, Any]:
         async with httpx.AsyncClient(base_url=self.base_url, timeout=30) as client:
             async def retrieve(week_day: date) -> dict[str, Any]:
+                params = {
+                    "week_start": week_day.isoformat(),
+                    "include_all_departments": "true",
+                    "freeze_one_h_slots": "false",
+                    "max_items_per_bucket": 5000,
+                }
                 token = await self._token(client)
                 response = await client.get(
                     "/api/common-view",
-                    params={"week_start": week_day.isoformat(), "freeze_one_h_slots": "true", "max_items_per_bucket": 5000},
+                    params=params,
                     headers={"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"},
                 )
                 if response.status_code == 401:
                     self.access_token = None
                     token = await self._token(client)
-                    response = await client.get("/api/common-view", params={"week_start": week_day.isoformat(), "freeze_one_h_slots": "true", "max_items_per_bucket": 5000}, headers={"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"})
+                    response = await client.get(
+                        "/api/common-view",
+                        params=params,
+                        headers={"Authorization": f"Bearer {token}", "Cache-Control": "no-cache"},
+                    )
                 response.raise_for_status()
                 payload = response.json()
                 if any((payload.get("guardrails", {}).get("truncated") or {}).values()):

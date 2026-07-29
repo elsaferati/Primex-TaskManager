@@ -39,6 +39,13 @@ from app.models.question_library import (
 )
 from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.refresh_token import RefreshToken
+from app.models.realization import (
+    RealizationDepartmentResult,
+    RealizationObservation,
+    RealizationPeriod,
+    RealizationPersonResult,
+    RealizationPolicyVersion,
+)
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.system_task_occurrence import SystemTaskOccurrence
@@ -102,6 +109,11 @@ __all__ = [
     "QuestionUserStatus",
     "VsWorkflowItem",
     "RefreshToken",
+    "RealizationDepartmentResult",
+    "RealizationObservation",
+    "RealizationPeriod",
+    "RealizationPersonResult",
+    "RealizationPolicyVersion",
     "SystemTaskTemplate",
     "SystemTaskTemplateAssigneeSlot",
     "SystemTaskOccurrence",

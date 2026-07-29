@@ -1,0 +1,253 @@
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime, time
+from decimal import Decimal
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+from app.models.enums import (
+    RealizationLevel,
+    RealizationMarker,
+    RealizationObservationCategory,
+    RealizationObservationVisibility,
+    RealizationPeriodSlot,
+    RealizationPeriodStatus,
+    RealizationPeriodType,
+    RealizationScopeType,
+    RealizationSymbol,
+)
+
+
+class RealizationSchema(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+
+class RealizationPolicyVersionCreate(RealizationSchema):
+    name: str = Field(min_length=1, max_length=120)
+    version: int = Field(gt=0)
+    effective_from: date
+    effective_to: date | None = None
+    criteria_json: dict
+    bonus_json: dict
+    am_cutoff: time
+    pm_cutoff: time
+
+    @model_validator(mode="after")
+    def validate_policy(self) -> "RealizationPolicyVersionCreate":
+        if self.effective_to is not None and self.effective_to < self.effective_from:
+            raise ValueError("effective_to must be on or after effective_from")
+        if self.am_cutoff >= self.pm_cutoff:
+            raise ValueError("am_cutoff must be before pm_cutoff")
+        missing = {level.value for level in RealizationLevel} - set(self.bonus_json)
+        if missing:
+            raise ValueError(f"bonus_json is missing levels: {', '.join(sorted(missing))}")
+        return self
+
+
+class RealizationPolicyVersionOut(RealizationPolicyVersionCreate):
+    id: uuid.UUID
+    created_by: uuid.UUID | None
+    approved_by: uuid.UUID | None
+    created_at: datetime
+    approved_at: datetime | None
+
+
+class RealizationPeriodCreate(RealizationSchema):
+    period_type: RealizationPeriodType
+    slot: RealizationPeriodSlot
+    start_date: date
+    end_date: date
+    department_id: uuid.UUID | None = None
+    policy_version_id: uuid.UUID
+    planned_snapshot_id: uuid.UUID | None = None
+    final_snapshot_id: uuid.UUID | None = None
+
+    @model_validator(mode="after")
+    def validate_period_shape(self) -> "RealizationPeriodCreate":
+        if self.end_date < self.start_date:
+            raise ValueError("end_date must be on or after start_date")
+        if self.period_type is RealizationPeriodType.DAILY:
+            if self.slot not in {RealizationPeriodSlot.AM, RealizationPeriodSlot.PM}:
+                raise ValueError("daily periods require an AM or PM slot")
+            if self.start_date != self.end_date:
+                raise ValueError("daily periods must cover one date")
+        elif self.slot is not RealizationPeriodSlot.ALL:
+            raise ValueError("weekly and monthly periods require the ALL slot")
+        return self
+
+
+class RealizationPeriodOut(RealizationPeriodCreate):
+    id: uuid.UUID
+    status: RealizationPeriodStatus
+    calculated_at: datetime | None
+    approved_at: datetime | None
+    locked_at: datetime | None
+    created_by: uuid.UUID | None
+    approved_by: uuid.UUID | None
+    created_at: datetime
+
+
+class RealizationObservationCreate(RealizationSchema):
+    period_id: uuid.UUID | None = None
+    scope_type: RealizationScopeType
+    task_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
+    project_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    marker: RealizationMarker
+    category: RealizationObservationCategory
+    impact_minutes: int | None = Field(default=None, ge=0)
+    repeat_key: str | None = Field(default=None, max_length=200)
+    comment: str | None = Field(default=None, max_length=4000)
+    evidence_json: dict = Field(default_factory=dict)
+    source_type: str | None = Field(default=None, max_length=80)
+    source_id: uuid.UUID | None = None
+    visibility: RealizationObservationVisibility = (
+        RealizationObservationVisibility.PERSON_AND_MANAGER
+    )
+
+    @model_validator(mode="after")
+    def validate_evidence(self) -> "RealizationObservationCreate":
+        scope_reference = {
+            RealizationScopeType.TASK: self.task_id,
+            RealizationScopeType.SYSTEM_TASK: self.task_id,
+            RealizationScopeType.PERSON: self.user_id,
+            RealizationScopeType.PROJECT: self.project_id,
+            RealizationScopeType.DEPARTMENT: self.department_id,
+        }[self.scope_type]
+        if scope_reference is None:
+            raise ValueError(f"{self.scope_type.value} scope requires its matching reference")
+
+        has_comment = bool(self.comment and self.comment.strip())
+        if self.marker in {RealizationMarker.NEGATIVE, RealizationMarker.DIAMOND} and not has_comment:
+            raise ValueError(f"{self.marker.value} observations require a comment")
+        if self.category is RealizationObservationCategory.TIME_SAVED:
+            if not self.impact_minutes or not has_comment:
+                raise ValueError("TIME_SAVED requires positive impact_minutes and a comment")
+        if self.category is RealizationObservationCategory.REPEATED_PROBLEM:
+            if not (self.repeat_key and self.repeat_key.strip()) or not has_comment:
+                raise ValueError("REPEATED_PROBLEM requires repeat_key and a comment")
+        if self.evidence_json.get("high_impact") is True and not has_comment:
+            raise ValueError("high-impact evidence requires a comment")
+        return self
+
+
+class RealizationObservationOut(RealizationObservationCreate):
+    id: uuid.UUID
+    repeat_count_at_creation: int
+    is_system_generated: bool
+    created_by: uuid.UUID | None
+    created_at: datetime
+    voided_at: datetime | None
+    voided_by: uuid.UUID | None
+    void_reason: str | None
+
+
+class RealizationObservationVoid(RealizationSchema):
+    reason: str = Field(min_length=1, max_length=4000)
+
+
+class RealizationFinalDecision(RealizationSchema):
+    final_symbol: RealizationSymbol | None = None
+    final_level: RealizationLevel | None = None
+    final_bonus: int | None = Field(default=None, ge=0)
+    manager_comment: str | None = Field(default=None, max_length=4000)
+    override_reason: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_complete_final(self) -> "RealizationFinalDecision":
+        final_fields = (self.final_symbol, self.final_level, self.final_bonus)
+        if any(value is not None for value in final_fields) and not all(
+            value is not None for value in final_fields
+        ):
+            raise ValueError("final symbol, level, and bonus must be supplied together")
+        return self
+
+    def validate_against_suggestion(
+        self,
+        *,
+        suggested_symbol: RealizationSymbol | None,
+        suggested_level: RealizationLevel | None,
+        suggested_bonus: int | None,
+    ) -> None:
+        if self.final_level is None:
+            return
+        changed = (
+            self.final_symbol != suggested_symbol
+            or self.final_level != suggested_level
+            or self.final_bonus != suggested_bonus
+        )
+        if changed and not (self.override_reason and self.override_reason.strip()):
+            raise ValueError("an override_reason is required when final differs from suggested")
+
+
+class RealizationPersonResultOut(RealizationSchema):
+    id: uuid.UUID
+    period_id: uuid.UUID
+    user_id: uuid.UUID
+    department_id: uuid.UUID | None
+    facts_json: dict
+    planned_count: int
+    completed_on_time_count: int
+    completed_late_count: int
+    in_progress_count: int
+    pending_count: int
+    no_progress_count: int
+    additional_count: int
+    approved_postponement_count: int
+    unapproved_postponement_count: int
+    system_task_count: int
+    system_task_completed_count: int
+    meeting_missed_count: int
+    tardiness_count: int
+    approved_absence_days: int
+    unexcused_absence_days: int
+    diamond_count: int
+    positive_count: int
+    negative_count: int
+    neutral_count: int
+    proposal_count: int
+    helped_colleague_count: int
+    time_saved_minutes: int
+    repeated_problem_count: int
+    suggested_symbol: RealizationSymbol | None
+    suggested_level: RealizationLevel | None
+    suggested_bonus: int | None
+    final_symbol: RealizationSymbol | None
+    final_level: RealizationLevel | None
+    final_bonus: int | None
+    auto_narrative: str | None
+    manager_comment: str | None
+    override_reason: str | None
+    reviewed_by: uuid.UUID | None
+    approved_by: uuid.UUID | None
+    reviewed_at: datetime | None
+    approved_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+
+
+class RealizationDepartmentResultOut(RealizationSchema):
+    id: uuid.UUID
+    period_id: uuid.UUID
+    department_id: uuid.UUID
+    facts_json: dict
+    a_plus_count: int
+    a_count: int
+    b_count: int
+    c_count: int
+    m_count: int
+    d_count: int
+    e_count: int
+    a_rate: Decimal | None
+    total_bonus: Decimal | None
+    average_bonus: Decimal | None
+    proposal_count: int
+    time_saved_minutes: int
+    repeated_problem_count: int
+    trend_percent: Decimal | None
+    department_suggestion: str | None
+    final_comment: str | None
+    created_at: datetime
+    updated_at: datetime
