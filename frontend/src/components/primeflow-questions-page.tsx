@@ -47,6 +47,12 @@ type QuestionStatusSummary = {
   updated_at: string
 }
 
+type QuestionDailySignoffSummary = {
+  user_id: string
+  full_name: string
+  signed_at: string
+}
+
 type QuestionDefinition = {
   id: string
   category_id: string
@@ -56,6 +62,9 @@ type QuestionDefinition = {
   edit_count: number
   current_user_status: QuestionStatus | null
   statuses: QuestionStatusSummary[]
+  is_done: boolean
+  current_user_daily_signed: boolean
+  daily_signoffs: QuestionDailySignoffSummary[]
   created_at: string
   updated_at: string
 }
@@ -90,8 +99,8 @@ type QuestionLibraryUser = {
 }
 
 const STATUS_OPTIONS: Array<{ value: QuestionStatus | null; label: string }> = [
-  { value: "DONE", label: "Done" },
-  { value: "X", label: "X" },
+  { value: "DONE", label: "Understood" },
+  { value: "X", label: "Needs clarification" },
 ]
 
 const NEW_QUESTION_DURATION_MS = 24 * 60 * 60 * 1000
@@ -170,6 +179,7 @@ export function PrimeflowQuestionsPage() {
   const [newQuestion, setNewQuestion] = React.useState("")
   const [saving, setSaving] = React.useState(false)
   const [statusQuestionId, setStatusQuestionId] = React.useState<string | null>(null)
+  const [signoffQuestionId, setSignoffQuestionId] = React.useState<string | null>(null)
   const [editingQuestion, setEditingQuestion] = React.useState<QuestionDefinition | null>(null)
   const [editText, setEditText] = React.useState("")
   const [editGuidance, setEditGuidance] = React.useState("")
@@ -406,6 +416,23 @@ export function PrimeflowQuestionsPage() {
     }
   }
 
+  const updateDailySignoff = async (question: QuestionDefinition) => {
+    setSignoffQuestionId(question.id)
+    try {
+      const response = await apiFetch(`/question-library/questions/${question.id}/daily-signoff`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signed: !question.current_user_daily_signed }),
+      })
+      if (!response.ok) throw new Error(await responseError(response, "Failed to update daily sign-off"))
+      await loadCategories(question.category_id)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to update daily sign-off")
+    } finally {
+      setSignoffQuestionId(null)
+    }
+  }
+
   const openHistory = async (question: QuestionDefinition) => {
     if (!canViewHistory) return
     setHistoryQuestion(question)
@@ -554,7 +581,7 @@ export function PrimeflowQuestionsPage() {
           <table
             className={cn(
               "w-full table-fixed border-collapse text-sm",
-              canDelete ? "min-w-[1280px]" : canViewHistory ? "min-w-[1200px]" : "min-w-[820px]"
+              canDelete ? "min-w-[1400px]" : canViewHistory ? "min-w-[1320px]" : "min-w-[880px]"
             )}
           >
             <thead className="bg-[#e7edf5] text-xs uppercase text-[#071126]">
@@ -563,13 +590,14 @@ export function PrimeflowQuestionsPage() {
                 <th className="border-r border-[#183b68] px-3 py-3 text-left">{activeCategory?.name || "Pyetje"}</th>
                 {canViewHistory ? (
                   <>
-                    <th className="w-48 border-r border-[#183b68] px-3 py-3 text-center">Understood</th>
-                    <th className="w-48 border-r border-[#183b68] px-3 py-3 text-center">Not understood</th>
-                    <th className="w-56 border-r border-[#183b68] px-3 py-3 text-center">Waiting</th>
+                    <th className="w-52 border-r border-[#183b68] px-3 py-3 text-center">Understood / Signed</th>
+                    <th className="w-52 border-r border-[#183b68] px-3 py-3 text-center">Needs clarification</th>
+                    <th className="w-56 border-r border-[#183b68] px-3 py-3 text-center">Awaiting response</th>
                   </>
                 ) : (
-                  <th className="w-56 border-r border-[#183b68] px-3 py-3 text-center">Users</th>
+                  <th className="w-40 border-r border-[#183b68] px-2 py-3 text-center">Users</th>
                 )}
+                <th className="w-40 border-r border-[#183b68] px-2 py-3 text-center">Checked</th>
                 {canDelete && <th className="w-24 border-r border-[#183b68] px-3 py-3 text-center">Editime</th>}
                 <th className="w-44 border-r border-[#183b68] px-3 py-3 text-center">Status</th>
                 {canManage && <th className="w-28 px-3 py-3 text-center">Edit / Fshi</th>}
@@ -577,7 +605,7 @@ export function PrimeflowQuestionsPage() {
             </thead>
             <tbody>
               {!activeCategory || activeCategory.questions.length === 0 ? (
-                <tr><td colSpan={3 + (canViewHistory ? 3 : 1) + Number(canDelete) + Number(canManage)} className="px-4 py-10 text-center text-muted-foreground">Nuk ka pyetje të definuara për këtë kategori.</td></tr>
+                <tr><td colSpan={4 + (canViewHistory ? 3 : 1) + Number(canDelete) + Number(canManage)} className="px-4 py-10 text-center text-muted-foreground">Nuk ka pyetje të definuara për këtë kategori.</td></tr>
               ) : activeCategory.questions.map((question, index) => {
                 const isEditing = editingQuestion?.id === question.id
                 const questionAge = currentTime - new Date(question.created_at).getTime()
@@ -590,9 +618,7 @@ export function PrimeflowQuestionsPage() {
                     !["GA", "KA"].includes(initials(item.full_name || "")) &&
                     !usersWithStatus.has(item.id)
                 )
-                const isQuestionDone = canViewHistory
-                  ? statusUsersLoaded && pendingUsers.length === 0
-                  : question.current_user_status !== null
+                const isQuestionDone = question.is_done
                 return (
                   <tr key={question.id} className="border-t border-[#183b68] bg-[#f7fbff] align-middle">
                     <td className="border-r border-[#183b68] px-2 py-3 text-center">
@@ -684,7 +710,7 @@ export function PrimeflowQuestionsPage() {
                                   className="border-red-300 bg-red-50 text-red-700"
                                   title={item.full_name}
                                 >
-                                  {initials(item.full_name)} <X className="size-3" />
+                                  {initials(item.full_name)}
                                 </Badge>
                               ))}
                             </div>
@@ -722,6 +748,44 @@ export function PrimeflowQuestionsPage() {
                         ) : <span className="text-muted-foreground">-</span>}
                       </td>
                     )}
+                    <td className="border-r border-[#183b68] px-2 py-3 text-center">
+                      {user?.role === "ADMIN" ? (
+                        <div className="flex min-h-8 flex-wrap items-center justify-center gap-1">
+                          {question.daily_signoffs.length ? question.daily_signoffs.map((item) => (
+                            <Badge
+                              key={item.user_id}
+                              variant="outline"
+                              className="border-sky-300 bg-sky-50 text-sky-800"
+                              title={`${item.full_name} · checked today`}
+                            >
+                              {initials(item.full_name)}
+                            </Badge>
+                          )) : <span className="text-muted-foreground">-</span>}
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          role="checkbox"
+                          onClick={() => void updateDailySignoff(question)}
+                          disabled={signoffQuestionId === question.id}
+                          aria-checked={question.current_user_daily_signed}
+                          aria-label={question.current_user_daily_signed ? "Checked today" : "Mark as checked today"}
+                          className={cn(
+                            "inline-flex size-7 items-center justify-center rounded border transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                            question.current_user_daily_signed
+                              ? "border-emerald-500 bg-emerald-50 text-emerald-700 hover:bg-emerald-100"
+                              : "border-slate-400 bg-white text-transparent hover:bg-slate-100"
+                          )}
+                          title={question.current_user_daily_signed ? "Checked today" : "Mark as checked today"}
+                        >
+                          {signoffQuestionId === question.id
+                            ? <Loader2 className="size-3.5 animate-spin text-slate-500" />
+                            : question.current_user_daily_signed
+                              ? <Check className="size-4" />
+                              : null}
+                        </button>
+                      )}
+                    </td>
                     {canDelete && (
                       <td className="border-r border-[#183b68] px-3 py-3 text-center">
                         <button

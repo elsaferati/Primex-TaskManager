@@ -15,6 +15,7 @@ from app.db import get_db
 from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
 from app.models.question_library import (
     QuestionCategory,
+    QuestionDailySignoff,
     QuestionDefinition,
     QuestionEditEvent,
     QuestionStatusEvent,
@@ -27,6 +28,8 @@ from app.schemas.question_library import (
     QuestionCategoryCreate,
     QuestionCategoryOut,
     QuestionCategoryUpdate,
+    QuestionDailySignoffSummary,
+    QuestionDailySignoffUpdate,
     QuestionDefinitionCreate,
     QuestionDefinitionOut,
     QuestionDefinitionUpdate,
@@ -98,6 +101,17 @@ def _question_task_due_date(created_at: datetime) -> datetime:
     return local_end_of_day.astimezone(timezone.utc)
 
 
+def _daily_signoff_window() -> tuple[datetime, datetime]:
+    try:
+        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        app_timezone = timezone.utc
+    local_now = datetime.now(app_timezone)
+    local_start = datetime.combine(local_now.date(), time.min, tzinfo=app_timezone)
+    local_end = local_start + timedelta(days=1)
+    return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
+
+
 async def _category_or_404(db: AsyncSession, category_id: uuid.UUID) -> QuestionCategory:
     category = await db.get(QuestionCategory, category_id)
     if category is None:
@@ -145,6 +159,30 @@ async def _question_out(
             )
         )
         own = own_status
+    signoff_start, signoff_end = _daily_signoff_window()
+    signoff_stmt = (
+        select(QuestionDailySignoff, User.full_name)
+        .join(User, User.id == QuestionDailySignoff.user_id)
+        .where(
+            QuestionDailySignoff.question_id == question.id,
+            QuestionDailySignoff.signed_at >= signoff_start,
+            QuestionDailySignoff.signed_at < signoff_end,
+        )
+        .order_by(User.full_name, QuestionDailySignoff.signed_at.desc())
+    )
+    if owner_id is not None:
+        signoff_stmt = signoff_stmt.where(QuestionDailySignoff.user_id == owner_id)
+    daily_signoffs = [
+        QuestionDailySignoffSummary(
+            user_id=signoff.user_id,
+            full_name=full_name,
+            signed_at=signoff.signed_at,
+        )
+        for signoff, full_name in (await db.execute(signoff_stmt)).all()
+    ]
+    task_status = await db.scalar(
+        select(Task.status).where(Task.question_origin_id == question.id)
+    )
     return QuestionDefinitionOut(
         id=question.id,
         category_id=question.category_id,
@@ -154,6 +192,9 @@ async def _question_out(
         edit_count=question.edit_count,
         current_user_status=own,
         statuses=summaries,
+        is_done=(task_status or "").upper() == TaskStatus.DONE.value,
+        current_user_daily_signed=any(item.user_id == current_user.id for item in daily_signoffs),
+        daily_signoffs=daily_signoffs,
         created_at=question.created_at,
         updated_at=question.updated_at,
     )
@@ -162,6 +203,8 @@ async def _question_out(
 def _question_out_from_summaries(
     question: QuestionDefinition,
     summaries: list[QuestionStatusSummary],
+    daily_signoffs: list[QuestionDailySignoffSummary],
+    is_done: bool,
     current_user_id: uuid.UUID,
 ) -> QuestionDefinitionOut:
     return QuestionDefinitionOut(
@@ -176,6 +219,9 @@ def _question_out_from_summaries(
             None,
         ),
         statuses=summaries,
+        is_done=is_done,
+        current_user_daily_signed=any(item.user_id == current_user_id for item in daily_signoffs),
+        daily_signoffs=daily_signoffs,
         created_at=question.created_at,
         updated_at=question.updated_at,
     )
@@ -203,6 +249,8 @@ async def list_question_library(
         by_category.setdefault(question.category_id, []).append(question)
 
     statuses_by_question: dict[uuid.UUID, list[QuestionStatusSummary]] = {}
+    signoffs_by_question: dict[uuid.UUID, list[QuestionDailySignoffSummary]] = {}
+    done_question_ids: set[uuid.UUID] = set()
     if questions:
         owner_id = visible_status_owner_id(current_user.role, current_user.id)
         status_stmt = (
@@ -222,6 +270,37 @@ async def list_question_library(
                     updated_at=status_row.updated_at,
                 )
             )
+        signoff_start, signoff_end = _daily_signoff_window()
+        signoff_stmt = (
+            select(QuestionDailySignoff, User.full_name)
+            .join(User, User.id == QuestionDailySignoff.user_id)
+            .where(
+                QuestionDailySignoff.question_id.in_([item.id for item in questions]),
+                QuestionDailySignoff.signed_at >= signoff_start,
+                QuestionDailySignoff.signed_at < signoff_end,
+            )
+            .order_by(User.full_name, QuestionDailySignoff.signed_at.desc())
+        )
+        if owner_id is not None:
+            signoff_stmt = signoff_stmt.where(QuestionDailySignoff.user_id == owner_id)
+        for signoff, full_name in (await db.execute(signoff_stmt)).all():
+            signoffs_by_question.setdefault(signoff.question_id, []).append(
+                QuestionDailySignoffSummary(
+                    user_id=signoff.user_id,
+                    full_name=full_name,
+                    signed_at=signoff.signed_at,
+                )
+            )
+        done_question_ids = set(
+            (
+                await db.execute(
+                    select(Task.question_origin_id).where(
+                        Task.question_origin_id.in_([item.id for item in questions]),
+                        Task.status == TaskStatus.DONE.value,
+                    )
+                )
+            ).scalars().all()
+        )
 
     output: list[QuestionCategoryOut] = []
     for category in categories:
@@ -229,6 +308,8 @@ async def list_question_library(
             _question_out_from_summaries(
                 item,
                 statuses_by_question.get(item.id, []),
+                signoffs_by_question.get(item.id, []),
+                item.id in done_question_ids,
                 current_user.id,
             )
             for item in by_category.get(category.id, [])
@@ -454,6 +535,9 @@ async def update_question_definition(
             delete(QuestionUserStatus).where(QuestionUserStatus.question_id == question.id)
         )
         await db.execute(
+            delete(QuestionDailySignoff).where(QuestionDailySignoff.question_id == question.id)
+        )
+        await db.execute(
             update(Task)
             .where(Task.question_origin_id == question.id)
             .values(
@@ -600,6 +684,51 @@ async def update_own_question_status(
         full_name=current_user.full_name,
         status=current.status,
         updated_at=current.updated_at,
+    )
+
+
+@router.put(
+    "/questions/{question_id}/daily-signoff",
+    response_model=QuestionDailySignoffSummary | None,
+)
+async def update_own_question_daily_signoff(
+    question_id: uuid.UUID,
+    payload: QuestionDailySignoffUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> QuestionDailySignoffSummary | None:
+    if current_user.role == UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Admins can monitor daily sign-offs but cannot submit one",
+        )
+    await _question_or_404(db, question_id)
+    current = await db.scalar(
+        select(QuestionDailySignoff).where(
+            QuestionDailySignoff.question_id == question_id,
+            QuestionDailySignoff.user_id == current_user.id,
+        )
+    )
+    if not payload.signed:
+        if current is not None:
+            await db.delete(current)
+            await db.commit()
+        return None
+
+    if current is None:
+        current = QuestionDailySignoff(
+            question_id=question_id,
+            user_id=current_user.id,
+        )
+        db.add(current)
+    else:
+        current.signed_at = func.now()
+    await db.commit()
+    await db.refresh(current)
+    return QuestionDailySignoffSummary(
+        user_id=current_user.id,
+        full_name=current_user.full_name,
+        signed_at=current.signed_at,
     )
 
 
