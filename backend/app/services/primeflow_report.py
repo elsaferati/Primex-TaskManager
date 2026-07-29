@@ -256,9 +256,14 @@ def build_report_document(
             ("R1 = 1H", filter_tasks(items.get("r1") or [], report_day)),
         ])
     else:
-        definitions.append(
-            (f"SLOTI {report_day:%d.%m.%Y} {slot}", filter_tasks(one_h, report_day, slot))
-        )
+        previous_slot = SLOTS[SLOTS.index(slot) - 1]
+        definitions.extend([
+            (f"SLOTI {report_day:%d.%m.%Y} {slot}", filter_tasks(one_h, report_day, slot)),
+            (
+                f"SLOTI PARAPRAK {report_day:%d.%m.%Y} {previous_slot}",
+                filter_tasks(one_h, report_day, previous_slot),
+            ),
+        ])
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
     source_generated = datetime.fromisoformat(str(generated_value).replace("Z", "+00:00"))
     return ReportDocument(

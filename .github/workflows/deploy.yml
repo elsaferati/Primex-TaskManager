@@ -9,6 +9,9 @@ jobs:
     runs-on: self-hosted
     env:
       PM2_HOME: C:\pm2-system
+      # PM2 services must outlive this self-hosted Actions job. Without clearing
+      # the runner marker, GitHub kills them as orphan processes during cleanup.
+      RUNNER_TRACKING_ID: ""
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -148,6 +151,7 @@ jobs:
           set PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD%
           set PRIMEFLOW_REPORT_TIMEZONE=Europe/Tirane
           set PRIMEFLOW_REPORT_RECIPIENTS=130primex.eu@gmail.com,ga@primexeu.com
+          set RUNNER_TRACKING_ID=
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
           call pm2 delete primex-backend || ver > NUL
@@ -281,6 +285,7 @@ jobs:
           $env:REDIS_URL = "redis://127.0.0.1:6379/0"
           $env:APP_TIMEZONE = "Europe/Budapest"
           $env:APP_BUILD_SHA = "${{ github.sha }}"
+          $env:RUNNER_TRACKING_ID = ""
           cmd /c "pm2 start `"$python`" --name $processName --cwd `"$PWD`" -- -m uvicorn app.main:app --host 0.0.0.0 --port $port"
           if ($LASTEXITCODE -ne 0) { Write-Error "PM2 public API start failed"; exit 1 }
 
@@ -343,6 +348,7 @@ jobs:
  
           Write-Host "5. Starting Frontend Process..."
           $CurrentPath = (Get-Location).Path
+          $env:RUNNER_TRACKING_ID = ""
           $pm2Start = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000" -NoNewWindow -Wait -PassThru
           if ($pm2Start.ExitCode -ne 0) { Write-Error "PM2 frontend start failed"; exit 1 }
  
@@ -381,3 +387,4 @@ jobs:
         run: |
           call pm2 status
           call pm2 logs primex-backend --lines 50 --nostream || ver > NUL
+          call pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL

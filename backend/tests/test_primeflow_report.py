@@ -138,7 +138,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(predecessor(date(2026, 7, 28), "10:00"), (date(2026, 7, 27), "16:00"))
         self.assertEqual(predecessor(date(2026, 7, 28), "14:20"), (date(2026, 7, 28), "11:50"))
 
-    def test_after_ten_only_current_slot_is_included(self) -> None:
+    def test_after_ten_includes_current_then_immediately_previous_slot(self) -> None:
         common = {"date": "2026-07-28", "person": "Anisa Tërnava", "status": "TODO"}
         data = {
             "generated_at": "2026-07-28T13:59:00+02:00",
@@ -155,10 +155,40 @@ class PrimeFlowReportTests(unittest.TestCase):
             },
         }
         document = build_report_document(data, date(2026, 7, 28), "14:20")
-        self.assertEqual([section.title for section in document.sections], ["SLOTI 28.07.2026 14:20"])
-        self.assertEqual(document.task_count, 1)
+        self.assertEqual(
+            [section.title for section in document.sections],
+            ["SLOTI 28.07.2026 14:20", "SLOTI PARAPRAK 28.07.2026 11:50"],
+        )
+        self.assertEqual(document.task_count, 2)
         self.assertEqual(document.sections[0].employees[0].name, "AT")
         self.assertEqual(document.sections[0].employees[0].tasks[0].title, "Current")
+        self.assertEqual(document.sections[1].employees[0].tasks[0].title, "Earlier")
+        self.assertNotIn("Later", render_plain_text(document))
+
+    def test_each_later_report_uses_the_immediately_previous_slot(self) -> None:
+        common = {"date": "2026-07-28", "person": "Anisa Tërnava", "status": "TODO"}
+        tasks = [
+            {**common, "id": slot, "slot": slot, "title": f"Task {slot}"}
+            for slot in ("10:00", "11:00", "11:50", "14:20", "16:00")
+        ]
+        data = {"guardrails": {"truncated": {}}, "items": {"oneH": tasks}}
+        expected = {
+            "11:00": "10:00",
+            "11:50": "11:00",
+            "14:20": "11:50",
+            "16:00": "14:20",
+        }
+        for current, previous in expected.items():
+            with self.subTest(current=current):
+                document = build_report_document(data, date(2026, 7, 28), current)
+                self.assertEqual(
+                    [section.title for section in document.sections],
+                    [
+                        f"SLOTI 28.07.2026 {current}",
+                        f"SLOTI PARAPRAK 28.07.2026 {previous}",
+                    ],
+                )
+                self.assertEqual(document.task_count, 2)
 
     def test_employee_names_are_uppercase_initials(self) -> None:
         self.assertEqual(employee_initials("Anisa Tërnava"), "AT")
