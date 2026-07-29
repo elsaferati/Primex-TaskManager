@@ -143,3 +143,75 @@ class ChecklistItemType(str, enum.Enum):
     TITLE = "TITLE"
     COMMENT = "COMMENT"
     CHECKBOX = "CHECKBOX"
+
+
+class RealizationPeriodType(str, enum.Enum):
+    DAILY = "DAILY"
+    WEEKLY = "WEEKLY"
+    MONTHLY = "MONTHLY"
+
+
+class RealizationPeriodSlot(str, enum.Enum):
+    AM = "AM"
+    PM = "PM"
+    ALL = "ALL"
+
+
+class RealizationPeriodStatus(str, enum.Enum):
+    OPEN = "OPEN"
+    CALCULATED = "CALCULATED"
+    REVIEWED = "REVIEWED"
+    APPROVED = "APPROVED"
+    LOCKED = "LOCKED"
+
+
+class RealizationScopeType(str, enum.Enum):
+    TASK = "TASK"
+    PERSON = "PERSON"
+    PROJECT = "PROJECT"
+    DEPARTMENT = "DEPARTMENT"
+    SYSTEM_TASK = "SYSTEM_TASK"
+
+
+class RealizationMarker(str, enum.Enum):
+    POSITIVE = "POSITIVE"
+    NEUTRAL = "NEUTRAL"
+    NEGATIVE = "NEGATIVE"
+    DIAMOND = "DIAMOND"
+
+
+class RealizationObservationCategory(str, enum.Enum):
+    EXTRA_TASK = "EXTRA_TASK"
+    HELPED_COLLEAGUE = "HELPED_COLLEAGUE"
+    PROPOSAL = "PROPOSAL"
+    TIME_SAVED = "TIME_SAVED"
+    QUALITY = "QUALITY"
+    DELAY = "DELAY"
+    ABSENCE = "ABSENCE"
+    MISSED_MEETING = "MISSED_MEETING"
+    BLOCKER = "BLOCKER"
+    REPEATED_PROBLEM = "REPEATED_PROBLEM"
+    PRIORITY_CHANGE = "PRIORITY_CHANGE"
+    OTHER = "OTHER"
+
+
+class RealizationObservationVisibility(str, enum.Enum):
+    PRIVATE_MANAGER = "PRIVATE_MANAGER"
+    PERSON_AND_MANAGER = "PERSON_AND_MANAGER"
+    TEAM_AGGREGATE = "TEAM_AGGREGATE"
+
+
+class RealizationLevel(str, enum.Enum):
+    A_PLUS = "A+"
+    A = "A"
+    B = "B"
+    C = "C"
+    M = "M"
+    D = "D"
+    E = "E"
+
+
+class RealizationSymbol(str, enum.Enum):
+    POSITIVE = "+"
+    MIXED = "+/-"
+    NEGATIVE = "-"
