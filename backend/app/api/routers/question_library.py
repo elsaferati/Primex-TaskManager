@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime, time, timedelta, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -42,6 +42,7 @@ from app.services.notifications import add_notification, publish_notification
 
 
 router = APIRouter()
+QUESTION_TASK_START_DATE = date(2026, 8, 3)
 
 
 def can_manage_question_library(role: UserRole) -> bool:
@@ -110,6 +111,14 @@ def _daily_signoff_window() -> tuple[datetime, datetime]:
     local_start = datetime.combine(local_now.date(), time.min, tzinfo=app_timezone)
     local_end = local_start + timedelta(days=1)
     return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
+
+
+def _question_tasks_enabled_at(moment: datetime) -> bool:
+    try:
+        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        app_timezone = timezone.utc
+    return moment.astimezone(app_timezone).date() >= QUESTION_TASK_START_DATE
 
 
 async def _category_or_404(db: AsyncSession, category_id: uuid.UUID) -> QuestionCategory:
@@ -447,6 +456,11 @@ async def create_question_definition(
     await db.flush()
 
     now = datetime.now(timezone.utc)
+    if not _question_tasks_enabled_at(now):
+        await db.commit()
+        await db.refresh(question)
+        return await _question_out(db, question, current_user)
+
     participant_users = (
         await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at))
     ).scalars().all()
