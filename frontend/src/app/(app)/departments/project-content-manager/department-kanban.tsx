@@ -94,7 +94,7 @@ function getProjectPhases(project: Project): string[] {
   }
 
   // General/Development projects
-  if (projectType === "GENERAL") {
+  if (project.project_type === "GENERAL") {
     return ["MEETINGS", "PLANNING", "DEVELOPMENT", "TESTING", "DOCUMENTATION", "CLOSED"]
   }
 
