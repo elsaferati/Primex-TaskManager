@@ -90,6 +90,24 @@ class PrimeFlowReportTests(unittest.TestCase):
         tasks = [base, dict(base), {**base, "id": "2", "date": "2026-07-29"}, {**base, "id": "3", "slot": "11:00"}, {**base, "id": "4", "employee": ""}]
         self.assertEqual(filter_tasks(tasks, date(2026, 7, 28), "10:00"), [base])
 
+    def test_slot_filter_includes_tasks_spanning_report_date_and_deduplicates_occurrences(self) -> None:
+        spanning = {
+            "id": "task:spanning:2026-07-27", "task_id": "spanning", "date": "2026-07-27",
+            "start_date": "2026-07-27", "due_date": "2026-07-29", "slot": "14:20",
+            "employee": "Diellza", "title": "Visible in today's slot", "status": "TODO",
+        }
+        exact = {**spanning, "id": "task:spanning:2026-07-29", "date": "2026-07-29"}
+        outside = {
+            **spanning, "id": "task:outside:2026-07-27", "task_id": "outside",
+            "start_date": "2026-07-26", "due_date": "2026-07-27", "title": "Outside",
+        }
+        self.assertEqual(
+            filter_tasks(
+                [spanning, exact, outside], date(2026, 7, 29), "14:20", include_spanning=True,
+            ),
+            [exact],
+        )
+
     def test_status_sort_numbering_order_and_description_preservation(self) -> None:
         tasks = [
             {"id": "d", "date": "2026-07-28", "slot": "10:00", "employee": "Besa", "title": "Done EXACT", "description": "Zeile 1\n\nZeile 3", "status": "DONE"},

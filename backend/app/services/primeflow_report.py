@@ -147,6 +147,23 @@ def _task_date(item: dict[str, Any]) -> date | None:
         return None
 
 
+def _date_value(value: Any) -> date | None:
+    try:
+        return date.fromisoformat(str(value)[:10]) if value else None
+    except ValueError:
+        return None
+
+
+def _task_is_active_on(item: dict[str, Any], day: date) -> bool:
+    if _task_date(item) == day:
+        return True
+    start = _date_value(item.get("start_date") or item.get("planned_for"))
+    due = _date_value(item.get("due_date") or item.get("planned_for"))
+    if start and due:
+        return start <= day <= due
+    return bool((start and start == day) or (due and due == day))
+
+
 def _slot(item: dict[str, Any]) -> str | None:
     return item.get("one_h_report_slot") or item.get("slot") or item.get("time_slot")
 
@@ -163,17 +180,22 @@ def employee_initials(name: str) -> str:
     return "".join(part[0] for part in parts).upper()
 
 
-def filter_tasks(items: list[dict[str, Any]], day: date, slot: str | None = None) -> list[dict[str, Any]]:
+def filter_tasks(
+    items: list[dict[str, Any]], day: date, slot: str | None = None, *, include_spanning: bool = False,
+) -> list[dict[str, Any]]:
     seen: set[str] = set()
     result = []
-    for item in items:
+    ordered_items = sorted(items, key=lambda item: _task_date(item) != day) if include_spanning else items
+    for item in ordered_items:
         employee = _employee(item)
         title = item.get("task_title") or item.get("title") or item.get("task")
-        if not employee or not str(title or "").strip() or _task_date(item) != day:
+        date_matches = _task_is_active_on(item, day) if include_spanning else _task_date(item) == day
+        if not employee or not str(title or "").strip() or not date_matches:
             continue
         if slot is not None and _slot(item) != slot:
             continue
-        key = str(item.get("id") or item.get("task_id") or json.dumps(item, sort_keys=True, default=str))
+        key_value = item.get("task_id") if include_spanning else None
+        key = str(key_value or item.get("id") or json.dumps(item, sort_keys=True, default=str))
         if key in seen:
             continue
         seen.add(key)
@@ -245,11 +267,14 @@ def build_report_document(
     if slot == "10:00":
         for candidate in SLOTS:
             definitions.append(
-                (f"SLOTI {report_day:%d.%m.%Y} {candidate}", filter_tasks(one_h, report_day, candidate))
+                (
+                    f"SLOTI {report_day:%d.%m.%Y} {candidate}",
+                    filter_tasks(one_h, report_day, candidate, include_spanning=True),
+                )
             )
         definitions.extend([
             ("DETYRA PA SLOT – E GJITHË DITA", [
-                task for task in filter_tasks(one_h, report_day, None) if _slot(task) is None
+                task for task in filter_tasks(one_h, report_day, None, include_spanning=True) if _slot(task) is None
             ]),
             ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
             ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
@@ -258,10 +283,13 @@ def build_report_document(
     else:
         previous_slot = SLOTS[SLOTS.index(slot) - 1]
         definitions.extend([
-            (f"SLOTI {report_day:%d.%m.%Y} {slot}", filter_tasks(one_h, report_day, slot)),
+            (
+                f"SLOTI {report_day:%d.%m.%Y} {slot}",
+                filter_tasks(one_h, report_day, slot, include_spanning=True),
+            ),
             (
                 f"SLOTI PARAPRAK {report_day:%d.%m.%Y} {previous_slot}",
-                filter_tasks(one_h, report_day, previous_slot),
+                filter_tasks(one_h, report_day, previous_slot, include_spanning=True),
             ),
         ])
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
