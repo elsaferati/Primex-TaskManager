@@ -1610,6 +1610,7 @@ export default function CommonViewPage() {
     if (selectedDates.size !== weekISOs.length) return false
     return weekISOs.every((iso) => selectedDates.has(iso))
   }, [selectedDates, weekISOs])
+  const calendarDateIso = selectedDates.size === 1 ? Array.from(selectedDates)[0] : toISODate(weekStart)
   const activeMeeting = React.useMemo(
     () => meetingTemplates.find((template) => template.id === activeMeetingId) || null,
     [activeMeetingId, meetingTemplates]
@@ -3952,6 +3953,7 @@ export default function CommonViewPage() {
   const selectWeek = (weekStartDate: Date) => {
     const targetWeekIso = toISODate(weekStartDate)
     if (toISODate(weekStart) !== targetWeekIso) {
+      setDataLoaded(false)
       setWeekStart(weekStartDate)
     }
     setSelectedDates(new Set(getWeekdays(weekStartDate).map(toISODate)))
@@ -3963,6 +3965,7 @@ export default function CommonViewPage() {
     const today = new Date()
     const todayMonday = getMonday(today)
     if (toISODate(weekStart) !== toISODate(todayMonday)) {
+      setDataLoaded(false)
       setWeekStart(todayMonday)
     }
     setSelectedDates(new Set([toISODate(today)]))
@@ -4473,12 +4476,12 @@ export default function CommonViewPage() {
   const setWeek = (dateStr: string) => {
     const base = dateStr ? fromISODate(dateStr) : new Date()
     const monday = getMonday(base)
-    setWeekStart(monday)
-    const weekISO = getWeekdays(monday).map(toISODate)
-    setSelectedDates((prev) => {
-      const filtered = Array.from(prev).filter((d) => weekISO.includes(d))
-      return filtered.length ? new Set(filtered) : new Set([weekISO[0]])
-    })
+    if (toISODate(weekStart) !== toISODate(monday)) {
+      setDataLoaded(false)
+      setWeekStart(monday)
+    }
+    setSelectedDates(new Set([toISODate(base)]))
+    setMultiMode(false)
     resetSwimlaneTitleRowsOpen()
   }
 
@@ -7014,7 +7017,34 @@ export default function CommonViewPage() {
           overflow: visible; 
           flex-grow: 1; 
           min-height: 0;
+          position: relative;
           background: linear-gradient(to bottom, #f8f9fa 0%, #ffffff 100%);
+        }
+        .common-view-loading {
+          position: absolute;
+          inset: 54px 24px 16px;
+          z-index: 40;
+          min-height: 320px;
+          display: flex;
+          align-items: flex-start;
+          justify-content: center;
+          gap: 10px;
+          padding-top: 72px;
+          color: #475569;
+          font-size: 14px;
+          font-weight: 700;
+          background: rgba(248, 250, 252, 0.98);
+        }
+        .common-view-loading-spinner {
+          width: 18px;
+          height: 18px;
+          border: 2px solid #bfdbfe;
+          border-top-color: #2563eb;
+          border-radius: 999px;
+          animation: common-view-loading-spin 0.7s linear infinite;
+        }
+        @keyframes common-view-loading-spin {
+          to { transform: rotate(360deg); }
         }
         .common-view-title {
           text-align: center;
@@ -9808,7 +9838,7 @@ export default function CommonViewPage() {
               className="input"
               type="text"
               placeholder="DD/MM/YYYY"
-              value={toDDMMYYYY(toISODate(weekStart))}
+              value={toDDMMYYYY(calendarDateIso)}
               onChange={(e) => {
                 const value = e.target.value
                 const isoDate = fromDDMMYYYY(value)
@@ -9821,7 +9851,7 @@ export default function CommonViewPage() {
             />
             <input
               type="date"
-              value={toISODate(weekStart)}
+              value={calendarDateIso}
               onChange={(e) => setWeek(e.target.value)}
               style={{
                 position: "absolute",
@@ -11734,8 +11764,14 @@ export default function CommonViewPage() {
         </section>
       ) : null}
 
-      <div className="view-container">
+      <div className="view-container" aria-busy={!dataLoaded}>
         <div className="common-view-title">PERMBLEDHJA - COMMON VIEW</div>
+        {!dataLoaded ? (
+          <div className="common-view-loading no-print" role="status" aria-live="polite">
+            <span className="common-view-loading-spinner" aria-hidden="true" />
+            <span>Loading tasks...</span>
+          </div>
+        ) : null}
         {allDaysSelected ? (
           <div className="week-table-view week-table-onepage neutral-all-days" ref={weekTablePrintRef}>
             <div className="week-table-onepage-content" ref={weekTablePrintContentRef}>
