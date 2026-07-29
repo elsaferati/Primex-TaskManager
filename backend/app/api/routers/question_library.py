@@ -1,15 +1,18 @@
 from __future__ import annotations
 
 import uuid
+from datetime import datetime, time, timedelta, timezone
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user, require_admin, require_manager_or_admin
+from app.config import settings
 from app.db import get_db
-from app.models.enums import UserRole
+from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
 from app.models.question_library import (
     QuestionCategory,
     QuestionDefinition,
@@ -17,6 +20,8 @@ from app.models.question_library import (
     QuestionStatusEvent,
     QuestionUserStatus,
 )
+from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.schemas.question_library import (
     QuestionCategoryCreate,
@@ -30,6 +35,7 @@ from app.schemas.question_library import (
     QuestionStatusSummary,
     QuestionStatusUpdate,
 )
+from app.services.notifications import add_notification, publish_notification
 
 
 router = APIRouter()
@@ -55,6 +61,41 @@ def _clean_optional(value: str | None) -> str | None:
         return None
     cleaned = value.strip()
     return cleaned or None
+
+
+def _user_initials(full_name: str | None) -> str:
+    parts = (full_name or "").strip().split()
+    if not parts:
+        return ""
+    return "".join(part[0] for part in parts)[:2].upper()
+
+
+def _is_question_participant(user: User) -> bool:
+    return user.is_active and _user_initials(user.full_name) not in {"GA", "KA"}
+
+
+def _question_task_title(text: str) -> str:
+    return f"PYETJE E RE: {text}"
+
+
+def _question_task_description(guidance: str | None) -> str:
+    return guidance or "Përgjigju me ✓ ose X te faqja Pyetje për Barazim."
+
+
+def _question_task_due_date(created_at: datetime) -> datetime:
+    try:
+        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        app_timezone = timezone.utc
+    local_created_at = created_at.astimezone(app_timezone)
+    if local_created_at.hour >= 12:
+        return (local_created_at + timedelta(days=1)).astimezone(timezone.utc)
+    local_end_of_day = datetime.combine(
+        local_created_at.date(),
+        time.max,
+        tzinfo=app_timezone,
+    )
+    return local_end_of_day.astimezone(timezone.utc)
 
 
 async def _category_or_404(db: AsyncSession, category_id: uuid.UUID) -> QuestionCategory:
@@ -322,7 +363,53 @@ async def create_question_definition(
         created_by_user_id=current_user.id,
     )
     db.add(question)
+    await db.flush()
+
+    now = datetime.now(timezone.utc)
+    participant_users = (
+        await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at))
+    ).scalars().all()
+    participants = [user for user in participant_users if _is_question_participant(user)]
+    task = Task(
+        title=_question_task_title(question.text),
+        description=_question_task_description(question.guidance),
+        assigned_to=None,
+        created_by=current_user.id,
+        question_origin_id=question.id,
+        fast_task_group_id=question.id,
+        status=TaskStatus.TODO.value,
+        priority=TaskPriority.NORMAL.value,
+        phase=ProjectPhaseStatus.MEETINGS.value,
+        progress_percentage=0,
+        start_date=now,
+        due_date=_question_task_due_date(now),
+        is_deadline_important=True,
+        is_r1=True,
+        is_active=True,
+    )
+    db.add(task)
+    await db.flush()
+
+    notifications = []
+    for participant in participants:
+        db.add(TaskAssignee(task_id=task.id, user_id=participant.id))
+        notifications.append(
+            add_notification(
+                db=db,
+                user_id=participant.id,
+                type=NotificationType.assignment,
+                title="Detyrë e re",
+                body=question.text,
+                data={"task_id": str(task.id), "question_id": str(question.id)},
+            )
+        )
+
     await db.commit()
+    for notification in notifications:
+        try:
+            await publish_notification(user_id=notification.user_id, notification=notification)
+        except Exception:
+            pass
     await db.refresh(question)
     return await _question_out(db, question, current_user)
 
@@ -365,6 +452,16 @@ async def update_question_definition(
         )
         await db.execute(
             delete(QuestionUserStatus).where(QuestionUserStatus.question_id == question.id)
+        )
+        await db.execute(
+            update(Task)
+            .where(Task.question_origin_id == question.id)
+            .values(
+                title=_question_task_title(updated_text),
+                description=_question_task_description(updated_guidance),
+                status=TaskStatus.TODO.value,
+                completed_at=None,
+            )
         )
     await db.commit()
     await db.refresh(question)
@@ -463,6 +560,35 @@ async def update_own_question_status(
             user_id=current_user.id,
             user_full_name=current_user.full_name,
             status=payload.status,
+        )
+    )
+    await db.flush()
+    assigned_user_ids = set(
+        (
+            await db.execute(
+                select(TaskAssignee.user_id)
+                .join(Task, Task.id == TaskAssignee.task_id)
+                .where(Task.question_origin_id == question_id)
+            )
+        ).scalars().all()
+    )
+    responded_user_ids = set(
+        (
+            await db.execute(
+                select(QuestionUserStatus.user_id).where(
+                    QuestionUserStatus.question_id == question_id
+                )
+            )
+        ).scalars().all()
+    )
+    all_users_responded = bool(assigned_user_ids) and assigned_user_ids.issubset(responded_user_ids)
+    task_status = TaskStatus.DONE.value if all_users_responded else TaskStatus.TODO.value
+    await db.execute(
+        update(Task)
+        .where(Task.question_origin_id == question_id)
+        .values(
+            status=task_status,
+            completed_at=datetime.now(timezone.utc) if all_users_responded else None,
         )
     )
     await db.commit()

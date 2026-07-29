@@ -586,6 +586,7 @@ def _task_to_out(
         created_by=task.created_by,
         ga_note_origin_id=task.ga_note_origin_id,
         plan_note_origin_id=task.plan_note_origin_id,
+        question_origin_id=task.question_origin_id,
         system_template_origin_id=task.system_template_origin_id,
         origin_run_at=task.origin_run_at,
         system_task_slot_id=task.system_task_slot_id,
@@ -882,9 +883,22 @@ async def list_tasks(
         stmt = stmt.where(Task.system_template_origin_id.is_not(None))
 
     if department_id:
-        # Include tasks that belong to projects in the department (legacy tasks may have null/mismatched Task.department_id).
+        assignee_in_department = exists(
+            select(1)
+            .select_from(TaskAssignee)
+            .join(User, User.id == TaskAssignee.user_id)
+            .where(
+                TaskAssignee.task_id == Task.id,
+                User.department_id == department_id,
+            )
+        )
+        # A shared task can belong to a department through its assignees.
         stmt = stmt.outerjoin(Project, Task.project_id == Project.id).where(
-            or_(Task.department_id == department_id, Project.department_id == department_id)
+            or_(
+                Task.department_id == department_id,
+                Project.department_id == department_id,
+                assignee_in_department,
+            )
         )
     if project_id:
         stmt = stmt.where(Task.project_id == project_id)

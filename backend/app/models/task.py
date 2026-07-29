@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, func
+from sqlalchemy import Boolean, Date, DateTime, Enum, ForeignKey, Integer, String, Text, UniqueConstraint, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -13,6 +13,9 @@ from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority,
 
 class Task(Base):
     __tablename__ = "tasks"
+    __table_args__ = (
+        UniqueConstraint("question_origin_id", name="uq_tasks_question_origin"),
+    )
     # Unique constraint removed - now allows multiple tasks per template (one per user)
     # Database has unique index: uq_tasks_system_template_user_date
 
@@ -39,6 +42,12 @@ class Task(Base):
     ga_note_origin_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("ga_notes.id"))
     plan_note_origin_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("plan_notes.id"), index=True
+    )
+    question_origin_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("question_definitions.id", ondelete="CASCADE"),
+        nullable=True,
+        index=True,
     )
     system_template_origin_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("system_task_templates.id")
