@@ -49,6 +49,7 @@ class Task(Base):
         nullable=True,
         index=True,
     )
+    question_batch_date: Mapped[date | None] = mapped_column(Date, nullable=True, unique=True, index=True)
     system_template_origin_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("system_task_templates.id")
     )

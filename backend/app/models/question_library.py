@@ -33,6 +33,9 @@ class QuestionDefinition(Base):
     category_id: Mapped[uuid.UUID] = mapped_column(
         UUID(as_uuid=True), ForeignKey("question_categories.id", ondelete="CASCADE"), nullable=False, index=True
     )
+    task_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("tasks.id", ondelete="SET NULL"), nullable=True, index=True
+    )
     text: Mapped[str] = mapped_column(Text, nullable=False)
     guidance: Mapped[str | None] = mapped_column(Text, nullable=True)
     sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0", index=True)

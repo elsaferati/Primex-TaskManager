@@ -5,7 +5,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -121,6 +121,177 @@ def _question_tasks_enabled_at(moment: datetime) -> bool:
     return moment.astimezone(app_timezone).date() >= QUESTION_TASK_START_DATE
 
 
+def _question_task_batch_date(moment: datetime) -> date:
+    try:
+        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
+    except ZoneInfoNotFoundError:
+        app_timezone = timezone.utc
+    return moment.astimezone(app_timezone).date()
+
+
+def _question_batch_content(
+    questions: list[QuestionDefinition],
+) -> tuple[str, str]:
+    if len(questions) == 1:
+        question = questions[0]
+        return _question_task_title(question.text), _question_task_description(question.guidance)
+    lines = ["Përgjigju për secilën pyetje te faqja Pyetje për Barazim.", ""]
+    for index, question in enumerate(questions, start=1):
+        lines.append(f"{index}. {question.text}")
+        if question.guidance:
+            lines.append(f"   Udhëzim: {question.guidance}")
+    return f"PYETJE TË REJA ({len(questions)})", "\n".join(lines)
+
+
+async def _question_task_members(
+    db: AsyncSession,
+    task_id: uuid.UUID,
+) -> list[QuestionDefinition]:
+    return list(
+        (
+            await db.execute(
+                select(QuestionDefinition)
+                .where(QuestionDefinition.task_id == task_id)
+                .order_by(QuestionDefinition.created_at, QuestionDefinition.sort_order)
+            )
+        ).scalars().all()
+    )
+
+
+def _apply_question_task_content(
+    task: Task,
+    questions: list[QuestionDefinition],
+) -> None:
+    task.title, task.description = _question_batch_content(questions)
+
+
+async def _refresh_question_task_status(
+    db: AsyncSession,
+    task: Task,
+) -> None:
+    question_ids = set(
+        (
+            await db.execute(
+                select(QuestionDefinition.id).where(QuestionDefinition.task_id == task.id)
+            )
+        ).scalars().all()
+    )
+    if not question_ids and task.question_origin_id is not None:
+        question_ids = {task.question_origin_id}
+    assigned_user_ids = set(
+        (
+            await db.execute(
+                select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
+            )
+        ).scalars().all()
+    )
+    responded_pairs = (
+        {
+            (row.question_id, row.user_id)
+            for row in (
+                await db.execute(
+                    select(QuestionUserStatus.question_id, QuestionUserStatus.user_id).where(
+                        QuestionUserStatus.question_id.in_(question_ids)
+                    )
+                )
+            ).all()
+        }
+        if question_ids
+        else set()
+    )
+    all_users_responded = bool(question_ids and assigned_user_ids) and all(
+        (question_id, user_id) in responded_pairs
+        for question_id in question_ids
+        for user_id in assigned_user_ids
+    )
+    task.status = TaskStatus.DONE.value if all_users_responded else TaskStatus.TODO.value
+    task.completed_at = datetime.now(timezone.utc) if all_users_responded else None
+
+
+async def _split_or_update_edited_question_task(
+    db: AsyncSession,
+    question: QuestionDefinition,
+) -> None:
+    task = await db.get(Task, question.task_id) if question.task_id is not None else None
+    if task is None:
+        task = await db.scalar(
+            select(Task).where(Task.question_origin_id == question.id)
+        )
+    if task is None:
+        return
+
+    members = await _question_task_members(db, task.id)
+    if not members:
+        members = [question]
+    other_members = [item for item in members if item.id != question.id]
+    if not other_members:
+        question.task_id = task.id
+        task.question_batch_date = None
+        _apply_question_task_content(task, [question])
+        task.status = TaskStatus.TODO.value
+        task.completed_at = None
+        return
+
+    assignee_ids = list(
+        (
+            await db.execute(
+                select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
+            )
+        ).scalars().all()
+    )
+    question.task_id = None
+    if task.question_origin_id == question.id:
+        task.question_origin_id = other_members[0].id
+        task.fast_task_group_id = other_members[0].id
+    _apply_question_task_content(task, other_members)
+    await db.flush()
+    await _refresh_question_task_status(db, task)
+
+    separate_task = Task(
+        title=_question_task_title(question.text),
+        description=_question_task_description(question.guidance),
+        assigned_to=None,
+        created_by=task.created_by,
+        question_origin_id=question.id,
+        question_batch_date=None,
+        fast_task_group_id=question.id,
+        status=TaskStatus.TODO.value,
+        priority=task.priority,
+        phase=task.phase,
+        progress_percentage=0,
+        start_date=datetime.now(timezone.utc),
+        due_date=task.due_date,
+        is_deadline_important=task.is_deadline_important,
+        is_r1=task.is_r1,
+        is_active=task.is_active,
+    )
+    db.add(separate_task)
+    await db.flush()
+    question.task_id = separate_task.id
+    for user_id in assignee_ids:
+        db.add(TaskAssignee(task_id=separate_task.id, user_id=user_id))
+
+
+async def _detach_question_from_shared_task(
+    db: AsyncSession,
+    question: QuestionDefinition,
+) -> None:
+    task = await db.get(Task, question.task_id) if question.task_id is not None else None
+    if task is None:
+        return
+    members = await _question_task_members(db, task.id)
+    other_members = [item for item in members if item.id != question.id]
+    if not other_members:
+        return
+    question.task_id = None
+    if task.question_origin_id == question.id:
+        task.question_origin_id = other_members[0].id
+        task.fast_task_group_id = other_members[0].id
+    _apply_question_task_content(task, other_members)
+    await db.flush()
+    await _refresh_question_task_status(db, task)
+
+
 async def _category_or_404(db: AsyncSession, category_id: uuid.UUID) -> QuestionCategory:
     category = await db.get(QuestionCategory, category_id)
     if category is None:
@@ -189,9 +360,13 @@ async def _question_out(
         )
         for signoff, full_name in (await db.execute(signoff_stmt)).all()
     ]
-    task_status = await db.scalar(
-        select(Task.status).where(Task.question_origin_id == question.id)
-    )
+    task_status = None
+    if question.task_id is not None:
+        task_status = await db.scalar(select(Task.status).where(Task.id == question.task_id))
+    if task_status is None:
+        task_status = await db.scalar(
+            select(Task.status).where(Task.question_origin_id == question.id)
+        )
     return QuestionDefinitionOut(
         id=question.id,
         category_id=question.category_id,
@@ -303,13 +478,28 @@ async def list_question_library(
         done_question_ids = set(
             (
                 await db.execute(
-                    select(Task.question_origin_id).where(
-                        Task.question_origin_id.in_([item.id for item in questions]),
+                    select(QuestionDefinition.id)
+                    .join(Task, Task.id == QuestionDefinition.task_id)
+                    .where(
+                        QuestionDefinition.id.in_([item.id for item in questions]),
                         Task.status == TaskStatus.DONE.value,
                     )
                 )
             ).scalars().all()
         )
+        legacy_done_question_ids = set(
+            (
+                await db.execute(
+                    select(Task.question_origin_id).where(
+                        Task.question_origin_id.in_(
+                            [item.id for item in questions if item.task_id is None]
+                        ),
+                        Task.status == TaskStatus.DONE.value,
+                    )
+                )
+            ).scalars().all()
+        )
+        done_question_ids.update(legacy_done_question_ids)
 
     output: list[QuestionCategoryOut] = []
     for category in categories:
@@ -421,6 +611,13 @@ async def delete_question_category(
     _: User = Depends(require_admin),
 ) -> Response:
     category = await _category_or_404(db, category_id)
+    category_questions = (
+        await db.execute(
+            select(QuestionDefinition).where(QuestionDefinition.category_id == category_id)
+        )
+    ).scalars().all()
+    for question in category_questions:
+        await _detach_question_from_shared_task(db, question)
     await db.delete(category)
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
@@ -461,43 +658,56 @@ async def create_question_definition(
         await db.refresh(question)
         return await _question_out(db, question, current_user)
 
-    participant_users = (
-        await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at))
-    ).scalars().all()
-    participants = [user for user in participant_users if _is_question_participant(user)]
-    task = Task(
-        title=_question_task_title(question.text),
-        description=_question_task_description(question.guidance),
-        assigned_to=None,
-        created_by=current_user.id,
-        question_origin_id=question.id,
-        fast_task_group_id=question.id,
-        status=TaskStatus.TODO.value,
-        priority=TaskPriority.NORMAL.value,
-        phase=ProjectPhaseStatus.MEETINGS.value,
-        progress_percentage=0,
-        start_date=now,
-        due_date=_question_task_due_date(now),
-        is_deadline_important=True,
-        is_r1=True,
-        is_active=True,
-    )
-    db.add(task)
-    await db.flush()
-
     notifications = []
-    for participant in participants:
-        db.add(TaskAssignee(task_id=task.id, user_id=participant.id))
-        notifications.append(
-            add_notification(
-                db=db,
-                user_id=participant.id,
-                type=NotificationType.assignment,
-                title="Detyrë e re",
-                body=question.text,
-                data={"task_id": str(task.id), "question_id": str(question.id)},
-            )
+    batch_date = _question_task_batch_date(now)
+    task = await db.scalar(
+        select(Task).where(Task.question_batch_date == batch_date)
+    )
+    if task is None:
+        participant_users = (
+            await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at))
+        ).scalars().all()
+        participants = [user for user in participant_users if _is_question_participant(user)]
+        task = Task(
+            title=_question_task_title(question.text),
+            description=_question_task_description(question.guidance),
+            assigned_to=None,
+            created_by=current_user.id,
+            question_origin_id=question.id,
+            question_batch_date=batch_date,
+            fast_task_group_id=question.id,
+            status=TaskStatus.TODO.value,
+            priority=TaskPriority.NORMAL.value,
+            phase=ProjectPhaseStatus.MEETINGS.value,
+            progress_percentage=0,
+            start_date=now,
+            due_date=_question_task_due_date(now),
+            is_deadline_important=True,
+            is_r1=True,
+            is_active=True,
         )
+        db.add(task)
+        await db.flush()
+        question.task_id = task.id
+        for participant in participants:
+            db.add(TaskAssignee(task_id=task.id, user_id=participant.id))
+            notifications.append(
+                add_notification(
+                    db=db,
+                    user_id=participant.id,
+                    type=NotificationType.assignment,
+                    title="Detyrë e re",
+                    body=question.text,
+                    data={"task_id": str(task.id), "question_id": str(question.id)},
+                )
+            )
+    else:
+        question.task_id = task.id
+        await db.flush()
+        members = await _question_task_members(db, task.id)
+        _apply_question_task_content(task, members)
+        task.status = TaskStatus.TODO.value
+        task.completed_at = None
 
     await db.commit()
     for notification in notifications:
@@ -551,16 +761,7 @@ async def update_question_definition(
         await db.execute(
             delete(QuestionDailySignoff).where(QuestionDailySignoff.question_id == question.id)
         )
-        await db.execute(
-            update(Task)
-            .where(Task.question_origin_id == question.id)
-            .values(
-                title=_question_task_title(updated_text),
-                description=_question_task_description(updated_guidance),
-                status=TaskStatus.TODO.value,
-                completed_at=None,
-            )
-        )
+        await _split_or_update_edited_question_task(db, question)
     await db.commit()
     await db.refresh(question)
     return await _question_out(db, question, current_user)
@@ -599,6 +800,7 @@ async def delete_question_definition(
 ) -> Response:
     question = await _question_or_404(db, question_id)
     category_id = question.category_id
+    await _detach_question_from_shared_task(db, question)
     await db.delete(question)
     await db.flush()
     remaining = (
@@ -621,7 +823,7 @@ async def update_own_question_status(
     db: AsyncSession = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ) -> QuestionStatusSummary | None:
-    await _question_or_404(db, question_id)
+    question = await _question_or_404(db, question_id)
     current = await db.scalar(
         select(QuestionUserStatus).where(
             QuestionUserStatus.question_id == question_id,
@@ -661,34 +863,11 @@ async def update_own_question_status(
         )
     )
     await db.flush()
-    assigned_user_ids = set(
-        (
-            await db.execute(
-                select(TaskAssignee.user_id)
-                .join(Task, Task.id == TaskAssignee.task_id)
-                .where(Task.question_origin_id == question_id)
-            )
-        ).scalars().all()
-    )
-    responded_user_ids = set(
-        (
-            await db.execute(
-                select(QuestionUserStatus.user_id).where(
-                    QuestionUserStatus.question_id == question_id
-                )
-            )
-        ).scalars().all()
-    )
-    all_users_responded = bool(assigned_user_ids) and assigned_user_ids.issubset(responded_user_ids)
-    task_status = TaskStatus.DONE.value if all_users_responded else TaskStatus.TODO.value
-    await db.execute(
-        update(Task)
-        .where(Task.question_origin_id == question_id)
-        .values(
-            status=task_status,
-            completed_at=datetime.now(timezone.utc) if all_users_responded else None,
-        )
-    )
+    task = await db.get(Task, question.task_id) if question.task_id is not None else None
+    if task is None:
+        task = await db.scalar(select(Task).where(Task.question_origin_id == question_id))
+    if task is not None:
+        await _refresh_question_task_status(db, task)
     await db.commit()
     if payload.status is None:
         return None
