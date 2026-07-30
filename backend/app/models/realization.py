@@ -233,6 +233,17 @@ class RealizationObservation(Base):
         Index("ix_realization_observation_period_user", "period_id", "user_id", "created_at"),
         Index("ix_realization_observation_repeat_key", "repeat_key", "created_at"),
         Index("ix_realization_observation_source", "source_type", "source_id"),
+        Index(
+            "uq_realization_observation_active_verification",
+            "period_id",
+            "source_type",
+            "source_id",
+            unique=True,
+            postgresql_where=text(
+                "source_type = 'realization_observation_verification' "
+                "AND voided_at IS NULL"
+            ),
+        ),
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)

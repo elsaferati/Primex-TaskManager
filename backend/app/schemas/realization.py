@@ -130,6 +130,25 @@ class RealizationObservationCreate(RealizationSchema):
                 raise ValueError("REPEATED_PROBLEM requires repeat_key and a comment")
         if self.evidence_json.get("high_impact") is True and not has_comment:
             raise ValueError("high-impact evidence requires a comment")
+        if self.category is RealizationObservationCategory.HELPED_COLLEAGUE:
+            if not self.evidence_json.get("helped_user_id"):
+                raise ValueError("HELPED_COLLEAGUE requires evidence_json.helped_user_id")
+        if self.category is RealizationObservationCategory.BLOCKER:
+            impact = self.evidence_json.get("impact_level")
+            if not self.evidence_json.get("affected_user_id") or impact not in {
+                "MINOR",
+                "MAJOR",
+                "MULTIPLE_PEOPLE",
+            }:
+                raise ValueError(
+                    "BLOCKER requires affected_user_id and a valid impact_level"
+                )
+        if (
+            self.category is RealizationObservationCategory.EXTRA_TASK
+            and self.evidence_json.get("kind") == "COMPLETED_EXTRA_TASK"
+            and self.task_id is None
+        ):
+            raise ValueError("COMPLETED_EXTRA_TASK requires task scope evidence")
         return self
 
 
@@ -251,3 +270,27 @@ class RealizationDepartmentResultOut(RealizationSchema):
     final_comment: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class RealizationReviewRequest(RealizationFinalDecision):
+    question_values: dict[str, object] = Field(default_factory=dict)
+
+
+class RealizationObservationVerify(RealizationSchema):
+    comment: str | None = Field(default=None, max_length=4000)
+
+
+class RealizationPersonWorkflowOut(RealizationPersonResultOut):
+    user_name: str
+
+
+class RealizationWeeklyOut(RealizationSchema):
+    period: RealizationPeriodOut
+    department_name: str | None = None
+    has_planned_snapshot: bool
+    has_final_snapshot: bool
+    can_calculate: bool
+    message: str | None = None
+    people: list[RealizationPersonWorkflowOut] = Field(default_factory=list)
+    department_result: RealizationDepartmentResultOut | None = None
+    unassigned: list[dict] = Field(default_factory=list)

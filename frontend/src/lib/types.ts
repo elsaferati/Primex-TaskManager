@@ -618,3 +618,137 @@ export interface Meeting {
   updated_at: string
   participant_ids?: string[]
 }
+
+export type RealizationPeriodStatus =
+  | "OPEN"
+  | "CALCULATED"
+  | "REVIEWED"
+  | "APPROVED"
+  | "LOCKED"
+
+export type RealizationLevel = "A+" | "A" | "B" | "C" | "M" | "D" | "E"
+export type RealizationSymbol = "+" | "+/-" | "-"
+
+export interface RealizationPeriod {
+  id: string
+  period_type: "WEEKLY"
+  slot: "ALL"
+  start_date: string
+  end_date: string
+  department_id: string
+  policy_version_id: string
+  planned_snapshot_id?: string | null
+  final_snapshot_id?: string | null
+  status: RealizationPeriodStatus
+  calculated_at?: string | null
+  approved_at?: string | null
+  locked_at?: string | null
+  created_by?: string | null
+  approved_by?: string | null
+  created_at: string
+}
+
+export interface RealizationTaskFact {
+  match_key: string
+  task_id?: string | null
+  title: string
+  project_title?: string | null
+  source_type: string
+  classification: string
+  status?: string | null
+  completed_at?: string | null
+  planned_deadline?: string | null
+  positive_progress_delta?: number
+  postponement?: string | null
+  reassignment?: boolean
+}
+
+export interface RealizationObservationFact {
+  id: string
+  marker: "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "DIAMOND"
+  category: string
+  comment?: string | null
+  task_id?: string | null
+  evidence_json: Record<string, unknown>
+  verified: boolean
+  visibility: string
+}
+
+export interface RealizationQuestion {
+  key: string
+  label: string
+  answer_type: string
+  auto_value: unknown
+  final_value: unknown
+  source_status: string
+  evidence_ids: string[]
+  explanation: string
+}
+
+export interface RealizationPersonResult {
+  id: string
+  period_id: string
+  user_id: string
+  user_name: string
+  department_id?: string | null
+  facts_json: {
+    tasks?: RealizationTaskFact[]
+    observations?: RealizationObservationFact[]
+    questions?: RealizationQuestion[]
+    needs_review?: Array<Record<string, unknown>>
+    counters?: Record<string, number>
+    decision?: { triggered_rule?: string; reasons?: string[] }
+  }
+  planned_count: number
+  completed_on_time_count: number
+  completed_late_count: number
+  in_progress_count: number
+  pending_count: number
+  no_progress_count: number
+  additional_count: number
+  approved_postponement_count: number
+  unapproved_postponement_count: number
+  tardiness_count: number
+  approved_absence_days: number
+  unexcused_absence_days: number
+  suggested_symbol?: RealizationSymbol | null
+  suggested_level?: RealizationLevel | null
+  suggested_bonus?: number | null
+  final_symbol?: RealizationSymbol | null
+  final_level?: RealizationLevel | null
+  final_bonus?: number | null
+  auto_narrative?: string | null
+  manager_comment?: string | null
+  override_reason?: string | null
+  reviewed_by?: string | null
+  reviewed_at?: string | null
+}
+
+export interface RealizationDepartmentResult {
+  id: string
+  period_id: string
+  department_id: string
+  facts_json: Record<string, unknown>
+  a_plus_count: number
+  a_count: number
+  b_count: number
+  c_count: number
+  m_count: number
+  d_count: number
+  e_count: number
+  a_rate?: number | null
+  total_bonus?: number | null
+  average_bonus?: number | null
+}
+
+export interface RealizationWeeklyResponse {
+  period: RealizationPeriod
+  department_name?: string | null
+  has_planned_snapshot: boolean
+  has_final_snapshot: boolean
+  can_calculate: boolean
+  message?: string | null
+  people: RealizationPersonResult[]
+  department_result?: RealizationDepartmentResult | null
+  unassigned: RealizationTaskFact[]
+}

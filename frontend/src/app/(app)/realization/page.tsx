@@ -3,10 +3,10 @@
 import * as React from "react"
 import Link from "next/link"
 import {
-  Activity,
   AlertTriangle,
   ArrowRight,
   CalendarDays,
+  Check,
   CheckCircle2,
   ChevronDown,
   ChevronUp,
@@ -14,19 +14,15 @@ import {
   Clock3,
   ExternalLink,
   FileClock,
-  Layers3,
+  Lock,
   RefreshCw,
+  ShieldCheck,
   Sparkles,
   Target,
   Users,
 } from "lucide-react"
 import { toast } from "sonner"
 
-import type {
-  WeeklyPlanPerformanceAssigneeGroup,
-  WeeklyPlanPerformanceResponse,
-  WeeklyPlanPerformanceTask,
-} from "@/components/weekly-plan-performance-view"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -47,61 +43,64 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
-import type { Department } from "@/lib/types"
+import type {
+  Department,
+  RealizationLevel,
+  RealizationPersonResult,
+  RealizationQuestion,
+  RealizationSymbol,
+  RealizationTaskFact,
+  RealizationWeeklyResponse,
+} from "@/lib/types"
 import { cn } from "@/lib/utils"
 
+const WORKFLOW = ["OPEN", "CALCULATED", "REVIEWED", "APPROVED", "LOCKED"] as const
 
-type EvidenceBucket = {
-  key: keyof Pick<
-    WeeklyPlanPerformanceAssigneeGroup,
-    "completed" | "in_progress" | "pending" | "late" | "additional" | "removed_or_canceled"
-  >
-  label: string
-  emptyLabel: string
-  dotClass: string
+const CLASSIFICATION_LABELS: Record<string, string> = {
+  completed_on_time: "Përfunduar në kohë",
+  completed_late: "Përfunduar me vonesë",
+  in_progress: "Në progres",
+  pending_confirmation: "Në pritje të konfirmimit",
+  no_progress: "Pa progres",
+  late_open: "E hapur me vonesë",
+  needs_review: "Kërkon shqyrtim",
+  removed_or_canceled_approved: "Hequr / anuluar me aprovim",
+  removed_or_canceled_unapproved: "Hequr / anuluar pa aprovim",
+  additional_completed: "Shtesë e përfunduar",
+  additional_in_progress: "Shtesë në progres",
+  additional_pending: "Shtesë në pritje",
+  additional_no_progress: "Shtesë pa progres",
 }
 
-const EVIDENCE_BUCKETS: EvidenceBucket[] = [
+const QUESTION_SECTIONS = [
+  { title: "1. Detyrat", keys: ["task_status", "new_tasks_added", "approved_postponement"] },
   {
-    key: "completed",
-    label: "Completed",
-    emptyLabel: "No completed tasks",
-    dotClass: "bg-emerald-500",
+    title: "2. Angazhimi",
+    keys: ["requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal"],
   },
   {
-    key: "in_progress",
-    label: "In progress",
-    emptyLabel: "No tasks in progress",
-    dotClass: "bg-amber-400",
+    title: "3. Disiplina",
+    keys: ["respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences"],
   },
   {
-    key: "pending",
-    label: "Pending",
-    emptyLabel: "No pending tasks",
-    dotClass: "bg-slate-400",
+    title: "4. Vështrim shtesë i javës",
+    keys: ["week_positive", "week_problems", "affected_other_plan", "repeated_after_clarification"],
   },
   {
-    key: "late",
-    label: "Late / overdue",
-    emptyLabel: "No late tasks",
-    dotClass: "bg-rose-500",
-  },
-  {
-    key: "additional",
-    label: "Additional",
-    emptyLabel: "No additional tasks",
-    dotClass: "bg-cyan-500",
-  },
-  {
-    key: "removed_or_canceled",
-    label: "Removed / canceled",
-    emptyLabel: "No removed tasks",
-    dotClass: "bg-violet-400",
+    title: "5. Vlerësimi",
+    keys: [
+      "current_level",
+      "suggested_evaluation_level",
+      "weekly_bonus",
+      "evaluation",
+      "comments",
+    ],
   },
 ]
 
-function localDateValue(value: Date) {
+function dateValue(value: Date) {
   const year = value.getFullYear()
   const month = String(value.getMonth() + 1).padStart(2, "0")
   const day = String(value.getDate()).padStart(2, "0")
@@ -111,56 +110,70 @@ function localDateValue(value: Date) {
 function currentWeekStart() {
   const today = new Date()
   const day = today.getDay()
-  const distanceFromMonday = day === 0 ? 6 : day - 1
-  today.setDate(today.getDate() - distanceFromMonday)
-  return localDateValue(today)
+  today.setDate(today.getDate() - (day === 0 ? 6 : day - 1))
+  return dateValue(today)
 }
 
-function formatWeekRange(start: string, end?: string | null) {
-  const format = (value: string) =>
-    new Intl.DateTimeFormat("sq-AL", { day: "2-digit", month: "short", year: "numeric" }).format(
-      new Date(`${value}T12:00:00`)
-    )
-  return end ? `${format(start)} – ${format(end)}` : format(start)
+function formatWeek(start: string, end: string) {
+  const formatter = new Intl.DateTimeFormat("sq-AL", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })
+  return `${formatter.format(new Date(`${start}T12:00:00`))} – ${formatter.format(
+    new Date(`${end}T12:00:00`)
+  )}`
 }
 
-function percentage(value: number, total: number) {
-  if (total <= 0) return 0
-  return Math.min(100, Math.round((value / total) * 100))
+function errorDetail(payload: unknown, fallback: string) {
+  if (payload && typeof payload === "object" && "detail" in payload) {
+    const detail = (payload as { detail?: unknown }).detail
+    if (typeof detail === "string") return detail
+  }
+  return fallback
 }
 
-function taskCount(group: WeeklyPlanPerformanceAssigneeGroup) {
-  return (
-    (group.completed?.length || 0) +
-    (group.in_progress?.length || 0) +
-    (group.pending?.length || 0) +
-    (group.late?.length || 0) +
-    (group.removed_or_canceled?.length || 0)
-  )
+function displayValue(value: unknown): string {
+  if (value === null || value === undefined || value === "") return "—"
+  if (typeof value === "boolean") return value ? "Po" : "Jo"
+  if (Array.isArray(value)) return value.length ? value.map(displayValue).join(", ") : "—"
+  if (typeof value === "object") {
+    return Object.entries(value as Record<string, unknown>)
+      .map(([key, item]) => `${key.replaceAll("_", " ")}: ${displayValue(item)}`)
+      .join(" · ")
+  }
+  return String(value)
 }
 
-function MetricCard({
+function statusTone(status: string) {
+  if (status === "MISSING_EVIDENCE") return "border-amber-200 bg-amber-50 text-amber-800"
+  if (status === "AUTO_NEEDS_CONFIRMATION") return "border-orange-200 bg-orange-50 text-orange-800"
+  if (status === "MANAGER_CONFIRMED") return "border-emerald-200 bg-emerald-50 text-emerald-800"
+  return "border-slate-200 bg-slate-50 text-slate-700"
+}
+
+function classificationTone(classification: string) {
+  if (classification.includes("completed")) return "border-emerald-200 bg-emerald-50 text-emerald-800"
+  if (classification.includes("additional")) return "border-cyan-200 bg-cyan-50 text-cyan-800"
+  if (classification.includes("late") || classification.includes("no_progress"))
+    return "border-rose-200 bg-rose-50 text-rose-800"
+  if (classification.includes("review")) return "border-amber-200 bg-amber-50 text-amber-800"
+  return "border-slate-200 bg-slate-50 text-slate-700"
+}
+
+function Metric({
   label,
   value,
   detail,
   icon: Icon,
-  tone,
 }: {
   label: string
-  value: number
+  value: number | string
   detail: string
   icon: React.ComponentType<{ className?: string }>
-  tone: "emerald" | "amber" | "rose" | "cyan" | "slate"
 }) {
-  const toneClasses = {
-    emerald: "border-emerald-200 bg-emerald-50/70 text-emerald-700",
-    amber: "border-amber-200 bg-amber-50/70 text-amber-700",
-    rose: "border-rose-200 bg-rose-50/70 text-rose-700",
-    cyan: "border-cyan-200 bg-cyan-50/70 text-cyan-700",
-    slate: "border-slate-200 bg-slate-50/70 text-slate-700",
-  }
   return (
-    <Card className="overflow-hidden shadow-none">
+    <Card className="shadow-none">
       <CardContent className="flex items-center justify-between gap-4 p-5">
         <div>
           <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
@@ -169,7 +182,7 @@ function MetricCard({
           <p className="mt-2 text-3xl font-bold tabular-nums">{value}</p>
           <p className="mt-1 text-xs text-muted-foreground">{detail}</p>
         </div>
-        <div className={cn("rounded-2xl border p-3", toneClasses[tone])}>
+        <div className="rounded-2xl border bg-slate-50 p-3 text-slate-700">
           <Icon className="h-5 w-5" />
         </div>
       </CardContent>
@@ -177,78 +190,342 @@ function MetricCard({
   )
 }
 
-function EvidenceTask({ task }: { task: WeeklyPlanPerformanceTask }) {
-  const content = (
-    <>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium">{task.title}</p>
-        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-          {task.project_title || task.source_type || "Task"}
-        </p>
-      </div>
-      {task.task_id ? <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : null}
-    </>
-  )
-
-  if (!task.task_id) {
-    return <div className="flex items-start justify-between gap-3 rounded-lg border bg-background p-3">{content}</div>
-  }
+function WorkflowStrip({ status }: { status: string }) {
+  const current = WORKFLOW.indexOf(status as (typeof WORKFLOW)[number])
   return (
-    <Link
-      href={`/tasks/${task.task_id}`}
-      className="flex items-start justify-between gap-3 rounded-lg border bg-background p-3 transition-colors hover:bg-muted/60"
-    >
-      {content}
-    </Link>
+    <div className="grid gap-2 sm:grid-cols-5">
+      {WORKFLOW.map((step, index) => (
+        <div
+          key={step}
+          className={cn(
+            "flex items-center gap-2 rounded-lg border px-3 py-2 text-xs font-semibold",
+            index <= current
+              ? "border-cyan-300 bg-cyan-50 text-cyan-900"
+              : "border-slate-200 bg-white text-slate-400"
+          )}
+        >
+          {index < current ? <Check className="h-3.5 w-3.5" /> : <CircleDashed className="h-3.5 w-3.5" />}
+          {step}
+        </div>
+      ))}
+    </div>
   )
 }
 
-function EvidencePanel({
-  group,
-  onClose,
-}: {
-  group: WeeklyPlanPerformanceAssigneeGroup
-  onClose: () => void
-}) {
+function TaskEvidence({ task }: { task: RealizationTaskFact }) {
+  const body = (
+    <>
+      <div className="min-w-0 flex-1">
+        <p className="truncate text-sm font-medium">{task.title}</p>
+        <p className="mt-0.5 truncate text-xs text-muted-foreground">
+          {task.project_title || task.source_type}
+        </p>
+      </div>
+      <Badge variant="outline" className={cn("shrink-0", classificationTone(task.classification))}>
+        {CLASSIFICATION_LABELS[task.classification] || task.classification}
+      </Badge>
+      {task.task_id ? <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" /> : null}
+    </>
+  )
+  return task.task_id ? (
+    <Link
+      href={`/tasks/${task.task_id}`}
+      className="flex items-center gap-3 rounded-lg border bg-background p-3 hover:bg-muted/50"
+    >
+      {body}
+    </Link>
+  ) : (
+    <div className="flex items-center gap-3 rounded-lg border bg-background p-3">{body}</div>
+  )
+}
+
+function QuestionRow({ question }: { question: RealizationQuestion }) {
+  const value = question.final_value ?? question.auto_value
   return (
-    <Card className="border-slate-300 shadow-sm">
-      <CardHeader className="flex flex-row items-start justify-between gap-4 border-b bg-slate-50/70">
-        <div>
-          <CardTitle className="text-base">Evidence · {group.assignee_name}</CardTitle>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Çdo numër në rresht lidhet me task-et burimore të snapshot-it.
-          </p>
-        </div>
-        <Button variant="ghost" size="sm" onClick={onClose}>
-          Mbyll
-        </Button>
-      </CardHeader>
-      <CardContent className="grid gap-5 p-5 md:grid-cols-2 xl:grid-cols-3">
-        {EVIDENCE_BUCKETS.map((bucket) => {
-          const tasks = group[bucket.key] || []
-          return (
-            <section key={bucket.key}>
-              <div className="mb-2 flex items-center justify-between">
-                <div className="flex items-center gap-2">
-                  <span className={cn("h-2 w-2 rounded-full", bucket.dotClass)} />
-                  <h3 className="text-sm font-semibold">{bucket.label}</h3>
+    <div className="grid gap-2 border-b py-3 last:border-b-0 md:grid-cols-[minmax(220px,0.8fr)_1.4fr_auto]">
+      <div>
+        <p className="text-sm font-medium">{question.label}</p>
+        {question.explanation ? (
+          <p className="mt-1 text-xs text-muted-foreground">{question.explanation}</p>
+        ) : null}
+      </div>
+      <p className="text-sm leading-6">{displayValue(value)}</p>
+      <Badge variant="outline" className={cn("h-fit w-fit", statusTone(question.source_status))}>
+        {question.source_status}
+      </Badge>
+    </div>
+  )
+}
+
+function PersonDetail({
+  person,
+  canReview,
+  canVerify,
+  onReload,
+  apiFetch,
+}: {
+  person: RealizationPersonResult
+  canReview: boolean
+  canVerify: boolean
+  onReload: () => Promise<void>
+  apiFetch: (path: string, init?: RequestInit) => Promise<Response>
+}) {
+  const [level, setLevel] = React.useState<RealizationLevel>(person.suggested_level || "B")
+  const [symbol, setSymbol] = React.useState<RealizationSymbol>(person.suggested_symbol || "+")
+  const [bonus, setBonus] = React.useState(String(person.suggested_bonus ?? 0))
+  const [managerComment, setManagerComment] = React.useState(person.manager_comment || "")
+  const [overrideReason, setOverrideReason] = React.useState(person.override_reason || "")
+  const [saving, setSaving] = React.useState(false)
+  const [observationCategory, setObservationCategory] = React.useState("EXTRA_TASK")
+  const [observationMarker, setObservationMarker] = React.useState("POSITIVE")
+  const [observationComment, setObservationComment] = React.useState("")
+  const questions = person.facts_json.questions || []
+  const tasks = person.facts_json.tasks || []
+  const observations = person.facts_json.observations || []
+  const overridden =
+    level !== person.suggested_level ||
+    symbol !== person.suggested_symbol ||
+    Number(bonus) !== person.suggested_bonus
+
+  const submitReview = async () => {
+    if (overridden && !overrideReason.trim()) {
+      toast.error("Arsyeja e override është e detyrueshme.")
+      return
+    }
+    setSaving(true)
+    try {
+      const response = await apiFetch(
+        `/realization/periods/${person.period_id}/results/${person.id}/review`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            final_level: level,
+            final_symbol: symbol,
+            final_bonus: Number(bonus),
+            manager_comment: managerComment || null,
+            override_reason: overridden ? overrideReason : null,
+            question_values: {},
+          }),
+        }
+      )
+      if (!response.ok) throw new Error(errorDetail(await response.json(), "Review dështoi."))
+      toast.success("Rezultati u shqyrtua.")
+      await onReload()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Review dështoi.")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const addObservation = async () => {
+    if (!observationComment.trim()) {
+      toast.error("Shkruaj evidencën ose komentin.")
+      return
+    }
+    const response = await apiFetch("/realization/observations", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        period_id: person.period_id,
+        scope_type: "PERSON",
+        user_id: person.user_id,
+        department_id: person.department_id,
+        marker: observationMarker,
+        category: observationCategory,
+        comment: observationComment,
+        evidence_json:
+          observationCategory === "EXTRA_TASK" ? { kind: "REQUESTED_EXTRA_TASK" } : {},
+        visibility: "PERSON_AND_MANAGER",
+      }),
+    })
+    if (!response.ok) {
+      toast.error(errorDetail(await response.json(), "Evidenca nuk u ruajt."))
+      return
+    }
+    setObservationComment("")
+    toast.success("Evidenca u shtua. Verifikimi kërkohet para se të ndikojë në rezultat.")
+    await onReload()
+  }
+
+  const verifyObservation = async (id: string) => {
+    const response = await apiFetch(`/realization/observations/${id}/verify`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({}),
+    })
+    if (!response.ok) {
+      toast.error(errorDetail(await response.json(), "Verifikimi dështoi."))
+      return
+    }
+    toast.success("Evidenca u verifikua. Rikalkulo për ta përfshirë në sugjerim.")
+    await onReload()
+  }
+
+  return (
+    <div className="space-y-5 border-t bg-slate-50/50 p-5">
+      <div className="grid gap-5 xl:grid-cols-[1.15fr_0.85fr]">
+        <Card className="shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">Task evidence</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {tasks.length ? tasks.map((task) => <TaskEvidence key={task.match_key} task={task} />) : (
+              <p className="text-sm text-muted-foreground">Nuk ka task evidence për këtë person.</p>
+            )}
+          </CardContent>
+        </Card>
+        <Card className="shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">Narrativa automatike</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <p className="text-sm leading-6">{person.auto_narrative || "—"}</p>
+            {person.facts_json.needs_review?.length ? (
+              <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                {person.facts_json.needs_review.length} çështje kërkojnë shqyrtim manual.
+              </div>
+            ) : null}
+          </CardContent>
+        </Card>
+      </div>
+
+      <Card className="shadow-none">
+        <CardHeader>
+          <CardTitle className="text-base">Pyetjet automatike</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {QUESTION_SECTIONS.map((section) => {
+            const sectionQuestions = section.keys
+              .map((key) => questions.find((item) => item.key === key))
+              .filter((item): item is RealizationQuestion => Boolean(item))
+            if (!sectionQuestions.length) return null
+            return (
+              <section key={section.title} className="mb-5 last:mb-0">
+                <h3 className="rounded-md bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
+                  {section.title}
+                </h3>
+                {sectionQuestions.map((question) => (
+                  <QuestionRow key={question.key} question={question} />
+                ))}
+              </section>
+            )
+          })}
+        </CardContent>
+      </Card>
+
+      <div className="grid gap-5 xl:grid-cols-2">
+        <Card className="shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">Observime</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {observations.map((observation) => (
+              <div key={observation.id} className="rounded-lg border bg-white p-3">
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{observation.category}</Badge>
+                  <Badge
+                    variant="outline"
+                    className={observation.verified ? "border-emerald-200 bg-emerald-50 text-emerald-800" : ""}
+                  >
+                    {observation.verified ? "VERIFIED" : "UNVERIFIED"}
+                  </Badge>
                 </div>
-                <Badge variant="secondary">{tasks.length}</Badge>
+                <p className="mt-2 text-sm">{observation.comment || "Pa koment"}</p>
+                {!observation.verified && canVerify ? (
+                  <Button className="mt-3" size="sm" variant="outline" onClick={() => void verifyObservation(observation.id)}>
+                    <ShieldCheck className="mr-2 h-4 w-4" />
+                    Verifiko
+                  </Button>
+                ) : null}
+              </div>
+            ))}
+            {!observations.length ? <p className="text-sm text-muted-foreground">Nuk ka observime.</p> : null}
+            <div className="grid gap-3 rounded-lg border border-dashed p-3">
+              <div className="grid gap-3 sm:grid-cols-2">
+                <Select value={observationCategory} onValueChange={setObservationCategory}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["EXTRA_TASK", "PROPOSAL", "QUALITY", "OTHER"].map((value) => (
+                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Select value={observationMarker} onValueChange={setObservationMarker}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["POSITIVE", "NEUTRAL", ...(canVerify ? ["NEGATIVE", "DIAMOND"] : [])].map((value) => (
+                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <Textarea
+                value={observationComment}
+                onChange={(event) => setObservationComment(event.target.value)}
+                placeholder="Përshkruaj evidencën pa supozime…"
+              />
+              <Button variant="outline" onClick={() => void addObservation()}>Shto observim</Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        <Card className="shadow-none">
+          <CardHeader>
+            <CardTitle className="text-base">Manager review</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="space-y-2">
+                <Label>Niveli final</Label>
+                <Select value={level} onValueChange={(value) => setLevel(value as RealizationLevel)} disabled={!canReview}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["A+", "A", "B", "C", "M", "D", "E"].map((value) => (
+                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="space-y-2">
-                {tasks.length ? (
-                  tasks.map((task) => <EvidenceTask key={task.match_key} task={task} />)
-                ) : (
-                  <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
-                    {bucket.emptyLabel}
-                  </div>
-                )}
+                <Label>Vlerësimi</Label>
+                <Select value={symbol} onValueChange={(value) => setSymbol(value as RealizationSymbol)} disabled={!canReview}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {["+", "+/-", "-"].map((value) => <SelectItem key={value} value={value}>{value}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
-            </section>
-          )
-        })}
-      </CardContent>
-    </Card>
+              <div className="space-y-2">
+                <Label>Bonusi (€)</Label>
+                <Input type="number" min={0} value={bonus} onChange={(event) => setBonus(event.target.value)} disabled={!canReview} />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label>Komenti i menaxherit</Label>
+              <Textarea value={managerComment} onChange={(event) => setManagerComment(event.target.value)} disabled={!canReview} />
+            </div>
+            {overridden ? (
+              <div className="space-y-2">
+                <Label>Arsyeja e override *</Label>
+                <Textarea value={overrideReason} onChange={(event) => setOverrideReason(event.target.value)} disabled={!canReview} />
+              </div>
+            ) : null}
+            {canReview ? (
+              <Button onClick={() => void submitReview()} disabled={saving}>
+                {saving ? <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle2 className="mr-2 h-4 w-4" />}
+                Ruaj review
+              </Button>
+            ) : (
+              <p className="text-sm text-muted-foreground">
+                {person.reviewed_at ? "Ky rezultat është shqyrtuar." : "Review nuk është i hapur në këtë fazë."}
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      </div>
+    </div>
   )
 }
 
@@ -257,19 +534,22 @@ export default function RealizationPage() {
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [departmentId, setDepartmentId] = React.useState("")
   const [weekStart, setWeekStart] = React.useState(currentWeekStart)
-  const [data, setData] = React.useState<WeeklyPlanPerformanceResponse | null>(null)
+  const [data, setData] = React.useState<RealizationWeeklyResponse | null>(null)
+  const [selectedPersonId, setSelectedPersonId] = React.useState<string | null>(null)
   const [loading, setLoading] = React.useState(false)
-  const [selectedAssigneeId, setSelectedAssigneeId] = React.useState<string | null>(null)
+  const [acting, setActing] = React.useState(false)
 
-  const visibleDepartments = React.useMemo(() => {
-    if (user?.role === "ADMIN" || !user?.department_id) return departments
-    return departments.filter((department) => department.id === user.department_id)
-  }, [departments, user?.department_id, user?.role])
+  const visibleDepartments = React.useMemo(
+    () =>
+      user?.role === "ADMIN" || !user?.department_id
+        ? departments
+        : departments.filter((item) => item.id === user.department_id),
+    [departments, user?.department_id, user?.role]
+  )
 
   React.useEffect(() => {
     let cancelled = false
-    const loadDepartments = async () => {
-      const response = await apiFetch("/departments")
+    void apiFetch("/departments").then(async (response) => {
       if (!response.ok || cancelled) return
       const payload = (await response.json()) as Department[]
       if (cancelled) return
@@ -277,144 +557,118 @@ export default function RealizationPage() {
       const accessible =
         user?.role === "ADMIN" || !user?.department_id
           ? payload
-          : payload.filter((department) => department.id === user.department_id)
+          : payload.filter((item) => item.id === user.department_id)
       setDepartmentId((current) => current || accessible[0]?.id || "")
-    }
-    void loadDepartments()
+    })
     return () => {
       cancelled = true
     }
   }, [apiFetch, user?.department_id, user?.role])
 
-  const loadRealization = React.useCallback(async () => {
+  const load = React.useCallback(async () => {
     if (!departmentId || !weekStart) return
     setLoading(true)
-    setSelectedAssigneeId(null)
     try {
-      const query = new URLSearchParams({
-        department_id: departmentId,
-        week_start: weekStart,
-      })
-      const response = await apiFetch(
-        `/planners/weekly-snapshots/plan-vs-final?${query.toString()}`
-      )
-      if (!response.ok) {
-        let detail = "Realizimi javor nuk mund të ngarkohej."
-        try {
-          const payload = (await response.json()) as { detail?: string }
-          if (payload.detail) detail = payload.detail
-        } catch {
-          // Keep the user-facing fallback.
-        }
-        throw new Error(detail)
-      }
-      setData((await response.json()) as WeeklyPlanPerformanceResponse)
+      const query = new URLSearchParams({ department_id: departmentId, week_start: weekStart })
+      const response = await apiFetch(`/realization/weekly?${query.toString()}`)
+      if (!response.ok) throw new Error(errorDetail(await response.json(), "Realizimi nuk mund të ngarkohej."))
+      setData((await response.json()) as RealizationWeeklyResponse)
     } catch (error) {
       setData(null)
-      toast.error(error instanceof Error ? error.message : "Realizimi javor nuk mund të ngarkohej.")
+      toast.error(error instanceof Error ? error.message : "Realizimi nuk mund të ngarkohej.")
     } finally {
       setLoading(false)
     }
   }, [apiFetch, departmentId, weekStart])
 
   React.useEffect(() => {
-    void loadRealization()
-  }, [loadRealization])
+    void load()
+  }, [load])
 
-  const summary = data?.summary
-  const planned = summary?.total_planned || 0
-  const completed = summary?.completed || 0
-  const open =
-    (summary?.in_progress || 0) + (summary?.pending || 0) + (summary?.late || 0)
-  const completionRate = percentage(completed, planned)
-  const groups = React.useMemo(
-    () =>
-      [...(data?.by_assignee || [])]
-        .filter((group) => group.assignee_name?.trim())
-        .sort((left, right) => left.assignee_name.localeCompare(right.assignee_name)),
-    [data?.by_assignee]
+  const mutate = async (path: string, success: string) => {
+    setActing(true)
+    try {
+      const response = await apiFetch(path, { method: "POST" })
+      if (!response.ok) throw new Error(errorDetail(await response.json(), "Veprimi dështoi."))
+      toast.success(success)
+      await load()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Veprimi dështoi.")
+    } finally {
+      setActing(false)
+    }
+  }
+
+  const calculate = () => {
+    const query = new URLSearchParams({ department_id: departmentId, week_start: weekStart })
+    return mutate(`/realization/weekly/calculate?${query.toString()}`, "Realizimi u kalkulua.")
+  }
+
+  const people = data?.people || []
+  const planned = people.reduce((sum, person) => sum + person.planned_count, 0)
+  const completed = people.reduce(
+    (sum, person) => sum + person.completed_on_time_count + person.completed_late_count,
+    0
   )
-  const selectedGroup =
-    groups.find(
-      (group) =>
-        (group.assignee_id || `name:${group.assignee_name}`) === selectedAssigneeId
-    ) || null
-  const departmentName =
-    visibleDepartments.find((department) => department.id === departmentId)?.name ||
-    data?.department_name ||
-    "Departamenti"
+  const open = people.reduce(
+    (sum, person) => sum + person.in_progress_count + person.pending_count + person.no_progress_count,
+    0
+  )
+  const additional = people.reduce((sum, person) => sum + person.additional_count, 0)
+  const canManage = user?.role === "MANAGER" || user?.role === "ADMIN"
+  const status = data?.period.status
 
   return (
     <div className="mx-auto max-w-[1600px] space-y-6 p-2 md:p-4">
       <section className="relative overflow-hidden rounded-2xl border bg-slate-950 px-5 py-6 text-white md:px-7">
         <div className="absolute -right-16 -top-20 h-56 w-56 rounded-full bg-cyan-400/20 blur-3xl" />
-        <div className="absolute bottom-0 left-1/3 h-24 w-72 bg-emerald-400/10 blur-3xl" />
         <div className="relative flex flex-col justify-between gap-5 lg:flex-row lg:items-end">
           <div>
-            <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">
-              <Activity className="h-4 w-4" />
-              PrimeFlow performance
-            </div>
+            <p className="mb-3 text-xs font-semibold uppercase tracking-[0.22em] text-cyan-300">
+              PrimeFlow automatic weekly realization
+            </p>
             <h1 className="text-3xl font-bold tracking-tight md:text-4xl">Realizimi</h1>
             <p className="mt-2 max-w-2xl text-sm leading-6 text-slate-300">
-              Plan vs Final, evidence dhe rezultatet javore në një pamje të vetme.
-              Snapshot-et mbeten burimi zyrtar i fakteve.
+              PLANNED dhe FINAL janë baseline zyrtar; detyrat, progresi, prezenca dhe observimet
+              shfaqen si evidence e riprodhueshme.
             </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
-            <Badge className="border border-white/15 bg-white/10 px-3 py-1.5 text-white hover:bg-white/10">
-              <CalendarDays className="mr-1.5 h-3.5 w-3.5" />
-              {data ? formatWeekRange(data.week_start, data.week_end) : "Java aktuale"}
-            </Badge>
-            <Badge className="border border-emerald-300/30 bg-emerald-400/15 px-3 py-1.5 text-emerald-100 hover:bg-emerald-400/15">
-              {data?.final_snapshot_id ? "FINAL snapshot" : "Në pritje të FINAL"}
-            </Badge>
-          </div>
+          {data ? (
+            <div className="flex flex-wrap gap-2">
+              <Badge className="border border-white/15 bg-white/10 text-white hover:bg-white/10">
+                <CalendarDays className="mr-1.5 h-3.5 w-3.5" />
+                {formatWeek(data.period.start_date, data.period.end_date)}
+              </Badge>
+              <Badge className="border border-cyan-300/30 bg-cyan-400/15 text-cyan-100 hover:bg-cyan-400/15">
+                {data.period.status}
+              </Badge>
+            </div>
+          ) : null}
         </div>
       </section>
 
       <Card className="shadow-none">
-        <CardContent className="flex flex-col gap-4 p-5 lg:flex-row lg:items-end">
-          <div className="grid flex-1 gap-4 sm:grid-cols-2">
-            <div className="space-y-2">
-              <Label htmlFor="realization-week">Java</Label>
-              <Input
-                id="realization-week"
-                type="date"
-                value={weekStart}
-                onChange={(event) => setWeekStart(event.target.value)}
-              />
-              <p className="text-xs text-muted-foreground">
-                Zgjidh të hënën e javës që dëshiron të analizosh.
-              </p>
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="realization-department">Departamenti</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId}>
-                <SelectTrigger id="realization-department">
-                  <SelectValue placeholder="Zgjidh departamentin" />
-                </SelectTrigger>
-                <SelectContent>
-                  {visibleDepartments.map((department) => (
-                    <SelectItem key={department.id} value={department.id}>
-                      {department.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <p className="text-xs text-muted-foreground">
-                Shfaqen vetëm departamentet brenda scope-it tënd.
-              </p>
-            </div>
+        <CardContent className="grid gap-4 p-5 lg:grid-cols-[1fr_1fr_auto] lg:items-end">
+          <div className="space-y-2">
+            <Label htmlFor="realization-week">Java</Label>
+            <Input id="realization-week" type="date" value={weekStart} onChange={(event) => setWeekStart(event.target.value)} />
+          </div>
+          <div className="space-y-2">
+            <Label>Departamenti</Label>
+            <Select value={departmentId} onValueChange={setDepartmentId}>
+              <SelectTrigger><SelectValue placeholder="Zgjidh departamentin" /></SelectTrigger>
+              <SelectContent>
+                {visibleDepartments.map((department) => (
+                  <SelectItem key={department.id} value={department.id}>{department.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" asChild>
-              <Link href="/weekly-planner">
-                Weekly Planner
-                <ArrowRight className="ml-2 h-4 w-4" />
-              </Link>
+              <Link href="/weekly-planner">Weekly Planner <ArrowRight className="ml-2 h-4 w-4" /></Link>
             </Button>
-            <Button onClick={() => void loadRealization()} disabled={loading || !departmentId}>
+            <Button variant="outline" onClick={() => void load()} disabled={loading}>
               <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
               Rifresko
             </Button>
@@ -422,256 +676,149 @@ export default function RealizationPage() {
         </CardContent>
       </Card>
 
+      {data ? (
+        <Card className="shadow-none">
+          <CardContent className="space-y-4 p-5">
+            <WorkflowStrip status={data.period.status} />
+            <div className="flex flex-wrap justify-end gap-2">
+              {data.can_calculate && canManage ? (
+                <Button onClick={() => void calculate()} disabled={acting}>
+                  <Sparkles className="mr-2 h-4 w-4" />
+                  {status === "CALCULATED" ? "Rikalkulo" : "Kalkulo automatikisht"}
+                </Button>
+              ) : null}
+              {user?.role === "ADMIN" && status === "REVIEWED" ? (
+                <Button onClick={() => void mutate(`/realization/periods/${data.period.id}/approve`, "Periudha u aprovua.")} disabled={acting}>
+                  <ShieldCheck className="mr-2 h-4 w-4" /> Aprovo
+                </Button>
+              ) : null}
+              {user?.role === "ADMIN" && status === "APPROVED" ? (
+                <Button onClick={() => void mutate(`/realization/periods/${data.period.id}/lock`, "Periudha u mbyll dhe u bë immutable.")} disabled={acting}>
+                  <Lock className="mr-2 h-4 w-4" /> Lock
+                </Button>
+              ) : null}
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <MetricCard
-          label="Plan"
-          value={planned}
-          detail={`${departmentName} · task-e të planifikuara`}
-          icon={Target}
-          tone="slate"
-        />
-        <MetricCard
-          label="Completed"
-          value={completed}
-          detail={`${completionRate}% e planit`}
-          icon={CheckCircle2}
-          tone="emerald"
-        />
-        <MetricCard
-          label="Open"
-          value={open}
-          detail="In progress, pending ose late"
-          icon={Clock3}
-          tone="amber"
-        />
-        <MetricCard
-          label="Late"
-          value={summary?.late || 0}
-          detail="Task-e të vonuara në FINAL"
-          icon={AlertTriangle}
-          tone="rose"
-        />
-        <MetricCard
-          label="Additional"
-          value={summary?.additional || 0}
-          detail="Të shtuara pas planit"
-          icon={Sparkles}
-          tone="cyan"
-        />
+        <Metric label="Plan" value={planned} detail="Obligime sipas assignee-ve të PLANNED" icon={Target} />
+        <Metric label="Completed" value={completed} detail="Në kohë dhe me vonesë" icon={CheckCircle2} />
+        <Metric label="Open" value={open} detail="Në progres, pending ose pa progres" icon={Clock3} />
+        <Metric label="Additional" value={additional} detail="Të futura pas baseline-it" icon={Sparkles} />
+        <Metric label="Bonus total" value={`€${data?.department_result?.total_bonus ?? 0}`} detail="Nga policy version i fiksuar" icon={ShieldCheck} />
       </div>
 
       <Card className="overflow-hidden shadow-none">
-        <CardContent className="p-0">
-          <div className="grid gap-5 border-b bg-slate-50/70 p-5 md:grid-cols-[1fr_auto] md:items-center">
-            <div>
-              <div className="flex items-center gap-2">
-                <Layers3 className="h-4 w-4 text-slate-600" />
-                <h2 className="font-semibold">Mbulimi i planit</h2>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">
-                {completed} nga {planned} task-e të planifikuara janë completed në snapshot-in final.
-              </p>
-            </div>
-            <div className="text-left md:text-right">
-              <div className="text-2xl font-bold tabular-nums">{completionRate}%</div>
-              <div className="text-xs text-muted-foreground">Plan completion</div>
-            </div>
-          </div>
-          <div className="h-2 bg-slate-100">
-            <div
-              className="h-full bg-emerald-500 transition-[width] duration-500"
-              style={{ width: `${completionRate}%` }}
-            />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card className="overflow-hidden shadow-none">
-        <CardHeader className="flex flex-row items-start justify-between gap-4 border-b">
-          <div>
-            <CardTitle className="flex items-center gap-2 text-lg">
-              <Users className="h-5 w-5" />
-              Rezultati sipas personit
-            </CardTitle>
-            <p className="mt-1 text-sm text-muted-foreground">
-              Kliko një rresht për të parë task evidence. Suggested dhe Final mbeten të ndara.
-            </p>
-          </div>
-          {data?.snapshot_id && data.final_snapshot_id ? (
-            <Badge variant="outline" className="hidden md:inline-flex">
-              PLANNED + FINAL
-            </Badge>
-          ) : null}
+        <CardHeader className="border-b">
+          <CardTitle className="flex items-center gap-2 text-lg"><Users className="h-5 w-5" /> Rezultatet sipas personit</CardTitle>
         </CardHeader>
         <CardContent className="p-0">
           {loading ? (
-            <div className="flex min-h-64 items-center justify-center">
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <RefreshCw className="h-4 w-4 animate-spin" />
-                Po ngarkohet realizimi…
-              </div>
+            <div className="flex min-h-64 items-center justify-center text-sm text-muted-foreground">
+              <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Po ngarkohet…
             </div>
-          ) : !data?.snapshot_id ? (
-            <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-              <div className="rounded-full bg-amber-50 p-4 text-amber-600">
-                <FileClock className="h-7 w-7" />
-              </div>
-              <h3 className="mt-4 font-semibold">Nuk ka PLANNED snapshot për këtë javë</h3>
-              <p className="mt-1 max-w-lg text-sm text-muted-foreground">
-                Ruaje planin zyrtar në Weekly Planner. Pas krijimit të FINAL snapshot,
-                faktet do të shfaqen automatikisht këtu.
-              </p>
-              <Button className="mt-5" variant="outline" asChild>
-                <Link href="/weekly-planner">Hap Weekly Planner</Link>
-              </Button>
-            </div>
-          ) : !data.final_snapshot_id ? (
-            <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
-              <div className="rounded-full bg-cyan-50 p-4 text-cyan-700">
-                <FileClock className="h-7 w-7" />
-              </div>
-              <h3 className="mt-4 font-semibold">Plani ekziston; FINAL snapshot mungon</h3>
-              <p className="mt-1 max-w-lg text-sm text-muted-foreground">
-                Realizimi sipas personit do të kalkulohet sapo të ruhet snapshot-i
-                “This Week (Final)” në Weekly Planner.
-              </p>
-              <Button className="mt-5" variant="outline" asChild>
-                <Link href="/weekly-planner">Krijo FINAL snapshot</Link>
-              </Button>
-            </div>
-          ) : groups.length === 0 ? (
-            <div className="flex min-h-64 flex-col items-center justify-center px-6 text-center">
-              <CircleDashed className="h-8 w-8 text-muted-foreground" />
-              <h3 className="mt-3 font-semibold">Nuk ka persona në këtë snapshot</h3>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Kontrollo departamentin ose javën e zgjedhur.
-              </p>
+          ) : !data?.has_planned_snapshot ? (
+            <MissingState title="Nuk ka PLANNED snapshot" detail="Ruaje planin zyrtar për këtë javë në Weekly Planner." />
+          ) : !data.has_final_snapshot ? (
+            <MissingState title="Plani ekziston; FINAL snapshot mungon" detail="Kalkulimi është i çaktivizuar derisa të ruhet This Week (Final)." />
+          ) : !people.length ? (
+            <div className="flex min-h-56 items-center justify-center text-sm text-muted-foreground">
+              {status === "OPEN" ? "Kliko “Kalkulo automatikisht” për të gjeneruar sugjerimet." : "Nuk ka rezultate për këtë scope."}
             </div>
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-slate-50/80 hover:bg-slate-50/80">
-                    <TableHead className="min-w-52">Personi</TableHead>
-                    <TableHead className="text-center">Plan</TableHead>
-                    <TableHead className="text-center">Completed</TableHead>
-                    <TableHead className="text-center">Open</TableHead>
-                    <TableHead className="text-center">Late</TableHead>
-                    <TableHead className="text-center">Additional</TableHead>
-                    <TableHead className="min-w-32">Suggested</TableHead>
-                    <TableHead className="min-w-32">Final</TableHead>
-                    <TableHead className="w-12" />
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {groups.map((group) => {
-                    const rowId = group.assignee_id || `name:${group.assignee_name}`
-                    const isSelected = selectedAssigneeId === rowId
-                    const groupPlan = taskCount(group)
-                    const groupCompleted = group.completed?.length || 0
-                    const groupOpen =
-                      (group.in_progress?.length || 0) +
-                      (group.pending?.length || 0) +
-                      (group.late?.length || 0)
-                    return (
-                      <TableRow
-                        key={rowId}
-                        className={cn(
-                          "cursor-pointer",
-                          isSelected && "bg-cyan-50/60 hover:bg-cyan-50/60"
-                        )}
-                        onClick={() => setSelectedAssigneeId(isSelected ? null : rowId)}
-                      >
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-slate-50/80">
+                  <TableHead>Personi</TableHead>
+                  <TableHead className="text-center">Plan</TableHead>
+                  <TableHead className="text-center">Në kohë</TableHead>
+                  <TableHead className="text-center">Late</TableHead>
+                  <TableHead className="text-center">Open</TableHead>
+                  <TableHead className="text-center">Additional</TableHead>
+                  <TableHead>Suggested</TableHead>
+                  <TableHead>Final</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {people.map((person) => {
+                  const expanded = selectedPersonId === person.id
+                  return (
+                    <React.Fragment key={person.id}>
+                      <TableRow className={cn("cursor-pointer", expanded && "bg-cyan-50/60")} onClick={() => setSelectedPersonId(expanded ? null : person.id)}>
                         <TableCell>
-                          <div className="font-semibold">{group.assignee_name}</div>
-                          <div className="mt-1 flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>{percentage(groupCompleted, groupPlan)}% completed</span>
-                            <span>·</span>
-                            <span>{groupPlan} evidence items</span>
-                          </div>
+                          <p className="font-semibold">{person.user_name}</p>
+                          <p className="text-xs text-muted-foreground">{person.reviewed_at ? "Reviewed" : "Awaiting review"}</p>
                         </TableCell>
-                        <TableCell className="text-center font-medium tabular-nums">
-                          {groupPlan}
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge className="bg-emerald-100 text-emerald-800 hover:bg-emerald-100">
-                            {groupCompleted}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge variant="secondary">{groupOpen}</Badge>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              (group.late?.length || 0) > 0 &&
-                                "border-rose-200 bg-rose-50 text-rose-700"
-                            )}
-                          >
-                            {group.late?.length || 0}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-center">
-                          <Badge
-                            variant="outline"
-                            className="border-cyan-200 bg-cyan-50 text-cyan-700"
-                          >
-                            {group.additional?.length || 0}
-                          </Badge>
+                        <TableCell className="text-center">{person.planned_count}</TableCell>
+                        <TableCell className="text-center">{person.completed_on_time_count}</TableCell>
+                        <TableCell className="text-center">{person.completed_late_count}</TableCell>
+                        <TableCell className="text-center">{person.in_progress_count + person.pending_count + person.no_progress_count}</TableCell>
+                        <TableCell className="text-center">{person.additional_count}</TableCell>
+                        <TableCell>
+                          <Badge variant="outline">{person.suggested_level} · {person.suggested_symbol} · €{person.suggested_bonus}</Badge>
                         </TableCell>
                         <TableCell>
-                          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <CircleDashed className="h-3.5 w-3.5" />
-                            Pa kalkuluar
-                          </span>
+                          {person.final_level ? (
+                            <Badge className="bg-emerald-100 text-emerald-900 hover:bg-emerald-100">
+                              {person.final_level} · {person.final_symbol} · €{person.final_bonus}
+                            </Badge>
+                          ) : <span className="text-xs text-muted-foreground">Pa final</span>}
                         </TableCell>
-                        <TableCell>
-                          <span className="inline-flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <CircleDashed className="h-3.5 w-3.5" />
-                            Pa aprovuar
-                          </span>
-                        </TableCell>
-                        <TableCell>
-                          {isSelected ? (
-                            <ChevronUp className="h-4 w-4 text-muted-foreground" />
-                          ) : (
-                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
-                          )}
-                        </TableCell>
+                        <TableCell>{expanded ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}</TableCell>
                       </TableRow>
-                    )
-                  })}
-                </TableBody>
-              </Table>
-            </div>
+                      {expanded ? (
+                        <TableRow>
+                          <TableCell colSpan={9} className="p-0">
+                            <PersonDetail
+                              person={person}
+                              canReview={canManage && status === "CALCULATED" && !person.reviewed_at}
+                              canVerify={Boolean(canManage && status !== "LOCKED")}
+                              onReload={load}
+                              apiFetch={apiFetch}
+                            />
+                          </TableCell>
+                        </TableRow>
+                      ) : null}
+                    </React.Fragment>
+                  )
+                })}
+              </TableBody>
+            </Table>
           )}
         </CardContent>
       </Card>
 
-      {selectedGroup ? (
-        <EvidencePanel group={selectedGroup} onClose={() => setSelectedAssigneeId(null)} />
+      {data?.unassigned.length ? (
+        <Card className="border-amber-200 shadow-none">
+          <CardHeader><CardTitle className="text-base">Unassigned evidence</CardTitle></CardHeader>
+          <CardContent className="space-y-2">
+            {data.unassigned.map((task) => <TaskEvidence key={task.match_key} task={task} />)}
+          </CardContent>
+        </Card>
       ) : null}
 
       {data?.message ? (
         <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
-          <div>
-            <p className="font-semibold">Snapshot status</p>
-            <p className="mt-0.5 text-amber-800">{data.message}</p>
-          </div>
+          {data.message}
         </div>
       ) : null}
+    </div>
+  )
+}
 
-      <div className="flex flex-col justify-between gap-3 rounded-xl border border-dashed bg-muted/30 p-4 text-sm text-muted-foreground md:flex-row md:items-center">
-        <p>
-          Nivelet A+–E/M dhe bonuset do të aktivizohen vetëm nga scoring engine dhe approval workflow.
-        </p>
-        <Link href="/reviews" className="inline-flex items-center gap-1 font-medium text-foreground hover:underline">
-          Hap Reviews
-          <ArrowRight className="h-3.5 w-3.5" />
-        </Link>
-      </div>
+function MissingState({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
+      <div className="rounded-full bg-amber-50 p-4 text-amber-700"><FileClock className="h-7 w-7" /></div>
+      <h3 className="mt-4 font-semibold">{title}</h3>
+      <p className="mt-1 max-w-lg text-sm text-muted-foreground">{detail}</p>
+      <Button className="mt-5" variant="outline" asChild>
+        <Link href="/weekly-planner">Hap Weekly Planner <ArrowRight className="ml-2 h-4 w-4" /></Link>
+      </Button>
     </div>
   )
 }
