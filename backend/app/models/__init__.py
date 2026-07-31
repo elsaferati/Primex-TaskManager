@@ -67,6 +67,11 @@ from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
+from app.models.weekly_planning_audit import (
+    WeeklyPlanningAuditDelivery,
+    WeeklyPlanningAuditRun,
+    WeeklyPlanningAuditSettings,
+)
 
 __all__ = [
     "AttendanceLog",
@@ -135,5 +140,8 @@ __all__ = [
     "WeeklyPlan",
     "WeeklyPlannerSnapshot",
     "WeeklyPlannerLegendEntry",
+    "WeeklyPlanningAuditDelivery",
+    "WeeklyPlanningAuditRun",
+    "WeeklyPlanningAuditSettings",
 ]
 

@@ -600,13 +600,16 @@ class GmailService:
         self, subject: str, recipients: list[str] | dict[str, list[str]], body: str,
         html_body: str | None = None,
         attachments: list[tuple[str, bytes, str]] | None = None,
+        message_id: str | None = None,
     ) -> dict[str, Any]:
         recipient_map = recipients if isinstance(recipients, dict) else {"to": recipients, "cc": [], "bcc": []}
         all_recipients = sum(recipient_map.values(), [])
         if not recipient_map["to"]:
             raise ValueError("At least one To recipient is required")
         message = EmailMessage()
-        message_id = make_msgid(domain=self.sender.rsplit("@", 1)[-1])
+        message_id = message_id or make_msgid(domain=self.sender.rsplit("@", 1)[-1])
+        if not message_id.startswith("<"):
+            message_id = f"<{message_id}>"
         message["From"] = self.sender
         message["To"] = ", ".join(recipient_map["to"])
         message["Subject"] = subject

@@ -85,6 +85,7 @@ jobs:
           PRIMEFLOW_READONLY_DATABASE_URL: ${{ secrets.PRIMEFLOW_READONLY_DATABASE_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          REPORT_STORAGE_DIR: ${{ vars.REPORT_STORAGE_DIR }}
         run: |
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
@@ -93,7 +94,7 @@ jobs:
           echo DB_POOL_TIMEOUT=30 >> backend\.env
           echo DB_POOL_RECYCLE=1800 >> backend\.env
           echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend\.env
-          echo REDIS_ENABLED=false >> backend\.env
+          echo REDIS_ENABLED=true >> backend\.env
           echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend\.env
           echo APP_TIMEZONE=Europe/Budapest >> backend\.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend\.env
@@ -112,6 +113,11 @@ jobs:
           echo EMAIL_PORT=587 >> backend\.env
           echo EMAIL_USER=%EMAIL_USER% >> backend\.env
           echo EMAIL_PASSWORD=%EMAIL_PASSWORD% >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_ENABLED=true >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_TIMEZONE=Europe/Tirane >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_RECIPIENTS=130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com >> backend\.env
+          echo REPORT_STORAGE_DIR=%REPORT_STORAGE_DIR% >> backend\.env
+          echo REPORT_RETENTION_DAYS=90 >> backend\.env
  
       - name: Update Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
@@ -142,12 +148,12 @@ jobs:
           if errorlevel 1 exit /b 1
           echo Alembic migrations completed.
  
-          REM Redis is disabled in this environment, so keep Celery processes stopped.
-          call pm2 stop celery_worker
-          call pm2 stop celery_beat
+          REM Celery worker and Beat own weekly audit generation and delivery.
+          call pm2 delete celery_worker || ver > NUL
+          call pm2 delete celery_beat || ver > NUL
  
           REM Stop legacy backend process names so the current checkout owns the API port.
-          set REDIS_ENABLED=false
+          set REDIS_ENABLED=true
           set REDIS_URL=redis://127.0.0.1:6379/0
           set APP_TIMEZONE=Europe/Budapest
           set APP_BUILD_SHA=${{ github.sha }}
@@ -155,6 +161,10 @@ jobs:
           set PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD%
           set PRIMEFLOW_REPORT_TIMEZONE=Europe/Tirane
           set PRIMEFLOW_REPORT_RECIPIENTS=130primex.eu@gmail.com,ga@primexeu.com
+          set WEEKLY_PLANNING_AUDIT_ENABLED=true
+          set WEEKLY_PLANNING_AUDIT_TIMEZONE=Europe/Tirane
+          set WEEKLY_PLANNING_AUDIT_RECIPIENTS=130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com
+          set REPORT_RETENTION_DAYS=90
           set RUNNER_TRACKING_ID=
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
@@ -170,9 +180,13 @@ jobs:
           call pm2 start ecosystem.config.cjs --only primex-backend --update-env
           call pm2 start ecosystem.config.cjs --only primeflow-mcp --update-env
           call pm2 start ecosystem.config.cjs --only primeflow-report-scheduler --update-env
+          call pm2 start ecosystem.config.cjs --only celery_worker --update-env
+          call pm2 start ecosystem.config.cjs --only celery_beat --update-env
           call pm2 describe primex-backend | findstr /I "status"
           call pm2 describe primeflow-mcp | findstr /I "status"
           call pm2 describe primeflow-report-scheduler | findstr /I "status"
+          call pm2 describe celery_worker | findstr /I "status"
+          call pm2 describe celery_beat | findstr /I "status"
           echo PM2 backend restart/start completed.
  
       - name: Wait for Backend Readiness

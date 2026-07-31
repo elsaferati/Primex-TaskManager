@@ -14,7 +14,7 @@ celery_app = Celery(
 )
 
 celery_app.conf.enable_utc = True
-celery_app.conf.timezone = settings.APP_TIMEZONE
+celery_app.conf.timezone = settings.WEEKLY_PLANNING_AUDIT_TIMEZONE
 celery_app.conf.task_serializer = "json"
 celery_app.conf.result_serializer = "json"
 celery_app.conf.accept_content = ["json"]
@@ -51,6 +51,35 @@ celery_app.conf.beat_schedule = {
     "reset-expired-internal-meeting-sessions": {
         "task": "app.celery_tasks.reset_expired_internal_meeting_sessions",
         "schedule": crontab(minute="*/15"),
+    },
+    "weekly-planning-audit-0900": {
+        "task": "app.celery_tasks.send_weekly_planning_audit_report",
+        "schedule": crontab(day_of_week="fri", hour=9, minute=0),
+        "args": ("09:00",),
+    },
+    "weekly-planning-audit-0930": {
+        "task": "app.celery_tasks.send_weekly_planning_audit_report",
+        "schedule": crontab(day_of_week="fri", hour=9, minute=30),
+        "args": ("09:30",),
+    },
+    "weekly-planning-audit-1000": {
+        "task": "app.celery_tasks.send_weekly_planning_audit_report",
+        "schedule": crontab(day_of_week="fri", hour=10, minute=0),
+        "args": ("10:00",),
+    },
+    "weekly-planning-audit-1030": {
+        "task": "app.celery_tasks.send_weekly_planning_audit_report",
+        "schedule": crontab(day_of_week="fri", hour=10, minute=30),
+        "args": ("10:30",),
+    },
+    "weekly-planning-audit-1100": {
+        "task": "app.celery_tasks.send_weekly_planning_audit_report",
+        "schedule": crontab(day_of_week="fri", hour=11, minute=0),
+        "args": ("11:00",),
+    },
+    "weekly-planning-audit-cleanup": {
+        "task": "app.celery_tasks.cleanup_weekly_planning_audit_files",
+        "schedule": crontab(day_of_week="sun", hour=3, minute=15),
     },
 }
 
