@@ -29,6 +29,10 @@ jobs:
         run: |
           git fetch origin main
           git reset --hard origin/main
+          REM The self-hosted runner keeps ignored deployment state, but stale
+          REM untracked migration files must never participate in Alembic's graph.
+          git clean -f -- backend/alembic/versions
+          git status --short -- backend/alembic/versions
  
       - name: Detect Changed Files
         id: changes
@@ -119,14 +123,9 @@ jobs:
           echo REPORT_STORAGE_DIR=%REPORT_STORAGE_DIR% >> backend\.env
           echo REPORT_RETENTION_DAYS=90 >> backend\.env
  
-      - name: Update Backend
+      - name: Prepare Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
-        env:
-          PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
-          PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
-          EMAIL_USER: ${{ secrets.EMAIL_USER }}
-          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
@@ -136,17 +135,61 @@ jobs:
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server
           if errorlevel 1 exit /b 1
 
-          REM Prevent the old scheduler process from reloading schedule rows while
-          REM the new migration is being applied. A migration failure stops deploy.
-          call pm2 stop primeflow-report-scheduler || ver > NUL
-          echo Applying Alembic migrations through head...
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic current
-          if errorlevel 1 exit /b 1
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
-          if errorlevel 1 exit /b 1
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic current
-          if errorlevel 1 exit /b 1
-          echo Alembic migrations completed.
+      - name: Apply Database Migrations
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          Set-Location backend
+          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+
+          # Prevent the legacy scheduler from reloading rows while migrations run.
+          cmd /c "pm2 stop primeflow-report-scheduler || ver > NUL" | Out-Host
+
+          $headOutput = @(& $python -m alembic heads 2>&1)
+          if ($LASTEXITCODE -ne 0) {
+            $headOutput | ForEach-Object { Write-Host $_ }
+            throw "Unable to inspect Alembic heads."
+          }
+          $headLines = @($headOutput | Where-Object { "$_" -match '\(head\)' })
+          if ($headLines.Count -ne 1) {
+            $headOutput | ForEach-Object { Write-Host $_ }
+            throw "Expected exactly one Alembic head; found $($headLines.Count)."
+          }
+          $expectedHead = ("$($headLines[0])" -split '\s+')[0]
+          Write-Host "Alembic repository head: $expectedHead"
+
+          & $python -m alembic current
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to read the current database revision."
+          }
+
+          & $python -m alembic upgrade head
+          if ($LASTEXITCODE -ne 0) {
+            throw "Alembic upgrade failed."
+          }
+
+          $currentOutput = @(& $python -m alembic current 2>&1)
+          if ($LASTEXITCODE -ne 0) {
+            $currentOutput | ForEach-Object { Write-Host $_ }
+            throw "Unable to verify the upgraded database revision."
+          }
+          $currentOutput | ForEach-Object { Write-Host $_ }
+          if (-not ($currentOutput -join "`n").Contains($expectedHead)) {
+            throw "Database revision does not match repository head $expectedHead."
+          }
+          Write-Host "Alembic migrations completed at $expectedHead."
+
+      - name: Restart Backend Services
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: cmd
+        env:
+          PRIMEFLOW_MCP_EMAIL: ${{ secrets.PRIMEFLOW_MCP_EMAIL }}
+          PRIMEFLOW_MCP_PASSWORD: ${{ secrets.PRIMEFLOW_MCP_PASSWORD }}
+          EMAIL_USER: ${{ secrets.EMAIL_USER }}
+          EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+        run: |
+          cd backend
  
           REM Celery worker and Beat own weekly audit generation and delivery.
           call pm2 delete celery_worker || ver > NUL
