@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import asyncio
-from datetime import time
 
 from sqlalchemy import text
 
 from app.db import SessionLocal
 from app.services.primeflow_report_delivery import validate_report_config
+from app.services.primeflow_report_schedule_config import default_schedule_validation_errors
 
 
 async def main() -> None:
@@ -17,37 +17,27 @@ async def main() -> None:
             await db.execute(
                 text(
                     """
-                    SELECT name, report_slot, execution_time, timezone, weekdays,
-                           is_default, backfill_enabled
-                    FROM primeflow_report_schedules
-                    WHERE is_active IS TRUE
+                    SELECT schedule.name, schedule.report_slot,
+                           schedule.execution_time, schedule.timezone,
+                           schedule.weekdays, schedule.is_default,
+                           schedule.backfill_enabled,
+                           predecessor.name AS predecessor_name
+                    FROM primeflow_report_schedules AS schedule
+                    LEFT JOIN primeflow_report_schedules AS predecessor
+                      ON predecessor.id = schedule.predecessor_schedule_id
+                    WHERE schedule.is_active IS TRUE
+                      AND schedule.is_default IS TRUE
+                    ORDER BY schedule.sort_order, schedule.name
                     """
                 )
             )
         ).mappings().all()
-    if len(active_jobs) != 1:
-        raise RuntimeError(
-            "PrimeFlow report scheduler requires exactly one active schedule; "
-            f"found {len(active_jobs)}."
-        )
-    job = active_jobs[0]
-    expected = {
-        "report_slot": "10:00",
-        "execution_time": time(9, 0),
-        "timezone": "Europe/Tirane",
-        "weekdays": [4],
-        "is_default": True,
-        "backfill_enabled": False,
-    }
-    mismatches = {
-        key: {"expected": value, "actual": job[key]}
-        for key, value in expected.items() if job[key] != value
-    }
-    if mismatches:
-        raise RuntimeError(f"PrimeFlow Friday 09:00 schedule is misconfigured: {mismatches}")
+    errors = default_schedule_validation_errors(active_jobs)
+    if errors:
+        raise RuntimeError(f"PrimeFlow 1H schedules are misconfigured: {'; '.join(errors)}")
     print(
         "report scheduler dry-run health OK: configuration, database connectivity, "
-        "and weekly Friday 09:00 schedule=1"
+        "and weekday default schedules=5"
     )
 
 
