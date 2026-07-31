@@ -8,6 +8,7 @@ import {
   Globe, 
   Code2, 
   FileText, 
+  FileSpreadsheet,
   Palette, 
   CalendarDays, 
   CalendarRange, 
@@ -162,6 +163,12 @@ const items: NavItem[] = [
     href: "/reports", 
     label: "Reports & Exports", 
     icon: BarChart3 
+  },
+  {
+    href: "/reports/weekly-planning-audit",
+    label: "Kontrolli PLNF JAV",
+    icon: FileSpreadsheet,
+    roles: ["ADMIN", "MANAGER"],
   },
   {
     href: "/platforms",

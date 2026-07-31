@@ -13,6 +13,7 @@ backend/.env
 backend/.venv
 backend/.python-version
 backend/alembic/versions/*.pyc
+backend/uploads/reports/
 
 # Frontend
 frontend/.next/

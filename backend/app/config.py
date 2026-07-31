@@ -31,6 +31,13 @@ class Settings(BaseSettings):
     SYSTEM_TASK_SCHEDULER_MINUTE: int = 0
     SYSTEM_TASK_SCHEDULER_DAY_OF_WEEK: str = "fri"
     SYSTEM_TASK_GENERATE_AHEAD_DAYS: int = 7
+    WEEKLY_PLANNING_AUDIT_ENABLED: bool = True
+    WEEKLY_PLANNING_AUDIT_TIMEZONE: str = "Europe/Tirane"
+    WEEKLY_PLANNING_AUDIT_RECIPIENTS: str = (
+        "130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com"
+    )
+    REPORT_STORAGE_DIR: str = "uploads/reports"
+    REPORT_RETENTION_DAYS: int = 90
 
      # Add these three lines:
     ADMIN_EMAIL: str | None = None
