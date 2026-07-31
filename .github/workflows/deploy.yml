@@ -146,7 +146,7 @@ jobs:
           # Prevent the legacy scheduler from reloading rows while migrations run.
           cmd /c "pm2 stop primeflow-report-scheduler || ver > NUL" | Out-Host
 
-          $headOutput = @(& $python -m alembic heads 2>&1)
+          $headOutput = @(& $python -m alembic heads)
           if ($LASTEXITCODE -ne 0) {
             $headOutput | ForEach-Object { Write-Host $_ }
             throw "Unable to inspect Alembic heads."
@@ -169,7 +169,9 @@ jobs:
             throw "Alembic upgrade failed."
           }
 
-          $currentOutput = @(& $python -m alembic current 2>&1)
+          # Capture stdout only. Alembic writes normal INFO logging to stderr,
+          # which Windows PowerShell 5 converts to NativeCommandError when merged.
+          $currentOutput = @(& $python -m alembic current)
           if ($LASTEXITCODE -ne 0) {
             $currentOutput | ForEach-Object { Write-Host $_ }
             throw "Unable to verify the upgraded database revision."
