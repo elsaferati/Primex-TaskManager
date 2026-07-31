@@ -113,12 +113,6 @@ jobs:
           echo EMAIL_USER=%EMAIL_USER% >> backend\.env
           echo EMAIL_PASSWORD=%EMAIL_PASSWORD% >> backend\.env
  
-      - name: Database Migration Notice
-        if: ${{ steps.changes.outputs.migration_changed == 'true' }}
-        shell: powershell
-        run: |
-          Write-Warning "Alembic auto-migration is disabled in deploy. Apply DB SQL manually in pgAdmin before or after this deploy as needed."
- 
       - name: Update Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
@@ -135,8 +129,18 @@ jobs:
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server
           if errorlevel 1 exit /b 1
- 
-          REM Database migrations are manual in pgAdmin (no alembic auto-run in deploy).
+
+          REM Prevent the old scheduler process from reloading schedule rows while
+          REM the new migration is being applied. A migration failure stops deploy.
+          call pm2 stop primeflow-report-scheduler || ver > NUL
+          echo Applying Alembic migrations through head...
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic current
+          if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic upgrade head
+          if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m alembic current
+          if errorlevel 1 exit /b 1
+          echo Alembic migrations completed.
  
           REM Redis is disabled in this environment, so keep Celery processes stopped.
           call pm2 stop celery_worker

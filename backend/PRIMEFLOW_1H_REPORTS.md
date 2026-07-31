@@ -4,7 +4,10 @@
 
 The missed reports were caused by an intermittent connector/tool-discovery path before the PrimeFlow API was called. Scheduled delivery now runs in the dedicated `primeflow-report-scheduler` PM2 process and calls the authenticated FastAPI Common View endpoint directly. MCP remains available for interactive work.
 
-Five weekday jobs run in `Europe/Tirane`: 09:00→10:00, 10:50→11:00, 11:40→11:50, 14:10→14:20, and 15:50→16:00. Every job first processes its predecessor. PostgreSQL uniqueness and row locking prevent concurrent sends; Gmail exact Subject lookup handles ambiguous API timeouts. Common View truncation prevents delivery.
+One weekly job runs every Friday at `09:00` in `Europe/Tirane` and sends the
+`10:00` full-day report. Backfill is disabled, so the Friday job sends only that
+report. PostgreSQL uniqueness and row locking prevent concurrent application
+sends. Common View truncation prevents delivery.
 
 ## Configuration
 
@@ -15,14 +18,17 @@ password. Secrets must remain in GitHub/PM2 configuration.
 
 ## Migration and deployment
 
-Migrations remain manual. Apply them in order:
+GitHub Actions applies the current migration chain automatically on every backend
+deployment before PM2 restarts the services. For local or manual deployments, run:
 
-1. `alembic upgrade 0072_add_primeflow_report_delivery_runs`
-2. `alembic upgrade 0073_add_primeflow_report_management`
+`alembic upgrade head`
 
-`0073` idempotently seeds the two default recipients and five default schedules. Roll back in reverse order. Stop `primeflow-report-scheduler` before downgrading; preserve/export snapshots and audit history first because rollback removes management configuration and exact sent-content snapshots.
+`0073` seeds the original report configuration. `0106_primeflow_report_friday_0900`
+converts it to the single Friday schedule and disables every other report schedule.
+Stop `primeflow-report-scheduler` before downgrading; preserve/export snapshots and
+audit history first.
 
-Deploy the branch through review. Confirm the MCP functional check completes, PM2 reports `primeflow-report-scheduler` online, and its log contains `scheduler_ready jobs=5 timezone=Europe/Tirane`. Deployment health checks never send email.
+Deploy the branch through review. Confirm the MCP functional check completes, PM2 reports `primeflow-report-scheduler` online, and its log contains `scheduler_ready jobs=1 timezone=Europe/Tirane`. Deployment health checks never send email.
 
 ## Operations
 
@@ -61,6 +67,6 @@ SLOTI 28.07.2026 10:00
 
 1. Apply migration manually and set secrets.
 2. Run the dry-run command; verify current `generated_at`, no truncation, exact titles/descriptions, section order, and no email.
-3. Check MCP initialization/tools/list/health and all five scheduler jobs.
+3. Check MCP initialization/tools/list/health and the Friday 09:00 scheduler job.
 4. After the first scheduled run, verify exact Gmail subject/recipients and stored message/thread IDs.
 5. Roll back by stopping only `primeflow-report-scheduler`, reverting the application commit, and downgrading the migration only after preserving delivery history. MCP and API ports are unchanged; Redis/Celery remain disabled.

@@ -23,7 +23,6 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
 SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
-SCHEDULES = {"10:00": "09:00", "11:00": "10:50", "11:50": "11:40", "14:20": "14:10", "16:00": "15:50"}
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
 TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
