@@ -27,17 +27,44 @@ async def scheduled_job(schedule_id: str, slot: str, version: int, timezone_name
             await db.get(PrimeFlowReportSchedule, schedule.predecessor_schedule_id)
             if schedule and schedule.backfill_enabled and schedule.predecessor_schedule_id else None
         )
+    if not schedule or not schedule.is_active:
+        logger.info("scheduler_job_skipped schedule_id=%s reason=inactive_or_missing", schedule_id)
+        return
+    if schedule.version != version:
+        logger.info(
+            "scheduler_job_skipped schedule_id=%s reason=stale_version expected=%s actual=%s",
+            schedule_id, version, schedule.version,
+        )
+        return
+    if now.weekday() not in schedule.weekdays:
+        logger.info(
+            "scheduler_job_skipped schedule_id=%s reason=weekday_not_enabled weekday=%s",
+            schedule_id, now.weekday(),
+        )
+        return
+
+    slot = schedule.report_slot
+    if not schedule.backfill_enabled:
+        await deliver_report(
+            now.date(), slot, schedule_id=schedule_id, schedule_version=schedule.version,
+            scheduled_for=now, trigger_type="SCHEDULED",
+        )
+        return
+
     if predecessor_schedule:
         predecessor_day = now.date()
         if predecessor_schedule.report_slot >= slot:
             predecessor_day = previous_working_day(predecessor_day)
         await deliver_report(predecessor_day, predecessor_schedule.report_slot, trigger_type="BACKFILL")
         await deliver_report(
-            now.date(), slot, schedule_id=schedule_id, schedule_version=version,
+            now.date(), slot, schedule_id=schedule_id, schedule_version=schedule.version,
             scheduled_for=now, trigger_type="SCHEDULED",
         )
     else:
-        await execute_chain(now.date(), slot, schedule_id=schedule_id, schedule_version=version, scheduled_for=now)
+        await execute_chain(
+            now.date(), slot, schedule_id=schedule_id,
+            schedule_version=schedule.version, scheduled_for=now,
+        )
 
 
 async def sync_jobs(scheduler: AsyncIOScheduler) -> int:

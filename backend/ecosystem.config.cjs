@@ -17,6 +17,17 @@ const sharedEnv = {
   REDIS_URL: redisUrl,
   APP_TIMEZONE: appTimezone,
   APP_BUILD_SHA: process.env.APP_BUILD_SHA ?? "unknown",
+  WEEKLY_PLANNING_AUDIT_ENABLED: process.env.WEEKLY_PLANNING_AUDIT_ENABLED ?? "true",
+  WEEKLY_PLANNING_AUDIT_TIMEZONE: process.env.WEEKLY_PLANNING_AUDIT_TIMEZONE ?? "Europe/Tirane",
+  WEEKLY_PLANNING_AUDIT_RECIPIENTS:
+    process.env.WEEKLY_PLANNING_AUDIT_RECIPIENTS ??
+    "130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com",
+  REPORT_STORAGE_DIR: process.env.REPORT_STORAGE_DIR ?? "uploads/reports",
+  REPORT_RETENTION_DAYS: process.env.REPORT_RETENTION_DAYS ?? "90",
+  EMAIL_HOST: process.env.EMAIL_HOST ?? "smtp.gmail.com",
+  EMAIL_PORT: process.env.EMAIL_PORT ?? "587",
+  EMAIL_USER: process.env.EMAIL_USER ?? "",
+  EMAIL_PASSWORD: process.env.EMAIL_PASSWORD ?? "",
 };
 
 const apiProcess = {

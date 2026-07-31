@@ -23,7 +23,6 @@ from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
 SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
-SCHEDULES = {"10:00": "09:00", "11:00": "10:50", "11:50": "11:40", "14:20": "14:10", "16:00": "15:50"}
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
 TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
@@ -601,13 +600,16 @@ class GmailService:
         self, subject: str, recipients: list[str] | dict[str, list[str]], body: str,
         html_body: str | None = None,
         attachments: list[tuple[str, bytes, str]] | None = None,
+        message_id: str | None = None,
     ) -> dict[str, Any]:
         recipient_map = recipients if isinstance(recipients, dict) else {"to": recipients, "cc": [], "bcc": []}
         all_recipients = sum(recipient_map.values(), [])
         if not recipient_map["to"]:
             raise ValueError("At least one To recipient is required")
         message = EmailMessage()
-        message_id = make_msgid(domain=self.sender.rsplit("@", 1)[-1])
+        message_id = message_id or make_msgid(domain=self.sender.rsplit("@", 1)[-1])
+        if not message_id.startswith("<"):
+            message_id = f"<{message_id}>"
         message["From"] = self.sender
         message["To"] = ", ".join(recipient_map["to"])
         message["Subject"] = subject
