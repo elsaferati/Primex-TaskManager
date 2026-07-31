@@ -26,6 +26,7 @@ import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
@@ -213,6 +214,16 @@ function WorkflowStrip({ status }: { status: string }) {
 }
 
 function TaskEvidence({ task }: { task: RealizationTaskFact }) {
+  const plannedSlots = (task.planned_occurrences || [])
+    .map((item) => [item.day, item.time_slot].filter(Boolean).join(" "))
+    .filter(Boolean)
+    .join(", ")
+  const progressDays = (task.daily_progress || [])
+    .map(
+      (item) =>
+        `${item.day} ${item.finish_period || "—"}: +${item.completed_delta} (${item.daily_status})`
+    )
+    .join(", ")
   const body = (
     <>
       <div className="min-w-0 flex-1">
@@ -220,6 +231,14 @@ function TaskEvidence({ task }: { task: RealizationTaskFact }) {
         <p className="mt-0.5 truncate text-xs text-muted-foreground">
           {task.project_title || task.source_type}
         </p>
+        <div className="mt-1 flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-muted-foreground">
+          {task.effective_deadline ? <span>Afati: {task.effective_deadline}</span> : null}
+          {plannedSlots ? <span>Plan: {plannedSlots}</span> : null}
+          {progressDays ? <span>Progres: {progressDays}</span> : null}
+          {task.postponement ? <span>Shtyrje: {task.postponement}</span> : null}
+          {task.reassignment ? <span>Ka ndryshim të assignee-ve</span> : null}
+          {task.attribution === "actual_worker" ? <span>Kredit pune faktike</span> : null}
+        </div>
       </div>
       <Badge variant="outline" className={cn("shrink-0", classificationTone(task.classification))}>
         {CLASSIFICATION_LABELS[task.classification] || task.classification}
@@ -239,20 +258,81 @@ function TaskEvidence({ task }: { task: RealizationTaskFact }) {
   )
 }
 
-function QuestionRow({ question }: { question: RealizationQuestion }) {
-  const value = question.final_value ?? question.auto_value
+function QuestionRow({
+  question,
+  canReview,
+  managerValue,
+  onManagerValueChange,
+}: {
+  question: RealizationQuestion
+  canReview: boolean
+  managerValue?: unknown
+  onManagerValueChange: (value: unknown) => void
+}) {
+  const value = managerValue ?? question.final_value ?? question.auto_value
+  const needsConfirmation =
+    question.source_status === "MISSING_EVIDENCE" ||
+    question.source_status === "AUTO_NEEDS_CONFIRMATION"
   return (
-    <div className="grid gap-2 border-b py-3 last:border-b-0 md:grid-cols-[minmax(220px,0.8fr)_1.4fr_auto]">
+    <div className="grid gap-3 border-b py-3 last:border-b-0 md:grid-cols-[minmax(220px,0.8fr)_1.4fr_auto]">
       <div>
         <p className="text-sm font-medium">{question.label}</p>
         {question.explanation ? (
           <p className="mt-1 text-xs text-muted-foreground">{question.explanation}</p>
         ) : null}
+        {question.evidence_ids.length ? (
+          <p className="mt-1 break-all text-[11px] text-muted-foreground">
+            Evidencë: {question.evidence_ids.join(", ")}
+          </p>
+        ) : null}
       </div>
       <p className="text-sm leading-6">{displayValue(value)}</p>
-      <Badge variant="outline" className={cn("h-fit w-fit", statusTone(question.source_status))}>
-        {question.source_status}
-      </Badge>
+      <div className="space-y-2">
+        <Badge variant="outline" className={cn("h-fit w-fit", statusTone(question.source_status))}>
+          {managerValue !== undefined ? "MANAGER_CONFIRMED" : question.source_status}
+        </Badge>
+        {canReview && needsConfirmation ? (
+          question.answer_type === "boolean" ? (
+            <Select
+              value={
+                managerValue === true ? "true" : managerValue === false ? "false" : "__unset__"
+              }
+              onValueChange={(next) =>
+                onManagerValueChange(next === "__unset__" ? undefined : next === "true")
+              }
+            >
+              <SelectTrigger className="h-8 min-w-32"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__unset__">Pa konfirmim</SelectItem>
+                <SelectItem value="true">Po</SelectItem>
+                <SelectItem value="false">Jo</SelectItem>
+              </SelectContent>
+            </Select>
+          ) : question.answer_type === "integer" ? (
+            <Input
+              className="h-8 w-32"
+              type="number"
+              min={0}
+              placeholder="Konfirmo"
+              value={typeof managerValue === "number" ? managerValue : ""}
+              onChange={(event) =>
+                onManagerValueChange(
+                  event.target.value === "" ? undefined : Number(event.target.value)
+                )
+              }
+            />
+          ) : (
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => onManagerValueChange(question.auto_value)}
+            >
+              Konfirmo vlerën
+            </Button>
+          )
+        ) : null}
+      </div>
     </div>
   )
 }
@@ -261,14 +341,18 @@ function PersonDetail({
   person,
   canReview,
   canVerify,
+  canMutateObservations,
   onReload,
   apiFetch,
+  people,
 }: {
   person: RealizationPersonResult
   canReview: boolean
   canVerify: boolean
+  canMutateObservations: boolean
   onReload: () => Promise<void>
   apiFetch: (path: string, init?: RequestInit) => Promise<Response>
+  people: RealizationPersonResult[]
 }) {
   const [level, setLevel] = React.useState<RealizationLevel>(person.suggested_level || "B")
   const [symbol, setSymbol] = React.useState<RealizationSymbol>(person.suggested_symbol || "+")
@@ -279,6 +363,17 @@ function PersonDetail({
   const [observationCategory, setObservationCategory] = React.useState("EXTRA_TASK")
   const [observationMarker, setObservationMarker] = React.useState("POSITIVE")
   const [observationComment, setObservationComment] = React.useState("")
+  const [observationKind, setObservationKind] = React.useState("")
+  const [observationTaskId, setObservationTaskId] = React.useState("")
+  const [relatedUserId, setRelatedUserId] = React.useState("")
+  const [impactLevel, setImpactLevel] = React.useState("")
+  const [impactMinutes, setImpactMinutes] = React.useState("")
+  const [repeatKey, setRepeatKey] = React.useState("")
+  const [highImpact, setHighImpact] = React.useState(false)
+  const [replacementAnswer, setReplacementAnswer] = React.useState("")
+  const [duplicateAnswer, setDuplicateAnswer] = React.useState("")
+  const [observationVisibility, setObservationVisibility] = React.useState("PERSON_AND_MANAGER")
+  const [questionValues, setQuestionValues] = React.useState<Record<string, unknown>>({})
   const questions = person.facts_json.questions || []
   const tasks = person.facts_json.tasks || []
   const observations = person.facts_json.observations || []
@@ -286,6 +381,28 @@ function PersonDetail({
     level !== person.suggested_level ||
     symbol !== person.suggested_symbol ||
     Number(bonus) !== person.suggested_bonus
+  const additionalTasks = tasks.filter(
+    (task) => task.classification.startsWith("additional_") && task.task_id
+  )
+
+  React.useEffect(() => {
+    setLevel(person.final_level || person.suggested_level || "B")
+    setSymbol(person.final_symbol || person.suggested_symbol || "+")
+    setBonus(String(person.final_bonus ?? person.suggested_bonus ?? 0))
+    setManagerComment(person.manager_comment || "")
+    setOverrideReason(person.override_reason || "")
+    setQuestionValues({})
+  }, [
+    person.final_bonus,
+    person.final_level,
+    person.final_symbol,
+    person.id,
+    person.manager_comment,
+    person.override_reason,
+    person.suggested_bonus,
+    person.suggested_level,
+    person.suggested_symbol,
+  ])
 
   const submitReview = async () => {
     if (overridden && !overrideReason.trim()) {
@@ -305,7 +422,7 @@ function PersonDetail({
             final_bonus: Number(bonus),
             manager_comment: managerComment || null,
             override_reason: overridden ? overrideReason : null,
-            question_values: {},
+            question_values: questionValues,
           }),
         }
       )
@@ -324,20 +441,62 @@ function PersonDetail({
       toast.error("Shkruaj evidencën ose komentin.")
       return
     }
+    if (observationCategory === "EXTRA_TASK" && !observationKind) {
+      toast.error("Zgjidh llojin e evidencës shtesë.")
+      return
+    }
+    if (observationCategory === "EXTRA_TASK" && observationKind === "COMPLETED_EXTRA_TASK") {
+      if (!observationTaskId || replacementAnswer === "" || duplicateAnswer === "") {
+        toast.error("Zgjidh detyrën dhe konfirmo nëse është zëvendësim ose duplikat.")
+        return
+      }
+    }
+    if (observationCategory === "HELPED_COLLEAGUE" && !relatedUserId) {
+      toast.error("Zgjidh kolegun e ndihmuar.")
+      return
+    }
+    if (observationCategory === "BLOCKER" && (!relatedUserId || !impactLevel)) {
+      toast.error("Zgjidh personin e prekur dhe nivelin e ndikimit.")
+      return
+    }
+    if (observationCategory === "TIME_SAVED" && Number(impactMinutes) <= 0) {
+      toast.error("Shkruaj minutat e kursyera.")
+      return
+    }
+    if (observationCategory === "REPEATED_PROBLEM" && !repeatKey.trim()) {
+      toast.error("Shkruaj repeat key.")
+      return
+    }
+    const evidenceJson: Record<string, unknown> = {}
+    if (observationKind) evidenceJson.kind = observationKind
+    if (observationCategory === "HELPED_COLLEAGUE") evidenceJson.helped_user_id = relatedUserId
+    if (observationCategory === "BLOCKER") {
+      evidenceJson.affected_user_id = relatedUserId
+      evidenceJson.impact_level = impactLevel
+    }
+    if (highImpact) evidenceJson.high_impact = true
+    if (observationKind === "COMPLETED_EXTRA_TASK") {
+      evidenceJson.replaces_unfinished_planned_task = replacementAnswer === "true"
+      evidenceJson.duplicate = duplicateAnswer === "true"
+    }
     const response = await apiFetch("/realization/observations", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         period_id: person.period_id,
-        scope_type: "PERSON",
+        scope_type: observationKind === "COMPLETED_EXTRA_TASK" ? "TASK" : "PERSON",
+        task_id: observationKind === "COMPLETED_EXTRA_TASK" ? observationTaskId : null,
         user_id: person.user_id,
         department_id: person.department_id,
         marker: observationMarker,
         category: observationCategory,
         comment: observationComment,
-        evidence_json:
-          observationCategory === "EXTRA_TASK" ? { kind: "REQUESTED_EXTRA_TASK" } : {},
-        visibility: "PERSON_AND_MANAGER",
+        impact_minutes:
+          observationCategory === "TIME_SAVED" ? Number(impactMinutes) : null,
+        repeat_key:
+          observationCategory === "REPEATED_PROBLEM" ? repeatKey.trim() : null,
+        evidence_json: evidenceJson,
+        visibility: observationVisibility,
       }),
     })
     if (!response.ok) {
@@ -345,6 +504,15 @@ function PersonDetail({
       return
     }
     setObservationComment("")
+    setObservationKind("")
+    setObservationTaskId("")
+    setRelatedUserId("")
+    setImpactLevel("")
+    setImpactMinutes("")
+    setRepeatKey("")
+    setHighImpact(false)
+    setReplacementAnswer("")
+    setDuplicateAnswer("")
     toast.success("Evidenca u shtua. Verifikimi kërkohet para se të ndikojë në rezultat.")
     await onReload()
   }
@@ -382,9 +550,24 @@ function PersonDetail({
           </CardHeader>
           <CardContent>
             <p className="text-sm leading-6">{person.auto_narrative || "—"}</p>
+            {Object.entries(person.facts_json.attendance || {}).length ? (
+              <div className="mt-4 space-y-1 rounded-lg border bg-white p-3">
+                <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Prezenca</p>
+                {Object.entries(person.facts_json.attendance || {}).map(([id, entry]) => (
+                  <p key={id} className="text-xs">
+                    {entry.date} · {entry.type}{entry.details ? ` · ${entry.details}` : ""}
+                  </p>
+                ))}
+              </div>
+            ) : null}
             {person.facts_json.needs_review?.length ? (
               <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
-                {person.facts_json.needs_review.length} çështje kërkojnë shqyrtim manual.
+                <p>{person.facts_json.needs_review.length} çështje kërkojnë shqyrtim manual.</p>
+                <ul className="mt-2 list-disc space-y-1 pl-5 text-xs">
+                  {person.facts_json.needs_review.map((item, index) => (
+                    <li key={`${String(item.kind)}-${index}`}>{displayValue(item)}</li>
+                  ))}
+                </ul>
               </div>
             ) : null}
           </CardContent>
@@ -407,7 +590,22 @@ function PersonDetail({
                   {section.title}
                 </h3>
                 {sectionQuestions.map((question) => (
-                  <QuestionRow key={question.key} question={question} />
+                  <QuestionRow
+                    key={question.key}
+                    question={question}
+                    canReview={canReview}
+                    managerValue={questionValues[question.key]}
+                    onManagerValueChange={(value) =>
+                      setQuestionValues((current) => {
+                        if (value === undefined) {
+                          const next = { ...current }
+                          delete next[question.key]
+                          return next
+                        }
+                        return { ...current, [question.key]: value }
+                      })
+                    }
+                  />
                 ))}
               </section>
             )
@@ -433,6 +631,11 @@ function PersonDetail({
                   </Badge>
                 </div>
                 <p className="mt-2 text-sm">{observation.comment || "Pa koment"}</p>
+                {Object.keys(observation.evidence_json || {}).length ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {displayValue(observation.evidence_json)}
+                  </p>
+                ) : null}
                 {!observation.verified && canVerify ? (
                   <Button className="mt-3" size="sm" variant="outline" onClick={() => void verifyObservation(observation.id)}>
                     <ShieldCheck className="mr-2 h-4 w-4" />
@@ -442,12 +645,40 @@ function PersonDetail({
               </div>
             ))}
             {!observations.length ? <p className="text-sm text-muted-foreground">Nuk ka observime.</p> : null}
+            {canMutateObservations ? (
             <div className="grid gap-3 rounded-lg border border-dashed p-3">
               <div className="grid gap-3 sm:grid-cols-2">
-                <Select value={observationCategory} onValueChange={setObservationCategory}>
+                <Select
+                  value={observationCategory}
+                  onValueChange={(value) => {
+                    setObservationCategory(value)
+                    if (["EXTRA_TASK", "HELPED_COLLEAGUE", "PROPOSAL", "TIME_SAVED"].includes(value)) {
+                      setObservationMarker("POSITIVE")
+                    } else if (["DELAY", "ABSENCE", "MISSED_MEETING", "BLOCKER", "REPEATED_PROBLEM"].includes(value)) {
+                      setObservationMarker("NEGATIVE")
+                    }
+                  }}
+                >
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    {["EXTRA_TASK", "PROPOSAL", "QUALITY", "OTHER"].map((value) => (
+                    {[
+                      "EXTRA_TASK",
+                      "HELPED_COLLEAGUE",
+                      "PROPOSAL",
+                      "TIME_SAVED",
+                      "QUALITY",
+                      ...(canVerify
+                        ? [
+                            "DELAY",
+                            "ABSENCE",
+                            "MISSED_MEETING",
+                            "BLOCKER",
+                            "REPEATED_PROBLEM",
+                            "PRIORITY_CHANGE",
+                          ]
+                        : []),
+                      "OTHER",
+                    ].map((value) => (
                       <SelectItem key={value} value={value}>{value}</SelectItem>
                     ))}
                   </SelectContent>
@@ -461,6 +692,106 @@ function PersonDetail({
                   </SelectContent>
                 </Select>
               </div>
+              {observationCategory === "EXTRA_TASK" ? (
+                <Select value={observationKind} onValueChange={setObservationKind}>
+                  <SelectTrigger><SelectValue placeholder="Lloji i detyrës shtesë" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="REQUESTED_EXTRA_TASK">Kërkoi detyrë shtesë</SelectItem>
+                    <SelectItem value="COMPLETED_EXTRA_TASK">Përfundoi detyrë shtesë</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : null}
+              {observationKind === "COMPLETED_EXTRA_TASK" ? (
+                <div className="grid gap-3">
+                  <Select value={observationTaskId} onValueChange={setObservationTaskId}>
+                    <SelectTrigger><SelectValue placeholder="Zgjidh detyrën additional" /></SelectTrigger>
+                    <SelectContent>
+                      {additionalTasks.map((task) => (
+                        <SelectItem key={task.task_id} value={task.task_id!}>{task.title}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <Select value={replacementAnswer} onValueChange={setReplacementAnswer}>
+                      <SelectTrigger><SelectValue placeholder="Zëvendëson obligim?" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="false">Nuk zëvendëson obligim</SelectItem>
+                        <SelectItem value="true">Po, zëvendëson obligim</SelectItem>
+                      </SelectContent>
+                    </Select>
+                    <Select value={duplicateAnswer} onValueChange={setDuplicateAnswer}>
+                      <SelectTrigger><SelectValue placeholder="Është duplikat?" /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="false">Nuk është duplikat</SelectItem>
+                        <SelectItem value="true">Po, është duplikat</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              ) : null}
+              {observationCategory === "HELPED_COLLEAGUE" || observationCategory === "BLOCKER" ? (
+                <Select value={relatedUserId} onValueChange={setRelatedUserId}>
+                  <SelectTrigger>
+                    <SelectValue
+                      placeholder={
+                        observationCategory === "BLOCKER" ? "Personi i prekur" : "Kolegu i ndihmuar"
+                      }
+                    />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {people
+                      .filter((item) => item.user_id !== person.user_id)
+                      .map((item) => (
+                        <SelectItem key={item.user_id} value={item.user_id}>{item.user_name}</SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+              {observationCategory === "BLOCKER" ? (
+                <Select value={impactLevel} onValueChange={setImpactLevel}>
+                  <SelectTrigger><SelectValue placeholder="Niveli i ndikimit" /></SelectTrigger>
+                  <SelectContent>
+                    {["MINOR", "MAJOR", "MULTIPLE_PEOPLE"].map((value) => (
+                      <SelectItem key={value} value={value}>{value}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              ) : null}
+              {observationCategory === "TIME_SAVED" ? (
+                <Input
+                  type="number"
+                  min={1}
+                  value={impactMinutes}
+                  onChange={(event) => setImpactMinutes(event.target.value)}
+                  placeholder="Minutat e kursyera"
+                />
+              ) : null}
+              {observationCategory === "REPEATED_PROBLEM" ? (
+                <Input
+                  value={repeatKey}
+                  onChange={(event) => setRepeatKey(event.target.value)}
+                  placeholder="Repeat key i qëndrueshëm"
+                />
+              ) : null}
+              {["EXTRA_TASK", "QUALITY"].includes(observationCategory) ? (
+                <label className="flex items-center gap-2 text-sm">
+                  <Checkbox
+                    checked={highImpact}
+                    onCheckedChange={(checked) => setHighImpact(checked === true)}
+                  />
+                  Ndikim i lartë (kërkon koment)
+                </label>
+              ) : null}
+              {canVerify ? (
+                <Select value={observationVisibility} onValueChange={setObservationVisibility}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="PERSON_AND_MANAGER">Personi dhe menaxheri</SelectItem>
+                    <SelectItem value="PRIVATE_MANAGER">Vetëm menaxheri</SelectItem>
+                    <SelectItem value="TEAM_AGGREGATE">Vetëm agregat i ekipit</SelectItem>
+                  </SelectContent>
+                </Select>
+              ) : null}
               <Textarea
                 value={observationComment}
                 onChange={(event) => setObservationComment(event.target.value)}
@@ -468,6 +799,9 @@ function PersonDetail({
               />
               <Button variant="outline" onClick={() => void addObservation()}>Shto observim</Button>
             </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">Periudha e mbyllur nuk pranon observime të reja.</p>
+            )}
           </CardContent>
         </Card>
 
@@ -604,17 +938,32 @@ export default function RealizationPage() {
     return mutate(`/realization/weekly/calculate?${query.toString()}`, "Realizimi u kalkulua.")
   }
 
-  const people = data?.people || []
-  const planned = people.reduce((sum, person) => sum + person.planned_count, 0)
-  const completed = people.reduce(
-    (sum, person) => sum + person.completed_on_time_count + person.completed_late_count,
-    0
-  )
-  const open = people.reduce(
-    (sum, person) => sum + person.in_progress_count + person.pending_count + person.no_progress_count,
-    0
-  )
-  const additional = people.reduce((sum, person) => sum + person.additional_count, 0)
+  const people = React.useMemo(() => data?.people || [], [data?.people])
+  const uniqueTaskFacts = React.useMemo(() => {
+    const facts = new Map<string, RealizationTaskFact>()
+    for (const person of people) {
+      for (const task of person.facts_json.tasks || []) {
+        if (task.attribution === "actual_worker") continue
+        if (!facts.has(task.match_key)) facts.set(task.match_key, task)
+      }
+    }
+    return [...facts.values()]
+  }, [people])
+  const plannedTasks = uniqueTaskFacts.filter((task) => task.attribution === "planned_owner")
+  const additionalTasks = uniqueTaskFacts.filter((task) => task.classification.startsWith("additional_"))
+  const planned = plannedTasks.length
+  const completed = plannedTasks.filter((task) =>
+    ["completed_on_time", "completed_late"].includes(task.classification)
+  ).length
+  const open = plannedTasks.filter((task) =>
+    ["in_progress", "pending_confirmation", "no_progress", "late_open", "needs_review"].includes(
+      task.classification
+    )
+  ).length
+  const late = plannedTasks.filter((task) =>
+    ["completed_late", "late_open"].includes(task.classification)
+  ).length
+  const additional = additionalTasks.length
   const canManage = user?.role === "MANAGER" || user?.role === "ADMIN"
   const status = data?.period.status
 
@@ -666,7 +1015,9 @@ export default function RealizationPage() {
           </div>
           <div className="flex flex-wrap gap-2">
             <Button variant="outline" asChild>
-              <Link href="/weekly-planner">Weekly Planner <ArrowRight className="ml-2 h-4 w-4" /></Link>
+              <Link href={`/weekly-planner?week=${weekStart}&department_id=${departmentId}`}>
+                Weekly Planner <ArrowRight className="ml-2 h-4 w-4" />
+              </Link>
             </Button>
             <Button variant="outline" onClick={() => void load()} disabled={loading}>
               <RefreshCw className={cn("mr-2 h-4 w-4", loading && "animate-spin")} />
@@ -702,10 +1053,11 @@ export default function RealizationPage() {
         </Card>
       ) : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
-        <Metric label="Plan" value={planned} detail="Obligime sipas assignee-ve të PLANNED" icon={Target} />
+      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-6">
+        <Metric label="Plan" value={planned} detail="Detyra unike në PLANNED" icon={Target} />
         <Metric label="Completed" value={completed} detail="Në kohë dhe me vonesë" icon={CheckCircle2} />
         <Metric label="Open" value={open} detail="Në progres, pending ose pa progres" icon={Clock3} />
+        <Metric label="Late" value={late} detail="Të përfunduara ose të hapura me vonesë" icon={AlertTriangle} />
         <Metric label="Additional" value={additional} detail="Të futura pas baseline-it" icon={Sparkles} />
         <Metric label="Bonus total" value={`€${data?.department_result?.total_bonus ?? 0}`} detail="Nga policy version i fiksuar" icon={ShieldCheck} />
       </div>
@@ -720,9 +1072,17 @@ export default function RealizationPage() {
               <RefreshCw className="mr-2 h-4 w-4 animate-spin" /> Po ngarkohet…
             </div>
           ) : !data?.has_planned_snapshot ? (
-            <MissingState title="Nuk ka PLANNED snapshot" detail="Ruaje planin zyrtar për këtë javë në Weekly Planner." />
+            <MissingState
+              title="Nuk ka PLANNED snapshot"
+              detail="Ruaje planin zyrtar për këtë javë në Weekly Planner."
+              href={`/weekly-planner?week=${weekStart}&department_id=${departmentId}`}
+            />
           ) : !data.has_final_snapshot ? (
-            <MissingState title="Plani ekziston; FINAL snapshot mungon" detail="Kalkulimi është i çaktivizuar derisa të ruhet This Week (Final)." />
+            <MissingState
+              title="Plani ekziston; FINAL snapshot mungon"
+              detail="Kalkulimi është i çaktivizuar derisa të ruhet This Week (Final)."
+              href={`/weekly-planner?week=${weekStart}&department_id=${departmentId}`}
+            />
           ) : !people.length ? (
             <div className="flex min-h-56 items-center justify-center text-sm text-muted-foreground">
               {status === "OPEN" ? "Kliko “Kalkulo automatikisht” për të gjeneruar sugjerimet." : "Nuk ka rezultate për këtë scope."}
@@ -776,8 +1136,10 @@ export default function RealizationPage() {
                               person={person}
                               canReview={canManage && status === "CALCULATED" && !person.reviewed_at}
                               canVerify={Boolean(canManage && status !== "LOCKED")}
+                              canMutateObservations={status !== "LOCKED"}
                               onReload={load}
                               apiFetch={apiFetch}
+                              people={people}
                             />
                           </TableCell>
                         </TableRow>
@@ -810,14 +1172,14 @@ export default function RealizationPage() {
   )
 }
 
-function MissingState({ title, detail }: { title: string; detail: string }) {
+function MissingState({ title, detail, href }: { title: string; detail: string; href: string }) {
   return (
     <div className="flex min-h-72 flex-col items-center justify-center px-6 text-center">
       <div className="rounded-full bg-amber-50 p-4 text-amber-700"><FileClock className="h-7 w-7" /></div>
       <h3 className="mt-4 font-semibold">{title}</h3>
       <p className="mt-1 max-w-lg text-sm text-muted-foreground">{detail}</p>
       <Button className="mt-5" variant="outline" asChild>
-        <Link href="/weekly-planner">Hap Weekly Planner <ArrowRight className="ml-2 h-4 w-4" /></Link>
+        <Link href={href}>Hap Weekly Planner <ArrowRight className="ml-2 h-4 w-4" /></Link>
       </Button>
     </div>
   )

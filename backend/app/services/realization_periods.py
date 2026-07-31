@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models.enums import RealizationPeriodStatus
 from app.models.realization import RealizationPeriod, RealizationPolicyVersion
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
+from app.services.system_task_schedule import _is_working_day
 
 
 class RealizationWorkflowError(ValueError):
@@ -21,7 +22,14 @@ def normalize_week_start(value: date) -> date:
 
 
 def weekly_end(value: date) -> date:
-    return normalize_week_start(value) + timedelta(days=4)
+    current = normalize_week_start(value)
+    working_days = 0
+    while True:
+        if _is_working_day(current):
+            working_days += 1
+            if working_days == 5:
+                return current
+        current += timedelta(days=1)
 
 
 async def select_policy(db: AsyncSession, week_start: date) -> RealizationPolicyVersion:
@@ -34,6 +42,7 @@ async def select_policy(db: AsyncSession, week_start: date) -> RealizationPolicy
                     RealizationPolicyVersion.effective_to.is_(None)
                     | (RealizationPolicyVersion.effective_to >= week_start)
                 ),
+                RealizationPolicyVersion.approved_at.is_not(None),
             )
             .order_by(
                 RealizationPolicyVersion.version.desc(),

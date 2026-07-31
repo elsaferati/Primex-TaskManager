@@ -77,6 +77,32 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
         for item in tasks
         if str(item["classification"]).startswith("additional_") and item.get("task_id")
     ]
+    planned_task_ids = sorted(
+        {
+            str(item["task_id"])
+            for item in tasks
+            if item.get("attribution") == "planned_owner" and item.get("task_id")
+        }
+    )
+    postponement_evidence_ids = sorted(
+        {
+            evidence_id
+            for item in tasks
+            for evidence_id in item.get("postponement_evidence_ids") or []
+        }
+    )
+    meeting_task_ids = sorted(
+        {
+            str(item["task_id"])
+            for item in tasks
+            if item.get("meeting_origin_id") and item.get("task_id")
+        }
+    )
+    absence_evidence_ids = sorted(
+        attendance_id
+        for attendance_id, item in (person.get("attendance") or {}).items()
+        if item.get("type") == "MUNGESE"
+    )
     verified_ids = [str(item["id"]) for item in verified]
     positive = [item for item in verified if item["marker"] == "POSITIVE"]
     negative = [item for item in verified if item["marker"] == "NEGATIVE"]
@@ -112,15 +138,16 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
         "unapproved_postponements": c.get("unapproved_postponement_count", 0),
     }
     closed = (
-        c.get("planned_count", 0)
-        == c.get("completed_on_time_count", 0)
-        + c.get("completed_late_count", 0)
-        + c.get("approved_postponement_count", 0)
-        + c.get("removed_or_canceled_approved_count", 0)
+        c.get("planned_count", 0) == c.get("accounted_planned_count", 0)
     )
     absence_needs_review = c.get("absence_needs_review_count", 0)
     questions = [
-        _question("task_status", task_status, answer_type="object"),
+        _question(
+            "task_status",
+            task_status,
+            evidence_ids=planned_task_ids,
+            answer_type="object",
+        ),
         _question(
             "new_tasks_added",
             {
@@ -145,24 +172,47 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
                 if c.get("postponement_needs_review_count", 0)
                 else "AUTO"
             ),
+            evidence_ids=postponement_evidence_ids,
             answer_type="object",
         ),
-        _question("requested_extra_tasks", bool(requested), evidence_ids=[str(item["id"]) for item in requested]),
-        _question("helped_colleague", bool(helped), evidence_ids=[str(item["id"]) for item in helped]),
+        _question(
+            "requested_extra_tasks",
+            bool(requested),
+            evidence_ids=[str(item["id"]) for item in requested],
+            answer_type="boolean",
+        ),
+        _question(
+            "helped_colleague",
+            bool(helped),
+            evidence_ids=[str(item["id"]) for item in helped],
+            answer_type="boolean",
+        ),
         _question(
             "extra_engagement",
             {"count": len(engagement_categories), "categories": sorted(engagement_categories)},
             evidence_ids=[str(item["id"]) for item in positive],
             answer_type="object",
         ),
-        _question("gave_proposal", bool(proposals), evidence_ids=[str(item["id"]) for item in proposals]),
+        _question(
+            "gave_proposal",
+            bool(proposals),
+            evidence_ids=[str(item["id"]) for item in proposals],
+            answer_type="boolean",
+        ),
         _question(
             "respected_meetings",
             None,
             source_status="MISSING_EVIDENCE",
+            evidence_ids=meeting_task_ids,
             explanation="Ftesa në takim nuk provon prezencën.",
+            answer_type="boolean",
         ),
-        _question("closed_tasks", closed),
+        _question(
+            "closed_tasks",
+            closed,
+            evidence_ids=planned_task_ids,
+            answer_type="boolean",
+        ),
         _question(
             "frequent_delays",
             {
@@ -176,10 +226,12 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             "unexpected_absences",
             None if absence_needs_review else c.get("unexcused_absence_days", 0),
             source_status="AUTO_NEEDS_CONFIRMATION" if absence_needs_review else "AUTO",
+            evidence_ids=absence_evidence_ids,
             explanation=(
                 "Burimi aktual i prezencës nuk dallon mungesën e arsyetuar nga ajo e papritur."
                 if absence_needs_review else ""
             ),
+            answer_type="integer",
         ),
         _question("week_positive", narrative, evidence_ids=[str(item["id"]) for item in positive], answer_type="text"),
         _question(
@@ -188,17 +240,31 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             evidence_ids=[str(item["id"]) for item in negative],
             answer_type="list",
         ),
-        _question("affected_other_plan", bool(blockers), evidence_ids=[str(item["id"]) for item in blockers]),
-        _question("repeated_after_clarification", bool(repeated), evidence_ids=[str(item["id"]) for item in repeated]),
+        _question(
+            "affected_other_plan",
+            bool(blockers),
+            evidence_ids=[str(item["id"]) for item in blockers],
+            answer_type="boolean",
+        ),
+        _question(
+            "repeated_after_clarification",
+            bool(repeated),
+            evidence_ids=[str(item["id"]) for item in repeated],
+            answer_type="boolean",
+        ),
         _question(
             "current_level",
             "—",
             source_status="NOT_APPLICABLE",
             explanation="Niveli aktual i punonjësit nuk ruhet ende në profil.",
         ),
-        _question("suggested_evaluation_level", decision.level.value),
-        _question("weekly_bonus", decision.bonus),
-        _question("evaluation", decision.symbol.value),
+        _question(
+            "suggested_evaluation_level",
+            decision.level.value,
+            answer_type="level",
+        ),
+        _question("weekly_bonus", decision.bonus, answer_type="currency"),
+        _question("evaluation", decision.symbol.value, answer_type="symbol"),
         _question(
             "comments",
             {"automatic_narrative": narrative, "manager_comment": None, "override_reason": None},
@@ -256,6 +322,8 @@ async def calculate_weekly_period(
         period=period,
         planned_snapshot=planned_snapshot,
         final_snapshot=final_snapshot,
+        am_cutoff=policy.am_cutoff,
+        pm_cutoff=policy.pm_cutoff,
     )
     existing = {
         row.user_id: row
@@ -328,6 +396,9 @@ async def calculate_weekly_period(
     count = len(results)
     department_result.facts_json = {
         "unique_task_count": len(evidence["department_unique_task_keys"]),
+        "unique_planned_task_count": len(evidence["department_planned_task_keys"]),
+        "unique_final_task_count": len(evidence["department_final_task_keys"]),
+        "unique_additional_task_count": len(evidence["department_additional_task_keys"]),
         "unique_attributed_task_count": len(all_task_keys),
         "unassigned": evidence["unassigned"],
         "planned_snapshot_id": evidence["planned_snapshot_id"],

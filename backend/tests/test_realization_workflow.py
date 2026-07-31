@@ -2,7 +2,7 @@ import importlib.util
 import io
 import unittest
 import uuid
-from datetime import date
+from datetime import date, datetime, time, timezone
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -11,7 +11,13 @@ from alembic.operations import Operations
 
 from app.models.enums import RealizationLevel, RealizationPeriodStatus
 from app.services.realization_calculator import build_questions
-from app.services.realization_evidence import _postponement, _snapshot_tasks
+from app.services.realization_evidence import (
+    _classify_planned_task,
+    _planned_deadline,
+    _postponement,
+    _snapshot_tasks,
+    _snapshot_users,
+)
 from app.services.realization_narrative import build_albanian_narrative
 from app.services.realization_periods import (
     RealizationWorkflowError,
@@ -66,6 +72,33 @@ class TestPolicy(unittest.TestCase):
             BONUSES,
         )
         self.assertEqual(result.level, RealizationLevel.D)
+
+    def test_accounted_counter_does_not_double_count_completed_postponement(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 1,
+                "completed_on_time_count": 1,
+                "approved_postponement_count": 1,
+                "accounted_planned_count": 1,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.B)
+
+    def test_verified_minor_impact_caps_result_at_c(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 1,
+                "completed_on_time_count": 1,
+                "accounted_planned_count": 1,
+                "negative_count": 1,
+                "minor_negative_impact_count": 1,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.C)
 
 
 class TestWorkflow(unittest.TestCase):
@@ -142,6 +175,69 @@ class TestEvidenceNormalization(unittest.TestCase):
         self.assertIn(f"id:{task_id}", rows)
         self.assertEqual(rows[f"id:{task_id}"]["assignees"][0]["assignee_id"], user_id)
 
+    def test_snapshot_employee_set_includes_people_without_tasks(self) -> None:
+        user_id = uuid.uuid4()
+        snapshot = SimpleNamespace(
+            payload={
+                "department": {
+                    "days": [
+                        {
+                            "users": [
+                                {"user_id": str(user_id), "user_name": "No Task User"}
+                            ]
+                        }
+                    ]
+                },
+                "task_items": [],
+            }
+        )
+        self.assertEqual(_snapshot_users(snapshot), {user_id: "No Task User"})
+
+    def test_deadline_uses_policy_cutoff_and_not_mutable_current_due_date(self) -> None:
+        task = {
+            "planned_due_date": None,
+            "occurrences": [{"day": date(2026, 7, 27), "time_slot": "AM"}],
+            "finish_period": "AM",
+        }
+        source = SimpleNamespace(
+            original_due_date=None,
+            due_date=datetime(2026, 8, 10, 16, 0, tzinfo=timezone.utc),
+        )
+        period = SimpleNamespace(end_date=date(2026, 7, 31))
+        deadline = _planned_deadline(
+            task,
+            source,
+            period,
+            am_cutoff=time(11, 30),
+            pm_cutoff=time(17, 0),
+        )
+        self.assertEqual(deadline.date(), date(2026, 7, 27))
+        self.assertEqual(deadline.timetz().replace(tzinfo=None), time(11, 30))
+
+    def test_done_without_completion_timestamp_requires_review(self) -> None:
+        classification = _classify_planned_task(
+            current={"is_completed": True, "completed_at": None, "status": "DONE"},
+            positive_delta=0,
+            postponement=None,
+            effective_deadline=datetime(2026, 7, 31, 16, 0, tzinfo=timezone.utc),
+            period_end=date(2026, 7, 31),
+        )
+        self.assertEqual(classification, "needs_review")
+
+    def test_in_progress_without_delta_stays_visible_and_is_reviewable(self) -> None:
+        classification = _classify_planned_task(
+            current={
+                "is_completed": False,
+                "completed_at": None,
+                "status": "IN_PROGRESS",
+            },
+            positive_delta=0,
+            postponement=None,
+            effective_deadline=datetime(2026, 7, 31, 16, 0, tzinfo=timezone.utc),
+            period_end=date(2026, 7, 31),
+        )
+        self.assertEqual(classification, "in_progress")
+
     def test_due_date_change_without_approval_is_unapproved(self) -> None:
         from datetime import datetime, timezone
 
@@ -178,6 +274,22 @@ class TestPolicyMigration(unittest.TestCase):
         sql = output.getvalue()
         self.assertIn("version", sql)
         self.assertIn("DELETE FROM realization_policy_versions", sql)
+
+    def test_merge_migration_keeps_one_head_for_concurrent_question_work(self) -> None:
+        path = (
+            Path(__file__).parents[1]
+            / "alembic"
+            / "versions"
+            / "0105_merge_realization_question_batches.py"
+        )
+        spec = importlib.util.spec_from_file_location("realization_merge_migration", path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.assertEqual(
+            module.down_revision,
+            ("0104_realization_policy_v2", "0104_question_task_batches"),
+        )
 
 
 if __name__ == "__main__":

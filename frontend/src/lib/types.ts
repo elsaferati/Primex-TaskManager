@@ -658,9 +658,28 @@ export interface RealizationTaskFact {
   status?: string | null
   completed_at?: string | null
   planned_deadline?: string | null
+  effective_deadline?: string | null
   positive_progress_delta?: number
+  planned_occurrences?: Array<{
+    day?: string | null
+    time_slot?: string | null
+    assignee_id?: string | null
+  }>
+  daily_progress?: Array<{
+    id: string
+    day: string
+    completed_value: number
+    total_value: number
+    completed_delta: number
+    daily_status: string
+    finish_period?: string | null
+  }>
   postponement?: string | null
+  postponement_evidence_ids?: string[]
   reassignment?: boolean
+  attribution?: "planned_owner" | "actual_worker" | "additional_owner"
+  meeting_origin_id?: string | null
+  status_progress_inconsistent?: boolean
 }
 
 export interface RealizationObservationFact {
@@ -697,6 +716,7 @@ export interface RealizationPersonResult {
     questions?: RealizationQuestion[]
     needs_review?: Array<Record<string, unknown>>
     counters?: Record<string, number>
+    attendance?: Record<string, { date: string; type: string; details?: string | null }>
     decision?: { triggered_rule?: string; reasons?: string[] }
   }
   planned_count: number

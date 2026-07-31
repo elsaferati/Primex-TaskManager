@@ -61,6 +61,7 @@ Major modules:
 - Projects: grouped work with current_phase, status, manager, department, project_type, total_products, templates, workflow items, phase advancement, close/remove-from-day operations.
 - Common View: operational cross-department view built from common entries and task/project signals. It includes common entries, approval/rejection, assignment, leave/block rows, bllok tasks, personal/R1/1H/common orderable tasks, and consolidated planning visibility.
 - Weekly Planner: weekly and weekly-table endpoints show planned work by user/day/slot, support save-day, user ordering, user visibility, snapshots, plan-vs-actual, plan-vs-final, comparison, latest snapshot, overview, and legend rows.
+- Realization: deterministic weekly PLANNED-vs-FINAL evidence, policy-based suggestions, observations, manager review, admin approval, and locking. Use Realization tools instead of calculating grades in the model.
 - Monthly Planner: monthly planning endpoint for larger time windows.
 - System Tasks: recurring/system templates, approvals, rejections, occurrence generation, occurrence date changes, and generated task visibility.
 - GA notes and Plan notes: notes with attachments, discussed/done fields, task conversion, task deadlines, waiting confirmation handling, and public GA notes.
@@ -98,6 +99,7 @@ Endpoint guidance:
   - Workload of one person -> get_person_workload. Whole department -> get_department_overview.
   - Task steps -> get_task_steps, add_task_step, set_task_step_done. Scheduling a task to days/slots -> schedule_task.
   - Weekly summary report -> get_weekly_report. Excel/PDF downloads -> export_report.
+  - Weekly Realization -> get_weekly_realization first; calculate_weekly_realization only on explicit request; review/approve/lock with the dedicated workflow tools.
 - Database read-only tools are for schema understanding, relationship discovery, debugging, and simple analytics only. Use API tools for writes and Primeflow business logic.
 - run_readonly_sql allows only SELECT/WITH statements and runs in a read-only transaction. Never use database tools for create/update/delete actions.
 """
@@ -2153,6 +2155,244 @@ async def get_plan_vs_actual(
         "GET",
         f"/api/planners/weekly-snapshots/plan-vs-{compare_to}",
         params={"department_id": department_id, "week_start": monday},
+    )
+
+
+async def _weekly_realization(
+    department_ref: str,
+    week_start: str | None,
+) -> tuple[str, str, dict[str, Any]]:
+    department_id = await _resolve_department_id(department_ref)
+    if not department_id:
+        raise ValueError("department_ref is required.")
+    monday = _week_start(week_start)
+    result = await _request(
+        "GET",
+        "/api/realization/weekly",
+        params={"department_id": department_id, "week_start": monday},
+    )
+    if not isinstance(result, dict):
+        raise RuntimeError("Primeflow returned an invalid weekly Realization response.")
+    return department_id, monday, result
+
+
+@mcp.tool()
+async def get_weekly_realization(
+    department_ref: str,
+    week_start: str | None = None,
+) -> Any:
+    """
+    Read the official weekly Realization workflow for a department.
+
+    Returns PLANNED/FINAL availability, period status, deterministic person results,
+    evidence, questions, and department totals. It does not calculate grades in MCP.
+    """
+    _, _, result = await _weekly_realization(department_ref, week_start)
+    return result
+
+
+@mcp.tool()
+async def calculate_weekly_realization(
+    department_ref: str,
+    week_start: str | None = None,
+) -> Any:
+    """
+    Explicitly calculate or recalculate an unlocked weekly Realization period.
+
+    Call only when the user asks to calculate. Primeflow requires official PLANNED
+    and FINAL snapshots and enforces manager/admin permissions and review locks.
+    """
+    department_id = await _resolve_department_id(department_ref)
+    if not department_id:
+        raise ValueError("department_ref is required.")
+    monday = _week_start(week_start)
+    return await _request(
+        "POST",
+        "/api/realization/weekly/calculate",
+        params={"department_id": department_id, "week_start": monday},
+    )
+
+
+@mcp.tool()
+async def review_weekly_realization_person(
+    department_ref: str,
+    user_ref: str,
+    week_start: str | None = None,
+    final_level: Literal["A+", "A", "B", "C", "M", "D", "E"] | None = None,
+    final_symbol: Literal["+", "+/-", "-"] | None = None,
+    final_bonus: int | None = None,
+    manager_comment: str | None = None,
+    override_reason: str | None = None,
+    question_values_json: str | None = None,
+) -> Any:
+    """
+    Review one calculated employee result using Primeflow's manager workflow.
+
+    Omit final fields to accept the suggestion. Supply all changed final fields
+    together; an override_reason is mandatory when any final value differs.
+    question_values_json may contain manager-confirmed answers keyed by stable
+    Realization question keys.
+    """
+    department_id, _, weekly = await _weekly_realization(department_ref, week_start)
+    user_id = await _resolve_user_id(user_ref, department_ref)
+    if not user_id:
+        raise ValueError("user_ref is required.")
+    people = weekly.get("people") or []
+    matches = [person for person in people if str(person.get("user_id")) == user_id]
+    if len(matches) != 1:
+        raise ValueError(
+            f"No calculated Realization result exists for user {user_ref} in department {department_id}."
+        )
+    question_values = _parse_json_arg(question_values_json, default={})
+    if not isinstance(question_values, dict):
+        raise ValueError("question_values_json must be a JSON object.")
+    result = matches[0]
+    return await _request(
+        "POST",
+        f"/api/realization/periods/{weekly['period']['id']}/results/{result['id']}/review",
+        json={
+            "final_level": final_level,
+            "final_symbol": final_symbol,
+            "final_bonus": final_bonus,
+            "manager_comment": manager_comment,
+            "override_reason": override_reason,
+            "question_values": question_values,
+        },
+    )
+
+
+@mcp.tool()
+async def add_realization_observation(
+    department_ref: str,
+    user_ref: str,
+    category: Literal[
+        "EXTRA_TASK",
+        "HELPED_COLLEAGUE",
+        "PROPOSAL",
+        "TIME_SAVED",
+        "QUALITY",
+        "DELAY",
+        "ABSENCE",
+        "MISSED_MEETING",
+        "BLOCKER",
+        "REPEATED_PROBLEM",
+        "PRIORITY_CHANGE",
+        "OTHER",
+    ],
+    marker: Literal["POSITIVE", "NEUTRAL", "NEGATIVE", "DIAMOND"],
+    comment: str,
+    week_start: str | None = None,
+    task_id: str | None = None,
+    observation_kind: Literal["REQUESTED_EXTRA_TASK", "COMPLETED_EXTRA_TASK"] | None = None,
+    helped_user_ref: str | None = None,
+    affected_user_ref: str | None = None,
+    impact_level: Literal["MINOR", "MAJOR", "MULTIPLE_PEOPLE"] | None = None,
+    impact_minutes: int | None = None,
+    repeat_key: str | None = None,
+    high_impact: bool | None = None,
+    replaces_unfinished_planned_task: bool | None = None,
+    duplicate: bool | None = None,
+    visibility: Literal[
+        "PRIVATE_MANAGER", "PERSON_AND_MANAGER", "TEAM_AGGREGATE"
+    ] = "PERSON_AND_MANAGER",
+) -> Any:
+    """
+    Append a Realization observation without changing task/planner data.
+
+    Staff submissions remain unverified. A completed additional task can affect
+    A/A+ only after verification and explicit duplicate=false and
+    replaces_unfinished_planned_task=false evidence.
+    """
+    _, _, weekly = await _weekly_realization(department_ref, week_start)
+    user_id = await _resolve_user_id(user_ref, department_ref)
+    if not user_id:
+        raise ValueError("user_ref is required.")
+    helped_user_id = await _resolve_user_id(helped_user_ref, department_ref)
+    affected_user_id = await _resolve_user_id(affected_user_ref, department_ref)
+    evidence = {
+        key: value
+        for key, value in {
+            "kind": observation_kind,
+            "helped_user_id": helped_user_id,
+            "affected_user_id": affected_user_id,
+            "impact_level": impact_level,
+            "high_impact": high_impact,
+            "replaces_unfinished_planned_task": replaces_unfinished_planned_task,
+            "duplicate": duplicate,
+        }.items()
+        if value is not None
+    }
+    return await _request(
+        "POST",
+        "/api/realization/observations",
+        json={
+            "period_id": weekly["period"]["id"],
+            "scope_type": "TASK" if task_id else "PERSON",
+            "task_id": task_id,
+            "user_id": user_id,
+            "department_id": weekly["period"]["department_id"],
+            "marker": marker,
+            "category": category,
+            "impact_minutes": impact_minutes,
+            "repeat_key": repeat_key,
+            "comment": comment,
+            "evidence_json": evidence,
+            "visibility": visibility,
+        },
+    )
+
+
+@mcp.tool()
+async def verify_realization_observation(
+    observation_id: str,
+    comment: str | None = None,
+) -> Any:
+    """Verify one active Realization observation as a manager/admin append-only event."""
+    return await _request(
+        "POST",
+        f"/api/realization/observations/{observation_id}/verify",
+        json={"comment": comment},
+    )
+
+
+@mcp.tool()
+async def void_realization_observation(observation_id: str, reason: str) -> Any:
+    """Void an observation with a required reason; Primeflow retains its audit history."""
+    if not reason.strip():
+        raise ValueError("reason is required.")
+    return await _request(
+        "POST",
+        f"/api/realization/observations/{observation_id}/void",
+        json={"reason": reason},
+    )
+
+
+@mcp.tool()
+async def approve_weekly_realization(
+    department_ref: str,
+    week_start: str | None = None,
+) -> Any:
+    """Approve a fully reviewed weekly Realization period. Admin permission is required."""
+    _, _, weekly = await _weekly_realization(department_ref, week_start)
+    return await _request(
+        "POST", f"/api/realization/periods/{weekly['period']['id']}/approve"
+    )
+
+
+@mcp.tool()
+async def lock_weekly_realization(
+    department_ref: str,
+    week_start: str | None = None,
+) -> Any:
+    """
+    Permanently lock an approved weekly Realization period.
+
+    Call only on an explicit lock request. Locked periods reject recalculation,
+    review changes, observation mutations, and result changes.
+    """
+    _, _, weekly = await _weekly_realization(department_ref, week_start)
+    return await _request(
+        "POST", f"/api/realization/periods/{weekly['period']['id']}/lock"
     )
 
 

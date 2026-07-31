@@ -11,6 +11,8 @@ def build_albanian_narrative(facts: dict[str, Any]) -> str:
     verified_extra = int(counters.get("verified_extra_count", 0))
     helped = int(counters.get("helped_colleague_count", 0))
     no_progress = int(counters.get("no_progress_count", 0))
+    late_open = int(counters.get("late_open_count", 0))
+    unapproved = int(counters.get("unapproved_postponement_count", 0))
     tardiness = int(counters.get("tardiness_count", 0))
     unexpected = int(counters.get("unexcused_absence_days", 0))
 
@@ -28,6 +30,10 @@ def build_albanian_narrative(facts: dict[str, Any]) -> str:
     negatives: list[str] = []
     if no_progress:
         negatives.append(f"{no_progress} detyrë(a) pa progres")
+    if late_open:
+        negatives.append(f"{late_open} detyrë(a) të hapura pas afatit")
+    if unapproved:
+        negatives.append(f"{unapproved} shtyrje pa aprovim")
     if tardiness:
         negatives.append(f"{tardiness} vonesë(a) në prezencë")
     if unexpected:

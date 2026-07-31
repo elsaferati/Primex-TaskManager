@@ -26,6 +26,7 @@ from app.models.realization import (
     RealizationPeriod,
     RealizationPersonResult,
 )
+from app.models.task import Task
 from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.schemas.realization import (
@@ -120,6 +121,7 @@ def _visible_facts(user: User, result: RealizationPersonResult) -> dict:
                 if isinstance(value, dict):
                     value = dict(value)
                     value["manager_comment"] = None
+                    value["override_reason"] = None
                     item[value_key] = value
         questions.append(item)
     facts["questions"] = questions
@@ -201,7 +203,11 @@ async def _weekly_response(
                 "comment": observation.comment,
                 "task_id": str(observation.task_id) if observation.task_id else None,
                 "evidence_json": observation.evidence_json or {},
-                "verified": observation.id in verified_ids,
+                "verified": observation.id in verified_ids
+                or (
+                    observation.is_system_generated
+                    and (observation.evidence_json or {}).get("verified") is True
+                ),
                 "visibility": observation.visibility,
             }
         )
@@ -212,6 +218,7 @@ async def _weekly_response(
         payload["facts_json"]["observations"] = live_by_user.get(row.user_id, [])
         if user.role == UserRole.STAFF:
             payload["manager_comment"] = None
+            payload["override_reason"] = None
         payload["user_name"] = names.get(row.user_id, "Employee")
         people.append(RealizationPersonWorkflowOut.model_validate(payload))
     department_result = (
@@ -223,6 +230,7 @@ async def _weekly_response(
     ).scalar_one_or_none()
     has_planned = period.planned_snapshot_id is not None
     has_final = period.final_snapshot_id is not None
+    has_reviewed_result = any(row.reviewed_at is not None for row in rows)
     message = None
     if not has_planned:
         message = "Nuk ka PLANNED snapshot zyrtar për këtë javë."
@@ -240,14 +248,26 @@ async def _weekly_response(
                 RealizationPeriodStatus.OPEN.value,
                 RealizationPeriodStatus.CALCULATED.value,
             }
+            and not has_reviewed_result
             and user.role in {UserRole.MANAGER, UserRole.ADMIN}
         ),
         message=message,
         people=people,
         department_result=(
-            RealizationDepartmentResultOut.model_validate(department_result)
-            if department_result
-            else None
+            RealizationDepartmentResultOut.model_validate(
+                {
+                    **RealizationDepartmentResultOut.model_validate(
+                        department_result
+                    ).model_dump(),
+                    "final_comment": None,
+                }
+            )
+            if department_result and user.role == UserRole.STAFF
+            else (
+                RealizationDepartmentResultOut.model_validate(department_result)
+                if department_result
+                else None
+            )
         ),
         unassigned=(department_result.facts_json or {}).get("unassigned", [])
         if department_result
@@ -396,25 +416,40 @@ async def review_person_result(
     result.reviewed_by = user.id
     result.reviewed_at = datetime.now(timezone.utc)
     facts = dict(result.facts_json or {})
+    known_question_keys = {
+        str(question.get("key"))
+        for question in facts.get("questions") or []
+        if question.get("key")
+    }
+    unknown_question_keys = set(payload.question_values) - known_question_keys
+    if unknown_question_keys:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=f"Unknown question keys: {', '.join(sorted(unknown_question_keys))}",
+        )
     questions = []
     for question in facts.get("questions") or []:
         item = dict(question)
         key = item.get("key")
-        if key in payload.question_values:
-            item["final_value"] = payload.question_values[key]
-            item["source_status"] = "MANAGER_CONFIRMED"
-        elif key == "suggested_evaluation_level":
+        if key == "suggested_evaluation_level":
             item["final_value"] = final_level.value
+            item["source_status"] = "MANAGER_CONFIRMED"
         elif key == "weekly_bonus":
             item["final_value"] = final_bonus
+            item["source_status"] = "MANAGER_CONFIRMED"
         elif key == "evaluation":
             item["final_value"] = final_symbol.value
+            item["source_status"] = "MANAGER_CONFIRMED"
         elif key == "comments":
             item["final_value"] = {
                 "automatic_narrative": result.auto_narrative,
                 "manager_comment": payload.manager_comment,
                 "override_reason": payload.override_reason,
             }
+            item["source_status"] = "MANAGER_CONFIRMED"
+        elif key in payload.question_values:
+            item["final_value"] = payload.question_values[key]
+            item["source_status"] = "MANAGER_CONFIRMED"
         questions.append(item)
     facts["questions"] = questions
     result.facts_json = facts
@@ -528,14 +563,33 @@ async def create_observation(
     if user.role == UserRole.STAFF:
         if subject_id != user.id:
             raise HTTPException(status_code=403, detail="Staff may submit only their own observations")
-        if payload.marker in {RealizationMarker.NEGATIVE, RealizationMarker.DIAMOND}:
+        if payload.marker == RealizationMarker.NEGATIVE:
             raise HTTPException(status_code=403, detail="Only managers may create negative or private evidence")
         if payload.visibility == RealizationObservationVisibility.PRIVATE_MANAGER:
             raise HTTPException(status_code=403, detail="Only managers may create private evidence")
     elif not can_review_realization(user, department_id=period.department_id):
         raise HTTPException(status_code=403, detail="Forbidden")
+    if payload.department_id is not None and payload.department_id != period.department_id:
+        raise HTTPException(status_code=422, detail="Observation department must match its period")
+    if payload.scope_type in {RealizationScopeType.TASK, RealizationScopeType.SYSTEM_TASK}:
+        if subject_id is None:
+            raise HTTPException(status_code=422, detail="Task observations require user_id attribution")
+        task = (
+            await db.execute(select(Task).where(Task.id == payload.task_id))
+        ).scalar_one_or_none()
+        if task is None:
+            raise HTTPException(status_code=404, detail="Task not found")
+    if subject_id is not None:
+        subject = (
+            await db.execute(select(User).where(User.id == subject_id))
+        ).scalar_one_or_none()
+        if subject is None or subject.department_id != period.department_id:
+            raise HTTPException(
+                status_code=422,
+                detail="Observation subject must belong to the period department",
+            )
     observation_data = payload.model_dump(mode="python")
-    observation_data["department_id"] = observation_data.get("department_id") or period.department_id
+    observation_data["department_id"] = period.department_id
     observation = RealizationObservation(
         **observation_data,
         is_system_generated=False,
@@ -569,6 +623,8 @@ async def verify_observation(
     ).scalar_one_or_none()
     if original is None or original.period_id is None:
         raise HTTPException(status_code=404, detail="Observation not found")
+    if original.source_type == "realization_observation_verification":
+        raise HTTPException(status_code=422, detail="Verification events cannot be verified")
     period = await _period(db, original.period_id, for_update=True)
     try:
         require_unlocked(period)
