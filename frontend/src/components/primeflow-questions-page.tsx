@@ -5,11 +5,13 @@ import {
   Check,
   ChevronDown,
   Circle,
+  FileSpreadsheet,
   History,
   Loader2,
   Minus,
   Pencil,
   Plus,
+  Printer,
   Save,
   Search,
   Trash2,
@@ -465,6 +467,47 @@ export function PrimeflowQuestionsPage() {
     }
   }
 
+  const printCategory = () => {
+    if (!activeCategory) {
+      toast.error("Zgjidh një kategori për printim")
+      return
+    }
+    window.print()
+  }
+
+  const exportCategoryExcel = async () => {
+    if (!activeCategory) {
+      toast.error("Zgjidh një kategori për eksport")
+      return
+    }
+    setSaving(true)
+    try {
+      const response = await apiFetch(
+        `/question-library/categories/${activeCategory.id}/export.xlsx`
+      )
+      if (!response.ok) {
+        throw new Error(await responseError(response, "Eksporti në Excel dështoi"))
+      }
+      const blob = await response.blob()
+      const disposition = response.headers.get("content-disposition") || ""
+      const filenameMatch = disposition.match(/filename="?([^"]+)"?/i)
+      const filename = filenameMatch?.[1] || "pyetje_per_barazim.xlsx"
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      toast.success("Excel-i u eksportua")
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Eksporti në Excel dështoi")
+    } finally {
+      setSaving(false)
+    }
+  }
+
   if (loading) {
     return (
       <div className="flex min-h-[420px] items-center justify-center">
@@ -474,19 +517,38 @@ export function PrimeflowQuestionsPage() {
   }
 
   return (
-    <div className="min-w-0 bg-[#f5f7fb] p-4 sm:p-5">
+    <div className="question-library-page min-w-0 bg-[#f5f7fb] p-4 sm:p-5">
       <header className="mb-4 flex min-h-16 items-center justify-between gap-4 border border-[#d7dee8] border-l-4 border-l-[#183b68] bg-white px-4 py-3 shadow-sm">
         <h1 className="text-xl font-bold text-[#071126]">PYETJE PËR BARAZIM</h1>
-        <Badge
-          className="min-w-20 justify-center border-[#183b68] bg-[#183b68] px-3 py-1 text-xs font-semibold text-white tabular-nums"
-          aria-label={`${activeCategory?.questions.length ?? 0} pyetje`}
-        >
-          {activeCategory?.questions.length ?? 0} PYETJE
-        </Badge>
+        <div className="question-library-actions flex flex-wrap items-center justify-end gap-2">
+          <Button type="button" variant="outline" onClick={printCategory} disabled={!activeCategory}>
+            <Printer className="size-4" /> Print
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void exportCategoryExcel()}
+            disabled={!activeCategory || saving}
+          >
+            {saving
+              ? <Loader2 className="size-4 animate-spin" />
+              : <FileSpreadsheet className="size-4" />}
+            Export Excel
+          </Button>
+          <Badge
+            className="min-w-20 justify-center border-[#183b68] bg-[#183b68] px-3 py-1 text-xs font-semibold text-white tabular-nums"
+            aria-label={`${activeCategory?.questions.length ?? 0} pyetje`}
+          >
+            {activeCategory?.questions.length ?? 0} PYETJE
+          </Badge>
+        </div>
       </header>
 
       <section className="border bg-white p-4 shadow-sm">
-        <div className="flex flex-wrap items-end gap-3">
+        <div className="question-library-print-summary hidden">
+          <strong>Kategoria:</strong> {activeCategory?.name || "-"}
+        </div>
+        <div className="question-library-controls flex flex-wrap items-end gap-3">
           <label className="grid min-w-[280px] flex-1 gap-1.5 text-xs font-semibold uppercase text-muted-foreground">
             Kategoria e pyetjeve
             <DropdownMenu
@@ -562,7 +624,7 @@ export function PrimeflowQuestionsPage() {
           )}
         </div>
 
-        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+        <div className="question-library-create-category mt-3 flex flex-col gap-2 sm:flex-row">
           <Input
             value={newCategory}
             onChange={(event) => setNewCategory(event.target.value)}
@@ -577,7 +639,7 @@ export function PrimeflowQuestionsPage() {
           </Button>
         </div>
 
-        <div className="mt-4 overflow-x-auto border border-[#183b68]">
+        <div className="question-library-table-wrapper mt-4 overflow-x-auto border border-[#183b68]">
           <table
             className={cn(
               "w-full table-fixed border-collapse text-sm",
@@ -598,9 +660,9 @@ export function PrimeflowQuestionsPage() {
                   <th className="w-40 border-r border-[#183b68] px-2 py-3 text-center">Users</th>
                 )}
                 <th className="w-40 border-r border-[#183b68] px-2 py-3 text-center">Checked</th>
-                {canDelete && <th className="w-24 border-r border-[#183b68] px-3 py-3 text-center">Editime</th>}
+                {canDelete && <th className="question-library-no-print w-24 border-r border-[#183b68] px-3 py-3 text-center">Editime</th>}
                 <th className="w-44 border-r border-[#183b68] px-3 py-3 text-center">Status</th>
-                {canManage && <th className="w-28 px-3 py-3 text-center">Edit / Fshi</th>}
+                {canManage && <th className="question-library-no-print w-28 px-3 py-3 text-center">Edit / Fshi</th>}
               </tr>
             </thead>
             <tbody>
@@ -787,7 +849,7 @@ export function PrimeflowQuestionsPage() {
                       )}
                     </td>
                     {canDelete && (
-                      <td className="border-r border-[#183b68] px-3 py-3 text-center">
+                      <td className="question-library-no-print border-r border-[#183b68] px-3 py-3 text-center">
                         <button
                           type="button"
                           onClick={() => void openEditHistory(question)}
@@ -805,7 +867,7 @@ export function PrimeflowQuestionsPage() {
                       <StatusControls value={question.current_user_status} disabled={statusQuestionId === question.id} onChange={(value) => void updateStatus(question, value)} />
                     </td>
                     {canManage && (
-                      <td className="px-3 py-3 text-center">
+                      <td className="question-library-no-print px-3 py-3 text-center">
                         {isEditing ? (
                           <div className="flex justify-center gap-1">
                             <Button size="icon-sm" onClick={() => void saveQuestion()} disabled={saving || !editText.trim()} title="Save" aria-label="Save"><Save /></Button>
@@ -829,7 +891,7 @@ export function PrimeflowQuestionsPage() {
         </div>
 
         {activeCategory && (
-          <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
+          <div className="question-library-add-question mt-3 flex flex-col gap-2 sm:flex-row sm:items-start">
             <Textarea
               value={newQuestion}
               onChange={(event) => setNewQuestion(event.target.value)}
@@ -925,6 +987,76 @@ export function PrimeflowQuestionsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      <style jsx global>{`
+        @media print {
+          @page {
+            size: A4 landscape;
+            margin: 10mm;
+          }
+
+          body * {
+            visibility: hidden !important;
+          }
+
+          .question-library-page,
+          .question-library-page * {
+            visibility: visible !important;
+          }
+
+          .question-library-page {
+            position: absolute !important;
+            inset: 0 !important;
+            width: 100% !important;
+            min-width: 0 !important;
+            padding: 0 !important;
+            background: white !important;
+          }
+
+          .question-library-actions,
+          .question-library-controls,
+          .question-library-create-category,
+          .question-library-add-question,
+          .question-library-no-print {
+            display: none !important;
+          }
+
+          .question-library-print-summary {
+            display: block !important;
+            margin-bottom: 8px;
+            font-size: 11pt;
+          }
+
+          .question-library-page header,
+          .question-library-page section {
+            margin: 0 0 10px !important;
+            border-color: #183b68 !important;
+            box-shadow: none !important;
+          }
+
+          .question-library-table-wrapper {
+            overflow: visible !important;
+            margin-top: 0 !important;
+          }
+
+          .question-library-table-wrapper table {
+            width: 100% !important;
+            min-width: 0 !important;
+            table-layout: auto !important;
+            font-size: 8pt !important;
+          }
+
+          .question-library-table-wrapper th,
+          .question-library-table-wrapper td {
+            padding: 5px !important;
+          }
+
+          .question-library-table-wrapper tr {
+            break-inside: avoid;
+            page-break-inside: avoid;
+          }
+        }
+      `}</style>
     </div>
   )
 }

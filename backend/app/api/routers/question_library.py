@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+import io
+import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from sqlalchemy import delete, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -524,6 +529,150 @@ async def list_question_library(
             )
         )
     return output
+
+
+@router.get("/categories/{category_id}/export.xlsx")
+async def export_question_category_excel(
+    category_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> StreamingResponse:
+    categories = await list_question_library(db=db, current_user=current_user)
+    category = next((item for item in categories if item.id == category_id), None)
+    if category is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Question category not found")
+
+    participants: list[User] = []
+    if can_manage_question_library(current_user.role):
+        active_users = (
+            await db.execute(
+                select(User)
+                .where(User.is_active.is_(True))
+                .order_by(User.full_name, User.email)
+            )
+        ).scalars().all()
+        participants = [item for item in active_users if _is_question_participant(item)]
+
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "Pyetje"
+    sheet.sheet_view.showGridLines = False
+    sheet.freeze_panes = "A4"
+
+    sheet.merge_cells("A1:H1")
+    title_cell = sheet["A1"]
+    title_cell.value = "PYETJE PËR BARAZIM"
+    title_cell.font = Font(bold=True, size=16, color="FFFFFF")
+    title_cell.fill = PatternFill("solid", fgColor="183B68")
+    title_cell.alignment = Alignment(horizontal="center", vertical="center")
+    sheet.row_dimensions[1].height = 28
+
+    sheet.merge_cells("A2:H2")
+    category_cell = sheet["A2"]
+    category_cell.value = f"Kategoria: {category.name}"
+    category_cell.font = Font(bold=True, size=12, color="071126")
+    category_cell.fill = PatternFill("solid", fgColor="E7EDF5")
+    category_cell.alignment = Alignment(horizontal="left", vertical="center")
+
+    headers = [
+        "NR",
+        "PYETJA",
+        "UDHËZIMI",
+        "UNDERSTOOD / SIGNED",
+        "NEEDS CLARIFICATION",
+        "AWAITING RESPONSE",
+        "CHECKED TODAY",
+        "DONE",
+    ]
+    header_fill = PatternFill("solid", fgColor="DCE6F1")
+    border_side = Side(style="thin", color="183B68")
+    cell_border = Border(left=border_side, right=border_side, top=border_side, bottom=border_side)
+    for column, label in enumerate(headers, start=1):
+        cell = sheet.cell(row=3, column=column, value=label)
+        cell.font = Font(bold=True, size=9.5, color="071126")
+        cell.fill = header_fill
+        cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        cell.border = cell_border
+    sheet.row_dimensions[2].height = 24
+    sheet.row_dimensions[3].height = 34
+
+    participant_ids = {item.id for item in participants}
+    participant_names = {
+        item.id: item.full_name or item.username or item.email
+        for item in participants
+    }
+    row_count = max(1, len(category.questions))
+    base_row_height = min(42, max(22, 420 / row_count))
+    for row_index, question in enumerate(category.questions, start=4):
+        understood = [item.full_name for item in question.statuses if item.status == "DONE"]
+        needs_clarification = [item.full_name for item in question.statuses if item.status == "X"]
+        responded_ids = {item.user_id for item in question.statuses}
+        awaiting = [
+            participant_names[user_id]
+            for user_id in participant_ids - responded_ids
+        ] if participants else []
+        checked_today = [item.full_name for item in question.daily_signoffs]
+        values = [
+            row_index - 3,
+            question.text,
+            question.guidance or "",
+            ", ".join(sorted(understood)),
+            ", ".join(sorted(needs_clarification)),
+            ", ".join(sorted(awaiting)),
+            ", ".join(sorted(checked_today)),
+            "PO" if question.is_done else "JO",
+        ]
+        for column, value in enumerate(values, start=1):
+            cell = sheet.cell(row=row_index, column=column, value=value)
+            cell.font = Font(size=10.5, color="071126")
+            cell.border = cell_border
+            cell.alignment = Alignment(
+                horizontal="center" if column in {1, 8} else "left",
+                vertical="top",
+                wrap_text=True,
+            )
+            if row_index % 2 == 0:
+                cell.fill = PatternFill("solid", fgColor="F7FBFF")
+        content_lines = max(
+            1,
+            len(question.text.splitlines()),
+            len((question.guidance or "").splitlines()),
+        )
+        sheet.row_dimensions[row_index].height = max(base_row_height, 16 * content_lines + 8)
+
+    # Every data column keeps its own fixed width and full border in print.
+    widths = {"A": 6, "B": 42, "C": 34, "D": 23, "E": 23, "F": 27, "G": 21, "H": 9}
+    for column, width in widths.items():
+        sheet.column_dimensions[column].width = width
+    sheet.auto_filter.ref = f"A3:H{max(3, len(category.questions) + 3)}"
+    sheet.print_title_rows = "1:3"
+    sheet.page_setup.orientation = "landscape"
+    sheet.page_setup.paperSize = sheet.PAPERSIZE_A4
+    sheet.page_setup.fitToWidth = 1
+    sheet.page_setup.fitToHeight = 1
+    sheet.sheet_properties.pageSetUpPr.fitToPage = True
+    sheet.print_options.horizontalCentered = True
+    sheet.print_options.verticalCentered = True
+    sheet.page_margins.left = 0.2
+    sheet.page_margins.right = 0.2
+    sheet.page_margins.top = 0.3
+    sheet.page_margins.bottom = 0.3
+    sheet.page_margins.header = 0.1
+    sheet.page_margins.footer = 0.1
+    sheet.print_area = f"A1:H{max(3, len(category.questions) + 3)}"
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    safe_name = re.sub(r"[^A-Za-z0-9_-]+", "_", category.name).strip("_") or "pyetje"
+    return StreamingResponse(
+        output,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={
+            "Content-Disposition": f'attachment; filename="pyetje_{safe_name}.xlsx"',
+            "Cache-Control": "no-store",
+        },
+    )
 
 
 @router.post("/categories", response_model=QuestionCategoryOut, status_code=status.HTTP_201_CREATED)
