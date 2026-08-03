@@ -71,8 +71,8 @@ async function responseError(res: Response) {
 }
 
 export default function MeetingsReportPage() {
-  const { apiFetch, user } = useAuth()
-  const canAccess = Boolean(user)
+  const { apiFetch, loading: authLoading, user } = useAuth()
+  const canAccess = !authLoading && Boolean(user)
   const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [reportDate, setReportDate] = React.useState(todayIso())
   const [draft, setDraft] = React.useState<Draft | null>(null)
@@ -104,6 +104,7 @@ export default function MeetingsReportPage() {
   }, [])
 
   const loadDraft = React.useCallback(async () => {
+    if (!canAccess) return
     setLoading(true)
     try {
       const res = await apiFetch(`${API}?report_date=${reportDate}`)
@@ -114,21 +115,22 @@ export default function MeetingsReportPage() {
       if (!res.ok) throw new Error(await responseError(res))
       applyDraft(await res.json())
     } catch (error) {
-      toast.error("Unable to load Meetings Report", { description: String(error) })
+      if (canAccess) toast.error("Unable to load Meetings Report", { description: String(error) })
     } finally {
       setLoading(false)
     }
-  }, [apiFetch, applyDraft, reportDate])
+  }, [apiFetch, applyDraft, canAccess, reportDate])
 
   const loadSettings = React.useCallback(async () => {
+    if (!canAccess) return
     try {
       const res = await apiFetch(`${API}/settings`)
       if (!res.ok) throw new Error(await responseError(res))
       applySettings(await res.json())
     } catch (error) {
-      toast.error("Unable to load Meetings Report settings", { description: String(error) })
+      if (canAccess) toast.error("Unable to load Meetings Report settings", { description: String(error) })
     }
-  }, [apiFetch, applySettings])
+  }, [apiFetch, applySettings, canAccess])
 
   React.useEffect(() => {
     if (canAccess) {
@@ -138,6 +140,7 @@ export default function MeetingsReportPage() {
   }, [canAccess, loadDraft, loadSettings])
 
   const generate = async () => {
+    if (!canAccess) return
     setLoading(true)
     try {
       const res = await apiFetch(`${API}/generate?report_date=${reportDate}`, { method: "POST" })
