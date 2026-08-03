@@ -103,6 +103,12 @@ def _late_days(task: Task) -> int:
     return business_days_between(due_day, today)
 
 
+def _late_days_label(days: int) -> str:
+    if days <= 0:
+        return "-"
+    return f"{days} day" if days == 1 else f"{days} days"
+
+
 def _initials(name: str | None) -> str:
     parts = re.findall(r"[^\W\d_]+", name or "", flags=re.UNICODE)
     return "".join(part[0] for part in parts).upper() or "-"
@@ -159,7 +165,7 @@ def _task_line_with_late_days(task: Task, names: dict[Any, str]) -> str:
     owner = _initials(names.get(task.assigned_to))
     title_lines = _wrap_fixed_width(_clean_task_title(task.title), 48)
     days = _late_days(task)
-    late_label = f"{days} dite late" if days else "-"
+    late_label = _late_days_label(days)
     lines = [f"- {owner:<4} | {title_lines[0]:<48} | {late_label}"]
     lines.extend(f"  {'':<4} | {line:<48} |" for line in title_lines[1:])
     return "\n".join(lines)
@@ -194,7 +200,7 @@ def _m3_status_table(status_label: str, tasks: list[Task], names: dict[Any, str]
         owner = _initials(names.get(task.assigned_to))
         title_lines = _wrap_fixed_width(_clean_task_title(task.title), 64)
         if include_late_days:
-            late_label = f"{_late_days(task)} dite late" if _late_days(task) else "-"
+            late_label = _late_days_label(_late_days(task))
             rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} | {late_label:<12} |")
         else:
             rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} |")
@@ -321,9 +327,9 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         {"title": SECTION_TITLES[2], "body": _normalize_section(section_1)},
         {"title": SECTION_TITLES[3], "body": _normalize_section(_m3_status_table("TODO", today_todo, names))},
         {"title": SECTION_TITLES[4], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
-        {"title": SECTION_TITLES[5], "body": _normalize_section(section_4)},
-        {"title": SECTION_TITLES[6], "body": _normalize_section(section_5)},
         {"title": SECTION_TITLES[7], "body": section_6},
+        {"title": SECTION_TITLES[6], "body": _normalize_section(section_5)},
+        {"title": SECTION_TITLES[5], "body": _normalize_section(section_4)},
         {"title": SECTION_TITLES[8], "body": _normalize_section(_m3_status_table("1H PA SLOT", one_h_no_slot, names))},
         {"title": SECTION_TITLES[9], "body": _normalize_section(_m3_status_table("PERSONAL GA/KA", personal_ga_ka, names))},
     ]
@@ -428,8 +434,34 @@ def _meeting_lines(meetings: list[Meeting]) -> list[str]:
 
 
 def _meeting_group_title(title: str) -> list[str]:
-    border = "=" * len(title)
-    return [border, title, border]
+    return [title]
+
+
+def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: dict[Any, str]) -> list[str]:
+    border = "+----+-------+------------------------------------------------------------------+----------+----------+-----------+"
+    rows = [
+        border,
+        f"| {'NR':<2} | {'TIME':<5} | {'TITLE':<64} | {'MBAJTUR':<8} | {'ANULUAR':<8} | {'PA STATUS':<9} |",
+        border,
+    ]
+    if not meetings:
+        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje takim)':<64} | {'':<8} | {'':<8} | {'':<9} |")
+        rows.append(border)
+        return rows
+    for index, meeting in enumerate(sorted(meetings, key=lambda item: item.starts_at or datetime.min), start=1):
+        status = status_by_meeting.get(meeting.id, "")
+        title_lines = _wrap_fixed_width(meeting.title or "-", 64)
+        held = "✓" if status == "held" else ""
+        canceled = "✓" if status == "canceled" else ""
+        no_status = "✓" if status == "" else ""
+        rows.append(
+            f"| {index:<2} | {_local_time(meeting.starts_at):<5} | {title_lines[0]:<64} | "
+            f"{held:<8} | {canceled:<8} | {no_status:<9} |"
+        )
+        for line in title_lines[1:]:
+            rows.append(f"| {'':<2} | {'':<5} | {line:<64} | {'':<8} | {'':<8} | {'':<9} |")
+        rows.append(border)
+    return rows
 
 
 async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting], report_day: date) -> str:
@@ -442,31 +474,12 @@ async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting
     external = [meeting for meeting in meetings if getattr(meeting, "meeting_type", None) == "external"]
     internal = [meeting for meeting in meetings if getattr(meeting, "meeting_type", None) != "external"]
 
-    def by_status(values: list[Meeting], status_value: str) -> list[Meeting]:
-        return [meeting for meeting in values if status_by_meeting.get(meeting.id, "") == status_value]
-
     return _normalize_section([
         *_meeting_group_title("TAKIMET EXTERNE"),
-        "",
-        "MBAJTUR:",
-        *_meeting_lines(by_status(external, "held")),
-        "",
-        "ANULUAR:",
-        *_meeting_lines(by_status(external, "canceled")),
-        "",
-        "PA STATUS:",
-        *_meeting_lines(by_status(external, "")),
+        *_meeting_status_checkbox_table(external, status_by_meeting),
         "",
         *_meeting_group_title("TAKIMET INTERNE"),
-        "",
-        "MBAJTUR:",
-        *_meeting_lines(by_status(internal, "held")),
-        "",
-        "ANULUAR:",
-        *_meeting_lines(by_status(internal, "canceled")),
-        "",
-        "PA STATUS:",
-        *_meeting_lines(by_status(internal, "")),
+        *_meeting_status_checkbox_table(internal, status_by_meeting),
     ])
 
 
@@ -543,6 +556,63 @@ def _prefer_common(common_lines: list[str], fallback_lines: list[str]) -> list[s
     return common_lines if common_lines else [line for line in fallback_lines if not line.startswith("(Asnje")]
 
 
+def _strip_list_marker(value: str) -> str:
+    return re.sub(r"^\s*-\s*", "", value).strip()
+
+
+def _tomorrow_meeting_table(title: str, lines: list[str]) -> list[str]:
+    border = "+----+-------+------------------------------------------------------------------+"
+    rows = [
+        f"{title}:",
+        border,
+        f"| {'NR':<2} | {'TIME':<5} | {'TITLE':<64} |",
+        border,
+    ]
+    values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
+    if not values:
+        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje takim)':<64} |")
+        rows.append(border)
+        return rows
+    for index, value in enumerate(values, start=1):
+        match = re.match(r"^(\d{1,2}:\d{2})\s*:\s*(.+)$", value)
+        time_value = match.group(1) if match else "-"
+        title_value = match.group(2) if match else value
+        title_lines = _wrap_fixed_width(title_value, 64)
+        rows.append(f"| {index:<2} | {time_value:<5} | {title_lines[0]:<64} |")
+        for line in title_lines[1:]:
+            rows.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        rows.append(border)
+    return rows
+
+
+def _tomorrow_task_table(title: str, lines: list[str]) -> list[str]:
+    border = "+----+-------+------------------------------------------------------------------+"
+    rows = [
+        f"{title}:",
+        border,
+        f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} |",
+        border,
+    ]
+    values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
+    if not values:
+        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+        rows.append(border)
+        return rows
+    for index, value in enumerate(values, start=1):
+        owner = "-"
+        title_value = value
+        if ":" in value:
+            owner, title_value = value.split(":", 1)
+            owner = owner.strip() or "-"
+            title_value = title_value.strip()
+        title_lines = _wrap_fixed_width(title_value, 64)
+        rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} |")
+        for line in title_lines[1:]:
+            rows.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        rows.append(border)
+    return rows
+
+
 def _tomorrow_common_section(
     *,
     common_items: dict[str, list[dict[str, Any]]],
@@ -557,29 +627,36 @@ def _tomorrow_common_section(
     bz = _prefer_common(_common_task_lines(common_items.get("bz") or [], tomorrow), fallback_bz)
     blocked = _prefer_common(_common_task_lines(common_items.get("blocked") or [], tomorrow), fallback_blocked)
     return [
-        "TAKIMET EXTERNE:",
-        *(external or ["(Asnje takim)"]),
+        *_tomorrow_meeting_table("TAKIMET EXTERNE", external),
         "",
-        "TAKIMET INTERNE:",
-        *(internal or ["(Asnje takim)"]),
+        *_tomorrow_meeting_table("TAKIMET INTERNE", internal),
         "",
-        "BZ ME GA:",
-        *(bz or ["(Asnje detyre)"]),
+        *_tomorrow_task_table("BZ ME GA", bz),
         "",
-        "BLLOK:",
-        *(blocked or ["(Asnje detyre)"]),
+        *_tomorrow_task_table("BLLOK", blocked),
     ]
 
 
 def _leave_lines(entries: list[tuple[CommonEntry, bool, str | None, str | None, str | None, bool]], names: dict[Any, str]) -> list[str]:
+    border = "+----+-------+------------------------------------------------------------------+"
+    lines = [
+        border,
+        f"| {'NR':<2} | {'WHO':<5} | {'TIME':<64} |",
+        border,
+    ]
     if not entries:
-        return []
-    lines = []
-    for entry, full_day, start_time, end_time, note, is_all_users in entries:
+        lines.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+        lines.append(border)
+        return lines
+    for index, (entry, full_day, start_time, end_time, note, is_all_users) in enumerate(entries, start=1):
         person = "ALL" if is_all_users else _initials(names.get(entry.assigned_to_user_id or entry.created_by_user_id) or entry.title)
         when = "Full day" if full_day else f"{start_time or '-'}-{end_time or '-'}"
         detail = f" - {note}" if note else ""
-        lines.append(f"- {person}: {when}{detail}")
+        time_lines = _wrap_fixed_width(f"{when}{detail}", 64)
+        lines.append(f"| {index:<2} | {person:<5} | {time_lines[0]:<64} |")
+        for line in time_lines[1:]:
+            lines.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        lines.append(border)
     return lines
 
 
@@ -604,10 +681,19 @@ def _render_ascii_table_html(lines: list[str]) -> str:
         return ""
     header, body_rows = table_rows[0], table_rows[1:]
     header_html = "".join(f"<th>{html.escape(cell)}</th>" for cell in header)
-    body_html = "".join(
-        "<tr>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>"
-        for row in body_rows
-    )
+    canceled_index = next((index for index, cell in enumerate(header) if cell.upper() == "ANULUAR"), None)
+    body_html_parts = []
+    for row in body_rows:
+        is_canceled = (
+            canceled_index is not None
+            and len(row) > canceled_index
+            and bool(row[canceled_index].strip())
+        )
+        row_class = " class=\"report-row-canceled\"" if is_canceled else ""
+        body_html_parts.append(
+            f"<tr{row_class}>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>"
+        )
+    body_html = "".join(body_html_parts)
     return f"<table class=\"report-table\"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
 
 
@@ -657,6 +743,7 @@ pre{{white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-heigh
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700}}
 .report-table th,.report-table td{{border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top}}
 .report-table td{{background:#f8fafc}}
+.report-table .report-row-canceled td{{background:#fee2e2;color:#991b1b}}
 </style></head><body><div class="wrap"><h1>{html.escape(subject)}</h1>
 <p>Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>{section_html}</div></body></html>"""
 
