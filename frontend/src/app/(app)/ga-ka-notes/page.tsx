@@ -1060,7 +1060,7 @@ export default function GaKaNotesPage() {
     const taskRequests: Promise<Response>[] = []
     if (gaNoteIds.length) {
       taskRequests.push(
-        apiFetch("/tasks/by-ga-notes", {
+        apiFetch("/tasks/by-ga-notes/summary", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1073,7 +1073,7 @@ export default function GaKaNotesPage() {
     }
     if (planNoteIds.length) {
       taskRequests.push(
-        apiFetch("/tasks/by-ga-notes", {
+        apiFetch("/tasks/by-ga-notes/summary", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({

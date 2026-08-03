@@ -63,6 +63,31 @@ class TaskOut(BaseModel):
     updated_at: datetime
 
 
+class GaNoteTaskSummaryOut(BaseModel):
+    """Lean task shape used by the GA/KA notes dashboard."""
+
+    id: uuid.UUID
+    description: str | None = None
+    project_id: uuid.UUID | None = None
+    department_id: uuid.UUID | None = None
+    assigned_to: uuid.UUID | None = None
+    assignees: list[TaskAssigneeOut] = Field(default_factory=list)
+    ga_note_origin_id: uuid.UUID | None = None
+    plan_note_origin_id: uuid.UUID | None = None
+    status: TaskStatus
+    priority: TaskPriority
+    finish_period: TaskFinishPeriod | None = None
+    start_date: datetime | None = None
+    due_date: datetime | None = None
+    is_deadline_important: bool
+    is_bllok: bool
+    is_1h_report: bool
+    is_r1: bool
+    is_personal: bool
+    created_at: datetime
+    updated_at: datetime
+
+
 class TaskCreate(BaseModel):
     title: str = Field(min_length=2)
     description: str | None = Field(default=None)

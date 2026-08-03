@@ -175,11 +175,6 @@ const navGroups: NavGroup[] = [
   },
 ]
 
-const PRIORITY_PREFETCH_ROUTES = new Set([
-  "/departments/development",
-  "/weekly-planner",
-])
-
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const router = useRouter()
@@ -306,7 +301,7 @@ export function Sidebar({ role }: { role: UserRole }) {
       <Link
         key={item.href}
         href={item.href}
-        prefetch={PRIORITY_PREFETCH_ROUTES.has(item.href)}
+        prefetch={false}
         onMouseEnter={() => router.prefetch(item.href)}
         onFocus={() => router.prefetch(item.href)}
         onClick={() => {
