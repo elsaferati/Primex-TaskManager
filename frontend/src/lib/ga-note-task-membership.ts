@@ -6,7 +6,7 @@ export async function loadGaNoteTaskAssigneeIds(
   apiFetch: ApiFetch,
   gaNoteOriginId: string
 ): Promise<string[]> {
-  const res = await apiFetch("/tasks/by-ga-notes", {
+  const res = await apiFetch("/tasks/by-ga-notes/summary", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field
 
@@ -50,3 +50,21 @@ class MeetingUpdate(BaseModel):
     recurrence_days_of_month: list[int] | None = None
     project_id: uuid.UUID | None = None
     participant_ids: list[uuid.UUID] | None = None
+
+
+class MeetingOccurrenceStatusOut(BaseModel):
+    id: uuid.UUID
+    meeting_id: uuid.UUID
+    occurrence_date: date
+    status: str
+    note: str | None = None
+    checked_by_user_id: uuid.UUID | None = None
+    checked_at: datetime | None = None
+    created_at: datetime
+    updated_at: datetime
+
+
+class MeetingOccurrenceStatusUpdate(BaseModel):
+    occurrence_date: date
+    status: str = Field(pattern="^(|held|canceled)$")
+    note: str | None = None

@@ -20,6 +20,9 @@ from app.models.holiday import Holiday
 from app.models.internal_note import InternalNote
 from app.models.internal_meeting_session import InternalMeetingSession
 from app.models.meeting import Meeting
+from app.models.meetings_report_draft import MeetingsReportDraft
+from app.models.meetings_report_settings import MeetingsReportSettings
+from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
 from app.models.project import Project
@@ -31,6 +34,7 @@ from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project_member import ProjectMember
 from app.models.project_prompt import ProjectPrompt
+from app.models.std_feedback_ticket import StdFeedbackTicket
 from app.models.question_library import (
     QuestionCategory,
     QuestionDefinition,
@@ -67,6 +71,11 @@ from app.models.user import User
 from app.models.weekly_plan import WeeklyPlan
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
+from app.models.weekly_planning_audit import (
+    WeeklyPlanningAuditDelivery,
+    WeeklyPlanningAuditRun,
+    WeeklyPlanningAuditSettings,
+)
 
 __all__ = [
     "AttendanceLog",
@@ -92,6 +101,9 @@ __all__ = [
     "InternalNote",
     "InternalMeetingSession",
     "Meeting",
+    "MeetingsReportDraft",
+    "MeetingsReportSettings",
+    "MeetingOccurrenceStatus",
     "MicrosoftToken",
     "Notification",
     "Project",
@@ -103,6 +115,7 @@ __all__ = [
     "ProjectPhaseChecklistItem",
     "ProjectMember",
     "ProjectPrompt",
+    "StdFeedbackTicket",
     "QuestionCategory",
     "QuestionDefinition",
     "QuestionStatusEvent",
@@ -135,5 +148,8 @@ __all__ = [
     "WeeklyPlan",
     "WeeklyPlannerSnapshot",
     "WeeklyPlannerLegendEntry",
+    "WeeklyPlanningAuditDelivery",
+    "WeeklyPlanningAuditRun",
+    "WeeklyPlanningAuditSettings",
 ]
 

@@ -64,6 +64,8 @@ const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: str
 const MAX_ATTACHMENT_FILES = 20
 const MAX_ATTACHMENT_MB = 25
 const MAX_ATTACHMENT_BYTES = MAX_ATTACHMENT_MB * 1024 * 1024
+const INITIAL_NOTES_RENDER_LIMIT = 80
+const NOTES_RENDER_BATCH_SIZE = 80
 const EMAIL_MARKER_RE = /(^|\s)em:/i
 const DONE_MARK_START = "[[done]]"
 const DONE_MARK_END = "[[/done]]"
@@ -798,9 +800,17 @@ export default function GaKaNotesPage() {
   const confirm = useConfirm()
   const searchParams = useSearchParams()
   const [notes, setNotes] = React.useState<GaNotesTableNote[]>([])
+  const notesRef = React.useRef<GaNotesTableNote[]>([])
+  notesRef.current = notes
+  const noteOriginsKey = React.useMemo(
+    () => notes.map((note) => `${note.source || "GA_KA"}:${note.id}`).join("|"),
+    [notes]
+  )
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
   const [users, setUsers] = React.useState<UserLookup[]>([])
+  const usersRef = React.useRef<UserLookup[]>([])
+  usersRef.current = users
 
   // Initialize from URL parameters if present
   const urlDepartmentId = searchParams.get("department_id")
@@ -826,6 +836,7 @@ export default function GaKaNotesPage() {
   const [contentFilter, setContentFilter] = React.useState<ContentFilter>("all")
   const [searchQuery, setSearchQuery] = React.useState("")
   const deferredSearchQuery = React.useDeferredValue(searchQuery)
+  const [notesRenderLimit, setNotesRenderLimit] = React.useState(INITIAL_NOTES_RENDER_LIMIT)
   const [exportingDailyReport, setExportingDailyReport] = React.useState(false)
   const [showLegend, setShowLegend] = React.useState(false)
   const [taskTitle, setTaskTitle] = React.useState("")
@@ -857,6 +868,8 @@ export default function GaKaNotesPage() {
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
   const [previewTitle, setPreviewTitle] = React.useState<string | null>(null)
+  const [previewContentType, setPreviewContentType] = React.useState<string | null>(null)
+  const [previewAttachment, setPreviewAttachment] = React.useState<GaNoteAttachment | null>(null)
 
   const [internalMeetingTaskDialogOpen, setInternalMeetingTaskDialogOpen] = React.useState(false)
   const [internalMeetingTaskTitle, setInternalMeetingTaskTitle] = React.useState("")
@@ -1031,9 +1044,10 @@ export default function GaKaNotesPage() {
   }, [fetchNotes])
 
   const loadNoteTasks = React.useCallback(async (noteIdsOverride?: string[]) => {
+    const currentNotes = notesRef.current
     const selectedNotes = noteIdsOverride
-      ? notes.filter((note) => noteIdsOverride.includes(note.id))
-      : notes
+      ? currentNotes.filter((note) => noteIdsOverride.includes(note.id))
+      : currentNotes
     const gaNoteIds = selectedNotes.filter((note) => note.source !== "PX_JAV").map((note) => note.id)
     const planNoteIds = selectedNotes.filter((note) => note.source === "PX_JAV").map((note) => note.id)
     const noteIds = [...gaNoteIds, ...planNoteIds]
@@ -1046,7 +1060,7 @@ export default function GaKaNotesPage() {
     const taskRequests: Promise<Response>[] = []
     if (gaNoteIds.length) {
       taskRequests.push(
-        apiFetch("/tasks/by-ga-notes", {
+        apiFetch("/tasks/by-ga-notes/summary", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
@@ -1058,12 +1072,18 @@ export default function GaKaNotesPage() {
       )
     }
     if (planNoteIds.length) {
-      const planParams = new URLSearchParams({
-        include_done: "true",
-        include_all_departments: "true",
-      })
-      planNoteIds.forEach((id) => planParams.append("plan_note_origin_ids", id))
-      taskRequests.push(apiFetch(`/tasks?${planParams.toString()}`))
+      taskRequests.push(
+        apiFetch("/tasks/by-ga-notes/summary", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            ga_note_origin_ids: [],
+            plan_note_origin_ids: planNoteIds,
+            include_done: true,
+            include_all_done: false,
+          }),
+        })
+      )
     }
     const taskResponses = await Promise.all(taskRequests)
     if (taskResponses.some((response) => !response.ok)) return
@@ -1072,7 +1092,7 @@ export default function GaKaNotesPage() {
     ).flat()
 
     const map = new Map<string, NoteTaskInfo>()
-    const userMapById = new Map(users.map((person) => [person.id, person]))
+    const userMapById = new Map(usersRef.current.map((person) => [person.id, person]))
     const mergeAssignees = (base: TaskAssignee[], incoming: TaskAssignee[]) => {
       const result: TaskAssignee[] = []
       const seen = new Set<string>()
@@ -1158,12 +1178,12 @@ export default function GaKaNotesPage() {
     } else {
       setNoteTaskInfo(map)
     }
-  }, [apiFetch, notes, users])
+  }, [apiFetch])
 
   // Load tasks linked to notes to show assignees/descriptions
   React.useEffect(() => {
     void loadNoteTasks()
-  }, [loadNoteTasks])
+  }, [loadNoteTasks, noteOriginsKey])
 
 
 
@@ -1370,7 +1390,7 @@ export default function GaKaNotesPage() {
 
   const openAttachmentPreview = async (attachment: GaNoteAttachment) => {
     try {
-      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}`)
+      const res = await apiFetch(`/ga-notes/attachments/${attachment.id}/preview`)
       if (!res?.ok) {
         toast.error("Failed to open file")
         return
@@ -1378,6 +1398,8 @@ export default function GaKaNotesPage() {
       const blob = await res.blob()
       const url = window.URL.createObjectURL(blob)
       setPreviewTitle(attachment.original_filename || "Attachment preview")
+      setPreviewContentType(blob.type || attachment.content_type || "application/octet-stream")
+      setPreviewAttachment(attachment)
       setPreviewUrl((prev) => {
         if (prev) window.URL.revokeObjectURL(prev)
         return url
@@ -2203,6 +2225,15 @@ export default function GaKaNotesPage() {
     return sorted
   }, [notes, rangeFilter, taskStatusFilter, contentFilter, deferredSearchQuery, noteTaskInfo, users, departments, projects])
 
+  React.useEffect(() => {
+    setNotesRenderLimit(INITIAL_NOTES_RENDER_LIMIT)
+  }, [contentFilter, deferredSearchQuery, departmentId, projectId, rangeFilter, taskStatusFilter])
+
+  const renderedNotes = React.useMemo(
+    () => visibleNotes.slice(0, notesRenderLimit),
+    [notesRenderLimit, visibleNotes]
+  )
+
   const attachmentDialogItems = React.useMemo(() => {
     if (!attachmentsDialogNoteId) return []
     const note = visibleNotes.find((item) => item.id === attachmentsDialogNoteId)
@@ -2360,8 +2391,8 @@ export default function GaKaNotesPage() {
               ref={contentTextareaRef}
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              rows={6}
-              className="md:min-h-[220px] min-h-[170px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
+              rows={4}
+              className="min-h-[110px] md:min-h-[120px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
             />
             {isVoiceListening ? (
@@ -2622,15 +2653,31 @@ export default function GaKaNotesPage() {
             <Button
               variant="outline"
               className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
-              onClick={() => {
+              onClick={async () => {
                 const printWindow = window.open('', '_blank')
                 if (!printWindow) return
-                
+
+                const previousNotesRenderLimit = notesRenderLimit
+                if (notesRenderLimit < visibleNotes.length) {
+                  setNotesRenderLimit(visibleNotes.length)
+                  await new Promise<void>((resolve) => {
+                    window.requestAnimationFrame(() => window.requestAnimationFrame(() => resolve()))
+                  })
+                }
+
                 const tableContainer = document.querySelector('.notes-table-container')
-                if (!tableContainer) return
-                
+                if (!tableContainer) {
+                  setNotesRenderLimit(previousNotesRenderLimit)
+                  printWindow.close()
+                  return
+                }
+
                 const table = tableContainer.querySelector('table')
-                if (!table) return
+                if (!table) {
+                  setNotesRenderLimit(previousNotesRenderLimit)
+                  printWindow.close()
+                  return
+                }
                 
                 // Get user initials
                 const userInitials = user ? getInitials(user.full_name || user.username || "") : "USER"
@@ -2650,6 +2697,7 @@ export default function GaKaNotesPage() {
                 
                 // Clone the table and clean up React-specific attributes
                 const clonedTable = table.cloneNode(true) as HTMLElement
+                setNotesRenderLimit(previousNotesRenderLimit)
                 const allElements = clonedTable.querySelectorAll('*')
                 allElements.forEach((el) => {
                   // Remove React event handlers and other attributes
@@ -2866,14 +2914,22 @@ export default function GaKaNotesPage() {
           ) : notes.length === 0 ? (
             <div className="text-sm text-muted-foreground">No notes yet.</div>
           ) : (
-            <div className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full">
-              <div className="w-full min-w-[1266px] sm:min-w-[1516px]">
-                <table className="w-full table-fixed caption-bottom text-sm min-w-[1266px] sm:min-w-[1516px]">
+            <div
+              className="notes-table-container rounded-md border-2 border-slate-700 max-h-[75vh] overflow-x-auto overflow-y-auto relative bg-white w-full"
+              onScroll={(event) => {
+                const container = event.currentTarget
+                const distanceFromBottom = container.scrollHeight - container.scrollTop - container.clientHeight
+                if (distanceFromBottom > 800 || notesRenderLimit >= visibleNotes.length) return
+                setNotesRenderLimit((current) => Math.min(current + NOTES_RENDER_BATCH_SIZE, visibleNotes.length))
+              }}
+            >
+              <div className="w-full min-w-[1266px] sm:min-w-[1466px]">
+                <table className="w-full table-fixed caption-bottom text-sm min-w-[1266px] sm:min-w-[1466px]">
                   <thead className="sticky top-0 z-50 bg-white shadow-md" style={{ position: 'sticky', top: 0, zIndex: 50 }}>
                     <tr className="bg-white" style={{ borderBottom: '1px solid rgb(51 65 85)' }}>
                       <th className="w-[40px] border border-slate-600 border-l-2 border-l-slate-800 bg-white text-foreground h-10 px-2 text-left align-middle font-medium" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)', whiteSpace: 'normal' }}>NR</th>
                       <th className="min-w-[280px] w-[280px] max-w-[280px] sm:min-w-[320px] sm:w-[320px] sm:max-w-[320px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>SHENIMI</th>
-                      <th className="hidden sm:table-cell min-w-[220px] w-[220px] max-w-[220px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
+                      <th className="hidden sm:table-cell min-w-[170px] w-[170px] max-w-[170px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>PERSHKRIMI</th>
                       <th className="min-w-[50px] w-[50px] max-w-[50px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }} title="Diskutuar YES/JO?">DISK</th>
                       <th className="w-[96px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>DATA,ORA</th>
                       <th className="w-[106px] border border-slate-600 bg-white text-foreground h-10 px-2 text-left align-middle font-medium whitespace-nowrap" style={{ verticalAlign: 'bottom', borderBottom: '1px solid rgb(51 65 85)' }}>EDITUAR</th>
@@ -2888,7 +2944,7 @@ export default function GaKaNotesPage() {
                     </tr>
                   </thead>
                   <tbody>
-                  {visibleNotes.map((note, idx) => {
+                  {renderedNotes.map((note, idx) => {
                     const isPxJavNote = note.source === "PX_JAV"
                     const creator = note.created_by ? userMap.get(note.created_by) : null
                     const creatorLabel =
@@ -2988,7 +3044,8 @@ export default function GaKaNotesPage() {
                                     {assignees.length > 0 ? (
                                       <span className="inline-flex items-center gap-1">
                                         {assignees.map((assignee, assigneeIdx) => {
-                                          const assigneeLabel = assignee.full_name || assignee.username || "Unknown"
+                                          const knownAssignee = assignee.id ? userMap.get(assignee.id) : null
+                                          const assigneeLabel = assignee.full_name || assignee.username || knownAssignee?.full_name || knownAssignee?.username || "Unknown"
                                           const assigneeInitials = getInitials(assigneeLabel)
                                           return (
                                             <span
@@ -3153,7 +3210,7 @@ export default function GaKaNotesPage() {
                             </div>
                           </div>
                         </td>
-                        <td className="hidden sm:table-cell border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[220px] w-[220px] max-w-[220px]" style={{ verticalAlign: 'bottom' }}>
+                        <td className="hidden sm:table-cell border border-slate-600 p-2 align-middle whitespace-pre-wrap text-xs text-slate-700 min-w-[170px] w-[170px] max-w-[170px]" style={{ verticalAlign: 'bottom' }}>
                           {taskInfo?.description || attachments.length > 0 ? (
                             <div className="space-y-2">
                               {canAddAttachments || attachments.length > 0 ? (
@@ -3177,36 +3234,23 @@ export default function GaKaNotesPage() {
                               {attachments.length > 0 ? (
                                 <div className="space-y-1">
                                   {attachments.map((attachment) => (
-                                    <div key={attachment.id} className="flex items-center justify-between gap-2 rounded border border-slate-200 bg-white px-2 py-1">
-                                      <div className="flex flex-col">
-                                        <span className="text-xs font-medium text-slate-700">
+                                    <button
+                                      key={attachment.id}
+                                      type="button"
+                                      className="flex w-full min-w-0 items-start gap-1.5 rounded border border-slate-200 bg-white px-2 py-1.5 text-left transition-colors hover:border-blue-300 hover:bg-blue-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500"
+                                      title={`Open ${attachment.original_filename}`}
+                                      onClick={() => void openAttachmentPreview(attachment)}
+                                    >
+                                      <Paperclip className="mt-0.5 h-3.5 w-3.5 shrink-0 text-slate-500" />
+                                      <span className="min-w-0 flex-1">
+                                        <span className="block truncate text-xs font-medium text-blue-700 underline underline-offset-2">
                                           {attachment.original_filename}
                                         </span>
-                                        <span className="text-[10px] text-slate-500">
+                                        <span className="block text-[10px] text-slate-500">
                                           {formatFileSize(attachment.size_bytes)}
                                         </span>
-                                      </div>
-                                      <div className="flex items-center gap-2">
-                                        {(attachment.content_type || "").startsWith("image/") ? (
-                                          <Button
-                                            variant="outline"
-                                            size="sm"
-                                            className="h-6 text-[10px]"
-                                            onClick={() => void openAttachmentPreview(attachment)}
-                                          >
-                                            View
-                                          </Button>
-                                        ) : null}
-                                        <Button
-                                          variant="outline"
-                                          size="sm"
-                                          className="h-6 text-[10px]"
-                                          onClick={() => void downloadAttachment(attachment)}
-                                        >
-                                          Download
-                                        </Button>
-                                      </div>
-                                    </div>
+                                      </span>
+                                    </button>
                                   ))}
                                 </div>
                               ) : null}
@@ -3288,7 +3332,8 @@ export default function GaKaNotesPage() {
                           ) : (
                             <div className="flex items-center gap-1 flex-wrap">
                               {assignees.map((assignee, assigneeIdx) => {
-                                const assigneeLabel = assignee.full_name || assignee.username || "Unknown"
+                                const knownAssignee = assignee.id ? userMap.get(assignee.id) : null
+                                const assigneeLabel = assignee.full_name || assignee.username || knownAssignee?.full_name || knownAssignee?.username || "Unknown"
                                 const assigneeInitials = getInitials(assigneeLabel)
                                 const assigneeBadgeClasses =
                                   assigneeInitials === "GA"
@@ -3481,15 +3526,19 @@ export default function GaKaNotesPage() {
           ) : (
             <div className="max-h-[70vh] space-y-3 overflow-y-auto pr-1">
               {attachmentDialogItems.map((item) => {
-                const isImage = (item.attachment.content_type || "").startsWith("image/")
                 const isDeleting = deletingAttachmentIds.includes(item.attachment.id)
                 return (
                   <div key={item.attachment.id} className="rounded-lg border border-slate-200 bg-white p-3">
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <div className="text-sm font-medium text-slate-800 truncate">
+                        <button
+                          type="button"
+                          className="block max-w-full truncate text-left text-sm font-medium text-blue-700 underline underline-offset-2 hover:text-blue-900"
+                          title={`Open ${item.attachment.original_filename}`}
+                          onClick={() => void openAttachmentPreview(item.attachment)}
+                        >
                           {item.attachment.original_filename}
-                        </div>
+                        </button>
                         <div className="text-xs text-slate-500">
                           {formatFileSize(item.attachment.size_bytes)} • {(() => {
                             const parts = formatDateParts(item.noteCreatedAt)
@@ -3501,16 +3550,14 @@ export default function GaKaNotesPage() {
                         </div>
                       </div>
                       <div className="flex items-center gap-2">
-                        {isImage ? (
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-7 text-xs"
-                            onClick={() => void openAttachmentPreview(item.attachment)}
-                          >
-                            View
-                          </Button>
-                        ) : null}
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-7 text-xs"
+                          onClick={() => void openAttachmentPreview(item.attachment)}
+                        >
+                          Preview
+                        </Button>
                         <Button
                           variant="outline"
                           size="sm"
@@ -3602,16 +3649,45 @@ export default function GaKaNotesPage() {
               return null
             })
             setPreviewTitle(null)
+            setPreviewContentType(null)
+            setPreviewAttachment(null)
           }
         }}
       >
-        <DialogContent className="sm:max-w-4xl">
+        <DialogContent className="w-[96vw] sm:max-w-5xl">
           <DialogHeader>
-            <DialogTitle>{previewTitle || "Attachment preview"}</DialogTitle>
+            <div className="flex items-center justify-between gap-3 pr-6">
+              <DialogTitle className="min-w-0 truncate" title={previewTitle || undefined}>
+                {previewTitle || "Attachment preview"}
+              </DialogTitle>
+              {previewAttachment ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => void downloadAttachment(previewAttachment)}
+                >
+                  Download
+                </Button>
+              ) : null}
+            </div>
           </DialogHeader>
           {previewUrl ? (
-            <div className="flex max-h-[70vh] items-center justify-center overflow-hidden rounded border border-slate-200 bg-white p-2">
-              <img src={previewUrl} alt={previewTitle || "Attachment preview"} className="max-h-[66vh] w-auto object-contain" />
+            <div className="flex h-[72vh] items-center justify-center overflow-hidden rounded border border-slate-200 bg-white">
+              {previewContentType?.startsWith("image/") ? (
+                <img src={previewUrl} alt={previewTitle || "Attachment preview"} className="max-h-full max-w-full object-contain" />
+              ) : previewContentType?.startsWith("audio/") ? (
+                <audio src={previewUrl} controls className="w-[min(90%,640px)]" />
+              ) : previewContentType?.startsWith("video/") ? (
+                <video src={previewUrl} controls className="max-h-full max-w-full" />
+              ) : (
+                <iframe
+                  src={previewUrl}
+                  title={previewTitle || "Attachment preview"}
+                  className="h-full w-full border-0 bg-white"
+                />
+              )}
             </div>
           ) : null}
         </DialogContent>

@@ -12,6 +12,7 @@ except ImportError:
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
 from sqlalchemy import Date, cast, delete, exists, func, insert, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
 from app.api.deps import get_current_user
@@ -33,8 +34,15 @@ from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.one_h_slots import effective_slot_date
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
-from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFromDayRequest, TaskUpdate
-from pydantic import BaseModel
+from app.schemas.task import (
+    GaNoteTaskSummaryOut,
+    TaskAssigneeOut,
+    TaskCreate,
+    TaskOut,
+    TaskRemoveFromDayRequest,
+    TaskUpdate,
+)
+from pydantic import BaseModel, Field
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
@@ -726,9 +734,37 @@ class FastTaskOrderUpdate(BaseModel):
 
 class GaNoteTaskBatchRequest(BaseModel):
     ga_note_origin_ids: list[uuid.UUID]
+    plan_note_origin_ids: list[uuid.UUID] = Field(default_factory=list)
     include_done: bool = True
     include_all_done: bool = False
     include_inactive: bool = False
+
+
+def _ga_note_task_batch_stmt(payload: GaNoteTaskBatchRequest):
+    ga_note_ids = list(dict.fromkeys(payload.ga_note_origin_ids))
+    plan_note_ids = list(dict.fromkeys(payload.plan_note_origin_ids))
+    origin_filters = []
+    if ga_note_ids:
+        origin_filters.append(Task.ga_note_origin_id.in_(ga_note_ids))
+    if plan_note_ids:
+        origin_filters.append(Task.plan_note_origin_id.in_(plan_note_ids))
+    if not origin_filters:
+        return None
+
+    stmt = select(Task).where(or_(*origin_filters))
+    if not payload.include_inactive:
+        stmt = stmt.where(Task.is_active.is_(True))
+    if not payload.include_done:
+        stmt = stmt.where(Task.status != TaskStatus.DONE.value)
+    elif not payload.include_all_done:
+        done_cutoff = datetime.now(timezone.utc) - timedelta(days=45)
+        stmt = stmt.where(
+            or_(
+                Task.status != TaskStatus.DONE.value,
+                Task.completed_at >= done_cutoff,
+            )
+        )
+    return stmt.order_by(Task.created_at)
 
 
 def _is_common_view_orderable_task(task: Task) -> bool:
@@ -881,21 +917,20 @@ async def list_tasks(
         stmt = stmt.where(Task.system_template_origin_id.is_not(None))
 
     if department_id:
-        assignee_in_department = exists(
-            select(1)
-            .select_from(TaskAssignee)
+        project_ids_in_department = select(Project.id).where(Project.department_id == department_id)
+        task_ids_assigned_in_department = (
+            select(TaskAssignee.task_id)
             .join(User, User.id == TaskAssignee.user_id)
-            .where(
-                TaskAssignee.task_id == Task.id,
-                User.department_id == department_id,
-            )
+            .where(User.department_id == department_id)
         )
         # A shared task can belong to a department through its assignees.
-        stmt = stmt.outerjoin(Project, Task.project_id == Project.id).where(
+        # Keep these as semi-joins so PostgreSQL can resolve the small project
+        # and user sets once instead of probing joined tables for every task.
+        stmt = stmt.where(
             or_(
                 Task.department_id == department_id,
-                Project.department_id == department_id,
-                assignee_in_department,
+                Task.project_id.in_(project_ids_in_department),
+                Task.id.in_(task_ids_assigned_in_department),
             )
         )
     if project_id:
@@ -999,26 +1034,10 @@ async def list_tasks_by_ga_notes(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[TaskOut]:
-    note_ids = list(dict.fromkeys(payload.ga_note_origin_ids))
-    if not note_ids:
+    stmt = _ga_note_task_batch_stmt(payload)
+    if stmt is None:
         return []
-
-    stmt = select(Task).where(Task.ga_note_origin_id.in_(note_ids))
-
-    if not payload.include_inactive:
-        stmt = stmt.where(Task.is_active.is_(True))
-    if not payload.include_done:
-        stmt = stmt.where(Task.status != TaskStatus.DONE.value)
-    elif not payload.include_all_done:
-        done_cutoff = datetime.now(timezone.utc) - timedelta(days=45)
-        stmt = stmt.where(
-            or_(
-                Task.status != TaskStatus.DONE.value,
-                Task.completed_at >= done_cutoff,
-            )
-        )
-
-    tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
+    tasks = (await db.execute(stmt)).scalars().all()
     task_ids = [task.id for task in tasks]
     assignee_map = await _assignees_for_tasks(db, task_ids)
     comment_map = await _user_comments_for_tasks(db, task_ids, user.id)
@@ -1047,6 +1066,74 @@ async def list_tasks_by_ga_notes(
         dto.alignment_user_ids = alignment_map.get(task.id)
         out.append(dto)
     return out
+
+
+@router.post("/by-ga-notes/summary", response_model=list[GaNoteTaskSummaryOut])
+async def list_task_summaries_by_ga_notes(
+    payload: GaNoteTaskBatchRequest,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user),
+) -> list[GaNoteTaskSummaryOut]:
+    """Return only the fields rendered by GA/KA Notes.
+
+    The regular task endpoint remains unchanged for other consumers. This path
+    avoids loading/serializing large task details and skips per-user comments
+    and alignment metadata that the notes table never renders.
+    """
+
+    stmt = _ga_note_task_batch_stmt(payload)
+    if stmt is None:
+        return []
+    stmt = stmt.options(
+        load_only(
+            Task.id,
+            Task.description,
+            Task.project_id,
+            Task.department_id,
+            Task.assigned_to,
+            Task.ga_note_origin_id,
+            Task.plan_note_origin_id,
+            Task.status,
+            Task.priority,
+            Task.finish_period,
+            Task.start_date,
+            Task.due_date,
+            Task.is_deadline_important,
+            Task.is_bllok,
+            Task.is_1h_report,
+            Task.is_r1,
+            Task.is_personal,
+            Task.created_at,
+            Task.updated_at,
+        )
+    )
+    tasks = (await db.execute(stmt)).scalars().all()
+    assignee_map = await _assignees_for_tasks(db, [task.id for task in tasks])
+    return [
+        GaNoteTaskSummaryOut(
+            id=task.id,
+            description=task.description,
+            project_id=task.project_id,
+            department_id=task.department_id,
+            assigned_to=task.assigned_to,
+            assignees=assignee_map.get(task.id, []),
+            ga_note_origin_id=task.ga_note_origin_id,
+            plan_note_origin_id=task.plan_note_origin_id,
+            status=task.status,
+            priority=task.priority,
+            finish_period=task.finish_period,
+            start_date=task.start_date,
+            due_date=task.due_date,
+            is_deadline_important=task.is_deadline_important,
+            is_bllok=task.is_bllok,
+            is_1h_report=task.is_1h_report,
+            is_r1=task.is_r1,
+            is_personal=task.is_personal,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+        )
+        for task in tasks
+    ]
 
 
 @router.patch("/fast-order", response_model=None)

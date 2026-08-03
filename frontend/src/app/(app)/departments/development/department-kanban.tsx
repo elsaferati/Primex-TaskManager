@@ -7627,8 +7627,8 @@ export default function DepartmentKanban() {
               </Card>
             ) : null}
 
-            <div className="space-y-4">
-              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+            <div className="space-y-2">
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl gap-2 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">Meetings</div>
@@ -7639,7 +7639,7 @@ export default function DepartmentKanban() {
                 </div>
                 {todayExternalMeetings.length || todayInternalMeetings.length ? (
                   <Table
-                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+                    containerClassName="mt-2 rounded-lg border border-slate-200 bg-white"
                     className="min-w-[520px] text-[11px]"
                   >
                     <TableHeader>
@@ -7691,13 +7691,13 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <div className="mt-3 text-sm text-slate-500">
+                  <div className="mt-1 text-sm text-slate-500">
                     {loadingExtras ? "Loading meetings..." : "No meetings today."}
                   </div>
                 )}
               </Card>
 
-              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl p-4">
+              <Card className="bg-white border border-slate-200 shadow-sm rounded-2xl gap-2 p-3">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <div className="text-sm font-semibold text-slate-800">Waiting Confirmation</div>
@@ -7706,7 +7706,7 @@ export default function DepartmentKanban() {
                 </div>
                 {todayWaitingTasks.length ? (
                   <Table
-                    containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
+                    containerClassName="mt-2 rounded-lg border border-slate-200 bg-white"
                     className="min-w-[1100px] text-[11px]"
                   >
                     <TableHeader>
@@ -7820,7 +7820,7 @@ export default function DepartmentKanban() {
                     </TableBody>
                   </Table>
                 ) : (
-                  <div className="mt-3 text-sm text-slate-500">No waiting confirmation tasks.</div>
+                  <div className="mt-1 text-sm text-slate-500">No waiting confirmation tasks.</div>
                 )}
               </Card>
 

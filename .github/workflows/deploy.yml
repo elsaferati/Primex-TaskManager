@@ -29,6 +29,10 @@ jobs:
         run: |
           git fetch origin main
           git reset --hard origin/main
+          REM The self-hosted runner keeps ignored deployment state, but stale
+          REM untracked migration files must never participate in Alembic's graph.
+          git clean -f -- backend/alembic/versions
+          git status --short -- backend/alembic/versions
  
       - name: Detect Changed Files
         id: changes
@@ -85,6 +89,7 @@ jobs:
           PRIMEFLOW_READONLY_DATABASE_URL: ${{ secrets.PRIMEFLOW_READONLY_DATABASE_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          REPORT_STORAGE_DIR: ${{ vars.REPORT_STORAGE_DIR }}
         run: |
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
@@ -93,7 +98,7 @@ jobs:
           echo DB_POOL_TIMEOUT=30 >> backend\.env
           echo DB_POOL_RECYCLE=1800 >> backend\.env
           echo JWT_SECRET=primex_nexus_secret_key_2026 >> backend\.env
-          echo REDIS_ENABLED=false >> backend\.env
+          echo REDIS_ENABLED=true >> backend\.env
           echo REDIS_URL=redis://127.0.0.1:6379/0 >> backend\.env
           echo APP_TIMEZONE=Europe/Budapest >> backend\.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend\.env
@@ -112,14 +117,72 @@ jobs:
           echo EMAIL_PORT=587 >> backend\.env
           echo EMAIL_USER=%EMAIL_USER% >> backend\.env
           echo EMAIL_PASSWORD=%EMAIL_PASSWORD% >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_ENABLED=true >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_TIMEZONE=Europe/Tirane >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_RECIPIENTS=130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com >> backend\.env
+          echo REPORT_STORAGE_DIR=%REPORT_STORAGE_DIR% >> backend\.env
+          echo REPORT_RETENTION_DAYS=90 >> backend\.env
  
-      - name: Database Migration Notice
-        if: ${{ steps.changes.outputs.migration_changed == 'true' }}
+      - name: Prepare Backend
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
+        shell: cmd
+        run: |
+          cd backend
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
+          if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m py_compile mcp_server.py app\api\routers\search.py app\schemas\search.py
+          if errorlevel 1 exit /b 1
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server
+          if errorlevel 1 exit /b 1
+
+      - name: Apply Database Migrations
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
         run: |
-          Write-Warning "Alembic auto-migration is disabled in deploy. Apply DB SQL manually in pgAdmin before or after this deploy as needed."
- 
-      - name: Update Backend
+          $ErrorActionPreference = "Stop"
+          Set-Location backend
+          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
+
+          # Prevent the legacy scheduler from reloading rows while migrations run.
+          cmd /c "pm2 stop primeflow-report-scheduler || ver > NUL" | Out-Host
+
+          $headOutput = @(& $python -m alembic heads)
+          if ($LASTEXITCODE -ne 0) {
+            $headOutput | ForEach-Object { Write-Host $_ }
+            throw "Unable to inspect Alembic heads."
+          }
+          $headLines = @($headOutput | Where-Object { "$_" -match '\(head\)' })
+          if ($headLines.Count -ne 1) {
+            $headOutput | ForEach-Object { Write-Host $_ }
+            throw "Expected exactly one Alembic head; found $($headLines.Count)."
+          }
+          $expectedHead = ("$($headLines[0])" -split '\s+')[0]
+          Write-Host "Alembic repository head: $expectedHead"
+
+          & $python -m alembic current
+          if ($LASTEXITCODE -ne 0) {
+            throw "Unable to read the current database revision."
+          }
+
+          & $python -m alembic upgrade head
+          if ($LASTEXITCODE -ne 0) {
+            throw "Alembic upgrade failed."
+          }
+
+          # Capture stdout only. Alembic writes normal INFO logging to stderr,
+          # which Windows PowerShell 5 converts to NativeCommandError when merged.
+          $currentOutput = @(& $python -m alembic current)
+          if ($LASTEXITCODE -ne 0) {
+            $currentOutput | ForEach-Object { Write-Host $_ }
+            throw "Unable to verify the upgraded database revision."
+          }
+          $currentOutput | ForEach-Object { Write-Host $_ }
+          if (-not ($currentOutput -join "`n").Contains($expectedHead)) {
+            throw "Database revision does not match repository head $expectedHead."
+          }
+          Write-Host "Alembic migrations completed at $expectedHead."
+
+      - name: Restart Backend Services
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
         env:
@@ -129,21 +192,13 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
         run: |
           cd backend
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
-          if errorlevel 1 exit /b 1
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m py_compile mcp_server.py app\api\routers\search.py app\schemas\search.py
-          if errorlevel 1 exit /b 1
-          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server
-          if errorlevel 1 exit /b 1
  
-          REM Database migrations are manual in pgAdmin (no alembic auto-run in deploy).
- 
-          REM Redis is disabled in this environment, so keep Celery processes stopped.
-          call pm2 stop celery_worker
-          call pm2 stop celery_beat
+          REM Celery worker and Beat own weekly audit generation and delivery.
+          call pm2 delete celery_worker || ver > NUL
+          call pm2 delete celery_beat || ver > NUL
  
           REM Stop legacy backend process names so the current checkout owns the API port.
-          set REDIS_ENABLED=false
+          set REDIS_ENABLED=true
           set REDIS_URL=redis://127.0.0.1:6379/0
           set APP_TIMEZONE=Europe/Budapest
           set APP_BUILD_SHA=${{ github.sha }}
@@ -151,6 +206,10 @@ jobs:
           set PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD%
           set PRIMEFLOW_REPORT_TIMEZONE=Europe/Tirane
           set PRIMEFLOW_REPORT_RECIPIENTS=130primex.eu@gmail.com,ga@primexeu.com
+          set WEEKLY_PLANNING_AUDIT_ENABLED=true
+          set WEEKLY_PLANNING_AUDIT_TIMEZONE=Europe/Tirane
+          set WEEKLY_PLANNING_AUDIT_RECIPIENTS=130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com
+          set REPORT_RETENTION_DAYS=90
           set RUNNER_TRACKING_ID=
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
@@ -166,9 +225,13 @@ jobs:
           call pm2 start ecosystem.config.cjs --only primex-backend --update-env
           call pm2 start ecosystem.config.cjs --only primeflow-mcp --update-env
           call pm2 start ecosystem.config.cjs --only primeflow-report-scheduler --update-env
+          call pm2 start ecosystem.config.cjs --only celery_worker --update-env
+          call pm2 start ecosystem.config.cjs --only celery_beat --update-env
           call pm2 describe primex-backend | findstr /I "status"
           call pm2 describe primeflow-mcp | findstr /I "status"
           call pm2 describe primeflow-report-scheduler | findstr /I "status"
+          call pm2 describe celery_worker | findstr /I "status"
+          call pm2 describe celery_beat | findstr /I "status"
           echo PM2 backend restart/start completed.
  
       - name: Wait for Backend Readiness

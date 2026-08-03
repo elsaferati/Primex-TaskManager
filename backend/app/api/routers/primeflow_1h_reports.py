@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import io
-import json
 import uuid
 from datetime import date, datetime, time
 from zoneinfo import ZoneInfo
@@ -25,6 +23,11 @@ from app.services.audit import add_audit_log
 from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, render_html, render_plain_text, render_png
 from app.services.primeflow_report_delivery import configured_recipients, deliver_report, generate_fresh
+from app.services.primeflow_report_schedule_config import (
+    DEFAULT_1H_SCHEDULES,
+    DEFAULT_TIMEZONE,
+    DEFAULT_WEEKDAYS,
+)
 
 router = APIRouter()
 
@@ -406,29 +409,51 @@ async def update_schedule(schedule_id: uuid.UUID, payload: SchedulePayload, db: 
 
 @router.post("/schedules/restore-defaults")
 async def restore_default_schedules(db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
-    defaults = [
-        ("1H 10:00", "10:00", "09:00"),
-        ("1H 11:00", "11:00", "10:50"),
-        ("1H 11:50", "11:50", "11:40"),
-        ("1H 14:20", "14:20", "14:10"),
-        ("1H 16:00", "16:00", "15:50"),
-    ]
+    rows = (await db.execute(select(PrimeFlowReportSchedule))).scalars().all()
+    rows_by_name = {row.name: row for row in rows}
     restored: list[PrimeFlowReportSchedule] = []
-    predecessor = None
-    for order, (name, report_slot, execution) in enumerate(defaults, 1):
-        row = (await db.execute(select(PrimeFlowReportSchedule).where(PrimeFlowReportSchedule.name == name))).scalar_one_or_none()
+    predecessor_id: uuid.UUID | None = None
+
+    for default in DEFAULT_1H_SCHEDULES:
+        row = rows_by_name.get(default.name)
+        before = _schedule(row) if row is not None else None
         if row is None:
-            row = PrimeFlowReportSchedule(name=name, report_slot=report_slot, execution_time=time.fromisoformat(execution), created_by=user.id)
+            row = PrimeFlowReportSchedule(
+                name=default.name,
+                report_slot=default.report_slot,
+                execution_time=default.execution_time,
+                created_by=user.id,
+            )
             db.add(row)
             await db.flush()
-        row.report_slot, row.execution_time, row.timezone = report_slot, time.fromisoformat(execution), "Europe/Tirane"
-        row.weekdays, row.is_active, row.is_default = [0, 1, 2, 3, 4], True, True
-        row.backfill_enabled, row.predecessor_schedule_id = True, predecessor
-        row.grace_period_minutes, row.retry_count, row.retry_delays_seconds = 30, 3, [0, 2, 5]
-        row.sort_order, row.updated_by, row.version = order * 10, user.id, row.version + 1
-        add_audit_log(db=db, actor_user_id=user.id, entity_type="primeflow_report_schedule", entity_id=row.id, action="RESTORE_DEFAULTS", after=_schedule(row))
+            rows_by_name[row.name] = row
+
+        row.report_slot = default.report_slot
+        row.execution_time = default.execution_time
+        row.timezone = DEFAULT_TIMEZONE
+        row.weekdays = list(DEFAULT_WEEKDAYS)
+        row.is_active = True
+        row.is_default = True
+        row.backfill_enabled = True
+        row.predecessor_schedule_id = predecessor_id
+        row.grace_period_minutes = 30
+        row.retry_count = 3
+        row.retry_delays_seconds = [0, 2, 5]
+        row.sort_order = default.sort_order
+        row.updated_by = user.id
+        row.version += 1
+        add_audit_log(
+            db=db,
+            actor_user_id=user.id,
+            entity_type="primeflow_report_schedule",
+            entity_id=row.id,
+            action="RESTORE_DEFAULTS",
+            before=before,
+            after=_schedule(row),
+        )
         restored.append(row)
-        predecessor = row.id
+        predecessor_id = row.id
+
     await db.commit()
     return [_schedule(row) for row in restored]
 

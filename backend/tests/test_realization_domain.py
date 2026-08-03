@@ -212,6 +212,33 @@ class TestRealizationDomainContract(unittest.TestCase):
                 )
             )
 
+    def test_completed_extra_requires_traceable_nonreplacement_evidence(self) -> None:
+        task_id = uuid.uuid4()
+        with self.assertRaises(ValidationError):
+            RealizationObservationCreate(
+                scope_type=RealizationScopeType.TASK,
+                task_id=task_id,
+                user_id=uuid.uuid4(),
+                marker=RealizationMarker.POSITIVE,
+                category=RealizationObservationCategory.EXTRA_TASK,
+                comment="Completed an additional obligation",
+                evidence_json={"kind": "COMPLETED_EXTRA_TASK"},
+            )
+        observation = RealizationObservationCreate(
+            scope_type=RealizationScopeType.TASK,
+            task_id=task_id,
+            user_id=uuid.uuid4(),
+            marker=RealizationMarker.POSITIVE,
+            category=RealizationObservationCategory.EXTRA_TASK,
+            comment="Completed an additional obligation",
+            evidence_json={
+                "kind": "COMPLETED_EXTRA_TASK",
+                "replaces_unfinished_planned_task": False,
+                "duplicate": False,
+            },
+        )
+        self.assertFalse(observation.evidence_json["duplicate"])
+
     def test_scope_requires_matching_evidence_reference(self) -> None:
         with self.assertRaises(ValidationError):
             RealizationObservationCreate(

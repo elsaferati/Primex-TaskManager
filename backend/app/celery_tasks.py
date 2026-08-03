@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+from datetime import date
 
 from app.celery_app import celery_app
 from app.jobs.carryover import run_carryover as _run_carryover
@@ -15,6 +16,11 @@ from app.jobs.system_tasks import (
     generate_system_tasks as _generate_system_tasks,
     pregenerate_system_tasks_today as _pregenerate_system_tasks_today,
     reconcile_system_task_slots_daily as _reconcile_system_task_slots_daily,
+)
+from app.services.weekly_planning_audit_delivery import (
+    WeeklyPlanningAuditEmailError,
+    cleanup_expired_report_files,
+    generate_and_send_scheduled,
 )
 
 
@@ -61,4 +67,28 @@ def cleanup_old_done_internal_notes() -> int:
 @celery_app.task(name="app.celery_tasks.reset_expired_internal_meeting_sessions")
 def reset_expired_internal_meeting_sessions() -> int:
     return asyncio.run(_reset_expired_internal_meeting_sessions())
+
+
+@celery_app.task(
+    bind=True,
+    name="app.celery_tasks.send_weekly_planning_audit_report",
+    max_retries=4,
+)
+def send_weekly_planning_audit_report(
+    self,
+    slot: str,
+    week_start: str | None = None,
+) -> str | None:
+    parsed_week_start = date.fromisoformat(week_start) if week_start else None
+    try:
+        run_id = asyncio.run(generate_and_send_scheduled(slot, parsed_week_start))
+        return str(run_id) if run_id else None
+    except WeeklyPlanningAuditEmailError as exc:
+        countdown = min(1800, 60 * (2 ** self.request.retries))
+        raise self.retry(exc=exc, countdown=countdown)
+
+
+@celery_app.task(name="app.celery_tasks.cleanup_weekly_planning_audit_files")
+def cleanup_weekly_planning_audit_files() -> int:
+    return asyncio.run(cleanup_expired_report_files())
 

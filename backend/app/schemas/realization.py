@@ -130,6 +130,50 @@ class RealizationObservationCreate(RealizationSchema):
                 raise ValueError("REPEATED_PROBLEM requires repeat_key and a comment")
         if self.evidence_json.get("high_impact") is True and not has_comment:
             raise ValueError("high-impact evidence requires a comment")
+        if self.category is RealizationObservationCategory.HELPED_COLLEAGUE:
+            if not self.evidence_json.get("helped_user_id"):
+                raise ValueError("HELPED_COLLEAGUE requires evidence_json.helped_user_id")
+            if self.marker is not RealizationMarker.POSITIVE:
+                raise ValueError("HELPED_COLLEAGUE must be a POSITIVE observation")
+        if self.category is RealizationObservationCategory.BLOCKER:
+            impact = self.evidence_json.get("impact_level")
+            if not self.evidence_json.get("affected_user_id") or impact not in {
+                "MINOR",
+                "MAJOR",
+                "MULTIPLE_PEOPLE",
+            }:
+                raise ValueError(
+                    "BLOCKER requires affected_user_id and a valid impact_level"
+                )
+            if self.marker is not RealizationMarker.NEGATIVE:
+                raise ValueError("BLOCKER must be a NEGATIVE observation")
+        if self.category is RealizationObservationCategory.EXTRA_TASK:
+            kind = self.evidence_json.get("kind")
+            if kind not in {"REQUESTED_EXTRA_TASK", "COMPLETED_EXTRA_TASK"}:
+                raise ValueError("EXTRA_TASK requires a supported evidence_json.kind")
+            if self.marker is not RealizationMarker.POSITIVE:
+                raise ValueError("EXTRA_TASK must be a POSITIVE observation")
+            if kind == "COMPLETED_EXTRA_TASK":
+                if self.scope_type not in {
+                    RealizationScopeType.TASK,
+                    RealizationScopeType.SYSTEM_TASK,
+                } or self.task_id is None:
+                    raise ValueError("COMPLETED_EXTRA_TASK requires task scope evidence")
+                for key in ("replaces_unfinished_planned_task", "duplicate"):
+                    if not isinstance(self.evidence_json.get(key), bool):
+                        raise ValueError(
+                            f"COMPLETED_EXTRA_TASK requires boolean evidence_json.{key}"
+                        )
+        if self.category in {
+            RealizationObservationCategory.PROPOSAL,
+            RealizationObservationCategory.TIME_SAVED,
+        } and self.marker is not RealizationMarker.POSITIVE:
+            raise ValueError(f"{self.category.value} must be a POSITIVE observation")
+        if (
+            self.category is RealizationObservationCategory.REPEATED_PROBLEM
+            and self.marker is not RealizationMarker.NEGATIVE
+        ):
+            raise ValueError("REPEATED_PROBLEM must be a NEGATIVE observation")
         return self
 
 
@@ -251,3 +295,27 @@ class RealizationDepartmentResultOut(RealizationSchema):
     final_comment: str | None
     created_at: datetime
     updated_at: datetime
+
+
+class RealizationReviewRequest(RealizationFinalDecision):
+    question_values: dict[str, object] = Field(default_factory=dict)
+
+
+class RealizationObservationVerify(RealizationSchema):
+    comment: str | None = Field(default=None, max_length=4000)
+
+
+class RealizationPersonWorkflowOut(RealizationPersonResultOut):
+    user_name: str
+
+
+class RealizationWeeklyOut(RealizationSchema):
+    period: RealizationPeriodOut
+    department_name: str | None = None
+    has_planned_snapshot: bool
+    has_final_snapshot: bool
+    can_calculate: bool
+    message: str | None = None
+    people: list[RealizationPersonWorkflowOut] = Field(default_factory=list)
+    department_result: RealizationDepartmentResultOut | None = None
+    unassigned: list[dict] = Field(default_factory=list)

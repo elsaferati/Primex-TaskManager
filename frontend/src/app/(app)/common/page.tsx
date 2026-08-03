@@ -17,6 +17,7 @@ import type {
   CommonEntry,
   Project,
   Meeting,
+  MeetingOccurrenceStatus,
   Department,
   SystemTaskTemplate,
   TaskReview,
@@ -499,6 +500,7 @@ type SwimlaneCell = {
   completedAt?: string | null
   dateIsToday?: boolean
   recurrenceType?: string | null
+  meetingId?: string
 }
 type SwimlaneRow = {
   id: CommonType
@@ -1320,6 +1322,8 @@ export default function CommonViewPage() {
   const [internalMeetingRecurrenceMonth, setInternalMeetingRecurrenceMonth] = React.useState("1")
   const [internalMeetingRecurrenceDay, setInternalMeetingRecurrenceDay] = React.useState("1")
   const [internalMeetingDepartmentId, setInternalMeetingDepartmentId] = React.useState("")
+  const [meetingOccurrenceStatuses, setMeetingOccurrenceStatuses] = React.useState<Map<string, MeetingOccurrenceStatus>>(new Map())
+  const [savingMeetingStatusKey, setSavingMeetingStatusKey] = React.useState<string | null>(null)
   const syncCommonMeetingBucket = React.useCallback(
     (meetingType: "external" | "internal", meetings: Meeting[]) => {
       const meetingItems = meetings
@@ -1547,9 +1551,6 @@ export default function CommonViewPage() {
   const [editingMeetingTitle, setEditingMeetingTitle] = React.useState(false)
   const [meetingTitleDraft, setMeetingTitleDraft] = React.useState("")
   const [savingMeetingTitle, setSavingMeetingTitle] = React.useState(false)
-  const [editingMeetingTopicColumn, setEditingMeetingTopicColumn] = React.useState(false)
-  const [meetingTopicColumnDraft, setMeetingTopicColumnDraft] = React.useState("")
-  const [savingMeetingTopicColumn, setSavingMeetingTopicColumn] = React.useState(false)
   const [editingMeetingTopicHeader, setEditingMeetingTopicHeader] = React.useState(false)
   const [meetingTopicHeaderDraft, setMeetingTopicHeaderDraft] = React.useState("")
   const [savingMeetingTopicHeader, setSavingMeetingTopicHeader] = React.useState(false)
@@ -1640,55 +1641,6 @@ export default function CommonViewPage() {
     setEditingMeetingTitle(false)
     setMeetingTitleDraft("")
   }, [])
-
-  const startEditMeetingTopicColumn = React.useCallback(() => {
-    if (!activeMeeting) return
-    const topicColumn = activeMeeting.columns.find((col) => col.key === "topic")
-    setMeetingTopicColumnDraft(topicColumn?.label || "M1 PIKAT")
-    setEditingMeetingTopicColumn(true)
-  }, [activeMeeting])
-
-  const cancelEditMeetingTopicColumn = React.useCallback(() => {
-    setEditingMeetingTopicColumn(false)
-    setMeetingTopicColumnDraft("")
-  }, [])
-
-  const saveMeetingTopicColumn = React.useCallback(async () => {
-    if (!activeMeeting || !meetingTopicColumnDraft.trim()) return
-    const previousColumns = activeMeeting.columns
-    const nextColumns = previousColumns.map((col) =>
-      col.key === "topic" ? { ...col, label: meetingTopicColumnDraft.trim() } : col
-    )
-    setSavingMeetingTopicColumn(true)
-    setMeetingTemplates((prev) =>
-      prev.map((meeting) => (meeting.id === activeMeeting.id ? { ...meeting, columns: nextColumns } : meeting))
-    )
-    try {
-      const res = await apiFetch(`/checklists/${activeMeeting.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ columns: nextColumns }),
-      })
-      if (!res.ok) {
-        setMeetingTemplates((prev) =>
-          prev.map((meeting) =>
-            meeting.id === activeMeeting.id ? { ...meeting, columns: previousColumns } : meeting
-          )
-        )
-        toast.error("Failed to update column name.")
-        return
-      }
-      setEditingMeetingTopicColumn(false)
-      setMeetingTopicColumnDraft("")
-    } catch {
-      setMeetingTemplates((prev) =>
-        prev.map((meeting) => (meeting.id === activeMeeting.id ? { ...meeting, columns: previousColumns } : meeting))
-      )
-      toast.error("Failed to update column name.")
-    } finally {
-      setSavingMeetingTopicColumn(false)
-    }
-  }, [activeMeeting, apiFetch, meetingTopicColumnDraft])
 
   const saveMeetingTitle = React.useCallback(async () => {
     if (!activeMeeting || !meetingTitleDraft.trim()) return
@@ -1849,6 +1801,131 @@ export default function CommonViewPage() {
       return a.title.localeCompare(b.title)
     })
   }, [internalMeetings])
+
+  const meetingStatusDate = React.useMemo(() => {
+    if (selectedDates.size === 1) return Array.from(selectedDates)[0]!
+    return toISODate(new Date())
+  }, [selectedDates])
+
+  const occurrenceStatusKey = React.useCallback((meetingId: string, occurrenceDate: string) => {
+    return `${meetingId}|${occurrenceDate}`
+  }, [])
+
+  const loadMeetingOccurrenceStatuses = React.useCallback(async () => {
+    try {
+      const res = await apiFetch(`/meetings/occurrence-statuses?occurrence_date=${meetingStatusDate}`)
+      if (!res.ok) {
+        setMeetingOccurrenceStatuses(new Map())
+        return
+      }
+      const rows = (await res.json()) as MeetingOccurrenceStatus[]
+      setMeetingOccurrenceStatuses(new Map(rows.map((row) => [occurrenceStatusKey(row.meeting_id, row.occurrence_date), row])))
+    } catch {
+      setMeetingOccurrenceStatuses(new Map())
+    }
+  }, [apiFetch, meetingStatusDate, occurrenceStatusKey])
+
+  React.useEffect(() => {
+    void loadMeetingOccurrenceStatuses()
+  }, [loadMeetingOccurrenceStatuses])
+
+  const meetingOccurrenceDateIso = React.useCallback(
+    (meeting: Meeting) => {
+      const resolved = resolveExternalMeetingDate(meeting)
+      return resolved ? toISODate(resolved) : meetingStatusDate
+    },
+    [meetingStatusDate, resolveExternalMeetingDate]
+  )
+
+  const getMeetingOccurrenceStatus = React.useCallback(
+    (meeting: Meeting) => {
+      const occurrenceDate = meetingOccurrenceDateIso(meeting)
+      return meetingOccurrenceStatuses.get(occurrenceStatusKey(meeting.id, occurrenceDate))?.status || ""
+    },
+    [meetingOccurrenceDateIso, meetingOccurrenceStatuses, occurrenceStatusKey]
+  )
+
+  const updateMeetingOccurrenceStatus = React.useCallback(
+    async (meeting: Meeting, status: "" | "held" | "canceled") => {
+      const occurrenceDate = meetingOccurrenceDateIso(meeting)
+      const key = occurrenceStatusKey(meeting.id, occurrenceDate)
+      setSavingMeetingStatusKey(key)
+      try {
+        const res = await apiFetch(`/meetings/${meeting.id}/occurrence-status`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ occurrence_date: occurrenceDate, status }),
+        })
+        if (!res.ok) throw new Error(await res.text())
+        const row = (await res.json()) as MeetingOccurrenceStatus
+        setMeetingOccurrenceStatuses((prev) => new Map(prev).set(occurrenceStatusKey(row.meeting_id, row.occurrence_date), row))
+      } catch (error) {
+        toast.error("Meeting status update failed", { description: String(error) })
+      } finally {
+        setSavingMeetingStatusKey(null)
+      }
+    },
+    [apiFetch, meetingOccurrenceDateIso, occurrenceStatusKey]
+  )
+
+  const renderMeetingStatusControl = React.useCallback(
+    (meeting: Meeting) => {
+      const occurrenceDate = meetingOccurrenceDateIso(meeting)
+      const key = occurrenceStatusKey(meeting.id, occurrenceDate)
+      return (
+        <select
+          className="input"
+          value={getMeetingOccurrenceStatus(meeting)}
+          onChange={(event) => void updateMeetingOccurrenceStatus(meeting, event.target.value as "" | "held" | "canceled")}
+          disabled={savingMeetingStatusKey === key}
+          title={`Meeting status for ${occurrenceDate}`}
+          style={{ width: "120px", minHeight: "32px", padding: "4px 8px", fontSize: "12px" }}
+        >
+          <option value=""></option>
+          <option value="held">Mbajtur</option>
+          <option value="canceled">Anuluar</option>
+        </select>
+      )
+    },
+    [getMeetingOccurrenceStatus, meetingOccurrenceDateIso, occurrenceStatusKey, savingMeetingStatusKey, updateMeetingOccurrenceStatus]
+  )
+
+  const renderSwimlaneMeetingStatusControl = React.useCallback(
+    (cell: SwimlaneCell) => {
+      if (!cell.meetingId || !cell.entryDate) return null
+      const key = occurrenceStatusKey(cell.meetingId, cell.entryDate)
+      const status = meetingOccurrenceStatuses.get(key)?.status || ""
+      return (
+        <select
+          className="meeting-status-select"
+          value={status}
+          onChange={(event) => {
+            event.stopPropagation()
+            void updateMeetingOccurrenceStatus(
+              {
+                id: cell.meetingId!,
+                title: cell.title,
+                starts_at: cell.entryDate,
+                meeting_type: null,
+                department_id: "",
+                created_at: "",
+                updated_at: "",
+              },
+              event.target.value as "" | "held" | "canceled"
+            )
+          }}
+          onClick={(event) => event.stopPropagation()}
+          disabled={savingMeetingStatusKey === key}
+          title={`Meeting status for ${cell.entryDate}`}
+        >
+          <option value=""></option>
+          <option value="held">Mbajtur</option>
+          <option value="canceled">Anuluar</option>
+        </select>
+      )
+    },
+    [meetingOccurrenceStatuses, occurrenceStatusKey, savingMeetingStatusKey, updateMeetingOccurrenceStatus]
+  )
   const userById = React.useMemo(() => new Map(users.map((u) => [u.id, u])), [users])
   
   const reloadExternalChecklist = React.useCallback(async () => {
@@ -2249,8 +2326,8 @@ export default function CommonViewPage() {
     setEditingRowId(null)
     setEditDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
     setAddDraft({ nr: "", day: "", topic: "", owner: "", time: "" })
-    setEditingMeetingTopicColumn(false)
-    setMeetingTopicColumnDraft("")
+    setEditingMeetingTopicHeader(false)
+    setMeetingTopicHeaderDraft("")
   }, [activeMeetingId])
 
   React.useEffect(() => {
@@ -5814,6 +5891,8 @@ export default function CommonViewPage() {
         .filter(Boolean)
         .join(" "),
       recurrenceType: x.recurrenceType ?? x.recurrence_type,
+      entryDate: x.date,
+      meetingId: String(x.id || "").startsWith("meeting:") ? String(x.id).split(":")[1] : undefined,
     }))
     const internalSource = isMultiDate
       ? sortByDateTime(filtered.internal, (x) => x.date, (x) => x.time, (x) => x.title)
@@ -5829,6 +5908,8 @@ export default function CommonViewPage() {
         .filter(Boolean)
         .join(" "),
       recurrenceType: x.recurrenceType ?? x.recurrence_type,
+      entryDate: x.date,
+      meetingId: String(x.id || "").startsWith("meeting:") ? String(x.id).split(":")[1] : undefined,
     }))
 
     const bzSource = isMultiDate
@@ -7376,19 +7457,6 @@ export default function CommonViewPage() {
           min-width: 860px;
           max-width: 860px;
         }
-        .meeting-header-edit-button {
-          border: 0;
-          background: transparent;
-          color: inherit;
-          font: inherit;
-          font-weight: inherit;
-          padding: 0;
-          cursor: pointer;
-          text-align: left;
-        }
-        .meeting-header-edit-button:hover {
-          color: #2563eb;
-        }
         .meeting-topic-header-edit {
           border: 0;
           background: transparent;
@@ -8448,6 +8516,17 @@ export default function CommonViewPage() {
           line-height: 1;
           flex: 0 0 auto;
           white-space: nowrap;
+        }
+        .meeting-status-select {
+          height: 22px;
+          max-width: 92px;
+          border: 1px solid #cbd5e1;
+          border-radius: 6px;
+          background: #ffffff;
+          color: #334155;
+          font-size: 11px;
+          font-weight: 700;
+          padding: 1px 4px;
         }
         .time-indicator {
           display: inline-flex;
@@ -10170,46 +10249,6 @@ export default function CommonViewPage() {
                           style={col.width ? { width: col.width } : undefined}
                         >
                           {col.key === "topic" && canEditMeetingTemplates ? (
-                            editingMeetingTopicColumn ? (
-                              <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
-                                <input
-                                  className="input"
-                                  type="text"
-                                  value={meetingTopicColumnDraft}
-                                  onChange={(e) => setMeetingTopicColumnDraft(e.target.value)}
-                                  onKeyDown={(e) => {
-                                    if (e.key === "Enter") void saveMeetingTopicColumn()
-                                    if (e.key === "Escape") cancelEditMeetingTopicColumn()
-                                  }}
-                                  style={{ height: "28px", maxWidth: "220px" }}
-                                />
-                                <button
-                                  className="btn-primary"
-                                  type="button"
-                                  onClick={() => void saveMeetingTopicColumn()}
-                                  disabled={savingMeetingTopicColumn || !meetingTopicColumnDraft.trim()}
-                                  style={{ padding: "4px 8px" }}
-                                >
-                                  Save
-                                </button>
-                                <button
-                                  className="btn-outline"
-                                  type="button"
-                                  onClick={cancelEditMeetingTopicColumn}
-                                  disabled={savingMeetingTopicColumn}
-                                  style={{ padding: "4px 8px" }}
-                                >
-                                  Cancel
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                type="button"
-                                className="meeting-header-edit-button"
-                                onClick={startEditMeetingTopicColumn}
-                                title="Click to edit"
-                              >
-                          {col.key === "topic" && canEditMeetingTemplates ? (
                             editingMeetingTopicHeader ? (
                               <input
                                 type="text"
@@ -10241,12 +10280,7 @@ export default function CommonViewPage() {
                                 onClick={startEditMeetingTopicHeader}
                                 title="Click to edit"
                               >
-                                      {col.label}
-                              </button>
-                            )
-                          ) : (
-                            col.label
-                          )}
+                                {col.label}
                               </button>
                             )
                           ) : (
@@ -11200,6 +11234,9 @@ export default function CommonViewPage() {
                                   <span>{department?.name || "Department TBD"}</span>
                                   <span>Owner: {ownerName}</span>
                                 </div>
+                                <div className="external-meeting-meta" style={{ marginTop: "8px" }}>
+                                  <span>Status: {renderMeetingStatusControl(meeting)}</span>
+                                </div>
                               </div>
                               {((isAdmin || isManager) && canCreateAgentTestTaskForMeeting(meeting))
                               || canEditExternalMeeting(meeting) ? (
@@ -11722,6 +11759,9 @@ export default function CommonViewPage() {
                                 <div className="external-meeting-meta">
                                   <span>{department?.name || "Department TBD"}</span>
                                   <span>Owner: {ownerName}</span>
+                                </div>
+                                <div className="external-meeting-meta" style={{ marginTop: "8px" }}>
+                                  <span>Status: {renderMeetingStatusControl(meeting)}</span>
                                 </div>
                               </div>
                               {canEditInternalMeeting(meeting) ? (
@@ -12637,6 +12677,7 @@ export default function CommonViewPage() {
                                             08:00
                                           </span>
                                         ) : null}
+                                        {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
                                         {isFastTaskRowId(row.id)
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -12668,6 +12709,7 @@ export default function CommonViewPage() {
                                             08:00
                                           </span>
                                         ) : null}
+                                        {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
                                         {isFastTaskRowId(row.id)
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
@@ -12676,6 +12718,10 @@ export default function CommonViewPage() {
                                     ) : reviewButton ? (
                                       <div className="swimlane-assignees">
                                         {reviewButton}
+                                      </div>
+                                    ) : (row.id === "external" || row.id === "internal") ? (
+                                      <div className="swimlane-assignees">
+                                        {renderSwimlaneMeetingStatusControl(cell)}
                                       </div>
                                     ) : null}
                                     {row.id === "diamond" ? (

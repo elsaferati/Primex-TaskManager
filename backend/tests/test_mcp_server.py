@@ -290,6 +290,117 @@ class TestWeeklyPlanTools(unittest.IsolatedAsyncioTestCase):
                 )
 
 
+class TestRealizationTools(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self) -> None:
+        mcp_server._lookup_cache.clear()
+
+    async def test_get_weekly_realization_resolves_department_and_normalizes_week(self) -> None:
+        request = AsyncMock(return_value={"period": {"id": "period-1"}, "people": []})
+        with (
+            patch.object(mcp_server, "_request", request),
+            patch.object(
+                mcp_server,
+                "_resolve_department_id",
+                AsyncMock(return_value="aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa"),
+            ),
+        ):
+            result = await mcp_server.get_weekly_realization(
+                "Development", "2026-07-29"
+            )
+
+        self.assertEqual(result["period"]["id"], "period-1")
+        self.assertEqual(request.await_args.args[:2], ("GET", "/api/realization/weekly"))
+        self.assertEqual(request.await_args.kwargs["params"]["week_start"], "2026-07-27")
+
+    async def test_review_accepts_suggestion_without_model_side_scoring(self) -> None:
+        user_id = "11111111-1111-1111-1111-111111111111"
+        weekly = {
+            "period": {"id": "period-1"},
+            "people": [{"id": "result-1", "user_id": user_id}],
+        }
+        request = AsyncMock(return_value={"id": "result-1", "final_level": "B"})
+        with (
+            patch.object(
+                mcp_server,
+                "_weekly_realization",
+                AsyncMock(
+                    return_value=(
+                        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                        "2026-07-27",
+                        weekly,
+                    )
+                ),
+            ),
+            patch.object(
+                mcp_server,
+                "_resolve_user_id",
+                AsyncMock(return_value=user_id),
+            ),
+            patch.object(mcp_server, "_request", request),
+        ):
+            result = await mcp_server.review_weekly_realization_person(
+                "Development",
+                "Endi Hyseni",
+                week_start="2026-07-27",
+                manager_comment="Confirmed",
+            )
+
+        self.assertEqual(result["final_level"], "B")
+        self.assertEqual(
+            request.await_args.args[1],
+            "/api/realization/periods/period-1/results/result-1/review",
+        )
+        payload = request.await_args.kwargs["json"]
+        self.assertIsNone(payload["final_level"])
+        self.assertEqual(payload["manager_comment"], "Confirmed")
+
+    async def test_completed_extra_observation_forwards_verification_metadata(self) -> None:
+        request = AsyncMock(return_value={"id": "observation-1"})
+        weekly = {
+            "period": {
+                "id": "period-1",
+                "department_id": "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+            }
+        }
+        with (
+            patch.object(
+                mcp_server,
+                "_weekly_realization",
+                AsyncMock(
+                    return_value=(
+                        "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+                        "2026-07-27",
+                        weekly,
+                    )
+                ),
+            ),
+            patch.object(
+                mcp_server,
+                "_resolve_user_id",
+                AsyncMock(return_value="11111111-1111-1111-1111-111111111111"),
+            ),
+            patch.object(mcp_server, "_request", request),
+        ):
+            await mcp_server.add_realization_observation(
+                "Development",
+                "Endi Hyseni",
+                "EXTRA_TASK",
+                "POSITIVE",
+                "Completed verified extra work",
+                task_id="22222222-2222-2222-2222-222222222222",
+                observation_kind="COMPLETED_EXTRA_TASK",
+                replaces_unfinished_planned_task=False,
+                duplicate=False,
+            )
+
+        payload = request.await_args.kwargs["json"]
+        self.assertEqual(payload["scope_type"], "TASK")
+        self.assertFalse(payload["evidence_json"]["duplicate"])
+        self.assertFalse(
+            payload["evidence_json"]["replaces_unfinished_planned_task"]
+        )
+
+
 class TestPeopleAndStepsTools(unittest.IsolatedAsyncioTestCase):
     async def asyncSetUp(self) -> None:
         mcp_server._lookup_cache.clear()
@@ -384,6 +495,14 @@ class TestNewToolsRegistered(unittest.IsolatedAsyncioTestCase):
             "schedule_task",
             "get_weekly_report",
             "export_report",
+            "get_weekly_realization",
+            "calculate_weekly_realization",
+            "review_weekly_realization_person",
+            "add_realization_observation",
+            "verify_realization_observation",
+            "void_realization_observation",
+            "approve_weekly_realization",
+            "lock_weekly_realization",
         }
         self.assertTrue(expected.issubset(tools), expected - tools)
 

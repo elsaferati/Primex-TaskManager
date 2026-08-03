@@ -12,6 +12,8 @@ from starlette.middleware.gzip import GZipMiddleware
 from app.auth.security import ACCESS_TOKEN_TYPE, decode_token, require_token_type
 from app.api.routers import api_router
 from app.config import settings
+from app.services.meetings_report_scheduler import run_meetings_report_scheduler_forever
+from app.services.std_feedback_tickets import run_std_feedback_ticket_sync_forever
 from app.services.system_task_scheduler import run_system_task_scheduler_forever
 from app.websocket.redis_listener import start_notification_listener
 from app.websocket.manager import manager
@@ -33,6 +35,8 @@ app.include_router(api_router, prefix="/api")
 
 listener_task: asyncio.Task | None = None
 scheduler_task: asyncio.Task | None = None
+meetings_report_scheduler_task: asyncio.Task | None = None
+std_feedback_sync_task: asyncio.Task | None = None
 
 @app.get("/health")
 async def health() -> dict:
@@ -41,16 +45,18 @@ async def health() -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    global listener_task, scheduler_task
+    global listener_task, scheduler_task, meetings_report_scheduler_task, std_feedback_sync_task
     if settings.REDIS_ENABLED:
         listener_task = asyncio.create_task(start_notification_listener())
     if settings.SYSTEM_TASK_SCHEDULER_ENABLED:
         scheduler_task = asyncio.create_task(run_system_task_scheduler_forever())
+    meetings_report_scheduler_task = asyncio.create_task(run_meetings_report_scheduler_forever())
+    std_feedback_sync_task = asyncio.create_task(run_std_feedback_ticket_sync_forever())
 
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    global listener_task, scheduler_task
+    global listener_task, scheduler_task, meetings_report_scheduler_task, std_feedback_sync_task
     if listener_task is not None:
         listener_task.cancel()
         try:
@@ -65,6 +71,20 @@ async def _shutdown() -> None:
         except asyncio.CancelledError:
             pass
         scheduler_task = None
+    if meetings_report_scheduler_task is not None:
+        meetings_report_scheduler_task.cancel()
+        try:
+            await meetings_report_scheduler_task
+        except asyncio.CancelledError:
+            pass
+        meetings_report_scheduler_task = None
+    if std_feedback_sync_task is not None:
+        std_feedback_sync_task.cancel()
+        try:
+            await std_feedback_sync_task
+        except asyncio.CancelledError:
+            pass
+        std_feedback_sync_task = None
 
 
 @app.websocket("/ws/notifications")
