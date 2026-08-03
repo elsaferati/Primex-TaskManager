@@ -170,6 +170,43 @@ def _wrap_fixed_width(value: str, width: int) -> list[str]:
     return textwrap.wrap(cleaned, width=width, break_long_words=False, break_on_hyphens=False) or ["-"]
 
 
+def _m3_status_table(status_label: str, tasks: list[Task], names: dict[Any, str], *, include_late_days: bool = False) -> list[str]:
+    if include_late_days:
+        border = "+----+-------+------------------------------------------------------------------+--------------+"
+        header = f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} | {'LATE':<12} |"
+    else:
+        border = "+----+-------+------------------------------------------------------------------+"
+        header = f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} |"
+    rows = [
+        f"{status_label}:",
+        border,
+        header,
+        border,
+    ]
+    if not tasks:
+        if include_late_days:
+            rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} | {'-':<12} |")
+        else:
+            rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+        rows.append(border)
+        return rows
+    for index, task in enumerate(sorted(tasks, key=lambda item: (_initials(names.get(item.assigned_to)), _clean_task_title(item.title))), start=1):
+        owner = _initials(names.get(task.assigned_to))
+        title_lines = _wrap_fixed_width(_clean_task_title(task.title), 64)
+        if include_late_days:
+            late_label = f"{_late_days(task)} dite late" if _late_days(task) else "-"
+            rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} | {late_label:<12} |")
+        else:
+            rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} |")
+        for line in title_lines[1:]:
+            if include_late_days:
+                rows.append(f"| {'':<2} | {'':<5} | {line:<64} | {'':<12} |")
+            else:
+                rows.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        rows.append(border)
+    return rows
+
+
 def _task_late_lines(tasks: list[Task], names: dict[Any, str]) -> list[str]:
     if not tasks:
         return ["(Asnje detyre)"]
@@ -257,11 +294,9 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             leave_tomorrow.append((entry, full_day, start_time, end_time, note, is_all_users))
 
     section_1 = [
-        "IN PROGRESS:",
-        *_task_lines(system_in_progress, names),
+        *_m3_status_table("IN PROGRESS", system_in_progress, names),
         "",
-        "LATE:",
-        *_task_late_lines(system_late, names),
+        *_m3_status_table("LATE", system_late, names, include_late_days=True),
     ]
     section_4 = _tomorrow_common_section(
         common_items=common_items,
@@ -272,14 +307,11 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         fallback_blocked=_task_lines(blocked, names),
     )
     section_5 = [
-        "DETYRAT E REJA:",
-        *_task_lines(new_tomorrow, names),
+        *_m3_status_table("DETYRAT E REJA", new_tomorrow, names),
         "",
-        "08:00:",
-        *_task_lines(at_0800, names),
+        *_m3_status_table("08:00", at_0800, names),
         "",
-        "ME DEADLINE:",
-        *_task_lines(deadline, names),
+        *_m3_status_table("ME DEADLINE", deadline, names),
     ]
     section_6 = await _today_meeting_status_section(db, today_meetings, report_day)
 
@@ -287,13 +319,13 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         {"title": SECTION_TITLES[0], "body": finance_section},
         {"title": SECTION_TITLES[1], "body": std_tickets_section},
         {"title": SECTION_TITLES[2], "body": _normalize_section(section_1)},
-        {"title": SECTION_TITLES[3], "body": _empty_aware(_task_lines(today_todo, names))},
+        {"title": SECTION_TITLES[3], "body": _normalize_section(_m3_status_table("TODO", today_todo, names))},
         {"title": SECTION_TITLES[4], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
         {"title": SECTION_TITLES[5], "body": _normalize_section(section_4)},
         {"title": SECTION_TITLES[6], "body": _normalize_section(section_5)},
         {"title": SECTION_TITLES[7], "body": section_6},
-        {"title": SECTION_TITLES[8], "body": _empty_aware(_task_lines(one_h_no_slot, names))},
-        {"title": SECTION_TITLES[9], "body": _empty_aware(_task_lines(personal_ga_ka, names))},
+        {"title": SECTION_TITLES[8], "body": _normalize_section(_m3_status_table("1H PA SLOT", one_h_no_slot, names))},
+        {"title": SECTION_TITLES[9], "body": _normalize_section(_m3_status_table("PERSONAL GA/KA", personal_ga_ka, names))},
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
@@ -322,17 +354,13 @@ def _status_group_section(title: str, tasks: list[Task], names: dict[Any, str], 
     late = [task for task in tasks if _is_open(task) and _late_days(task) > 0]
     return [
         f"{title}:",
-        "TODO:",
-        *_task_lines(todo, names),
+        *_m3_status_table("TODO", todo, names),
         "",
-        "IN PROGRESS:",
-        *_task_lines(in_progress, names),
+        *_m3_status_table("IN PROGRESS", in_progress, names),
         "",
-        "DONE:",
-        *_task_lines(done, names),
+        *_m3_status_table("DONE", done, names),
         "",
-        "LATE:",
-        *_task_late_lines(late, names),
+        *_m3_status_table("LATE", late, names, include_late_days=True),
     ]
 
 
@@ -365,9 +393,9 @@ async def _m3_finance_ga_section(db: AsyncSession, tasks: list[Task], names: dic
         ]
 
     return _normalize_section([
-        *_status_group_section("GA", ga_tasks, names, report_day),
+        *_status_group_section("GA TASKS", ga_tasks, names, report_day),
         "",
-        *_status_group_section("HV", hv_tasks, names, report_day),
+        *_status_group_section("HV TASKS", hv_tasks, names, report_day),
     ])
 
 
@@ -399,6 +427,11 @@ def _meeting_lines(meetings: list[Meeting]) -> list[str]:
     return [f"- {_local_time(meeting.starts_at)}: {meeting.title}" for meeting in sorted(meetings, key=lambda m: m.starts_at or datetime.min)]
 
 
+def _meeting_group_title(title: str) -> list[str]:
+    border = "=" * len(title)
+    return [border, title, border]
+
+
 async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting], report_day: date) -> str:
     statuses = (
         await db.execute(
@@ -413,22 +446,26 @@ async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting
         return [meeting for meeting in values if status_by_meeting.get(meeting.id, "") == status_value]
 
     return _normalize_section([
-        "TAKIMET EXTERNE TE MBAJTURA:",
+        *_meeting_group_title("TAKIMET EXTERNE"),
+        "",
+        "MBAJTUR:",
         *_meeting_lines(by_status(external, "held")),
         "",
-        "TAKIMET EXTERNE TE ANULUARA:",
+        "ANULUAR:",
         *_meeting_lines(by_status(external, "canceled")),
         "",
-        "TAKIMET EXTERNE PA STATUS:",
+        "PA STATUS:",
         *_meeting_lines(by_status(external, "")),
         "",
-        "TAKIMET INTERNE TE MBAJTURA:",
+        *_meeting_group_title("TAKIMET INTERNE"),
+        "",
+        "MBAJTUR:",
         *_meeting_lines(by_status(internal, "held")),
         "",
-        "TAKIMET INTERNE TE ANULUARA:",
+        "ANULUAR:",
         *_meeting_lines(by_status(internal, "canceled")),
         "",
-        "TAKIMET INTERNE PA STATUS:",
+        "PA STATUS:",
         *_meeting_lines(by_status(internal, "")),
     ])
 
@@ -557,11 +594,55 @@ def render_plain_text(subject: str, report_day: date, tomorrow: date, sections: 
     return "\n\n".join(blocks)
 
 
+def _parse_ascii_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _render_ascii_table_html(lines: list[str]) -> str:
+    table_rows = [_parse_ascii_cells(line) for line in lines if line.startswith("|")]
+    if not table_rows:
+        return ""
+    header, body_rows = table_rows[0], table_rows[1:]
+    header_html = "".join(f"<th>{html.escape(cell)}</th>" for cell in header)
+    body_html = "".join(
+        "<tr>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>"
+        for row in body_rows
+    )
+    return f"<table class=\"report-table\"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+
+
+def _render_section_body_html(body: str) -> str:
+    lines = body.splitlines()
+    chunks: list[str] = []
+    text_buffer: list[str] = []
+    index = 0
+
+    def flush_text() -> None:
+        if text_buffer:
+            chunks.append(f"<pre>{html.escape(chr(10).join(text_buffer).strip())}</pre>")
+            text_buffer.clear()
+
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("+-") and index + 1 < len(lines) and lines[index + 1].startswith("|"):
+            flush_text()
+            table_lines: list[str] = []
+            while index < len(lines) and (lines[index].startswith("+-") or lines[index].startswith("|")):
+                table_lines.append(lines[index])
+                index += 1
+            chunks.append(_render_ascii_table_html(table_lines))
+            continue
+        text_buffer.append(line)
+        index += 1
+    flush_text()
+    return "".join(chunk for chunk in chunks if chunk)
+
+
 def render_html(subject: str, report_day: date, tomorrow: date, sections: list[dict[str, str]]) -> str:
     section_html = "".join(
         "<section>"
         f"<h2>{index}. {html.escape(section['title'])}</h2>"
-        f"<pre>{html.escape(section.get('body') or '')}</pre>"
+        f"{_render_section_body_html(section.get('body') or '')}"
         "</section>"
         for index, section in enumerate(sections, 1)
     )
@@ -572,6 +653,10 @@ body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;pad
 h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
 h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 pre{{white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;background:#f8fafc;border:1px solid #e5e7eb;padding:12px;margin:0}}
+.report-table{{width:100%;border-collapse:collapse;margin:8px 0 12px;font-size:13px}}
+.report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700}}
+.report-table th,.report-table td{{border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top}}
+.report-table td{{background:#f8fafc}}
 </style></head><body><div class="wrap"><h1>{html.escape(subject)}</h1>
 <p>Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>{section_html}</div></body></html>"""
 
