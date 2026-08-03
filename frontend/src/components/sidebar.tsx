@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { 
@@ -346,13 +347,19 @@ export function Sidebar({ role }: { role: UserRole }) {
         style={{ touchAction: "pan-y" }}
       >
         {/* Header / Logo Area */}
-        <div className="flex h-16 w-64 items-center justify-between border-b px-3">
-          <Link href="/dashboard" className="flex h-full min-w-0 flex-1 items-center justify-center overflow-hidden pr-2" aria-label="PrimeFlow dashboard">
-            <span
-              role="img"
-              aria-label="Prime Flow"
-              className="block h-[58px] w-[176px] shrink-0 bg-contain bg-center bg-no-repeat"
-              style={{ backgroundImage: "url('/primeflow-sidebar-logo.png')" }}
+        <div className="flex h-20 w-64 items-center justify-between border-b px-3">
+          <Link
+            href="/dashboard"
+            className="flex h-full min-w-0 flex-1 items-center justify-center px-2"
+            aria-label="PrimeFlow dashboard"
+          >
+            <Image
+              src="/primeflow-sidebar-logo-transparent.png"
+              alt="Prime Flow"
+              width={160}
+              height={58}
+              priority
+              className="h-auto max-h-[54px] w-full max-w-[160px] object-contain"
             />
           </Link>
           <button
