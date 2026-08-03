@@ -1,14 +1,19 @@
 from __future__ import annotations
 
+import csv
+import html
+import mimetypes
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
+from fastapi.responses import FileResponse, HTMLResponse
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from pydantic import BaseModel
+from starlette.concurrency import run_in_threadpool
 
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
@@ -98,6 +103,100 @@ def _ga_note_upload_base_dir() -> Path:
     if not upload_base.is_absolute():
         upload_base = Path(__file__).resolve().parents[3] / upload_base
     return upload_base
+
+
+def _preview_page(title: str, body: str) -> str:
+    return f"""<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{html.escape(title)}</title>
+  <style>
+    :root {{ color-scheme: light; font-family: Arial, sans-serif; }}
+    body {{ margin: 0; padding: 16px; color: #0f172a; background: #fff; }}
+    h2 {{ margin: 0 0 14px; font-size: 16px; }}
+    h3 {{ margin: 18px 0 8px; font-size: 14px; }}
+    .sheet {{ overflow: auto; margin-bottom: 20px; border: 1px solid #cbd5e1; border-radius: 6px; }}
+    table {{ width: 100%; border-collapse: collapse; font-size: 12px; }}
+    td {{ min-width: 90px; max-width: 320px; padding: 6px 8px; border: 1px solid #cbd5e1; vertical-align: top; white-space: pre-wrap; overflow-wrap: anywhere; }}
+    tr:first-child td {{ background: #f1f5f9; font-weight: 600; }}
+    pre {{ margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.5 Consolas, monospace; }}
+    p {{ margin: 0 0 10px; white-space: pre-wrap; overflow-wrap: anywhere; }}
+    .muted {{ color: #64748b; font-size: 12px; }}
+  </style>
+</head>
+<body>
+  <h2>{html.escape(title)}</h2>
+  {body}
+</body>
+</html>"""
+
+
+def _preview_table(rows: list[list[object]]) -> str:
+    rendered_rows = []
+    for row in rows:
+        cells = "".join(f"<td>{html.escape('' if value is None else str(value))}</td>" for value in row)
+        rendered_rows.append(f"<tr>{cells}</tr>")
+    return f'<div class="sheet"><table>{"".join(rendered_rows)}</table></div>'
+
+
+def _build_attachment_preview(path: Path, original_filename: str) -> str:
+    suffix = path.suffix.lower()
+
+    if suffix in {".xlsx", ".xlsm", ".xltx", ".xltm"}:
+        from openpyxl import load_workbook
+
+        workbook = load_workbook(path, read_only=True, data_only=True)
+        sections: list[str] = []
+        try:
+            for worksheet in workbook.worksheets[:8]:
+                rows: list[list[object]] = []
+                for row_index, row in enumerate(worksheet.iter_rows(values_only=True)):
+                    if row_index >= 250:
+                        break
+                    rows.append(list(row[:40]))
+                sections.append(f"<h3>{html.escape(worksheet.title)}</h3>")
+                sections.append(_preview_table(rows) if rows else '<p class="muted">Empty sheet</p>')
+            if len(workbook.worksheets) > 8:
+                sections.append('<p class="muted">Only the first 8 sheets are shown.</p>')
+        finally:
+            workbook.close()
+        return _preview_page(original_filename, "".join(sections))
+
+    if suffix in {".csv", ".tsv"}:
+        delimiter = "\t" if suffix == ".tsv" else ","
+        rows: list[list[object]] = []
+        with path.open("r", encoding="utf-8-sig", errors="replace", newline="") as stream:
+            for row_index, row in enumerate(csv.reader(stream, delimiter=delimiter)):
+                if row_index >= 500:
+                    break
+                rows.append(list(row[:40]))
+        return _preview_page(original_filename, _preview_table(rows))
+
+    if suffix == ".docx":
+        from docx import Document
+
+        document = Document(path)
+        sections = [f"<p>{html.escape(paragraph.text)}</p>" for paragraph in document.paragraphs[:500] if paragraph.text]
+        for table in document.tables[:20]:
+            rows = [[cell.text for cell in row.cells[:20]] for row in table.rows[:200]]
+            sections.append(_preview_table(rows))
+        return _preview_page(original_filename, "".join(sections) or '<p class="muted">Empty document</p>')
+
+    text_suffixes = {
+        ".txt", ".log", ".md", ".json", ".xml", ".html", ".htm", ".css", ".js", ".ts", ".tsx",
+        ".jsx", ".py", ".sql", ".yaml", ".yml", ".ini", ".cfg",
+    }
+    if suffix in text_suffixes:
+        content = path.read_text(encoding="utf-8", errors="replace")[:300_000]
+        return _preview_page(original_filename, f"<pre>{html.escape(content)}</pre>")
+
+    body = (
+        '<p>This file format cannot be displayed directly in the browser.</p>'
+        '<p class="muted">Use the Download button in the preview window to open it with the appropriate application.</p>'
+    )
+    return _preview_page(original_filename, body)
 
 
 async def _ensure_note_access(note: GaNote, user, db: AsyncSession) -> None:
@@ -675,6 +774,47 @@ async def upload_ga_note_attachments_by_form(
     return await _save_ga_note_attachments(note, files, db, user)
 
 
+@router.get("/attachments/{attachment_id}/preview")
+async def preview_ga_note_attachment(
+    attachment_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+):
+    attachment = (
+        await db.execute(
+            select(GaNoteAttachment)
+            .options(selectinload(GaNoteAttachment.note))
+            .where(GaNoteAttachment.id == attachment_id)
+        )
+    ).scalar_one_or_none()
+    if attachment is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Attachment not found")
+
+    await _ensure_note_access(attachment.note, user, db)
+
+    stored_path = _ga_note_upload_base_dir() / str(attachment.note_id) / attachment.stored_filename
+    if not stored_path.exists():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
+
+    content_type = attachment.content_type or mimetypes.guess_type(attachment.original_filename)[0] or "application/octet-stream"
+    suffix = stored_path.suffix.lower()
+    if content_type.startswith(("image/", "audio/", "video/")) or content_type == "application/pdf" or suffix == ".pdf":
+        return FileResponse(stored_path, media_type=content_type)
+
+    try:
+        preview_html = await run_in_threadpool(
+            _build_attachment_preview,
+            stored_path,
+            attachment.original_filename,
+        )
+    except Exception:
+        preview_html = _preview_page(
+            attachment.original_filename,
+            '<p>The preview could not be generated.</p><p class="muted">Use Download to open the original file.</p>',
+        )
+    return HTMLResponse(preview_html)
+
+
 @router.get("/attachments/{attachment_id}")
 async def download_ga_note_attachment(
     attachment_id: uuid.UUID,
@@ -697,8 +837,6 @@ async def download_ga_note_attachment(
     stored_path = upload_base / str(attachment.note_id) / attachment.stored_filename
     if not stored_path.exists():
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found on server")
-
-    from fastapi.responses import FileResponse
 
     return FileResponse(
         stored_path,

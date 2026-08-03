@@ -34,7 +34,7 @@ from app.services.one_h_slots import effective_slot_date
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.user import User
 from app.schemas.task import TaskAssigneeOut, TaskCreate, TaskOut, TaskRemoveFromDayRequest, TaskUpdate
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
@@ -726,6 +726,7 @@ class FastTaskOrderUpdate(BaseModel):
 
 class GaNoteTaskBatchRequest(BaseModel):
     ga_note_origin_ids: list[uuid.UUID]
+    plan_note_origin_ids: list[uuid.UUID] = Field(default_factory=list)
     include_done: bool = True
     include_all_done: bool = False
     include_inactive: bool = False
@@ -999,11 +1000,17 @@ async def list_tasks_by_ga_notes(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[TaskOut]:
-    note_ids = list(dict.fromkeys(payload.ga_note_origin_ids))
-    if not note_ids:
+    ga_note_ids = list(dict.fromkeys(payload.ga_note_origin_ids))
+    plan_note_ids = list(dict.fromkeys(payload.plan_note_origin_ids))
+    origin_filters = []
+    if ga_note_ids:
+        origin_filters.append(Task.ga_note_origin_id.in_(ga_note_ids))
+    if plan_note_ids:
+        origin_filters.append(Task.plan_note_origin_id.in_(plan_note_ids))
+    if not origin_filters:
         return []
 
-    stmt = select(Task).where(Task.ga_note_origin_id.in_(note_ids))
+    stmt = select(Task).where(or_(*origin_filters))
 
     if not payload.include_inactive:
         stmt = stmt.where(Task.is_active.is_(True))

@@ -18,7 +18,6 @@ import {
   Settings,
   Layers,
   ClipboardCheck,
-  Hexagon,
   StickyNote,
   CalendarClock,
   Briefcase,
@@ -62,11 +61,6 @@ const items: NavItem[] = [
   {
     href: "/ga-ka-notes",
     label: "GA/KA Notes",
-    icon: StickyNote,
-  },
-  {
-    href: "/primeflow-notes",
-    label: "Notes",
     icon: StickyNote,
   },
   {
@@ -305,10 +299,14 @@ export function Sidebar({ role }: { role: UserRole }) {
         style={{ touchAction: "pan-y" }}
       >
         {/* Header / Logo Area */}
-        <div className="flex h-16 w-64 items-center justify-between border-b px-6">
-          <Link href="/dashboard" className="flex items-center gap-2 font-bold text-lg tracking-tight">
-            <Hexagon className="h-6 w-6 text-primary fill-primary/20" />
-            <span>PrimeFlow</span>
+        <div className="flex h-16 w-64 items-center justify-between border-b px-3">
+          <Link href="/dashboard" className="flex h-full min-w-0 flex-1 items-center justify-center overflow-hidden pr-2" aria-label="PrimeFlow dashboard">
+            <span
+              role="img"
+              aria-label="Prime Flow"
+              className="block h-[58px] w-[176px] shrink-0 bg-contain bg-center bg-no-repeat"
+              style={{ backgroundImage: "url('/primeflow-sidebar-logo.png')" }}
+            />
           </Link>
           <button
             onClick={() => setIsOpen(false)}

@@ -2304,8 +2304,8 @@ export default function NextWeekPlanPage() {
               ref={contentTextareaRef}
               value={content}
               onChange={(e) => setContent(e.target.value)}
-              rows={6}
-              className="md:min-h-[220px] min-h-[170px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
+              rows={4}
+              className="min-h-[110px] md:min-h-[120px] resize-none text-base md:text-lg bg-primary/5 border-primary/40 shadow-[0_0_0_1px_rgba(0,0,0,0.04)] focus-visible:ring-2 focus-visible:ring-primary/60 focus-visible:border-primary"
               autoFocus
             />
             <div className="flex flex-wrap items-center gap-2">
