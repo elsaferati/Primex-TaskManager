@@ -36,6 +36,8 @@ class Settings(BaseSettings):
     WEEKLY_PLANNING_AUDIT_RECIPIENTS: str = (
         "130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com"
     )
+    STD_PRIMEFLOW_API_BASE_URL: str = "https://std.primexeu.com/api/integrations/primeflow/v1"
+    STD_PRIMEFLOW_API_TOKEN: str | None = None
     REPORT_STORAGE_DIR: str = "uploads/reports"
     REPORT_RETENTION_DAYS: int = 90
 

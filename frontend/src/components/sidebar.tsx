@@ -104,6 +104,11 @@ const items: NavItem[] = [
     label: "System Tasks Report",
     icon: Layers,
   },
+  {
+    href: "/meetings-report",
+    label: "Meetings Report",
+    icon: MailCheck,
+  },
   { 
     href: "/departments/development", 
     label: "Development", 

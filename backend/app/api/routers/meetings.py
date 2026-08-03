@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import uuid
+from datetime import date, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import delete, select
@@ -10,9 +11,16 @@ from app.api.access import ensure_admin, ensure_department_access, ensure_manage
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.meeting import Meeting, MeetingParticipant
+from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.project import Project
 from app.models.user import User
-from app.schemas.meeting import MeetingCreate, MeetingOut, MeetingUpdate
+from app.schemas.meeting import (
+    MeetingCreate,
+    MeetingOccurrenceStatusOut,
+    MeetingOccurrenceStatusUpdate,
+    MeetingOut,
+    MeetingUpdate,
+)
 from app.services.meeting_system_tasks import (
     deactivate_external_meeting_system_tasks,
     reconcile_external_meeting_system_tasks_for_meeting,
@@ -20,6 +28,20 @@ from app.services.meeting_system_tasks import (
 
 
 router = APIRouter()
+
+
+def _occurrence_status_out(row: MeetingOccurrenceStatus) -> MeetingOccurrenceStatusOut:
+    return MeetingOccurrenceStatusOut(
+        id=row.id,
+        meeting_id=row.meeting_id,
+        occurrence_date=row.occurrence_date,
+        status=row.status,
+        note=row.note,
+        checked_by_user_id=row.checked_by_user_id,
+        checked_at=row.checked_at,
+        created_at=row.created_at,
+        updated_at=row.updated_at,
+    )
 
 
 @router.get("", response_model=list[MeetingOut])
@@ -86,6 +108,53 @@ async def list_meetings(
         )
         for m in meetings
     ]
+
+
+@router.get("/occurrence-statuses", response_model=list[MeetingOccurrenceStatusOut])
+async def list_meeting_occurrence_statuses(
+    occurrence_date: date,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[MeetingOccurrenceStatusOut]:
+    rows = (
+        await db.execute(
+            select(MeetingOccurrenceStatus).where(MeetingOccurrenceStatus.occurrence_date == occurrence_date)
+        )
+    ).scalars().all()
+    return [_occurrence_status_out(row) for row in rows]
+
+
+@router.patch("/{meeting_id}/occurrence-status", response_model=MeetingOccurrenceStatusOut)
+async def update_meeting_occurrence_status(
+    meeting_id: uuid.UUID,
+    payload: MeetingOccurrenceStatusUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> MeetingOccurrenceStatusOut:
+    meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    row = (
+        await db.execute(
+            select(MeetingOccurrenceStatus).where(
+                MeetingOccurrenceStatus.meeting_id == meeting_id,
+                MeetingOccurrenceStatus.occurrence_date == payload.occurrence_date,
+            )
+        )
+    ).scalar_one_or_none()
+    if row is None:
+        row = MeetingOccurrenceStatus(
+            meeting_id=meeting_id,
+            occurrence_date=payload.occurrence_date,
+        )
+        db.add(row)
+    row.status = payload.status
+    row.note = payload.note
+    row.checked_by_user_id = user.id
+    row.checked_at = datetime.now().astimezone()
+    await db.commit()
+    await db.refresh(row)
+    return _occurrence_status_out(row)
 
 
 @router.post("", response_model=MeetingOut, status_code=status.HTTP_201_CREATED)

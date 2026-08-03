@@ -619,6 +619,18 @@ export interface Meeting {
   participant_ids?: string[]
 }
 
+export interface MeetingOccurrenceStatus {
+  id: string
+  meeting_id: string
+  occurrence_date: string
+  status: "planned" | "held" | "canceled"
+  note?: string | null
+  checked_by_user_id?: string | null
+  checked_at?: string | null
+  created_at: string
+  updated_at: string
+}
+
 export type RealizationPeriodStatus =
   | "OPEN"
   | "CALCULATED"
