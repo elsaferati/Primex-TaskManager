@@ -146,7 +146,7 @@ const navGroups: NavGroup[] = [
     icon: BarChart3,
     items: [
       { href: "/system-task-instances", label: "System Tasks Report", icon: Layers },
-      { href: "/meetings-report", label: "Meetings Report", icon: MailCheck },
+      { href: "/meetings-report", label: "Mbyllja e dites M3", icon: MailCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
       {

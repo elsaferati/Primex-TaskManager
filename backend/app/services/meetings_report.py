@@ -675,13 +675,29 @@ def _parse_ascii_cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
-def _render_ascii_table_html(lines: list[str]) -> str:
+def _table_tone_from_label(label: str) -> str:
+    normalized = label.strip().upper().rstrip(":")
+    if normalized in {"TODO", "DETYRAT E REJA"}:
+        return "todo"
+    if normalized == "IN PROGRESS":
+        return "in-progress"
+    if normalized == "DONE":
+        return "done"
+    if normalized == "LATE":
+        return "late"
+    if normalized == "ME DEADLINE":
+        return "deadline"
+    return ""
+
+
+def _render_ascii_table_html(lines: list[str], tone: str = "") -> str:
     table_rows = [_parse_ascii_cells(line) for line in lines if line.startswith("|")]
     if not table_rows:
         return ""
     header, body_rows = table_rows[0], table_rows[1:]
     header_html = "".join(f"<th>{html.escape(cell)}</th>" for cell in header)
     canceled_index = next((index for index, cell in enumerate(header) if cell.upper() == "ANULUAR"), None)
+    table_class = f"report-table report-table-{tone}" if tone else "report-table"
     body_html_parts = []
     for row in body_rows:
         is_canceled = (
@@ -694,7 +710,7 @@ def _render_ascii_table_html(lines: list[str]) -> str:
             f"<tr{row_class}>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>"
         )
     body_html = "".join(body_html_parts)
-    return f"<table class=\"report-table\"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+    return f"<table class=\"{table_class}\"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
 
 
 def _render_section_body_html(body: str) -> str:
@@ -708,15 +724,22 @@ def _render_section_body_html(body: str) -> str:
             chunks.append(f"<pre>{html.escape(chr(10).join(text_buffer).strip())}</pre>")
             text_buffer.clear()
 
+    def current_table_tone() -> str:
+        for previous in reversed(text_buffer):
+            if previous.strip():
+                return _table_tone_from_label(previous)
+        return ""
+
     while index < len(lines):
         line = lines[index]
         if line.startswith("+-") and index + 1 < len(lines) and lines[index + 1].startswith("|"):
+            tone = current_table_tone()
             flush_text()
             table_lines: list[str] = []
             while index < len(lines) and (lines[index].startswith("+-") or lines[index].startswith("|")):
                 table_lines.append(lines[index])
                 index += 1
-            chunks.append(_render_ascii_table_html(table_lines))
+            chunks.append(_render_ascii_table_html(table_lines, tone))
             continue
         text_buffer.append(line)
         index += 1
@@ -743,6 +766,11 @@ pre{{white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-heigh
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700}}
 .report-table th,.report-table td{{border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top}}
 .report-table td{{background:#f8fafc}}
+.report-table-todo td{{background:#fbcfe8}}
+.report-table-in-progress td{{background:#fef3c7}}
+.report-table-done td{{background:#d4ffe1}}
+.report-table-late td{{background:#fee2e2}}
+.report-table-deadline td{{background:#dc2626;color:#ffffff}}
 .report-table .report-row-canceled td{{background:#fee2e2;color:#991b1b}}
 </style></head><body><div class="wrap"><h1>{html.escape(subject)}</h1>
 <p>Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>{section_html}</div></body></html>"""

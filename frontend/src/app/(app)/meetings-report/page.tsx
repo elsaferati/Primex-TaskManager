@@ -37,6 +37,7 @@ type Draft = {
 }
 
 const API = "/meetings-report"
+const REPORT_LABEL = "Mbyllja e dites M3"
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
@@ -115,7 +116,7 @@ export default function MeetingsReportPage() {
       if (!res.ok) throw new Error(await responseError(res))
       applyDraft(await res.json())
     } catch (error) {
-      if (canAccess) toast.error("Unable to load Meetings Report", { description: String(error) })
+      if (canAccess) toast.error(`Unable to load ${REPORT_LABEL}`, { description: String(error) })
     } finally {
       setLoading(false)
     }
@@ -128,7 +129,7 @@ export default function MeetingsReportPage() {
       if (!res.ok) throw new Error(await responseError(res))
       applySettings(await res.json())
     } catch (error) {
-      if (canAccess) toast.error("Unable to load Meetings Report settings", { description: String(error) })
+      if (canAccess) toast.error(`Unable to load ${REPORT_LABEL} settings`, { description: String(error) })
     }
   }, [apiFetch, applySettings, canAccess])
 
@@ -146,7 +147,7 @@ export default function MeetingsReportPage() {
       const res = await apiFetch(`${API}/generate?report_date=${reportDate}`, { method: "POST" })
       if (!res.ok) throw new Error(await responseError(res))
       applyDraft(await res.json())
-      toast.success("Meetings Report generated")
+      toast.success(`${REPORT_LABEL} generated`)
     } catch (error) {
       toast.error("Generate failed", { description: String(error) })
     } finally {
@@ -198,7 +199,7 @@ export default function MeetingsReportPage() {
       if (!res.ok) throw new Error(await responseError(res))
       const data = await res.json()
       applyDraft(data)
-      toast.success("Meetings Report sent", { description: data.gmail_message_id || undefined })
+      toast.success(`${REPORT_LABEL} sent`, { description: data.gmail_message_id || undefined })
     } catch (error) {
       toast.error("Send failed", { description: String(error) })
     } finally {
@@ -246,7 +247,7 @@ export default function MeetingsReportPage() {
       })
       if (!res.ok) throw new Error(await responseError(res))
       applySettings(await res.json())
-      toast.success("Meetings Report settings saved")
+      toast.success(`${REPORT_LABEL} settings saved`)
     } catch (error) {
       toast.error("Settings save failed", { description: String(error) })
     } finally {
@@ -254,13 +255,13 @@ export default function MeetingsReportPage() {
     }
   }
 
-  if (!canAccess) return <div className="rounded-lg border p-8">Meetings Report access required.</div>
+  if (!canAccess) return <div className="rounded-lg border p-8">{REPORT_LABEL} access required.</div>
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Meetings Report</h1>
+          <h1 className="text-2xl font-semibold">{REPORT_LABEL}</h1>
           <p className="text-sm text-muted-foreground">Editable end-of-day report for boss meeting follow-up.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -442,7 +443,7 @@ export default function MeetingsReportPage() {
           <DialogHeader>
             <DialogTitle>Email preview</DialogTitle>
           </DialogHeader>
-          {preview ? <iframe title="Meetings Report preview" srcDoc={preview.html} className="h-[650px] w-full rounded border bg-white" /> : null}
+          {preview ? <iframe title={`${REPORT_LABEL} preview`} srcDoc={preview.html} className="h-[650px] w-full rounded border bg-white" /> : null}
         </DialogContent>
       </Dialog>
     </div>
