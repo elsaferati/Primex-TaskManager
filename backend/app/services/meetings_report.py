@@ -710,7 +710,23 @@ def _render_ascii_table_html(lines: list[str], tone: str = "") -> str:
             f"<tr{row_class}>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>"
         )
     body_html = "".join(body_html_parts)
-    return f"<table class=\"{table_class}\"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+    return (
+        "<div class=\"report-table-wrap\">"
+        f"<table class=\"{table_class}\"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+        "</div>"
+    )
+
+
+def _render_text_block_html(lines: list[str]) -> str:
+    rendered_lines = []
+    for line in lines:
+        stripped = line.strip()
+        escaped = html.escape(line)
+        if stripped and len(stripped) <= 40 and stripped.endswith(":"):
+            rendered_lines.append(f"<strong>{escaped}</strong>")
+        else:
+            rendered_lines.append(escaped)
+    return f"<pre>{chr(10).join(rendered_lines).strip()}</pre>"
 
 
 def _render_section_body_html(body: str) -> str:
@@ -721,7 +737,7 @@ def _render_section_body_html(body: str) -> str:
 
     def flush_text() -> None:
         if text_buffer:
-            chunks.append(f"<pre>{html.escape(chr(10).join(text_buffer).strip())}</pre>")
+            chunks.append(_render_text_block_html(text_buffer))
             text_buffer.clear()
 
     def current_table_tone() -> str:
@@ -762,7 +778,8 @@ body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;pad
 h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
 h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 pre{{white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;background:#f8fafc;border:1px solid #e5e7eb;padding:12px;margin:0}}
-.report-table{{width:100%;border-collapse:collapse;margin:8px 0 12px;font-size:13px}}
+.report-table-wrap{{width:100%;overflow-x:auto;margin:8px 0 12px}}
+.report-table{{width:100%;min-width:560px;border-collapse:collapse;font-size:13px}}
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700}}
 .report-table th,.report-table td{{border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top}}
 .report-table td{{background:#f8fafc}}
@@ -772,6 +789,15 @@ pre{{white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-heigh
 .report-table-late td{{background:#fee2e2}}
 .report-table-deadline td{{background:#dc2626;color:#ffffff}}
 .report-table .report-row-canceled td{{background:#fee2e2;color:#991b1b}}
+@media only screen and (max-width:600px){{
+body{{padding:8px}}
+.wrap{{width:100%;max-width:none;padding:12px;box-sizing:border-box}}
+h1{{font-size:18px}}
+h2{{font-size:13px}}
+pre{{font-size:12px;padding:10px}}
+.report-table{{font-size:12px;min-width:520px}}
+.report-table th,.report-table td{{padding:5px 6px}}
+}}
 </style></head><body><div class="wrap"><h1>{html.escape(subject)}</h1>
 <p>Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>{section_html}</div></body></html>"""
 
