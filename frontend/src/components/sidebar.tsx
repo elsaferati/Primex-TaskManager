@@ -29,6 +29,9 @@ import {
   PanelLeftClose,
   Gem,
   Activity,
+  ChevronDown,
+  FileSpreadsheet,
+  ScrollText,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -206,11 +209,17 @@ export function Sidebar({ role }: { role: UserRole }) {
     role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
+  const standardsActive = pathname === "/standards/excel" || pathname.startsWith("/standards/excel/")
+  const [standardsOpen, setStandardsOpen] = React.useState(standardsActive)
   const [resolvedProjectRoute, setResolvedProjectRoute] = React.useState<"dev" | "pcm" | "design" | null>(null)
   const genericProjectId = React.useMemo(() => {
     const match = pathname.match(/^\/projects\/([^/]+)$/)
     return match ? decodeURIComponent(match[1]) : null
   }, [pathname])
+
+  React.useEffect(() => {
+    if (standardsActive) setStandardsOpen(true)
+  }, [standardsActive])
 
   React.useEffect(() => {
     if (!genericProjectId) {
@@ -351,6 +360,40 @@ export function Sidebar({ role }: { role: UserRole }) {
               </Link>
             )
           })}
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => setStandardsOpen((current) => !current)}
+            className={cn(
+              "group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+              "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              standardsActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground"
+            )}
+            aria-expanded={standardsOpen}
+          >
+            <ScrollText className={cn("h-4 w-4 shrink-0", standardsActive ? "text-primary" : "text-muted-foreground")} />
+            <span className="flex-1 text-left">STANDARDET</span>
+            <ChevronDown className={cn("h-4 w-4 transition-transform", standardsOpen && "rotate-180")} />
+          </button>
+          {standardsOpen ? (
+            <Link
+              href="/standards/excel"
+              onMouseEnter={() => router.prefetch("/standards/excel")}
+              onFocus={() => router.prefetch("/standards/excel")}
+              onClick={() => {
+                if (!isDesktop) setIsOpen(false)
+              }}
+              className={cn(
+                "ml-6 mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                standardsActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground"
+              )}
+            >
+              <FileSpreadsheet className={cn("h-4 w-4", standardsActive ? "text-primary" : "text-muted-foreground")} />
+              Excel
+            </Link>
+          ) : null}
+        </div>
       </nav>
 
       {/* Optional: User Profile / Footer area could go here */}
