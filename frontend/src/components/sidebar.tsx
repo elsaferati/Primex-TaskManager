@@ -31,8 +31,6 @@ import {
   Gem,
   Activity,
   ChevronDown,
-  ChevronDown,
-  FileSpreadsheet,
   ScrollText,
   type LucideIcon
 } from "lucide-react"

@@ -413,8 +413,8 @@ export default function MeetingsReportPage() {
               <div className="font-medium">{draft.status}</div>
             </div>
             <div className="rounded-lg border bg-white p-3">
-              <div className="text-muted-foreground">Gmail</div>
-              <div className="truncate font-medium">{draft.gmail_message_id || "-"}</div>
+              <div className="text-muted-foreground">Sent to</div>
+              <div className="truncate font-medium">{draft.recipients.to.join(", ") || "-"}</div>
             </div>
           </div>
 
