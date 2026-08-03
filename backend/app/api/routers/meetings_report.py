@@ -77,12 +77,22 @@ def _validate_gmail_config() -> None:
 
 
 def _can_use_meetings_report(user: User) -> bool:
+    return True
+
+
+def _can_edit_meetings_report(user: User) -> bool:
     return can_manage_reports(user) or user.role == "MANAGER"
 
 
 async def require_meetings_report_user(user: User = Depends(get_current_user)) -> User:
     if not _can_use_meetings_report(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return user
+
+
+async def require_meetings_report_editor(user: User = Depends(get_current_user)) -> User:
+    if not _can_edit_meetings_report(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or manager access required")
     return user
 
 
@@ -151,7 +161,7 @@ async def get_settings(
 async def update_settings(
     payload: SettingsPayload,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_meetings_report_user),
+    _: User = Depends(require_meetings_report_editor),
 ) -> dict:
     if any(day < 0 or day > 6 for day in payload.weekdays):
         raise HTTPException(status_code=400, detail="Weekdays must be numbers from 0 to 6")
@@ -230,7 +240,7 @@ async def update_draft(
     draft_id: uuid.UUID,
     payload: DraftUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_meetings_report_user),
+    user: User = Depends(require_meetings_report_editor),
 ) -> dict:
     row = await db.get(MeetingsReportDraft, draft_id)
     if row is None:
@@ -267,7 +277,7 @@ async def preview_draft(
 async def send_draft(
     draft_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_meetings_report_user),
+    user: User = Depends(require_meetings_report_editor),
 ) -> dict:
     row = await db.get(MeetingsReportDraft, draft_id)
     if row is None:

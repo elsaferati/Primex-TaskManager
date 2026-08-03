@@ -72,7 +72,8 @@ async function responseError(res: Response) {
 
 export default function MeetingsReportPage() {
   const { apiFetch, user } = useAuth()
-  const canAccess = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.full_name?.trim().toLowerCase() === "laurent hoxha"
+  const canAccess = Boolean(user)
+  const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [reportDate, setReportDate] = React.useState(todayIso())
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)
@@ -151,7 +152,7 @@ export default function MeetingsReportPage() {
   }
 
   const save = async (): Promise<Draft | null> => {
-    if (!draft) return null
+    if (!draft || !canEdit) return draft
     setSaving(true)
     try {
       const res = await apiFetch(`${API}/${draft.id}`, {
@@ -174,7 +175,7 @@ export default function MeetingsReportPage() {
 
   const previewDraft = async () => {
     if (!draft) return
-    await save()
+    if (canEdit) await save()
     try {
       const res = await apiFetch(`${API}/${draft.id}/preview`)
       if (!res.ok) throw new Error(await responseError(res))
@@ -185,7 +186,7 @@ export default function MeetingsReportPage() {
   }
 
   const sendDraft = async () => {
-    if (!draft) return
+    if (!draft || !canEdit) return
     setSending(true)
     try {
       const savedDraft = await save()
@@ -232,7 +233,7 @@ export default function MeetingsReportPage() {
   }
 
   const saveSettings = async () => {
-    if (!settings) return
+    if (!settings || !canEdit) return
     setSavingSettings(true)
     try {
       const res = await apiFetch(`${API}/settings`, {
@@ -280,18 +281,23 @@ export default function MeetingsReportPage() {
             value={draft?.subject || ""}
             onChange={(event) => draft && setDraft({ ...draft, subject: event.target.value })}
             placeholder="Generate a draft first"
+            readOnly={!canEdit}
           />
         </div>
         <div className="flex items-end gap-2">
-          <Button variant="outline" onClick={() => void save()} disabled={!draft || saving}>
-            <Save /> Save
-          </Button>
+          {canEdit ? (
+            <Button variant="outline" onClick={() => void save()} disabled={!draft || saving}>
+              <Save /> Save
+            </Button>
+          ) : null}
           <Button variant="outline" onClick={() => void previewDraft()} disabled={!draft || saving}>
             <Eye /> Preview
           </Button>
-          <Button onClick={() => void sendDraft()} disabled={!draft || sending}>
-            <Send /> Send
-          </Button>
+          {canEdit ? (
+            <Button onClick={() => void sendDraft()} disabled={!draft || sending}>
+              <Send /> Send
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -302,6 +308,7 @@ export default function MeetingsReportPage() {
             value={recipientInputs.to}
             onChange={(event) => draft && updateRecipients("to", event.target.value)}
             placeholder="email@example.com"
+            readOnly={!canEdit}
           />
         </div>
         <div>
@@ -310,6 +317,7 @@ export default function MeetingsReportPage() {
             value={recipientInputs.cc}
             onChange={(event) => draft && updateRecipients("cc", event.target.value)}
             placeholder="Optional"
+            readOnly={!canEdit}
           />
         </div>
         <div>
@@ -318,6 +326,7 @@ export default function MeetingsReportPage() {
             value={recipientInputs.bcc}
             onChange={(event) => draft && updateRecipients("bcc", event.target.value)}
             placeholder="Optional"
+            readOnly={!canEdit}
           />
         </div>
       </div>
@@ -329,18 +338,18 @@ export default function MeetingsReportPage() {
               <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic Send</div>
               <div className="text-sm text-muted-foreground">Saved default recipients and schedule for this report.</div>
             </div>
-            <Button variant={settings.is_active ? "default" : "outline"} onClick={() => setSettings({ ...settings, is_active: !settings.is_active })}>
+            <Button variant={settings.is_active ? "default" : "outline"} onClick={() => canEdit && setSettings({ ...settings, is_active: !settings.is_active })} disabled={!canEdit}>
               {settings.is_active ? "Enabled" : "Disabled"}
             </Button>
           </div>
           <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
             <div>
               <Label>Send time</Label>
-              <Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} />
+              <Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} readOnly={!canEdit} />
             </div>
             <div>
               <Label>Timezone</Label>
-              <Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} />
+              <Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} readOnly={!canEdit} />
             </div>
             <div>
               <Label>Days</Label>
@@ -351,6 +360,7 @@ export default function MeetingsReportPage() {
                     type="button"
                     variant={settings.weekdays.includes(day) ? "default" : "outline"}
                     onClick={() => toggleWeekday(day)}
+                    disabled={!canEdit}
                   >
                     {label}
                   </Button>
@@ -361,22 +371,24 @@ export default function MeetingsReportPage() {
           <div className="grid gap-3 md:grid-cols-3">
             <div>
               <Label>Default To</Label>
-              <Input value={settingsInputs.to} onChange={(event) => updateSettingsRecipients("to", event.target.value)} />
+              <Input value={settingsInputs.to} onChange={(event) => updateSettingsRecipients("to", event.target.value)} readOnly={!canEdit} />
             </div>
             <div>
               <Label>Default Cc</Label>
-              <Input value={settingsInputs.cc} onChange={(event) => updateSettingsRecipients("cc", event.target.value)} />
+              <Input value={settingsInputs.cc} onChange={(event) => updateSettingsRecipients("cc", event.target.value)} readOnly={!canEdit} />
             </div>
             <div>
               <Label>Default Bcc</Label>
-              <Input value={settingsInputs.bcc} onChange={(event) => updateSettingsRecipients("bcc", event.target.value)} />
+              <Input value={settingsInputs.bcc} onChange={(event) => updateSettingsRecipients("bcc", event.target.value)} readOnly={!canEdit} />
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm text-muted-foreground">Last automatic run: {settings.last_run_date || "-"}</div>
-            <Button variant="outline" onClick={() => void saveSettings()} disabled={savingSettings}>
-              <Save /> Save settings
-            </Button>
+            {canEdit ? (
+              <Button variant="outline" onClick={() => void saveSettings()} disabled={savingSettings}>
+                <Save /> Save settings
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -410,6 +422,7 @@ export default function MeetingsReportPage() {
                   className="mt-3 min-h-[150px] font-mono text-sm"
                   value={section.body}
                   onChange={(event) => updateSection(index, event.target.value)}
+                  readOnly={!canEdit}
                 />
               </div>
             ))}

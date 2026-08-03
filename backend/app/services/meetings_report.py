@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import os
 import re
+import textwrap
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -15,6 +16,7 @@ from app.models.enums import CommonCategory
 from app.models.meeting import Meeting
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.daily_report_logic import business_days_between
@@ -24,7 +26,7 @@ from app.services.std_feedback_tickets import std_tickets_report_section
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
-    "(GA) M3 DET GA MBYLLJA ME HV/OH?",
+    "(GA) M3 DET GA MBYLLJA ME HV?",
     "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3",
     "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?",
     "DET. PA PROGRES (PINK)?",
@@ -108,10 +110,43 @@ def _initials(name: str | None) -> str:
 
 async def _assignee_names(db: AsyncSession, tasks: list[Task]) -> dict[Any, str]:
     user_ids = {task.assigned_to for task in tasks if task.assigned_to}
+    task_ids = [task.id for task in tasks]
+    if task_ids:
+        assignee_user_ids = (
+            await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids)))
+        ).scalars().all()
+        user_ids.update(assignee_user_ids)
     if not user_ids:
         return {}
     users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
     return {user.id: user.full_name or user.email for user in users}
+
+
+async def _effective_task_assignee_ids(db: AsyncSession, tasks: list[Task]) -> dict[Any, set[Any]]:
+    result: dict[Any, set[Any]] = {task.id: set() for task in tasks}
+    for task in tasks:
+        if task.assigned_to:
+            result.setdefault(task.id, set()).add(task.assigned_to)
+    task_ids = [task.id for task in tasks]
+    if not task_ids:
+        return result
+    rows = (
+        await db.execute(select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids)))
+    ).all()
+    for task_id, user_id in rows:
+        result.setdefault(task_id, set()).add(user_id)
+    return result
+
+
+async def _users_by_initials(db: AsyncSession, initials: str) -> list[User]:
+    users = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
+    target = initials.upper()
+    return [
+        user for user in users
+        if _initials(user.full_name) == target
+        or (user.username or "").strip().upper() == target
+        or (user.email or "").split("@", 1)[0].strip().upper() == target
+    ]
 
 
 def _task_line(task: Task, names: dict[Any, str]) -> str:
@@ -122,10 +157,17 @@ def _task_line(task: Task, names: dict[Any, str]) -> str:
 
 def _task_line_with_late_days(task: Task, names: dict[Any, str]) -> str:
     owner = _initials(names.get(task.assigned_to))
-    title = _clean_task_title(task.title)
+    title_lines = _wrap_fixed_width(_clean_task_title(task.title), 48)
     days = _late_days(task)
     late_label = f"{days} dite late" if days else "-"
-    return f"- {owner:<4} | {title:<45} | {late_label}"
+    lines = [f"- {owner:<4} | {title_lines[0]:<48} | {late_label}"]
+    lines.extend(f"  {'':<4} | {line:<48} |" for line in title_lines[1:])
+    return "\n".join(lines)
+
+
+def _wrap_fixed_width(value: str, width: int) -> list[str]:
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    return textwrap.wrap(cleaned, width=width, break_long_words=False, break_on_hyphens=False) or ["-"]
 
 
 def _task_late_lines(tasks: list[Task], names: dict[Any, str]) -> list[str]:
@@ -172,7 +214,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     )
     tasks = (await db.execute(task_stmt)).scalars().all()
     names = await _assignee_names(db, tasks)
-    finance_section = await _finance_section(db, tasks, names, report_day)
+    finance_section = await _m3_finance_ga_section(db, tasks, names, report_day)
     std_tickets_section = await std_tickets_report_section(db, report_day)
 
     system_tasks = [task for task in tasks if task.system_template_origin_id and _is_open(task)]
@@ -268,25 +310,18 @@ def _task_lines(tasks: list[Task], names: dict[Any, str]) -> list[str]:
     return [_task_line(task, names) for task in ordered]
 
 
-async def _finance_section(db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date) -> str:
-    finance_department = (
-        await db.execute(select(Department).where(Department.name.ilike("finance")))
-    ).scalar_one_or_none()
-    if finance_department is None:
-        return "TODO:\n(Asnje detyre)\n\nIN PROGRESS:\n(Asnje detyre)\n\nDONE:\n(Asnje detyre)\n\nLATE:\n(Asnje detyre)"
-
-    finance_tasks = [task for task in tasks if task.department_id == finance_department.id]
-    today_tasks = [task for task in finance_tasks if _task_day(task) == report_day]
+def _status_group_section(title: str, tasks: list[Task], names: dict[Any, str], report_day: date) -> list[str]:
+    today_tasks = [task for task in tasks if _task_day(task) == report_day]
     todo = [task for task in today_tasks if str(task.status or "").upper() == "TODO" and _is_open(task)]
     in_progress = [task for task in today_tasks if str(task.status or "").upper() == "IN_PROGRESS" and _is_open(task)]
     done = [
-        task for task in finance_tasks
+        task for task in tasks
         if str(task.status or "").upper() in {"DONE", "COMPLETED"}
         and (_task_day(task) == report_day or _local_date(task.completed_at) == report_day)
     ]
-    late = [task for task in finance_tasks if _is_open(task) and _late_days(task) > 0]
-
-    return _normalize_section([
+    late = [task for task in tasks if _is_open(task) and _late_days(task) > 0]
+    return [
+        f"{title}:",
         "TODO:",
         *_task_lines(todo, names),
         "",
@@ -298,6 +333,41 @@ async def _finance_section(db: AsyncSession, tasks: list[Task], names: dict[Any,
         "",
         "LATE:",
         *_task_late_lines(late, names),
+    ]
+
+
+async def _m3_finance_ga_section(db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date) -> str:
+    assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    ga_users = await _users_by_initials(db, "GA")
+    ga_user_ids = {user.id for user in ga_users}
+    ga_tasks = [
+        task for task in tasks
+        if ga_user_ids.intersection(assignee_ids_by_task.get(task.id, set()))
+        and (
+            _task_day(task) == report_day
+            or _local_date(task.completed_at) == report_day
+            or _late_days(task) > 0
+        )
+    ]
+
+    finance_department = (
+        await db.execute(select(Department).where(Department.name.ilike("finance")))
+    ).scalar_one_or_none()
+    if finance_department is None:
+        hv_tasks: list[Task] = []
+    else:
+        finance_tasks = [task for task in tasks if task.department_id == finance_department.id]
+        hv_tasks = [
+            task for task in finance_tasks
+            if _task_day(task) == report_day
+            or _local_date(task.completed_at) == report_day
+            or _late_days(task) > 0
+        ]
+
+    return _normalize_section([
+        *_status_group_section("GA", ga_tasks, names, report_day),
+        "",
+        *_status_group_section("HV", hv_tasks, names, report_day),
     ])
 
 
