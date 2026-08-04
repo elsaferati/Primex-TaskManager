@@ -57,16 +57,24 @@ function errorDetail(value: unknown, fallback: string) {
 }
 
 export default function ExcelStandardsPage() {
-  const { apiFetch } = useAuth()
+  const { apiFetch, user } = useAuth()
   const [file, setFile] = React.useState<File | null>(null)
   const [analysis, setAnalysis] = React.useState<Analysis | null>(null)
   const [missingHeaders, setMissingHeaders] = React.useState<Record<string, Record<string, string>>>({})
-  const [initials, setInitials] = React.useState("")
   const [description, setDescription] = React.useState("")
   const [analyzing, setAnalyzing] = React.useState(false)
   const [generating, setGenerating] = React.useState(false)
   const [report, setReport] = React.useState<GenerationReport | null>(null)
   const [downloadUrl, setDownloadUrl] = React.useState<string | null>(null)
+  const automaticInitials = React.useMemo(() => {
+    const label = user?.full_name || user?.username || user?.email || ""
+    return label
+      .split(/[^0-9A-Za-zÀ-ž]+/)
+      .filter(Boolean)
+      .map((part) => part[0]?.toUpperCase())
+      .join("")
+      .slice(0, 10)
+  }, [user])
 
   React.useEffect(() => {
     return () => {
@@ -86,7 +94,6 @@ export default function ExcelStandardsPage() {
     setFile(nextFile)
     setAnalysis(null)
     setMissingHeaders({})
-    setInitials("")
     setDescription("")
     resetResult()
   }
@@ -139,16 +146,11 @@ export default function ExcelStandardsPage() {
       toast.error("Plotëso tekstin për çdo header bosh.")
       return
     }
-    if (!initials.trim()) {
-      toast.error("Inicialet janë të detyrueshme për këtë skedar.")
-      return
-    }
     setGenerating(true)
     resetResult()
     try {
       const body = new FormData()
       body.append("file", file)
-      body.append("initials", initials.trim())
       body.append("description", description.trim())
       body.append("missing_headers_json", JSON.stringify(missingHeaders))
       const response = await apiFetch("/standards/excel/generate", { method: "POST", body })
@@ -294,21 +296,20 @@ export default function ExcelStandardsPage() {
                 />
                 <p className="text-xs text-muted-foreground">Data reale e gjenerimit dhe inicialet shtohen automatikisht.</p>
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="excel-initials">What are the initials of the person who worked on it?</Label>
-                <Input
-                  id="excel-initials"
-                  value={initials}
-                  onChange={(event) => setInitials(event.target.value.toUpperCase())}
-                  placeholder="P.sh. AN"
-                  autoComplete="off"
-                />
-                <p className="text-xs text-muted-foreground">Inicialet kërkohen çdo herë dhe nuk ripërdoren nga skedarët e kaluar.</p>
+              <div className="space-y-2 rounded-md border bg-slate-50 p-3">
+                <Label>Gjenerimi automatik</Label>
+                <div className="flex flex-wrap gap-2 text-sm">
+                  <Badge variant="secondary">Inicialet: {automaticInitials || "—"}</Badge>
+                  <Badge variant="secondary">Data: sot</Badge>
+                </div>
+                <p className="text-xs text-muted-foreground">
+                  Inicialet merren nga përdoruesi i kyçur në PrimeFlow; data dhe ora merren në momentin e gjenerimit.
+                </p>
               </div>
             </div>
 
             <div className="flex justify-end">
-              <Button type="button" onClick={() => void generate()} disabled={!allMissingHeadersFilled || !initials.trim() || generating}>
+              <Button type="button" onClick={() => void generate()} disabled={!allMissingHeadersFilled || generating}>
                 {generating ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
                 {generating ? "Duke gjeneruar..." : "Gjenero Excel-in final"}
               </Button>
