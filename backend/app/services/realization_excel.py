@@ -8,6 +8,8 @@ from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 
+from app.services.realization_calculator import QUESTION_LABELS, REPORT_QUESTION_SECTIONS
+
 
 NAVY = "17365D"
 BLUE = "D9EAF7"
@@ -28,11 +30,30 @@ LEVEL_COLORS = {
 THIN = Side(style="thin", color="A6A6A6")
 VALUE_LABELS = {
     "planned": "Planifikuar",
+    "weekly_planned": "Në planin javor",
+    "weekly_completed": "Të mbyllura deri sot",
+    "weekly_remaining": "Të pambyllura",
+    "today_planned": "Planifikuar sot",
+    "today_completed": "Mbyllur sot",
+    "today_in_progress": "Në progres sot",
+    "today_no_progress": "Pa progres sot",
     "completed": "Mbyllur",
     "in_progress": "Në progres",
     "no_progress": "Pa progres",
     "count": "Gjithsej",
     "fast_tasks": "Fast tasks",
+    "yes": "Ka detyra të reja",
+    "approved": "Të konfirmuara",
+    "unapproved": "Pa konfirmim",
+    "needs_confirmation": "Kërkon konfirmim",
+    "verified_categories": "Kategori të verifikuara",
+    "additional_tasks_candidate": "Taska shtesë kandidate",
+    "all_closed": "Të gjitha të mbyllura",
+    "closed": "Të mbyllura",
+    "remaining": "Të pambyllura",
+    "attendance_tardiness": "Vonesa në prezencë",
+    "frequent": "Të shpeshta",
+    "threshold": "Pragu",
 }
 SOURCE_LABELS = {"system": "Sistem", "project": "Projekt", "fast": "Fast task"}
 STATUS_LABELS = {
@@ -199,50 +220,107 @@ def build_realization_workbook(
             ws.cell(6, 1).alignment = Alignment(horizontal="center")
             ws.cell(6, 1).fill = PatternFill("solid", fgColor=AMBER)
 
-        ordered_keys: list[str] = []
-        labels: dict[str, str] = {}
-        for person in people:
-            for question in (person.get("facts_json") or {}).get("questions") or []:
-                key = str(question.get("key") or "")
-                if key and key not in ordered_keys:
-                    ordered_keys.append(key)
-                    labels[key] = question.get("label") or key
-        start = 6
-        for row_offset, key in enumerate(ordered_keys):
-            current_row = start + row_offset
-            ws.cell(current_row, 1, labels[key])
-            ws.cell(current_row, 1).font = Font(bold=True)
-            ws.cell(current_row, 1).fill = PatternFill("solid", fgColor=BLUE)
-            for index, person in enumerate(people):
-                col = 2 + index * 2
-                question = next(
-                    (
-                        item for item in (person.get("facts_json") or {}).get("questions") or []
-                        if item.get("key") == key
-                    ),
-                    {},
-                )
-                answer = question.get("final_value")
-                if answer is None:
-                    answer = question.get("auto_value")
-                ws.cell(current_row, col, _value(answer))
-                evidence = question.get("evidence_ids") or []
-                explanation = str(question.get("explanation") or "")
-                note = " | ".join(
-                    item for item in [
-                        str(question.get("source_status") or "AUTO"),
-                        explanation,
-                        f"Evidenca: {', '.join(map(str, evidence))}" if evidence else "",
-                    ] if item
-                )
-                ws.cell(current_row, col + 1, note)
-                for target in (ws.cell(current_row, col), ws.cell(current_row, col + 1)):
-                    target.alignment = Alignment(vertical="top", wrap_text=True)
-                    target.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-            ws.cell(current_row, 1).border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
-            ws.row_dimensions[current_row].height = 42
+        current_row = 7 if not people else 6
+        source_labels = {
+            "AUTO": "Automatik nga databaza",
+            "AUTO_NEEDS_CONFIRMATION": "Kërkon konfirmim",
+            "MISSING_EVIDENCE": "Kërkon evidencë",
+            "MANAGER_CONFIRMED": "Konfirmuar nga menaxheri",
+        }
+        long_answer_keys = {
+            "task_status",
+            "week_positive",
+            "week_problems",
+            "repeated_after_clarification",
+        }
+        for section_title, question_keys in REPORT_QUESTION_SECTIONS:
+            ws.merge_cells(
+                start_row=current_row,
+                start_column=1,
+                end_row=current_row,
+                end_column=width,
+            )
+            ws.cell(current_row, 1, section_title)
+            _header(ws.cell(current_row, 1), "1F4E78")
+            ws.cell(current_row, 1).alignment = Alignment(horizontal="left", vertical="center")
+            ws.row_dimensions[current_row].height = 22
+            current_row += 1
 
-        current_row = start + len(ordered_keys)
+            for key in question_keys:
+                ws.cell(current_row, 1, QUESTION_LABELS[key])
+                ws.cell(current_row, 1).font = Font(bold=True)
+                ws.cell(current_row, 1).fill = PatternFill("solid", fgColor=BLUE)
+                ws.cell(current_row, 1).alignment = Alignment(vertical="top", wrap_text=True)
+                ws.cell(current_row, 1).border = Border(
+                    left=THIN, right=THIN, top=THIN, bottom=THIN
+                )
+
+                for index, person in enumerate(people):
+                    col = 2 + index * 2
+                    question = next(
+                        (
+                            item
+                            for item in (person.get("facts_json") or {}).get("questions") or []
+                            if item.get("key") == key
+                        ),
+                        {},
+                    )
+                    source_status = str(
+                        question.get("source_status") or "AUTO_NEEDS_CONFIRMATION"
+                    )
+                    answer = question.get("final_value")
+                    if answer is None:
+                        answer = question.get("auto_value")
+                    needs_confirmation = (
+                        source_status in {"AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"}
+                        and answer is None
+                    )
+                    answer_cell = ws.cell(
+                        current_row,
+                        col,
+                        "PËR KONFIRMIM" if needs_confirmation else _value(answer),
+                    )
+                    answer_cell.fill = PatternFill(
+                        "solid", fgColor=AMBER if needs_confirmation else WHITE
+                    )
+
+                    evidence = question.get("evidence_ids") or []
+                    explanation = str(question.get("explanation") or "").strip()
+                    note_parts = [
+                        source_labels.get(source_status, source_status.replace("_", " ").title()),
+                        explanation,
+                        f"{len(evidence)} evidencë/a — detajet në fletën Evidenca"
+                        if evidence
+                        else "",
+                    ]
+                    ws.cell(
+                        current_row,
+                        col + 1,
+                        " | ".join(item for item in note_parts if item),
+                    )
+                    for target in (
+                        ws.cell(current_row, col),
+                        ws.cell(current_row, col + 1),
+                    ):
+                        target.alignment = Alignment(vertical="top", wrap_text=True)
+                        target.border = Border(
+                            left=THIN, right=THIN, top=THIN, bottom=THIN
+                        )
+                ws.row_dimensions[current_row].height = (
+                    64 if key in long_answer_keys else 46
+                )
+                current_row += 1
+
+        ws.merge_cells(
+            start_row=current_row,
+            start_column=1,
+            end_row=current_row,
+            end_column=width,
+        )
+        ws.cell(current_row, 1, "5. SNAPSHOT-ET DITORE")
+        _header(ws.cell(current_row, 1), "1F4E78")
+        ws.cell(current_row, 1).alignment = Alignment(horizontal="left", vertical="center")
+        current_row += 1
         daily_dates = sorted(
             {
                 str(item.get("date"))
@@ -298,6 +376,19 @@ def build_realization_workbook(
                 for project in (person.get("facts_json") or {}).get("project_progress") or []
             }
         )
+        if project_keys:
+            ws.merge_cells(
+                start_row=current_row,
+                start_column=1,
+                end_row=current_row,
+                end_column=width,
+            )
+            ws.cell(current_row, 1, "6. PROJEKTET MST / TT")
+            _header(ws.cell(current_row, 1), "1F4E78")
+            ws.cell(current_row, 1).alignment = Alignment(
+                horizontal="left", vertical="center"
+            )
+            current_row += 1
         for project_key in project_keys:
             title = next(
                 str(project.get("project_title") or "MST/TT")
@@ -337,40 +428,109 @@ def build_realization_workbook(
 
         grade_row = current_row + 1
         department_is_live = department.get("report_mode") == "LIVE_DAILY"
+        ws.merge_cells(
+            start_row=grade_row,
+            start_column=1,
+            end_row=grade_row,
+            end_column=width,
+        )
+        evaluation_section_number = 7 if project_keys else 6
         ws.cell(
             grade_row,
             1,
-            "Vlerësimi final (pas FINAL)" if department_is_live else "Vlerësimi final",
+            f"{evaluation_section_number}. VLERËSIMI DHE KOMENTET",
         )
-        _header(ws.cell(grade_row, 1))
-        for index, person in enumerate(people):
-            col = 2 + index * 2
-            level = (
-                "Në pritje"
-                if department_is_live
-                else person.get("final_level") or person.get("suggested_level") or "—"
+        _header(ws.cell(grade_row, 1), "1F4E78")
+        ws.cell(grade_row, 1).alignment = Alignment(horizontal="left", vertical="center")
+
+        evaluation_rows = [
+            (
+                "Propozimi për nivelin e vlerësimit",
+                lambda person: (
+                    "Në pritje të FINAL"
+                    if department_is_live
+                    else person.get("suggested_level") or "—"
+                ),
+                lambda person: (
+                    "Klasifikohet pas ruajtjes FINAL"
+                    if department_is_live
+                    else str(person.get("auto_narrative") or "")
+                ),
+            ),
+            (
+                "Vlerësimi final",
+                lambda person: (
+                    "Në pritje"
+                    if department_is_live
+                    else person.get("final_level")
+                    or person.get("suggested_level")
+                    or "—"
+                ),
+                lambda person: (
+                    "Menaxheri e konfirmon pas FINAL"
+                    if department_is_live
+                    else str(person.get("override_reason") or "")
+                ),
+            ),
+            (
+                "Simboli",
+                lambda person: (
+                    "—"
+                    if department_is_live
+                    else person.get("final_symbol")
+                    or person.get("suggested_symbol")
+                    or "—"
+                ),
+                lambda person: "Pa vlera monetare",
+            ),
+            (
+                "Komente",
+                lambda person: str(person.get("manager_comment") or "—"),
+                lambda person: str(person.get("auto_narrative") or "—"),
+            ),
+        ]
+        for row_offset, (label, value_builder, note_builder) in enumerate(
+            evaluation_rows, 1
+        ):
+            evaluation_row = grade_row + row_offset
+            ws.cell(evaluation_row, 1, label)
+            ws.cell(evaluation_row, 1).font = Font(bold=True)
+            ws.cell(evaluation_row, 1).fill = PatternFill("solid", fgColor=BLUE)
+            ws.cell(evaluation_row, 1).border = Border(
+                left=THIN, right=THIN, top=THIN, bottom=THIN
             )
-            symbol = (
-                "—"
-                if department_is_live
-                else person.get("final_symbol") or person.get("suggested_symbol") or "—"
-            )
-            ws.cell(grade_row, col, level)
-            ws.cell(grade_row, col + 1, symbol)
-            fill = LEVEL_COLORS.get(str(level), GRAY)
-            for target in (ws.cell(grade_row, col), ws.cell(grade_row, col + 1)):
-                target.fill = PatternFill("solid", fgColor=fill)
-                target.font = Font(bold=True)
-                target.alignment = Alignment(horizontal="center")
-                target.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+            for index, person in enumerate(people):
+                col = 2 + index * 2
+                value = value_builder(person)
+                note = note_builder(person)
+                fill = LEVEL_COLORS.get(str(value), GRAY if row_offset <= 3 else WHITE)
+                for target, target_value in (
+                    (ws.cell(evaluation_row, col), value),
+                    (ws.cell(evaluation_row, col + 1), note),
+                ):
+                    target.value = target_value
+                    target.fill = PatternFill("solid", fgColor=fill)
+                    target.font = Font(bold=row_offset <= 3)
+                    target.alignment = Alignment(
+                        horizontal="center" if row_offset <= 3 else "left",
+                        vertical="top",
+                        wrap_text=True,
+                    )
+                    target.border = Border(
+                        left=THIN, right=THIN, top=THIN, bottom=THIN
+                    )
+            ws.row_dimensions[evaluation_row].height = 46 if row_offset == 4 else 32
+        last_row = grade_row + len(evaluation_rows)
 
         ws.freeze_panes = "B6"
-        ws.column_dimensions["A"].width = 38
+        ws.column_dimensions["A"].width = 44
         for index in range(len(people)):
-            ws.column_dimensions[get_column_letter(2 + index * 2)].width = 25
-            ws.column_dimensions[get_column_letter(3 + index * 2)].width = 38
+            ws.column_dimensions[get_column_letter(2 + index * 2)].width = 28
+            ws.column_dimensions[get_column_letter(3 + index * 2)].width = 40
         ws.sheet_view.showGridLines = False
-        ws.auto_filter.ref = f"A5:{get_column_letter(width)}{max(5, grade_row)}"
+        ws.auto_filter.ref = f"A5:{get_column_letter(width)}5"
+        ws.print_title_rows = "1:5"
+        ws.print_area = f"A1:{get_column_letter(width)}{max(5, last_row)}"
 
     evidence = workbook.create_sheet("Evidenca")
     _title(evidence, "REGJISTRI I EVIDENCËS", "Çdo përgjigje duhet të jetë e gjurmueshme", 8)
@@ -447,6 +607,41 @@ def build_realization_workbook(
             cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
         guide.cell(row, 1).font = Font(bold=True)
         guide.row_dimensions[row].height = 34
+    question_row = 20
+    guide.merge_cells(
+        start_row=question_row,
+        start_column=1,
+        end_row=question_row,
+        end_column=4,
+    )
+    guide.cell(question_row, 1, "15 PYETJET E RAPORTIT")
+    _header(guide.cell(question_row, 1))
+    question_number = 1
+    for section_title, question_keys in REPORT_QUESTION_SECTIONS:
+        question_row += 1
+        guide.merge_cells(
+            start_row=question_row,
+            start_column=1,
+            end_row=question_row,
+            end_column=4,
+        )
+        guide.cell(question_row, 1, section_title)
+        _header(guide.cell(question_row, 1), "1F4E78")
+        guide.cell(question_row, 1).alignment = Alignment(horizontal="left")
+        for key in question_keys:
+            question_row += 1
+            values = (
+                question_number,
+                QUESTION_LABELS[key],
+                "AUTO ose MANUAL",
+                "Pa provë shënohet PËR KONFIRMIM; nuk hamendësohet.",
+            )
+            for column, value in enumerate(values, 1):
+                cell = guide.cell(question_row, column, value)
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+            guide.row_dimensions[question_row].height = 30
+            question_number += 1
     for index, width in enumerate([18, 24, 65, 45], 1):
         guide.column_dimensions[get_column_letter(index)].width = width
     guide.freeze_panes = "A5"

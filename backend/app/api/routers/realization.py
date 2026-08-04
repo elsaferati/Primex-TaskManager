@@ -51,7 +51,7 @@ from app.services.realization_access import (
     can_view_observation,
     can_view_person_result,
 )
-from app.services.realization_calculator import calculate_weekly_period
+from app.services.realization_calculator import build_live_questions, calculate_weekly_period
 from app.services.realization_ai import RealizationAIError, analyze_realization
 from app.services.realization_daily import calculate_daily_period
 from app.services.realization_excel import build_realization_workbook
@@ -310,6 +310,7 @@ async def _weekly_response(
             ).scalars().all()
         } if visible else {}
     daily_by_user: dict[uuid.UUID, list[dict]] = {}
+    daily_tasks_by_user: dict[uuid.UUID, dict[str, dict]] = {}
     for daily_result, daily_period in daily_rows:
         daily_facts = daily_result.facts_json or {}
         daily_by_user.setdefault(daily_result.user_id, []).append(
@@ -329,12 +330,22 @@ async def _weekly_response(
                 "attendance": daily_facts.get("attendance") or [],
             }
         )
+        for task in daily_facts.get("tasks") or []:
+            task_key = str(task.get("task_id") or task.get("match_key") or "")
+            if task_key:
+                daily_tasks_by_user.setdefault(daily_result.user_id, {})[task_key] = task
     people: list[RealizationPersonWorkflowOut] = []
     for row in visible:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
-        payload["facts_json"] = _visible_facts(user, row)
-        payload["facts_json"]["daily_timeline"] = daily_by_user.get(row.user_id, [])
-        payload["facts_json"]["observations"] = live_by_user.get(row.user_id, [])
+        facts = _visible_facts(user, row)
+        facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
+        facts["observations"] = live_by_user.get(row.user_id, [])
+        if period.final_snapshot_id is None:
+            facts["tasks"] = list(daily_tasks_by_user.get(row.user_id, {}).values()) or (
+                facts.get("tasks") or []
+            )
+            facts["questions"] = build_live_questions(facts)
+        payload["facts_json"] = facts
         if user.role == UserRole.STAFF:
             payload["manager_comment"] = None
             payload["override_reason"] = None
@@ -487,6 +498,9 @@ async def export_realization_excel(
         )
     ).scalars().all() if daily_period_by_id else []
     timeline_by_user_department: dict[tuple[uuid.UUID, uuid.UUID | None], list[dict]] = {}
+    tasks_by_user_department: dict[
+        tuple[uuid.UUID, uuid.UUID | None], dict[str, dict]
+    ] = {}
     latest_daily_by_user_department: dict[
         tuple[uuid.UUID, uuid.UUID | None],
         tuple[RealizationPersonResult, RealizationPeriod],
@@ -517,6 +531,12 @@ async def export_realization_excel(
                 ),
             }
         )
+        for task in facts.get("tasks") or []:
+            task_key = str(task.get("task_id") or task.get("match_key") or "")
+            if task_key:
+                tasks_by_user_department.setdefault(user_department_key, {})[
+                    task_key
+                ] = task
         latest = latest_daily_by_user_department.get(user_department_key)
         if latest is None or daily_period.start_date > latest[1].start_date:
             latest_daily_by_user_department[user_department_key] = (daily, daily_period)
@@ -532,6 +552,55 @@ async def export_realization_excel(
             await db.execute(select(User).where(User.id.in_(all_user_ids)))
         ).scalars().all()
     } if all_user_ids else {}
+
+    export_observations = (
+        await db.execute(
+            select(RealizationObservation).where(
+                RealizationObservation.period_id.in_([period.id for period in periods]),
+                RealizationObservation.voided_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    export_verified_ids: set[uuid.UUID] = set()
+    for observation in export_observations:
+        evidence = observation.evidence_json or {}
+        if (
+            observation.source_type == "realization_observation_verification"
+            and evidence.get("verified") is True
+        ):
+            try:
+                export_verified_ids.add(
+                    uuid.UUID(str(evidence.get("verification_of") or observation.source_id))
+                )
+            except (TypeError, ValueError):
+                pass
+    export_observations_by_period_user: dict[
+        tuple[uuid.UUID | None, uuid.UUID], list[dict]
+    ] = {}
+    for observation in export_observations:
+        if (
+            observation.source_type == "realization_observation_verification"
+            or observation.user_id is None
+        ):
+            continue
+        export_observations_by_period_user.setdefault(
+            (observation.period_id, observation.user_id), []
+        ).append(
+            {
+                "id": str(observation.id),
+                "marker": observation.marker,
+                "category": observation.category,
+                "comment": observation.comment,
+                "task_id": str(observation.task_id) if observation.task_id else None,
+                "evidence_json": observation.evidence_json or {},
+                "verified": observation.id in export_verified_ids
+                or (
+                    observation.is_system_generated
+                    and (observation.evidence_json or {}).get("verified") is True
+                ),
+                "visibility": observation.visibility,
+            }
+        )
 
     results_by_period: dict[uuid.UUID, list[dict]] = {}
     live_period_ids: set[uuid.UUID] = set()
@@ -559,7 +628,17 @@ async def export_realization_excel(
                 timeline_by_user_department.get((row.user_id, row.department_id), []),
                 key=lambda item: item["date"],
             )
-            if is_live_fallback:
+            facts["observations"] = export_observations_by_period_user.get(
+                (period.id, row.user_id), []
+            )
+            is_live = is_live_fallback or period.final_snapshot_id is None
+            if is_live:
+                live_period_ids.add(period.id)
+                facts["tasks"] = list(
+                    tasks_by_user_department.get(
+                        (row.user_id, row.department_id), {}
+                    ).values()
+                ) or (facts.get("tasks") or [])
                 payload["planned_count"] = int(
                     facts.get("weekly_planned_count", payload.get("planned_count", 0))
                 )
@@ -576,6 +655,7 @@ async def export_realization_excel(
                     )
                 )
                 facts["report_mode"] = "LIVE_DAILY"
+                facts["questions"] = build_live_questions(facts)
             else:
                 facts["report_mode"] = "FINAL_WEEKLY"
             payload["facts_json"] = facts

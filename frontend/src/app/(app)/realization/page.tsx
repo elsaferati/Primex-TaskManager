@@ -88,6 +88,25 @@ const TASK_STATUS_LABEL: Record<string, string> = {
   pending_confirmation: "Në pritje të konfirmimit",
 }
 
+const QUESTION_SECTIONS = [
+  {
+    title: "1. Detyrat",
+    keys: ["task_status", "new_tasks_added", "approved_postponement"],
+  },
+  {
+    title: "2. Angazhimi",
+    keys: ["requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal"],
+  },
+  {
+    title: "3. Disiplina dhe përgjegjësia",
+    keys: ["respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences"],
+  },
+  {
+    title: "4. Ndikimi pozitiv / negativ",
+    keys: ["week_positive", "week_problems", "affected_other_plan", "repeated_after_clarification"],
+  },
+] as const
+
 const WEEK_DAYS = ["Hënë", "Martë", "Mërkurë", "Enjte", "Premte"]
 
 function isoLocalDate(date: Date) {
@@ -198,6 +217,9 @@ function QuestionRow({ question }: { question: RealizationQuestion }) {
   const needsConfirmation = ["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(
     question.source_status
   )
+  const visibleValue = needsConfirmation && finalValue == null
+    ? "Për konfirmim nga menaxheri"
+    : displayValue(finalValue)
   return (
     <div className="grid gap-2 border-b py-4 last:border-b-0 md:grid-cols-[minmax(220px,0.9fr)_minmax(260px,1.4fr)]">
       <div>
@@ -214,7 +236,7 @@ function QuestionRow({ question }: { question: RealizationQuestion }) {
         </div>
       </div>
       <div>
-        <p className="text-sm leading-6 text-foreground/90">{displayValue(finalValue)}</p>
+        <p className={cn("text-sm leading-6", needsConfirmation && finalValue == null ? "font-medium text-amber-700 dark:text-amber-300" : "text-foreground/90")}>{visibleValue}</p>
         {question.explanation ? (
           <p className="mt-1 text-xs leading-5 text-muted-foreground">{question.explanation}</p>
         ) : null}
@@ -424,7 +446,7 @@ export default function RealizationPage() {
   }
 
   const evidenceMarker = React.useMemo(() => {
-    if (["QUALITY", "PROPOSAL", "HELPED_COLLEAGUE", "TIME_SAVED", "EXTRA_TASK"].includes(evidenceCategory)) {
+    if (["QUALITY", "PROPOSAL", "HELPED_COLLEAGUE", "TIME_SAVED", "EXTRA_TASK", "REQUESTED_EXTRA_TASK"].includes(evidenceCategory)) {
       return "POSITIVE"
     }
     if (["REPEATED_PROBLEM", "MISSED_MEETING", "BLOCKER"].includes(evidenceCategory)) return "NEGATIVE"
@@ -436,6 +458,7 @@ export default function RealizationPage() {
     if (!selected || !data) return
     const evidenceJson: Record<string, unknown> = {}
     let scopeType = "PERSON"
+    let apiCategory = evidenceCategory
     if (evidenceCategory === "ABSENCE") {
       evidenceJson.classification = absenceClass
       evidenceJson.date = evidenceDate
@@ -454,6 +477,9 @@ export default function RealizationPage() {
       evidenceJson.replaces_unfinished_planned_task = false
       evidenceJson.duplicate = false
       scopeType = "TASK"
+    } else if (evidenceCategory === "REQUESTED_EXTRA_TASK") {
+      apiCategory = "EXTRA_TASK"
+      evidenceJson.kind = "REQUESTED_EXTRA_TASK"
     }
     if (evidenceCategory === "REPEATED_PROBLEM" && !relatedId.trim()) {
       toast.error("Vendos çelësin e problemit të përsëritur")
@@ -479,7 +505,7 @@ export default function RealizationPage() {
           user_id: selected.user_id,
           department_id: departmentId,
           marker: evidenceMarker,
-          category: evidenceCategory,
+          category: apiCategory,
           repeat_key: evidenceCategory === "REPEATED_PROBLEM" ? relatedId : null,
           comment: evidenceComment || null,
           evidence_json: evidenceJson,
@@ -773,7 +799,32 @@ export default function RealizationPage() {
                   </section>
                 ) : null}
 
-                <section><h2 className="mb-1 font-semibold">Pyetjet dhe argumentimi</h2><p className="mb-2 text-xs text-muted-foreground">AUTO = nga databaza; kërkon konfirmim = sistemi nuk pretendon diçka pa provë.</p><div>{selectedQuestions.map((question) => <QuestionRow key={question.key} question={question} />)}</div></section>
+                <section>
+                  <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h2 className="font-semibold">Pyetjet dhe argumentimi</h2>
+                      <p className="mt-1 text-xs text-muted-foreground">Të 15 pyetjet e barazimit: automatike kur ka prova; për konfirmim kur kërkohet gjykim njerëzor.</p>
+                    </div>
+                    <Badge variant="outline">
+                      {selectedQuestions.filter((question) => !["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(question.source_status)).length} automatike · {selectedQuestions.filter((question) => ["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(question.source_status)).length} për konfirmim
+                    </Badge>
+                  </div>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {QUESTION_SECTIONS.map((section) => {
+                      const questions = section.keys
+                        .map((key) => selectedQuestions.find((question) => question.key === key))
+                        .filter((question): question is RealizationQuestion => Boolean(question))
+                      return (
+                        <div key={section.title} className="overflow-hidden rounded-xl border bg-card">
+                          <div className="border-b bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">{section.title}</div>
+                          <div className="px-4">
+                            {questions.map((question) => <QuestionRow key={question.key} question={question} />)}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
 
                 <section><h2 className="mb-3 font-semibold">Evidenca e taskave</h2><div className="max-h-72 overflow-y-auto rounded-xl border"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 font-medium">Detyra</th><th className="px-3 py-2 font-medium">Burimi</th><th className="px-3 py-2 font-medium">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t"><td className="px-3 py-2"><p className="font-medium">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-muted-foreground">{task.task_id || task.match_key}</p></td><td className="px-3 py-2">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></section>
 
@@ -801,7 +852,7 @@ export default function RealizationPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader><DialogTitle>Shto evidencë të verifikueshme</DialogTitle><DialogDescription>Evidenca verifikohet menjëherë nga llogaria menaxheriale dhe rikalkulon automatikisht raportin.</DialogDescription></DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1.5"><Label>Kategoria</Label><Select value={evidenceCategory} onValueChange={setEvidenceCategory}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{[["QUALITY", "Cilësi / angazhim ekstra"], ["PROPOSAL", "Propozim"], ["HELPED_COLLEAGUE", "Ndihmoi koleg"], ["EXTRA_TASK", "Detyrë shtesë e përfunduar"], ["REPEATED_PROBLEM", "Problem i përsëritur"], ["BLOCKER", "I prishi planin kolegut"], ["MISSED_MEETING", "Takim i humbur"], ["ABSENCE", "Mungesë / pushim"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1.5"><Label>Kategoria</Label><Select value={evidenceCategory} onValueChange={setEvidenceCategory}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{[["QUALITY", "Cilësi / angazhim ekstra"], ["PROPOSAL", "Propozim"], ["REQUESTED_EXTRA_TASK", "Kërkoi detyra shtesë"], ["HELPED_COLLEAGUE", "Ndihmoi koleg"], ["EXTRA_TASK", "Detyrë shtesë e përfunduar"], ["REPEATED_PROBLEM", "Problem i përsëritur"], ["BLOCKER", "I prishi planin kolegut"], ["MISSED_MEETING", "Takim i humbur"], ["ABSENCE", "Mungesë / pushim"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
             {evidenceCategory === "ABSENCE" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Klasifikimi</Label><Select value={absenceClass} onValueChange={setAbsenceClass}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="UNEXCUSED">E papritur / pa aprovim</SelectItem><SelectItem value="APPROVED_PERSONAL">Personale e aprovuar</SelectItem><SelectItem value="ANNUAL_LEAVE">Pushim vjetor</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label>Data</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></div> : null}
             {evidenceCategory === "MISSED_MEETING" ? <><div className="space-y-1.5"><Label>ID e takimit</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div><div className="space-y-1.5"><Label>Data e takimit</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></> : null}
             {evidenceCategory === "BLOCKER" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>ID e personit të prekur</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div><div className="space-y-1.5"><Label>Ndikimi</Label><Select value={impactLevel} onValueChange={setImpactLevel}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MINOR">I vogël</SelectItem><SelectItem value="MAJOR">I madh</SelectItem><SelectItem value="MULTIPLE_PEOPLE">Disa persona</SelectItem></SelectContent></Select></div></div> : null}

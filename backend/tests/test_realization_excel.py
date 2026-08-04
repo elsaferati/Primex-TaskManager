@@ -3,10 +3,46 @@ import unittest
 
 from openpyxl import load_workbook
 
+from app.services.realization_calculator import (
+    QUESTION_LABELS,
+    REPORT_QUESTION_SECTIONS,
+    build_live_questions,
+)
 from app.services.realization_excel import build_realization_workbook
 
 
 class TestRealizationExcel(unittest.TestCase):
+    def test_live_questions_cover_the_full_reference_catalog(self) -> None:
+        questions = build_live_questions(
+            {
+                "weekly_planned_count": 5,
+                "weekly_completed_count": 2,
+                "weekly_additional_count": 1,
+                "weekly_fast_task_count": 1,
+                "daily_planned_count": 2,
+                "daily_completed_count": 1,
+                "counters": {"in_progress_count": 1, "no_progress_count": 0},
+                "tasks": [],
+                "observations": [],
+                "daily_timeline": [],
+                "attendance": [],
+            }
+        )
+        expected_keys = [
+            key
+            for _section_title, question_keys in REPORT_QUESTION_SECTIONS
+            for key in question_keys
+        ]
+        self.assertEqual([question["key"] for question in questions], expected_keys)
+        self.assertEqual(len(questions), 15)
+        by_key = {question["key"]: question for question in questions}
+        self.assertEqual(by_key["task_status"]["source_status"], "AUTO")
+        self.assertEqual(
+            by_key["helped_colleague"]["source_status"],
+            "AUTO_NEEDS_CONFIRMATION",
+        )
+        self.assertIsNone(by_key["helped_colleague"]["auto_value"])
+
     def test_export_has_department_evidence_guide_and_no_money(self) -> None:
         payload = build_realization_workbook(
             week_start="2026-08-03",
@@ -135,7 +171,12 @@ class TestRealizationExcel(unittest.TestCase):
             for cell in row
         )
         self.assertIn("Sot: 0/5 (0%)", values)
-        self.assertIn("Vlerësimi final (pas FINAL)", values)
+        self.assertIn("Vlerësimi final", values)
+        self.assertIn("PËR KONFIRMIM", values)
+        for section_title, question_keys in REPORT_QUESTION_SECTIONS:
+            self.assertIn(section_title, values)
+            for key in question_keys:
+                self.assertIn(QUESTION_LABELS[key], values)
 
 
 if __name__ == "__main__":
