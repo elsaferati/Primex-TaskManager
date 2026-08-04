@@ -14,9 +14,10 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.user import User
 from app.services.meetings_report import (
+    DUE_SUFFIX,
     TECHNICAL_TAG,
+    TITLE_PREFIX,
     _assignee_names,
-    _clean_task_title,
     _effective_task_assignee_ids,
     _initials,
     _is_open,
@@ -87,6 +88,21 @@ def _note_text(value: str | None) -> str:
     return re.sub(r"\s+", " ", cleaned).strip() or "-"
 
 
+def _display_title(value: str | None) -> str:
+    """Like meetings_report._clean_task_title, but keeps text added after creation.
+
+    That text is wrapped in [[added]]..[[/added]] and carries the meaningful part of the
+    title (e.g. "DM/[[added]] GA: BZ GA - P/P PARA PF[[/added]]"), so only the markers go.
+    """
+    cleaned = TECHNICAL_TAG.sub("", value or "")
+    candidates = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    title_line = next((line for line in candidates if TITLE_PREFIX.search(line)), "")
+    if not title_line:
+        title_line = next((line for line in candidates if not re.match(r"^\d+\.", line)), "")
+    title_line = DUE_SUFFIX.sub("", title_line)
+    return re.sub(r"\s+", " ", title_line).strip() or "-"
+
+
 def _task_covers_day(task: Task, day: date) -> bool:
     """Mirror the Common View date logic so the report shows the same rows as the P: lane."""
     single_day_only = str(task.phase or "").upper() in {"CHECK", "CONTROL"}
@@ -147,7 +163,7 @@ async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
         rows.append([
             str(len(rows) + 1),
             owner_label,
-            _clean_task_title(template.title),
+            _display_title(template.title),
             created.strftime("%d.%m.%Y") if created else "-",
         ])
     return rows
@@ -162,12 +178,12 @@ def _waiting_confirmation_rows(
         task for task in tasks
         if str(task.status or "").upper() == "WAITING_CONFIRMATION" and _is_open(task)
     ]
-    ordered = sorted(pending, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _clean_task_title(task.title)))
+    ordered = sorted(pending, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _display_title(task.title)))
     return [
         [
             str(index),
             _task_owners(task, names, assignee_ids_by_task),
-            _clean_task_title(task.title),
+            _display_title(task.title),
             _initials(names.get(task.confirmation_assignee_id)),
         ]
         for index, task in enumerate(ordered, start=1)
@@ -188,10 +204,10 @@ async def _personal_section(
     note_titles: dict[Any, str] = {}
     if note_ids:
         rows = (await db.execute(select(GaNote.id, GaNote.content).where(GaNote.id.in_(note_ids)))).all()
-        note_titles = {note_id: _clean_task_title(content) for note_id, content in rows}
+        note_titles = {note_id: _display_title(content) for note_id, content in rows}
 
     def _title(task: Task) -> str:
-        return note_titles.get(task.ga_note_origin_id) or _clean_task_title(task.title)
+        return note_titles.get(task.ga_note_origin_id) or _display_title(task.title)
 
     def _is_ga(task: Task) -> bool:
         return bool(PERSONAL_GA.search(_title(task)) or PERSONAL_GA.search(task.title or ""))
