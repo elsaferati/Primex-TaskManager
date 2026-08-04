@@ -526,6 +526,15 @@ def _common_title(item: dict[str, Any]) -> str:
 
 
 def _common_owner(item: dict[str, Any]) -> str:
+    bz_with_label = str(item.get("bzWithLabel") or item.get("bz_with_label") or "").strip()
+    if bz_with_label:
+        initials = [
+            value.strip().upper()
+            for value in re.split(r"[,;/\s]+", bz_with_label)
+            if value.strip()
+        ]
+        if initials:
+            return " ".join(dict.fromkeys(initials))
     assignees = item.get("assignees") or item.get("assigned_users") or item.get("owners")
     if isinstance(assignees, list):
         initials = []
