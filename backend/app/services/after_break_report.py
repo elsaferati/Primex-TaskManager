@@ -37,8 +37,6 @@ SECTION_TITLES = [
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED?",
 ]
-EMPTY_TASKS = "(Asnje detyre)"
-EMPTY_NOTES = "(Asnje shenim)"
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
 PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
@@ -55,7 +53,9 @@ def subject_for(day: date) -> str:
     return f"PrimeFlow Permbledhja pas pauzes - {day:%d.%m.%Y}"
 
 
-def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[list[str]], empty_label: str) -> list[str]:
+def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[list[str]]) -> list[str]:
+    if not rows_values:
+        return [f"{label}: 0"]
     border = "+" + "+".join("-" * (width + 2) for _, width in columns) + "+"
     rows = [
         f"{label}:",
@@ -63,12 +63,6 @@ def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[l
         "| " + " | ".join(f"{name:<{width}}" for name, width in columns) + " |",
         border,
     ]
-    if not rows_values:
-        empty_row = ["-"] * len(columns)
-        empty_row[2] = empty_label
-        rows.append("| " + " | ".join(f"{value:<{width}}" for value, (_, width) in zip(empty_row, columns)) + " |")
-        rows.append(border)
-        return rows
     for values in rows_values:
         wrapped = [
             _wrap_fixed_width(value, width) if value.strip() else [""]
@@ -124,6 +118,19 @@ def _days_between(start: date, end: date):
     while current <= end:
         yield current
         current += timedelta(days=1)
+
+
+def _is_done(task: Task) -> bool:
+    return bool(task.completed_at) or str(task.status or "").upper() in {"DONE", "COMPLETED"}
+
+
+def _belongs_to_day(task: Task, day: date) -> bool:
+    """Only today's work: a finished task counts on the day it was finished, not for its whole range."""
+    if _is_done(task):
+        completed = _local_date(task.completed_at)
+        if completed is not None:
+            return completed == day
+    return _task_covers_day(task, day)
 
 
 async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
@@ -198,7 +205,7 @@ async def _personal_section(
     assignee_ids_by_task: dict[Any, set[Any]],
     report_day: date,
 ) -> list[str]:
-    personal = [task for task in tasks if task.is_personal and _task_covers_day(task, report_day)]
+    personal = [task for task in tasks if task.is_personal and _belongs_to_day(task, report_day)]
 
     # Common View shows the originating GA/KA note text for note-based tasks, not the task title.
     note_ids = {task.ga_note_origin_id for task in personal if task.ga_note_origin_id}
@@ -216,10 +223,7 @@ async def _personal_section(
     ga_personal = [task for task in personal if _is_ga(task)]
 
     def _group_key(task: Task) -> str:
-        status = str(task.status or "").upper()
-        if task.completed_at or status in {"DONE", "COMPLETED"}:
-            return "DONE"
-        return status
+        return "DONE" if _is_done(task) else str(task.status or "").upper()
 
     grouped: dict[str, list[Task]] = {}
     for task in ga_personal:
@@ -242,7 +246,7 @@ async def _personal_section(
         ]
         if lines:
             lines.append("")
-        lines.extend(_ascii_table(label, PERSONAL_COLUMNS, rows_values, EMPTY_TASKS))
+        lines.extend(_ascii_table(label, PERSONAL_COLUMNS, rows_values))
     return lines
 
 
@@ -316,14 +320,12 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             "NEW SYSTEM TASKS",
             [("NR", 2), ("WHO", 20), ("TITLE", 56), ("DATA", 10)],
             await _new_system_task_rows(db),
-            EMPTY_TASKS,
         ),
         "",
         *_ascii_table(
             "PYETJE PER KONFIRMIM",
             [("NR", 2), ("WHO", 20), ("TITLE", 56), ("PER", 10)],
             _waiting_confirmation_rows(tasks, names, assignee_ids_by_task),
-            EMPTY_TASKS,
         ),
     ]
     section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
@@ -331,7 +333,6 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         "NOTES",
         [("NR", 2), ("FROM", 8), ("NOTE", 60), ("DISK", 4), ("TIME", 5)],
         await _blue_note_rows(db, report_day),
-        EMPTY_NOTES,
     )
 
     sections = [

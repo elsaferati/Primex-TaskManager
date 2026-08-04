@@ -895,7 +895,7 @@ def _ascii_table_is_empty(lines: list[str]) -> bool:
     if len(table_rows) != 2:
         return False
     row = table_rows[1]
-    return any(cell in {"(Asnje detyre)", "(Asnje takim)", "(Asnje shenim)"} for cell in row)
+    return any(cell in {"(Asnje detyre)", "(Asnje takim)"} for cell in row)
 
 
 def _render_text_block_html(lines: list[str]) -> str:
