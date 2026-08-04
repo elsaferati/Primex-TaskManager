@@ -821,6 +821,8 @@ def _table_tone_from_label(label: str) -> str:
         return "late"
     if normalized == "ME DEADLINE":
         return "deadline"
+    if normalized == "NOTES":
+        return "notes"
     return ""
 
 
@@ -835,6 +837,8 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
         return "#fee2e2", "#111827"
     if tone == "deadline":
         return "#dc2626", "#ffffff"
+    if tone == "notes":
+        return "#dbeafe", "#111827"
     return "#f8fafc", "#111827"
 
 
