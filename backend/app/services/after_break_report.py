@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import html
 import re
-from datetime import date
+from datetime import date, timedelta
 from typing import Any
 
 from sqlalchemy import select
@@ -24,7 +24,6 @@ from app.services.meetings_report import (
     _local_time,
     _normalize_section,
     _render_section_body_html,
-    _task_day,
     _task_owners,
     _wrap_fixed_width,
     send_meetings_report,
@@ -81,6 +80,28 @@ def _note_text(value: str | None) -> str:
 
 def _status_label(task: Task) -> str:
     return str(task.status or "-").upper().replace("_", " ")
+
+
+def _task_covers_day(task: Task, day: date) -> bool:
+    """Mirror the Common View date logic so the report shows the same rows as the P: lane."""
+    single_day_only = str(task.phase or "").upper() in {"CHECK", "CONTROL"}
+    start = _local_date(task.start_date)
+    due = _local_date(task.due_date)
+    if not single_day_only and start and due:
+        if start > due:
+            start, due = due, start
+        if any(current.weekday() < 5 for current in _days_between(start, due)):
+            return start <= day <= due and day.weekday() < 5
+        return day == start
+    source = getattr(task, "planned_for", None) or task.due_date or task.start_date or task.created_at
+    return _local_date(source) == day
+
+
+def _days_between(start: date, end: date):
+    current = start
+    while current <= end:
+        yield current
+        current += timedelta(days=1)
 
 
 async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
@@ -148,19 +169,33 @@ def _waiting_confirmation_rows(
     ]
 
 
-def _personal_rows(
+async def _personal_rows(
+    db: AsyncSession,
     tasks: list[Task],
     names: dict[Any, str],
     assignee_ids_by_task: dict[Any, set[Any]],
     report_day: date,
 ) -> list[list[str]]:
-    personal = [task for task in tasks if task.is_personal and _task_day(task) == report_day]
-    ordered = sorted(personal, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _clean_task_title(task.title)))
+    personal = [task for task in tasks if task.is_personal and _task_covers_day(task, report_day)]
+    if not personal:
+        return []
+
+    # Common View shows the originating GA/KA note text for note-based tasks, not the task title.
+    note_ids = {task.ga_note_origin_id for task in personal if task.ga_note_origin_id}
+    note_titles: dict[Any, str] = {}
+    if note_ids:
+        rows = (await db.execute(select(GaNote.id, GaNote.content).where(GaNote.id.in_(note_ids)))).all()
+        note_titles = {note_id: _clean_task_title(content) for note_id, content in rows}
+
+    def _title(task: Task) -> str:
+        return note_titles.get(task.ga_note_origin_id) or _clean_task_title(task.title)
+
+    ordered = sorted(personal, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _title(task)))
     return [
         [
             str(index),
             _task_owners(task, names, assignee_ids_by_task),
-            _clean_task_title(task.title),
+            _title(task),
             _status_label(task),
         ]
         for index, task in enumerate(ordered, start=1)
@@ -246,7 +281,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     section_2 = _ascii_table(
         "PERSONAL",
         [("NR", 2), ("WHO", 20), ("TITLE", 56), ("STATUS", 12)],
-        _personal_rows(tasks, names, assignee_ids_by_task, report_day),
+        await _personal_rows(db, tasks, names, assignee_ids_by_task, report_day),
         EMPTY_TASKS,
     )
     section_3 = _ascii_table(
