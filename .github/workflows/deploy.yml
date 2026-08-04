@@ -60,7 +60,6 @@ jobs:
           $backendChanged = $false
           $frontendChanged = $false
           $migrationChanged = $false
-          $backendDependenciesChanged = $false
  
           foreach ($file in $changedFiles) {
             if ($file -like "backend/*") {
@@ -76,15 +75,11 @@ jobs:
             if ($file -like "backend/alembic/versions/*") {
               $migrationChanged = $true
             }
-            if ($file -eq "backend/requirements.txt") {
-              $backendDependenciesChanged = $true
-            }
           }
  
           "backend_changed=$($backendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "migration_changed=$($migrationChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "backend_dependencies_changed=$($backendDependenciesChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
  
       - name: Create Env Files
         shell: cmd
@@ -128,26 +123,20 @@ jobs:
           echo REPORT_STORAGE_DIR=%REPORT_STORAGE_DIR% >> backend\.env
           echo REPORT_RETENTION_DAYS=90 >> backend\.env
  
-      - name: Install Backend Dependencies
-        if: ${{ steps.changes.outputs.backend_dependencies_changed == 'true' }}
+      - name: Prepare Backend
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: cmd
         run: |
           cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m pip install -r requirements.txt
           if errorlevel 1 exit /b 1
-
-      - name: Validate Backend
-        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
-        shell: cmd
-        run: |
-          cd backend
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m py_compile mcp_server.py app\api\routers\search.py app\schemas\search.py
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server
           if errorlevel 1 exit /b 1
 
       - name: Apply Database Migrations
-        if: ${{ steps.changes.outputs.migration_changed == 'true' }}
+        if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
@@ -204,6 +193,12 @@ jobs:
         run: |
           cd backend
  
+          REM Celery worker and Beat own weekly audit generation and delivery.
+          REM PM2 accepts multiple ecosystem app names in one call, which preserves
+          REM the delete/start lifecycle while avoiding repeated CLI startup cost.
+          call pm2 delete ecosystem.config.cjs --only "primex-backend,primeflow-mcp,primeflow-report-scheduler,celery_worker,celery_beat" || ver > NUL
+
+          REM Stop legacy backend process names so the current checkout owns the API port.
           set REDIS_ENABLED=true
           set REDIS_URL=redis://127.0.0.1:6379/0
           set APP_TIMEZONE=Europe/Budapest
@@ -217,17 +212,17 @@ jobs:
           set WEEKLY_PLANNING_AUDIT_RECIPIENTS=130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com
           set REPORT_RETENTION_DAYS=90
           set RUNNER_TRACKING_ID=
-
-          REM Remove historical process names. Current services are updated together
-          REM from the ecosystem file, avoiding slow delete/start cycles per service.
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
-          call pm2 delete primex-public-api || ver > NUL
 
-          call pm2 startOrReload ecosystem.config.cjs --update-env
+          REM Kill any orphaned process still holding port 8000 (a squatter outside PM2
+          REM keeps serving stale code and makes health checks pass against old builds).
+          powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8000'); Stop-Process -Id $_ -Force }"
+          powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8010'); Stop-Process -Id $_ -Force }"
+
+          call pm2 start ecosystem.config.cjs --only "primex-backend,primeflow-mcp,primeflow-report-scheduler,celery_worker,celery_beat" --update-env
           if errorlevel 1 exit /b 1
           call pm2 describe primex-backend | findstr /I "status"
-          call pm2 describe backend-api-flow | findstr /I "status"
           call pm2 describe primeflow-mcp | findstr /I "status"
           call pm2 describe primeflow-report-scheduler | findstr /I "status"
           call pm2 describe celery_worker | findstr /I "status"
@@ -321,11 +316,37 @@ jobs:
             exit 1
           }
  
-      - name: Wait for Public API Readiness
+      - name: Replace Public API Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}
         shell: powershell
         run: |
+          Set-Location backend
+
+          $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
           $port = 8080
+          $processName = "backend-api-flow"
+
+          Write-Host "Replacing public API backend on port $port from current checkout..."
+          cmd /c "pm2 delete backend-api-flow || ver > NUL" | Out-Host
+          cmd /c "pm2 delete primex-public-api || ver > NUL" | Out-Host
+
+          # Kill any orphaned process still holding the port (a squatter outside PM2
+          # keeps serving stale code and makes health checks pass against old builds).
+          Get-NetTCPConnection -LocalPort $port -State Listen -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty OwningProcess -Unique |
+            ForEach-Object {
+              Write-Host "Killing stale listener PID $_ on port $port"
+              Stop-Process -Id $_ -Force
+            }
+
+          $env:REDIS_ENABLED = "false"
+          $env:REDIS_URL = "redis://127.0.0.1:6379/0"
+          $env:APP_TIMEZONE = "Europe/Budapest"
+          $env:APP_BUILD_SHA = "${{ github.sha }}"
+          $env:RUNNER_TRACKING_ID = ""
+          cmd /c "pm2 start `"$python`" --name $processName --cwd `"$PWD`" -- -m uvicorn app.main:app --host 0.0.0.0 --port $port"
+          if ($LASTEXITCODE -ne 0) { Write-Error "PM2 public API start failed"; exit 1 }
+
           $ok = $false
           $expected = "${{ github.sha }}"
           $lastBuild = "<no response>"
@@ -347,7 +368,6 @@ jobs:
             }
           }
           if (-not $ok) {
-            cmd /c "pm2 logs backend-api-flow --lines 100 --nostream || ver > NUL"
             Write-Error "Public API /health not serving deployed build $expected (last seen: $lastBuild). A stale process may be holding port $port."
             exit 1
           }
