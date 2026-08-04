@@ -12,6 +12,7 @@ from app.services.excel_standardizer import (
     ExcelStandardizationError,
     MAX_UPLOAD_BYTES,
     analyze_workbook,
+    initials_from_user,
     standardize_workbook,
 )
 
@@ -46,10 +47,9 @@ async def analyze_excel(
 @router.post("/excel/generate")
 async def generate_excel(
     file: UploadFile = File(...),
-    initials: str = Form(...),
     description: str = Form(""),
     missing_headers_json: str = Form("{}"),
-    _user=Depends(get_current_user),
+    user=Depends(get_current_user),
 ):
     content, filename = await _read_upload(file)
     try:
@@ -58,6 +58,12 @@ async def generate_excel(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Header-at e plotësuar nuk janë validë.") from exc
     if not isinstance(parsed_missing_headers, dict):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Header-at e plotësuar nuk janë validë.")
+    initials = initials_from_user(user.full_name, user.username, user.email)
+    if not initials:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Inicialet nuk mund të nxirren nga profili i përdoruesit në PrimeFlow.",
+        )
     try:
         workbook_bytes, output_filename, report = standardize_workbook(
             content=content,

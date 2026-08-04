@@ -5,10 +5,15 @@ from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook, load_workbook
 
-from app.services.excel_standardizer import analyze_workbook, standardize_workbook
+from app.services.excel_standardizer import analyze_workbook, initials_from_user, standardize_workbook
 
 
 class TestExcelStandardizer(unittest.TestCase):
+    def test_initials_are_derived_from_primeflow_user_profile(self) -> None:
+        self.assertEqual(initials_from_user("Arben Krasniqi", "arben.k", "arben@example.com"), "AK")
+        self.assertEqual(initials_from_user("", "arben.krasniqi", "arben@example.com"), "AK")
+        self.assertEqual(initials_from_user("", "", "arben.krasniqi@example.com"), "AK")
+
     def _source(self) -> bytes:
         workbook = Workbook()
         worksheet = workbook.active

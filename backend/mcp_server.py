@@ -2220,7 +2220,6 @@ async def review_weekly_realization_person(
     week_start: str | None = None,
     final_level: Literal["A+", "A", "B", "C", "M", "D", "E"] | None = None,
     final_symbol: Literal["+", "+/-", "-"] | None = None,
-    final_bonus: int | None = None,
     manager_comment: str | None = None,
     override_reason: str | None = None,
     question_values_json: str | None = None,
@@ -2228,8 +2227,8 @@ async def review_weekly_realization_person(
     """
     Review one calculated employee result using Primeflow's manager workflow.
 
-    Omit final fields to accept the suggestion. Supply all changed final fields
-    together; an override_reason is mandatory when any final value differs.
+    Omit final fields to accept the suggestion. Supply level and symbol together;
+    an override_reason is mandatory when either final value differs.
     question_values_json may contain manager-confirmed answers keyed by stable
     Realization question keys.
     """
@@ -2253,7 +2252,6 @@ async def review_weekly_realization_person(
         json={
             "final_level": final_level,
             "final_symbol": final_symbol,
-            "final_bonus": final_bonus,
             "manager_comment": manager_comment,
             "override_reason": override_reason,
             "question_values": question_values,

@@ -74,6 +74,13 @@ class Settings(BaseSettings):
     SPEECH_TRANSCRIBE_MODEL: str = "whisper-1"
     SPEECH_MAX_FILE_MB: int = 20
     SPEECH_ALLOWED_MIME: str | None = None
+    REALIZATION_TIMEZONE: str = "Europe/Tirane"
+    REALIZATION_DAILY_ENABLED: bool = True
+    REALIZATION_DAILY_HOUR: int = 16
+    REALIZATION_DAILY_MINUTE: int = 20
+    REALIZATION_AI_ENABLED: bool = False
+    REALIZATION_AI_MODEL: str = "gpt-5.2"
+    REALIZATION_AI_TIMEOUT_SECONDS: int = 45
 
     @property
     def cors_origin_list(self) -> list[str]:

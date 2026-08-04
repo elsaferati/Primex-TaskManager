@@ -138,7 +138,12 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/weekly-planner", label: "Weekly Planner", icon: CalendarDays },
       { href: "/monthly-planner", label: "Monthly Planner", icon: CalendarRange },
-      { href: "/realization", label: "Realizimi", icon: Activity },
+      {
+        href: "/realization",
+        label: "Realizimi",
+        icon: Activity,
+        roles: ["ADMIN", "MANAGER"],
+      },
     ],
   },
   {

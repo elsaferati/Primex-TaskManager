@@ -40,7 +40,6 @@ QUESTION_LABELS = {
     "repeated_after_clarification": "A ka pasur përsëritje të detyrave edhe pas sqarimeve?",
     "current_level": "Niveli",
     "suggested_evaluation_level": "Propozimi për nivelin e vlerësimit",
-    "weekly_bonus": "Bonusi javor (€)",
     "evaluation": "Vlerësimi",
     "comments": "Komente",
 }
@@ -126,6 +125,7 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
         and (item.get("evidence_json") or {}).get("affected_user_id")
     ]
     repeated = [item for item in negative if item["category"] == "REPEATED_PROBLEM"]
+    missed_meetings = [item for item in negative if item["category"] == "MISSED_MEETING"]
     task_status = {
         "planned": c.get("planned_count", 0),
         "completed_on_time": c.get("completed_on_time_count", 0),
@@ -201,10 +201,21 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
         ),
         _question(
             "respected_meetings",
-            None,
-            source_status="MISSING_EVIDENCE",
-            evidence_ids=meeting_task_ids,
-            explanation="Ftesa në takim nuk provon prezencën.",
+            False if c.get("meeting_missed_count", 0) else None,
+            source_status=(
+                "AUTO"
+                if c.get("meeting_missed_count", 0)
+                else "AUTO_NEEDS_CONFIRMATION"
+            ),
+            evidence_ids=sorted(
+                set(meeting_task_ids)
+                | {str(item["id"]) for item in missed_meetings}
+            ),
+            explanation=(
+                "Ka evidencë të konfirmuar për takim të humbur."
+                if c.get("meeting_missed_count", 0)
+                else "Pa evidencë negative; prezenca duhet konfirmuar nga menaxheri."
+            ),
             answer_type="boolean",
         ),
         _question(
@@ -263,7 +274,6 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             decision.level.value,
             answer_type="level",
         ),
-        _question("weekly_bonus", decision.bonus, answer_type="currency"),
         _question("evaluation", decision.symbol.value, answer_type="symbol"),
         _question(
             "comments",
@@ -297,6 +307,54 @@ COUNTER_FIELDS = {
     "time_saved_minutes": "time_saved_minutes",
     "repeated_problem_count": "repeated_problem_count",
 }
+
+
+def _task_progress_percent(task: dict[str, Any]) -> float:
+    rows = task.get("daily_progress") or []
+    usable = [row for row in rows if int(row.get("total_value") or 0) > 0]
+    if usable:
+        latest = usable[-1]
+        completed = int(latest.get("completed_value") or 0)
+        total = int(latest["total_value"])
+        return round(min(100.0, max(0.0, completed * 100.0 / total)), 1)
+    return 100.0 if task.get("classification") in {
+        "completed_on_time",
+        "completed_late",
+        "additional_completed",
+    } else 0.0
+
+
+def build_project_progress(tasks: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Aggregate MST/TT projects; all other projects remain task-level evidence."""
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        title = str(task.get("project_title") or "").strip()
+        normalized = title.upper()
+        if not title or not (
+            "MST" in normalized or normalized == "TT" or normalized.startswith("TT ")
+        ):
+            continue
+        key = str(task.get("project_id") or title)
+        grouped.setdefault(key, []).append(task)
+
+    projects: list[dict[str, Any]] = []
+    for project_key, project_tasks in sorted(grouped.items(), key=lambda item: item[0]):
+        percentages = [_task_progress_percent(task) for task in project_tasks]
+        projects.append(
+            {
+                "project_id": project_key,
+                "project_title": project_tasks[0].get("project_title") or "MST/TT",
+                "task_count": len(project_tasks),
+                "progress_percent": round(sum(percentages) / len(percentages), 1),
+                "method": "latest_daily_quantity_or_completed_task_average",
+                "task_ids": [
+                    str(task.get("task_id"))
+                    for task in project_tasks
+                    if task.get("task_id")
+                ],
+            }
+        )
+    return projects
 
 
 async def calculate_weekly_period(
@@ -337,9 +395,12 @@ async def calculate_weekly_period(
     }
     if any(row.reviewed_at is not None for row in existing.values()):
         raise ValueError("Recalculation is not allowed after any person result has been reviewed")
+    eligible_user_ids = {uuid.UUID(user_id) for user_id in evidence["people"]}
+    for user_id, stale_result in existing.items():
+        if user_id not in eligible_user_ids:
+            await db.delete(stale_result)
     results: list[RealizationPersonResult] = []
     level_counts: Counter[str] = Counter()
-    total_bonus = 0
     all_task_keys: set[str] = set()
     for user_id_raw, person in sorted(evidence["people"].items()):
         user_id = uuid.UUID(user_id_raw)
@@ -351,6 +412,14 @@ async def calculate_weekly_period(
             "triggered_rule": decision.triggered_rule,
             "reasons": list(decision.reasons),
         }
+        planned_count = int(counters.get("planned_count", 0))
+        accounted_count = int(counters.get("accounted_planned_count", 0))
+        person["weekly_progress_percent"] = (
+            round(accounted_count * 100.0 / planned_count, 1)
+            if planned_count
+            else 100.0
+        )
+        person["project_progress"] = build_project_progress(person["tasks"])
         result = existing.get(user_id)
         if result is None:
             result = RealizationPersonResult(
@@ -369,14 +438,13 @@ async def calculate_weekly_period(
             if item["source_type"] == "system"
             and item["classification"] in {"completed_on_time", "completed_late", "additional_completed"}
         )
-        result.meeting_missed_count = 0
+        result.meeting_missed_count = int(counters.get("meeting_missed_count", 0))
         result.suggested_level = decision.level.value
         result.suggested_symbol = decision.symbol.value
-        result.suggested_bonus = decision.bonus
+        result.suggested_bonus = None
         result.auto_narrative = narrative
         results.append(result)
         level_counts[decision.level.value] += 1
-        total_bonus += decision.bonus
         all_task_keys.update(item["match_key"] for item in person["tasks"])
 
     department_result = (
@@ -394,6 +462,10 @@ async def calculate_weekly_period(
         )
         db.add(department_result)
     count = len(results)
+    unique_department_tasks: dict[str, dict[str, Any]] = {}
+    for person in evidence["people"].values():
+        for task in person.get("tasks") or []:
+            unique_department_tasks.setdefault(str(task.get("match_key")), task)
     department_result.facts_json = {
         "unique_task_count": len(evidence["department_unique_task_keys"]),
         "unique_planned_task_count": len(evidence["department_planned_task_keys"]),
@@ -401,8 +473,10 @@ async def calculate_weekly_period(
         "unique_additional_task_count": len(evidence["department_additional_task_keys"]),
         "unique_attributed_task_count": len(all_task_keys),
         "unassigned": evidence["unassigned"],
+        "excluded_people": evidence["excluded_people"],
         "planned_snapshot_id": evidence["planned_snapshot_id"],
         "final_snapshot_id": evidence["final_snapshot_id"],
+        "project_progress": build_project_progress(list(unique_department_tasks.values())),
     }
     department_result.a_plus_count = level_counts["A+"]
     department_result.a_count = level_counts["A"]
@@ -416,8 +490,8 @@ async def calculate_weekly_period(
         if count
         else Decimal(0)
     )
-    department_result.total_bonus = Decimal(total_bonus)
-    department_result.average_bonus = Decimal(total_bonus) / Decimal(count) if count else Decimal(0)
+    department_result.total_bonus = None
+    department_result.average_bonus = None
     department_result.proposal_count = sum(row.proposal_count for row in results)
     department_result.time_saved_minutes = sum(row.time_saved_minutes for row in results)
     department_result.repeated_problem_count = sum(row.repeated_problem_count for row in results)

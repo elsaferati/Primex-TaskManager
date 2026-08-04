@@ -63,6 +63,16 @@ class ExcelStandardizationError(ValueError):
     pass
 
 
+def initials_from_user(
+    full_name: str | None,
+    username: str | None = None,
+    email: str | None = None,
+) -> str:
+    label = _text(full_name) or _text(username) or _text(email).split("@", 1)[0]
+    parts = [part for part in re.split(r"[^0-9A-Za-zÀ-ž]+", label) if part]
+    return "".join(part[0].upper() for part in parts)[:10]
+
+
 def _text(value: Any) -> str:
     return "" if value is None else str(value).strip()
 

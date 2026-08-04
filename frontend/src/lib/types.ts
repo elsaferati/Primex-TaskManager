@@ -643,8 +643,8 @@ export type RealizationSymbol = "+" | "+/-" | "-"
 
 export interface RealizationPeriod {
   id: string
-  period_type: "WEEKLY"
-  slot: "ALL"
+  period_type: "DAILY" | "WEEKLY" | "MONTHLY"
+  slot: "AM" | "PM" | "ALL"
   start_date: string
   end_date: string
   department_id: string
@@ -689,7 +689,7 @@ export interface RealizationTaskFact {
   postponement?: string | null
   postponement_evidence_ids?: string[]
   reassignment?: boolean
-  attribution?: "planned_owner" | "actual_worker" | "additional_owner"
+  attribution?: "planned_owner" | "actual_worker" | "additional_owner" | "planned_today" | "added_after_weekly_plan"
   meeting_origin_id?: string | null
   status_progress_inconsistent?: boolean
 }
@@ -728,8 +728,30 @@ export interface RealizationPersonResult {
     questions?: RealizationQuestion[]
     needs_review?: Array<Record<string, unknown>>
     counters?: Record<string, number>
-    attendance?: Record<string, { date: string; type: string; details?: string | null }>
+    attendance?:
+      | Record<string, { date: string; type: string; details?: string | null }>
+      | Array<{ id?: string; date?: string; type: string; details?: string | null }>
     decision?: { triggered_rule?: string; reasons?: string[] }
+    weekly_progress_percent?: number
+    daily_progress_percent?: number
+    daily_timeline?: Array<{
+      date: string
+      daily_progress_percent: number
+      weekly_progress_percent: number
+      planned_count: number
+      completed_count: number
+      additional_count: number
+      attendance: Array<{ id?: string; type: string; details?: string | null }>
+    }>
+    project_progress?: Array<{
+      project_id: string
+      project_title: string
+      task_count: number
+      progress_percent: number
+      method: string
+      task_ids: string[]
+    }>
+    ai_analysis?: RealizationAIAnalysis
   }
   planned_count: number
   completed_on_time_count: number
@@ -745,10 +767,8 @@ export interface RealizationPersonResult {
   unexcused_absence_days: number
   suggested_symbol?: RealizationSymbol | null
   suggested_level?: RealizationLevel | null
-  suggested_bonus?: number | null
   final_symbol?: RealizationSymbol | null
   final_level?: RealizationLevel | null
-  final_bonus?: number | null
   auto_narrative?: string | null
   manager_comment?: string | null
   override_reason?: string | null
@@ -769,8 +789,28 @@ export interface RealizationDepartmentResult {
   d_count: number
   e_count: number
   a_rate?: number | null
-  total_bonus?: number | null
-  average_bonus?: number | null
+}
+
+export interface RealizationDailyResponse {
+  period: RealizationPeriod
+  department_name?: string | null
+  has_planned_snapshot: boolean
+  can_calculate: boolean
+  message?: string | null
+  people: RealizationPersonResult[]
+  department_result?: RealizationDepartmentResult | null
+}
+
+export interface RealizationAIAnalysis {
+  summary: string
+  positives: string[]
+  problems: string[]
+  missing_evidence: string[]
+  suggested_level: RealizationLevel
+  confidence: number
+  evidence_ids: string[]
+  model: string
+  advisory_only: true
 }
 
 export interface RealizationWeeklyResponse {

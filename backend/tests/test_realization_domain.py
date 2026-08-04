@@ -122,7 +122,7 @@ class TestRealizationDomainContract(unittest.TestCase):
                     f"{model.__name__}: {expected_name}",
                 )
 
-    def test_daily_period_requires_single_date_and_am_or_pm(self) -> None:
+    def test_daily_period_accepts_all_day_snapshot(self) -> None:
         valid = RealizationPeriodCreate(
             period_type=RealizationPeriodType.DAILY,
             slot=RealizationPeriodSlot.AM,
@@ -131,14 +131,14 @@ class TestRealizationDomainContract(unittest.TestCase):
             policy_version_id=uuid.uuid4(),
         )
         self.assertEqual(valid.slot, RealizationPeriodSlot.AM)
-        with self.assertRaises(ValidationError):
-            RealizationPeriodCreate(
-                period_type=RealizationPeriodType.DAILY,
-                slot=RealizationPeriodSlot.ALL,
-                start_date=date(2026, 7, 29),
-                end_date=date(2026, 7, 29),
-                policy_version_id=uuid.uuid4(),
-            )
+        all_day = RealizationPeriodCreate(
+            period_type=RealizationPeriodType.DAILY,
+            slot=RealizationPeriodSlot.ALL,
+            start_date=date(2026, 7, 29),
+            end_date=date(2026, 7, 29),
+            policy_version_id=uuid.uuid4(),
+        )
+        self.assertEqual(all_day.slot, RealizationPeriodSlot.ALL)
 
     def test_weekly_period_requires_all_slot(self) -> None:
         with self.assertRaises(ValidationError):
@@ -150,7 +150,7 @@ class TestRealizationDomainContract(unittest.TestCase):
                 policy_version_id=uuid.uuid4(),
             )
 
-    def test_policy_requires_every_level_bonus(self) -> None:
+    def test_policy_does_not_require_monetary_values(self) -> None:
         common = {
             "name": "Policy",
             "version": 1,
@@ -159,13 +159,8 @@ class TestRealizationDomainContract(unittest.TestCase):
             "am_cutoff": time(12, 0),
             "pm_cutoff": time(16, 0),
         }
-        with self.assertRaises(ValidationError):
-            RealizationPolicyVersionCreate(**common, bonus_json={"A+": 50})
-        policy = RealizationPolicyVersionCreate(
-            **common,
-            bonus_json={"A+": 50, "A": 40, "B": 30, "C": 20, "M": 15, "D": 10, "E": 0},
-        )
-        self.assertEqual(policy.bonus_json["M"], 15)
+        policy = RealizationPolicyVersionCreate(**common)
+        self.assertEqual(policy.bonus_json, {})
 
     def test_negative_and_diamond_require_comment(self) -> None:
         for marker in (RealizationMarker.NEGATIVE, RealizationMarker.DIAMOND):
@@ -255,23 +250,19 @@ class TestRealizationDomainContract(unittest.TestCase):
         decision = RealizationFinalDecision(
             final_symbol=RealizationSymbol.MIXED,
             final_level=RealizationLevel.C,
-            final_bonus=20,
         )
         with self.assertRaises(ValueError):
             decision.validate_against_suggestion(
                 suggested_symbol=RealizationSymbol.POSITIVE,
                 suggested_level=RealizationLevel.B,
-                suggested_bonus=30,
             )
         unchanged = RealizationFinalDecision(
             final_symbol=RealizationSymbol.POSITIVE,
             final_level=RealizationLevel.B,
-            final_bonus=30,
         )
         unchanged.validate_against_suggestion(
             suggested_symbol=RealizationSymbol.POSITIVE,
             suggested_level=RealizationLevel.B,
-            suggested_bonus=30,
         )
 
 
@@ -319,8 +310,8 @@ class TestRealizationPermissions(unittest.TestCase):
         self.manager = UserStub(uuid.uuid4(), UserRole.MANAGER, self.department)
         self.admin = UserStub(uuid.uuid4(), UserRole.ADMIN, None)
 
-    def test_staff_sees_only_own_person_detail(self) -> None:
-        self.assertTrue(
+    def test_staff_cannot_open_realization_person_detail(self) -> None:
+        self.assertFalse(
             can_view_person_result(
                 self.staff,
                 subject_user_id=self.staff.id,
@@ -366,8 +357,8 @@ class TestRealizationPermissions(unittest.TestCase):
             )
         )
 
-    def test_staff_can_see_team_aggregate_without_private_detail(self) -> None:
-        self.assertTrue(
+    def test_staff_cannot_see_team_aggregate_or_private_detail(self) -> None:
+        self.assertFalse(
             can_view_department_aggregate(self.staff, department_id=self.other_department)
         )
         self.assertFalse(

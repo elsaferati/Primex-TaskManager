@@ -352,6 +352,7 @@ class TestRealizationTools(unittest.IsolatedAsyncioTestCase):
         )
         payload = request.await_args.kwargs["json"]
         self.assertIsNone(payload["final_level"])
+        self.assertNotIn("final_bonus", payload)
         self.assertEqual(payload["manager_comment"], "Confirmed")
 
     async def test_completed_extra_observation_forwards_verification_metadata(self) -> None:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -17,6 +17,11 @@ from app.models.realization import RealizationObservation, RealizationPeriod
 from app.models.task import Task
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
+from app.services.realization_people import (
+    full_period_leave_user_ids,
+    load_active_users_and_common_leave,
+)
+from app.services.system_task_schedule import _is_working_day
 
 
 def _uuid(value: Any) -> uuid.UUID | None:
@@ -334,7 +339,19 @@ async def collect_weekly_evidence(
         if row.source_type != "realization_observation_verification"
     ]
     cancellation_by_task: dict[uuid.UUID, tuple[str, str]] = {}
+    verified_absence_by_user_date: dict[tuple[uuid.UUID, date], str] = {}
     for observation in evidence_observations:
+        if (
+            observation.id in verified_ids
+            and observation.user_id is not None
+            and observation.category == "ABSENCE"
+        ):
+            absence_date = _date((observation.evidence_json or {}).get("date"))
+            classification = str(
+                (observation.evidence_json or {}).get("classification") or ""
+            ).upper()
+            if absence_date and classification:
+                verified_absence_by_user_date[(observation.user_id, absence_date)] = classification
         if observation.id not in verified_ids or observation.task_id is None:
             continue
         kind = str((observation.evidence_json or {}).get("kind") or "").upper()
@@ -349,24 +366,48 @@ async def collect_weekly_evidence(
                 str(observation.id),
             )
 
+    active_users, common_leave = await load_active_users_and_common_leave(
+        db,
+        department_id=period.department_id,
+        start_date=period.start_date,
+        end_date=period.end_date,
+    )
+    active_by_id = {user.id: user for user in active_users}
+    working_days: set[date] = set()
+    current_day = period.start_date
+    while current_day <= period.end_date:
+        if _is_working_day(current_day):
+            working_days.add(current_day)
+        current_day += timedelta(days=1)
+    excluded_on_full_leave = full_period_leave_user_ids(
+        common_leave,
+        working_days=working_days,
+    )
+    eligible_user_ids = set(active_by_id) - excluded_on_full_leave
+
     people: dict[uuid.UUID, dict[str, Any]] = {}
     unassigned: list[dict[str, Any]] = []
 
-    def ensure_person(user_id: uuid.UUID, name: str) -> dict[str, Any]:
+    def ensure_person(user_id: uuid.UUID, name: str) -> dict[str, Any] | None:
+        if user_id not in eligible_user_ids:
+            return None
+        canonical_name = active_by_id[user_id].full_name or name
         if user_id not in people:
             people[user_id] = {
                 "user_id": user_id,
-                "user_name": name,
+                "user_name": canonical_name,
                 "tasks": [],
                 "observations": [],
                 "attendance": {},
                 "counters": defaultdict(int),
                 "needs_review": [],
             }
-        elif people[user_id]["user_name"] == "Employee" and name != "Employee":
-            people[user_id]["user_name"] = name
+        elif people[user_id]["user_name"] == "Employee" and canonical_name != "Employee":
+            people[user_id]["user_name"] = canonical_name
         return people[user_id]
 
+    for active_user in active_users:
+        ensure_person(active_user.id, active_user.full_name)
     for snapshot in (planned_snapshot, final_snapshot):
         for user_id, name in _snapshot_users(snapshot).items():
             ensure_person(user_id, name)
@@ -391,6 +432,9 @@ async def collect_weekly_evidence(
         else []
     )
     approved_absence_dates: dict[uuid.UUID, set[date]] = defaultdict(set)
+    for user_id, leave in common_leave.items():
+        if user_id in eligible_user_ids:
+            approved_absence_dates[user_id].update(leave.days & working_days)
     for row in attendance:
         if row.user_id is not None and row.type == AttendanceType.PUSHIM_VJETOR:
             approved_absence_dates[row.user_id].add(row.date)
@@ -452,6 +496,7 @@ async def collect_weekly_evidence(
             "task_id": planned_task["task_id"],
             "title": planned_task["title"],
             "project_title": planned_task["project_title"],
+            "project_id": planned_task["project_id"],
             "source_type": planned_task["source_type"],
             "classification": classification,
             "status": current["status"] if current else None,
@@ -485,6 +530,8 @@ async def collect_weekly_evidence(
                 unassigned.append(_iso(fact))
                 continue
             person = ensure_person(user_id, assignee["assignee_name"])
+            if person is None:
+                continue
             planned_days = {
                 item["day"]
                 for item in planned_task["occurrences"]
@@ -562,6 +609,8 @@ async def collect_weekly_evidence(
                 if user_id is None or user_id in planned_owner_ids:
                     continue
                 actual_person = ensure_person(user_id, assignee["assignee_name"])
+                if actual_person is None:
+                    continue
                 if actual_credit_supported:
                     credit_fact = {
                         **fact,
@@ -609,6 +658,7 @@ async def collect_weekly_evidence(
             "task_id": task["task_id"],
             "title": task["title"],
             "project_title": task["project_title"],
+            "project_id": task["project_id"],
             "source_type": task["source_type"],
             "classification": classification,
             "status": status,
@@ -631,6 +681,8 @@ async def collect_weekly_evidence(
                 unassigned.append(_iso(fact))
                 continue
             person = ensure_person(user_id, assignee["assignee_name"])
+            if person is None:
+                continue
             person["tasks"].append(fact)
             person["counters"]["additional_count"] += 1
             person["counters"][f"{classification}_count"] += 1
@@ -640,6 +692,8 @@ async def collect_weekly_evidence(
         if observation.user_id:
             observation_by_user[observation.user_id].append(observation)
     for user_id, person_observations in observation_by_user.items():
+        if user_id not in people:
+            continue
         person = people[user_id]
         for observation in person_observations:
             verified = observation.id in verified_ids or (
@@ -667,6 +721,20 @@ async def collect_weekly_evidence(
                     person["counters"]["time_saved_minutes"] += observation.impact_minutes or 0
                 if observation.category == "REPEATED_PROBLEM":
                     person["counters"]["repeated_problem_count"] += 1
+                if observation.category == "MISSED_MEETING":
+                    person["counters"]["meeting_missed_count"] += 1
+                if observation.category == "ABSENCE":
+                    absence_kind = str(
+                        (observation.evidence_json or {}).get("classification") or ""
+                    ).upper()
+                    if absence_kind == "UNEXCUSED":
+                        person["counters"]["unexcused_absence_days"] += 1
+                    elif absence_kind == "APPROVED_PERSONAL":
+                        person["counters"]["approved_personal_absence_days"] += 1
+                        person["counters"]["approved_absence_days"] += 1
+                    elif absence_kind == "ANNUAL_LEAVE":
+                        person["counters"]["annual_leave_days"] += 1
+                        person["counters"]["approved_absence_days"] += 1
                 extra_kind = str((observation.evidence_json or {}).get("kind") or "").upper()
                 related_task = next(
                     (
@@ -713,18 +781,44 @@ async def collect_weekly_evidence(
         if row.type == AttendanceType.VONESE:
             person["counters"]["tardiness_count"] += 1
         elif row.type == AttendanceType.PUSHIM_VJETOR:
-            person["counters"]["approved_absence_days"] += 1
+            if (row.user_id, row.date) not in verified_absence_by_user_date:
+                person["counters"]["annual_leave_days"] += 1
+                person["counters"]["approved_absence_days"] += 1
         elif row.type == AttendanceType.MUNGESE:
-            # The current model does not distinguish excused and unexpected absence.
-            person["counters"]["absence_needs_review_count"] += 1
-            person["needs_review"].append(
-                {"kind": "ABSENCE_APPROVAL", "attendance_id": str(row.id)}
-            )
+            if (row.user_id, row.date) not in verified_absence_by_user_date:
+                # The source model cannot distinguish absence types; a manager
+                # classification observation resolves this without guessing.
+                person["counters"]["absence_needs_review_count"] += 1
+                person["needs_review"].append(
+                    {"kind": "ABSENCE_APPROVAL", "attendance_id": str(row.id)}
+                )
         person["attendance"][str(row.id)] = {
             "date": row.date,
             "type": row.type.value,
             "details": row.details,
         }
+
+    attendance_leave_pairs = {
+        (row.user_id, row.date)
+        for row in attendance
+        if row.user_id is not None and row.type == AttendanceType.PUSHIM_VJETOR
+    }
+    for user_id, leave in common_leave.items():
+        if user_id not in people:
+            continue
+        person = people[user_id]
+        for leave_day in sorted(leave.days & working_days):
+            if (user_id, leave_day) in attendance_leave_pairs:
+                continue
+            person["counters"]["annual_leave_days"] += 1
+            person["counters"]["approved_absence_days"] += 1
+            evidence_key = f"common-leave:{user_id}:{leave_day.isoformat()}"
+            person["attendance"][evidence_key] = {
+                "date": leave_day,
+                "type": AttendanceType.PUSHIM_VJETOR.value,
+                "details": "Common View PV/FEST",
+                "common_entry_ids": [str(entry_id) for entry_id in leave.entry_ids],
+            }
 
     for person in people.values():
         person["tasks"].sort(
@@ -752,6 +846,18 @@ async def collect_weekly_evidence(
         "department_planned_task_keys": sorted(planned),
         "department_final_task_keys": sorted(final),
         "department_additional_task_keys": sorted(set(final) - set(planned)),
+        "excluded_people": [
+            {
+                "user_id": str(user.id),
+                "user_name": user.full_name,
+                "reason": "FULL_PERIOD_ANNUAL_LEAVE_COMMON_VIEW",
+                "common_entry_ids": [
+                    str(entry_id) for entry_id in common_leave[user.id].entry_ids
+                ],
+            }
+            for user in active_users
+            if user.id in excluded_on_full_leave
+        ],
         "planned_snapshot_id": str(planned_snapshot.id),
         "final_snapshot_id": str(final_snapshot.id),
     }

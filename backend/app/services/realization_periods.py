@@ -147,6 +147,71 @@ async def ensure_weekly_period(
     return period, planned, final
 
 
+async def ensure_daily_period(
+    db: AsyncSession,
+    *,
+    department_id: uuid.UUID,
+    day: date,
+    created_by: uuid.UUID | None,
+) -> tuple[RealizationPeriod, WeeklyPlannerSnapshot | None]:
+    week_start = normalize_week_start(day)
+    planned, _ = await select_weekly_snapshots(
+        db, department_id=department_id, week_start=week_start
+    )
+    period = (
+        await db.execute(
+            select(RealizationPeriod).where(
+                RealizationPeriod.period_type == "DAILY",
+                RealizationPeriod.slot == "ALL",
+                RealizationPeriod.start_date == day,
+                RealizationPeriod.end_date == day,
+                RealizationPeriod.department_id == department_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if period is None:
+        policy = await select_policy(db, week_start)
+        await db.execute(
+            pg_insert(RealizationPeriod)
+            .values(
+                id=uuid.uuid4(),
+                period_type="DAILY",
+                slot="ALL",
+                start_date=day,
+                end_date=day,
+                department_id=department_id,
+                policy_version_id=policy.id,
+                planned_snapshot_id=planned.id if planned else None,
+                status=RealizationPeriodStatus.OPEN.value,
+                created_by=created_by,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    RealizationPeriod.period_type,
+                    RealizationPeriod.slot,
+                    RealizationPeriod.start_date,
+                    RealizationPeriod.end_date,
+                    RealizationPeriod.department_id,
+                ],
+                index_where=RealizationPeriod.department_id.is_not(None),
+            )
+        )
+        period = (
+            await db.execute(
+                select(RealizationPeriod).where(
+                    RealizationPeriod.period_type == "DAILY",
+                    RealizationPeriod.slot == "ALL",
+                    RealizationPeriod.start_date == day,
+                    RealizationPeriod.end_date == day,
+                    RealizationPeriod.department_id == department_id,
+                )
+            )
+        ).scalar_one()
+    elif period.status == RealizationPeriodStatus.OPEN.value:
+        period.planned_snapshot_id = planned.id if planned else None
+    return period, planned
+
+
 def require_unlocked(period: RealizationPeriod) -> None:
     if period.status == RealizationPeriodStatus.LOCKED.value:
         raise RealizationWorkflowError("Locked Realization periods are immutable")
