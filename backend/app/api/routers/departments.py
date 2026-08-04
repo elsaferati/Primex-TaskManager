@@ -3,6 +3,7 @@ from __future__ import annotations
 from fastapi import APIRouter, Depends
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.api.deps import get_current_user
 from app.db import get_db
@@ -15,6 +16,12 @@ router = APIRouter()
 
 @router.get("", response_model=list[DepartmentOut])
 async def list_departments(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)) -> list[DepartmentOut]:
-    departments = (await db.execute(select(Department).order_by(Department.name))).scalars().all()
+    departments = (
+        await db.execute(
+            select(Department)
+            .options(load_only(Department.id, Department.name, Department.code))
+            .order_by(Department.name)
+        )
+    ).scalars().all()
     return [DepartmentOut(id=d.id, name=d.name, code=d.code) for d in departments]
 

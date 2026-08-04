@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { usePathname } from "next/navigation"
 
 import { useAuth } from "@/lib/auth"
 import type { Task, UserLookup } from "@/lib/types"
@@ -26,8 +27,10 @@ function matchesGane(user: UserLookup) {
 
 export function WaitingConfirmationGaProvider({ children }: { children: React.ReactNode }) {
   const { apiFetch } = useAuth()
+  const pathname = usePathname()
   const [ganeUser, setGaneUser] = React.useState<UserLookup | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
+  const [count, setCount] = React.useState(0)
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
 
@@ -55,18 +58,29 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
       const gane = users.find(matchesGane) ?? null
       const fetchedTasks = (await tasksRes.json()) as Task[]
 
+      const matchingTasks = gane
+        ? fetchedTasks.filter(
+            (task) =>
+              task.status === "WAITING_CONFIRMATION" &&
+              task.confirmation_assignee_id === gane.id
+          )
+        : []
       setGaneUser(gane)
-      setTasks(
-        gane
-          ? fetchedTasks.filter(
-              (task) =>
-                task.status === "WAITING_CONFIRMATION" &&
-                task.confirmation_assignee_id === gane.id
-            )
-          : []
-      )
+      setTasks(matchingTasks)
+      setCount(matchingTasks.length)
     } catch {
       setError("Could not load waiting confirmation tasks.")
+    } finally {
+      setLoading(false)
+    }
+  }, [apiFetch])
+
+  const refreshCount = React.useCallback(async () => {
+    try {
+      const res = await apiFetch("/tasks/waiting-confirmation-ga/count")
+      if (!res.ok) return
+      const data = (await res.json()) as { count: number }
+      setCount(Math.max(0, Number(data.count) || 0))
     } finally {
       setLoading(false)
     }
@@ -77,15 +91,18 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
     let timeoutId: ReturnType<typeof window.setTimeout> | null = null
     let idleId: number | null = null
 
+    const onWaitingConfirmationPage = pathname === "/waiting-confirmation-ga"
     const runRefresh = () => {
       if (cancelled) return
-      void refresh()
+      void (onWaitingConfirmationPage ? refresh() : refreshCount())
     }
 
-    if (typeof window !== "undefined" && "requestIdleCallback" in window) {
+    if (onWaitingConfirmationPage) {
+      runRefresh()
+    } else if (typeof window !== "undefined" && typeof window.requestIdleCallback === "function") {
       idleId = window.requestIdleCallback(runRefresh, { timeout: 1200 })
     } else {
-      timeoutId = window.setTimeout(runRefresh, 150)
+      timeoutId = setTimeout(runRefresh, 150)
     }
 
     return () => {
@@ -97,7 +114,7 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
         window.clearTimeout(timeoutId)
       }
     }
-  }, [refresh])
+  }, [pathname, refresh, refreshCount])
 
   const applyTaskResult = React.useCallback(
     (task: Task) => {
@@ -107,14 +124,15 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
           task.status === "WAITING_CONFIRMATION" &&
           task.confirmation_assignee_id === ganeUser.id
 
+        let next: Task[]
         if (!shouldStay) {
-          return prev.filter((item) => item.id !== task.id)
+          next = prev.filter((item) => item.id !== task.id)
+        } else {
+          const existingIndex = prev.findIndex((item) => item.id === task.id)
+          next = existingIndex === -1 ? [task, ...prev] : [...prev]
+          if (existingIndex !== -1) next[existingIndex] = task
         }
-
-        const existingIndex = prev.findIndex((item) => item.id === task.id)
-        if (existingIndex === -1) return [task, ...prev]
-        const next = [...prev]
-        next[existingIndex] = task
+        setCount(next.length)
         return next
       })
     },
@@ -125,13 +143,13 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
     () => ({
       ganeUser,
       tasks,
-      count: tasks.length,
+      count,
       loading,
       error,
       refresh,
       applyTaskResult,
     }),
-    [applyTaskResult, error, ganeUser, loading, refresh, tasks]
+    [applyTaskResult, count, error, ganeUser, loading, refresh, tasks]
   )
 
   return (

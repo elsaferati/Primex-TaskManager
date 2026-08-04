@@ -4,6 +4,7 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { API_HTTP_URL, API_HTTP_FALLBACK_URL, API_WS_URL } from "@/lib/config"
+import { clearDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import type { User } from "@/lib/types"
 
 type AuthContextValue = {
@@ -24,6 +25,21 @@ const FETCH_TIMEOUT_MS = 8000
 const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
 let refreshPromise: Promise<string | null> | null = null
 const inFlightGetRequests = new Map<string, Promise<Response>>()
+const referenceResponseCache = new Map<string, { response: Response; expiresAt: number }>()
+const REFERENCE_CACHE_TTL_MS = 60 * 1000
+const REFERENCE_CACHE_PATHS = new Set(["/departments", "/users/lookup", "/task-statuses", "/boards"])
+
+function clearSessionCaches() {
+  inFlightGetRequests.clear()
+  referenceResponseCache.clear()
+  clearDepartmentBootstrapCache()
+}
+
+function isReferenceDataRequest(path: string, init: RequestInit) {
+  if (init.cache === "no-store" || path.startsWith("http")) return false
+  const pathname = path.split("?", 1)[0]
+  return REFERENCE_CACHE_PATHS.has(pathname)
+}
 
 function getStoredToken(): string | null {
   if (typeof window === "undefined") return null
@@ -160,6 +176,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } catch {
             const restored = await restoreSessionFromRefreshCookie()
             if (!restored) {
+              clearSessionCaches()
               setStoredToken(null)
               setStoredLogoutAt(null)
               setToken(null)
@@ -179,6 +196,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const restored = await restoreSessionFromRefreshCookie()
         if (!restored) {
+          clearSessionCaches()
           setStoredToken(null)
           setStoredLogoutAt(null)
           setToken(null)
@@ -193,6 +211,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
         }
       } catch {
+        clearSessionCaches()
         setStoredToken(null)
         setStoredLogoutAt(null)
         setToken(null)
@@ -262,6 +281,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
+    clearSessionCaches()
     setStoredToken(null)
     setStoredLogoutAt(null)
     setToken(null)
@@ -342,6 +362,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const refreshed = await refreshAccessTokenShared()
         if (!refreshed) {
+          clearSessionCaches()
           setStoredToken(null)
           setStoredLogoutAt(null)
           setToken(null)
@@ -355,6 +376,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const me = await fetchMe(refreshed)
           setUser(me)
         } catch {
+          clearSessionCaches()
           setStoredToken(null)
           setStoredLogoutAt(null)
           setToken(null)
@@ -364,6 +386,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const retryRes = await doFetch(refreshed)
         if (retryRes.status === 401) {
+          clearSessionCaches()
           setStoredToken(null)
           setStoredLogoutAt(null)
           setToken(null)
@@ -373,6 +396,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const method = (init.method || "GET").toUpperCase()
+      if (method !== "GET") {
+        // Reference data can be changed by administrative mutations. Clearing
+        // all session-local entries keeps subsequent reads authoritative.
+        referenceResponseCache.clear()
+        clearDepartmentBootstrapCache()
+      }
       const canShareRequest = method === "GET" && init.body == null && init.signal == null
       if (!canShareRequest) return executeRequest()
 
@@ -386,13 +415,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         init.referrerPolicy,
         init.integrity,
       ])
+      const canCacheResponse = isReferenceDataRequest(path, init)
+      if (canCacheResponse) {
+        const cached = referenceResponseCache.get(requestKey)
+        if (cached && Date.now() < cached.expiresAt) return cached.response.clone()
+        if (cached) referenceResponseCache.delete(requestKey)
+      }
       const existingRequest = inFlightGetRequests.get(requestKey)
       if (existingRequest) return (await existingRequest).clone()
 
       const request = executeRequest()
       inFlightGetRequests.set(requestKey, request)
       try {
-        return (await request).clone()
+        const response = await request
+        if (canCacheResponse && response.ok) {
+          referenceResponseCache.set(requestKey, {
+            response: response.clone(),
+            expiresAt: Date.now() + REFERENCE_CACHE_TTL_MS,
+          })
+        }
+        return response.clone()
       } finally {
         if (inFlightGetRequests.get(requestKey) === request) {
           inFlightGetRequests.delete(requestKey)
@@ -403,6 +445,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   )
 
   const login = React.useCallback(async (email: string, password: string) => {
+    clearSessionCaches()
     let res: Response
     try {
       res = await fetchWithTimeout(`${API_HTTP_URL}/auth/login`, {

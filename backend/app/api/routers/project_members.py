@@ -2,10 +2,11 @@ from __future__ import annotations
 
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.api.access import ensure_department_access
 from app.api.deps import get_current_user
@@ -24,6 +25,62 @@ class ProjectMembersCreatePayload(BaseModel):
     user_ids: list[uuid.UUID]
 
 
+class ProjectMembersBatchItem(BaseModel):
+    project_id: uuid.UUID
+    members: list[UserOut]
+
+
+def _user_out(user: User) -> UserOut:
+    return UserOut(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        full_name=user.full_name,
+        role=user.role,
+        department_id=user.department_id,
+        is_active=user.is_active,
+    )
+
+
+@router.get("/batch", response_model=list[ProjectMembersBatchItem])
+async def list_project_members_batch(
+    project_ids: list[uuid.UUID] = Query(...),
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> list[ProjectMembersBatchItem]:
+    """Resolve many project member lists in a single database round trip."""
+
+    unique_ids = list(dict.fromkeys(project_ids))
+    if not unique_ids:
+        return []
+    rows = (
+        await db.execute(
+            select(ProjectMember.project_id, User)
+            .options(
+                load_only(
+                    User.id,
+                    User.email,
+                    User.username,
+                    User.full_name,
+                    User.role,
+                    User.department_id,
+                    User.is_active,
+                )
+            )
+            .join(User, ProjectMember.user_id == User.id)
+            .where(ProjectMember.project_id.in_(unique_ids))
+            .order_by(ProjectMember.project_id, User.full_name)
+        )
+    ).all()
+    members_by_project: dict[uuid.UUID, list[UserOut]] = {project_id: [] for project_id in unique_ids}
+    for project_id, member in rows:
+        members_by_project[project_id].append(_user_out(member))
+    return [
+        ProjectMembersBatchItem(project_id=project_id, members=members_by_project[project_id])
+        for project_id in unique_ids
+    ]
+
+
 @router.get("", response_model=list[UserOut])
 async def list_project_members(
     project_id: uuid.UUID,
@@ -37,24 +94,24 @@ async def list_project_members(
     members = (
         await db.execute(
             select(User)
+            .options(
+                load_only(
+                    User.id,
+                    User.email,
+                    User.username,
+                    User.full_name,
+                    User.role,
+                    User.department_id,
+                    User.is_active,
+                )
+            )
             .join(ProjectMember, ProjectMember.user_id == User.id)
             .where(ProjectMember.project_id == project_id)
             .order_by(User.full_name)
         )
     ).scalars().all()
 
-    return [
-        UserOut(
-            id=u.id,
-            email=u.email,
-            username=u.username,
-            full_name=u.full_name,
-            role=u.role,
-            department_id=u.department_id,
-            is_active=u.is_active,
-        )
-        for u in members
-    ]
+    return [_user_out(u) for u in members]
 
 
 @router.post("", response_model=list[UserOut], status_code=status.HTTP_201_CREATED)
@@ -94,15 +151,4 @@ async def add_project_members(
 
     await db.commit()
 
-    return [
-        UserOut(
-            id=u.id,
-            email=u.email,
-            username=u.username,
-            full_name=u.full_name,
-            role=u.role,
-            department_id=u.department_id,
-            is_active=u.is_active,
-        )
-        for u in rows
-    ]
+    return [_user_out(u) for u in rows]

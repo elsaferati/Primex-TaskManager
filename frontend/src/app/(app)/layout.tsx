@@ -3,7 +3,7 @@
 import * as React from "react"
 import { useRouter } from "next/navigation"
 
-import { CommandPalette } from "@/components/command-palette"
+import { LazyCommandPalette } from "@/components/lazy-command-palette"
 import { Sidebar } from "@/components/sidebar"
 import { Topbar } from "@/components/topbar"
 import { SidebarProvider } from "@/components/sidebar-context"
@@ -32,7 +32,7 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Topbar />
             <main className="flex-1 p-4 print:p-0">{children}</main>
           </div>
-          <CommandPalette />
+          <LazyCommandPalette />
         </div>
       </WaitingConfirmationGaProvider>
     </SidebarProvider>

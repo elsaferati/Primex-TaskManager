@@ -30,7 +30,9 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
-app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
+# Level 3 retains nearly all JSON compression while spending materially less
+# CPU on the large planner, task and report payloads.
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=3)
 
 app.include_router(api_router, prefix="/api")
 

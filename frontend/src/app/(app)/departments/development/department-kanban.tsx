@@ -1687,19 +1687,16 @@ export default function DepartmentKanban() {
     const loadMembers = async () => {
       const missing = projects.filter((project) => !projectMembersRef.current[project.id])
       if (!missing.length) return
-      const results = await Promise.all(
-        missing.map(async (project) => {
-          const res = await apiFetch(`/project-members?project_id=${project.id}`)
-          if (!res.ok) return { id: project.id, members: [] as UserLookup[] }
-          const members = (await res.json()) as UserLookup[]
-          return { id: project.id, members }
-        })
-      )
+      const params = new URLSearchParams()
+      for (const project of missing) params.append("project_ids", project.id)
+      const res = await apiFetch(`/project-members/batch?${params.toString()}`)
+      if (!res.ok) return
+      const results = (await res.json()) as Array<{ project_id: string; members: UserLookup[] }>
       if (cancelled) return
       setProjectMembers((prev) => {
         const next = { ...prev }
         for (const result of results) {
-          next[result.id] = result.members
+          next[result.project_id] = result.members
         }
         return next
       })
