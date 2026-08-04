@@ -12,9 +12,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.common_entry import CommonEntry
 from app.models.department import Department
-from app.models.enums import CommonCategory
+from app.models.enums import CommonApprovalStatus, CommonCategory
 from app.models.meeting import Meeting
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
+from app.models.system_task_template import SystemTaskTemplate
+from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.user import User
@@ -23,6 +25,7 @@ from app.services.daily_report_logic import business_days_between
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.primeflow_report import PrimeFlowClient
 from app.services.std_feedback_tickets import std_tickets_report_section
+from app.services.system_task_schedule import matches_template_date
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
@@ -292,6 +295,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     ]
     blocked = [task for task in tomorrow_tasks if task.is_bllok]
     bz_tasks = [task for task in tomorrow_tasks if re.search(r"\bBZ\b", task.title or "", re.I)]
+    bz_alignment_lines = await _bz_alignment_lines(db, tomorrow)
 
     meeting_stmt = select(Meeting).where(Meeting.starts_at.is_not(None))
     meetings = (await db.execute(meeting_stmt)).scalars().all()
@@ -318,7 +322,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         tomorrow=tomorrow,
         fallback_external=_meeting_lines(external_meetings),
         fallback_internal=_meeting_lines(internal_meetings),
-        fallback_bz=_task_lines(bz_tasks, names, assignee_ids_by_task),
+        fallback_bz=bz_alignment_lines or _task_lines(bz_tasks, names, assignee_ids_by_task),
         fallback_blocked=_task_lines(blocked, names, assignee_ids_by_task),
     )
     section_5 = [
@@ -566,6 +570,63 @@ def _common_task_lines(items: list[dict[str, Any]], day: date) -> list[str]:
     return lines
 
 
+async def _bz_alignment_lines(db: AsyncSession, day: date) -> list[str]:
+    templates = (
+        await db.execute(
+            select(SystemTaskTemplate)
+            .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
+        )
+    ).scalars().all()
+    template_ids = [template.id for template in templates]
+    if not template_ids:
+        return []
+
+    rows = (
+        await db.execute(
+            select(SystemTaskTemplateAlignmentUser.template_id, SystemTaskTemplateAlignmentUser.user_id)
+            .where(SystemTaskTemplateAlignmentUser.template_id.in_(template_ids))
+        )
+    ).all()
+    alignment_users_map: dict[Any, list[Any]] = {}
+    user_ids: set[Any] = set()
+    for template_id, user_id in rows:
+        alignment_users_map.setdefault(template_id, []).append(user_id)
+        user_ids.add(user_id)
+    if not user_ids:
+        return []
+
+    users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    users_map = {user.id: user for user in users}
+    ga_user = next((user for user in users if (user.username or "").lower() == "gane.arifaj"), None)
+    ga_user_id = ga_user.id if ga_user else None
+    if ga_user_id is None:
+        ga_candidates = [user for user in users if _initials(user.full_name or user.username or user.email) == "GA"]
+        ga_user_id = ga_candidates[0].id if ga_candidates else None
+
+    lines: list[str] = []
+    seen: set[tuple[Any, str]] = set()
+    for template in sorted(templates, key=lambda item: (item.alignment_time or datetime.min.time(), item.title or "")):
+        alignment_ids = alignment_users_map.get(template.id, [])
+        if not alignment_ids or (ga_user_id is not None and ga_user_id not in alignment_ids):
+            continue
+        if not matches_template_date(template, day):
+            continue
+        owners = [
+            _initials(users_map[user_id].full_name or users_map[user_id].username or users_map[user_id].email)
+            for user_id in alignment_ids
+            if user_id in users_map
+        ]
+        owner_label = " ".join(dict.fromkeys([owner for owner in owners if owner != "-"])) or "-"
+        title = _clean_task_title(template.title)
+        key = (template.id, day.isoformat())
+        if key in seen:
+            continue
+        seen.add(key)
+        lines.append(f"- {owner_label}: {title}")
+    return lines
+
+
 def _common_meeting_lines(items: list[dict[str, Any]], day: date) -> list[str]:
     lines = []
     seen = set()
@@ -585,6 +646,14 @@ def _common_meeting_lines(items: list[dict[str, Any]], day: date) -> list[str]:
 
 def _prefer_common(common_lines: list[str], fallback_lines: list[str]) -> list[str]:
     return common_lines if common_lines else [line for line in fallback_lines if not line.startswith("(Asnje")]
+
+
+def _prefer_owned_common(common_lines: list[str], fallback_lines: list[str]) -> list[str]:
+    usable_common = [
+        line for line in common_lines
+        if not re.match(r"^\s*-\s*-+\s*:", line)
+    ]
+    return usable_common if usable_common else [line for line in fallback_lines if not line.startswith("(Asnje")]
 
 
 def _strip_list_marker(value: str) -> str:
@@ -655,7 +724,7 @@ def _tomorrow_common_section(
 ) -> list[str]:
     external = _prefer_common(_common_meeting_lines(common_items.get("external") or [], tomorrow), fallback_external)
     internal = _prefer_common(_common_meeting_lines(common_items.get("internal") or [], tomorrow), fallback_internal)
-    bz = _prefer_common(_common_task_lines(common_items.get("bz") or [], tomorrow), fallback_bz)
+    bz = _prefer_owned_common(_common_task_lines(common_items.get("bz") or [], tomorrow), fallback_bz)
     blocked = _prefer_common(_common_task_lines(common_items.get("blocked") or [], tomorrow), fallback_blocked)
     return [
         *_tomorrow_meeting_table("TAKIMET EXTERNE", external),
