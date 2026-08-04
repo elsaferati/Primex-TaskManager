@@ -7,6 +7,11 @@ import { AuthProvider } from "@/lib/auth";
 export const metadata: Metadata = {
   title: "PrimeFlow",
   description: "Internal task & project management",
+  icons: {
+    icon: "/ICON@2x.png",
+    shortcut: "/ICON@2x.png",
+    apple: "/ICON@2x.png",
+  },
 };
 
 export default function RootLayout({
