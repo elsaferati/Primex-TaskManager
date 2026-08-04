@@ -38,6 +38,15 @@ SECTION_TITLES = [
 ]
 EMPTY_TASKS = "(Asnje detyre)"
 EMPTY_NOTES = "(Asnje shenim)"
+# Personal tasks count only when the title marks them as GA's, e.g. "DM/GA: BZ GA - P/P PARA PF".
+PERSONAL_GA = re.compile(r"/\s*GA\b", re.I)
+PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("TITLE", 56)]
+PERSONAL_GROUPS = [
+    ("TODO", "TODO"),
+    ("IN PROGRESS", "IN_PROGRESS"),
+    ("WAITING CONFIRMATION", "WAITING_CONFIRMATION"),
+    ("DONE", "DONE"),
+]
 
 
 def subject_for(day: date) -> str:
@@ -76,10 +85,6 @@ def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[l
 def _note_text(value: str | None) -> str:
     cleaned = TECHNICAL_TAG.sub("", value or "")
     return re.sub(r"\s+", " ", cleaned).strip() or "-"
-
-
-def _status_label(task: Task) -> str:
-    return str(task.status or "-").upper().replace("_", " ")
 
 
 def _task_covers_day(task: Task, day: date) -> bool:
@@ -169,16 +174,14 @@ def _waiting_confirmation_rows(
     ]
 
 
-async def _personal_rows(
+async def _personal_section(
     db: AsyncSession,
     tasks: list[Task],
     names: dict[Any, str],
     assignee_ids_by_task: dict[Any, set[Any]],
     report_day: date,
-) -> list[list[str]]:
+) -> list[str]:
     personal = [task for task in tasks if task.is_personal and _task_covers_day(task, report_day)]
-    if not personal:
-        return []
 
     # Common View shows the originating GA/KA note text for note-based tasks, not the task title.
     note_ids = {task.ga_note_origin_id for task in personal if task.ga_note_origin_id}
@@ -190,16 +193,40 @@ async def _personal_rows(
     def _title(task: Task) -> str:
         return note_titles.get(task.ga_note_origin_id) or _clean_task_title(task.title)
 
-    ordered = sorted(personal, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _title(task)))
-    return [
-        [
-            str(index),
-            _task_owners(task, names, assignee_ids_by_task),
-            _title(task),
-            _status_label(task),
+    def _is_ga(task: Task) -> bool:
+        return bool(PERSONAL_GA.search(_title(task)) or PERSONAL_GA.search(task.title or ""))
+
+    ga_personal = [task for task in personal if _is_ga(task)]
+
+    def _group_key(task: Task) -> str:
+        status = str(task.status or "").upper()
+        if task.completed_at or status in {"DONE", "COMPLETED"}:
+            return "DONE"
+        return status
+
+    grouped: dict[str, list[Task]] = {}
+    for task in ga_personal:
+        grouped.setdefault(_group_key(task), []).append(task)
+
+    known = {key for _, key in PERSONAL_GROUPS}
+    other = [task for key, rows in grouped.items() if key not in known for task in rows]
+    groups = [*PERSONAL_GROUPS, ("TJERA", "TJERA")] if other else PERSONAL_GROUPS
+    grouped["TJERA"] = other
+
+    lines: list[str] = []
+    for label, key in groups:
+        ordered = sorted(
+            grouped.get(key, []),
+            key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _title(task)),
+        )
+        rows_values = [
+            [str(index), _task_owners(task, names, assignee_ids_by_task), _title(task)]
+            for index, task in enumerate(ordered, start=1)
         ]
-        for index, task in enumerate(ordered, start=1)
-    ]
+        if lines:
+            lines.append("")
+        lines.extend(_ascii_table(label, PERSONAL_COLUMNS, rows_values, EMPTY_TASKS))
+    return lines
 
 
 async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]:
@@ -282,12 +309,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             EMPTY_TASKS,
         ),
     ]
-    section_2 = _ascii_table(
-        "PERSONAL",
-        [("NR", 2), ("WHO", 20), ("TITLE", 56), ("STATUS", 12)],
-        await _personal_rows(db, tasks, names, assignee_ids_by_task, report_day),
-        EMPTY_TASKS,
-    )
+    section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
     section_3 = _ascii_table(
         "NOTES",
         [("NR", 2), ("NGA", 8), ("SHENIMI", 60), ("DISK", 4), ("ORA", 5)],
