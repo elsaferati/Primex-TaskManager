@@ -55,7 +55,15 @@ async def run_after_break_report_scheduler_once(now: datetime | None = None) -> 
             await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_day))
         ).scalar_one_or_none()
         if row and row.status == "SENT":
-            return False
+            sent_at = row.sent_at
+            settings_updated_at = settings.updated_at
+            if sent_at and settings_updated_at and settings_updated_at > sent_at:
+                logger.info(
+                    "after_break_report_scheduler_resend_allowed reason=settings_changed report_date=%s",
+                    report_day,
+                )
+            else:
+                return False
 
         recipients = normalize_recipients(settings.recipients)
         if not recipients["to"]:
