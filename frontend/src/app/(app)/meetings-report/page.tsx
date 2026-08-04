@@ -60,6 +60,32 @@ function parseRecipients(value: string) {
   return rows
 }
 
+function formatDateTimeInTimezone(value: string | null | undefined, timezone: string) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone || "Europe/Tirane",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date)
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date)
+  }
+}
+
 async function responseError(res: Response) {
   const text = await res.text()
   if (!text) return `HTTP ${res.status}`
@@ -408,7 +434,9 @@ export default function MeetingsReportPage() {
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm text-muted-foreground">Last automatic run: {settings.last_run_date || "-"}</div>
+            <div className="text-sm text-muted-foreground">
+              Last automatic run: {formatDateTimeInTimezone(settings.last_run_date, settings.timezone)}
+            </div>
             {canEdit ? (
               <Button variant="outline" onClick={() => void saveSettings()} disabled={savingSettings}>
                 <Save /> Save settings
