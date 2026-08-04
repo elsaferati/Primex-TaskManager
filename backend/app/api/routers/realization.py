@@ -317,8 +317,14 @@ async def _weekly_response(
                 "date": daily_period.start_date.isoformat(),
                 "daily_progress_percent": daily_facts.get("daily_progress_percent", 0),
                 "weekly_progress_percent": daily_facts.get("weekly_progress_percent", 0),
-                "planned_count": daily_result.planned_count,
-                "completed_count": daily_result.completed_on_time_count,
+                "planned_count": daily_facts.get(
+                    "daily_planned_count", daily_result.planned_count
+                ),
+                "completed_count": daily_facts.get(
+                    "daily_completed_count", daily_result.completed_on_time_count
+                ),
+                "weekly_planned_count": daily_facts.get("weekly_planned_count", 0),
+                "weekly_completed_count": daily_facts.get("weekly_completed_count", 0),
                 "additional_count": daily_result.additional_count,
                 "attendance": daily_facts.get("attendance") or [],
             }
@@ -461,14 +467,6 @@ async def export_realization_excel(
         for row in weekly_results
         if row.user_id in eligible_by_period.get(row.period_id, set())
     ]
-    user_ids = [row.user_id for row in weekly_results]
-    user_names = {
-        row.id: row.full_name
-        for row in (
-            await db.execute(select(User).where(User.id.in_(user_ids)))
-        ).scalars().all()
-    } if user_ids else {}
-
     daily_periods = (
         await db.execute(
             select(RealizationPeriod).where(
@@ -489,38 +487,112 @@ async def export_realization_excel(
         )
     ).scalars().all() if daily_period_by_id else []
     timeline_by_user_department: dict[tuple[uuid.UUID, uuid.UUID | None], list[dict]] = {}
+    latest_daily_by_user_department: dict[
+        tuple[uuid.UUID, uuid.UUID | None],
+        tuple[RealizationPersonResult, RealizationPeriod],
+    ] = {}
     for daily in daily_results:
         daily_period = daily_period_by_id[daily.period_id]
         if daily.user_id not in eligible_by_department.get(daily.department_id, set()):
             continue
         facts = daily.facts_json or {}
-        timeline_by_user_department.setdefault(
-            (daily.user_id, daily.department_id), []
-        ).append(
+        user_department_key = (daily.user_id, daily.department_id)
+        timeline_by_user_department.setdefault(user_department_key, []).append(
             {
                 "date": daily_period.start_date.isoformat(),
                 "daily_progress_percent": facts.get("daily_progress_percent", 0),
                 "weekly_progress_percent": facts.get("weekly_progress_percent", 0),
+                "planned_count": facts.get(
+                    "daily_planned_count", daily.planned_count
+                ),
+                "completed_count": facts.get(
+                    "daily_completed_count", daily.completed_on_time_count
+                ),
+                "weekly_planned_count": facts.get("weekly_planned_count", 0),
+                "weekly_completed_count": facts.get("weekly_completed_count", 0),
                 "attendance": facts.get("attendance") or [],
+                "additional_count": daily.additional_count,
+                "weekly_additional_count": facts.get(
+                    "weekly_additional_count", daily.additional_count
+                ),
             }
         )
+        latest = latest_daily_by_user_department.get(user_department_key)
+        if latest is None or daily_period.start_date > latest[1].start_date:
+            latest_daily_by_user_department[user_department_key] = (daily, daily_period)
+
+    all_user_ids = {
+        row.user_id for row in weekly_results
+    } | {
+        user_id for user_id, _ in latest_daily_by_user_department
+    }
+    user_names = {
+        row.id: row.full_name
+        for row in (
+            await db.execute(select(User).where(User.id.in_(all_user_ids)))
+        ).scalars().all()
+    } if all_user_ids else {}
 
     results_by_period: dict[uuid.UUID, list[dict]] = {}
+    live_period_ids: set[uuid.UUID] = set()
+    weekly_by_period: dict[uuid.UUID, list[RealizationPersonResult]] = {}
     for row in weekly_results:
-        payload = RealizationPersonResultOut.model_validate(row).model_dump(mode="python")
-        facts = dict(payload.get("facts_json") or {})
-        facts["daily_timeline"] = sorted(
-            timeline_by_user_department.get((row.user_id, row.department_id), []),
-            key=lambda item: item["date"],
-        )
-        payload["facts_json"] = facts
-        payload["user_name"] = user_names.get(row.user_id, "Employee")
-        results_by_period.setdefault(row.period_id, []).append(payload)
+        weekly_by_period.setdefault(row.period_id, []).append(row)
+
+    for period in periods:
+        selected_rows: list[tuple[RealizationPersonResult, bool]] = [
+            (row, False) for row in weekly_by_period.get(period.id, [])
+        ]
+        selected_user_ids = {row.user_id for row, _ in selected_rows}
+        for (user_id, row_department_id), (daily, _) in latest_daily_by_user_department.items():
+            if (
+                row_department_id == period.department_id
+                and user_id not in selected_user_ids
+            ):
+                selected_rows.append((daily, True))
+                live_period_ids.add(period.id)
+
+        for row, is_live_fallback in selected_rows:
+            payload = RealizationPersonResultOut.model_validate(row).model_dump(mode="python")
+            facts = dict(payload.get("facts_json") or {})
+            facts["daily_timeline"] = sorted(
+                timeline_by_user_department.get((row.user_id, row.department_id), []),
+                key=lambda item: item["date"],
+            )
+            if is_live_fallback:
+                payload["planned_count"] = int(
+                    facts.get("weekly_planned_count", payload.get("planned_count", 0))
+                )
+                payload["completed_on_time_count"] = int(
+                    facts.get(
+                        "weekly_completed_count",
+                        payload.get("completed_on_time_count", 0),
+                    )
+                )
+                payload["completed_late_count"] = 0
+                payload["additional_count"] = int(
+                    facts.get(
+                        "weekly_additional_count", payload.get("additional_count", 0)
+                    )
+                )
+                facts["report_mode"] = "LIVE_DAILY"
+            else:
+                facts["report_mode"] = "FINAL_WEEKLY"
+            payload["facts_json"] = facts
+            payload["user_name"] = user_names.get(row.user_id, "Employee")
+            results_by_period.setdefault(period.id, []).append(payload)
 
     export_departments = [
         {
             "name": departments_by_id.get(period.department_id, "Departamenti"),
-            "status": period.status,
+            "status": (
+                "AKTUAL (SNAPSHOT DITOR)"
+                if period.id in live_period_ids
+                else period.status
+            ),
+            "report_mode": (
+                "LIVE_DAILY" if period.id in live_period_ids else "FINAL_WEEKLY"
+            ),
             "people": sorted(
                 results_by_period.get(period.id, []), key=lambda item: item["user_name"]
             ),

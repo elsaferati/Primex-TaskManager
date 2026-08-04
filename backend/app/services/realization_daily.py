@@ -200,6 +200,8 @@ async def calculate_daily_period(
 
     weekly_task_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
     weekly_completed_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
+    weekly_additional_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
+    weekly_fast_task_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
     for key, raw in planned.items():
         task = task_by_id.get(raw.get("task_id"))
         progress = daily_progress.get(raw.get("task_id"))
@@ -247,6 +249,12 @@ async def calculate_daily_period(
             continue
         if _local_date(task.created_at) > day:  # type: ignore[operator]
             continue
+        for user_id in assignees.get(task.id, set()):
+            if user_id not in people:
+                continue
+            weekly_additional_keys_by_user[user_id].add(str(task.id))
+            if not task.project_id and not task.system_template_origin_id:
+                weekly_fast_task_keys_by_user[user_id].add(str(task.id))
         if not (
             _local_date(task.created_at) == day
             or _local_date(task.completed_at) == day
@@ -319,12 +327,24 @@ async def calculate_daily_period(
         completed_today = int(counters.get("completed_count", 0))
         weekly_total = len(weekly_task_keys_by_user[user_id])
         weekly_completed = len(weekly_completed_by_user[user_id])
+        counters["daily_planned_count"] = planned_today
+        counters["daily_completed_count"] = completed_today
+        counters["weekly_planned_count"] = weekly_total
+        counters["weekly_completed_count"] = weekly_completed
+        counters["weekly_additional_count"] = len(weekly_additional_keys_by_user[user_id])
+        counters["weekly_fast_task_count"] = len(weekly_fast_task_keys_by_user[user_id])
         person["counters"] = counters
+        person["daily_planned_count"] = planned_today
+        person["daily_completed_count"] = completed_today
+        person["weekly_planned_count"] = weekly_total
+        person["weekly_completed_count"] = weekly_completed
+        person["weekly_additional_count"] = len(weekly_additional_keys_by_user[user_id])
+        person["weekly_fast_task_count"] = len(weekly_fast_task_keys_by_user[user_id])
         person["daily_progress_percent"] = (
-            round(completed_today * 100.0 / planned_today, 1) if planned_today else 100.0
+            round(completed_today * 100.0 / planned_today, 1) if planned_today else 0.0
         )
         person["weekly_progress_percent"] = (
-            round(weekly_completed * 100.0 / weekly_total, 1) if weekly_total else 100.0
+            round(weekly_completed * 100.0 / weekly_total, 1) if weekly_total else 0.0
         )
         person["project_progress"] = build_project_progress(person["tasks"])
         person["questions"] = [
