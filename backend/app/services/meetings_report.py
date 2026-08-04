@@ -690,12 +690,39 @@ def _table_tone_from_label(label: str) -> str:
     return ""
 
 
+def _table_tone_styles(tone: str) -> tuple[str, str]:
+    if tone == "todo":
+        return "#fbcfe8", "#111827"
+    if tone == "in-progress":
+        return "#fef3c7", "#111827"
+    if tone == "done":
+        return "#d4ffe1", "#111827"
+    if tone == "late":
+        return "#fee2e2", "#111827"
+    if tone == "deadline":
+        return "#dc2626", "#ffffff"
+    return "#f8fafc", "#111827"
+
+
 def _render_ascii_table_html(lines: list[str], tone: str = "") -> str:
     table_rows = [_parse_ascii_cells(line) for line in lines if line.startswith("|")]
     if not table_rows:
         return ""
     header, body_rows = table_rows[0], table_rows[1:]
-    header_html = "".join(f"<th>{html.escape(cell)}</th>" for cell in header)
+    header_cell_style = (
+        "background:#e5e7eb;color:#111827;text-align:left;font-weight:700;"
+        "border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top;"
+    )
+    body_bg, body_color = _table_tone_styles(tone)
+    body_cell_style = (
+        f"background:{body_bg};color:{body_color};border:1px solid #cbd5e1;"
+        "padding:6px 8px;vertical-align:top;"
+    )
+    canceled_cell_style = (
+        "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
+        "padding:6px 8px;vertical-align:top;"
+    )
+    header_html = "".join(f"<th style=\"{header_cell_style}\">{html.escape(cell)}</th>" for cell in header)
     canceled_index = next((index for index, cell in enumerate(header) if cell.upper() == "ANULUAR"), None)
     table_class = f"report-table report-table-{tone}" if tone else "report-table"
     body_html_parts = []
@@ -705,15 +732,19 @@ def _render_ascii_table_html(lines: list[str], tone: str = "") -> str:
             and len(row) > canceled_index
             and bool(row[canceled_index].strip())
         )
-        row_class = " class=\"report-row-canceled\"" if is_canceled else ""
+        cell_style = canceled_cell_style if is_canceled else body_cell_style
         body_html_parts.append(
-            f"<tr{row_class}>" + "".join(f"<td>{html.escape(cell)}</td>" for cell in row) + "</tr>"
+            "<tr>" + "".join(f"<td style=\"{cell_style}\">{html.escape(cell)}</td>" for cell in row) + "</tr>"
         )
     body_html = "".join(body_html_parts)
     return (
-        "<div class=\"report-table-wrap\">"
-        f"<table class=\"{table_class}\"><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
-        "</div>"
+        "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+        "style=\"width:100%;border-collapse:collapse;margin:8px 0 12px;\">"
+        "<tr><td style=\"padding:0;\">"
+        f"<table class=\"{table_class}\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+        "style=\"width:100%;border-collapse:collapse;font-size:13px;font-family:Arial,sans-serif;\">"
+        f"<thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+        "</td></tr></table>"
     )
 
 
@@ -726,7 +757,11 @@ def _render_text_block_html(lines: list[str]) -> str:
             rendered_lines.append(f"<strong>{escaped}</strong>")
         else:
             rendered_lines.append(escaped)
-    return f"<pre>{chr(10).join(rendered_lines).strip()}</pre>"
+    return (
+        "<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;"
+        "background:#f8fafc;border:1px solid #e5e7eb;padding:12px;margin:0;\">"
+        f"{chr(10).join(rendered_lines).strip()}</pre>"
+    )
 
 
 def _render_section_body_html(body: str) -> str:
@@ -765,41 +800,35 @@ def _render_section_body_html(body: str) -> str:
 
 def render_html(subject: str, report_day: date, tomorrow: date, sections: list[dict[str, str]]) -> str:
     section_html = "".join(
-        "<section>"
-        f"<h2>{index}. {html.escape(section['title'])}</h2>"
+        "<div style=\"margin:22px 0 0;\">"
+        f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">{index}. {html.escape(section['title'])}</h2>"
         f"{_render_section_body_html(section.get('body') or '')}"
-        "</section>"
+        "</div>"
         for index, section in enumerate(sections, 1)
     )
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><style>
 body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
-.wrap{{max-width:980px;margin:0 auto;background:white;border:1px solid #e5e7eb;padding:24px}}
 h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
 h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
-pre{{white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;background:#f8fafc;border:1px solid #e5e7eb;padding:12px;margin:0}}
-.report-table-wrap{{width:100%;overflow-x:auto;margin:8px 0 12px}}
-.report-table{{width:100%;min-width:560px;border-collapse:collapse;font-size:13px}}
-.report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700}}
-.report-table th,.report-table td{{border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top}}
-.report-table td{{background:#f8fafc}}
-.report-table-todo td{{background:#fbcfe8}}
-.report-table-in-progress td{{background:#fef3c7}}
-.report-table-done td{{background:#d4ffe1}}
-.report-table-late td{{background:#fee2e2}}
-.report-table-deadline td{{background:#dc2626;color:#ffffff}}
-.report-table .report-row-canceled td{{background:#fee2e2;color:#991b1b}}
 @media only screen and (max-width:600px){{
 body{{padding:8px}}
-.wrap{{width:100%;max-width:none;padding:12px;box-sizing:border-box}}
 h1{{font-size:18px}}
 h2{{font-size:13px}}
 pre{{font-size:12px;padding:10px}}
-.report-table{{font-size:12px;min-width:520px}}
 .report-table th,.report-table td{{padding:5px 6px}}
 }}
-</style></head><body><div class="wrap"><h1>{html.escape(subject)}</h1>
-<p>Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>{section_html}</div></body></html>"""
+</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
+<tr><td align="center" style="padding:0;">
+<table role="presentation" width="980" cellspacing="0" cellpadding="0" border="0" style="width:980px;max-width:980px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<tr><td style="padding:24px;">
+<h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
+<p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>
+{section_html}
+</td></tr></table>
+</td></tr></table>
+</body></html>"""
 
 
 async def send_meetings_report(subject: str, recipients: dict[str, list[str]], plain_text: str, html_body: str) -> dict[str, Any]:

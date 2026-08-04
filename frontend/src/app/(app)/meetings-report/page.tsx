@@ -340,11 +340,32 @@ export default function MeetingsReportPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic Send</div>
-              <div className="text-sm text-muted-foreground">Saved default recipients and schedule for this report.</div>
+              <div className="text-sm text-muted-foreground">
+                {settings.is_active
+                  ? "Automatic sending is ON. This report will send on the selected days and time."
+                  : "Automatic sending is OFF. This report will not send by itself."}
+              </div>
             </div>
-            <Button variant={settings.is_active ? "default" : "outline"} onClick={() => canEdit && setSettings({ ...settings, is_active: !settings.is_active })} disabled={!canEdit}>
-              {settings.is_active ? "Enabled" : "Disabled"}
-            </Button>
+            <button
+              type="button"
+              aria-pressed={settings.is_active}
+              aria-label={settings.is_active ? "Turn automatic send off" : "Turn automatic send on"}
+              onClick={() => canEdit && setSettings({ ...settings, is_active: !settings.is_active })}
+              disabled={!canEdit}
+              className={
+                settings.is_active
+                  ? "relative h-8 w-14 rounded-full bg-emerald-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                  : "relative h-8 w-14 rounded-full bg-red-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              }
+            >
+              <span
+                className={
+                  settings.is_active
+                    ? "absolute right-1 top-1 size-6 rounded-full bg-white shadow transition-all"
+                    : "absolute left-1 top-1 size-6 rounded-full bg-white shadow transition-all"
+                }
+              />
+            </button>
           </div>
           <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
             <div>
