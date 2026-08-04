@@ -779,9 +779,9 @@ def _render_section_body_html(body: str) -> str:
     index = 0
 
     def flush_text() -> None:
-        if text_buffer:
+        if any(line.strip() for line in text_buffer):
             chunks.append(_render_text_block_html(text_buffer))
-            text_buffer.clear()
+        text_buffer.clear()
 
     def current_table_tone() -> str:
         for previous in reversed(text_buffer):
