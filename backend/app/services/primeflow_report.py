@@ -614,6 +614,7 @@ class GmailService:
         message["To"] = ", ".join(recipient_map["to"])
         message["Subject"] = subject
         message["Message-ID"] = message_id
+        message["X-Entity-Ref-ID"] = message_id.strip("<>")
         if recipient_map["cc"]:
             message["Cc"] = ", ".join(recipient_map["cc"])
         if recipient_map["bcc"]:

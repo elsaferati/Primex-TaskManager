@@ -55,7 +55,7 @@ def next_working_day(day: date) -> date:
 
 
 def subject_for(day: date) -> str:
-    return f"PrimeFlow Meetings Report - {day:%d.%m.%Y}"
+    return f"PrimeFlow Mbyllja e dites M3 - {day:%d.%m.%Y}"
 
 
 def _local_date(value: datetime | date | None) -> date | None:
@@ -339,8 +339,8 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         {"title": SECTION_TITLES[1], "body": std_tickets_section},
         {"title": SECTION_TITLES[2], "body": _normalize_section(section_1)},
         {"title": SECTION_TITLES[3], "body": _normalize_section(_m3_status_table("TODO", today_todo, names))},
-        {"title": SECTION_TITLES[4], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
         {"title": SECTION_TITLES[7], "body": section_6},
+        {"title": SECTION_TITLES[4], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
         {"title": SECTION_TITLES[6], "body": _normalize_section(section_5)},
         {"title": SECTION_TITLES[5], "body": _normalize_section(section_4)},
         {"title": SECTION_TITLES[8], "body": _normalize_section(_m3_status_table("1H PA SLOT", one_h_no_slot, names))},
@@ -848,6 +848,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         return ""
     header, body_rows = table_rows[0], table_rows[1:]
     body_rows = _merge_ascii_continuation_rows(header, body_rows)
+    column_widths = _email_column_widths(header)
     header_cell_style = (
         "background:#e5e7eb;color:#111827;text-align:left;font-weight:700;"
         "border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top;"
@@ -861,8 +862,18 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
         "padding:6px 8px;vertical-align:top;"
     )
-    header_html = "".join(f"<th style=\"{header_cell_style}\">{html.escape(cell)}</th>" for cell in header)
+    not_discussed_cell_style = (
+        "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
+        "padding:6px 8px;vertical-align:top;"
+    )
+    header_html = "".join(
+        f"<th width=\"{column_widths[index]}%\" style=\"{header_cell_style}{_email_column_cell_style(cell)}\">"
+        f"{html.escape(cell)}</th>"
+        for index, cell in enumerate(header)
+    )
+    colgroup_html = "".join(f"<col width=\"{width}%\" style=\"width:{width}%;\" />" for width in column_widths)
     canceled_index = next((index for index, cell in enumerate(header) if cell.upper() == "ANULUAR"), None)
+    disk_index = next((index for index, cell in enumerate(header) if cell.upper() == "DISK"), None)
     table_class = f"report-table report-table-{tone}" if tone else "report-table"
     body_html_parts = []
     for row in body_rows:
@@ -871,12 +882,19 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             and len(row) > canceled_index
             and bool(row[canceled_index].strip())
         )
-        cell_style = canceled_cell_style if is_canceled else body_cell_style
+        is_not_discussed_note = (
+            tone == "notes"
+            and disk_index is not None
+            and len(row) > disk_index
+            and row[disk_index].strip().upper() == "NO"
+        )
+        cell_style = not_discussed_cell_style if is_not_discussed_note else canceled_cell_style if is_canceled else body_cell_style
         body_html_parts.append(
             "<tr>"
             + "".join(
-                f"<td style=\"{cell_style}\">{html.escape(cell).replace(chr(10), '<br>')}</td>"
-                for cell in row
+                f"<td width=\"{column_widths[index]}%\" style=\"{cell_style}{_email_column_cell_style(header[index])}\">"
+                f"{html.escape(cell).replace(chr(10), '<br>')}</td>"
+                for index, cell in enumerate(row)
             )
             + "</tr>"
         )
@@ -894,10 +912,65 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         "style=\"width:100%;border-collapse:collapse;margin:8px 0 12px;\">"
         f"{caption_html}<tr><td style=\"padding:0;\">"
         f"<table class=\"{table_class}\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
-        "style=\"width:100%;border-collapse:collapse;font-size:13px;font-family:Arial,sans-serif;\">"
-        f"<thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+        "style=\"width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;font-family:Arial,sans-serif;\">"
+        f"<colgroup>{colgroup_html}</colgroup><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
         "</td></tr></table>"
     )
+
+
+def _email_column_cell_style(header_cell: str) -> str:
+    name = header_cell.strip().upper()
+    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "MBAJTUR", "ANULUAR", "PA STATUS"}:
+        return "white-space:nowrap;"
+    if name == "WHO":
+        return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
+    return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
+
+
+def _email_column_widths(header: list[str]) -> list[int]:
+    """Give utility columns only the space they need; reserve the rest for title/note text."""
+    if not header:
+        return []
+    fixed_by_name = {
+        "NR": 4,
+        "WHO": 8,
+        "FROM": 9,
+        "TIME": 8,
+        "ORA": 8,
+        "KOHA": 8,
+        "DISK": 7,
+        "LATE": 10,
+        "MBAJTUR": 8,
+        "ANULUAR": 8,
+        "PA STATUS": 9,
+    }
+    content_names = {"TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"}
+    normalized = [cell.strip().upper() for cell in header]
+    content_indexes = [index for index, name in enumerate(normalized) if name in content_names]
+    widths: list[int | None] = []
+    fixed_total = 0
+    for name in normalized:
+        if name in content_names:
+            widths.append(None)
+            continue
+        width = fixed_by_name.get(name, 10)
+        widths.append(width)
+        fixed_total += width
+    if content_indexes:
+        remaining = max(35, 100 - fixed_total)
+        share = max(1, remaining // len(content_indexes))
+        for index in content_indexes:
+            widths[index] = share
+    unresolved = [index for index, width in enumerate(widths) if width is None]
+    if unresolved:
+        share = max(1, (100 - fixed_total) // len(unresolved))
+        for index in unresolved:
+            widths[index] = share
+    total = sum(int(width or 0) for width in widths)
+    if total != 100 and widths:
+        target_index = content_indexes[0] if content_indexes else len(widths) - 1
+        widths[target_index] = max(1, int(widths[target_index] or 1) + (100 - total))
+    return [int(width or 1) for width in widths]
 
 
 def _primary_text_column_index(header: list[str]) -> int:
@@ -913,6 +986,7 @@ def _merge_ascii_continuation_rows(header: list[str], rows: list[list[str]]) -> 
         return rows
     width = len(header)
     text_index = _primary_text_column_index(header)
+    nr_index = next((index for index, cell in enumerate(header) if cell.strip().upper() == "NR"), 0)
     merged: list[list[str]] = []
     for row in rows:
         normalized = (row + [""] * width)[:width]
@@ -922,7 +996,19 @@ def _merge_ascii_continuation_rows(header: list[str], rows: list[list[str]]) -> 
             for index in range(width)
             if index != text_index
         )
-        if merged and has_text_continuation and other_cells_empty:
+        is_wrapped_row = merged and not normalized[nr_index].strip() and any(cell.strip() for cell in normalized)
+        if is_wrapped_row:
+            previous = merged[-1]
+            for index, value in enumerate(normalized):
+                stripped = value.strip()
+                if not stripped:
+                    continue
+                previous[index] = (
+                    f"{previous[index]}\n{stripped}"
+                    if previous[index].strip()
+                    else stripped
+                )
+        elif merged and has_text_continuation and other_cells_empty:
             previous = merged[-1]
             previous[text_index] = (
                 f"{previous[text_index]}\n{normalized[text_index].strip()}"
@@ -1042,7 +1128,7 @@ pre{{font-size:12px;padding:10px}}
 </style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
 <tr><td align="center" style="padding:0;">
-<table role="presentation" width="980" cellspacing="0" cellpadding="0" border="0" style="width:980px;max-width:980px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:980px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
 <tr><td style="padding:24px;">
 <h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
 <p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>

@@ -381,7 +381,7 @@ pre{{font-size:12px;padding:10px}}
 </style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
 <tr><td align="center" style="padding:0;">
-<table role="presentation" width="980" cellspacing="0" cellpadding="0" border="0" style="width:980px;max-width:980px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:980px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
 <tr><td style="padding:24px;">
 <h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
 <p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y}</p>
