@@ -53,10 +53,11 @@ module.exports = {
     },
     {
       ...apiProcess,
-      name: "primex-public-api",
+      name: "backend-api-flow",
       args: "-m uvicorn app.main:app --host 0.0.0.0 --port 8080",
       env: {
         ...sharedEnv,
+        REDIS_ENABLED: "false",
         // Only one API instance should run the weekly system-task scheduler.
         SYSTEM_TASK_SCHEDULER_ENABLED: "false",
       },
