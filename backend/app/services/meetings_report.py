@@ -155,8 +155,16 @@ async def _users_by_initials(db: AsyncSession, initials: str) -> list[User]:
     ]
 
 
-def _task_line(task: Task, names: dict[Any, str]) -> str:
-    owner = _initials(names.get(task.assigned_to))
+def _task_owners(task: Task, names: dict[Any, str], assignee_ids_by_task: dict[Any, set[Any]] | None = None) -> str:
+    assignee_ids = assignee_ids_by_task.get(task.id, set()) if assignee_ids_by_task else set()
+    if not assignee_ids and task.assigned_to:
+        assignee_ids = {task.assigned_to}
+    owners = sorted({_initials(names.get(user_id)) for user_id in assignee_ids if _initials(names.get(user_id)) != "-"})
+    return " ".join(owners) or _initials(names.get(task.assigned_to))
+
+
+def _task_line(task: Task, names: dict[Any, str], assignee_ids_by_task: dict[Any, set[Any]] | None = None) -> str:
+    owner = _task_owners(task, names, assignee_ids_by_task)
     title = _clean_task_title(task.title)
     return f"- {owner}: {title}"
 
@@ -257,6 +265,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     )
     tasks = (await db.execute(task_stmt)).scalars().all()
     names = await _assignee_names(db, tasks)
+    assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     finance_section = await _m3_finance_ga_section(db, tasks, names, report_day)
     std_tickets_section = await std_tickets_report_section(db, report_day)
 
@@ -309,8 +318,8 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         tomorrow=tomorrow,
         fallback_external=_meeting_lines(external_meetings),
         fallback_internal=_meeting_lines(internal_meetings),
-        fallback_bz=_task_lines(bz_tasks, names),
-        fallback_blocked=_task_lines(blocked, names),
+        fallback_bz=_task_lines(bz_tasks, names, assignee_ids_by_task),
+        fallback_blocked=_task_lines(blocked, names, assignee_ids_by_task),
     )
     section_5 = [
         *_m3_status_table("DETYRAT E REJA", new_tomorrow, names),
@@ -341,11 +350,11 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     return tomorrow, sections, snapshot
 
 
-def _task_lines(tasks: list[Task], names: dict[Any, str]) -> list[str]:
+def _task_lines(tasks: list[Task], names: dict[Any, str], assignee_ids_by_task: dict[Any, set[Any]] | None = None) -> list[str]:
     if not tasks:
         return ["(Asnje detyre)"]
-    ordered = sorted(tasks, key=lambda task: (names.get(task.assigned_to) or "", task.title or ""))
-    return [_task_line(task, names) for task in ordered]
+    ordered = sorted(tasks, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), task.title or ""))
+    return [_task_line(task, names, assignee_ids_by_task) for task in ordered]
 
 
 def _status_group_section(title: str, tasks: list[Task], names: dict[Any, str], report_day: date) -> list[str]:
@@ -517,6 +526,19 @@ def _common_title(item: dict[str, Any]) -> str:
 
 
 def _common_owner(item: dict[str, Any]) -> str:
+    assignees = item.get("assignees") or item.get("assigned_users") or item.get("owners")
+    if isinstance(assignees, list):
+        initials = []
+        for assignee in assignees:
+            if isinstance(assignee, dict):
+                label = assignee.get("full_name") or assignee.get("username") or assignee.get("email") or assignee.get("name")
+            else:
+                label = assignee
+            value = _initials(str(label or ""))
+            if value != "-" and value not in initials:
+                initials.append(value)
+        if initials:
+            return " ".join(initials)
     return _initials(str(item.get("person") or item.get("owner") or item.get("employee") or item.get("assignee_name") or ""))
 
 
@@ -704,7 +726,7 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
     return "#f8fafc", "#111827"
 
 
-def _render_ascii_table_html(lines: list[str], tone: str = "") -> str:
+def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = "") -> str:
     table_rows = [_parse_ascii_cells(line) for line in lines if line.startswith("|")]
     if not table_rows:
         return ""
@@ -737,10 +759,18 @@ def _render_ascii_table_html(lines: list[str], tone: str = "") -> str:
             "<tr>" + "".join(f"<td style=\"{cell_style}\">{html.escape(cell)}</td>" for cell in row) + "</tr>"
         )
     body_html = "".join(body_html_parts)
+    caption_html = ""
+    if caption.strip():
+        caption_html = (
+            "<tr><td style=\"background:#f8fafc;color:#111827;font-weight:700;"
+            "border:1px solid #cbd5e1;border-bottom:0;padding:8px 10px;"
+            "font-family:Arial,sans-serif;font-size:13px;\">"
+            f"{html.escape(caption.strip())}</td></tr>"
+        )
     return (
         "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
         "style=\"width:100%;border-collapse:collapse;margin:8px 0 12px;\">"
-        "<tr><td style=\"padding:0;\">"
+        f"{caption_html}<tr><td style=\"padding:0;\">"
         f"<table class=\"{table_class}\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
         "style=\"width:100%;border-collapse:collapse;font-size:13px;font-family:Arial,sans-serif;\">"
         f"<thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
@@ -800,6 +830,18 @@ def _render_section_body_html(body: str) -> str:
                 )
                 return
 
+    def pop_current_table_label() -> str:
+        for previous_index in range(len(text_buffer) - 1, -1, -1):
+            stripped = text_buffer[previous_index].strip()
+            if not stripped:
+                continue
+            if len(stripped) <= 45 and (stripped.endswith(":") or stripped.isupper() or re.match(r"^\d{1,2}:\d{2}:?$", stripped)):
+                label = stripped
+                del text_buffer[previous_index:]
+                return label
+            return ""
+        return ""
+
     while index < len(lines):
         line = lines[index]
         if line.startswith("+-") and index + 1 < len(lines) and lines[index + 1].startswith("|"):
@@ -811,8 +853,9 @@ def _render_section_body_html(body: str) -> str:
             if _ascii_table_is_empty(table_lines):
                 mark_current_label_empty()
                 continue
+            caption = pop_current_table_label()
             flush_text()
-            chunks.append(_render_ascii_table_html(table_lines, tone))
+            chunks.append(_render_ascii_table_html(table_lines, tone, caption))
             continue
         text_buffer.append(line)
         index += 1
