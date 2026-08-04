@@ -3,6 +3,7 @@ from __future__ import annotations
 import html
 import os
 import re
+import textwrap
 from datetime import date, datetime, timedelta
 from typing import Any
 
@@ -15,6 +16,7 @@ from app.models.enums import CommonCategory
 from app.models.meeting import Meeting
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.daily_report_logic import business_days_between
@@ -24,7 +26,7 @@ from app.services.std_feedback_tickets import std_tickets_report_section
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
-    "(GA) M3 DET GA MBYLLJA ME HV/OH?",
+    "(GA) M3 DET GA MBYLLJA ME HV?",
     "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3",
     "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?",
     "DET. PA PROGRES (PINK)?",
@@ -101,6 +103,12 @@ def _late_days(task: Task) -> int:
     return business_days_between(due_day, today)
 
 
+def _late_days_label(days: int) -> str:
+    if days <= 0:
+        return "-"
+    return f"{days} day" if days == 1 else f"{days} days"
+
+
 def _initials(name: str | None) -> str:
     parts = re.findall(r"[^\W\d_]+", name or "", flags=re.UNICODE)
     return "".join(part[0] for part in parts).upper() or "-"
@@ -108,24 +116,109 @@ def _initials(name: str | None) -> str:
 
 async def _assignee_names(db: AsyncSession, tasks: list[Task]) -> dict[Any, str]:
     user_ids = {task.assigned_to for task in tasks if task.assigned_to}
+    task_ids = [task.id for task in tasks]
+    if task_ids:
+        assignee_user_ids = (
+            await db.execute(select(TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids)))
+        ).scalars().all()
+        user_ids.update(assignee_user_ids)
     if not user_ids:
         return {}
     users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
     return {user.id: user.full_name or user.email for user in users}
 
 
-def _task_line(task: Task, names: dict[Any, str]) -> str:
-    owner = _initials(names.get(task.assigned_to))
+async def _effective_task_assignee_ids(db: AsyncSession, tasks: list[Task]) -> dict[Any, set[Any]]:
+    result: dict[Any, set[Any]] = {task.id: set() for task in tasks}
+    for task in tasks:
+        if task.assigned_to:
+            result.setdefault(task.id, set()).add(task.assigned_to)
+    task_ids = [task.id for task in tasks]
+    if not task_ids:
+        return result
+    rows = (
+        await db.execute(select(TaskAssignee.task_id, TaskAssignee.user_id).where(TaskAssignee.task_id.in_(task_ids)))
+    ).all()
+    for task_id, user_id in rows:
+        result.setdefault(task_id, set()).add(user_id)
+    return result
+
+
+async def _users_by_initials(db: AsyncSession, initials: str) -> list[User]:
+    users = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
+    target = initials.upper()
+    return [
+        user for user in users
+        if _initials(user.full_name) == target
+        or (user.username or "").strip().upper() == target
+        or (user.email or "").split("@", 1)[0].strip().upper() == target
+    ]
+
+
+def _task_owners(task: Task, names: dict[Any, str], assignee_ids_by_task: dict[Any, set[Any]] | None = None) -> str:
+    assignee_ids = assignee_ids_by_task.get(task.id, set()) if assignee_ids_by_task else set()
+    if not assignee_ids and task.assigned_to:
+        assignee_ids = {task.assigned_to}
+    owners = sorted({_initials(names.get(user_id)) for user_id in assignee_ids if _initials(names.get(user_id)) != "-"})
+    return " ".join(owners) or _initials(names.get(task.assigned_to))
+
+
+def _task_line(task: Task, names: dict[Any, str], assignee_ids_by_task: dict[Any, set[Any]] | None = None) -> str:
+    owner = _task_owners(task, names, assignee_ids_by_task)
     title = _clean_task_title(task.title)
     return f"- {owner}: {title}"
 
 
 def _task_line_with_late_days(task: Task, names: dict[Any, str]) -> str:
     owner = _initials(names.get(task.assigned_to))
-    title = _clean_task_title(task.title)
+    title_lines = _wrap_fixed_width(_clean_task_title(task.title), 48)
     days = _late_days(task)
-    late_label = f"{days} dite late" if days else "-"
-    return f"- {owner:<4} | {title:<45} | {late_label}"
+    late_label = _late_days_label(days)
+    lines = [f"- {owner:<4} | {title_lines[0]:<48} | {late_label}"]
+    lines.extend(f"  {'':<4} | {line:<48} |" for line in title_lines[1:])
+    return "\n".join(lines)
+
+
+def _wrap_fixed_width(value: str, width: int) -> list[str]:
+    cleaned = re.sub(r"\s+", " ", value).strip()
+    return textwrap.wrap(cleaned, width=width, break_long_words=False, break_on_hyphens=False) or ["-"]
+
+
+def _m3_status_table(status_label: str, tasks: list[Task], names: dict[Any, str], *, include_late_days: bool = False) -> list[str]:
+    if include_late_days:
+        border = "+----+-------+------------------------------------------------------------------+--------------+"
+        header = f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} | {'LATE':<12} |"
+    else:
+        border = "+----+-------+------------------------------------------------------------------+"
+        header = f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} |"
+    rows = [
+        f"{status_label}:",
+        border,
+        header,
+        border,
+    ]
+    if not tasks:
+        if include_late_days:
+            rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} | {'-':<12} |")
+        else:
+            rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+        rows.append(border)
+        return rows
+    for index, task in enumerate(sorted(tasks, key=lambda item: (_initials(names.get(item.assigned_to)), _clean_task_title(item.title))), start=1):
+        owner = _initials(names.get(task.assigned_to))
+        title_lines = _wrap_fixed_width(_clean_task_title(task.title), 64)
+        if include_late_days:
+            late_label = _late_days_label(_late_days(task))
+            rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} | {late_label:<12} |")
+        else:
+            rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} |")
+        for line in title_lines[1:]:
+            if include_late_days:
+                rows.append(f"| {'':<2} | {'':<5} | {line:<64} | {'':<12} |")
+            else:
+                rows.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        rows.append(border)
+    return rows
 
 
 def _task_late_lines(tasks: list[Task], names: dict[Any, str]) -> list[str]:
@@ -172,7 +265,8 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     )
     tasks = (await db.execute(task_stmt)).scalars().all()
     names = await _assignee_names(db, tasks)
-    finance_section = await _finance_section(db, tasks, names, report_day)
+    assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    finance_section = await _m3_finance_ga_section(db, tasks, names, report_day)
     std_tickets_section = await std_tickets_report_section(db, report_day)
 
     system_tasks = [task for task in tasks if task.system_template_origin_id and _is_open(task)]
@@ -215,29 +309,24 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             leave_tomorrow.append((entry, full_day, start_time, end_time, note, is_all_users))
 
     section_1 = [
-        "IN PROGRESS:",
-        *_task_lines(system_in_progress, names),
+        *_m3_status_table("IN PROGRESS", system_in_progress, names),
         "",
-        "LATE:",
-        *_task_late_lines(system_late, names),
+        *_m3_status_table("LATE", system_late, names, include_late_days=True),
     ]
     section_4 = _tomorrow_common_section(
         common_items=common_items,
         tomorrow=tomorrow,
         fallback_external=_meeting_lines(external_meetings),
         fallback_internal=_meeting_lines(internal_meetings),
-        fallback_bz=_task_lines(bz_tasks, names),
-        fallback_blocked=_task_lines(blocked, names),
+        fallback_bz=_task_lines(bz_tasks, names, assignee_ids_by_task),
+        fallback_blocked=_task_lines(blocked, names, assignee_ids_by_task),
     )
     section_5 = [
-        "DETYRAT E REJA:",
-        *_task_lines(new_tomorrow, names),
+        *_m3_status_table("DETYRAT E REJA", new_tomorrow, names),
         "",
-        "08:00:",
-        *_task_lines(at_0800, names),
+        *_m3_status_table("08:00", at_0800, names),
         "",
-        "ME DEADLINE:",
-        *_task_lines(deadline, names),
+        *_m3_status_table("ME DEADLINE", deadline, names),
     ]
     section_6 = await _today_meeting_status_section(db, today_meetings, report_day)
 
@@ -245,13 +334,13 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         {"title": SECTION_TITLES[0], "body": finance_section},
         {"title": SECTION_TITLES[1], "body": std_tickets_section},
         {"title": SECTION_TITLES[2], "body": _normalize_section(section_1)},
-        {"title": SECTION_TITLES[3], "body": _empty_aware(_task_lines(today_todo, names))},
+        {"title": SECTION_TITLES[3], "body": _normalize_section(_m3_status_table("TODO", today_todo, names))},
         {"title": SECTION_TITLES[4], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
-        {"title": SECTION_TITLES[5], "body": _normalize_section(section_4)},
-        {"title": SECTION_TITLES[6], "body": _normalize_section(section_5)},
         {"title": SECTION_TITLES[7], "body": section_6},
-        {"title": SECTION_TITLES[8], "body": _empty_aware(_task_lines(one_h_no_slot, names))},
-        {"title": SECTION_TITLES[9], "body": _empty_aware(_task_lines(personal_ga_ka, names))},
+        {"title": SECTION_TITLES[6], "body": _normalize_section(section_5)},
+        {"title": SECTION_TITLES[5], "body": _normalize_section(section_4)},
+        {"title": SECTION_TITLES[8], "body": _normalize_section(_m3_status_table("1H PA SLOT", one_h_no_slot, names))},
+        {"title": SECTION_TITLES[9], "body": _normalize_section(_m3_status_table("PERSONAL GA/KA", personal_ga_ka, names))},
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
@@ -261,43 +350,67 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     return tomorrow, sections, snapshot
 
 
-def _task_lines(tasks: list[Task], names: dict[Any, str]) -> list[str]:
+def _task_lines(tasks: list[Task], names: dict[Any, str], assignee_ids_by_task: dict[Any, set[Any]] | None = None) -> list[str]:
     if not tasks:
         return ["(Asnje detyre)"]
-    ordered = sorted(tasks, key=lambda task: (names.get(task.assigned_to) or "", task.title or ""))
-    return [_task_line(task, names) for task in ordered]
+    ordered = sorted(tasks, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), task.title or ""))
+    return [_task_line(task, names, assignee_ids_by_task) for task in ordered]
 
 
-async def _finance_section(db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date) -> str:
+def _status_group_section(title: str, tasks: list[Task], names: dict[Any, str], report_day: date) -> list[str]:
+    today_tasks = [task for task in tasks if _task_day(task) == report_day]
+    todo = [task for task in today_tasks if str(task.status or "").upper() == "TODO" and _is_open(task)]
+    in_progress = [task for task in today_tasks if str(task.status or "").upper() == "IN_PROGRESS" and _is_open(task)]
+    done = [
+        task for task in tasks
+        if str(task.status or "").upper() in {"DONE", "COMPLETED"}
+        and (_task_day(task) == report_day or _local_date(task.completed_at) == report_day)
+    ]
+    late = [task for task in tasks if _is_open(task) and _late_days(task) > 0]
+    return [
+        f"{title}:",
+        *_m3_status_table("TODO", todo, names),
+        "",
+        *_m3_status_table("IN PROGRESS", in_progress, names),
+        "",
+        *_m3_status_table("DONE", done, names),
+        "",
+        *_m3_status_table("LATE", late, names, include_late_days=True),
+    ]
+
+
+async def _m3_finance_ga_section(db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date) -> str:
+    assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    ga_users = await _users_by_initials(db, "GA")
+    ga_user_ids = {user.id for user in ga_users}
+    ga_tasks = [
+        task for task in tasks
+        if ga_user_ids.intersection(assignee_ids_by_task.get(task.id, set()))
+        and (
+            _task_day(task) == report_day
+            or _local_date(task.completed_at) == report_day
+            or _late_days(task) > 0
+        )
+    ]
+
     finance_department = (
         await db.execute(select(Department).where(Department.name.ilike("finance")))
     ).scalar_one_or_none()
     if finance_department is None:
-        return "TODO:\n(Asnje detyre)\n\nIN PROGRESS:\n(Asnje detyre)\n\nDONE:\n(Asnje detyre)\n\nLATE:\n(Asnje detyre)"
-
-    finance_tasks = [task for task in tasks if task.department_id == finance_department.id]
-    today_tasks = [task for task in finance_tasks if _task_day(task) == report_day]
-    todo = [task for task in today_tasks if str(task.status or "").upper() == "TODO" and _is_open(task)]
-    in_progress = [task for task in today_tasks if str(task.status or "").upper() == "IN_PROGRESS" and _is_open(task)]
-    done = [
-        task for task in finance_tasks
-        if str(task.status or "").upper() in {"DONE", "COMPLETED"}
-        and (_task_day(task) == report_day or _local_date(task.completed_at) == report_day)
-    ]
-    late = [task for task in finance_tasks if _is_open(task) and _late_days(task) > 0]
+        hv_tasks: list[Task] = []
+    else:
+        finance_tasks = [task for task in tasks if task.department_id == finance_department.id]
+        hv_tasks = [
+            task for task in finance_tasks
+            if _task_day(task) == report_day
+            or _local_date(task.completed_at) == report_day
+            or _late_days(task) > 0
+        ]
 
     return _normalize_section([
-        "TODO:",
-        *_task_lines(todo, names),
+        *_status_group_section("GA TASKS", ga_tasks, names, report_day),
         "",
-        "IN PROGRESS:",
-        *_task_lines(in_progress, names),
-        "",
-        "DONE:",
-        *_task_lines(done, names),
-        "",
-        "LATE:",
-        *_task_late_lines(late, names),
+        *_status_group_section("HV TASKS", hv_tasks, names, report_day),
     ])
 
 
@@ -329,6 +442,37 @@ def _meeting_lines(meetings: list[Meeting]) -> list[str]:
     return [f"- {_local_time(meeting.starts_at)}: {meeting.title}" for meeting in sorted(meetings, key=lambda m: m.starts_at or datetime.min)]
 
 
+def _meeting_group_title(title: str) -> list[str]:
+    return [title]
+
+
+def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: dict[Any, str]) -> list[str]:
+    border = "+----+-------+------------------------------------------------------------------+----------+----------+-----------+"
+    rows = [
+        border,
+        f"| {'NR':<2} | {'TIME':<5} | {'TITLE':<64} | {'MBAJTUR':<8} | {'ANULUAR':<8} | {'PA STATUS':<9} |",
+        border,
+    ]
+    if not meetings:
+        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje takim)':<64} | {'':<8} | {'':<8} | {'':<9} |")
+        rows.append(border)
+        return rows
+    for index, meeting in enumerate(sorted(meetings, key=lambda item: item.starts_at or datetime.min), start=1):
+        status = status_by_meeting.get(meeting.id, "")
+        title_lines = _wrap_fixed_width(meeting.title or "-", 64)
+        held = "✓" if status == "held" else ""
+        canceled = "✓" if status == "canceled" else ""
+        no_status = "✓" if status == "" else ""
+        rows.append(
+            f"| {index:<2} | {_local_time(meeting.starts_at):<5} | {title_lines[0]:<64} | "
+            f"{held:<8} | {canceled:<8} | {no_status:<9} |"
+        )
+        for line in title_lines[1:]:
+            rows.append(f"| {'':<2} | {'':<5} | {line:<64} | {'':<8} | {'':<8} | {'':<9} |")
+        rows.append(border)
+    return rows
+
+
 async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting], report_day: date) -> str:
     statuses = (
         await db.execute(
@@ -339,27 +483,12 @@ async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting
     external = [meeting for meeting in meetings if getattr(meeting, "meeting_type", None) == "external"]
     internal = [meeting for meeting in meetings if getattr(meeting, "meeting_type", None) != "external"]
 
-    def by_status(values: list[Meeting], status_value: str) -> list[Meeting]:
-        return [meeting for meeting in values if status_by_meeting.get(meeting.id, "") == status_value]
-
     return _normalize_section([
-        "TAKIMET EXTERNE TE MBAJTURA:",
-        *_meeting_lines(by_status(external, "held")),
+        *_meeting_group_title("TAKIMET EXTERNE"),
+        *_meeting_status_checkbox_table(external, status_by_meeting),
         "",
-        "TAKIMET EXTERNE TE ANULUARA:",
-        *_meeting_lines(by_status(external, "canceled")),
-        "",
-        "TAKIMET EXTERNE PA STATUS:",
-        *_meeting_lines(by_status(external, "")),
-        "",
-        "TAKIMET INTERNE TE MBAJTURA:",
-        *_meeting_lines(by_status(internal, "held")),
-        "",
-        "TAKIMET INTERNE TE ANULUARA:",
-        *_meeting_lines(by_status(internal, "canceled")),
-        "",
-        "TAKIMET INTERNE PA STATUS:",
-        *_meeting_lines(by_status(internal, "")),
+        *_meeting_group_title("TAKIMET INTERNE"),
+        *_meeting_status_checkbox_table(internal, status_by_meeting),
     ])
 
 
@@ -397,6 +526,28 @@ def _common_title(item: dict[str, Any]) -> str:
 
 
 def _common_owner(item: dict[str, Any]) -> str:
+    bz_with_label = str(item.get("bzWithLabel") or item.get("bz_with_label") or "").strip()
+    if bz_with_label:
+        initials = [
+            value.strip().upper()
+            for value in re.split(r"[,;/\s]+", bz_with_label)
+            if value.strip()
+        ]
+        if initials:
+            return " ".join(dict.fromkeys(initials))
+    assignees = item.get("assignees") or item.get("assigned_users") or item.get("owners")
+    if isinstance(assignees, list):
+        initials = []
+        for assignee in assignees:
+            if isinstance(assignee, dict):
+                label = assignee.get("full_name") or assignee.get("username") or assignee.get("email") or assignee.get("name")
+            else:
+                label = assignee
+            value = _initials(str(label or ""))
+            if value != "-" and value not in initials:
+                initials.append(value)
+        if initials:
+            return " ".join(initials)
     return _initials(str(item.get("person") or item.get("owner") or item.get("employee") or item.get("assignee_name") or ""))
 
 
@@ -436,6 +587,63 @@ def _prefer_common(common_lines: list[str], fallback_lines: list[str]) -> list[s
     return common_lines if common_lines else [line for line in fallback_lines if not line.startswith("(Asnje")]
 
 
+def _strip_list_marker(value: str) -> str:
+    return re.sub(r"^\s*-\s*", "", value).strip()
+
+
+def _tomorrow_meeting_table(title: str, lines: list[str]) -> list[str]:
+    border = "+----+-------+------------------------------------------------------------------+"
+    rows = [
+        f"{title}:",
+        border,
+        f"| {'NR':<2} | {'TIME':<5} | {'TITLE':<64} |",
+        border,
+    ]
+    values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
+    if not values:
+        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje takim)':<64} |")
+        rows.append(border)
+        return rows
+    for index, value in enumerate(values, start=1):
+        match = re.match(r"^(\d{1,2}:\d{2})\s*:\s*(.+)$", value)
+        time_value = match.group(1) if match else "-"
+        title_value = match.group(2) if match else value
+        title_lines = _wrap_fixed_width(title_value, 64)
+        rows.append(f"| {index:<2} | {time_value:<5} | {title_lines[0]:<64} |")
+        for line in title_lines[1:]:
+            rows.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        rows.append(border)
+    return rows
+
+
+def _tomorrow_task_table(title: str, lines: list[str]) -> list[str]:
+    border = "+----+-------+------------------------------------------------------------------+"
+    rows = [
+        f"{title}:",
+        border,
+        f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} |",
+        border,
+    ]
+    values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
+    if not values:
+        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+        rows.append(border)
+        return rows
+    for index, value in enumerate(values, start=1):
+        owner = "-"
+        title_value = value
+        if ":" in value:
+            owner, title_value = value.split(":", 1)
+            owner = owner.strip() or "-"
+            title_value = title_value.strip()
+        title_lines = _wrap_fixed_width(title_value, 64)
+        rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} |")
+        for line in title_lines[1:]:
+            rows.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        rows.append(border)
+    return rows
+
+
 def _tomorrow_common_section(
     *,
     common_items: dict[str, list[dict[str, Any]]],
@@ -450,29 +658,36 @@ def _tomorrow_common_section(
     bz = _prefer_common(_common_task_lines(common_items.get("bz") or [], tomorrow), fallback_bz)
     blocked = _prefer_common(_common_task_lines(common_items.get("blocked") or [], tomorrow), fallback_blocked)
     return [
-        "TAKIMET EXTERNE:",
-        *(external or ["(Asnje takim)"]),
+        *_tomorrow_meeting_table("TAKIMET EXTERNE", external),
         "",
-        "TAKIMET INTERNE:",
-        *(internal or ["(Asnje takim)"]),
+        *_tomorrow_meeting_table("TAKIMET INTERNE", internal),
         "",
-        "BZ ME GA:",
-        *(bz or ["(Asnje detyre)"]),
+        *_tomorrow_task_table("BZ ME GA", bz),
         "",
-        "BLLOK:",
-        *(blocked or ["(Asnje detyre)"]),
+        *_tomorrow_task_table("BLLOK", blocked),
     ]
 
 
 def _leave_lines(entries: list[tuple[CommonEntry, bool, str | None, str | None, str | None, bool]], names: dict[Any, str]) -> list[str]:
+    border = "+----+-------+------------------------------------------------------------------+"
+    lines = [
+        border,
+        f"| {'NR':<2} | {'WHO':<5} | {'TIME':<64} |",
+        border,
+    ]
     if not entries:
-        return []
-    lines = []
-    for entry, full_day, start_time, end_time, note, is_all_users in entries:
+        lines.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+        lines.append(border)
+        return lines
+    for index, (entry, full_day, start_time, end_time, note, is_all_users) in enumerate(entries, start=1):
         person = "ALL" if is_all_users else _initials(names.get(entry.assigned_to_user_id or entry.created_by_user_id) or entry.title)
         when = "Full day" if full_day else f"{start_time or '-'}-{end_time or '-'}"
         detail = f" - {note}" if note else ""
-        lines.append(f"- {person}: {when}{detail}")
+        time_lines = _wrap_fixed_width(f"{when}{detail}", 64)
+        lines.append(f"| {index:<2} | {person:<5} | {time_lines[0]:<64} |")
+        for line in time_lines[1:]:
+            lines.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        lines.append(border)
     return lines
 
 
@@ -487,23 +702,207 @@ def render_plain_text(subject: str, report_day: date, tomorrow: date, sections: 
     return "\n\n".join(blocks)
 
 
+def _parse_ascii_cells(line: str) -> list[str]:
+    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _table_tone_from_label(label: str) -> str:
+    normalized = label.strip().upper().rstrip(":")
+    if normalized in {"TODO", "DETYRAT E REJA"}:
+        return "todo"
+    if normalized == "IN PROGRESS":
+        return "in-progress"
+    if normalized == "DONE":
+        return "done"
+    if normalized == "LATE":
+        return "late"
+    if normalized == "ME DEADLINE":
+        return "deadline"
+    return ""
+
+
+def _table_tone_styles(tone: str) -> tuple[str, str]:
+    if tone == "todo":
+        return "#fbcfe8", "#111827"
+    if tone == "in-progress":
+        return "#fef3c7", "#111827"
+    if tone == "done":
+        return "#d4ffe1", "#111827"
+    if tone == "late":
+        return "#fee2e2", "#111827"
+    if tone == "deadline":
+        return "#dc2626", "#ffffff"
+    return "#f8fafc", "#111827"
+
+
+def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = "") -> str:
+    table_rows = [_parse_ascii_cells(line) for line in lines if line.startswith("|")]
+    if not table_rows:
+        return ""
+    header, body_rows = table_rows[0], table_rows[1:]
+    header_cell_style = (
+        "background:#e5e7eb;color:#111827;text-align:left;font-weight:700;"
+        "border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top;"
+    )
+    body_bg, body_color = _table_tone_styles(tone)
+    body_cell_style = (
+        f"background:{body_bg};color:{body_color};border:1px solid #cbd5e1;"
+        "padding:6px 8px;vertical-align:top;"
+    )
+    canceled_cell_style = (
+        "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
+        "padding:6px 8px;vertical-align:top;"
+    )
+    header_html = "".join(f"<th style=\"{header_cell_style}\">{html.escape(cell)}</th>" for cell in header)
+    canceled_index = next((index for index, cell in enumerate(header) if cell.upper() == "ANULUAR"), None)
+    table_class = f"report-table report-table-{tone}" if tone else "report-table"
+    body_html_parts = []
+    for row in body_rows:
+        is_canceled = (
+            canceled_index is not None
+            and len(row) > canceled_index
+            and bool(row[canceled_index].strip())
+        )
+        cell_style = canceled_cell_style if is_canceled else body_cell_style
+        body_html_parts.append(
+            "<tr>" + "".join(f"<td style=\"{cell_style}\">{html.escape(cell)}</td>" for cell in row) + "</tr>"
+        )
+    body_html = "".join(body_html_parts)
+    caption_html = ""
+    if caption.strip():
+        caption_html = (
+            "<tr><td style=\"background:#f8fafc;color:#111827;font-weight:700;"
+            "border:1px solid #cbd5e1;border-bottom:0;padding:8px 10px;"
+            "font-family:Arial,sans-serif;font-size:13px;\">"
+            f"{html.escape(caption.strip())}</td></tr>"
+        )
+    return (
+        "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+        "style=\"width:100%;border-collapse:collapse;margin:8px 0 12px;\">"
+        f"{caption_html}<tr><td style=\"padding:0;\">"
+        f"<table class=\"{table_class}\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+        "style=\"width:100%;border-collapse:collapse;font-size:13px;font-family:Arial,sans-serif;\">"
+        f"<thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
+        "</td></tr></table>"
+    )
+
+
+def _ascii_table_is_empty(lines: list[str]) -> bool:
+    table_rows = [_parse_ascii_cells(line) for line in lines if line.startswith("|")]
+    if len(table_rows) != 2:
+        return False
+    row = table_rows[1]
+    return any(cell in {"(Asnje detyre)", "(Asnje takim)"} for cell in row)
+
+
+def _render_text_block_html(lines: list[str]) -> str:
+    rendered_lines = []
+    for line in lines:
+        stripped = line.strip()
+        escaped = html.escape(line)
+        if stripped and len(stripped) <= 45 and stripped.endswith((": 0", ":")):
+            rendered_lines.append(f"<strong>{escaped}</strong>")
+        else:
+            rendered_lines.append(escaped)
+    return (
+        "<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;"
+        "background:#f8fafc;border:1px solid #e5e7eb;padding:12px;margin:0;\">"
+        f"{chr(10).join(rendered_lines).strip()}</pre>"
+    )
+
+
+def _render_section_body_html(body: str) -> str:
+    lines = body.splitlines()
+    chunks: list[str] = []
+    text_buffer: list[str] = []
+    index = 0
+
+    def flush_text() -> None:
+        if any(line.strip() for line in text_buffer):
+            chunks.append(_render_text_block_html(text_buffer))
+        text_buffer.clear()
+
+    def current_table_tone() -> str:
+        for previous in reversed(text_buffer):
+            if previous.strip():
+                return _table_tone_from_label(previous)
+        return ""
+
+    def mark_current_label_empty() -> None:
+        for previous_index in range(len(text_buffer) - 1, -1, -1):
+            stripped = text_buffer[previous_index].strip()
+            if stripped:
+                text_buffer[previous_index] = (
+                    f"{text_buffer[previous_index]} 0"
+                    if stripped.endswith(":")
+                    else f"{text_buffer[previous_index]}: 0"
+                )
+                return
+
+    def pop_current_table_label() -> str:
+        for previous_index in range(len(text_buffer) - 1, -1, -1):
+            stripped = text_buffer[previous_index].strip()
+            if not stripped:
+                continue
+            if len(stripped) <= 45 and (stripped.endswith(":") or stripped.isupper() or re.match(r"^\d{1,2}:\d{2}:?$", stripped)):
+                label = stripped
+                del text_buffer[previous_index:]
+                return label
+            return ""
+        return ""
+
+    while index < len(lines):
+        line = lines[index]
+        if line.startswith("+-") and index + 1 < len(lines) and lines[index + 1].startswith("|"):
+            tone = current_table_tone()
+            table_lines: list[str] = []
+            while index < len(lines) and (lines[index].startswith("+-") or lines[index].startswith("|")):
+                table_lines.append(lines[index])
+                index += 1
+            if _ascii_table_is_empty(table_lines):
+                mark_current_label_empty()
+                continue
+            caption = pop_current_table_label()
+            flush_text()
+            chunks.append(_render_ascii_table_html(table_lines, tone, caption))
+            continue
+        text_buffer.append(line)
+        index += 1
+    flush_text()
+    return "".join(chunk for chunk in chunks if chunk)
+
+
 def render_html(subject: str, report_day: date, tomorrow: date, sections: list[dict[str, str]]) -> str:
     section_html = "".join(
-        "<section>"
-        f"<h2>{index}. {html.escape(section['title'])}</h2>"
-        f"<pre>{html.escape(section.get('body') or '')}</pre>"
-        "</section>"
+        "<div style=\"margin:22px 0 0;\">"
+        f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">{index}. {html.escape(section['title'])}</h2>"
+        f"{_render_section_body_html(section.get('body') or '')}"
+        "</div>"
         for index, section in enumerate(sections, 1)
     )
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><style>
 body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
-.wrap{{max-width:980px;margin:0 auto;background:white;border:1px solid #e5e7eb;padding:24px}}
 h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
 h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
-pre{{white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;background:#f8fafc;border:1px solid #e5e7eb;padding:12px;margin:0}}
-</style></head><body><div class="wrap"><h1>{html.escape(subject)}</h1>
-<p>Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>{section_html}</div></body></html>"""
+@media only screen and (max-width:600px){{
+body{{padding:8px}}
+h1{{font-size:18px}}
+h2{{font-size:13px}}
+pre{{font-size:12px;padding:10px}}
+.report-table th,.report-table td{{padding:5px 6px}}
+}}
+</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
+<tr><td align="center" style="padding:0;">
+<table role="presentation" width="980" cellspacing="0" cellpadding="0" border="0" style="width:980px;max-width:980px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<tr><td style="padding:24px;">
+<h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
+<p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>
+{section_html}
+</td></tr></table>
+</td></tr></table>
+</body></html>"""
 
 
 async def send_meetings_report(subject: str, recipients: dict[str, list[str]], plain_text: str, html_body: str) -> dict[str, Any]:

@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import Image from "next/image"
 import Link from "next/link"
 import { usePathname, useRouter } from "next/navigation"
 import { 
@@ -30,6 +31,7 @@ import {
   Gem,
   Activity,
   ChevronDown,
+  ScrollText,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -145,7 +147,7 @@ const navGroups: NavGroup[] = [
     icon: BarChart3,
     items: [
       { href: "/system-task-instances", label: "System Tasks Report", icon: Layers },
-      { href: "/meetings-report", label: "Meetings Report", icon: MailCheck },
+      { href: "/meetings-report", label: "Mbyllja e dites M3", icon: MailCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
       {
@@ -183,11 +185,17 @@ export function Sidebar({ role }: { role: UserRole }) {
     role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
+  const standardsActive = pathname === "/standards/excel" || pathname.startsWith("/standards/excel/")
+  const [standardsOpen, setStandardsOpen] = React.useState(standardsActive)
   const [resolvedProjectRoute, setResolvedProjectRoute] = React.useState<"dev" | "pcm" | "design" | null>(null)
   const genericProjectId = React.useMemo(() => {
     const match = pathname.match(/^\/projects\/([^/]+)$/)
     return match ? decodeURIComponent(match[1]) : null
   }, [pathname])
+
+  React.useEffect(() => {
+    if (standardsActive) setStandardsOpen(true)
+  }, [standardsActive])
 
   React.useEffect(() => {
     if (!genericProjectId) {
@@ -346,13 +354,19 @@ export function Sidebar({ role }: { role: UserRole }) {
         style={{ touchAction: "pan-y" }}
       >
         {/* Header / Logo Area */}
-        <div className="flex h-16 w-64 items-center justify-between border-b px-3">
-          <Link href="/dashboard" className="flex h-full min-w-0 flex-1 items-center justify-center overflow-hidden pr-2" aria-label="PrimeFlow dashboard">
-            <span
-              role="img"
-              aria-label="Prime Flow"
-              className="block h-[58px] w-[176px] shrink-0 bg-contain bg-center bg-no-repeat"
-              style={{ backgroundImage: "url('/primeflow-sidebar-logo.png')" }}
+        <div className="flex h-20 w-64 items-center justify-between border-b px-3">
+          <Link
+            href="/dashboard"
+            className="flex h-full min-w-0 flex-1 items-center justify-center px-2"
+            aria-label="PrimeFlow dashboard"
+          >
+            <Image
+              src="/primeflow-sidebar-logo-transparent.png"
+              alt="Prime Flow"
+              width={160}
+              height={58}
+              priority
+              className="h-auto max-h-[54px] w-full max-w-[160px] object-contain"
             />
           </Link>
           <button
@@ -413,6 +427,40 @@ export function Sidebar({ role }: { role: UserRole }) {
             </div>
           )
         })}
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => setStandardsOpen((current) => !current)}
+            className={cn(
+              "group flex w-full items-center gap-3 rounded-md px-3 py-2.5 text-sm font-medium transition-colors",
+              "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+              standardsActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground"
+            )}
+            aria-expanded={standardsOpen}
+          >
+            <ScrollText className={cn("h-4 w-4 shrink-0", standardsActive ? "text-primary" : "text-muted-foreground")} />
+            <span className="flex-1 text-left">STANDARDET</span>
+            <ChevronDown className={cn("h-4 w-4 transition-transform", standardsOpen && "rotate-180")} />
+          </button>
+          {standardsOpen ? (
+            <Link
+              href="/standards/excel"
+              onMouseEnter={() => router.prefetch("/standards/excel")}
+              onFocus={() => router.prefetch("/standards/excel")}
+              onClick={() => {
+                if (!isDesktop) setIsOpen(false)
+              }}
+              className={cn(
+                "ml-6 mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                standardsActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground"
+              )}
+            >
+              <FileSpreadsheet className={cn("h-4 w-4", standardsActive ? "text-primary" : "text-muted-foreground")} />
+              Excel
+            </Link>
+          ) : null}
+        </div>
       </nav>
 
       {/* Optional: User Profile / Footer area could go here */}

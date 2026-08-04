@@ -37,6 +37,7 @@ type Draft = {
 }
 
 const API = "/meetings-report"
+const REPORT_LABEL = "Mbyllja e dites M3"
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
@@ -59,6 +60,32 @@ function parseRecipients(value: string) {
   return rows
 }
 
+function formatDateTimeInTimezone(value: string | null | undefined, timezone: string) {
+  if (!value) return "-"
+  const date = new Date(value)
+  if (Number.isNaN(date.getTime())) return value
+  try {
+    return new Intl.DateTimeFormat("en-GB", {
+      timeZone: timezone || "Europe/Tirane",
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date)
+  } catch {
+    return new Intl.DateTimeFormat("en-GB", {
+      year: "numeric",
+      month: "2-digit",
+      day: "2-digit",
+      hour: "2-digit",
+      minute: "2-digit",
+      hour12: false,
+    }).format(date)
+  }
+}
+
 async function responseError(res: Response) {
   const text = await res.text()
   if (!text) return `HTTP ${res.status}`
@@ -71,8 +98,9 @@ async function responseError(res: Response) {
 }
 
 export default function MeetingsReportPage() {
-  const { apiFetch, user } = useAuth()
-  const canAccess = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.full_name?.trim().toLowerCase() === "laurent hoxha"
+  const { apiFetch, loading: authLoading, user } = useAuth()
+  const canAccess = !authLoading && Boolean(user)
+  const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [reportDate, setReportDate] = React.useState(todayIso())
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)
@@ -103,6 +131,7 @@ export default function MeetingsReportPage() {
   }, [])
 
   const loadDraft = React.useCallback(async () => {
+    if (!canAccess) return
     setLoading(true)
     try {
       const res = await apiFetch(`${API}?report_date=${reportDate}`)
@@ -113,21 +142,22 @@ export default function MeetingsReportPage() {
       if (!res.ok) throw new Error(await responseError(res))
       applyDraft(await res.json())
     } catch (error) {
-      toast.error("Unable to load Meetings Report", { description: String(error) })
+      if (canAccess) toast.error(`Unable to load ${REPORT_LABEL}`, { description: String(error) })
     } finally {
       setLoading(false)
     }
-  }, [apiFetch, applyDraft, reportDate])
+  }, [apiFetch, applyDraft, canAccess, reportDate])
 
   const loadSettings = React.useCallback(async () => {
+    if (!canAccess) return
     try {
       const res = await apiFetch(`${API}/settings`)
       if (!res.ok) throw new Error(await responseError(res))
       applySettings(await res.json())
     } catch (error) {
-      toast.error("Unable to load Meetings Report settings", { description: String(error) })
+      if (canAccess) toast.error(`Unable to load ${REPORT_LABEL} settings`, { description: String(error) })
     }
-  }, [apiFetch, applySettings])
+  }, [apiFetch, applySettings, canAccess])
 
   React.useEffect(() => {
     if (canAccess) {
@@ -137,12 +167,13 @@ export default function MeetingsReportPage() {
   }, [canAccess, loadDraft, loadSettings])
 
   const generate = async () => {
+    if (!canAccess) return
     setLoading(true)
     try {
       const res = await apiFetch(`${API}/generate?report_date=${reportDate}`, { method: "POST" })
       if (!res.ok) throw new Error(await responseError(res))
       applyDraft(await res.json())
-      toast.success("Meetings Report generated")
+      toast.success(`${REPORT_LABEL} generated`)
     } catch (error) {
       toast.error("Generate failed", { description: String(error) })
     } finally {
@@ -151,7 +182,7 @@ export default function MeetingsReportPage() {
   }
 
   const save = async (): Promise<Draft | null> => {
-    if (!draft) return null
+    if (!draft || !canEdit) return draft
     setSaving(true)
     try {
       const res = await apiFetch(`${API}/${draft.id}`, {
@@ -174,7 +205,7 @@ export default function MeetingsReportPage() {
 
   const previewDraft = async () => {
     if (!draft) return
-    await save()
+    if (canEdit) await save()
     try {
       const res = await apiFetch(`${API}/${draft.id}/preview`)
       if (!res.ok) throw new Error(await responseError(res))
@@ -185,7 +216,7 @@ export default function MeetingsReportPage() {
   }
 
   const sendDraft = async () => {
-    if (!draft) return
+    if (!draft || !canEdit) return
     setSending(true)
     try {
       const savedDraft = await save()
@@ -194,7 +225,7 @@ export default function MeetingsReportPage() {
       if (!res.ok) throw new Error(await responseError(res))
       const data = await res.json()
       applyDraft(data)
-      toast.success("Meetings Report sent", { description: data.gmail_message_id || undefined })
+      toast.success(`${REPORT_LABEL} sent`, { description: data.gmail_message_id || undefined })
     } catch (error) {
       toast.error("Send failed", { description: String(error) })
     } finally {
@@ -232,7 +263,7 @@ export default function MeetingsReportPage() {
   }
 
   const saveSettings = async () => {
-    if (!settings) return
+    if (!settings || !canEdit) return
     setSavingSettings(true)
     try {
       const res = await apiFetch(`${API}/settings`, {
@@ -242,7 +273,7 @@ export default function MeetingsReportPage() {
       })
       if (!res.ok) throw new Error(await responseError(res))
       applySettings(await res.json())
-      toast.success("Meetings Report settings saved")
+      toast.success(`${REPORT_LABEL} settings saved`)
     } catch (error) {
       toast.error("Settings save failed", { description: String(error) })
     } finally {
@@ -250,13 +281,13 @@ export default function MeetingsReportPage() {
     }
   }
 
-  if (!canAccess) return <div className="rounded-lg border p-8">Meetings Report access required.</div>
+  if (!canAccess) return <div className="rounded-lg border p-8">{REPORT_LABEL} access required.</div>
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">Meetings Report</h1>
+          <h1 className="text-2xl font-semibold">{REPORT_LABEL}</h1>
           <p className="text-sm text-muted-foreground">Editable end-of-day report for boss meeting follow-up.</p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -280,18 +311,23 @@ export default function MeetingsReportPage() {
             value={draft?.subject || ""}
             onChange={(event) => draft && setDraft({ ...draft, subject: event.target.value })}
             placeholder="Generate a draft first"
+            readOnly={!canEdit}
           />
         </div>
         <div className="flex items-end gap-2">
-          <Button variant="outline" onClick={() => void save()} disabled={!draft || saving}>
-            <Save /> Save
-          </Button>
+          {canEdit ? (
+            <Button variant="outline" onClick={() => void save()} disabled={!draft || saving}>
+              <Save /> Save
+            </Button>
+          ) : null}
           <Button variant="outline" onClick={() => void previewDraft()} disabled={!draft || saving}>
             <Eye /> Preview
           </Button>
-          <Button onClick={() => void sendDraft()} disabled={!draft || sending}>
-            <Send /> Send
-          </Button>
+          {canEdit ? (
+            <Button onClick={() => void sendDraft()} disabled={!draft || sending}>
+              <Send /> Send
+            </Button>
+          ) : null}
         </div>
       </div>
 
@@ -302,6 +338,7 @@ export default function MeetingsReportPage() {
             value={recipientInputs.to}
             onChange={(event) => draft && updateRecipients("to", event.target.value)}
             placeholder="email@example.com"
+            readOnly={!canEdit}
           />
         </div>
         <div>
@@ -310,6 +347,7 @@ export default function MeetingsReportPage() {
             value={recipientInputs.cc}
             onChange={(event) => draft && updateRecipients("cc", event.target.value)}
             placeholder="Optional"
+            readOnly={!canEdit}
           />
         </div>
         <div>
@@ -318,6 +356,7 @@ export default function MeetingsReportPage() {
             value={recipientInputs.bcc}
             onChange={(event) => draft && updateRecipients("bcc", event.target.value)}
             placeholder="Optional"
+            readOnly={!canEdit}
           />
         </div>
       </div>
@@ -327,20 +366,41 @@ export default function MeetingsReportPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic Send</div>
-              <div className="text-sm text-muted-foreground">Saved default recipients and schedule for this report.</div>
+              <div className="text-sm text-muted-foreground">
+                {settings.is_active
+                  ? "Automatic sending is ON. This report will send on the selected days and time."
+                  : "Automatic sending is OFF. This report will not send by itself."}
+              </div>
             </div>
-            <Button variant={settings.is_active ? "default" : "outline"} onClick={() => setSettings({ ...settings, is_active: !settings.is_active })}>
-              {settings.is_active ? "Enabled" : "Disabled"}
-            </Button>
+            <button
+              type="button"
+              aria-pressed={settings.is_active}
+              aria-label={settings.is_active ? "Turn automatic send off" : "Turn automatic send on"}
+              onClick={() => canEdit && setSettings({ ...settings, is_active: !settings.is_active })}
+              disabled={!canEdit}
+              className={
+                settings.is_active
+                  ? "relative h-8 w-14 rounded-full bg-emerald-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+                  : "relative h-8 w-14 rounded-full bg-red-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
+              }
+            >
+              <span
+                className={
+                  settings.is_active
+                    ? "absolute right-1 top-1 size-6 rounded-full bg-white shadow transition-all"
+                    : "absolute left-1 top-1 size-6 rounded-full bg-white shadow transition-all"
+                }
+              />
+            </button>
           </div>
           <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
             <div>
               <Label>Send time</Label>
-              <Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} />
+              <Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} readOnly={!canEdit} />
             </div>
             <div>
               <Label>Timezone</Label>
-              <Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} />
+              <Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} readOnly={!canEdit} />
             </div>
             <div>
               <Label>Days</Label>
@@ -351,6 +411,7 @@ export default function MeetingsReportPage() {
                     type="button"
                     variant={settings.weekdays.includes(day) ? "default" : "outline"}
                     onClick={() => toggleWeekday(day)}
+                    disabled={!canEdit}
                   >
                     {label}
                   </Button>
@@ -361,22 +422,26 @@ export default function MeetingsReportPage() {
           <div className="grid gap-3 md:grid-cols-3">
             <div>
               <Label>Default To</Label>
-              <Input value={settingsInputs.to} onChange={(event) => updateSettingsRecipients("to", event.target.value)} />
+              <Input value={settingsInputs.to} onChange={(event) => updateSettingsRecipients("to", event.target.value)} readOnly={!canEdit} />
             </div>
             <div>
               <Label>Default Cc</Label>
-              <Input value={settingsInputs.cc} onChange={(event) => updateSettingsRecipients("cc", event.target.value)} />
+              <Input value={settingsInputs.cc} onChange={(event) => updateSettingsRecipients("cc", event.target.value)} readOnly={!canEdit} />
             </div>
             <div>
               <Label>Default Bcc</Label>
-              <Input value={settingsInputs.bcc} onChange={(event) => updateSettingsRecipients("bcc", event.target.value)} />
+              <Input value={settingsInputs.bcc} onChange={(event) => updateSettingsRecipients("bcc", event.target.value)} readOnly={!canEdit} />
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="text-sm text-muted-foreground">Last automatic run: {settings.last_run_date || "-"}</div>
-            <Button variant="outline" onClick={() => void saveSettings()} disabled={savingSettings}>
-              <Save /> Save settings
-            </Button>
+            <div className="text-sm text-muted-foreground">
+              Last automatic run: {formatDateTimeInTimezone(settings.last_run_date, settings.timezone)}
+            </div>
+            {canEdit ? (
+              <Button variant="outline" onClick={() => void saveSettings()} disabled={savingSettings}>
+                <Save /> Save settings
+              </Button>
+            ) : null}
           </div>
         </div>
       ) : null}
@@ -397,8 +462,8 @@ export default function MeetingsReportPage() {
               <div className="font-medium">{draft.status}</div>
             </div>
             <div className="rounded-lg border bg-white p-3">
-              <div className="text-muted-foreground">Gmail</div>
-              <div className="truncate font-medium">{draft.gmail_message_id || "-"}</div>
+              <div className="text-muted-foreground">Sent to</div>
+              <div className="truncate font-medium">{draft.recipients.to.join(", ") || "-"}</div>
             </div>
           </div>
 
@@ -410,6 +475,7 @@ export default function MeetingsReportPage() {
                   className="mt-3 min-h-[150px] font-mono text-sm"
                   value={section.body}
                   onChange={(event) => updateSection(index, event.target.value)}
+                  readOnly={!canEdit}
                 />
               </div>
             ))}
@@ -426,7 +492,7 @@ export default function MeetingsReportPage() {
           <DialogHeader>
             <DialogTitle>Email preview</DialogTitle>
           </DialogHeader>
-          {preview ? <iframe title="Meetings Report preview" srcDoc={preview.html} className="h-[650px] w-full rounded border bg-white" /> : null}
+          {preview ? <iframe title={`${REPORT_LABEL} preview`} srcDoc={preview.html} className="h-[650px] w-full rounded border bg-white" /> : null}
         </DialogContent>
       </Dialog>
     </div>

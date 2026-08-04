@@ -37,6 +37,7 @@ from app.api.routers.primeflow_1h_reports import router as primeflow_1h_reports_
 from app.api.routers.meetings_report import router as meetings_report_router
 from app.api.routers.realization import router as realization_router
 from app.api.routers.weekly_planning_audit import router as weekly_planning_audit_router
+from app.api.routers.standards import router as standards_router
 
 
 api_router = APIRouter()
@@ -81,4 +82,5 @@ api_router.include_router(
     prefix="/reports/weekly-planning-audit",
     tags=["reports", "weekly-planning-audit"],
 )
+api_router.include_router(standards_router, prefix="/standards", tags=["standards"])
 
