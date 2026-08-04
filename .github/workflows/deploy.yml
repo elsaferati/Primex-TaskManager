@@ -194,9 +194,10 @@ jobs:
           cd backend
  
           REM Celery worker and Beat own weekly audit generation and delivery.
-          call pm2 delete celery_worker || ver > NUL
-          call pm2 delete celery_beat || ver > NUL
- 
+          REM PM2 accepts multiple ecosystem app names in one call, which preserves
+          REM the delete/start lifecycle while avoiding repeated CLI startup cost.
+          call pm2 delete ecosystem.config.cjs --only "primex-backend,primeflow-mcp,primeflow-report-scheduler,celery_worker,celery_beat" || ver > NUL
+
           REM Stop legacy backend process names so the current checkout owns the API port.
           set REDIS_ENABLED=true
           set REDIS_URL=redis://127.0.0.1:6379/0
@@ -213,20 +214,14 @@ jobs:
           set RUNNER_TRACKING_ID=
           call pm2 delete backend-api || ver > NUL
           call pm2 delete backend || ver > NUL
-          call pm2 delete primex-backend || ver > NUL
-          call pm2 delete primeflow-mcp || ver > NUL
-          call pm2 delete primeflow-report-scheduler || ver > NUL
 
           REM Kill any orphaned process still holding port 8000 (a squatter outside PM2
           REM keeps serving stale code and makes health checks pass against old builds).
           powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8000 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8000'); Stop-Process -Id $_ -Force }"
           powershell -NoProfile -Command "Get-NetTCPConnection -LocalPort 8010 -State Listen -ErrorAction SilentlyContinue | Select-Object -ExpandProperty OwningProcess -Unique | ForEach-Object { Write-Host ('Killing stale listener PID ' + $_ + ' on port 8010'); Stop-Process -Id $_ -Force }"
 
-          call pm2 start ecosystem.config.cjs --only primex-backend --update-env
-          call pm2 start ecosystem.config.cjs --only primeflow-mcp --update-env
-          call pm2 start ecosystem.config.cjs --only primeflow-report-scheduler --update-env
-          call pm2 start ecosystem.config.cjs --only celery_worker --update-env
-          call pm2 start ecosystem.config.cjs --only celery_beat --update-env
+          call pm2 start ecosystem.config.cjs --only "primex-backend,primeflow-mcp,primeflow-report-scheduler,celery_worker,celery_beat" --update-env
+          if errorlevel 1 exit /b 1
           call pm2 describe primex-backend | findstr /I "status"
           call pm2 describe primeflow-mcp | findstr /I "status"
           call pm2 describe primeflow-report-scheduler | findstr /I "status"
@@ -326,11 +321,11 @@ jobs:
         shell: powershell
         run: |
           Set-Location backend
- 
+
           $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
           $port = 8080
           $processName = "backend-api-flow"
- 
+
           Write-Host "Replacing public API backend on port $port from current checkout..."
           cmd /c "pm2 delete backend-api-flow || ver > NUL" | Out-Host
           cmd /c "pm2 delete primex-public-api || ver > NUL" | Out-Host
@@ -441,11 +436,13 @@ jobs:
           Write-Host "Frontend readiness check: OK ($uri)"
  
       - name: Save PM2 Process List
+        if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}
         shell: cmd
         run: |
           pm2 save
  
       - name: Deploy Observability
+        if: ${{ failure() }}
         shell: cmd
         run: |
           call pm2 status
