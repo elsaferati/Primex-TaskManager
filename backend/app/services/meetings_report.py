@@ -748,12 +748,20 @@ def _render_ascii_table_html(lines: list[str], tone: str = "") -> str:
     )
 
 
+def _ascii_table_is_empty(lines: list[str]) -> bool:
+    table_rows = [_parse_ascii_cells(line) for line in lines if line.startswith("|")]
+    if len(table_rows) != 2:
+        return False
+    row = table_rows[1]
+    return any(cell in {"(Asnje detyre)", "(Asnje takim)"} for cell in row)
+
+
 def _render_text_block_html(lines: list[str]) -> str:
     rendered_lines = []
     for line in lines:
         stripped = line.strip()
         escaped = html.escape(line)
-        if stripped and len(stripped) <= 40 and stripped.endswith(":"):
+        if stripped and len(stripped) <= 45 and stripped.endswith((": 0", ":")):
             rendered_lines.append(f"<strong>{escaped}</strong>")
         else:
             rendered_lines.append(escaped)
@@ -781,15 +789,29 @@ def _render_section_body_html(body: str) -> str:
                 return _table_tone_from_label(previous)
         return ""
 
+    def mark_current_label_empty() -> None:
+        for previous_index in range(len(text_buffer) - 1, -1, -1):
+            stripped = text_buffer[previous_index].strip()
+            if stripped:
+                text_buffer[previous_index] = (
+                    f"{text_buffer[previous_index]} 0"
+                    if stripped.endswith(":")
+                    else f"{text_buffer[previous_index]}: 0"
+                )
+                return
+
     while index < len(lines):
         line = lines[index]
         if line.startswith("+-") and index + 1 < len(lines) and lines[index + 1].startswith("|"):
             tone = current_table_tone()
-            flush_text()
             table_lines: list[str] = []
             while index < len(lines) and (lines[index].startswith("+-") or lines[index].startswith("|")):
                 table_lines.append(lines[index])
                 index += 1
+            if _ascii_table_is_empty(table_lines):
+                mark_current_label_empty()
+                continue
+            flush_text()
             chunks.append(_render_ascii_table_html(table_lines, tone))
             continue
         text_buffer.append(line)
