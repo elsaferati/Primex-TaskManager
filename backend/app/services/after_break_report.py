@@ -39,8 +39,9 @@ SECTION_TITLES = [
 ]
 EMPTY_TASKS = "(Asnje detyre)"
 EMPTY_NOTES = "(Asnje shenim)"
-# Personal tasks count only when the title marks them as GA's, e.g. "DM/GA: BZ GA - P/P PARA PF".
-PERSONAL_GA = re.compile(r"/\s*GA\b", re.I)
+# Personal tasks count only when the title marks them as GA's: initials then a slash or a
+# colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
+PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
 PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("TITLE", 56)]
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
@@ -290,7 +291,7 @@ async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]
             str(index),
             _initials(names.get(note.created_by)),
             _note_text(note.content),
-            "YES" if note.is_discussed else "JO",
+            "YES" if note.is_discussed else "NO",
             _local_time(note.created_at),
         ]
         for index, note in enumerate(ordered, start=1)
@@ -328,7 +329,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
     section_3 = _ascii_table(
         "NOTES",
-        [("NR", 2), ("NGA", 8), ("SHENIMI", 60), ("DISK", 4), ("ORA", 5)],
+        [("NR", 2), ("FROM", 8), ("NOTE", 60), ("DISK", 4), ("TIME", 5)],
         await _blue_note_rows(db, report_day),
         EMPTY_NOTES,
     )
