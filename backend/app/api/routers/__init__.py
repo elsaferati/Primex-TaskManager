@@ -35,6 +35,7 @@ from app.api.routers.question_library import router as question_library_router
 from app.api.routers.report_delivery_runs import router as report_delivery_runs_router
 from app.api.routers.primeflow_1h_reports import router as primeflow_1h_reports_router
 from app.api.routers.meetings_report import router as meetings_report_router
+from app.api.routers.after_break_report import router as after_break_report_router
 from app.api.routers.realization import router as realization_router
 from app.api.routers.weekly_planning_audit import router as weekly_planning_audit_router
 from app.api.routers.standards import router as standards_router
@@ -76,6 +77,7 @@ api_router.include_router(question_library_router, prefix="/question-library", t
 api_router.include_router(report_delivery_runs_router, prefix="/admin/report-delivery-runs", tags=["admin"])
 api_router.include_router(primeflow_1h_reports_router, prefix="/admin/primeflow-1h-reports", tags=["admin", "primeflow-1h-reports"])
 api_router.include_router(meetings_report_router, prefix="/meetings-report", tags=["meetings-report"])
+api_router.include_router(after_break_report_router, prefix="/after-break-report", tags=["after-break-report"])
 api_router.include_router(realization_router, prefix="/realization", tags=["realization"])
 api_router.include_router(
     weekly_planning_audit_router,

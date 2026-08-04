@@ -1,0 +1,296 @@
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel, Field
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.api.deps import get_current_user
+from app.db import get_db
+from app.models.after_break_report_draft import AfterBreakReportDraft
+from app.models.after_break_report_settings import AfterBreakReportSettings
+from app.models.user import User
+from app.services.after_break_report import (
+    build_after_break_report_sections,
+    render_html,
+    render_plain_text,
+    send_after_break_report,
+    subject_for,
+)
+from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
+from app.services.primeflow_report import report_timezone
+from app.services.primeflow_report_access import can_manage_reports
+from app.services.primeflow_report_delivery import configured_recipients
+
+router = APIRouter()
+
+
+class SectionPayload(BaseModel):
+    title: str
+    body: str = ""
+
+
+class RecipientsPayload(BaseModel):
+    to: list[str] = Field(default_factory=list)
+    cc: list[str] = Field(default_factory=list)
+    bcc: list[str] = Field(default_factory=list)
+
+
+class DraftUpdate(BaseModel):
+    subject: str | None = Field(default=None, min_length=1, max_length=255)
+    recipients: RecipientsPayload | None = None
+    sections: list[SectionPayload] | None = None
+
+
+class SettingsPayload(BaseModel):
+    is_active: bool
+    send_time: str = Field(pattern=r"^\d{2}:\d{2}$")
+    timezone: str = Field(default="Europe/Tirane", min_length=1, max_length=80)
+    weekdays: list[int] = Field(default_factory=lambda: [0, 1, 2, 3, 4])
+    recipients: RecipientsPayload
+
+
+def _recipients_from_payload(value: dict | RecipientsPayload | None) -> dict[str, list[str]]:
+    return normalize_recipients(value.model_dump() if isinstance(value, RecipientsPayload) else value)
+
+
+def _time_from_hhmm(value: str):
+    from datetime import time
+
+    hour, minute = value.split(":", 1)
+    try:
+        return time(hour=int(hour), minute=int(minute))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Send time must be a valid HH:MM value") from exc
+
+
+def _validate_gmail_config() -> None:
+    import os
+
+    missing = [name for name in ("EMAIL_USER", "EMAIL_PASSWORD") if not os.getenv(name)]
+    if missing:
+        raise RuntimeError("Missing required Gmail configuration: " + ", ".join(missing))
+
+
+def _can_edit_after_break_report(user: User) -> bool:
+    return can_manage_reports(user) or user.role == "MANAGER"
+
+
+async def require_after_break_report_user(user: User = Depends(get_current_user)) -> User:
+    return user
+
+
+async def require_after_break_report_editor(user: User = Depends(get_current_user)) -> User:
+    if not _can_edit_after_break_report(user):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin or manager access required")
+    return user
+
+
+async def _get_or_create_settings(db: AsyncSession) -> AfterBreakReportSettings:
+    row = (
+        await db.execute(select(AfterBreakReportSettings).order_by(AfterBreakReportSettings.created_at.asc()))
+    ).scalars().first()
+    if row is None:
+        row = AfterBreakReportSettings(recipients=DEFAULT_RECIPIENTS)
+        db.add(row)
+        await db.commit()
+        await db.refresh(row)
+    return row
+
+
+async def _default_draft_recipients(db: AsyncSession) -> dict[str, list[str]]:
+    settings = await _get_or_create_settings(db)
+    recipients = normalize_recipients(settings.recipients)
+    if recipients["to"]:
+        return recipients
+    configured = normalize_recipients(await configured_recipients())
+    return configured if configured["to"] else DEFAULT_RECIPIENTS
+
+
+def _settings(row: AfterBreakReportSettings) -> dict:
+    return {
+        "id": str(row.id),
+        "is_active": row.is_active,
+        "send_time": row.send_time.strftime("%H:%M"),
+        "timezone": row.timezone,
+        "weekdays": row.weekdays or [],
+        "recipients": normalize_recipients(row.recipients),
+        "last_run_date": row.last_run_date.isoformat() if row.last_run_date else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+def _draft(row: AfterBreakReportDraft) -> dict:
+    return {
+        "id": str(row.id),
+        "report_date": row.report_date.isoformat(),
+        "subject": row.subject,
+        "recipients": normalize_recipients(row.recipients),
+        "sections": row.sections,
+        "generated_snapshot": row.generated_snapshot,
+        "status": row.status,
+        "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+        "gmail_message_id": row.gmail_message_id,
+        "gmail_thread_id": row.gmail_thread_id,
+        "last_error": row.last_error,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "updated_at": row.updated_at.isoformat() if row.updated_at else None,
+    }
+
+
+@router.get("/settings")
+async def get_settings(
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_after_break_report_user),
+) -> dict:
+    return _settings(await _get_or_create_settings(db))
+
+
+@router.put("/settings")
+async def update_settings(
+    payload: SettingsPayload,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_after_break_report_editor),
+) -> dict:
+    if any(day < 0 or day > 6 for day in payload.weekdays):
+        raise HTTPException(status_code=400, detail="Weekdays must be numbers from 0 to 6")
+    try:
+        ZoneInfo(payload.timezone)
+    except ZoneInfoNotFoundError as exc:
+        raise HTTPException(status_code=400, detail="Timezone is not valid") from exc
+    row = await _get_or_create_settings(db)
+    row.is_active = payload.is_active
+    row.send_time = _time_from_hhmm(payload.send_time)
+    row.timezone = payload.timezone
+    row.weekdays = sorted(set(payload.weekdays))
+    row.recipients = _recipients_from_payload(payload.recipients)
+    await db.commit()
+    await db.refresh(row)
+    return _settings(row)
+
+
+@router.get("")
+async def get_draft(
+    report_date: date,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_after_break_report_user),
+) -> dict:
+    row = (
+        await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_date))
+    ).scalar_one_or_none()
+    if row is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    return _draft(row)
+
+
+@router.post("/generate")
+async def generate_draft(
+    report_date: date,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_after_break_report_user),
+) -> dict:
+    try:
+        sections, snapshot = await build_after_break_report_sections(db, report_date)
+        recipients = await _default_draft_recipients(db)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Generate failed: {exc}") from exc
+    row = (
+        await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_date))
+    ).scalar_one_or_none()
+    if row is None:
+        row = AfterBreakReportDraft(
+            report_date=report_date,
+            subject=subject_for(report_date),
+            recipients=normalize_recipients(recipients),
+            sections=sections,
+            generated_snapshot=snapshot,
+            created_by_user_id=user.id,
+            updated_by_user_id=user.id,
+        )
+        db.add(row)
+    else:
+        row.subject = subject_for(report_date)
+        if not normalize_recipients(row.recipients)["to"]:
+            row.recipients = normalize_recipients(recipients)
+        row.sections = sections
+        row.generated_snapshot = snapshot
+        row.status = "DRAFT"
+        row.last_error = None
+        row.updated_by_user_id = user.id
+    await db.commit()
+    await db.refresh(row)
+    return _draft(row)
+
+
+@router.patch("/{draft_id}")
+async def update_draft(
+    draft_id: uuid.UUID,
+    payload: DraftUpdate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_after_break_report_editor),
+) -> dict:
+    row = await db.get(AfterBreakReportDraft, draft_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    if payload.subject is not None:
+        row.subject = payload.subject
+    if payload.recipients is not None:
+        row.recipients = _recipients_from_payload(payload.recipients)
+    if payload.sections is not None:
+        row.sections = [section.model_dump() for section in payload.sections]
+    row.status = "DRAFT" if row.status != "SENT" else row.status
+    row.updated_by_user_id = user.id
+    await db.commit()
+    await db.refresh(row)
+    return _draft(row)
+
+
+@router.get("/{draft_id}/preview")
+async def preview_draft(
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_after_break_report_user),
+) -> dict:
+    row = await db.get(AfterBreakReportDraft, draft_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    return {
+        "plain_text": render_plain_text(row.subject, row.report_date, row.sections),
+        "html": render_html(row.subject, row.report_date, row.sections),
+    }
+
+
+@router.post("/{draft_id}/send")
+async def send_draft(
+    draft_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(require_after_break_report_editor),
+) -> dict:
+    row = await db.get(AfterBreakReportDraft, draft_id)
+    if row is None:
+        raise HTTPException(status_code=404, detail="Draft not found")
+    recipients = normalize_recipients(row.recipients)
+    if not recipients["to"]:
+        raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
+    plain_text = render_plain_text(row.subject, row.report_date, row.sections)
+    html_body = render_html(row.subject, row.report_date, row.sections)
+    try:
+        _validate_gmail_config()
+        message = await send_after_break_report(row.subject, recipients, plain_text, html_body)
+    except Exception as exc:
+        row.last_error = str(exc)[:2000]
+        await db.commit()
+        raise HTTPException(status_code=502, detail=row.last_error)
+    row.status = "SENT"
+    row.sent_at = datetime.now(report_timezone())
+    row.gmail_message_id = message.get("id")
+    row.gmail_thread_id = message.get("threadId")
+    row.last_error = None
+    row.updated_by_user_id = user.id
+    await db.commit()
+    await db.refresh(row)
+    return _draft(row)
