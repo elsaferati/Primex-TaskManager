@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -31,6 +31,8 @@ from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.schemas.realization import (
     RealizationDepartmentResultOut,
+    RealizationAIAnalysisOut,
+    RealizationDailyOut,
     RealizationObservationCreate,
     RealizationObservationOut,
     RealizationObservationVerify,
@@ -50,11 +52,17 @@ from app.services.realization_access import (
     can_view_person_result,
 )
 from app.services.realization_calculator import calculate_weekly_period
+from app.services.realization_ai import RealizationAIError, analyze_realization
+from app.services.realization_daily import calculate_daily_period
+from app.services.realization_excel import build_realization_workbook
 from app.services.realization_periods import (
     RealizationWorkflowError,
+    ensure_daily_period,
     ensure_weekly_period,
+    normalize_week_start,
     require_unlocked,
     transition_period,
+    weekly_end,
 )
 
 
@@ -68,7 +76,7 @@ def _error(exc: ValueError, code: int = status.HTTP_409_CONFLICT) -> HTTPExcepti
 def _ensure_department_scope(user: User, department_id: uuid.UUID) -> None:
     if user.role == UserRole.ADMIN:
         return
-    if user.department_id != department_id:
+    if user.role != UserRole.MANAGER or user.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
@@ -101,6 +109,36 @@ async def _pinned_snapshots(
     )
     by_id = {row.id: row for row in rows}
     return by_id.get(period.planned_snapshot_id), by_id.get(period.final_snapshot_id)
+
+
+async def _recalculate_after_evidence(
+    db: AsyncSession, *, period: RealizationPeriod, actor_id: uuid.UUID
+) -> None:
+    """Keep automatic answers and grades synchronized with manager evidence."""
+    if period.period_type != "WEEKLY" or period.status not in {
+        RealizationPeriodStatus.OPEN.value,
+        RealizationPeriodStatus.CALCULATED.value,
+    }:
+        return
+    planned, final = await _pinned_snapshots(db, period)
+    if planned is None or final is None:
+        return
+    reviewed = (
+        await db.execute(
+            select(RealizationPersonResult.id).where(
+                RealizationPersonResult.period_id == period.id,
+                RealizationPersonResult.reviewed_at.is_not(None),
+            ).limit(1)
+        )
+    ).scalar_one_or_none()
+    if reviewed is None:
+        await calculate_weekly_period(
+            db,
+            period=period,
+            planned_snapshot=planned,
+            final_snapshot=final,
+            actor_id=actor_id,
+        )
 
 
 def _visible_facts(user: User, result: RealizationPersonResult) -> dict:
@@ -211,10 +249,61 @@ async def _weekly_response(
                 "visibility": observation.visibility,
             }
         )
+    daily_rows = (
+        await db.execute(
+            select(RealizationPersonResult, RealizationPeriod)
+            .join(RealizationPeriod, RealizationPeriod.id == RealizationPersonResult.period_id)
+            .where(
+                RealizationPeriod.period_type == "DAILY",
+                RealizationPeriod.department_id == period.department_id,
+                RealizationPeriod.start_date >= period.start_date,
+                RealizationPeriod.end_date <= period.end_date,
+                RealizationPeriod.status != RealizationPeriodStatus.OPEN.value,
+            )
+            .order_by(RealizationPeriod.start_date.asc())
+        )
+    ).all()
+    if not visible and daily_rows:
+        latest_by_user: dict[uuid.UUID, tuple[RealizationPersonResult, RealizationPeriod]] = {}
+        for daily_result, daily_period in daily_rows:
+            latest_by_user[daily_result.user_id] = (daily_result, daily_period)
+        rows = [item[0] for item in latest_by_user.values()]
+        visible = [
+            row
+            for row in rows
+            if can_view_person_result(
+                user,
+                subject_user_id=row.user_id,
+                subject_department_id=row.department_id,
+            )
+        ]
+        names = {
+            row.id: row.full_name
+            for row in (
+                await db.execute(
+                    select(User).where(User.id.in_([item.user_id for item in visible]))
+                )
+            ).scalars().all()
+        } if visible else {}
+    daily_by_user: dict[uuid.UUID, list[dict]] = {}
+    for daily_result, daily_period in daily_rows:
+        daily_facts = daily_result.facts_json or {}
+        daily_by_user.setdefault(daily_result.user_id, []).append(
+            {
+                "date": daily_period.start_date.isoformat(),
+                "daily_progress_percent": daily_facts.get("daily_progress_percent", 0),
+                "weekly_progress_percent": daily_facts.get("weekly_progress_percent", 0),
+                "planned_count": daily_result.planned_count,
+                "completed_count": daily_result.completed_on_time_count,
+                "additional_count": daily_result.additional_count,
+                "attendance": daily_facts.get("attendance") or [],
+            }
+        )
     people: list[RealizationPersonWorkflowOut] = []
     for row in visible:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
         payload["facts_json"] = _visible_facts(user, row)
+        payload["facts_json"]["daily_timeline"] = daily_by_user.get(row.user_id, [])
         payload["facts_json"]["observations"] = live_by_user.get(row.user_id, [])
         if user.role == UserRole.STAFF:
             payload["manager_comment"] = None
@@ -272,6 +361,128 @@ async def _weekly_response(
         unassigned=(department_result.facts_json or {}).get("unassigned", [])
         if department_result
         else [],
+    )
+
+
+@router.get("/export.xlsx")
+async def export_realization_excel(
+    week_start: date,
+    department_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> Response:
+    if user.role == UserRole.MANAGER:
+        if user.department_id is None:
+            raise HTTPException(status_code=403, detail="Manager has no department")
+        if department_id is not None and department_id != user.department_id:
+            raise HTTPException(status_code=403, detail="Forbidden")
+        department_id = user.department_id
+    elif user.role != UserRole.ADMIN:
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+    start = normalize_week_start(week_start)
+    end = weekly_end(start)
+    period_statement = select(RealizationPeriod).where(
+        RealizationPeriod.period_type == "WEEKLY",
+        RealizationPeriod.start_date == start,
+        RealizationPeriod.end_date == end,
+    )
+    if department_id is not None:
+        period_statement = period_statement.where(
+            RealizationPeriod.department_id == department_id
+        )
+    periods = (await db.execute(period_statement)).scalars().all()
+    if not periods:
+        raise HTTPException(status_code=409, detail="Nuk ka realizim të gjeneruar për këtë javë")
+
+    department_ids = [period.department_id for period in periods if period.department_id]
+    departments_by_id = {
+        row.id: row.name
+        for row in (
+            await db.execute(select(Department).where(Department.id.in_(department_ids)))
+        ).scalars().all()
+    }
+    weekly_results = (
+        await db.execute(
+            select(RealizationPersonResult).where(
+                RealizationPersonResult.period_id.in_([period.id for period in periods])
+            )
+        )
+    ).scalars().all()
+    user_ids = [row.user_id for row in weekly_results]
+    user_names = {
+        row.id: row.full_name
+        for row in (
+            await db.execute(select(User).where(User.id.in_(user_ids)))
+        ).scalars().all()
+    } if user_ids else {}
+
+    daily_periods = (
+        await db.execute(
+            select(RealizationPeriod).where(
+                RealizationPeriod.period_type == "DAILY",
+                RealizationPeriod.start_date >= start,
+                RealizationPeriod.end_date <= end,
+                RealizationPeriod.department_id.in_(department_ids),
+                RealizationPeriod.status != RealizationPeriodStatus.OPEN.value,
+            )
+        )
+    ).scalars().all() if department_ids else []
+    daily_period_by_id = {period.id: period for period in daily_periods}
+    daily_results = (
+        await db.execute(
+            select(RealizationPersonResult).where(
+                RealizationPersonResult.period_id.in_(list(daily_period_by_id))
+            )
+        )
+    ).scalars().all() if daily_period_by_id else []
+    timeline_by_user_department: dict[tuple[uuid.UUID, uuid.UUID | None], list[dict]] = {}
+    for daily in daily_results:
+        daily_period = daily_period_by_id[daily.period_id]
+        facts = daily.facts_json or {}
+        timeline_by_user_department.setdefault(
+            (daily.user_id, daily.department_id), []
+        ).append(
+            {
+                "date": daily_period.start_date.isoformat(),
+                "daily_progress_percent": facts.get("daily_progress_percent", 0),
+                "weekly_progress_percent": facts.get("weekly_progress_percent", 0),
+                "attendance": facts.get("attendance") or [],
+            }
+        )
+
+    results_by_period: dict[uuid.UUID, list[dict]] = {}
+    for row in weekly_results:
+        payload = RealizationPersonResultOut.model_validate(row).model_dump(mode="python")
+        facts = dict(payload.get("facts_json") or {})
+        facts["daily_timeline"] = sorted(
+            timeline_by_user_department.get((row.user_id, row.department_id), []),
+            key=lambda item: item["date"],
+        )
+        payload["facts_json"] = facts
+        payload["user_name"] = user_names.get(row.user_id, "Employee")
+        results_by_period.setdefault(row.period_id, []).append(payload)
+
+    export_departments = [
+        {
+            "name": departments_by_id.get(period.department_id, "Departamenti"),
+            "status": period.status,
+            "people": sorted(
+                results_by_period.get(period.id, []), key=lambda item: item["user_name"]
+            ),
+        }
+        for period in periods
+    ]
+    content = build_realization_workbook(
+        week_start=start.isoformat(),
+        week_end=end.isoformat(),
+        departments=export_departments,
+    )
+    filename = f"REALIZIMI_JAVOR_{start.isoformat()}_{end.isoformat()}.xlsx"
+    return Response(
+        content=content,
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 
@@ -359,6 +570,119 @@ async def calculate_realization(
     )
 
 
+async def _daily_response(
+    db: AsyncSession,
+    *,
+    period: RealizationPeriod,
+    department_name: str,
+) -> RealizationDailyOut:
+    rows = (
+        await db.execute(
+            select(RealizationPersonResult).where(
+                RealizationPersonResult.period_id == period.id
+            )
+        )
+    ).scalars().all()
+    names = {
+        row.id: row.full_name
+        for row in (
+            await db.execute(select(User).where(User.id.in_([item.user_id for item in rows])))
+        ).scalars().all()
+    } if rows else {}
+    people = []
+    for row in rows:
+        payload = RealizationPersonResultOut.model_validate(row).model_dump()
+        payload["user_name"] = names.get(row.user_id, "Employee")
+        people.append(RealizationPersonWorkflowOut.model_validate(payload))
+    department_result = (
+        await db.execute(
+            select(RealizationDepartmentResult).where(
+                RealizationDepartmentResult.period_id == period.id
+            )
+        )
+    ).scalar_one_or_none()
+    has_planned = period.planned_snapshot_id is not None
+    return RealizationDailyOut(
+        period=RealizationPeriodOut.model_validate(period),
+        department_name=department_name,
+        has_planned_snapshot=has_planned,
+        can_calculate=(
+            has_planned
+            and period.status in {
+                RealizationPeriodStatus.OPEN.value,
+                RealizationPeriodStatus.CALCULATED.value,
+            }
+        ),
+        message=None if has_planned else "Nuk ka PLANNED snapshot zyrtar për këtë javë.",
+        people=people,
+        department_result=(
+            RealizationDepartmentResultOut.model_validate(department_result)
+            if department_result else None
+        ),
+    )
+
+
+@router.get("/daily", response_model=RealizationDailyOut)
+async def get_daily_realization(
+    department_id: uuid.UUID,
+    day: date,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationDailyOut:
+    _ensure_department_scope(user, department_id)
+    department = (
+        await db.execute(select(Department).where(Department.id == department_id))
+    ).scalar_one_or_none()
+    if department is None:
+        raise HTTPException(status_code=404, detail="Department not found")
+    try:
+        period, _ = await ensure_daily_period(
+            db, department_id=department_id, day=day, created_by=user.id
+        )
+        await db.commit()
+        await db.refresh(period)
+    except RealizationWorkflowError as exc:
+        raise _error(exc)
+    return await _daily_response(db, period=period, department_name=department.name)
+
+
+@router.post("/daily/calculate", response_model=RealizationDailyOut)
+async def calculate_daily_realization(
+    department_id: uuid.UUID,
+    day: date,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationDailyOut:
+    _ensure_department_scope(user, department_id)
+    department = (
+        await db.execute(select(Department).where(Department.id == department_id))
+    ).scalar_one_or_none()
+    if department is None:
+        raise HTTPException(status_code=404, detail="Department not found")
+    try:
+        period, planned = await ensure_daily_period(
+            db, department_id=department_id, day=day, created_by=user.id
+        )
+        period = await _period(db, period.id, for_update=True)
+        await calculate_daily_period(
+            db, period=period, planned_snapshot=planned, actor_id=user.id
+        )
+        add_audit_log(
+            db=db,
+            actor_user_id=user.id,
+            entity_type="realization_period",
+            entity_id=period.id,
+            action="daily_snapshot_calculated",
+            after={"day": day.isoformat(), "status": period.status},
+        )
+        await db.commit()
+        await db.refresh(period)
+    except (ValueError, RealizationWorkflowError) as exc:
+        await db.rollback()
+        raise _error(exc)
+    return await _daily_response(db, period=period, department_name=department.name)
+
+
 @router.post(
     "/periods/{period_id}/results/{result_id}/review",
     response_model=RealizationPersonWorkflowOut,
@@ -387,30 +711,28 @@ async def review_person_result(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person result not found")
     final_symbol = payload.final_symbol or RealizationSymbol(result.suggested_symbol)
     final_level = payload.final_level or RealizationLevel(result.suggested_level)
-    final_bonus = payload.final_bonus if payload.final_bonus is not None else result.suggested_bonus
     decision = payload.model_copy(
         update={
             "final_symbol": final_symbol,
             "final_level": final_level,
-            "final_bonus": final_bonus,
         }
     )
+
+
     try:
         decision.validate_against_suggestion(
             suggested_symbol=RealizationSymbol(result.suggested_symbol),
             suggested_level=RealizationLevel(result.suggested_level),
-            suggested_bonus=result.suggested_bonus,
         )
     except ValueError as exc:
         raise _error(exc, status.HTTP_422_UNPROCESSABLE_ENTITY)
     before = {
         "final_symbol": result.final_symbol,
         "final_level": result.final_level,
-        "final_bonus": result.final_bonus,
     }
     result.final_symbol = final_symbol.value
     result.final_level = final_level.value
-    result.final_bonus = final_bonus
+    result.final_bonus = None
     result.manager_comment = payload.manager_comment
     result.override_reason = payload.override_reason
     result.reviewed_by = user.id
@@ -433,9 +755,6 @@ async def review_person_result(
         key = item.get("key")
         if key == "suggested_evaluation_level":
             item["final_value"] = final_level.value
-            item["source_status"] = "MANAGER_CONFIRMED"
-        elif key == "weekly_bonus":
-            item["final_value"] = final_bonus
             item["source_status"] = "MANAGER_CONFIRMED"
         elif key == "evaluation":
             item["final_value"] = final_symbol.value
@@ -463,7 +782,6 @@ async def review_person_result(
         after={
             "final_symbol": result.final_symbol,
             "final_level": result.final_level,
-            "final_bonus": result.final_bonus,
             "override_reason": result.override_reason,
         },
     )
@@ -486,6 +804,60 @@ async def review_person_result(
     out = RealizationPersonResultOut.model_validate(result).model_dump()
     out["user_name"] = subject.full_name
     return RealizationPersonWorkflowOut.model_validate(out)
+
+
+@router.post(
+    "/periods/{period_id}/results/{result_id}/ai-analysis",
+    response_model=RealizationAIAnalysisOut,
+)
+async def analyze_person_result(
+    period_id: uuid.UUID,
+    result_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationAIAnalysisOut:
+    period = await _period(db, period_id, for_update=True)
+    if not can_review_realization(user, department_id=period.department_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    try:
+        require_unlocked(period)
+    except RealizationWorkflowError as exc:
+        raise _error(exc)
+    result = (
+        await db.execute(
+            select(RealizationPersonResult).where(
+                RealizationPersonResult.id == result_id,
+                RealizationPersonResult.period_id == period.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Person result not found")
+    try:
+        analysis = await analyze_realization(str(result.id), result.facts_json or {})
+    except RealizationAIError as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    facts = dict(result.facts_json or {})
+    facts["ai_analysis"] = {
+        **analysis,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "generated_by": str(user.id),
+    }
+    result.facts_json = facts
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="realization_person_result",
+        entity_id=result.id,
+        action="ai_analysis_generated",
+        after={
+            "model": analysis["model"],
+            "suggested_level": analysis["suggested_level"],
+            "advisory_only": True,
+        },
+    )
+    await db.commit()
+    return RealizationAIAnalysisOut.model_validate(analysis)
 
 
 @router.post("/periods/{period_id}/approve", response_model=RealizationPeriodOut)
@@ -560,14 +932,7 @@ async def create_observation(
         raise _error(exc)
     _ensure_department_scope(user, period.department_id)
     subject_id = payload.user_id
-    if user.role == UserRole.STAFF:
-        if subject_id != user.id:
-            raise HTTPException(status_code=403, detail="Staff may submit only their own observations")
-        if payload.marker == RealizationMarker.NEGATIVE:
-            raise HTTPException(status_code=403, detail="Only managers may create negative or private evidence")
-        if payload.visibility == RealizationObservationVisibility.PRIVATE_MANAGER:
-            raise HTTPException(status_code=403, detail="Only managers may create private evidence")
-    elif not can_review_realization(user, department_id=period.department_id):
+    if not can_review_realization(user, department_id=period.department_id):
         raise HTTPException(status_code=403, detail="Forbidden")
     if payload.department_id is not None and payload.department_id != period.department_id:
         raise HTTPException(status_code=422, detail="Observation department must match its period")
@@ -601,6 +966,7 @@ async def create_observation(
         db=db, actor_user_id=user.id, entity_type="realization_observation",
         entity_id=observation.id, action="created", after={"period_id": str(period.id)},
     )
+    await _recalculate_after_evidence(db, period=period, actor_id=user.id)
     await db.commit()
     await db.refresh(observation)
     return RealizationObservationOut.model_validate(observation)
@@ -667,6 +1033,7 @@ async def verify_observation(
         db=db, actor_user_id=user.id, entity_type="realization_observation",
         entity_id=original.id, action="verified", after={"verification_id": str(verification.id)},
     )
+    await _recalculate_after_evidence(db, period=period, actor_id=user.id)
     await db.commit()
     await db.refresh(verification)
     return RealizationObservationOut.model_validate(verification)
@@ -704,6 +1071,7 @@ async def void_observation(
         entity_id=observation.id, action="voided",
         before={"voided_at": None}, after={"reason": payload.reason},
     )
+    await _recalculate_after_evidence(db, period=period, actor_id=user.id)
     await db.commit()
     await db.refresh(observation)
     return RealizationObservationOut.model_validate(observation)

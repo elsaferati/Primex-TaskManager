@@ -52,6 +52,18 @@ celery_app.conf.beat_schedule = {
         "task": "app.celery_tasks.reset_expired_internal_meeting_sessions",
         "schedule": crontab(minute="*/15"),
     },
+    "generate-daily-realization-snapshots": {
+        "task": "app.celery_tasks.generate_daily_realization_snapshots",
+        "schedule": crontab(
+            day_of_week="mon-fri",
+            hour=settings.REALIZATION_DAILY_HOUR,
+            minute=settings.REALIZATION_DAILY_MINUTE,
+        ),
+    },
+    "generate-weekly-realization-results": {
+        "task": "app.celery_tasks.generate_weekly_realization_results",
+        "schedule": crontab(day_of_week="fri", hour=17, minute=25),
+    },
     "weekly-planning-audit-0900": {
         "task": "app.celery_tasks.send_weekly_planning_audit_report",
         "schedule": crontab(day_of_week="fri", hour=9, minute=0),

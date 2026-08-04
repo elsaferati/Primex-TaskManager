@@ -25,7 +25,7 @@ def can_view_person_result(
             user.department_id is not None
             and user.department_id == subject_department_id
         )
-    return user.id == subject_user_id
+    return False
 
 
 def can_view_department_aggregate(
@@ -35,7 +35,7 @@ def can_view_department_aggregate(
         return True
     if user.role is UserRole.MANAGER:
         return user.department_id == department_id
-    return True
+    return False
 
 
 def can_view_observation(
@@ -49,11 +49,7 @@ def can_view_observation(
         return True
     if user.role is UserRole.MANAGER:
         return user.department_id is not None and user.department_id == department_id
-    if visibility is RealizationObservationVisibility.PRIVATE_MANAGER:
-        return False
-    if visibility is RealizationObservationVisibility.TEAM_AGGREGATE:
-        return False
-    return subject_user_id is not None and user.id == subject_user_id
+    return False
 
 
 def can_review_realization(user: RealizationUser, *, department_id: uuid.UUID | None) -> bool:

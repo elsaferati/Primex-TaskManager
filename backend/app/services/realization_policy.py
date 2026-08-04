@@ -10,7 +10,6 @@ from app.models.enums import RealizationLevel, RealizationSymbol
 class PolicyDecision:
     level: RealizationLevel
     symbol: RealizationSymbol
-    bonus: int
     reasons: tuple[str, ...]
     triggered_rule: str
 
@@ -28,16 +27,9 @@ DEFAULT_SYMBOLS = {
 DEFAULT_ORDER = ("E", "D", "M", "C", "A+", "A", "B")
 
 
-def validate_policy(criteria: dict[str, Any], bonuses: dict[str, Any]) -> None:
+def validate_policy(criteria: dict[str, Any], bonuses: dict[str, Any] | None = None) -> None:
     if criteria.get("algorithm") != "first_matching_rule":
         raise ValueError("Realization policy must use first_matching_rule")
-    missing_bonuses = {level.value for level in RealizationLevel} - set(bonuses)
-    if missing_bonuses:
-        raise ValueError(f"Realization policy bonuses missing: {sorted(missing_bonuses)}")
-    for level in RealizationLevel:
-        value = bonuses[level.value]
-        if not isinstance(value, (int, float)) or value < 0:
-            raise ValueError(f"Invalid bonus for {level.value}")
     symbols = {**DEFAULT_SYMBOLS, **(criteria.get("symbols") or {})}
     for level in RealizationLevel:
         try:
@@ -69,13 +61,11 @@ def _decision(
     rule: str,
     reasons: list[str],
     criteria: dict[str, Any],
-    bonuses: dict[str, Any],
 ) -> PolicyDecision:
     symbols = {**DEFAULT_SYMBOLS, **(criteria.get("symbols") or {})}
     return PolicyDecision(
         level=RealizationLevel(level),
         symbol=RealizationSymbol(symbols[level]),
-        bonus=int(bonuses[level]),
         reasons=tuple(reasons),
         triggered_rule=rule,
     )
@@ -84,7 +74,7 @@ def _decision(
 def evaluate_policy(
     facts: dict[str, Any],
     criteria: dict[str, Any],
-    bonuses: dict[str, Any],
+    bonuses: dict[str, Any] | None = None,
 ) -> PolicyDecision:
     """Apply the pinned policy without querying or mutating the database."""
     validate_policy(criteria, bonuses)
@@ -95,7 +85,7 @@ def evaluate_policy(
     no_progress = int(counters.get("no_progress_count", 0))
     late_open = int(counters.get("late_open_count", 0))
     unapproved = int(counters.get("unapproved_postponement_count", 0))
-    approved_absence = int(counters.get("approved_absence_days", 0))
+    approved_personal_absence = int(counters.get("approved_personal_absence_days", 0))
     unexpected_absence = int(counters.get("unexcused_absence_days", 0))
     repeated = int(counters.get("repeated_problem_count", 0))
     negative = int(counters.get("negative_count", 0))
@@ -103,6 +93,7 @@ def evaluate_policy(
     tardiness = int(counters.get("tardiness_count", 0))
     major_impact = bool(counters.get("major_negative_impact"))
     minor_impact = int(counters.get("minor_negative_impact_count", 0)) > 0
+    missed_meetings = int(counters.get("meeting_missed_count", 0))
 
     absence_e = int(criteria.get("unexpected_absence_e_threshold", 2))
     repeated_d = int(criteria.get("repeated_problem_d_threshold", 2))
@@ -132,7 +123,6 @@ def evaluate_policy(
                     "unexpected_absence",
                     [f"{unexpected_absence} unexpected absences"],
                     criteria,
-                    bonuses,
                 )
             if planned > 0 and no_progress >= planned:
                 return _decision(
@@ -140,7 +130,6 @@ def evaluate_policy(
                     "no_real_progress",
                     ["No planned obligation has recorded progress"],
                     criteria,
-                    bonuses,
                 )
         elif level == "D":
             if unapproved > 0 or repeated >= repeated_d or major_impact:
@@ -152,23 +141,34 @@ def evaluate_policy(
                 if major_impact:
                     reasons.append("Verified major negative impact")
                 return _decision(
-                    "D", "unapproved_or_major_failure", reasons, criteria, bonuses
+                    "D", "unapproved_or_major_failure", reasons, criteria
                 )
-            if unaccounted or no_progress or late_open or negative_without_minor_impact:
+            if (
+                unaccounted
+                or no_progress
+                or late_open
+                or negative_without_minor_impact
+                or missed_meetings
+            ):
+                reasons = ["Planned obligations are incomplete or have negative evidence"]
+                if missed_meetings:
+                    reasons.append(f"{missed_meetings} confirmed missed meetings")
                 return _decision(
                     "D",
                     "partial_failure",
-                    ["Planned obligations are incomplete or have negative evidence"],
+                    reasons,
                     criteria,
-                    bonuses,
                 )
-        elif level == "M" and approved_absence and planned == obligations_accounted:
+        elif (
+            level == "M"
+            and approved_personal_absence
+            and planned == obligations_accounted
+        ):
             return _decision(
                 "M",
                 "approved_absence",
                 ["Approved absence with remaining obligations accounted for"],
                 criteria,
-                bonuses,
             )
         elif level == "C" and (
             complete_late or tardiness >= frequent_delay or minor_impact
@@ -180,14 +180,13 @@ def evaluate_policy(
                 reasons.append(f"{tardiness} attendance tardiness events")
             if minor_impact:
                 reasons.append("Verified minor impact caps the result at C")
-            return _decision("C", "delay_or_minor_impact", reasons, criteria, bonuses)
+            return _decision("C", "delay_or_minor_impact", reasons, criteria)
         elif level == "A+" and planned > 0 and verified_extra >= a_plus_extra:
             return _decision(
                 "A+",
                 "multiple_verified_extras",
                 [f"{verified_extra} verified positive extras"],
                 criteria,
-                bonuses,
             )
         elif level == "A" and planned > 0 and verified_extra >= a_extra:
             return _decision(
@@ -195,7 +194,6 @@ def evaluate_policy(
                 "verified_extra",
                 [f"{verified_extra} verified positive extras"],
                 criteria,
-                bonuses,
             )
         elif level == "B":
             return _decision(
@@ -207,7 +205,6 @@ def evaluate_policy(
                     else "All planned obligations completed on time"
                 ],
                 criteria,
-                bonuses,
             )
         return None
 

@@ -29,7 +29,7 @@ class RealizationPolicyVersionCreate(RealizationSchema):
     effective_from: date
     effective_to: date | None = None
     criteria_json: dict
-    bonus_json: dict
+    bonus_json: dict = Field(default_factory=dict, exclude=True)
     am_cutoff: time
     pm_cutoff: time
 
@@ -39,9 +39,6 @@ class RealizationPolicyVersionCreate(RealizationSchema):
             raise ValueError("effective_to must be on or after effective_from")
         if self.am_cutoff >= self.pm_cutoff:
             raise ValueError("am_cutoff must be before pm_cutoff")
-        missing = {level.value for level in RealizationLevel} - set(self.bonus_json)
-        if missing:
-            raise ValueError(f"bonus_json is missing levels: {', '.join(sorted(missing))}")
         return self
 
 
@@ -68,8 +65,12 @@ class RealizationPeriodCreate(RealizationSchema):
         if self.end_date < self.start_date:
             raise ValueError("end_date must be on or after start_date")
         if self.period_type is RealizationPeriodType.DAILY:
-            if self.slot not in {RealizationPeriodSlot.AM, RealizationPeriodSlot.PM}:
-                raise ValueError("daily periods require an AM or PM slot")
+            if self.slot not in {
+                RealizationPeriodSlot.AM,
+                RealizationPeriodSlot.PM,
+                RealizationPeriodSlot.ALL,
+            }:
+                raise ValueError("daily periods require an AM, PM, or ALL slot")
             if self.start_date != self.end_date:
                 raise ValueError("daily periods must cover one date")
         elif self.slot is not RealizationPeriodSlot.ALL:
@@ -147,6 +148,26 @@ class RealizationObservationCreate(RealizationSchema):
                 )
             if self.marker is not RealizationMarker.NEGATIVE:
                 raise ValueError("BLOCKER must be a NEGATIVE observation")
+        if self.category is RealizationObservationCategory.ABSENCE:
+            if self.user_id is None:
+                raise ValueError("ABSENCE requires user_id attribution")
+            if self.evidence_json.get("classification") not in {
+                "UNEXCUSED",
+                "APPROVED_PERSONAL",
+                "ANNUAL_LEAVE",
+            }:
+                raise ValueError("ABSENCE requires a supported classification")
+            if not self.evidence_json.get("date"):
+                raise ValueError("ABSENCE requires evidence_json.date")
+        if self.category is RealizationObservationCategory.MISSED_MEETING:
+            if self.marker is not RealizationMarker.NEGATIVE:
+                raise ValueError("MISSED_MEETING must be a NEGATIVE observation")
+            if not self.evidence_json.get("meeting_id") or not self.evidence_json.get(
+                "occurrence_date"
+            ):
+                raise ValueError(
+                    "MISSED_MEETING requires meeting_id and occurrence_date evidence"
+                )
         if self.category is RealizationObservationCategory.EXTRA_TASK:
             kind = self.evidence_json.get("kind")
             if kind not in {"REQUESTED_EXTRA_TASK", "COMPLETED_EXTRA_TASK"}:
@@ -195,17 +216,16 @@ class RealizationObservationVoid(RealizationSchema):
 class RealizationFinalDecision(RealizationSchema):
     final_symbol: RealizationSymbol | None = None
     final_level: RealizationLevel | None = None
-    final_bonus: int | None = Field(default=None, ge=0)
     manager_comment: str | None = Field(default=None, max_length=4000)
     override_reason: str | None = Field(default=None, max_length=4000)
 
     @model_validator(mode="after")
     def validate_complete_final(self) -> "RealizationFinalDecision":
-        final_fields = (self.final_symbol, self.final_level, self.final_bonus)
+        final_fields = (self.final_symbol, self.final_level)
         if any(value is not None for value in final_fields) and not all(
             value is not None for value in final_fields
         ):
-            raise ValueError("final symbol, level, and bonus must be supplied together")
+            raise ValueError("final symbol and level must be supplied together")
         return self
 
     def validate_against_suggestion(
@@ -213,14 +233,12 @@ class RealizationFinalDecision(RealizationSchema):
         *,
         suggested_symbol: RealizationSymbol | None,
         suggested_level: RealizationLevel | None,
-        suggested_bonus: int | None,
     ) -> None:
         if self.final_level is None:
             return
         changed = (
             self.final_symbol != suggested_symbol
             or self.final_level != suggested_level
-            or self.final_bonus != suggested_bonus
         )
         if changed and not (self.override_reason and self.override_reason.strip()):
             raise ValueError("an override_reason is required when final differs from suggested")
@@ -257,10 +275,8 @@ class RealizationPersonResultOut(RealizationSchema):
     repeated_problem_count: int
     suggested_symbol: RealizationSymbol | None
     suggested_level: RealizationLevel | None
-    suggested_bonus: int | None
     final_symbol: RealizationSymbol | None
     final_level: RealizationLevel | None
-    final_bonus: int | None
     auto_narrative: str | None
     manager_comment: str | None
     override_reason: str | None
@@ -285,8 +301,6 @@ class RealizationDepartmentResultOut(RealizationSchema):
     d_count: int
     e_count: int
     a_rate: Decimal | None
-    total_bonus: Decimal | None
-    average_bonus: Decimal | None
     proposal_count: int
     time_saved_minutes: int
     repeated_problem_count: int
@@ -319,3 +333,25 @@ class RealizationWeeklyOut(RealizationSchema):
     people: list[RealizationPersonWorkflowOut] = Field(default_factory=list)
     department_result: RealizationDepartmentResultOut | None = None
     unassigned: list[dict] = Field(default_factory=list)
+
+
+class RealizationDailyOut(RealizationSchema):
+    period: RealizationPeriodOut
+    department_name: str | None = None
+    has_planned_snapshot: bool
+    can_calculate: bool
+    message: str | None = None
+    people: list[RealizationPersonWorkflowOut] = Field(default_factory=list)
+    department_result: RealizationDepartmentResultOut | None = None
+
+
+class RealizationAIAnalysisOut(RealizationSchema):
+    summary: str
+    positives: list[str]
+    problems: list[str]
+    missing_evidence: list[str]
+    suggested_level: RealizationLevel
+    confidence: float = Field(ge=0, le=1)
+    evidence_ids: list[str]
+    model: str
+    advisory_only: bool = True

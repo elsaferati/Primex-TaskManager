@@ -109,7 +109,7 @@ class RealizationPeriod(Base):
             name="ck_realization_period_status",
         ),
         CheckConstraint(
-            "(period_type = 'DAILY' AND slot IN ('AM', 'PM') AND start_date = end_date) "
+            "(period_type = 'DAILY' AND slot IN ('AM', 'PM', 'ALL') AND start_date = end_date) "
             "OR (period_type IN ('WEEKLY', 'MONTHLY') AND slot = 'ALL')",
             name="ck_realization_period_shape",
         ),
@@ -338,15 +338,14 @@ class RealizationPersonResult(Base):
             name="ck_realization_person_final_bonus",
         ),
         CheckConstraint(
-            "(final_symbol IS NULL AND final_level IS NULL AND final_bonus IS NULL) "
-            "OR (final_symbol IS NOT NULL AND final_level IS NOT NULL AND final_bonus IS NOT NULL)",
+            "(final_symbol IS NULL AND final_level IS NULL) "
+            "OR (final_symbol IS NOT NULL AND final_level IS NOT NULL)",
             name="ck_realization_person_final_complete",
         ),
         CheckConstraint(
             "final_level IS NULL "
             "OR (final_level IS NOT DISTINCT FROM suggested_level "
-            "AND final_symbol IS NOT DISTINCT FROM suggested_symbol "
-            "AND final_bonus IS NOT DISTINCT FROM suggested_bonus) "
+            "AND final_symbol IS NOT DISTINCT FROM suggested_symbol) "
             "OR NULLIF(BTRIM(override_reason), '') IS NOT NULL",
             name="ck_realization_person_override_reason",
         ),

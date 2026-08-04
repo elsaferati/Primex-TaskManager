@@ -334,7 +334,19 @@ async def collect_weekly_evidence(
         if row.source_type != "realization_observation_verification"
     ]
     cancellation_by_task: dict[uuid.UUID, tuple[str, str]] = {}
+    verified_absence_by_user_date: dict[tuple[uuid.UUID, date], str] = {}
     for observation in evidence_observations:
+        if (
+            observation.id in verified_ids
+            and observation.user_id is not None
+            and observation.category == "ABSENCE"
+        ):
+            absence_date = _date((observation.evidence_json or {}).get("date"))
+            classification = str(
+                (observation.evidence_json or {}).get("classification") or ""
+            ).upper()
+            if absence_date and classification:
+                verified_absence_by_user_date[(observation.user_id, absence_date)] = classification
         if observation.id not in verified_ids or observation.task_id is None:
             continue
         kind = str((observation.evidence_json or {}).get("kind") or "").upper()
@@ -452,6 +464,7 @@ async def collect_weekly_evidence(
             "task_id": planned_task["task_id"],
             "title": planned_task["title"],
             "project_title": planned_task["project_title"],
+            "project_id": planned_task["project_id"],
             "source_type": planned_task["source_type"],
             "classification": classification,
             "status": current["status"] if current else None,
@@ -609,6 +622,7 @@ async def collect_weekly_evidence(
             "task_id": task["task_id"],
             "title": task["title"],
             "project_title": task["project_title"],
+            "project_id": task["project_id"],
             "source_type": task["source_type"],
             "classification": classification,
             "status": status,
@@ -667,6 +681,20 @@ async def collect_weekly_evidence(
                     person["counters"]["time_saved_minutes"] += observation.impact_minutes or 0
                 if observation.category == "REPEATED_PROBLEM":
                     person["counters"]["repeated_problem_count"] += 1
+                if observation.category == "MISSED_MEETING":
+                    person["counters"]["meeting_missed_count"] += 1
+                if observation.category == "ABSENCE":
+                    absence_kind = str(
+                        (observation.evidence_json or {}).get("classification") or ""
+                    ).upper()
+                    if absence_kind == "UNEXCUSED":
+                        person["counters"]["unexcused_absence_days"] += 1
+                    elif absence_kind == "APPROVED_PERSONAL":
+                        person["counters"]["approved_personal_absence_days"] += 1
+                        person["counters"]["approved_absence_days"] += 1
+                    elif absence_kind == "ANNUAL_LEAVE":
+                        person["counters"]["annual_leave_days"] += 1
+                        person["counters"]["approved_absence_days"] += 1
                 extra_kind = str((observation.evidence_json or {}).get("kind") or "").upper()
                 related_task = next(
                     (
@@ -713,13 +741,17 @@ async def collect_weekly_evidence(
         if row.type == AttendanceType.VONESE:
             person["counters"]["tardiness_count"] += 1
         elif row.type == AttendanceType.PUSHIM_VJETOR:
-            person["counters"]["approved_absence_days"] += 1
+            if (row.user_id, row.date) not in verified_absence_by_user_date:
+                person["counters"]["annual_leave_days"] += 1
+                person["counters"]["approved_absence_days"] += 1
         elif row.type == AttendanceType.MUNGESE:
-            # The current model does not distinguish excused and unexpected absence.
-            person["counters"]["absence_needs_review_count"] += 1
-            person["needs_review"].append(
-                {"kind": "ABSENCE_APPROVAL", "attendance_id": str(row.id)}
-            )
+            if (row.user_id, row.date) not in verified_absence_by_user_date:
+                # The source model cannot distinguish absence types; a manager
+                # classification observation resolves this without guessing.
+                person["counters"]["absence_needs_review_count"] += 1
+                person["needs_review"].append(
+                    {"kind": "ABSENCE_APPROVAL", "attendance_id": str(row.id)}
+                )
         person["attendance"][str(row.id)] = {
             "date": row.date,
             "type": row.type.value,

@@ -47,7 +47,42 @@ class TestPolicy(unittest.TestCase):
             BONUSES,
         )
         self.assertEqual(result.level, RealizationLevel.B)
-        self.assertEqual(result.bonus, 30)
+
+    def test_annual_leave_is_not_personal_absence_m(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 0,
+                "annual_leave_days": 5,
+                "approved_absence_days": 5,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.B)
+
+    def test_approved_personal_absence_uses_m(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 1,
+                "accounted_planned_count": 1,
+                "approved_personal_absence_days": 1,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.M)
+
+    def test_confirmed_missed_meeting_uses_d(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 1,
+                "completed_on_time_count": 1,
+                "meeting_missed_count": 1,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.D)
 
     def test_verified_extras_use_first_matching_a_plus_rule(self) -> None:
         result = evaluate_policy(
@@ -139,9 +174,10 @@ class TestQuestionsAndNarrative(unittest.TestCase):
         decision = evaluate_policy(person["counters"], CRITERIA, BONUSES)
         narrative = build_albanian_narrative(person)
         questions = {row["key"]: row for row in build_questions(person, decision, narrative)}
-        self.assertEqual(questions["respected_meetings"]["source_status"], "MISSING_EVIDENCE")
+        self.assertEqual(questions["respected_meetings"]["source_status"], "AUTO_NEEDS_CONFIRMATION")
         self.assertEqual(questions["unexpected_absences"]["source_status"], "AUTO_NEEDS_CONFIRMATION")
         self.assertEqual(questions["current_level"]["auto_value"], "—")
+        self.assertNotIn("weekly_bonus", questions)
 
     def test_narrative_is_deterministic(self) -> None:
         facts = {"planned_count": 2, "completed_on_time_count": 2, "verified_extra_count": 1}
