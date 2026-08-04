@@ -202,11 +202,10 @@ async def _personal_rows(
     ]
 
 
-async def _blue_discussed_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]:
+async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]:
     notes = (
         await db.execute(
             select(GaNote)
-            .where(GaNote.is_discussed.is_(True))
             .where(GaNote.is_converted_to_task.is_(False))
             .where(GaNote.status != GaNoteStatus.CLOSED)
         )
@@ -238,12 +237,17 @@ async def _blue_discussed_note_rows(db: AsyncSession, report_day: date) -> list[
         users = (await db.execute(select(User).where(User.id.in_(author_ids)))).scalars().all()
         names = {user.id: user.full_name or user.username or user.email for user in users}
 
-    ordered = sorted(today_notes, key=lambda note: note.created_at or note.updated_at)
+    # Discussed notes first, then the rest, each chronological.
+    ordered = sorted(
+        today_notes,
+        key=lambda note: (not note.is_discussed, note.created_at or note.updated_at),
+    )
     return [
         [
             str(index),
             _initials(names.get(note.created_by)),
             _note_text(note.content),
+            "YES" if note.is_discussed else "JO",
             _local_time(note.created_at),
         ]
         for index, note in enumerate(ordered, start=1)
@@ -286,8 +290,8 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     )
     section_3 = _ascii_table(
         "NOTES",
-        [("NR", 2), ("NGA", 8), ("SHENIMI", 68), ("ORA", 5)],
-        await _blue_discussed_note_rows(db, report_day),
+        [("NR", 2), ("NGA", 8), ("SHENIMI", 60), ("DISK", 4), ("ORA", 5)],
+        await _blue_note_rows(db, report_day),
         EMPTY_NOTES,
     )
 
