@@ -809,6 +809,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     if not table_rows:
         return ""
     header, body_rows = table_rows[0], table_rows[1:]
+    body_rows = _merge_ascii_continuation_rows(header, body_rows)
     header_cell_style = (
         "background:#e5e7eb;color:#111827;text-align:left;font-weight:700;"
         "border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top;"
@@ -834,7 +835,12 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         )
         cell_style = canceled_cell_style if is_canceled else body_cell_style
         body_html_parts.append(
-            "<tr>" + "".join(f"<td style=\"{cell_style}\">{html.escape(cell)}</td>" for cell in row) + "</tr>"
+            "<tr>"
+            + "".join(
+                f"<td style=\"{cell_style}\">{html.escape(cell).replace(chr(10), '<br>')}</td>"
+                for cell in row
+            )
+            + "</tr>"
         )
     body_html = "".join(body_html_parts)
     caption_html = ""
@@ -854,6 +860,40 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         f"<thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
         "</td></tr></table>"
     )
+
+
+def _primary_text_column_index(header: list[str]) -> int:
+    normalized = [cell.strip().upper() for cell in header]
+    for name in ("NOTE", "TITLE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"):
+        if name in normalized:
+            return normalized.index(name)
+    return min(2, max(len(header) - 1, 0))
+
+
+def _merge_ascii_continuation_rows(header: list[str], rows: list[list[str]]) -> list[list[str]]:
+    if not header:
+        return rows
+    width = len(header)
+    text_index = _primary_text_column_index(header)
+    merged: list[list[str]] = []
+    for row in rows:
+        normalized = (row + [""] * width)[:width]
+        has_text_continuation = bool(normalized[text_index].strip())
+        other_cells_empty = all(
+            not normalized[index].strip()
+            for index in range(width)
+            if index != text_index
+        )
+        if merged and has_text_continuation and other_cells_empty:
+            previous = merged[-1]
+            previous[text_index] = (
+                f"{previous[text_index]}\n{normalized[text_index].strip()}"
+                if previous[text_index].strip()
+                else normalized[text_index].strip()
+            )
+        else:
+            merged.append(normalized)
+    return merged
 
 
 def _ascii_table_is_empty(lines: list[str]) -> bool:
