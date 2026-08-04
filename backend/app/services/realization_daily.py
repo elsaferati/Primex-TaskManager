@@ -21,10 +21,10 @@ from app.models.realization import (
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
-from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.services.realization_calculator import build_project_progress
-from app.services.realization_evidence import _snapshot_tasks, _snapshot_users
+from app.services.realization_evidence import _snapshot_tasks
+from app.services.realization_people import load_active_users_and_common_leave
 from app.services.realization_periods import require_recalculable, transition_period
 
 
@@ -114,7 +114,6 @@ async def calculate_daily_period(
 
     day = period.start_date
     planned = _snapshot_tasks(planned_snapshot)
-    snapshot_users = _snapshot_users(planned_snapshot)
     planned_ids = {row["task_id"] for row in planned.values() if row.get("task_id")}
 
     zone = ZoneInfo(settings.REALIZATION_TIMEZONE)
@@ -173,11 +172,19 @@ async def calculate_daily_period(
         if task.assigned_to:
             assignees[task.id].add(task.assigned_to)
 
-    department_users = (
-        await db.execute(select(User).where(User.department_id == period.department_id))
-    ).scalars().all()
-    user_names = {user.id: user.full_name for user in department_users}
-    user_names.update(snapshot_users)
+    department_users, common_leave = await load_active_users_and_common_leave(
+        db,
+        department_id=period.department_id,
+        start_date=day,
+        end_date=day,
+    )
+    excluded_on_leave = {
+        user_id for user_id, leave in common_leave.items() if day in leave.days
+    }
+    eligible_users = [
+        user for user in department_users if user.id not in excluded_on_leave
+    ]
+    user_names = {user.id: user.full_name for user in eligible_users}
     people: dict[uuid.UUID, dict[str, Any]] = {
         user_id: {
             "user_id": str(user_id),
@@ -210,10 +217,7 @@ async def calculate_daily_period(
                 )
         for user_id, due_today in occurrence_users.items():
             if user_id not in people:
-                people[user_id] = {
-                    "user_id": str(user_id), "user_name": "Employee", "date": day.isoformat(),
-                    "tasks": [], "attendance": [], "counters": defaultdict(int), "questions": [],
-                }
+                continue
             weekly_task_keys_by_user[user_id].add(key)
             latest = latest_progress.get(raw.get("task_id"))
             completed_as_of_day = (
@@ -305,6 +309,9 @@ async def calculate_daily_period(
             )
         ).scalars().all()
     }
+    for user_id, stale_result in existing.items():
+        if user_id not in people:
+            await db.delete(stale_result)
     results: list[RealizationPersonResult] = []
     for user_id, person in people.items():
         counters = dict(person["counters"])
@@ -400,6 +407,18 @@ async def calculate_daily_period(
         "completed_count": sum(row.completed_on_time_count for row in results),
         "additional_count": sum(row.additional_count for row in results),
         "source_planned_snapshot_id": str(planned_snapshot.id),
+        "excluded_people": [
+            {
+                "user_id": str(user.id),
+                "user_name": user.full_name,
+                "reason": "ANNUAL_LEAVE_COMMON_VIEW",
+                "common_entry_ids": [
+                    str(entry_id) for entry_id in common_leave[user.id].entry_ids
+                ],
+            }
+            for user in department_users
+            if user.id in excluded_on_leave
+        ],
     }
     department_result.total_bonus = None
     department_result.average_bonus = None

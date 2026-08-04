@@ -25,6 +25,10 @@ from app.services.realization_periods import (
     transition_period,
     weekly_end,
 )
+from app.services.realization_people import (
+    build_common_leave_coverage,
+    full_period_leave_user_ids,
+)
 from app.services.realization_policy import evaluate_policy
 
 
@@ -162,6 +166,59 @@ class TestWorkflow(unittest.TestCase):
         period = SimpleNamespace(status="OPEN", locked_at=None)
         with self.assertRaises(RealizationWorkflowError):
             transition_period(period, RealizationPeriodStatus.APPROVED, actor_id=uuid.uuid4())
+
+
+class TestRealizationPeopleEligibility(unittest.TestCase):
+    def test_full_week_common_view_leave_excludes_only_covered_user(self) -> None:
+        covered_user = uuid.uuid4()
+        working_user = uuid.uuid4()
+        entry = SimpleNamespace(
+            id=uuid.uuid4(),
+            assigned_to_user_id=covered_user,
+            created_by_user_id=covered_user,
+            entry_date=date(2026, 8, 3),
+            created_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            description="Date range: 2026-08-03 to 2026-08-07 (Full day)",
+        )
+        partial_entry = SimpleNamespace(
+            id=uuid.uuid4(),
+            assigned_to_user_id=working_user,
+            created_by_user_id=working_user,
+            entry_date=date(2026, 8, 4),
+            created_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            description="Date: 2026-08-04 (09:00 - 12:00)",
+        )
+        coverage = build_common_leave_coverage(
+            [entry, partial_entry],
+            user_ids={covered_user, working_user},
+            start_date=date(2026, 8, 3),
+            end_date=date(2026, 8, 7),
+        )
+        working_days = {date(2026, 8, day) for day in range(3, 8)}
+        self.assertEqual(
+            full_period_leave_user_ids(coverage, working_days=working_days),
+            {covered_user},
+        )
+        self.assertNotIn(working_user, coverage)
+
+    def test_common_view_all_users_leave_applies_to_each_active_user(self) -> None:
+        first = uuid.uuid4()
+        second = uuid.uuid4()
+        entry = SimpleNamespace(
+            id=uuid.uuid4(),
+            assigned_to_user_id=None,
+            created_by_user_id=first,
+            entry_date=date(2026, 8, 4),
+            created_at=datetime(2026, 8, 1, tzinfo=timezone.utc),
+            description="[ALL_USERS] Date: 2026-08-04 (Full day)",
+        )
+        coverage = build_common_leave_coverage(
+            [entry],
+            user_ids={first, second},
+            start_date=date(2026, 8, 4),
+            end_date=date(2026, 8, 4),
+        )
+        self.assertEqual(set(coverage), {first, second})
 
 
 class TestQuestionsAndNarrative(unittest.TestCase):

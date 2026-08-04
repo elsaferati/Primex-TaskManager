@@ -210,6 +210,7 @@ export default function RealizationPage() {
   const [relatedId, setRelatedId] = React.useState("")
   const [impactLevel, setImpactLevel] = React.useState("MINOR")
   const [taskId, setTaskId] = React.useState("")
+  const autoSnapshotAttemptRef = React.useRef<string | null>(null)
 
   const selected = React.useMemo(
     () => data?.people.find((person) => person.id === selectedId) || data?.people[0] || null,
@@ -283,6 +284,41 @@ export default function RealizationPage() {
     const params = new URLSearchParams({ department_id: departmentId, day: today })
     return run("daily", `/realization/daily/calculate?${params}`, { method: "POST" })
   }
+
+  React.useEffect(() => {
+    if (!data || loading || action || !departmentId) return
+
+    const today = isoLocalDate(new Date())
+    const currentWeek = mondayOf(new Date())
+    const attemptKey = `${departmentId}:${today}`
+    const canRefreshCurrentWeek = ["OPEN", "CALCULATED"].includes(data.period.status)
+
+    if (
+      weekStart !== currentWeek ||
+      !data.has_planned_snapshot ||
+      !canRefreshCurrentWeek ||
+      autoSnapshotAttemptRef.current === attemptKey
+    ) {
+      return
+    }
+
+    autoSnapshotAttemptRef.current = attemptKey
+    void (async () => {
+      setAction("auto-daily")
+      try {
+        const params = new URLSearchParams({ department_id: departmentId, day: today })
+        const response = await apiFetch(`/realization/daily/calculate?${params}`, { method: "POST" })
+        if (!response.ok) throw new Error(await errorMessage(response))
+        await loadReport()
+      } catch (error) {
+        toast.error("Snapshot-i automatik ditor dështoi", {
+          description: error instanceof Error ? error.message : undefined,
+        })
+      } finally {
+        setAction(null)
+      }
+    })()
+  }, [action, apiFetch, data, departmentId, loadReport, loading, weekStart])
 
   const downloadExcel = async (allDepartments = false) => {
     setAction(allDepartments ? "export-all" : "export")
@@ -503,7 +539,7 @@ export default function RealizationPage() {
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 self-end text-xs text-slate-300">
-            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3"><span className="block text-lg font-semibold text-white">17:10</span>Snapshot ditor</div>
+            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3"><span className="block text-lg font-semibold text-white">16:20</span>Snapshot ditor</div>
             <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3"><span className="block text-lg font-semibold text-white">Audit</span>Çdo ndryshim</div>
           </div>
         </div>
@@ -556,7 +592,12 @@ export default function RealizationPage() {
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard icon={Target} label="Progresi javor" value={`${averageProgress}%`} note={`${totalClosed}/${totalPlanned} detyra të mbyllura`} />
-        <MetricCard icon={UserCheck} label="Persona" value={people.length} note={data?.department_name || "Departamenti"} />
+        <MetricCard
+          icon={UserCheck}
+          label="Persona"
+          value={people.length}
+          note={`${data?.department_name || "Departamenti"} · vetëm aktivë, pa PV/FEST`}
+        />
         <MetricCard icon={Sparkles} label="Detyra shtesë" value={totalAdditional} note="Pas snapshot-it PLANNED" />
         <MetricCard icon={AlertTriangle} label="Për konfirmim" value={needsReview} note="Pa hamendësim automatik" />
       </div>
@@ -569,7 +610,15 @@ export default function RealizationPage() {
           </CardHeader>
           <CardContent className="max-h-[760px] space-y-2 overflow-y-auto p-3">
             {loading ? <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div> : null}
-            {!loading && !people.length ? <p className="px-3 py-12 text-center text-sm text-muted-foreground">Nuk ka rezultate. Ruaj snapshot-et PLANNED/FINAL dhe kalkulo javën.</p> : null}
+            {!loading && !people.length ? (
+              <p className="px-3 py-12 text-center text-sm text-muted-foreground">
+                {action === "auto-daily"
+                  ? "Po gjenerohet snapshot-i ditor…"
+                  : data?.has_planned_snapshot
+                    ? "Nuk ka ende snapshot ditor për këtë javë."
+                    : "Nuk ka plan javor PLANNED për këtë javë."}
+              </p>
+            ) : null}
             {people.map((person) => {
               const personGrade = person.final_level || person.suggested_level
               const progress = person.facts_json.weekly_progress_percent || 0

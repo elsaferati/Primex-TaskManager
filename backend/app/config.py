@@ -76,10 +76,10 @@ class Settings(BaseSettings):
     SPEECH_ALLOWED_MIME: str | None = None
     REALIZATION_TIMEZONE: str = "Europe/Tirane"
     REALIZATION_DAILY_ENABLED: bool = True
-    REALIZATION_DAILY_HOUR: int = 17
-    REALIZATION_DAILY_MINUTE: int = 10
+    REALIZATION_DAILY_HOUR: int = 16
+    REALIZATION_DAILY_MINUTE: int = 20
     REALIZATION_AI_ENABLED: bool = False
-    REALIZATION_AI_MODEL: str = "gpt-5.6-sol"
+    REALIZATION_AI_MODEL: str = "gpt-5.2"
     REALIZATION_AI_TIMEOUT_SECONDS: int = 45
 
     @property

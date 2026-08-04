@@ -2,9 +2,12 @@
 
 ## What is automatic
 
-- A department snapshot is stored every working day at `17:10` in `Europe/Tirane`.
+- A department snapshot is stored every working day at `16:20` in `Europe/Tirane`.
 - The snapshot measures tasks planned for that date, system tasks, tasks added after the official weekly plan, fast tasks, attendance, and cumulative weekly completion.
-- On Friday at `17:25`, the weekly result is calculated automatically when both official `PLANNED` and `FINAL` weekly planner snapshots exist.
+- Only active department users are eligible. A full-day `PV/FEST` entry in Common View excludes that person from the matching daily snapshot; leave covering every working day excludes the person from the weekly evaluation and Excel export.
+- If the official `PLANNED` baseline is missing, the first daily run freezes the active weekly plan automatically.
+- On Friday at `17:25`, the official `FINAL` state is captured and the weekly result is calculated automatically.
+- Automatic snapshots store scheduler provenance, type, creator, and timestamp in their auditable payload; manual versions remain available for comparison.
 - Adding, verifying, or voiding manager evidence recalculates every unreviewed weekly result immediately.
 - MST and TT project progress is averaged from the latest recorded quantities; other projects remain task-level evidence.
 
@@ -34,7 +37,7 @@ Configure in `backend/.env`:
 ```dotenv
 OPENAI_API_KEY=...
 REALIZATION_AI_ENABLED=true
-REALIZATION_AI_MODEL=gpt-5.6-sol
+REALIZATION_AI_MODEL=gpt-5.2
 ```
 
 Restart the API and workers after changing configuration. Never commit the real key.

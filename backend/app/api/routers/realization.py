@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import select
@@ -64,6 +64,11 @@ from app.services.realization_periods import (
     transition_period,
     weekly_end,
 )
+from app.services.realization_people import (
+    full_period_leave_user_ids,
+    load_active_users_and_common_leave,
+)
+from app.services.system_task_schedule import _is_working_day
 
 
 router = APIRouter()
@@ -173,13 +178,32 @@ async def _weekly_response(
     user: User,
     department_name: str | None,
 ) -> RealizationWeeklyOut:
-    rows = (
+    raw_rows = (
         await db.execute(
             select(RealizationPersonResult).where(
                 RealizationPersonResult.period_id == period.id
             )
         )
     ).scalars().all()
+    active_users, common_leave = await load_active_users_and_common_leave(
+        db,
+        department_id=period.department_id,
+        start_date=period.start_date,
+        end_date=period.end_date,
+    )
+    active_user_ids = {active_user.id for active_user in active_users}
+    working_days: set[date] = set()
+    current_day = period.start_date
+    while current_day <= period.end_date:
+        if _is_working_day(current_day):
+            working_days.add(current_day)
+        current_day += timedelta(days=1)
+    excluded_on_full_leave = full_period_leave_user_ids(
+        common_leave,
+        working_days=working_days,
+    )
+    eligible_user_ids = active_user_ids - excluded_on_full_leave
+    rows = [row for row in raw_rows if row.user_id in eligible_user_ids]
     visible = [
         row
         for row in rows
@@ -324,7 +348,10 @@ async def _weekly_response(
     if not has_planned:
         message = "Nuk ka PLANNED snapshot zyrtar për këtë javë."
     elif not has_final:
-        message = "Plani ekziston; FINAL snapshot mungon. Ruaje në Weekly Planner."
+        message = (
+            "Po shfaqet progresi aktual nga snapshot-et ditore. "
+            "FINAL ruhet në mbylljen e javës për vlerësimin përfundimtar."
+        )
     return RealizationWeeklyOut(
         period=RealizationPeriodOut.model_validate(period),
         department_name=department_name,
@@ -409,6 +436,31 @@ async def export_realization_excel(
             )
         )
     ).scalars().all()
+    working_days: set[date] = set()
+    current_day = start
+    while current_day <= end:
+        if _is_working_day(current_day):
+            working_days.add(current_day)
+        current_day += timedelta(days=1)
+    eligible_by_period: dict[uuid.UUID, set[uuid.UUID]] = {}
+    eligible_by_department: dict[uuid.UUID, set[uuid.UUID]] = {}
+    for period in periods:
+        active_users, common_leave = await load_active_users_and_common_leave(
+            db,
+            department_id=period.department_id,
+            start_date=start,
+            end_date=end,
+        )
+        eligible_ids = {active_user.id for active_user in active_users} - (
+            full_period_leave_user_ids(common_leave, working_days=working_days)
+        )
+        eligible_by_period[period.id] = eligible_ids
+        eligible_by_department[period.department_id] = eligible_ids
+    weekly_results = [
+        row
+        for row in weekly_results
+        if row.user_id in eligible_by_period.get(row.period_id, set())
+    ]
     user_ids = [row.user_id for row in weekly_results]
     user_names = {
         row.id: row.full_name
@@ -439,6 +491,8 @@ async def export_realization_excel(
     timeline_by_user_department: dict[tuple[uuid.UUID, uuid.UUID | None], list[dict]] = {}
     for daily in daily_results:
         daily_period = daily_period_by_id[daily.period_id]
+        if daily.user_id not in eligible_by_department.get(daily.department_id, set()):
+            continue
         facts = daily.facts_json or {}
         timeline_by_user_department.setdefault(
             (daily.user_id, daily.department_id), []
@@ -576,13 +630,26 @@ async def _daily_response(
     period: RealizationPeriod,
     department_name: str,
 ) -> RealizationDailyOut:
-    rows = (
+    raw_rows = (
         await db.execute(
             select(RealizationPersonResult).where(
                 RealizationPersonResult.period_id == period.id
             )
         )
     ).scalars().all()
+    active_users, common_leave = await load_active_users_and_common_leave(
+        db,
+        department_id=period.department_id,
+        start_date=period.start_date,
+        end_date=period.end_date,
+    )
+    eligible_user_ids = {
+        active_user.id
+        for active_user in active_users
+        if active_user.id not in common_leave
+        or period.start_date not in common_leave[active_user.id].days
+    }
+    rows = [row for row in raw_rows if row.user_id in eligible_user_ids]
     names = {
         row.id: row.full_name
         for row in (

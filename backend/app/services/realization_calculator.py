@@ -395,6 +395,10 @@ async def calculate_weekly_period(
     }
     if any(row.reviewed_at is not None for row in existing.values()):
         raise ValueError("Recalculation is not allowed after any person result has been reviewed")
+    eligible_user_ids = {uuid.UUID(user_id) for user_id in evidence["people"]}
+    for user_id, stale_result in existing.items():
+        if user_id not in eligible_user_ids:
+            await db.delete(stale_result)
     results: list[RealizationPersonResult] = []
     level_counts: Counter[str] = Counter()
     all_task_keys: set[str] = set()
@@ -469,6 +473,7 @@ async def calculate_weekly_period(
         "unique_additional_task_count": len(evidence["department_additional_task_keys"]),
         "unique_attributed_task_count": len(all_task_keys),
         "unassigned": evidence["unassigned"],
+        "excluded_people": evidence["excluded_people"],
         "planned_snapshot_id": evidence["planned_snapshot_id"],
         "final_snapshot_id": evidence["final_snapshot_id"],
         "project_progress": build_project_progress(list(unique_department_tasks.values())),
