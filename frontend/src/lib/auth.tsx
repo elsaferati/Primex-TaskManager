@@ -14,6 +14,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
   apiFetch: (path: string, init?: RequestInit) => Promise<Response>
+  prefetchApiFetch: (path: string, init?: RequestInit) => Promise<Response>
 }
 
 const AuthContext = React.createContext<AuthContextValue | null>(null)
@@ -26,13 +27,31 @@ const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
 let refreshPromise: Promise<string | null> | null = null
 const inFlightGetRequests = new Map<string, Promise<Response>>()
 const referenceResponseCache = new Map<string, { response: Response; expiresAt: number }>()
+const prefetchedResponseCache = new Map<string, { response: Response; expiresAt: number }>()
 const REFERENCE_CACHE_TTL_MS = 60 * 1000
+const PREFETCH_CACHE_TTL_MS = 30 * 1000
 const REFERENCE_CACHE_PATHS = new Set(["/departments", "/users/lookup", "/task-statuses", "/boards"])
+let cacheGeneration = 0
 
 function clearSessionCaches() {
+  cacheGeneration += 1
   inFlightGetRequests.clear()
   referenceResponseCache.clear()
+  prefetchedResponseCache.clear()
   clearDepartmentBootstrapCache()
+}
+
+function createRequestKey(url: string, headers: Headers, init: RequestInit) {
+  return JSON.stringify([
+    url,
+    Array.from(headers.entries()).sort(([left], [right]) => left.localeCompare(right)),
+    init.cache,
+    init.mode,
+    init.redirect,
+    init.referrer,
+    init.referrerPolicy,
+    init.integrity,
+  ])
 }
 
 function isReferenceDataRequest(path: string, init: RequestInit) {
@@ -399,22 +418,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (method !== "GET") {
         // Reference data can be changed by administrative mutations. Clearing
         // all session-local entries keeps subsequent reads authoritative.
-        referenceResponseCache.clear()
-        clearDepartmentBootstrapCache()
+        clearSessionCaches()
       }
       const canShareRequest = method === "GET" && init.body == null && init.signal == null
       if (!canShareRequest) return executeRequest()
 
-      const requestKey = JSON.stringify([
-        url,
-        Array.from(headers.entries()).sort(([left], [right]) => left.localeCompare(right)),
-        init.cache,
-        init.mode,
-        init.redirect,
-        init.referrer,
-        init.referrerPolicy,
-        init.integrity,
-      ])
+      const requestKey = createRequestKey(url, headers, init)
+      const prefetched = prefetchedResponseCache.get(requestKey)
+      if (prefetched && Date.now() < prefetched.expiresAt) {
+        prefetchedResponseCache.delete(requestKey)
+        return prefetched.response.clone()
+      }
+      if (prefetched) prefetchedResponseCache.delete(requestKey)
       const canCacheResponse = isReferenceDataRequest(path, init)
       if (canCacheResponse) {
         const cached = referenceResponseCache.get(requestKey)
@@ -425,10 +440,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (existingRequest) return (await existingRequest).clone()
 
       const request = executeRequest()
+      const requestCacheGeneration = cacheGeneration
       inFlightGetRequests.set(requestKey, request)
       try {
         const response = await request
-        if (canCacheResponse && response.ok) {
+        if (canCacheResponse && response.ok && requestCacheGeneration === cacheGeneration) {
           referenceResponseCache.set(requestKey, {
             response: response.clone(),
             expiresAt: Date.now() + REFERENCE_CACHE_TTL_MS,
@@ -442,6 +458,32 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
     },
     []
+  )
+
+  const prefetchApiFetch = React.useCallback(
+    async (path: string, init: RequestInit = {}) => {
+      const method = (init.method || "GET").toUpperCase()
+      if (method !== "GET" || init.body != null || init.signal != null) {
+        return apiFetch(path, init)
+      }
+
+      const generation = cacheGeneration
+      const response = await apiFetch(path, init)
+      if (!response.ok || generation !== cacheGeneration) return response
+
+      const baseUrl = path.startsWith("http") ? "" : API_HTTP_URL
+      const url = path.startsWith("http") ? path : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`
+      const headers = new Headers(init.headers)
+      const currentToken = tokenRef.current
+      if (currentToken) headers.set("Authorization", `Bearer ${currentToken}`)
+      const requestKey = createRequestKey(url, headers, init)
+      prefetchedResponseCache.set(requestKey, {
+        response: response.clone(),
+        expiresAt: Date.now() + PREFETCH_CACHE_TTL_MS,
+      })
+      return response
+    },
+    [apiFetch]
   )
 
   const login = React.useCallback(async (email: string, password: string) => {
@@ -467,8 +509,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = React.useMemo<AuthContextValue>(
-    () => ({ user, token, loading, login, logout, apiFetch }),
-    [user, token, loading, login, logout, apiFetch]
+    () => ({ user, token, loading, login, logout, apiFetch, prefetchApiFetch }),
+    [user, token, loading, login, logout, apiFetch, prefetchApiFetch]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>

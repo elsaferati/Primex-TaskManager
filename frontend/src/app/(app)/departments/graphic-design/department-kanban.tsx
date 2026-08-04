@@ -1280,11 +1280,14 @@ export default function DepartmentKanban() {
           allUsers = (await usersRes.json()) as UserLookup[]
         }
 
-        const [projRes, sysRes, allSysRes, tasksRes] = await Promise.all([
+        if (!silent) setLoadingExtras(true)
+        const [projRes, sysRes, allSysRes, tasksRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}&include_templates=true`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}&include_overdue=true`),
           apiFetch(`/system-tasks?department_id=${dep.id}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
+          apiFetch(`/internal-notes?department_id=${dep.id}`),
+          apiFetch(`/meetings?department_id=${dep.id}`),
         ])
         const allProjects = projRes.ok ? ((await projRes.json()) as Project[]) : []
         const templateProjects = allProjects.filter((p) => p.is_template)
@@ -1293,6 +1296,8 @@ export default function DepartmentKanban() {
         const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
         const allSystemTasks = allSysRes.ok ? ((await allSysRes.json()) as SystemTaskTemplate[]) : []
         const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
+        const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
+        const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
         const nonSystemTasks = taskRows.filter((t) => {
           if (t.system_template_origin_id) return false
           if (t.project_id && templateProjectIds.has(t.project_id)) return false
@@ -1315,14 +1320,6 @@ export default function DepartmentKanban() {
         bootstrapInternalNoteDeptIdRef.current = dep.id
         bootstrapInternalNoteProjectsRef.current = projects
         if (!silent) setLoading(false)
-
-        if (!silent) setLoadingExtras(true)
-        const [internalRes, meetingsRes] = await Promise.all([
-          apiFetch(`/internal-notes?department_id=${dep.id}`),
-          apiFetch(`/meetings?department_id=${dep.id}`),
-        ])
-        const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
-        const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
         setInternalNotes(internalNotes)
         setMeetings(meetings)
         const payload: DepartmentBootstrapPayload = {

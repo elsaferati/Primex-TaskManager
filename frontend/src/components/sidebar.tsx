@@ -181,7 +181,8 @@ const navGroups: NavGroup[] = [
 export function Sidebar({ role }: { role: UserRole }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { apiFetch, user } = useAuth()
+  const { apiFetch, prefetchApiFetch, user } = useAuth()
+  const currentUserId = user?.id
   const canAccessOneHReports =
     role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
@@ -249,6 +250,31 @@ export function Sidebar({ role }: { role: UserRole }) {
     }
   }, [apiFetch, genericProjectId])
 
+  React.useEffect(() => {
+    if (!currentUserId) return
+    const warmReferenceData = () => {
+      void Promise.all([prefetchApiFetch("/departments"), prefetchApiFetch("/users/lookup")])
+    }
+    if (typeof window.requestIdleCallback === "function") {
+      const idleId = window.requestIdleCallback(warmReferenceData, { timeout: 1500 })
+      return () => window.cancelIdleCallback(idleId)
+    }
+    const timeoutId = window.setTimeout(warmReferenceData, 250)
+    return () => window.clearTimeout(timeoutId)
+  }, [currentUserId, prefetchApiFetch])
+
+  const prefetchDepartmentData = React.useCallback(
+    (href: string) => {
+      if (!currentUserId) return
+      void import("@/lib/department-prefetch")
+        .then((module) => module.prefetchDepartmentData(href, currentUserId, prefetchApiFetch))
+        .catch(() => {
+          // Route loading remains the fallback when the optional prefetch chunk fails.
+        })
+    },
+    [currentUserId, prefetchApiFetch]
+  )
+
   const projectRoute =
     pathname.startsWith("/projects/pcm")
       ? "pcm"
@@ -311,8 +337,14 @@ export function Sidebar({ role }: { role: UserRole }) {
         key={item.href}
         href={item.href}
         prefetch={false}
-        onMouseEnter={() => router.prefetch(item.href)}
-        onFocus={() => router.prefetch(item.href)}
+        onMouseEnter={() => {
+          router.prefetch(item.href)
+          prefetchDepartmentData(item.href)
+        }}
+        onFocus={() => {
+          router.prefetch(item.href)
+          prefetchDepartmentData(item.href)
+        }}
         onClick={() => {
           if (!isDesktop) setIsOpen(false)
         }}
