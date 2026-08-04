@@ -1443,16 +1443,21 @@ export default function DepartmentKanban() {
           allUsers = (await usersRes.json()) as UserLookup[]
         }
 
-        const [projRes, sysRes, allSysRes, tasksRes] = await Promise.all([
+        if (!silent) setLoadingExtras(true)
+        const [projRes, sysRes, allSysRes, tasksRes, internalRes, meetingsRes] = await Promise.all([
           apiFetch(`/projects?department_id=${dep.id}`),
           apiFetch(`/system-tasks?department_id=${dep.id}&occurrence_date=${systemDateKey}&include_overdue=true`),
           apiFetch(`/system-tasks?department_id=${dep.id}`),
           apiFetch(`/tasks?include_done=true&department_id=${dep.id}`),
+          apiFetch(`/internal-notes?department_id=${dep.id}`),
+          apiFetch(`/meetings?department_id=${dep.id}`),
         ])
         const projects = projRes.ok ? ((await projRes.json()) as Project[]) : []
         const systemTasks = sysRes.ok ? ((await sysRes.json()) as SystemTaskTemplate[]) : []
         const allSystemTasks = allSysRes.ok ? ((await allSysRes.json()) as SystemTaskTemplate[]) : []
         const taskRows = tasksRes.ok ? ((await tasksRes.json()) as Task[]) : []
+        const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
+        const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
         const nonSystemTasks = taskRows.filter((t) => !t.system_template_origin_id)
         const systemTaskRows = taskRows.filter((t) => Boolean(t.system_template_origin_id))
         setDepartments(deps)
@@ -1470,14 +1475,6 @@ export default function DepartmentKanban() {
         bootstrapInternalNoteDeptIdRef.current = dep.id
         bootstrapInternalNoteProjectsRef.current = projects
         if (!silent) setLoading(false)
-
-        if (!silent) setLoadingExtras(true)
-        const [internalRes, meetingsRes] = await Promise.all([
-          apiFetch(`/internal-notes?department_id=${dep.id}`),
-          apiFetch(`/meetings?department_id=${dep.id}`),
-        ])
-        const internalNotes = internalRes.ok ? ((await internalRes.json()) as InternalNote[]) : []
-        const meetings = meetingsRes.ok ? ((await meetingsRes.json()) as Meeting[]) : []
         setInternalNotes(internalNotes)
         setMeetings(meetings)
         const payload: DepartmentBootstrapPayload = {
@@ -1687,19 +1684,16 @@ export default function DepartmentKanban() {
     const loadMembers = async () => {
       const missing = projects.filter((project) => !projectMembersRef.current[project.id])
       if (!missing.length) return
-      const results = await Promise.all(
-        missing.map(async (project) => {
-          const res = await apiFetch(`/project-members?project_id=${project.id}`)
-          if (!res.ok) return { id: project.id, members: [] as UserLookup[] }
-          const members = (await res.json()) as UserLookup[]
-          return { id: project.id, members }
-        })
-      )
+      const params = new URLSearchParams()
+      for (const project of missing) params.append("project_ids", project.id)
+      const res = await apiFetch(`/project-members/batch?${params.toString()}`)
+      if (!res.ok) return
+      const results = (await res.json()) as Array<{ project_id: string; members: UserLookup[] }>
       if (cancelled) return
       setProjectMembers((prev) => {
         const next = { ...prev }
         for (const result of results) {
-          next[result.id] = result.members
+          next[result.project_id] = result.members
         }
         return next
       })

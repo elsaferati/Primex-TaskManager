@@ -10,7 +10,7 @@ except ImportError:
     ZoneInfo = None
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status, Query
-from sqlalchemy import Date, cast, delete, exists, func, insert, or_, select, union_all, update
+from sqlalchemy import Date, cast, delete, exists, func, insert, literal, null, or_, select, union_all, update
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -396,6 +396,98 @@ async def _assignees_for_tasks(
     return assignees
 
 
+async def _task_list_metadata(
+    db: AsyncSession,
+    task_ids: list[uuid.UUID],
+    user_id: uuid.UUID,
+) -> tuple[
+    dict[uuid.UUID, list[TaskAssigneeOut]],
+    dict[uuid.UUID, str | None],
+    dict[uuid.UUID, list[uuid.UUID]],
+]:
+    """Load assignees, the viewer's comments and alignments in one round trip."""
+
+    if not task_ids:
+        return {}, {}, {}
+
+    explicit_assignees = select(
+        TaskAssignee.task_id.label("task_id"),
+        TaskAssignee.user_id.label("user_id"),
+    ).where(TaskAssignee.task_id.in_(task_ids))
+    has_explicit_assignee = exists(
+        select(1).where(TaskAssignee.task_id == Task.id)
+    ).correlate(Task)
+    fallback_assignees = select(
+        Task.id.label("task_id"),
+        Task.assigned_to.label("user_id"),
+    ).where(
+        Task.id.in_(task_ids),
+        Task.assigned_to.is_not(None),
+        ~has_explicit_assignee,
+    )
+    effective_assignees = union_all(explicit_assignees, fallback_assignees).subquery()
+
+    assignee_rows = (
+        select(
+            effective_assignees.c.task_id,
+            literal("assignee").label("kind"),
+            User.id.label("user_id"),
+            User.email.label("email"),
+            User.username.label("username"),
+            User.full_name.label("full_name"),
+            null().label("comment"),
+        )
+        .join(User, effective_assignees.c.user_id == User.id)
+    )
+    comment_rows = select(
+        TaskUserComment.task_id,
+        literal("comment").label("kind"),
+        null().label("user_id"),
+        null().label("email"),
+        null().label("username"),
+        null().label("full_name"),
+        TaskUserComment.comment.label("comment"),
+    ).where(
+        TaskUserComment.task_id.in_(task_ids),
+        TaskUserComment.user_id == user_id,
+    )
+    alignment_rows = select(
+        TaskAlignmentUser.task_id,
+        literal("alignment").label("kind"),
+        TaskAlignmentUser.user_id.label("user_id"),
+        null().label("email"),
+        null().label("username"),
+        null().label("full_name"),
+        null().label("comment"),
+    ).where(TaskAlignmentUser.task_id.in_(task_ids))
+
+    metadata = union_all(assignee_rows, comment_rows, alignment_rows).subquery()
+    rows = (
+        await db.execute(
+            select(metadata).order_by(metadata.c.kind, metadata.c.full_name.nulls_last())
+        )
+    ).all()
+
+    assignees: dict[uuid.UUID, list[TaskAssigneeOut]] = {task_id: [] for task_id in task_ids}
+    comments: dict[uuid.UUID, str | None] = {}
+    alignments: dict[uuid.UUID, list[uuid.UUID]] = {}
+    for task_id, kind, metadata_user_id, email, username, full_name, comment in rows:
+        if kind == "assignee" and metadata_user_id is not None and email is not None:
+            assignees.setdefault(task_id, []).append(
+                TaskAssigneeOut(
+                    id=metadata_user_id,
+                    email=email,
+                    username=username,
+                    full_name=full_name,
+                )
+            )
+        elif kind == "comment":
+            comments[task_id] = comment
+        elif kind == "alignment" and metadata_user_id is not None:
+            alignments.setdefault(task_id, []).append(metadata_user_id)
+    return assignees, comments, alignments
+
+
 async def _assignees_for_fast_task_groups(
     db: AsyncSession, group_ids: list[uuid.UUID]
 ) -> dict[uuid.UUID, list[TaskAssigneeOut]]:
@@ -740,6 +832,13 @@ class GaNoteTaskBatchRequest(BaseModel):
     include_inactive: bool = False
 
 
+class DashboardTaskSummary(BaseModel):
+    open_tasks: int
+    overdue: int
+    reminders: int
+    system_tasks: int
+
+
 def _ga_note_task_batch_stmt(payload: GaNoteTaskBatchRequest):
     ga_note_ids = list(dict.fromkeys(payload.ga_note_origin_ids))
     plan_note_ids = list(dict.fromkeys(payload.plan_note_origin_ids))
@@ -988,20 +1087,7 @@ async def list_tasks(
 
     tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]
-    assignee_map = await _assignees_for_tasks(db, task_ids)
-    comment_map = await _user_comments_for_tasks(db, task_ids, user.id)
-
-    # Fetch alignment users for returned tasks
-    alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
-    if task_ids:
-        rows = (
-            await db.execute(
-                select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
-                .where(TaskAlignmentUser.task_id.in_(task_ids))
-            )
-        ).all()
-        for tid, uid in rows:
-            alignment_map.setdefault(tid, []).append(uid)
+    assignee_map, comment_map, alignment_map = await _task_list_metadata(db, task_ids, user.id)
 
     out = []
     today = _as_local_date(datetime.now(timezone.utc)) or datetime.now(timezone.utc).date()
@@ -1028,6 +1114,64 @@ async def list_tasks(
     return out
 
 
+@router.get("/dashboard-summary", response_model=DashboardTaskSummary)
+async def dashboard_task_summary(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user),
+) -> DashboardTaskSummary:
+    """Return the counts rendered by the dashboard without materializing tasks.
+
+    The current task response does not expose the legacy ``planned_for``,
+    ``reminder_enabled`` or ``task_type`` fields, so those three client-side
+    filters always produce zero. Keeping those values explicit preserves the
+    existing dashboard result while reducing the request to one index-only
+    count query.
+    """
+
+    open_tasks = (
+        await db.execute(
+            select(func.count())
+            .select_from(Task)
+            .where(Task.is_active.is_(True), Task.status != TaskStatus.DONE.value)
+        )
+    ).scalar_one()
+    return DashboardTaskSummary(
+        open_tasks=int(open_tasks or 0),
+        overdue=0,
+        reminders=0,
+        system_tasks=0,
+    )
+
+
+@router.get("/waiting-confirmation-ga/count")
+async def waiting_confirmation_ga_count(
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user),
+) -> dict[str, int]:
+    """Return the global GA waiting-confirmation badge count cheaply."""
+
+    normalized_full_name = func.lower(func.trim(func.coalesce(User.full_name, "")))
+    normalized_username = func.lower(func.trim(func.coalesce(User.username, "")))
+    gane_user_ids = select(User.id).where(
+        or_(
+            normalized_full_name == "gane arifaj",
+            normalized_username.in_(("gane.arifaj", "gane_arifaj", "gane")),
+        )
+    )
+    count = (
+        await db.execute(
+            select(func.count())
+            .select_from(Task)
+            .where(
+                Task.is_active.is_(True),
+                Task.status == TaskStatus.WAITING_CONFIRMATION.value,
+                Task.confirmation_assignee_id.in_(gane_user_ids),
+            )
+        )
+    ).scalar_one()
+    return {"count": int(count or 0)}
+
+
 @router.post("/by-ga-notes", response_model=list[TaskOut])
 async def list_tasks_by_ga_notes(
     payload: GaNoteTaskBatchRequest,
@@ -1039,19 +1183,7 @@ async def list_tasks_by_ga_notes(
         return []
     tasks = (await db.execute(stmt)).scalars().all()
     task_ids = [task.id for task in tasks]
-    assignee_map = await _assignees_for_tasks(db, task_ids)
-    comment_map = await _user_comments_for_tasks(db, task_ids, user.id)
-
-    alignment_map: dict[uuid.UUID, list[uuid.UUID]] = {}
-    if task_ids:
-        rows = (
-            await db.execute(
-                select(TaskAlignmentUser.task_id, TaskAlignmentUser.user_id)
-                .where(TaskAlignmentUser.task_id.in_(task_ids))
-            )
-        ).all()
-        for task_id, user_id in rows:
-            alignment_map.setdefault(task_id, []).append(user_id)
+    assignee_map, comment_map, alignment_map = await _task_list_metadata(db, task_ids, user.id)
 
     today = _as_local_date(datetime.now(timezone.utc)) or datetime.now(timezone.utc).date()
     out = []

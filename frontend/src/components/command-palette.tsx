@@ -16,10 +16,10 @@ import { useAuth } from "@/lib/auth"
 type SearchTask = { id: string; title: string }
 type SearchProject = { id: string; name: string }
 
-export function CommandPalette() {
+export function CommandPalette({ openSignal = 0 }: { openSignal?: number }) {
   const router = useRouter()
   const { apiFetch } = useAuth()
-  const [open, setOpen] = React.useState(false)
+  const [open, setOpen] = React.useState(openSignal > 0)
   const [query, setQuery] = React.useState("")
   const [results, setResults] = React.useState<{ tasks: SearchTask[]; projects: SearchProject[] }>({
     tasks: [],
@@ -27,15 +27,8 @@ export function CommandPalette() {
   })
 
   React.useEffect(() => {
-    const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault()
-        setOpen((o) => !o)
-      }
-    }
-    window.addEventListener("keydown", onKeyDown)
-    return () => window.removeEventListener("keydown", onKeyDown)
-  }, [])
+    if (openSignal > 0) setOpen(true)
+  }, [openSignal])
 
   React.useEffect(() => {
     const q = query.trim()

@@ -5,6 +5,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin
 from app.api.deps import get_current_user
@@ -18,6 +19,18 @@ from app.schemas.user import UserCreate, UserLookup, UserOut, UserUpdate
 
 router = APIRouter()
 
+USER_OUT_COLUMNS = (
+    User.id,
+    User.email,
+    User.username,
+    User.full_name,
+    User.role,
+    User.department_id,
+    User.is_active,
+    User.weekly_planner_sort_order,
+    User.weekly_planner_hidden,
+)
+
 
 @router.get("", response_model=list[UserOut])
 async def list_users(
@@ -26,7 +39,7 @@ async def list_users(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[UserOut]:
-    stmt = select(User)
+    stmt = select(User).options(load_only(*USER_OUT_COLUMNS))
     if not include_inactive:
         stmt = stmt.where(User.is_active.is_(True))
     users = (await db.execute(stmt.order_by(User.created_at))).scalars().all()
@@ -52,7 +65,18 @@ async def list_users_lookup(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[UserLookup]:
-    stmt = select(User)
+    stmt = select(User).options(
+        load_only(
+            User.id,
+            User.username,
+            User.full_name,
+            User.role,
+            User.department_id,
+            User.is_active,
+            User.weekly_planner_sort_order,
+            User.weekly_planner_hidden,
+        )
+    )
     if not include_inactive:
         stmt = stmt.where(User.is_active.is_(True))
     users = (await db.execute(stmt.order_by(User.created_at))).scalars().all()

@@ -13,6 +13,7 @@ from app.auth.security import ACCESS_TOKEN_TYPE, decode_token, require_token_typ
 from app.api.routers import api_router
 from app.config import settings
 from app.services.meetings_report_scheduler import run_meetings_report_scheduler_forever
+from app.services.after_break_report_scheduler import run_after_break_report_scheduler_forever
 from app.services.std_feedback_tickets import run_std_feedback_ticket_sync_forever
 from app.services.system_task_scheduler import run_system_task_scheduler_forever
 from app.websocket.redis_listener import start_notification_listener
@@ -29,13 +30,16 @@ app.add_middleware(
     allow_headers=["*"],
     expose_headers=["Content-Disposition"],
 )
-app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=5)
+# Level 3 retains nearly all JSON compression while spending materially less
+# CPU on the large planner, task and report payloads.
+app.add_middleware(GZipMiddleware, minimum_size=1000, compresslevel=3)
 
 app.include_router(api_router, prefix="/api")
 
 listener_task: asyncio.Task | None = None
 scheduler_task: asyncio.Task | None = None
 meetings_report_scheduler_task: asyncio.Task | None = None
+after_break_report_scheduler_task: asyncio.Task | None = None
 std_feedback_sync_task: asyncio.Task | None = None
 
 @app.get("/health")
@@ -45,18 +49,19 @@ async def health() -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    global listener_task, scheduler_task, meetings_report_scheduler_task, std_feedback_sync_task
+    global listener_task, scheduler_task, meetings_report_scheduler_task, after_break_report_scheduler_task, std_feedback_sync_task
     if settings.REDIS_ENABLED:
         listener_task = asyncio.create_task(start_notification_listener())
     if settings.SYSTEM_TASK_SCHEDULER_ENABLED:
         scheduler_task = asyncio.create_task(run_system_task_scheduler_forever())
     meetings_report_scheduler_task = asyncio.create_task(run_meetings_report_scheduler_forever())
+    after_break_report_scheduler_task = asyncio.create_task(run_after_break_report_scheduler_forever())
     std_feedback_sync_task = asyncio.create_task(run_std_feedback_ticket_sync_forever())
 
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    global listener_task, scheduler_task, meetings_report_scheduler_task, std_feedback_sync_task
+    global listener_task, scheduler_task, meetings_report_scheduler_task, after_break_report_scheduler_task, std_feedback_sync_task
     if listener_task is not None:
         listener_task.cancel()
         try:
@@ -78,6 +83,13 @@ async def _shutdown() -> None:
         except asyncio.CancelledError:
             pass
         meetings_report_scheduler_task = None
+    if after_break_report_scheduler_task is not None:
+        after_break_report_scheduler_task.cancel()
+        try:
+            await after_break_report_scheduler_task
+        except asyncio.CancelledError:
+            pass
+        after_break_report_scheduler_task = None
     if std_feedback_sync_task is not None:
         std_feedback_sync_task.cancel()
         try:

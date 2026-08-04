@@ -295,7 +295,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     ]
     blocked = [task for task in tomorrow_tasks if task.is_bllok]
     bz_tasks = [task for task in tomorrow_tasks if re.search(r"\bBZ\b", task.title or "", re.I)]
-    bz_alignment_lines = await _bz_alignment_lines(db, tomorrow)
+    bz_alignment_lines = await _bz_alignment_lines(db, tomorrow, tasks, names, assignee_ids_by_task)
 
     meeting_stmt = select(Meeting).where(Meeting.starts_at.is_not(None))
     meetings = (await db.execute(meeting_stmt)).scalars().all()
@@ -530,15 +530,6 @@ def _common_title(item: dict[str, Any]) -> str:
 
 
 def _common_owner(item: dict[str, Any]) -> str:
-    bz_with_label = str(item.get("bzWithLabel") or item.get("bz_with_label") or "").strip()
-    if bz_with_label:
-        initials = [
-            value.strip().upper()
-            for value in re.split(r"[,;/\s]+", bz_with_label)
-            if value.strip()
-        ]
-        if initials:
-            return " ".join(dict.fromkeys(initials))
     assignees = item.get("assignees") or item.get("assigned_users") or item.get("owners")
     if isinstance(assignees, list):
         initials = []
@@ -552,6 +543,15 @@ def _common_owner(item: dict[str, Any]) -> str:
                 initials.append(value)
         if initials:
             return " ".join(initials)
+    bz_with_label = str(item.get("bzWithLabel") or item.get("bz_with_label") or "").strip()
+    if bz_with_label:
+        initials = [
+            value.strip().upper()
+            for value in re.split(r"[,;/\s]+", bz_with_label)
+            if value.strip()
+        ]
+        if initials:
+            return " ".join(dict.fromkeys(initials))
     return _initials(str(item.get("person") or item.get("owner") or item.get("employee") or item.get("assignee_name") or ""))
 
 
@@ -570,7 +570,13 @@ def _common_task_lines(items: list[dict[str, Any]], day: date) -> list[str]:
     return lines
 
 
-async def _bz_alignment_lines(db: AsyncSession, day: date) -> list[str]:
+async def _bz_alignment_lines(
+    db: AsyncSession,
+    day: date,
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+) -> list[str]:
     templates = (
         await db.execute(
             select(SystemTaskTemplate)
@@ -596,6 +602,12 @@ async def _bz_alignment_lines(db: AsyncSession, day: date) -> list[str]:
     if not user_ids:
         return []
 
+    for template in templates:
+        for user_id in (template.assignee_ids or []):
+            user_ids.add(user_id)
+        if template.default_assignee_id:
+            user_ids.add(template.default_assignee_id)
+
     users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
     users_map = {user.id: user for user in users}
     ga_user = next((user for user in users if (user.username or "").lower() == "gane.arifaj"), None)
@@ -603,6 +615,18 @@ async def _bz_alignment_lines(db: AsyncSession, day: date) -> list[str]:
     if ga_user_id is None:
         ga_candidates = [user for user in users if _initials(user.full_name or user.username or user.email) == "GA"]
         ga_user_id = ga_candidates[0].id if ga_candidates else None
+
+    task_owners_by_template: dict[Any, list[str]] = {}
+    for task in tasks:
+        template_id = task.system_template_origin_id
+        if not template_id:
+            continue
+        if _local_date(task.start_date or task.due_date or task.created_at) != day:
+            continue
+        owners = task_owners_by_template.setdefault(template_id, [])
+        for owner in _task_owners(task, names, assignee_ids_by_task).split():
+            if owner != "-" and owner not in owners:
+                owners.append(owner)
 
     lines: list[str] = []
     seen: set[tuple[Any, str]] = set()
@@ -612,11 +636,16 @@ async def _bz_alignment_lines(db: AsyncSession, day: date) -> list[str]:
             continue
         if not matches_template_date(template, day):
             continue
-        owners = [
-            _initials(users_map[user_id].full_name or users_map[user_id].username or users_map[user_id].email)
-            for user_id in alignment_ids
-            if user_id in users_map
-        ]
+        owners = list(task_owners_by_template.get(template.id) or [])
+        if not owners:
+            assignee_ids = list(template.assignee_ids or [])
+            if not assignee_ids and template.default_assignee_id:
+                assignee_ids = [template.default_assignee_id]
+            owners = [
+                _initials(users_map[user_id].full_name or users_map[user_id].username or users_map[user_id].email)
+                for user_id in assignee_ids
+                if user_id in users_map
+            ]
         owner_label = " ".join(dict.fromkeys([owner for owner in owners if owner != "-"])) or "-"
         title = _clean_task_title(template.title)
         key = (template.id, day.isoformat())
@@ -686,16 +715,18 @@ def _tomorrow_meeting_table(title: str, lines: list[str]) -> list[str]:
 
 
 def _tomorrow_task_table(title: str, lines: list[str]) -> list[str]:
-    border = "+----+-------+------------------------------------------------------------------+"
+    who_width = 20
+    title_width = 64
+    border = f"+----+{'-' * (who_width + 2)}+{'-' * (title_width + 2)}+"
     rows = [
         f"{title}:",
         border,
-        f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} |",
+        f"| {'NR':<2} | {'WHO':<{who_width}} | {'TITLE':<{title_width}} |",
         border,
     ]
     values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
     if not values:
-        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+        rows.append(f"| {'-':<2} | {'-':<{who_width}} | {'(Asnje detyre)':<{title_width}} |")
         rows.append(border)
         return rows
     for index, value in enumerate(values, start=1):
@@ -705,10 +736,13 @@ def _tomorrow_task_table(title: str, lines: list[str]) -> list[str]:
             owner, title_value = value.split(":", 1)
             owner = owner.strip() or "-"
             title_value = title_value.strip()
-        title_lines = _wrap_fixed_width(title_value, 64)
-        rows.append(f"| {index:<2} | {owner:<5} | {title_lines[0]:<64} |")
-        for line in title_lines[1:]:
-            rows.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        owner_lines = _wrap_fixed_width(owner, who_width)
+        title_lines = _wrap_fixed_width(title_value, title_width)
+        for position in range(max(len(owner_lines), len(title_lines))):
+            nr_cell = str(index) if position == 0 else ""
+            owner_cell = owner_lines[position] if position < len(owner_lines) else ""
+            title_cell = title_lines[position] if position < len(title_lines) else ""
+            rows.append(f"| {nr_cell:<2} | {owner_cell:<{who_width}} | {title_cell:<{title_width}} |")
         rows.append(border)
     return rows
 

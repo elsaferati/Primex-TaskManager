@@ -22,6 +22,8 @@ from app.models.internal_meeting_session import InternalMeetingSession
 from app.models.meeting import Meeting
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
+from app.models.after_break_report_draft import AfterBreakReportDraft
+from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.microsoft_token import MicrosoftToken
 from app.models.notification import Notification
@@ -103,6 +105,8 @@ __all__ = [
     "Meeting",
     "MeetingsReportDraft",
     "MeetingsReportSettings",
+    "AfterBreakReportDraft",
+    "AfterBreakReportSettings",
     "MeetingOccurrenceStatus",
     "MicrosoftToken",
     "Notification",

@@ -4,6 +4,7 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { API_HTTP_URL, API_HTTP_FALLBACK_URL, API_WS_URL } from "@/lib/config"
+import { clearDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
 import type { User } from "@/lib/types"
 
 type AuthContextValue = {
@@ -13,6 +14,7 @@ type AuthContextValue = {
   login: (email: string, password: string) => Promise<void>
   logout: () => Promise<void>
   apiFetch: (path: string, init?: RequestInit) => Promise<Response>
+  prefetchApiFetch: (path: string, init?: RequestInit) => Promise<Response>
 }
 
 const AuthContext = React.createContext<AuthContextValue | null>(null)
@@ -24,6 +26,39 @@ const FETCH_TIMEOUT_MS = 8000
 const TOKEN_REFRESH_BUFFER_MS = 3 * 60 * 1000 // 3 minutes in milliseconds
 let refreshPromise: Promise<string | null> | null = null
 const inFlightGetRequests = new Map<string, Promise<Response>>()
+const referenceResponseCache = new Map<string, { response: Response; expiresAt: number }>()
+const prefetchedResponseCache = new Map<string, { response: Response; expiresAt: number }>()
+const REFERENCE_CACHE_TTL_MS = 60 * 1000
+const PREFETCH_CACHE_TTL_MS = 30 * 1000
+const REFERENCE_CACHE_PATHS = new Set(["/departments", "/users/lookup", "/task-statuses", "/boards"])
+let cacheGeneration = 0
+
+function clearSessionCaches() {
+  cacheGeneration += 1
+  inFlightGetRequests.clear()
+  referenceResponseCache.clear()
+  prefetchedResponseCache.clear()
+  clearDepartmentBootstrapCache()
+}
+
+function createRequestKey(url: string, headers: Headers, init: RequestInit) {
+  return JSON.stringify([
+    url,
+    Array.from(headers.entries()).sort(([left], [right]) => left.localeCompare(right)),
+    init.cache,
+    init.mode,
+    init.redirect,
+    init.referrer,
+    init.referrerPolicy,
+    init.integrity,
+  ])
+}
+
+function isReferenceDataRequest(path: string, init: RequestInit) {
+  if (init.cache === "no-store" || path.startsWith("http")) return false
+  const pathname = path.split("?", 1)[0]
+  return REFERENCE_CACHE_PATHS.has(pathname)
+}
 
 function getStoredToken(): string | null {
   if (typeof window === "undefined") return null
@@ -160,6 +195,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           } catch {
             const restored = await restoreSessionFromRefreshCookie()
             if (!restored) {
+              clearSessionCaches()
               setStoredToken(null)
               setStoredLogoutAt(null)
               setToken(null)
@@ -179,6 +215,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const restored = await restoreSessionFromRefreshCookie()
         if (!restored) {
+          clearSessionCaches()
           setStoredToken(null)
           setStoredLogoutAt(null)
           setToken(null)
@@ -193,6 +230,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setStoredLogoutAt(Date.now() + 9 * 60 * 60 * 1000)
         }
       } catch {
+        clearSessionCaches()
         setStoredToken(null)
         setStoredLogoutAt(null)
         setToken(null)
@@ -262,6 +300,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     } catch {
       // ignore
     }
+    clearSessionCaches()
     setStoredToken(null)
     setStoredLogoutAt(null)
     setToken(null)
@@ -342,6 +381,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const refreshed = await refreshAccessTokenShared()
         if (!refreshed) {
+          clearSessionCaches()
           setStoredToken(null)
           setStoredLogoutAt(null)
           setToken(null)
@@ -355,6 +395,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           const me = await fetchMe(refreshed)
           setUser(me)
         } catch {
+          clearSessionCaches()
           setStoredToken(null)
           setStoredLogoutAt(null)
           setToken(null)
@@ -364,6 +405,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         const retryRes = await doFetch(refreshed)
         if (retryRes.status === 401) {
+          clearSessionCaches()
           setStoredToken(null)
           setStoredLogoutAt(null)
           setToken(null)
@@ -373,26 +415,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       }
 
       const method = (init.method || "GET").toUpperCase()
+      if (method !== "GET") {
+        // Reference data can be changed by administrative mutations. Clearing
+        // all session-local entries keeps subsequent reads authoritative.
+        clearSessionCaches()
+      }
       const canShareRequest = method === "GET" && init.body == null && init.signal == null
       if (!canShareRequest) return executeRequest()
 
-      const requestKey = JSON.stringify([
-        url,
-        Array.from(headers.entries()).sort(([left], [right]) => left.localeCompare(right)),
-        init.cache,
-        init.mode,
-        init.redirect,
-        init.referrer,
-        init.referrerPolicy,
-        init.integrity,
-      ])
+      const requestKey = createRequestKey(url, headers, init)
+      const prefetched = prefetchedResponseCache.get(requestKey)
+      if (prefetched && Date.now() < prefetched.expiresAt) {
+        prefetchedResponseCache.delete(requestKey)
+        return prefetched.response.clone()
+      }
+      if (prefetched) prefetchedResponseCache.delete(requestKey)
+      const canCacheResponse = isReferenceDataRequest(path, init)
+      if (canCacheResponse) {
+        const cached = referenceResponseCache.get(requestKey)
+        if (cached && Date.now() < cached.expiresAt) return cached.response.clone()
+        if (cached) referenceResponseCache.delete(requestKey)
+      }
       const existingRequest = inFlightGetRequests.get(requestKey)
       if (existingRequest) return (await existingRequest).clone()
 
       const request = executeRequest()
+      const requestCacheGeneration = cacheGeneration
       inFlightGetRequests.set(requestKey, request)
       try {
-        return (await request).clone()
+        const response = await request
+        if (canCacheResponse && response.ok && requestCacheGeneration === cacheGeneration) {
+          referenceResponseCache.set(requestKey, {
+            response: response.clone(),
+            expiresAt: Date.now() + REFERENCE_CACHE_TTL_MS,
+          })
+        }
+        return response.clone()
       } finally {
         if (inFlightGetRequests.get(requestKey) === request) {
           inFlightGetRequests.delete(requestKey)
@@ -402,7 +460,34 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     []
   )
 
+  const prefetchApiFetch = React.useCallback(
+    async (path: string, init: RequestInit = {}) => {
+      const method = (init.method || "GET").toUpperCase()
+      if (method !== "GET" || init.body != null || init.signal != null) {
+        return apiFetch(path, init)
+      }
+
+      const generation = cacheGeneration
+      const response = await apiFetch(path, init)
+      if (!response.ok || generation !== cacheGeneration) return response
+
+      const baseUrl = path.startsWith("http") ? "" : API_HTTP_URL
+      const url = path.startsWith("http") ? path : `${baseUrl}${path.startsWith("/") ? "" : "/"}${path}`
+      const headers = new Headers(init.headers)
+      const currentToken = tokenRef.current
+      if (currentToken) headers.set("Authorization", `Bearer ${currentToken}`)
+      const requestKey = createRequestKey(url, headers, init)
+      prefetchedResponseCache.set(requestKey, {
+        response: response.clone(),
+        expiresAt: Date.now() + PREFETCH_CACHE_TTL_MS,
+      })
+      return response
+    },
+    [apiFetch]
+  )
+
   const login = React.useCallback(async (email: string, password: string) => {
+    clearSessionCaches()
     let res: Response
     try {
       res = await fetchWithTimeout(`${API_HTTP_URL}/auth/login`, {
@@ -424,8 +509,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   const value = React.useMemo<AuthContextValue>(
-    () => ({ user, token, loading, login, logout, apiFetch }),
-    [user, token, loading, login, logout, apiFetch]
+    () => ({ user, token, loading, login, logout, apiFetch, prefetchApiFetch }),
+    [user, token, loading, login, logout, apiFetch, prefetchApiFetch]
   )
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
