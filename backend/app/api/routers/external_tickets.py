@@ -1,11 +1,17 @@
 from __future__ import annotations
 
+import io
+import json
 import math
 import re
 import uuid
 from datetime import date, datetime, time, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
+from fastapi.responses import StreamingResponse
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Font, PatternFill
+from openpyxl.utils import get_column_letter
 from sqlalchemy import String, asc, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -104,22 +110,16 @@ def _search_condition(search: str):
     )
 
 
-@router.get("", response_model=StdFeedbackTicketListOut)
-async def list_external_tickets(
-    page: int = Query(1, ge=1),
-    page_size: int = Query(25, ge=10, le=100),
-    search: str | None = Query(default=None, max_length=200),
-    ticket_status: str | None = Query(default=None, alias="status", max_length=50),
-    category: str | None = Query(default=None, max_length=50),
-    priority: str | None = Query(default=None, max_length=50),
-    review_status: str | None = Query(default=None, max_length=30),
+def _ticket_filters(
+    *,
+    search: str | None = None,
+    ticket_status: str | None = None,
+    category: str | None = None,
+    priority: str | None = None,
+    review_status: str | None = None,
     date_from: date | None = None,
     date_to: date | None = None,
-    sort_by: str = Query("updated_at"),
-    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-) -> StdFeedbackTicketListOut:
+) -> list:
     filters = [StdFeedbackTicket.is_external.is_(True)]
     if search and search.strip():
         filters.append(_search_condition(search))
@@ -137,7 +137,10 @@ async def list_external_tickets(
         filters.append(
             StdFeedbackTicket.reported_at < datetime.combine(date_to + timedelta(days=1), time.min, tzinfo=timezone.utc)
         )
+    return filters
 
+
+def _ticket_ordering(sort_by: str, sort_dir: str):
     sort_columns = {
         "issue_number": StdFeedbackTicket.issue_number,
         "created_at": StdFeedbackTicket.reported_at,
@@ -146,7 +149,178 @@ async def list_external_tickets(
         "status": StdFeedbackTicket.status,
     }
     sort_column = sort_columns.get(sort_by, StdFeedbackTicket.source_updated_at)
-    ordering = asc(sort_column) if sort_dir == "asc" else desc(sort_column)
+    return asc(sort_column) if sort_dir == "asc" else desc(sort_column)
+
+
+def _excel_text(value, *, limit: int = 32767) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, (dict, list)):
+        rendered = json.dumps(value, ensure_ascii=False, default=str)
+    else:
+        rendered = str(value)
+    return rendered[:limit]
+
+
+def _excel_datetime(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is not None:
+        return value.astimezone(timezone.utc).replace(tzinfo=None)
+    return value
+
+
+def _external_tickets_workbook(tickets: list[StdFeedbackTicket]) -> io.BytesIO:
+    headers = [
+        "External ID",
+        "Issue #",
+        "Order Ticket #",
+        "Title",
+        "Problem / Description",
+        "Affected Fields",
+        "Status",
+        "Category",
+        "Priority",
+        "Dashboard Area",
+        "Reporter",
+        "Reporter Email",
+        "Assigned Admin",
+        "Related Order ID",
+        "Order Information",
+        "Comments",
+        "Attachments",
+        "Comment Count",
+        "File Count",
+        "Created At (UTC)",
+        "Updated At (UTC)",
+        "Closed At (UTC)",
+        "Review Decision",
+        "Review Note",
+        "Reviewed By ID",
+        "Reviewed At (UTC)",
+        "GA Note ID",
+        "Task ID",
+        "Source",
+    ]
+    workbook = Workbook()
+    worksheet = workbook.active
+    worksheet.title = "STD Tickets"
+    worksheet.sheet_view.showGridLines = False
+    worksheet.freeze_panes = "A2"
+    worksheet.append(headers)
+
+    for ticket in tickets:
+        comments = ticket_comments(ticket)
+        files = ticket_files(ticket)
+        comment_lines = [
+            " — ".join(part for part in (_excel_text(item.get("author") or item.get("creator") or item.get("user")), _excel_text(item.get("body") or item.get("comment") or item.get("content"))) if part)
+            for item in comments
+            if isinstance(item, dict)
+        ]
+        file_lines = [
+            _excel_text(item.get("original_filename") or item.get("filename") or item.get("name") or item.get("id"))
+            for item in files
+            if isinstance(item, dict)
+        ]
+        worksheet.append(
+            [
+                ticket.external_id,
+                ticket.issue_number,
+                ticket.order_ticket_number or "",
+                ticket.title or "",
+                ticket.description or "",
+                _excel_text(ticket.affected_fields or []),
+                ticket.status or "",
+                ticket.category or "",
+                ticket.priority or "",
+                ticket.dashboard_area or "",
+                ticket.reporter_username or "",
+                ticket.reporter_email or "",
+                ticket.assigned_admin or "",
+                ticket.related_order_id or "",
+                _excel_text(ticket.order_snapshot_json or {}),
+                _excel_text("\n".join(comment_lines)),
+                _excel_text("\n".join(file_lines)),
+                ticket.comment_count or 0,
+                ticket.file_count or 0,
+                _excel_datetime(ticket.reported_at),
+                _excel_datetime(ticket.source_updated_at),
+                _excel_datetime(ticket.closed_at),
+                ticket.review_status or "",
+                ticket.review_note or "",
+                str(ticket.reviewed_by) if ticket.reviewed_by else "",
+                _excel_datetime(ticket.reviewed_at),
+                str(ticket.ga_note_id) if ticket.ga_note_id else "",
+                str(ticket.task_id) if ticket.task_id else "",
+                "STD External",
+            ]
+        )
+
+    header_fill = PatternFill(fill_type="solid", fgColor="0F172A")
+    alternating_fill = PatternFill(fill_type="solid", fgColor="F8FAFC")
+    for cell in worksheet[1]:
+        cell.fill = header_fill
+        cell.font = Font(color="FFFFFF", bold=True)
+        cell.alignment = Alignment(horizontal="left", vertical="center")
+    worksheet.row_dimensions[1].height = 28
+
+    wrapped_columns = {4, 5, 6, 15, 16, 17, 24}
+    datetime_columns = {20, 21, 22, 26}
+    for row_index in range(2, worksheet.max_row + 1):
+        if row_index % 2 == 0:
+            for cell in worksheet[row_index]:
+                cell.fill = alternating_fill
+        for column_index in range(1, len(headers) + 1):
+            cell = worksheet.cell(row=row_index, column=column_index)
+            cell.alignment = Alignment(vertical="top", wrap_text=column_index in wrapped_columns)
+            if column_index in datetime_columns and cell.value:
+                cell.number_format = "dd.mm.yyyy hh:mm"
+
+    widths = {
+        1: 18, 2: 11, 3: 18, 4: 28, 5: 48, 6: 28, 7: 15, 8: 16, 9: 13, 10: 18,
+        11: 22, 12: 30, 13: 22, 14: 18, 15: 36, 16: 42, 17: 32, 18: 14, 19: 11,
+        20: 20, 21: 20, 22: 20, 23: 18, 24: 32, 25: 38, 26: 20, 27: 38, 28: 38, 29: 16,
+    }
+    for column_index, width in widths.items():
+        worksheet.column_dimensions[get_column_letter(column_index)].width = width
+    worksheet.auto_filter.ref = f"A1:{get_column_letter(len(headers))}{max(1, worksheet.max_row)}"
+    worksheet.print_title_rows = "1:1"
+    worksheet.page_setup.orientation = "landscape"
+    worksheet.page_setup.fitToWidth = 1
+    worksheet.sheet_properties.pageSetUpPr.fitToPage = True
+
+    output = io.BytesIO()
+    workbook.save(output)
+    output.seek(0)
+    return output
+
+
+@router.get("", response_model=StdFeedbackTicketListOut)
+async def list_external_tickets(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(25, ge=10, le=100),
+    search: str | None = Query(default=None, max_length=200),
+    ticket_status: str | None = Query(default=None, alias="status", max_length=50),
+    category: str | None = Query(default=None, max_length=50),
+    priority: str | None = Query(default=None, max_length=50),
+    review_status: str | None = Query(default=None, max_length=30),
+    date_from: date | None = None,
+    date_to: date | None = None,
+    sort_by: str = Query("updated_at"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> StdFeedbackTicketListOut:
+    filters = _ticket_filters(
+        search=search,
+        ticket_status=ticket_status,
+        category=category,
+        priority=priority,
+        review_status=review_status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    ordering = _ticket_ordering(sort_by, sort_dir)
     total = (await db.execute(select(func.count(StdFeedbackTicket.id)).where(*filters))).scalar_one()
     items = (
         await db.execute(
@@ -186,6 +360,44 @@ async def list_external_tickets(
         statuses=statuses,
         last_synchronized_at=sync_state.last_successful_sync_at if sync_state else None,
         last_sync_error=(sync_state.last_sync_error if sync_state and user.role == UserRole.ADMIN else None),
+    )
+
+
+@router.get("/export.xlsx")
+async def export_external_tickets_xlsx(
+    search: str | None = Query(default=None, max_length=200),
+    ticket_status: str | None = Query(default=None, alias="status", max_length=50),
+    category: str | None = Query(default=None, max_length=50),
+    priority: str | None = Query(default=None, max_length=50),
+    review_status: str | None = Query(default=None, max_length=30),
+    date_from: date | None = None,
+    date_to: date | None = None,
+    sort_by: str = Query("updated_at"),
+    sort_dir: str = Query("desc", pattern="^(asc|desc)$"),
+    db: AsyncSession = Depends(get_db),
+    _user: User = Depends(get_current_user),
+):
+    filters = _ticket_filters(
+        search=search,
+        ticket_status=ticket_status,
+        category=category,
+        priority=priority,
+        review_status=review_status,
+        date_from=date_from,
+        date_to=date_to,
+    )
+    tickets = (
+        await db.execute(
+            select(StdFeedbackTicket)
+            .where(*filters)
+            .order_by(_ticket_ordering(sort_by, sort_dir).nullslast(), StdFeedbackTicket.id.asc())
+        )
+    ).scalars().all()
+    filename = f"STD_Tickets_EXT_{datetime.now(timezone.utc).date().isoformat()}.xlsx"
+    return StreamingResponse(
+        _external_tickets_workbook(list(tickets)),
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
 
 

@@ -10,6 +10,7 @@ import {
   Clock3,
   Download,
   FileText,
+  FileSpreadsheet,
   Loader2,
   MessageSquare,
   Paperclip,
@@ -226,6 +227,7 @@ export default function ExternalTicketsPage() {
   const [loading, setLoading] = React.useState(true)
   const [error, setError] = React.useState<string | null>(null)
   const [syncing, setSyncing] = React.useState(false)
+  const [exporting, setExporting] = React.useState(false)
   const [selectedIds, setSelectedIds] = React.useState<string[]>([])
 
   const [detailOpen, setDetailOpen] = React.useState(false)
@@ -333,6 +335,41 @@ export default function ExternalTicketsPage() {
     else toast.error(result.reason === "missing_token" ? "Token-i i STD nuk është konfiguruar në server." : "Sinkronizimi dështoi; të dhënat ekzistuese mbeten të disponueshme.")
     await loadTickets()
     setSyncing(false)
+  }
+
+  const exportExcel = async () => {
+    if (exporting) return
+    setExporting(true)
+    const [sortBy, sortDir] = sort.split(":")
+    const params = new URLSearchParams({ sort_by: sortBy, sort_dir: sortDir })
+    if (search) params.set("search", search)
+    if (statusFilter !== "ALL") params.set("status", statusFilter)
+    if (categoryFilter !== "ALL") params.set("category", categoryFilter)
+    if (priorityFilter !== "ALL") params.set("priority", priorityFilter)
+    if (reviewFilter !== "ALL") params.set("review_status", reviewFilter)
+    if (dateFrom) params.set("date_from", dateFrom)
+    if (dateTo) params.set("date_to", dateTo)
+    try {
+      const response = await apiFetch(`/external-tickets/export.xlsx?${params}`)
+      if (!response.ok) throw new Error(await readError(response, "Excel-i nuk mund të krijohej."))
+      const blob = await response.blob()
+      if (!blob.size) throw new Error("Excel-i i krijuar është bosh.")
+      const disposition = response.headers.get("content-disposition")
+      const filename = disposition?.match(/filename="?([^";]+)"?/i)?.[1] || "STD_Tickets_EXT.xlsx"
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      toast.success("Excel-i u eksportua me sukses.")
+    } catch (reason) {
+      toast.error(reason instanceof Error ? reason.message : "Excel-i nuk mund të krijohej.")
+    } finally {
+      setExporting(false)
+    }
   }
 
   const markNoAction = async () => {
@@ -491,12 +528,18 @@ export default function ExternalTicketsPage() {
             ) : null}
           </div>
         </div>
-        {user?.role === "ADMIN" ? (
-          <Button variant="outline" onClick={() => void syncNow()} disabled={syncing}>
-            {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
-            Sync now
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => void exportExcel()} disabled={exporting || loading}>
+            {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <FileSpreadsheet className="mr-2 h-4 w-4" />}
+            {exporting ? "Duke eksportuar…" : "Export Excel"}
           </Button>
-        ) : null}
+          {user?.role === "ADMIN" ? (
+            <Button variant="outline" onClick={() => void syncNow()} disabled={syncing}>
+              {syncing ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <RefreshCw className="mr-2 h-4 w-4" />}
+              Sync now
+            </Button>
+          ) : null}
+        </div>
       </div>
 
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
