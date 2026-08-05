@@ -16,7 +16,6 @@ import {
   RefreshCw,
   Search,
   TicketCheck,
-  UserRound,
   Wrench,
 } from "lucide-react"
 import { toast } from "sonner"
@@ -105,6 +104,15 @@ type TaskOptions = {
   users: Array<{ id: string; label: string; department_id?: string | null }>
 }
 
+const TASK_TYPE_OPTIONS = [
+  { value: "NORMAL", label: "Normal" },
+  { value: "HIGH", label: "High" },
+  { value: "1H", label: "1H" },
+  { value: "R1", label: "R1" },
+  { value: "PERSONAL", label: "P: (Personal)" },
+  { value: "BLLOK", label: "BLLOK" },
+] as const
+
 const EMPTY_RESPONSE: ListResponse = {
   items: [],
   total: 0,
@@ -157,13 +165,6 @@ function statusTone(status?: string | null) {
   }
 }
 
-function priorityTone(priority?: string | null) {
-  const value = (priority || "").toLowerCase()
-  if (["urgent", "critical", "high"].includes(value)) return "border-red-200 bg-red-50 text-red-700"
-  if (value === "medium" || value === "normal") return "border-amber-200 bg-amber-50 text-amber-700"
-  return "border-slate-200 bg-slate-50 text-slate-600"
-}
-
 function ReviewBadge({ value }: { value: string }) {
   if (value === "TASK_CREATED") {
     return <Badge className="gap-1 border-emerald-200 bg-emerald-50 text-emerald-700"><Check className="h-3 w-3" /> Detyrë e krijuar</Badge>
@@ -197,13 +198,23 @@ function fileName(file: Record<string, unknown>) {
   return String(file.original_filename || file.filename || file.name || file.id || "Attachment")
 }
 
+function userInitials(label: string) {
+  return label
+    .trim()
+    .split(/\s+/)
+    .filter(Boolean)
+    .map((part) => part[0])
+    .join("")
+    .toUpperCase() || "U"
+}
+
 export default function ExternalTicketsPage() {
   const { apiFetch, user } = useAuth()
   const [data, setData] = React.useState<ListResponse>(EMPTY_RESPONSE)
   const [page, setPage] = React.useState(1)
   const [searchInput, setSearchInput] = React.useState("")
   const [search, setSearch] = React.useState("")
-  const [statusFilter, setStatusFilter] = React.useState("ALL")
+  const [statusFilter, setStatusFilter] = React.useState("open")
   const [categoryFilter, setCategoryFilter] = React.useState("ALL")
   const [priorityFilter, setPriorityFilter] = React.useState("ALL")
   const [reviewFilter, setReviewFilter] = React.useState("ALL")
@@ -217,6 +228,7 @@ export default function ExternalTicketsPage() {
 
   const [detailOpen, setDetailOpen] = React.useState(false)
   const [detailLoading, setDetailLoading] = React.useState(false)
+  const [markingDetailNoAction, setMarkingDetailNoAction] = React.useState(false)
   const [detail, setDetail] = React.useState<ExternalTicketDetail | null>(null)
 
   const [taskDialogOpen, setTaskDialogOpen] = React.useState(false)
@@ -228,7 +240,7 @@ export default function ExternalTicketsPage() {
   const [taskTitle, setTaskTitle] = React.useState("")
   const [taskDescription, setTaskDescription] = React.useState("")
   const [reviewNote, setReviewNote] = React.useState("")
-  const [taskPriority, setTaskPriority] = React.useState("NORMAL")
+  const [taskPriority, setTaskPriority] = React.useState("1H")
   const [startDate, setStartDate] = React.useState("")
   const [dueDate, setDueDate] = React.useState("")
 
@@ -278,6 +290,7 @@ export default function ExternalTicketsPage() {
   const selectableItems = data.items.filter((item) => item.review_status !== "TASK_CREATED")
   const allPageSelected = selectableItems.length > 0 && selectableItems.every((item) => selectedIds.includes(item.id))
   const selectedTickets = data.items.filter((item) => selectedIds.includes(item.id))
+  const selectedAssignees = taskOptions.users.filter((item) => assigneeIds.includes(item.id))
   const pendingOnPage = data.items.filter((item) => item.review_status === "PENDING").length
   const taskCreatedOnPage = data.items.filter((item) => item.review_status === "TASK_CREATED").length
   const noActionOnPage = data.items.filter((item) => item.review_status === "NO_ACTION").length
@@ -337,12 +350,33 @@ export default function ExternalTicketsPage() {
     await loadTickets()
   }
 
+  const markDetailNoAction = async () => {
+    if (!detail || detail.review_status !== "PENDING") return
+    if (!window.confirm(`Ticket ${detail.order_ticket_number || detail.issue_number || ""} nuk ka nevojë për rregullim?`)) return
+    setMarkingDetailNoAction(true)
+    const response = await apiFetch("/external-tickets/reviews/no-action", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ticket_ids: [detail.id] }),
+    })
+    if (!response.ok) {
+      toast.error(await readError(response, "Vendimi nuk mund të ruhej."))
+      setMarkingDetailNoAction(false)
+      return
+    }
+    setDetail((current) => current ? { ...current, review_status: "NO_ACTION" } : current)
+    setSelectedIds((current) => current.filter((id) => id !== detail.id))
+    toast.success("Ticket-i u shënua si pa nevojë për rregullim.")
+    await loadTickets()
+    setMarkingDetailNoAction(false)
+  }
+
   const openTaskDialog = async () => {
     if (!selectedIds.length) return
     setTaskTitle(`STD - ${selectedIds.length} TIK EXT PËR RREGULLIM`)
     setTaskDescription("")
     setReviewNote("")
-    setTaskPriority("NORMAL")
+    setTaskPriority("1H")
     setStartDate("")
     setDueDate("")
     setAssigneeIds([])
@@ -474,7 +508,7 @@ export default function ExternalTicketsPage() {
               <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchInput} onChange={(event) => setSearchInput(event.target.value)} placeholder="Kërko issue, order ticket, titull ose reporter…" className="pl-9" />
             </div>
-            <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPage(1) }}><SelectTrigger className="w-full"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent><SelectItem value="ALL">Të gjitha statuset</SelectItem>{data.statuses.map((value) => <SelectItem key={value} value={value}>{valueLabel(value)}</SelectItem>)}</SelectContent></Select>
+            <Select value={statusFilter} onValueChange={(value) => { setStatusFilter(value); setPage(1) }}><SelectTrigger className="w-full"><SelectValue placeholder="Status" /></SelectTrigger><SelectContent><SelectItem value="open">Open tickets</SelectItem><SelectItem value="ALL">Të gjitha statuset</SelectItem>{data.statuses.filter((value) => value.toLowerCase() !== "open").map((value) => <SelectItem key={value} value={value}>{valueLabel(value)}</SelectItem>)}</SelectContent></Select>
             <Select value={categoryFilter} onValueChange={(value) => { setCategoryFilter(value); setPage(1) }}><SelectTrigger className="w-full"><SelectValue placeholder="Kategori" /></SelectTrigger><SelectContent><SelectItem value="ALL">Të gjitha kategoritë</SelectItem>{data.categories.map((value) => <SelectItem key={value} value={value}>{valueLabel(value)}</SelectItem>)}</SelectContent></Select>
             <Select value={priorityFilter} onValueChange={(value) => { setPriorityFilter(value); setPage(1) }}><SelectTrigger className="w-full"><SelectValue placeholder="Prioritet" /></SelectTrigger><SelectContent><SelectItem value="ALL">Të gjitha prioritetet</SelectItem>{data.priorities.map((value) => <SelectItem key={value} value={value}>{valueLabel(value)}</SelectItem>)}</SelectContent></Select>
             <Select value={reviewFilter} onValueChange={(value) => { setReviewFilter(value); setPage(1) }}><SelectTrigger className="w-full"><SelectValue placeholder="Review" /></SelectTrigger><SelectContent><SelectItem value="ALL">Të gjitha vendimet</SelectItem><SelectItem value="PENDING">Pa shqyrtuar</SelectItem><SelectItem value="TASK_CREATED">Detyrë e krijuar</SelectItem><SelectItem value="NO_ACTION">S’ka nevojë</SelectItem></SelectContent></Select>
@@ -504,17 +538,17 @@ export default function ExternalTicketsPage() {
         {error ? (
           <div className="flex min-h-72 flex-col items-center justify-center gap-3 p-8 text-center"><div className="rounded-full bg-red-50 p-3 text-red-600"><AlertCircle className="h-6 w-6" /></div><div><div className="font-medium">Ngarkimi dështoi</div><div className="mt-1 text-sm text-muted-foreground">{error}</div></div><Button variant="outline" onClick={() => void loadTickets()}><RefreshCw className="mr-2 h-4 w-4" /> Provo përsëri</Button></div>
         ) : (
-          <Table containerClassName="max-h-[660px] overflow-auto">
+          <Table className="min-w-[850px] table-fixed" containerClassName="max-h-[660px] overflow-auto">
             <TableHeader className="sticky top-0 z-20 bg-slate-50">
               <TableRow>
                 <TableHead className="w-11"><Checkbox checked={allPageSelected} onCheckedChange={(value) => toggleAll(Boolean(value))} aria-label="Zgjidh ticket-at në faqe" /></TableHead>
-                <TableHead className="whitespace-nowrap">Issue #</TableHead><TableHead className="whitespace-nowrap">Order Ticket #</TableHead><TableHead className="min-w-60">Title</TableHead><TableHead className="min-w-72">Problem</TableHead><TableHead className="min-w-48">Reporter</TableHead><TableHead>Category</TableHead><TableHead>Priority</TableHead><TableHead>Status</TableHead><TableHead className="text-center">Comments</TableHead><TableHead className="text-center">Files</TableHead><TableHead className="whitespace-nowrap">Created At</TableHead><TableHead className="whitespace-nowrap">Updated At</TableHead><TableHead>Source</TableHead><TableHead className="min-w-40">Vendimi</TableHead>
+                <TableHead className="w-24 whitespace-nowrap">Issue #</TableHead><TableHead className="w-32 whitespace-nowrap">Order Ticket #</TableHead><TableHead className="w-72">Problem</TableHead><TableHead className="w-28">Status</TableHead><TableHead className="w-20 text-center">Files</TableHead><TableHead className="w-32">Source</TableHead><TableHead className="w-40">Vendimi</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
-              {loading ? Array.from({ length: 7 }, (_, index) => <TableRow key={index}>{Array.from({ length: 15 }, (__, cell) => <TableCell key={cell}><div className="h-4 animate-pulse rounded bg-slate-100" /></TableCell>)}</TableRow>) : null}
+              {loading ? Array.from({ length: 7 }, (_, index) => <TableRow key={index}>{Array.from({ length: 8 }, (__, cell) => <TableCell key={cell}><div className="h-4 animate-pulse rounded bg-slate-100" /></TableCell>)}</TableRow>) : null}
               {!loading && !data.items.length ? (
-                <TableRow><TableCell colSpan={15}><div className="flex min-h-72 flex-col items-center justify-center text-center"><div className="mb-3 rounded-full bg-slate-100 p-4 text-slate-500"><TicketCheck className="h-7 w-7" /></div><div className="font-medium">Nuk u gjet asnjë ticket extern</div><div className="mt-1 max-w-md text-sm text-muted-foreground">Ndrysho filtrat ose kërkoji administratorit të ekzekutojë sinkronizimin me STD.</div></div></TableCell></TableRow>
+                <TableRow><TableCell colSpan={8}><div className="flex min-h-72 flex-col items-center justify-center text-center"><div className="mb-3 rounded-full bg-slate-100 p-4 text-slate-500"><TicketCheck className="h-7 w-7" /></div><div className="font-medium">Nuk u gjet asnjë ticket extern</div><div className="mt-1 max-w-md text-sm text-muted-foreground">Ndrysho filtrat ose kërkoji administratorit të ekzekutojë sinkronizimin me STD.</div></div></TableCell></TableRow>
               ) : null}
               {!loading ? data.items.map((ticket) => {
                 const disabled = ticket.review_status === "TASK_CREATED"
@@ -523,16 +557,9 @@ export default function ExternalTicketsPage() {
                     <TableCell onClick={(event) => event.stopPropagation()}><Checkbox checked={selectedIds.includes(ticket.id)} disabled={disabled} onCheckedChange={(value) => toggleTicket(ticket.id, Boolean(value))} aria-label={`Zgjidh ticket ${ticket.issue_number || ticket.external_id}`} /></TableCell>
                     <TableCell className="font-semibold text-slate-950">{ticket.issue_number ? `#${ticket.issue_number}` : "—"}</TableCell>
                     <TableCell>{ticket.order_ticket_number || "—"}</TableCell>
-                    <TableCell><div className="line-clamp-2 font-medium">{ticket.title || "Pa titull"}</div>{ticket.affected_fields.length ? <div className="mt-1 line-clamp-1 text-xs text-muted-foreground">{ticket.affected_fields.join(", ")}</div> : null}</TableCell>
-                    <TableCell><div className="line-clamp-3 text-sm text-slate-600">{ticket.description || "—"}</div></TableCell>
-                    <TableCell><div className="flex items-start gap-2"><div className="mt-0.5 rounded-full bg-slate-100 p-1.5"><UserRound className="h-3.5 w-3.5" /></div><div><div className="text-sm font-medium">{ticket.reporter_username || "—"}</div><div className="max-w-44 truncate text-xs text-muted-foreground">{ticket.reporter_email || "—"}</div></div></div></TableCell>
-                    <TableCell>{ticket.category ? <Badge variant="outline" className="font-normal">{valueLabel(ticket.category)}</Badge> : "—"}</TableCell>
-                    <TableCell>{ticket.priority ? <Badge className={priorityTone(ticket.priority)}>{valueLabel(ticket.priority)}</Badge> : "—"}</TableCell>
+                    <TableCell className="max-w-72"><div className="line-clamp-2 break-words text-sm text-slate-600">{ticket.description || "—"}</div></TableCell>
                     <TableCell>{ticket.status ? <Badge className={statusTone(ticket.status)}>{valueLabel(ticket.status)}</Badge> : "—"}</TableCell>
-                    <TableCell className="text-center"><span className="inline-flex items-center gap-1 text-sm"><MessageSquare className="h-3.5 w-3.5 text-muted-foreground" />{ticket.comment_count}</span></TableCell>
                     <TableCell className="text-center"><span className="inline-flex items-center gap-1 text-sm"><Paperclip className="h-3.5 w-3.5 text-muted-foreground" />{ticket.file_count}</span></TableCell>
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDate(ticket.reported_at)}</TableCell>
-                    <TableCell className="whitespace-nowrap text-xs text-muted-foreground">{formatDate(ticket.source_updated_at)}</TableCell>
                     <TableCell><Badge className="whitespace-nowrap border-blue-200 bg-blue-50 text-blue-700">STD External</Badge></TableCell>
                     <TableCell><ReviewBadge value={ticket.review_status} /></TableCell>
                   </TableRow>
@@ -552,8 +579,16 @@ export default function ExternalTicketsPage() {
           <SheetHeader className="border-b pr-12">
             <div className="flex flex-wrap items-center gap-2"><Badge className="border-blue-200 bg-blue-50 text-blue-700">STD External</Badge>{detail ? <ReviewBadge value={detail.review_status} /> : null}</div>
             <SheetTitle>{detail ? `${detail.issue_number ? `#${detail.issue_number} · ` : ""}${detail.title || "External ticket"}` : "External ticket"}</SheetTitle>
-            <SheetDescription>{detail?.order_ticket_number ? `Order ticket: ${detail.order_ticket_number}` : "Detajet e sinkronizuara nga STD 2.0"}</SheetDescription>
+            <SheetDescription>{detail?.order_ticket_number ? `Order ticket: ${detail.order_ticket_number}` : "Detajet e sinkronizuara nga STD"}</SheetDescription>
           </SheetHeader>
+          {!detailLoading && detail?.review_status === "PENDING" ? (
+            <div className="px-4">
+              <Button variant="outline" className="w-full border-slate-300 sm:w-auto" onClick={() => void markDetailNoAction()} disabled={markingDetailNoAction}>
+                {markingDetailNoAction ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CircleOff className="mr-2 h-4 w-4" />}
+                S’ka nevojë për rregullim
+              </Button>
+            </div>
+          ) : null}
           {detailLoading ? <div className="flex min-h-80 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : null}
           {!detailLoading && detail ? (
             <div className="space-y-6 px-4 pb-8">
@@ -578,13 +613,13 @@ export default function ExternalTicketsPage() {
           {optionsLoading ? <div className="flex min-h-52 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-muted-foreground" /></div> : (
             <div className="space-y-5">
               {!taskOptions.projects.length ? <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">Nuk u gjet projekt me fjalën kyçe “STD”. Kontrollo emrin e projektit ose STD_FEEDBACK_PROJECT_KEYWORDS në server.</div> : null}
-              <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Projekti STD</Label><Select value={projectId} onValueChange={setProjectId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh projektin" /></SelectTrigger><SelectContent>{taskOptions.projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.title}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Prioriteti</Label><Select value={taskPriority} onValueChange={setTaskPriority}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="NORMAL">Normal</SelectItem><SelectItem value="HIGH">High</SelectItem></SelectContent></Select></div></div>
-              <div className="space-y-2"><Label>Titulli i detyrës</Label><Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} /></div>
-              <div className="space-y-2"><Label>Përshkrim shtesë <span className="font-normal text-muted-foreground">(opsional; lista e ticket-ave shtohet automatikisht)</span></Label><Textarea value={taskDescription} onChange={(event) => setTaskDescription(event.target.value)} rows={3} placeholder="Udhëzime për personat që do ta rregullojnë…" /></div>
+              <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Projekti STD</Label><Select value={projectId} onValueChange={setProjectId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh projektin" /></SelectTrigger><SelectContent>{taskOptions.projects.map((project) => <SelectItem key={project.id} value={project.id}>{project.title}</SelectItem>)}</SelectContent></Select></div><div className="space-y-2"><Label>Prioriteti / lloji</Label><Select value={taskPriority} onValueChange={setTaskPriority}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{TASK_TYPE_OPTIONS.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent></Select></div></div>
+              <div className="space-y-2"><Label>Titulli bazë i detyrës</Label><Input value={taskTitle} onChange={(event) => setTaskTitle(event.target.value)} /><p className="text-xs text-muted-foreground">{selectedAssignees.length ? <>Titulli final: {selectedAssignees.slice(0, 3).map((item) => `${userInitials(item.label)}: ${taskTitle || `STD - ${selectedIds.length} TIK EXT PËR RREGULLIM`}`).join(" · ")}{selectedAssignees.length > 3 ? " …" : ""}</> : "Inicialet shtohen automatikisht pasi të zgjidhet personi."}</p></div>
+              <div className="space-y-2"><Label>Përshkrim shtesë <span className="font-normal text-muted-foreground">(opsional; lista e ticket-ave ruhet vetëm te shënimi)</span></Label><Textarea value={taskDescription} onChange={(event) => setTaskDescription(event.target.value)} rows={3} placeholder="Udhëzime shtesë për personat që do ta rregullojnë…" /></div>
               <div className="grid gap-4 sm:grid-cols-2"><div className="space-y-2"><Label>Fillimi</Label><Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} /></div><div className="space-y-2"><Label>Afati</Label><Input type="date" value={dueDate} onChange={(event) => setDueDate(event.target.value)} /></div></div>
               <div className="space-y-2"><Label>Personat e caktuar</Label><div className="grid max-h-56 gap-2 overflow-y-auto rounded-xl border p-3 sm:grid-cols-2">{taskOptions.users.map((option) => <label key={option.id} className="flex cursor-pointer items-center gap-3 rounded-lg p-2 text-sm hover:bg-slate-50"><Checkbox checked={assigneeIds.includes(option.id)} onCheckedChange={(value) => setAssigneeIds((current) => Boolean(value) ? [...new Set([...current, option.id])] : current.filter((id) => id !== option.id))} /><span>{option.label}</span></label>)}</div></div>
               <div className="space-y-2"><Label>Shënim i review-t <span className="font-normal text-muted-foreground">(opsional)</span></Label><Textarea value={reviewNote} onChange={(event) => setReviewNote(event.target.value)} rows={2} placeholder="Pse u zgjodhën këta ticket-a…" /></div>
-              <div className="rounded-xl bg-slate-50 p-3"><div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Ticket-at në këtë detyrë</div><ol className="space-y-1 pl-5 text-sm">{selectedTickets.map((ticket) => <li key={ticket.id} className="list-decimal">{ticket.issue_number ? `#${ticket.issue_number}` : ticket.external_id.slice(0, 8)}{ticket.order_ticket_number ? ` → ${ticket.order_ticket_number}` : ""} — {ticket.title || "Pa titull"}</li>)}</ol></div>
+              <div className="rounded-xl bg-slate-50 p-3"><div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Ticket-at në këtë detyrë</div><ol className="space-y-1 pl-5 text-sm">{selectedTickets.map((ticket) => <li key={ticket.id} className="list-decimal">{ticket.order_ticket_number || ticket.issue_number || ticket.external_id.slice(0, 8)}</li>)}</ol></div>
             </div>
           )}
           <DialogFooter><Button variant="outline" onClick={() => setTaskDialogOpen(false)} disabled={creatingTask}>Anulo</Button><Button onClick={() => void createTask()} disabled={creatingTask || optionsLoading || !projectId || !assigneeIds.length}>{creatingTask ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Wrench className="mr-2 h-4 w-4" />} Krijo GA Note + detyrë</Button></DialogFooter>

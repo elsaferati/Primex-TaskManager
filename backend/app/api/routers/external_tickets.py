@@ -9,7 +9,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
 from sqlalchemy import String, asc, cast, desc, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.access import ensure_admin, ensure_department_access
+from app.api.access import ensure_admin
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import UserRole
@@ -211,9 +211,6 @@ async def external_ticket_task_options(
         )
     ).scalars().all()
     projects = [project for project in projects if is_std_project_title(project.title)]
-    if user.role == UserRole.STAFF:
-        projects = [project for project in projects if project.department_id == user.department_id]
-
     users = (
         await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.full_name.asc().nullslast(), User.username.asc()))
     ).scalars().all()
@@ -263,8 +260,6 @@ async def create_external_ticket_task(
     project = (await db.execute(select(Project).where(Project.id == payload.project_id))).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-    if project.department_id is not None:
-        ensure_department_access(user, project.department_id)
     try:
         bundle = await create_ticket_task_bundle(
             db,

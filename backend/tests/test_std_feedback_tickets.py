@@ -14,13 +14,20 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 import httpx
 from fastapi import HTTPException
 
-from app.api.routers.external_tickets import _search_condition, sync_external_tickets_now
+from app.api.routers.external_tickets import (
+    _search_condition,
+    external_ticket_task_options,
+    sync_external_tickets_now,
+)
 from app.models.enums import UserRole
 from app.models.std_feedback_ticket import StdFeedbackTicket
 from app.services.std_feedback_task_creation import (
+    assignee_task_title,
     create_ticket_task_bundle,
     default_bundle_description,
     default_bundle_title,
+    task_type_fields,
+    user_initials,
 )
 from app.services.std_feedback_tickets import (
     StdFeedbackClient,
@@ -244,6 +251,85 @@ class TestStdFeedbackSync(unittest.IsolatedAsyncioTestCase):
 
 
 class TestStdFeedbackWorkflow(unittest.IsolatedAsyncioTestCase):
+    async def test_staff_from_any_department_can_access_std_task_options(self) -> None:
+        std_project = SimpleNamespace(id=uuid.uuid4(), title="STD", department_id=uuid.uuid4())
+        staff = SimpleNamespace(
+            id=uuid.uuid4(),
+            role=UserRole.STAFF,
+            department_id=uuid.uuid4(),
+            full_name="Staff User",
+            username="staff",
+            email="staff@example.com",
+            is_active=True,
+        )
+        db = _FakeDb([[std_project], [staff]])
+
+        result = await external_ticket_task_options(db=db, user=staff)
+
+        self.assertEqual([project.id for project in result.projects], [std_project.id])
+
+    def test_assignee_initials_are_added_to_task_title(self) -> None:
+        user = SimpleNamespace(full_name="Laurent Hoxha", username="laurent", email="laurent@example.com")
+        self.assertEqual(user_initials(user), "LH")
+        self.assertEqual(
+            assignee_task_title("STD - 3 TIK EXT PËR RREGULLIM", user),
+            "LH: STD - 3 TIK EXT PËR RREGULLIM",
+        )
+
+    def test_all_real_task_types_map_to_task_fields(self) -> None:
+        self.assertEqual(task_type_fields("NORMAL")["priority"], "NORMAL")
+        self.assertEqual(task_type_fields("HIGH")["priority"], "HIGH")
+        self.assertTrue(task_type_fields("1H")["is_1h_report"])
+        self.assertTrue(task_type_fields("R1")["is_r1"])
+        self.assertTrue(task_type_fields("PERSONAL")["is_personal"])
+        self.assertTrue(task_type_fields("BLLOK")["is_bllok"])
+
+    async def test_one_h_bundle_keeps_ticket_list_only_in_note(self) -> None:
+        ticket = StdFeedbackTicket(
+            id=uuid.uuid4(),
+            external_id="ticket-a",
+            issue_number=1038116,
+            title="Issue: 1038116",
+            is_external=True,
+        )
+        project = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="STD",
+            department_id=uuid.uuid4(),
+            current_phase="DEVELOPMENT",
+        )
+        assignee = SimpleNamespace(
+            id=uuid.uuid4(),
+            full_name="Laurent Hoxha",
+            username="laurent",
+            email="laurent@example.com",
+            department_id=project.department_id,
+        )
+        db = _FakeDb([[ticket], [project], [assignee]])
+
+        result = await create_ticket_task_bundle(
+            db,
+            ticket_ids=[ticket.id],
+            project_id=project.id,
+            assignee_ids=[assignee.id],
+            actor_user_id=uuid.uuid4(),
+            title="STD - 1 TIK EXT PËR RREGULLIM",
+            description=None,
+            review_note=None,
+            priority="1H",
+            start_date=None,
+            due_date=None,
+        )
+
+        self.assertTrue(result.created)
+        self.assertEqual(result.tasks[0].title, "LH: STD - 1 TIK EXT PËR RREGULLIM")
+        self.assertIsNone(result.tasks[0].description)
+        self.assertEqual(result.tasks[0].priority, "NORMAL")
+        self.assertTrue(result.tasks[0].is_1h_report)
+        self.assertIn("LH: STD - 1 TIK EXT PËR RREGULLIM", result.note.content)
+        self.assertIn("1. 1038116", result.note.content)
+        self.assertNotIn("#1038116", result.note.content)
+
     def test_task_content_contains_selected_ticket_references(self) -> None:
         tickets = [
             StdFeedbackTicket(external_id="a", issue_number=101, order_ticket_number="ORD-1", title="First"),
@@ -251,8 +337,10 @@ class TestStdFeedbackWorkflow(unittest.IsolatedAsyncioTestCase):
         ]
         self.assertEqual(default_bundle_title(tickets), "STD - 2 TIK EXT PËR RREGULLIM")
         description = default_bundle_description(tickets)
-        self.assertIn("#101 → ORD-1", description)
-        self.assertIn("#102", description)
+        self.assertIn("1. ORD-1", description)
+        self.assertIn("2. 102", description)
+        self.assertNotIn("#101", description)
+        self.assertNotIn("STD 2.0", description)
         self.assertIn("STD External", description)
 
     async def test_repeating_conversion_returns_existing_tasks_without_duplicates(self) -> None:

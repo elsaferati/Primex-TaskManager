@@ -100,7 +100,7 @@ class StdTicketCreateTaskRequest(BaseModel):
     title: str | None = Field(default=None, max_length=500)
     description: str | None = Field(default=None, max_length=10000)
     review_note: str | None = Field(default=None, max_length=2000)
-    priority: Literal["NORMAL", "HIGH"] = "NORMAL"
+    priority: Literal["NORMAL", "HIGH", "1H", "R1", "PERSONAL", "BLLOK"] = "1H"
     start_date: datetime | None = None
     due_date: datetime | None = None
 

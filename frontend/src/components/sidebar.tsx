@@ -75,11 +75,6 @@ const primaryItems: NavItem[] = [
     icon: StickyNote,
   },
   {
-    href: "/external-tickets",
-    label: "External Tickets",
-    icon: TicketCheck,
-  },
-  {
     href: "/next-week-plan",
     label: "PX JAV",
     icon: CalendarClock,
@@ -110,6 +105,11 @@ const navGroups: NavGroup[] = [
         label: "Development",
         icon: Code2,
         match: ["/departments/development", "/projects/dev"],
+      },
+      {
+        href: "/external-tickets",
+        label: "STD Tickets EXT",
+        icon: TicketCheck,
       },
       {
         href: "/departments/project-content-manager",

@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import re
 import uuid
 from dataclasses import dataclass
 from datetime import datetime, timezone
+from typing import TypedDict
 
 from sqlalchemy import insert, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -29,6 +31,14 @@ class StdTicketTaskBundle:
     created: bool
 
 
+class TaskTypeFields(TypedDict):
+    priority: str
+    is_1h_report: bool
+    is_r1: bool
+    is_personal: bool
+    is_bllok: bool
+
+
 def is_std_project_title(title: str | None) -> bool:
     normalized = (title or "").casefold()
     keywords = settings.std_feedback_project_keyword_list
@@ -39,15 +49,40 @@ def default_bundle_title(tickets: list[StdFeedbackTicket]) -> str:
     return f"STD - {len(tickets)} TIK EXT PËR RREGULLIM"
 
 
+def user_initials(user: User) -> str:
+    label = (user.full_name or user.username or user.email.split("@", 1)[0]).strip()
+    parts = re.findall(r"[A-Za-zÀ-ÖØ-öø-ÿ0-9]+", label)
+    return "".join(part[0] for part in parts).upper() or "U"
+
+
+def assignee_task_title(base_title: str, user: User) -> str:
+    return f"{user_initials(user)}: {base_title}"
+
+
+def task_type_fields(task_type: str) -> TaskTypeFields:
+    normalized = task_type.upper()
+    if normalized not in {"NORMAL", "HIGH", "1H", "R1", "PERSONAL", "BLLOK"}:
+        raise ValueError("Invalid task priority/type")
+    return {
+        "priority": "HIGH" if normalized == "HIGH" else "NORMAL",
+        "is_1h_report": normalized == "1H",
+        "is_r1": normalized == "R1",
+        "is_personal": normalized == "PERSONAL",
+        "is_bllok": normalized == "BLLOK",
+    }
+
+
 def _ticket_line(ticket: StdFeedbackTicket, index: int) -> str:
-    identifier = f"#{ticket.issue_number}" if ticket.issue_number is not None else ticket.external_id[:8]
-    order = f" → {ticket.order_ticket_number}" if ticket.order_ticket_number else ""
-    title = f" — {ticket.title.strip()}" if ticket.title and ticket.title.strip() else ""
-    return f"{index}. {identifier}{order}{title}"
+    ticket_number = (
+        ticket.order_ticket_number
+        or (str(ticket.issue_number) if ticket.issue_number is not None else None)
+        or ticket.external_id[:8]
+    )
+    return f"{index}. {ticket_number}"
 
 
 def default_bundle_description(tickets: list[StdFeedbackTicket]) -> str:
-    lines = ["Rregullo ticket-at externe të ardhura nga STD 2.0:"]
+    lines = ["Rregullo ticket-at externe të ardhura nga STD:"]
     lines.extend(_ticket_line(ticket, index) for index, ticket in enumerate(tickets, 1))
     lines.append("")
     lines.append("Burimi: STD External")
@@ -161,21 +196,21 @@ async def create_ticket_task_bundle(
     if due_date is not None and effective_start > due_date:
         raise ValueError("Start date cannot be after due date")
 
-    task_title = (title or "").strip() or default_bundle_title(tickets)
+    base_task_title = (title or "").strip() or default_bundle_title(tickets)
     ticket_list_description = default_bundle_description(tickets)
     extra_description = (description or "").strip()
-    task_description = (
-        f"{extra_description}\n\n{ticket_list_description}"
-        if extra_description
-        else ticket_list_description
-    )
-    note_content = f"{task_title}\n\n{task_description}"
+    task_description = extra_description or None
+    task_fields = task_type_fields(priority)
+    personalized_titles = [assignee_task_title(base_task_title, assignee) for assignee in ordered_users]
+    note_initials = "/".join(user_initials(assignee) for assignee in ordered_users)
+    note_title = f"{note_initials}: {base_task_title}"
+    note_content = f"{note_title}\n\n{ticket_list_description}"
     note = GaNote(
         content=note_content,
         created_by=actor_user_id,
         note_type=GaNoteType.GA,
         status=GaNoteStatus.OPEN,
-        priority=GaNotePriority.HIGH if priority == "HIGH" else GaNotePriority.NORMAL,
+        priority=GaNotePriority.HIGH if task_fields["priority"] == "HIGH" else GaNotePriority.NORMAL,
         start_date=effective_start,
         due_date=due_date,
         is_converted_to_task=True,
@@ -188,7 +223,7 @@ async def create_ticket_task_bundle(
 
     tasks: list[Task] = []
     notifications: list[Notification] = []
-    for assignee in ordered_users:
+    for assignee, task_title in zip(ordered_users, personalized_titles, strict=True):
         task = Task(
             title=task_title,
             description=task_description,
@@ -199,16 +234,16 @@ async def create_ticket_task_bundle(
             created_by=actor_user_id,
             ga_note_origin_id=note.id,
             status=TaskStatus.TODO.value,
-            priority=priority,
+            priority=task_fields["priority"],
             phase=project.current_phase or "MEETINGS",
             progress_percentage=0,
             start_date=effective_start,
             due_date=due_date,
             is_deadline_important=due_date is not None,
-            is_bllok=False,
-            is_1h_report=False,
-            is_r1=False,
-            is_personal=False,
+            is_bllok=task_fields["is_bllok"],
+            is_1h_report=task_fields["is_1h_report"],
+            is_r1=task_fields["is_r1"],
+            is_personal=task_fields["is_personal"],
             is_active=True,
         )
         db.add(task)
