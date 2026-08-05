@@ -743,6 +743,7 @@ export interface RealizationPersonResult {
     report_mode?: "LIVE_DAILY" | "FINAL_WEEKLY"
     daily_timeline?: Array<{
       date: string
+      has_snapshot?: boolean
       daily_progress_percent: number
       weekly_progress_percent: number
       planned_count: number
@@ -752,6 +753,7 @@ export interface RealizationPersonResult {
       additional_count: number
       weekly_additional_count?: number
       attendance: Array<{ id?: string; type: string; details?: string | null }>
+      tasks?: RealizationTaskFact[]
     }>
     project_progress?: Array<{
       project_id: string

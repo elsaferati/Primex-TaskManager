@@ -4,10 +4,12 @@ import * as React from "react"
 import {
   Activity,
   AlertTriangle,
+  ArrowRight,
   Bot,
   CalendarCheck,
   CheckCircle2,
-  ChevronRight,
+  CircleDashed,
+  Clock3,
   Download,
   FileCheck2,
   Loader2,
@@ -50,6 +52,7 @@ import type {
   RealizationLevel,
   RealizationPersonResult,
   RealizationQuestion,
+  RealizationTaskFact,
   RealizationWeeklyResponse,
 } from "@/lib/types"
 
@@ -80,12 +83,58 @@ const TASK_SOURCE_LABEL: Record<string, string> = {
 }
 
 const TASK_STATUS_LABEL: Record<string, string> = {
+  planned: "Planifikuar",
   completed: "Mbyllur",
   completed_on_time: "Mbyllur në kohë",
   completed_late: "Mbyllur me vonesë",
   in_progress: "Në progres",
   no_progress: "Pa progres",
   pending_confirmation: "Në pritje të konfirmimit",
+}
+
+function taskIsCompleted(task: RealizationTaskFact) {
+  return ["completed", "completed_on_time", "completed_late", "additional_completed"].includes(
+    task.classification
+  ) || task.status?.toUpperCase() === "DONE"
+}
+
+function taskPalette(task: RealizationTaskFact) {
+  const isAdditional = task.attribution === "added_after_weekly_plan"
+  if (taskIsCompleted(task)) {
+    return isAdditional
+      ? "border-[#059669] bg-[#6ee7b7] text-[#064e3b]"
+      : "border-[#4d7c0f] bg-[#C4FDC4] text-[#14532d]"
+  }
+  if (task.classification === "in_progress" || task.status?.toUpperCase() === "IN_PROGRESS") {
+    return "border-[#ca8a04] bg-[#FFFF00] text-[#422006]"
+  }
+  if (
+    task.classification === "pending_confirmation"
+    || task.status?.toUpperCase() === "WAITING_CONFIRMATION"
+  ) {
+    return "border-[#C2410C] bg-[#FFEDD5] text-[#9A3412]"
+  }
+  if (isAdditional) return "border-[#1d4ed8] bg-[#dbeafe] text-[#0f172a]"
+  return "border-[#be185d] bg-[#FFC4ED] text-[#500724]"
+}
+
+function DayTaskCard({ task }: { task: RealizationTaskFact }) {
+  const additional = task.attribution === "added_after_weekly_plan"
+  return (
+    <div className={cn("rounded-lg border px-2.5 py-2 text-xs shadow-sm", taskPalette(task))}>
+      <div className="flex items-start justify-between gap-2">
+        <p className="min-w-0 font-semibold leading-4">{cleanTaskTitle(task.title)}</p>
+        {additional ? (
+          <span className="shrink-0 rounded-full border border-current/25 bg-white/50 px-1.5 py-0.5 text-[9px] font-bold uppercase">E re</span>
+        ) : null}
+      </div>
+      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-75">
+        <span>{task.project_title || TASK_SOURCE_LABEL[task.source_type] || task.source_type}</span>
+        <span>•</span>
+        <span>{TASK_STATUS_LABEL[task.classification] || task.classification}</span>
+      </div>
+    </div>
+  )
 }
 
 const QUESTION_SECTIONS = [
@@ -306,13 +355,11 @@ export default function RealizationPage() {
 
   React.useEffect(() => {
     // Data loading is asynchronous; state updates happen only after the request resolves.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!authLoading && user && ["ADMIN", "MANAGER"].includes(user.role)) void loadDepartments()
   }, [authLoading, loadDepartments, user])
 
   React.useEffect(() => {
     // Data loading is asynchronous; state updates happen only after the request resolves.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (departmentId) void loadReport()
   }, [departmentId, loadReport])
 
@@ -544,12 +591,12 @@ export default function RealizationPage() {
       )
       if (!response.ok) throw new Error(await errorMessage(response))
       const analysis = (await response.json()) as RealizationAIAnalysis
-      toast.success("Analiza AI u gjenerua", {
+      toast.success("Analiza inteligjente u gjenerua", {
         description: `Sugjerimi ${analysis.suggested_level}, siguria ${Math.round(analysis.confidence * 100)}%`,
       })
       await loadReport()
     } catch (error) {
-      toast.error("AI nuk është gati", { description: error instanceof Error ? error.message : undefined })
+      toast.error("Analiza nuk u gjenerua", { description: error instanceof Error ? error.message : undefined })
     } finally {
       setAction(null)
     }
@@ -573,19 +620,30 @@ export default function RealizationPage() {
   }
 
   const people = data?.people || []
-  const totalPlanned = people.reduce((sum, person) => sum + weeklyPlanned(person), 0)
-  const totalClosed = people.reduce((sum, person) => sum + weeklyCompleted(person), 0)
-  const averageProgress = totalPlanned ? Math.round((totalClosed * 100) / totalPlanned) : 0
-  const totalAdditional = people.reduce((sum, person) => sum + weeklyAdditional(person), 0)
-  const needsReview = people.reduce((sum, person) => sum + (person.facts_json.needs_review?.length || 0), 0)
   const grade = selected?.final_level || selected?.suggested_level || null
   const selectedQuestions = selected?.facts_json.questions || []
   const aiAnalysis = selected?.facts_json.ai_analysis
   const selectedWeeklyPlanned = selected ? weeklyPlanned(selected) : 0
   const selectedWeeklyCompleted = selected ? weeklyCompleted(selected) : 0
   const selectedWeeklyAdditional = selected ? weeklyAdditional(selected) : 0
-  const selectedDailyPlanned = selected?.facts_json.daily_planned_count ?? selected?.planned_count ?? 0
   const isLive = data ? !data.has_final_snapshot : true
+  const selectedTimeline = WEEK_DAYS.map((label, index) => {
+    const date = addDays(weekStart, index)
+    const snapshot = selected?.facts_json.daily_timeline?.find((item) => item.date === date)
+    const tasks = snapshot?.tasks || []
+    const plannedTasks = tasks.filter((task) => task.attribution !== "added_after_weekly_plan")
+    const additionalTasks = tasks.filter((task) => task.attribution === "added_after_weekly_plan")
+    const completedTasks = plannedTasks.filter(taskIsCompleted)
+    return {
+      label,
+      date,
+      snapshot,
+      plannedTasks,
+      additionalTasks,
+      completedTasks,
+      remainingTasks: plannedTasks.filter((task) => !taskIsCompleted(task)),
+    }
+  })
 
   return (
     <div className="mx-auto w-full max-w-[1720px] space-y-6 pb-12">
@@ -598,9 +656,9 @@ export default function RealizationPage() {
                 Pa vlera monetare
               </Badge>
             </div>
-            <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">Realizimi ditor & javor</h1>
+            <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">Barazimi i planit javor</h1>
             <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 md:text-base">
-              Progres i ruajtur çdo ditë, krahasim me planin zyrtar, evidencë e gjurmueshme dhe vlerësim final me shkronjë.
+              Për çdo ditë: çfarë ishte planifikuar, çfarë u përfundua, çfarë mbeti dhe çfarë u shtua gjatë javës.
             </p>
           </div>
           <div className="grid grid-cols-2 gap-2 self-end text-xs text-slate-300">
@@ -612,7 +670,7 @@ export default function RealizationPage() {
 
       <Card className="border-border/70 shadow-sm">
         <CardContent className="flex flex-col gap-3 py-4 xl:flex-row xl:items-end">
-          <div className="grid flex-1 gap-3 sm:grid-cols-2">
+          <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <div className="space-y-1.5">
               <Label>Departamenti</Label>
               <Select value={departmentId} onValueChange={setDepartmentId} disabled={user.role === "MANAGER"}>
@@ -625,6 +683,19 @@ export default function RealizationPage() {
             <div className="space-y-1.5">
               <Label>Java (zgjedhja normalizohet në të hënë)</Label>
               <Input type="date" value={weekStart} onChange={(event) => setWeekStart(mondayOf(new Date(`${event.target.value}T12:00:00`)))} />
+            </div>
+            <div className="space-y-1.5">
+              <Label>Personi</Label>
+              <Select value={selected?.id || ""} onValueChange={setSelectedId} disabled={loading || !people.length}>
+                <SelectTrigger className="w-full"><SelectValue placeholder={loading ? "Duke ngarkuar…" : "Zgjidh personin"} /></SelectTrigger>
+                <SelectContent>
+                  {people.map((person) => (
+                    <SelectItem key={person.id} value={person.id}>
+                      {person.user_name} · {weeklyCompleted(person)}/{weeklyPlanned(person)}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <div className="flex flex-wrap gap-2">
@@ -655,85 +726,29 @@ export default function RealizationPage() {
         </div>
       ) : null}
 
-      <Card className="border-blue-200/80 bg-blue-50/50 shadow-sm dark:border-blue-900 dark:bg-blue-950/20">
-        <CardContent className="grid gap-4 py-4 md:grid-cols-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">1 · Java</p>
-            <p className="mt-1 text-sm">Taskat e planit javor të mbyllura deri sot / të gjitha taskat e planit javor.</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">2 · Sot</p>
-            <p className="mt-1 text-sm">Taskat e planifikuara pikërisht për atë ditë dhe statusi i tyre në snapshot.</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">3 · Shtesë</p>
-            <p className="mt-1 text-sm">Taska të krijuara pas PLANNED; shfaqen veç dhe nuk maskojnë taskat e pambyllura.</p>
-          </div>
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">4 · Final</p>
-            <p className="mt-1 text-sm">Shkronja dhe “në kohë/me vonesë” dalin vetëm pas FINAL-it dhe rishikimit.</p>
-          </div>
+      <Card className="border-border/70 shadow-sm">
+        <CardContent className="flex flex-wrap items-center gap-x-5 gap-y-2 py-3 text-xs">
+          <span className="font-semibold text-muted-foreground">Ngjyrat e Weekly Planner-it:</span>
+          {[
+            ["bg-[#FFC4ED] border-[#be185d]", "Pa filluar"],
+            ["bg-[#FFFF00] border-[#ca8a04]", "Në progres"],
+            ["bg-[#FFEDD5] border-[#C2410C]", "Në konfirmim"],
+            ["bg-[#C4FDC4] border-[#4d7c0f]", "Përfunduar"],
+            ["bg-[#dbeafe] border-[#1d4ed8]", "Shtuar gjatë javës"],
+          ].map(([color, label]) => (
+            <span key={label} className="inline-flex items-center gap-1.5"><span className={cn("h-3 w-3 rounded-sm border", color)} />{label}</span>
+          ))}
         </CardContent>
       </Card>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={Target} label="Progresi javor i ekipit" value={`${averageProgress}%`} note={`${totalClosed}/${totalPlanned} taska të planit javor të mbyllura`} />
-        <MetricCard
-          icon={UserCheck}
-          label="Persona"
-          value={people.length}
-          note={`${data?.department_name || "Departamenti"} · vetëm aktivë, pa PV/FEST`}
-        />
-        <MetricCard icon={Sparkles} label="Detyra shtesë" value={totalAdditional} note="Të akumuluara pas snapshot-it PLANNED" />
-        <MetricCard icon={AlertTriangle} label="Për konfirmim" value={needsReview} note="Pa hamendësim automatik" />
+        <MetricCard icon={Target} label="Realizimi i personit" value={`${selected?.facts_json.weekly_progress_percent || 0}%`} note={selected?.user_name || "Zgjidh personin"} />
+        <MetricCard icon={CalendarCheck} label="Në planin javor" value={selectedWeeklyPlanned} note="Plani bazë i ruajtur në PLANNED" />
+        <MetricCard icon={UserCheck} label="Të përfunduara" value={selectedWeeklyCompleted} note={`${Math.max(0, selectedWeeklyPlanned - selectedWeeklyCompleted)} detyra të planit kanë mbetur`} />
+        <MetricCard icon={Sparkles} label="Shtuar gjatë javës" value={selectedWeeklyAdditional} note="Raportohen veç nga plani bazë" />
       </div>
 
-      <div className="grid min-h-[680px] gap-5 xl:grid-cols-[390px_minmax(0,1fr)]">
-        <Card className="overflow-hidden border-border/70 shadow-sm">
-          <CardHeader className="border-b bg-muted/30">
-            <CardTitle className="text-lg">Ekipi</CardTitle>
-            <CardDescription>{data ? `${data.period.start_date} — ${data.period.end_date} · ${data.period.status}` : "Ngarko raportin"}</CardDescription>
-          </CardHeader>
-          <CardContent className="max-h-[760px] space-y-2 overflow-y-auto p-3">
-            {loading ? <div className="flex justify-center py-16"><Loader2 className="h-6 w-6 animate-spin" /></div> : null}
-            {!loading && !people.length ? (
-              <p className="px-3 py-12 text-center text-sm text-muted-foreground">
-                {action === "auto-daily"
-                  ? "Po gjenerohet snapshot-i ditor…"
-                  : data?.has_planned_snapshot
-                    ? "Nuk ka ende snapshot ditor për këtë javë."
-                    : "Nuk ka plan javor PLANNED për këtë javë."}
-              </p>
-            ) : null}
-            {people.map((person) => {
-              const personGrade = person.final_level || person.suggested_level
-              const progress = person.facts_json.weekly_progress_percent || 0
-              const personWeeklyPlanned = weeklyPlanned(person)
-              const personWeeklyCompleted = weeklyCompleted(person)
-              return (
-                <button
-                  key={person.id}
-                  type="button"
-                  onClick={() => setSelectedId(person.id)}
-                  className={cn(
-                    "w-full rounded-xl border p-4 text-left transition hover:border-primary/40 hover:bg-muted/40",
-                    selected?.id === person.id && "border-primary bg-primary/[0.04] ring-1 ring-primary/20"
-                  )}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0"><p className="truncate font-semibold">{person.user_name}</p><p className="mt-0.5 text-xs text-muted-foreground">Java: {personWeeklyCompleted}/{personWeeklyPlanned} të mbyllura</p></div>
-                    <div className="flex items-center gap-2">
-                      {personGrade ? <Badge className={cn("min-w-10 justify-center border", LEVEL_STYLE[personGrade])}>{personGrade}</Badge> : null}
-                      <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                    </div>
-                  </div>
-                  <div className="mt-3 flex items-center gap-3"><ProgressBar value={progress} className="flex-1" /><span className="w-10 text-right text-xs font-semibold">{progress}%</span></div>
-                </button>
-              )
-            })}
-          </CardContent>
-        </Card>
-
+      <div className="min-h-[680px]">
         <Card className="overflow-hidden border-border/70 shadow-sm">
           {selected ? (
             <>
@@ -749,42 +764,75 @@ export default function RealizationPage() {
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => setEvidenceOpen(true)} disabled={data?.period.status === "LOCKED"}><Plus className="h-4 w-4" /> Evidencë</Button>
-                    <Button size="sm" variant="outline" onClick={() => void runAI()} disabled={!!action || !data || selected.period_id !== data.period.id || data.period.status === "LOCKED"}>{action === "ai" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />} Analizë AI</Button>
+                    <Button size="sm" variant="outline" onClick={() => void runAI()} disabled={!!action || !data || data.period.status === "LOCKED"}>{action === "ai" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />} Gjenero analizën</Button>
                     <Button size="sm" onClick={openReview} disabled={data?.period.status !== "CALCULATED"}><FileCheck2 className="h-4 w-4" /> Rishiko</Button>
                   </div>
                 </div>
               </CardHeader>
               <CardContent className="space-y-7 py-6">
-                <section>
-                  <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">Progresi i javës</h2><span className="text-2xl font-semibold">{selected.facts_json.weekly_progress_percent || 0}%</span></div>
-                  <ProgressBar value={selected.facts_json.weekly_progress_percent || 0} className="h-3" />
-                  <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {(isLive
-                      ? [
-                          ["Në planin javor", selectedWeeklyPlanned],
-                          ["Të mbyllura deri sot", selectedWeeklyCompleted],
-                          ["Planifikuar sot", selectedDailyPlanned],
-                          ["Shtesë gjatë javës", selectedWeeklyAdditional],
-                        ]
-                      : [
-                          ["Planifikuar", selected.planned_count],
-                          ["Në kohë", selected.completed_on_time_count],
-                          ["Me vonesë", selected.completed_late_count],
-                          ["Shtesë", selected.additional_count],
-                        ]
-                    ).map(([label, value]) => <div key={String(label)} className="rounded-lg border bg-muted/25 px-3 py-2"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>)}
+                <section className="rounded-2xl border bg-muted/15 p-4 sm:p-5">
+                  <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+                    <div>
+                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Barazimi javor</p>
+                      <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
+                        <span className="font-semibold">{selectedWeeklyPlanned} të planifikuara</span>
+                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-semibold text-emerald-700">{selectedWeeklyCompleted} të përfunduara</span>
+                        <span className="text-muted-foreground">·</span>
+                        <span className="font-semibold text-rose-700">{Math.max(0, selectedWeeklyPlanned - selectedWeeklyCompleted)} të mbetura</span>
+                        <span className="text-muted-foreground">·</span>
+                        <span className="font-semibold text-blue-700">+{selectedWeeklyAdditional} shtesë</span>
+                      </div>
+                      <p className="mt-2 text-xs text-muted-foreground">Detyrat shtesë paraqiten veçmas; nuk e rrisin artificialisht përqindjen e planit bazë.</p>
+                    </div>
+                    <div className="min-w-52 rounded-xl border bg-background px-4 py-3">
+                      <div className="flex items-end justify-between"><span className="text-xs text-muted-foreground">Realizimi i planit</span><span className="text-2xl font-semibold">{selected.facts_json.weekly_progress_percent || 0}%</span></div>
+                      <ProgressBar value={selected.facts_json.weekly_progress_percent || 0} className="mt-2 h-2.5" />
+                    </div>
                   </div>
-                  {isLive ? <p className="mt-2 text-xs text-muted-foreground">Ky është progres operativ deri në snapshot-in e fundit; klasifikimi “në kohë/me vonesë” bëhet në FINAL.</p> : null}
                 </section>
 
                 <section>
-                  <h2 className="mb-3 font-semibold">Gjendja ditore e ruajtur</h2>
-                  <div className="grid gap-2 sm:grid-cols-5">
-                    {WEEK_DAYS.map((label, index) => {
-                      const day = addDays(weekStart, index)
-                      const snapshot = selected.facts_json.daily_timeline?.find((item) => item.date === day)
-                      return <div key={day} className={cn("rounded-xl border p-3", snapshot ? "bg-card" : "border-dashed bg-muted/20")}><p className="text-xs font-semibold">{label}</p><p className="mt-2 text-2xl font-semibold">{snapshot ? `${snapshot.weekly_progress_percent}%` : "—"}</p><p className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{snapshot ? "Java deri atë ditë" : "Pa snapshot"}</p><p className="mt-1 text-[11px] text-muted-foreground">{snapshot ? `Sot ${snapshot.completed_count}/${snapshot.planned_count} (${snapshot.daily_progress_percent}%) · +${snapshot.additional_count}` : "Snapshot-i ruhet në 16:20"}</p>{snapshot?.attendance?.length ? <Badge variant="destructive" className="mt-2 text-[10px]">{snapshot.attendance.map((item) => item.type).join(", ")}</Badge> : null}</div>
-                    })}
+                  <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h2 className="text-lg font-semibold">Planifikuar kundrejt realizuar, ditë pas dite</h2>
+                      <p className="mt-1 text-xs text-muted-foreground">Secila kolonë ruan planin e asaj dite dhe gjendjen në snapshot-in e orës 16:20.</p>
+                    </div>
+                    {isLive ? <Badge variant="outline"><Clock3 className="mr-1 h-3 w-3" /> Raport operativ</Badge> : <Badge variant="secondary"><CheckCircle2 className="mr-1 h-3 w-3" /> Raport final</Badge>}
+                  </div>
+                  <div className="grid gap-3 xl:grid-cols-5">
+                    {selectedTimeline.map((day) => (
+                      <div key={day.date} className="flex min-h-64 flex-col overflow-hidden rounded-xl border bg-card">
+                        <div className="border-b bg-muted/40 px-3 py-3">
+                          <div className="flex items-start justify-between gap-2">
+                            <div><p className="font-semibold">{day.label}</p><p className="text-[11px] text-muted-foreground">{day.date.split("-").reverse().join(".")}</p></div>
+                            {day.snapshot?.has_snapshot ? (
+                              <Badge variant="secondary" className="text-[10px]">{day.snapshot.daily_progress_percent}%</Badge>
+                            ) : (
+                              <Badge variant="outline" className="text-[10px]">Në pritje</Badge>
+                            )}
+                          </div>
+                          <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[10px]">
+                            <div className="rounded bg-background px-1 py-1"><strong className="block text-sm">{day.plannedTasks.length}</strong>Plan</div>
+                            <div className="rounded bg-emerald-50 px-1 py-1 text-emerald-800"><strong className="block text-sm">{day.completedTasks.length}</strong>Kryer</div>
+                            <div className="rounded bg-blue-50 px-1 py-1 text-blue-800"><strong className="block text-sm">{day.additionalTasks.length}</strong>Shtesë</div>
+                          </div>
+                        </div>
+                        <div className="flex-1 space-y-2 p-2.5">
+                          {day.plannedTasks.map((task) => <DayTaskCard key={`planned-${day.date}-${task.match_key}`} task={task} />)}
+                          {day.additionalTasks.length ? <div className="flex items-center gap-2 pt-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700"><span className="h-px flex-1 bg-blue-200" />Shtuar gjatë ditës<span className="h-px flex-1 bg-blue-200" /></div> : null}
+                          {day.additionalTasks.map((task) => <DayTaskCard key={`additional-${day.date}-${task.match_key}`} task={task} />)}
+                          {!day.plannedTasks.length && !day.additionalTasks.length ? (
+                            <div className="flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed text-center text-xs text-muted-foreground">
+                              <CircleDashed className="mb-2 h-5 w-5" />Nuk ka detyra për këtë ditë
+                            </div>
+                          ) : null}
+                        </div>
+                        <div className={cn("border-t px-3 py-2 text-[11px]", day.remainingTasks.length ? "bg-rose-50 text-rose-800" : "bg-emerald-50 text-emerald-800")}>
+                          {day.remainingTasks.length ? `${day.remainingTasks.length} nga plani mbetën pa u përfunduar` : day.plannedTasks.length ? "Plani i ditës është përfunduar" : "Pa obligime të planifikuara"}
+                        </div>
+                      </div>
+                    ))}
                   </div>
                 </section>
 
@@ -794,12 +842,28 @@ export default function RealizationPage() {
 
                 {aiAnalysis ? (
                   <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-5 dark:border-violet-900 dark:bg-violet-950/20">
-                    <div className="flex items-start justify-between gap-3"><div><h2 className="flex items-center gap-2 font-semibold"><Bot className="h-4 w-4 text-violet-600" /> Analiza AI — vetëm këshilluese</h2><p className="mt-2 text-sm leading-6">{aiAnalysis.summary}</p></div><Badge variant="outline">{aiAnalysis.suggested_level} · {Math.round(aiAnalysis.confidence * 100)}%</Badge></div>
-                    {aiAnalysis.missing_evidence.length ? <p className="mt-3 text-xs text-violet-900 dark:text-violet-200"><strong>Mungon evidenca:</strong> {aiAnalysis.missing_evidence.join("; ")}</p> : null}
+                    <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                      <div className="max-w-4xl">
+                        <h2 className="flex items-center gap-2 font-semibold"><Bot className="h-4 w-4 text-violet-600" /> Analiza inteligjente — vetëm këshilluese</h2>
+                        <p className="mt-2 text-sm leading-6">{aiAnalysis.summary}</p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-2"><Badge variant="outline">Sugjerimi {aiAnalysis.suggested_level}</Badge><Badge variant="secondary">Siguria {Math.round(aiAnalysis.confidence * 100)}%</Badge></div>
+                    </div>
+                    <div className="mt-4 grid gap-3 md:grid-cols-3">
+                      <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-emerald-800">Pozitive</p><ul className="mt-2 space-y-1 text-xs text-emerald-950">{aiAnalysis.positives.length ? aiAnalysis.positives.map((item) => <li key={item}>• {item}</li>) : <li>• Nuk ka evidencë pozitive të verifikuar.</li>}</ul></div>
+                      <div className="rounded-xl border border-rose-200 bg-rose-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-rose-800">Për vëmendje</p><ul className="mt-2 space-y-1 text-xs text-rose-950">{aiAnalysis.problems.length ? aiAnalysis.problems.map((item) => <li key={item}>• {item}</li>) : <li>• Nuk ka problem të provuar.</li>}</ul></div>
+                      <div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Duhet konfirmuar</p><ul className="mt-2 space-y-1 text-xs text-amber-950">{aiAnalysis.missing_evidence.length ? aiAnalysis.missing_evidence.map((item) => <li key={item}>• {item}</li>) : <li>• Evidenca është e plotë.</li>}</ul></div>
+                    </div>
+                    <p className="mt-3 text-[10px] text-muted-foreground">Burimi: {aiAnalysis.model}. Analiza përdor vetëm detyrat, snapshot-et dhe evidencat e verifikuara; vendimi final mbetet njerëzor.</p>
                   </section>
                 ) : null}
 
-                <section>
+                <details className="group overflow-hidden rounded-xl border bg-card">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-muted/30 px-4 py-3 text-sm font-semibold">
+                    <span>Detajet e vlerësimit dhe argumentimit</span>
+                    <Badge variant="outline">{selectedQuestions.length} pika</Badge>
+                  </summary>
+                  <div className="p-4">
                   <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
                     <div>
                       <h2 className="font-semibold">Pyetjet dhe argumentimi</h2>
@@ -824,9 +888,10 @@ export default function RealizationPage() {
                       )
                     })}
                   </div>
-                </section>
+                  </div>
+                </details>
 
-                <section><h2 className="mb-3 font-semibold">Evidenca e taskave</h2><div className="max-h-72 overflow-y-auto rounded-xl border"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 font-medium">Detyra</th><th className="px-3 py-2 font-medium">Burimi</th><th className="px-3 py-2 font-medium">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t"><td className="px-3 py-2"><p className="font-medium">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-muted-foreground">{task.task_id || task.match_key}</p></td><td className="px-3 py-2">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></section>
+                <details className="overflow-hidden rounded-xl border bg-card"><summary className="cursor-pointer list-none bg-muted/30 px-4 py-3 text-sm font-semibold">Evidenca teknike e detyrave ({selected.facts_json.tasks?.length || 0})</summary><div className="max-h-72 overflow-y-auto border-t"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 font-medium">Detyra</th><th className="px-3 py-2 font-medium">Burimi</th><th className="px-3 py-2 font-medium">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t"><td className="px-3 py-2"><p className="font-medium">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-muted-foreground">{task.task_id || task.match_key}</p></td><td className="px-3 py-2">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></details>
 
                 {user.role === "ADMIN" && data ? <div className="flex flex-wrap justify-end gap-2 border-t pt-5">{data.period.status === "REVIEWED" ? <Button variant="outline" onClick={() => void run("approve", `/realization/periods/${data.period.id}/approve`, { method: "POST" })} disabled={!!action}><ShieldCheck className="h-4 w-4" /> Aprovo raportin</Button> : null}{data.period.status === "APPROVED" ? <Button variant="destructive" onClick={() => void run("lock", `/realization/periods/${data.period.id}/lock`, { method: "POST" })} disabled={!!action}><LockKeyhole className="h-4 w-4" /> Blloko përfundimisht</Button> : null}</div> : null}
               </CardContent>
