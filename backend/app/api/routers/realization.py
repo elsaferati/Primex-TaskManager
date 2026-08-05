@@ -27,6 +27,7 @@ from app.models.realization import (
     RealizationPersonResult,
 )
 from app.models.task import Task
+from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.schemas.realization import (
@@ -436,6 +437,34 @@ async def _weekly_response(
                     item["tasks"] = merged_tasks
             current_day += timedelta(days=1)
         timeline.sort(key=lambda item: item["date"])
+
+    visible_task_ids: set[uuid.UUID] = set()
+    for row in visible:
+        for timeline_item in daily_by_user.get(row.user_id, []):
+            for task in timeline_item.get("tasks") or []:
+                try:
+                    visible_task_ids.add(uuid.UUID(str(task.get("task_id"))))
+                except (TypeError, ValueError):
+                    continue
+    task_comment_map = {
+        comment.task_id: comment.comment
+        for comment in (
+            await db.execute(
+                select(TaskUserComment).where(
+                    TaskUserComment.task_id.in_(visible_task_ids),
+                    TaskUserComment.user_id == user.id,
+                )
+            )
+        ).scalars().all()
+    } if visible_task_ids else {}
+    for row in visible:
+        for timeline_item in daily_by_user.get(row.user_id, []):
+            for task in timeline_item.get("tasks") or []:
+                try:
+                    task_uuid = uuid.UUID(str(task.get("task_id")))
+                except (TypeError, ValueError):
+                    task_uuid = None
+                task["user_comment"] = task_comment_map.get(task_uuid) if task_uuid else None
     people: list[RealizationPersonWorkflowOut] = []
     for row in visible:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()

@@ -14,6 +14,7 @@ import {
   FileCheck2,
   Loader2,
   LockKeyhole,
+  MessageSquare,
   Plus,
   RefreshCw,
   ShieldCheck,
@@ -118,23 +119,56 @@ function taskPalette(task: RealizationTaskFact) {
   return "border-[#be185d] bg-[#FFC4ED] text-[#500724]"
 }
 
-function DayTaskCard({ task }: { task: RealizationTaskFact }) {
+function DayTaskCard({
+  task,
+  onComment,
+}: {
+  task: RealizationTaskFact
+  onComment: (task: RealizationTaskFact) => void
+}) {
   const additional = task.attribution === "added_after_weekly_plan"
   return (
     <div className={cn("rounded-lg border px-2.5 py-2 text-xs shadow-sm", taskPalette(task))}>
-      <div className="flex items-start justify-between gap-2">
-        <p className="min-w-0 font-semibold leading-4">{cleanTaskTitle(task.title)}</p>
-        {additional ? (
-          <span className="shrink-0 rounded-full border border-current/25 bg-white/50 px-1.5 py-0.5 text-[9px] font-bold uppercase">E re</span>
-        ) : null}
-      </div>
-      <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[10px] opacity-75">
-        <span>{task.project_title || TASK_SOURCE_LABEL[task.source_type] || task.source_type}</span>
-        <span>•</span>
-        <span>{TASK_STATUS_LABEL[task.classification] || task.classification}</span>
+      <div className="flex items-start gap-2">
+        <p className="min-w-0 flex-1 font-semibold leading-4">{cleanTaskTitle(task.title)}</p>
+        <div className="flex shrink-0 items-center gap-1">
+          {additional ? (
+            <span className="rounded-full border border-current/25 bg-white/50 px-1.5 py-0.5 text-[9px] font-bold uppercase">E re</span>
+          ) : null}
+          {task.task_id ? (
+            <button
+              type="button"
+              aria-label={`Komento detyrën ${cleanTaskTitle(task.title)}`}
+              title={task.user_comment ? "Ndrysho komentin" : "Shto koment"}
+              onClick={() => onComment(task)}
+              className={cn(
+                "inline-flex h-6 w-6 items-center justify-center rounded-md border border-current/20 bg-white/60 transition hover:bg-white",
+                task.user_comment && "ring-1 ring-current/30"
+              )}
+            >
+              <MessageSquare className="h-3.5 w-3.5" />
+            </button>
+          ) : null}
+        </div>
       </div>
     </div>
   )
+}
+
+function groupDayTasks(tasks: RealizationTaskFact[]) {
+  const project: RealizationTaskFact[] = []
+  const fast: RealizationTaskFact[] = []
+  const system: RealizationTaskFact[] = []
+  for (const task of tasks) {
+    if (task.source_type === "system") system.push(task)
+    else if (task.source_type === "project" || task.project_title) project.push(task)
+    else fast.push(task)
+  }
+  return [
+    { key: "project", label: "Detyra projekti", tasks: project },
+    { key: "fast", label: "Fast Tasks · pa projekt", tasks: fast },
+    { key: "system", label: "Detyra sistemi", tasks: system },
+  ].filter((group) => group.tasks.length)
 }
 
 const QUESTION_SECTIONS = [
@@ -207,7 +241,10 @@ function weeklyAdditional(person: RealizationPersonResult) {
 }
 
 function cleanTaskTitle(value: string) {
-  return value.replace(/\[\[\/?[a-z_]+\]\]/gi, "").replace(/\s+/g, " ").trim()
+  const firstLine = value.replace(/\[\[\/?[a-z_]+\]\]/gi, "").split(/\r?\n/, 1)[0].trim()
+  const detailStart = firstLine.search(/\s+\d+[.)]\s+/)
+  const title = detailStart > 0 ? firstLine.slice(0, detailStart) : firstLine
+  return title.replace(/\s+/g, " ").trim()
 }
 
 async function errorMessage(response: Response) {
@@ -305,6 +342,9 @@ export default function RealizationPage() {
   const [action, setAction] = React.useState<string | null>(null)
   const [reviewOpen, setReviewOpen] = React.useState(false)
   const [evidenceOpen, setEvidenceOpen] = React.useState(false)
+  const [taskCommentOpen, setTaskCommentOpen] = React.useState(false)
+  const [commentTask, setCommentTask] = React.useState<RealizationTaskFact | null>(null)
+  const [taskComment, setTaskComment] = React.useState("")
   const [reviewLevel, setReviewLevel] = React.useState<RealizationLevel>("B")
   const [managerComment, setManagerComment] = React.useState("")
   const [overrideReason, setOverrideReason] = React.useState("")
@@ -602,6 +642,36 @@ export default function RealizationPage() {
     }
   }
 
+  const openTaskComment = (task: RealizationTaskFact) => {
+    if (!task.task_id) return
+    setCommentTask(task)
+    setTaskComment(task.user_comment || "")
+    setTaskCommentOpen(true)
+  }
+
+  const saveTaskComment = async () => {
+    if (!commentTask?.task_id) return
+    setAction("task-comment")
+    try {
+      const response = await apiFetch(`/tasks/${commentTask.task_id}/comment`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ comment: taskComment.trim() || null }),
+      })
+      if (!response.ok) throw new Error(await errorMessage(response))
+      toast.success(taskComment.trim() ? "Komenti u ruajt" : "Komenti u largua")
+      setTaskCommentOpen(false)
+      setCommentTask(null)
+      await loadReport()
+    } catch (error) {
+      toast.error("Komenti nuk u ruajt", {
+        description: error instanceof Error ? error.message : undefined,
+      })
+    } finally {
+      setAction(null)
+    }
+  }
+
   if (authLoading) {
     return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>
   }
@@ -634,6 +704,7 @@ export default function RealizationPage() {
     const plannedTasks = tasks.filter((task) => task.attribution !== "added_after_weekly_plan")
     const additionalTasks = tasks.filter((task) => task.attribution === "added_after_weekly_plan")
     const completedTasks = plannedTasks.filter(taskIsCompleted)
+    const groups = groupDayTasks([...plannedTasks, ...additionalTasks])
     return {
       label,
       date,
@@ -642,6 +713,7 @@ export default function RealizationPage() {
       additionalTasks,
       completedTasks,
       remainingTasks: plannedTasks.filter((task) => !taskIsCompleted(task)),
+      groups,
     }
   })
 
@@ -819,9 +891,20 @@ export default function RealizationPage() {
                           </div>
                         </div>
                         <div className="flex-1 space-y-2 p-2.5">
-                          {day.plannedTasks.map((task) => <DayTaskCard key={`planned-${day.date}-${task.match_key}`} task={task} />)}
-                          {day.additionalTasks.length ? <div className="flex items-center gap-2 pt-1 text-[10px] font-semibold uppercase tracking-wide text-blue-700"><span className="h-px flex-1 bg-blue-200" />Shtuar gjatë ditës<span className="h-px flex-1 bg-blue-200" /></div> : null}
-                          {day.additionalTasks.map((task) => <DayTaskCard key={`additional-${day.date}-${task.match_key}`} task={task} />)}
+                          {day.groups.map((group) => (
+                            <div key={`${day.date}-${group.key}`} className="space-y-1.5">
+                              <div className="flex items-center gap-2 px-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                <span>{group.label}</span><span className="h-px flex-1 bg-border" /><span>{group.tasks.length}</span>
+                              </div>
+                              {group.tasks.map((task) => (
+                                <DayTaskCard
+                                  key={`${group.key}-${day.date}-${task.match_key}`}
+                                  task={task}
+                                  onComment={openTaskComment}
+                                />
+                              ))}
+                            </div>
+                          ))}
                           {!day.plannedTasks.length && !day.additionalTasks.length ? (
                             <div className="flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed text-center text-xs text-muted-foreground">
                               <CircleDashed className="mb-2 h-5 w-5" />Nuk ka detyra për këtë ditë
@@ -899,6 +982,33 @@ export default function RealizationPage() {
           ) : <div className="flex min-h-[500px] items-center justify-center text-sm text-muted-foreground">Zgjidh një person nga ekipi.</div>}
         </Card>
       </div>
+
+      <Dialog open={taskCommentOpen} onOpenChange={setTaskCommentOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Komento detyrën</DialogTitle>
+            <DialogDescription>{commentTask ? cleanTaskTitle(commentTask.title) : "Komenti lidhet me detyrën e zgjedhur."}</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <Label htmlFor="realization-task-comment">Komenti</Label>
+            <Textarea
+              id="realization-task-comment"
+              value={taskComment}
+              onChange={(event) => setTaskComment(event.target.value)}
+              rows={5}
+              placeholder="Shëno sqarimin, pengesën, rezultatin ose çfarë duhet ndjekur…"
+              autoFocus
+            />
+            <p className="text-xs text-muted-foreground">Komenti ruhet te detyra reale dhe shfaqet sa herë që ajo paraqitet në raport.</p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setTaskCommentOpen(false)}>Anulo</Button>
+            <Button onClick={() => void saveTaskComment()} disabled={action === "task-comment"}>
+              {action === "task-comment" ? <Loader2 className="h-4 w-4 animate-spin" /> : <MessageSquare className="h-4 w-4" />} Ruaj komentin
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={reviewOpen} onOpenChange={setReviewOpen}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">

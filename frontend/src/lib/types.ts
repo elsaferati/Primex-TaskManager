@@ -692,6 +692,7 @@ export interface RealizationTaskFact {
   attribution?: "planned_owner" | "actual_worker" | "additional_owner" | "planned_today" | "added_after_weekly_plan"
   meeting_origin_id?: string | null
   status_progress_inconsistent?: boolean
+  user_comment?: string | null
 }
 
 export interface RealizationObservationFact {
