@@ -376,15 +376,8 @@ table,tbody,tr,td,div,pre{{max-width:100%!important;box-sizing:border-box!import
 h1{{font-size:18px!important;line-height:1.2!important;white-space:normal!important}}
 h2{{font-size:13px!important;line-height:1.25!important;white-space:normal!important;word-break:normal!important;overflow-wrap:anywhere!important}}
 pre{{font-size:12px!important;padding:10px!important}}
-.report-table th,.report-table td{{font-size:12px!important;padding:4px 5px!important;line-height:1.3!important}}
-}}
-@media only screen and (max-width:600px){{
-.report-table,.report-table thead,.report-table tbody,.report-table tr,.report-table th,.report-table td{{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;table-layout:fixed!important}}
-.report-table colgroup,.report-table thead{{display:none!important}}
-.report-table tr{{border:1px solid #cbd5e1!important;margin:0 0 8px!important}}
-.report-table td{{border:0!important;border-bottom:1px solid #e5e7eb!important;white-space:normal!important;word-break:break-all!important;overflow-wrap:anywhere!important}}
-.report-table td:last-child{{border-bottom:0!important}}
-.report-table td:before{{content:attr(data-label) ': ';display:inline!important;font-weight:700!important;color:#111827!important}}
+.report-table{{width:100%!important;table-layout:auto!important}}
+.report-table th,.report-table td{{font-size:11px!important;padding:3px 4px!important;line-height:1.25!important;word-break:normal!important;overflow-wrap:break-word!important}}
 }}
 </style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:8px;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
