@@ -154,6 +154,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/system-task-instances", label: "System Tasks Report", icon: Layers },
       { href: "/external-tickets", label: "STD Tickets EXT", icon: TicketCheck },
+      { href: "/morning-report", label: "Hapja e dites M1", icon: MailCheck },
       { href: "/meetings-report", label: "Mbyllja e dites M3", icon: MailCheck },
       { href: "/after-break-report", label: "Permbledhja pas pauzes", icon: MailCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },

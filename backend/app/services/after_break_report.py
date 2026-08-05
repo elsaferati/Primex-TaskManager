@@ -237,6 +237,7 @@ async def _personal_section(
     names: dict[Any, str],
     assignee_ids_by_task: dict[Any, set[Any]],
     report_day: date,
+    title_pattern: re.Pattern[str] = PERSONAL_GA,
 ) -> list[str]:
     personal = [task for task in tasks if task.is_personal and _belongs_to_day(task, report_day)]
 
@@ -250,10 +251,10 @@ async def _personal_section(
     def _title(task: Task) -> str:
         return note_titles.get(task.ga_note_origin_id) or _display_title(task.title)
 
-    def _is_ga(task: Task) -> bool:
-        return bool(PERSONAL_GA.search(_title(task)) or PERSONAL_GA.search(task.title or ""))
+    def _matches_title(task: Task) -> bool:
+        return bool(title_pattern.search(_title(task)) or title_pattern.search(task.title or ""))
 
-    ga_personal = [task for task in personal if _is_ga(task)]
+    ga_personal = [task for task in personal if _matches_title(task)]
 
     def _group_key(task: Task) -> str:
         return "DONE" if _is_done(task) else str(task.status or "").upper()
