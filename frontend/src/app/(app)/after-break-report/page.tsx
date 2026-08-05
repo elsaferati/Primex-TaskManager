@@ -36,6 +36,14 @@ type Draft = {
   last_error?: string | null
   updated_at?: string | null
 }
+
+function sectionGroupLabel(index: number) {
+  return index < 4 ? "Manual questions" : "Auto-filled from PrimeFlow"
+}
+
+function shouldShowSectionGroup(index: number) {
+  return index === 0 || sectionGroupLabel(index) !== sectionGroupLabel(index - 1)
+}
 type DeliveryHistory = {
   id: string
   report_date: string
@@ -574,72 +582,79 @@ export default function AfterBreakReportPage() {
             {draft.sections.map((section, index) => {
               const isEditing = editingSection?.index === index
               return (
-                <div key={`${section.title}-${index}`} className="rounded-lg border bg-white p-4 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {section.body.trim().split(/\s+/).filter(Boolean).length} words
-                      </div>
+                <React.Fragment key={`${section.title}-${index}`}>
+                  {shouldShowSectionGroup(index) ? (
+                    <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
+                      {sectionGroupLabel(index)}
                     </div>
-                    {canEdit ? (
-                      isEditing ? (
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={() => setEditingSection(null)}>
-                            Cancel
-                          </Button>
-                          <Button size="sm" onClick={applySectionEditor}>
-                            <Save className="h-4 w-4" /> Apply
-                          </Button>
+                  ) : null}
+                  <div className="rounded-lg border bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {section.body.trim().split(/\s+/).filter(Boolean).length} words
                         </div>
-                      ) : (
-                        <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
-                          <Pencil className="h-4 w-4" /> Edit
-                        </Button>
-                      )
-                    ) : null}
-                  </div>
-
-                  {isEditing ? (
-                    <div className="mt-3 space-y-2 rounded-md border bg-slate-50 p-3">
-                      <Label className="text-xs text-muted-foreground">Edit fields</Label>
-                      <div className="max-h-[560px] space-y-2 overflow-auto pr-1">
-                        {editingSection.lines.map((line, lineIndex) => {
-                          const cells = tableCells(line)
-                          if (!line.trim()) return <div key={lineIndex} className="h-3" />
-                          if (isRuleLine(line)) {
-                            return <div key={lineIndex} className="h-px bg-border" />
-                          }
-                          if (cells) {
-                            return (
-                              <div key={lineIndex} className="grid gap-2 md:grid-cols-4">
-                                {cells.map((cell, cellIndex) => (
-                                  <Input
-                                    key={cellIndex}
-                                    className={cellIndex >= 2 ? "md:col-span-2" : ""}
-                                    value={cell}
-                                    onChange={(event) => updateSectionEditorCell(lineIndex, cellIndex, event.target.value)}
-                                  />
-                                ))}
-                              </div>
-                            )
-                          }
-                          return (
-                            <Input
-                              key={lineIndex}
-                              value={line}
-                              onChange={(event) => updateSectionEditorLine(lineIndex, event.target.value)}
-                            />
-                          )
-                        })}
                       </div>
+                      {canEdit ? (
+                        isEditing ? (
+                          <div className="flex gap-2">
+                            <Button variant="outline" size="sm" onClick={() => setEditingSection(null)}>
+                              Cancel
+                            </Button>
+                            <Button size="sm" onClick={applySectionEditor}>
+                              <Save className="h-4 w-4" /> Apply
+                            </Button>
+                          </div>
+                        ) : (
+                          <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
+                            <Pencil className="h-4 w-4" /> Edit
+                          </Button>
+                        )
+                      ) : null}
                     </div>
-                  ) : (
-                    <pre className="mt-3 overflow-x-auto rounded-md border bg-slate-50 p-3 font-mono text-xs leading-5 text-slate-900">
-                      {sectionPreviewText(section.body)}
-                    </pre>
-                  )}
-                </div>
+
+                    {isEditing ? (
+                      <div className="mt-3 space-y-2 rounded-md border bg-slate-50 p-3">
+                        <Label className="text-xs text-muted-foreground">Edit fields</Label>
+                        <div className="max-h-[560px] space-y-2 overflow-auto pr-1">
+                          {editingSection.lines.map((line, lineIndex) => {
+                            const cells = tableCells(line)
+                            if (!line.trim()) return <div key={lineIndex} className="h-3" />
+                            if (isRuleLine(line)) {
+                              return <div key={lineIndex} className="h-px bg-border" />
+                            }
+                            if (cells) {
+                              return (
+                                <div key={lineIndex} className="grid gap-2 md:grid-cols-4">
+                                  {cells.map((cell, cellIndex) => (
+                                    <Input
+                                      key={cellIndex}
+                                      className={cellIndex >= 2 ? "md:col-span-2" : ""}
+                                      value={cell}
+                                      onChange={(event) => updateSectionEditorCell(lineIndex, cellIndex, event.target.value)}
+                                    />
+                                  ))}
+                                </div>
+                              )
+                            }
+                            return (
+                              <Input
+                                key={lineIndex}
+                                value={line}
+                                onChange={(event) => updateSectionEditorLine(lineIndex, event.target.value)}
+                              />
+                            )
+                          })}
+                        </div>
+                      </div>
+                    ) : (
+                      <pre className="mt-3 overflow-x-auto rounded-md border bg-slate-50 p-3 font-mono text-xs leading-5 text-slate-900">
+                        {sectionPreviewText(section.body)}
+                      </pre>
+                    )}
+                  </div>
+                </React.Fragment>
               )
             })}
           </div>

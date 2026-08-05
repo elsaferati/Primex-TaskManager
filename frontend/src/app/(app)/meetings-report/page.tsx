@@ -44,6 +44,14 @@ type Draft = {
   last_error?: string | null
   updated_at?: string | null
 }
+
+function sectionGroupLabel(index: number) {
+  return index === 0 ? "Manual questions" : "Auto-filled from PrimeFlow"
+}
+
+function shouldShowSectionGroup(index: number) {
+  return index === 0 || sectionGroupLabel(index) !== sectionGroupLabel(index - 1)
+}
 type DeliveryHistory = {
   id: string
   report_date: string
@@ -590,86 +598,93 @@ export default function MeetingsReportPage() {
                   const isEditing = editingSection?.index === index
                   const editorBlocks = isEditing ? editorTableBlocks(editingSection!.lines) : []
                   return (
-                    <section key={`${section.title}-${index}`} className="rounded-md border bg-white p-4 shadow-sm">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
-                        <div className="flex items-start gap-3">
-                          <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-sm font-semibold text-slate-700">{index + 1}</div>
-                          <div>
-                            <h2 className="text-sm font-semibold leading-5">{section.title}</h2>
-                          </div>
+                    <React.Fragment key={`${section.title}-${index}`}>
+                      {shouldShowSectionGroup(index) ? (
+                        <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
+                          {sectionGroupLabel(index)}
                         </div>
-                        {isEditing ? (
-                          <div className="flex gap-2">
-                            <Button variant="outline" size="sm" onClick={() => setEditingSection(null)}>Cancel</Button>
-                            <Button size="sm" onClick={applySectionEditor}><Save /> Save</Button>
+                      ) : null}
+                      <section className="rounded-md border bg-white p-4 shadow-sm">
+                        <div className="flex flex-wrap items-start justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <div className="flex size-8 shrink-0 items-center justify-center rounded-md bg-slate-100 text-sm font-semibold text-slate-700">{index + 1}</div>
+                            <div>
+                              <h2 className="text-sm font-semibold leading-5">{section.title}</h2>
+                            </div>
                           </div>
-                        ) : (
-                          <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}><Pencil /> Edit</Button>
-                        )}
-                      </div>
+                          {isEditing ? (
+                            <div className="flex gap-2">
+                              <Button variant="outline" size="sm" onClick={() => setEditingSection(null)}>Cancel</Button>
+                              <Button size="sm" onClick={applySectionEditor}><Save /> Save</Button>
+                            </div>
+                          ) : (
+                            <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}><Pencil /> Edit</Button>
+                          )}
+                        </div>
 
-                      {isEditing ? (
-                        <div className="mt-4 rounded-md border bg-slate-50 p-3">
-                          <div className="max-h-[620px] space-y-2 overflow-auto pr-1">
-                            {editingSection!.lines.map((line, lineIndex) => {
-                              const cells = tableCells(line)
-                              if (!line.trim()) return <div key={lineIndex} className="h-3" />
-                              if (isRuleLine(line)) {
-                                const endingBlock = editorBlocks.find((block) => block.endIndex === lineIndex)
-                                return endingBlock ? (
-                                  <div key={lineIndex} className="pb-2 pt-1">
-                                    <Button type="button" size="sm" variant="outline" onClick={() => addSectionEditorRow(endingBlock.headerIndex)}>
-                                      <Plus /> Add row
-                                    </Button>
-                                  </div>
-                                ) : null
-                              }
-                              if (cells) {
-                                const block = editorBlocks.find((item) => item.headerIndex === lineIndex || item.rowIndexes.includes(lineIndex))
-                                const headerCells = block ? tableCells(editingSection!.lines[block.headerIndex]) || cells : cells
-                                const isHeader = block?.headerIndex === lineIndex
-                                return (
-                                  <div key={lineIndex} className="flex min-w-[680px] items-center gap-2">
-                                    <div className="grid flex-1 gap-2" style={{ gridTemplateColumns: tableGridTemplate(headerCells) }}>
-                                      {cells.map((cell, cellIndex) => (
-                                        isHeader ? (
-                                          <div key={cellIndex} className="flex h-9 items-center rounded-md border bg-slate-100 px-3 text-sm font-semibold text-slate-700">
-                                            {cell || "\u00a0"}
-                                          </div>
-                                        ) : (
-                                          <Input
-                                            key={cellIndex}
-                                            className="bg-white"
-                                            value={cell}
-                                            onChange={(event) => updateSectionEditorCell(lineIndex, cellIndex, event.target.value)}
-                                          />
-                                        )
-                                      ))}
-                                    </div>
-                                    {isHeader ? <div className="size-8 shrink-0" /> : (
-                                      <Button
-                                        type="button"
-                                        size="icon-sm"
-                                        variant="ghost"
-                                        aria-label="Delete row"
-                                        title="Delete row"
-                                        onClick={() => deleteSectionEditorRow(lineIndex)}
-                                      >
-                                        <Trash2 className="text-red-600" />
+                        {isEditing ? (
+                          <div className="mt-4 rounded-md border bg-slate-50 p-3">
+                            <div className="max-h-[620px] space-y-2 overflow-auto pr-1">
+                              {editingSection!.lines.map((line, lineIndex) => {
+                                const cells = tableCells(line)
+                                if (!line.trim()) return <div key={lineIndex} className="h-3" />
+                                if (isRuleLine(line)) {
+                                  const endingBlock = editorBlocks.find((block) => block.endIndex === lineIndex)
+                                  return endingBlock ? (
+                                    <div key={lineIndex} className="pb-2 pt-1">
+                                      <Button type="button" size="sm" variant="outline" onClick={() => addSectionEditorRow(endingBlock.headerIndex)}>
+                                        <Plus /> Add row
                                       </Button>
-                                    )}
-                                  </div>
-                                )
-                              }
-                              if (isFixedEditorLabel(line)) {
-                                return <div key={lineIndex} className="rounded-md border bg-white px-3 py-2 text-sm font-semibold text-slate-700">{line}</div>
-                              }
-                              return <Input key={lineIndex} className="bg-white" value={line} onChange={(event) => updateSectionEditorLine(lineIndex, event.target.value)} />
-                            })}
+                                    </div>
+                                  ) : null
+                                }
+                                if (cells) {
+                                  const block = editorBlocks.find((item) => item.headerIndex === lineIndex || item.rowIndexes.includes(lineIndex))
+                                  const headerCells = block ? tableCells(editingSection!.lines[block.headerIndex]) || cells : cells
+                                  const isHeader = block?.headerIndex === lineIndex
+                                  return (
+                                    <div key={lineIndex} className="flex min-w-[680px] items-center gap-2">
+                                      <div className="grid flex-1 gap-2" style={{ gridTemplateColumns: tableGridTemplate(headerCells) }}>
+                                        {cells.map((cell, cellIndex) => (
+                                          isHeader ? (
+                                            <div key={cellIndex} className="flex h-9 items-center rounded-md border bg-slate-100 px-3 text-sm font-semibold text-slate-700">
+                                              {cell || "\u00a0"}
+                                            </div>
+                                          ) : (
+                                            <Input
+                                              key={cellIndex}
+                                              className="bg-white"
+                                              value={cell}
+                                              onChange={(event) => updateSectionEditorCell(lineIndex, cellIndex, event.target.value)}
+                                            />
+                                          )
+                                        ))}
+                                      </div>
+                                      {isHeader ? <div className="size-8 shrink-0" /> : (
+                                        <Button
+                                          type="button"
+                                          size="icon-sm"
+                                          variant="ghost"
+                                          aria-label="Delete row"
+                                          title="Delete row"
+                                          onClick={() => deleteSectionEditorRow(lineIndex)}
+                                        >
+                                          <Trash2 className="text-red-600" />
+                                        </Button>
+                                      )}
+                                    </div>
+                                  )
+                                }
+                                if (isFixedEditorLabel(line)) {
+                                  return <div key={lineIndex} className="rounded-md border bg-white px-3 py-2 text-sm font-semibold text-slate-700">{line}</div>
+                                }
+                                return <Input key={lineIndex} className="bg-white" value={line} onChange={(event) => updateSectionEditorLine(lineIndex, event.target.value)} />
+                              })}
+                            </div>
                           </div>
-                        </div>
-                      ) : <ReportSectionPreview body={sectionPreviewText(section.body)} />}
-                    </section>
+                        ) : <ReportSectionPreview body={sectionPreviewText(section.body)} />}
+                      </section>
+                    </React.Fragment>
                   )
                 })}
               </div>
