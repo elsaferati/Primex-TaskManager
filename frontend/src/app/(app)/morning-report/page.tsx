@@ -10,6 +10,12 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import {
+  ReportSectionFieldEditor,
+  ReportSectionPreview,
+  reportSectionEditorLines,
+  reportSectionPreviewText,
+} from "@/components/report-section-editor"
 import { useAuth } from "@/lib/auth"
 
 type Section = { title: string; body: string }
@@ -49,34 +55,6 @@ type DeliveryHistory = {
 
 const API = "/morning-report"
 const REPORT_LABEL = "Hapja e dites M1"
-
-function sectionPreviewText(value: string) {
-  const cleaned = value.trim()
-  if (!cleaned) return "No content"
-  return cleaned
-}
-
-function sectionEditorLines(value: string) {
-  return value.split(/\r?\n/)
-}
-
-function isRuleLine(value: string) {
-  const trimmed = value.trim()
-  return Boolean(trimmed) && /^[+\-\s]+$/.test(trimmed)
-}
-
-function tableCells(value: string) {
-  const trimmed = value.trim()
-  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null
-  return trimmed.slice(1, -1).split("|").map((cell) => cell.trim())
-}
-
-function updateTableCell(line: string, cellIndex: number, value: string) {
-  const cells = tableCells(line)
-  if (!cells) return line
-  const nextCells = cells.map((cell, index) => index === cellIndex ? value : cell)
-  return `| ${nextCells.join(" | ")} |`
-}
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
@@ -318,33 +296,13 @@ export default function MorningReportPage() {
 
   const openSectionEditor = (index: number) => {
     if (!draft) return
-    setEditingSection({ index, lines: sectionEditorLines(draft.sections[index]?.body || "") })
+    setEditingSection({ index, lines: reportSectionEditorLines(draft.sections[index]?.body || "") })
   }
 
   const applySectionEditor = () => {
     if (!editingSection) return
     updateSection(editingSection.index, editingSection.lines.join("\n"))
     setEditingSection(null)
-  }
-
-  const updateSectionEditorLine = (lineIndex: number, value: string) => {
-    setEditingSection((current) => {
-      if (!current) return current
-      return {
-        ...current,
-        lines: current.lines.map((line, index) => index === lineIndex ? value : line),
-      }
-    })
-  }
-
-  const updateSectionEditorCell = (lineIndex: number, cellIndex: number, value: string) => {
-    setEditingSection((current) => {
-      if (!current) return current
-      return {
-        ...current,
-        lines: current.lines.map((line, index) => index === lineIndex ? updateTableCell(line, cellIndex, value) : line),
-      }
-    })
   }
 
   const updateRecipients = (kind: keyof Recipients, value: string) => {
@@ -584,62 +542,22 @@ export default function MorningReportPage() {
                         {section.body.trim().split(/\s+/).filter(Boolean).length} words
                       </div>
                     </div>
-                    {canEdit ? (
-                      isEditing ? (
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={() => setEditingSection(null)}>
-                            Cancel
-                          </Button>
-                          <Button size="sm" onClick={applySectionEditor}>
-                            <Save className="h-4 w-4" /> Apply
-                          </Button>
-                        </div>
-                      ) : (
-                        <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
-                          <Pencil className="h-4 w-4" /> Edit
-                        </Button>
-                      )
+                    {canEdit && !isEditing ? (
+                      <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
+                        <Pencil className="h-4 w-4" /> Edit
+                      </Button>
                     ) : null}
                   </div>
 
                   {isEditing ? (
-                    <div className="mt-3 space-y-2 rounded-md border bg-slate-50 p-3">
-                      <Label className="text-xs text-muted-foreground">Edit fields</Label>
-                      <div className="max-h-[560px] space-y-2 overflow-auto pr-1">
-                        {editingSection.lines.map((line, lineIndex) => {
-                          const cells = tableCells(line)
-                          if (!line.trim()) return <div key={lineIndex} className="h-3" />
-                          if (isRuleLine(line)) {
-                            return <div key={lineIndex} className="h-px bg-border" />
-                          }
-                          if (cells) {
-                            return (
-                              <div key={lineIndex} className="grid gap-2 md:grid-cols-4">
-                                {cells.map((cell, cellIndex) => (
-                                  <Input
-                                    key={cellIndex}
-                                    className={cellIndex >= 2 ? "md:col-span-2" : ""}
-                                    value={cell}
-                                    onChange={(event) => updateSectionEditorCell(lineIndex, cellIndex, event.target.value)}
-                                  />
-                                ))}
-                              </div>
-                            )
-                          }
-                          return (
-                            <Input
-                              key={lineIndex}
-                              value={line}
-                              onChange={(event) => updateSectionEditorLine(lineIndex, event.target.value)}
-                            />
-                          )
-                        })}
-                      </div>
-                    </div>
+                    <ReportSectionFieldEditor
+                      lines={editingSection.lines}
+                      onChangeLines={(lines) => setEditingSection((current) => current ? { ...current, lines } : current)}
+                      onCancel={() => setEditingSection(null)}
+                      onSave={applySectionEditor}
+                    />
                   ) : (
-                    <pre className="mt-3 overflow-x-auto rounded-md border bg-slate-50 p-3 font-mono text-xs leading-5 text-slate-900">
-                      {sectionPreviewText(section.body)}
-                    </pre>
+                    <ReportSectionPreview body={reportSectionPreviewText(section.body)} />
                   )}
                 </div>
               )
