@@ -391,19 +391,45 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
 
 def render_plain_text(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
     blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", ""]
+    current_group = ""
     for index, section in enumerate(sections, 1):
+        group = "MANUAL QUESTIONS" if section["title"] in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
+        if group != current_group:
+            blocks.append(group)
+            current_group = group
         blocks.append(f"{index}. {section['title']}\n{section.get('body') or ''}".strip())
     return "\n\n".join(blocks)
 
 
-def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
-    section_html = "".join(
-        "<div style=\"margin:22px 0 0;\">"
-        f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">{index}. {html.escape(section['title'])}</h2>"
-        f"{_render_section_body_html(section.get('body') or '')}"
+def _section_group_label(title: str) -> str:
+    return "MANUAL QUESTIONS" if title in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
+
+
+def _render_group_label_html(label: str) -> str:
+    return (
+        "<div style=\"margin:22px 0 10px;padding:9px 11px;background:#f1f5f9;"
+        "border:1px solid #d7dee8;color:#334155;font-family:Arial,sans-serif;"
+        "font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;\">"
+        f"{html.escape(label)}"
         "</div>"
-        for index, section in enumerate(sections, 1)
     )
+
+
+def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
+    section_chunks: list[str] = []
+    current_group = ""
+    for index, section in enumerate(sections, 1):
+        group = _section_group_label(section["title"])
+        if group != current_group:
+            section_chunks.append(_render_group_label_html(group))
+            current_group = group
+        section_chunks.append(
+            "<div style=\"margin:22px 0 0;\">"
+            f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">{index}. {html.escape(section['title'])}</h2>"
+            f"{_render_section_body_html(section.get('body') or '')}"
+            "</div>"
+        )
+    section_html = "".join(section_chunks)
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
 body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
