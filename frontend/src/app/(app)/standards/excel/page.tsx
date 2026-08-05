@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, Loader2, Upload } from "lucide-react"
+import { AlertCircle, CheckCircle2, Download, FileSpreadsheet, FolderOpen, Loader2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -58,7 +58,9 @@ function errorDetail(value: unknown, fallback: string) {
 
 export default function ExcelStandardsPage() {
   const { apiFetch, user } = useAuth()
+  const fileInputRef = React.useRef<HTMLInputElement>(null)
   const [file, setFile] = React.useState<File | null>(null)
+  const [isDraggingFile, setIsDraggingFile] = React.useState(false)
   const [analysis, setAnalysis] = React.useState<Analysis | null>(null)
   const [missingHeaders, setMissingHeaders] = React.useState<Record<string, Record<string, string>>>({})
   const [description, setDescription] = React.useState("")
@@ -91,11 +93,27 @@ export default function ExcelStandardsPage() {
   }, [])
 
   const chooseFile = (nextFile: File | null) => {
+    if (nextFile && !/\.(xlsx|csv)$/i.test(nextFile.name)) {
+      toast.error("Lejohen vetëm skedarët .xlsx dhe .csv.")
+      return
+    }
+    if (nextFile && nextFile.size > 20 * 1024 * 1024) {
+      toast.error("Skedari është më i madh se 20 MB.")
+      return
+    }
     setFile(nextFile)
     setAnalysis(null)
     setMissingHeaders({})
     setDescription("")
     resetResult()
+  }
+
+  const openFilePicker = () => fileInputRef.current?.click()
+
+  const handleFileDrop = (event: React.DragEvent<HTMLDivElement>) => {
+    event.preventDefault()
+    setIsDraggingFile(false)
+    chooseFile(event.dataTransfer.files?.[0] || null)
   }
 
   const analyze = async () => {
@@ -207,17 +225,40 @@ export default function ExcelStandardsPage() {
           </CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <label className="flex cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-slate-300 bg-slate-50 px-6 py-10 text-center transition-colors hover:border-slate-400 hover:bg-slate-100">
+          <div
+            className={`flex flex-col items-center justify-center rounded-lg border border-dashed px-6 py-10 text-center transition-colors ${
+              isDraggingFile
+                ? "border-emerald-500 bg-emerald-50"
+                : "border-slate-300 bg-slate-50 hover:border-slate-400 hover:bg-slate-100"
+            }`}
+            onDragEnter={(event) => {
+              event.preventDefault()
+              setIsDraggingFile(true)
+            }}
+            onDragOver={(event) => event.preventDefault()}
+            onDragLeave={() => setIsDraggingFile(false)}
+            onDrop={handleFileDrop}
+          >
             <Upload className="mb-3 h-8 w-8 text-slate-500" />
-            <span className="text-sm font-medium">{file ? file.name : "Zgjidh skedarin .xlsx ose .csv"}</span>
-            <span className="mt-1 text-xs text-muted-foreground">Madhësia maksimale: 20 MB</span>
+            <span className="text-sm font-medium">
+              {file ? file.name : "Tërhiq skedarin këtu ose zgjidhe nga pajisja"}
+            </span>
+            <span className="mt-1 text-xs text-muted-foreground">Formatet: .xlsx, .csv · Madhësia maksimale: 20 MB</span>
+            <Button type="button" variant="outline" className="mt-4" onClick={openFilePicker}>
+              <FolderOpen className="h-4 w-4" />
+              {file ? "Zgjidh një skedar tjetër" : "Zgjidh skedarin"}
+            </Button>
             <input
+              ref={fileInputRef}
               type="file"
               accept=".xlsx,.csv,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,text/csv"
               className="sr-only"
+              onClick={(event) => {
+                event.currentTarget.value = ""
+              }}
               onChange={(event) => chooseFile(event.target.files?.[0] || null)}
             />
-          </label>
+          </div>
           <div className="flex justify-end">
             <Button type="button" onClick={() => void analyze()} disabled={!file || analyzing || generating}>
               {analyzing ? <Loader2 className="h-4 w-4 animate-spin" /> : <FileSpreadsheet className="h-4 w-4" />}

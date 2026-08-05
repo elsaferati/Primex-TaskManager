@@ -1,9 +1,12 @@
 import io
 import unittest
+import xml.etree.ElementTree as ET
 from datetime import datetime
+from zipfile import ZIP_DEFLATED, ZipFile
 from zoneinfo import ZoneInfo
 
 from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Border, Side
 
 from app.services.excel_standardizer import analyze_workbook, initials_from_user, standardize_workbook
 
@@ -84,6 +87,38 @@ class TestExcelStandardizer(unittest.TestCase):
         self.assertEqual([standardized[f"A{row}"].value for row in range(7, 10)], [1, 2, 3])
         self.assertIsNone(standardized["B8"].value)
         self.assertIsNone(standardized["B9"].value)
+
+    def test_dangling_source_border_style_does_not_abort_generation(self) -> None:
+        workbook = Workbook()
+        worksheet = workbook.active
+        worksheet.title = "Products"
+        worksheet.append(["Name", "Amount"])
+        worksheet.append(["Primex", 12])
+        worksheet["A1"].border = Border(left=Side(style="thin"))
+        valid_file = io.BytesIO()
+        workbook.save(valid_file)
+
+        source = io.BytesIO(valid_file.getvalue())
+        corrupted = io.BytesIO()
+        namespace = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+        with ZipFile(source, "r") as input_zip, ZipFile(corrupted, "w", ZIP_DEFLATED) as output_zip:
+            for entry in input_zip.infolist():
+                payload = input_zip.read(entry.filename)
+                if entry.filename == "xl/styles.xml":
+                    root = ET.fromstring(payload)
+                    cell_xfs = root.find(f"{{{namespace}}}cellXfs")
+                    self.assertIsNotNone(cell_xfs)
+                    assert cell_xfs is not None
+                    styled_xf = next(xf for xf in cell_xfs if xf.get("borderId") == "1")
+                    styled_xf.set("borderId", "999")
+                    payload = ET.tostring(root, encoding="utf-8", xml_declaration=True)
+                output_zip.writestr(entry, payload)
+
+        result, _, _ = standardize_workbook(corrupted.getvalue(), "products.xlsx", "AN")
+        standardized = load_workbook(io.BytesIO(result)).active
+
+        self.assertEqual(standardized["B7"].value, "PX")
+        self.assertEqual(standardized["C7"].value, 12)
 
 
 if __name__ == "__main__":
