@@ -13,8 +13,10 @@ os.environ.setdefault("JWT_SECRET", "test-secret")
 
 import httpx
 from fastapi import HTTPException
+from openpyxl import load_workbook
 
 from app.api.routers.external_tickets import (
+    _external_tickets_workbook,
     _search_condition,
     external_ticket_task_options,
     sync_external_tickets_now,
@@ -393,6 +395,49 @@ class TestStdFeedbackWorkflow(unittest.IsolatedAsyncioTestCase):
         )
         self.assertEqual(ticket_comments(ticket), [{"id": "c1"}])
         self.assertEqual(ticket_files(ticket), [{"id": "f1"}])
+
+    def test_excel_export_contains_full_ticket_information_and_excel_dates(self) -> None:
+        ticket = StdFeedbackTicket(
+            id=uuid.uuid4(),
+            external_id="std-266",
+            issue_number=266,
+            order_ticket_number="1038116",
+            title="Issue: 1038116",
+            description="Wrong customer number",
+            affected_fields=["customer_number"],
+            category="Data Issue",
+            priority="High",
+            status="Open",
+            dashboard_area="Orders",
+            reporter_username="Laurent Hoxha",
+            reporter_email="laurent@example.com",
+            comment_count=1,
+            file_count=1,
+            reported_at=datetime(2026, 8, 5, 8, 30, tzinfo=timezone.utc),
+            source_updated_at=datetime(2026, 8, 5, 9, 15, tzinfo=timezone.utc),
+            review_status="PENDING",
+            raw={
+                "comments": [{"author": "STD User", "body": "Please fix"}],
+                "files": [{"filename": "proof.png"}],
+            },
+        )
+
+        workbook = load_workbook(_external_tickets_workbook([ticket]))
+        worksheet = workbook["STD Tickets"]
+        headers = [cell.value for cell in worksheet[1]]
+
+        self.assertEqual(worksheet.freeze_panes, "A2")
+        self.assertEqual(worksheet.auto_filter.ref, "A1:AC2")
+        self.assertIn("Problem / Description", headers)
+        self.assertIn("Reporter Email", headers)
+        self.assertIn("Comments", headers)
+        self.assertIn("Review Decision", headers)
+        self.assertEqual(worksheet.cell(2, headers.index("Order Ticket #") + 1).value, "1038116")
+        self.assertIn("Please fix", worksheet.cell(2, headers.index("Comments") + 1).value)
+        self.assertEqual(worksheet.cell(2, headers.index("Attachments") + 1).value, "proof.png")
+        created_cell = worksheet.cell(2, headers.index("Created At (UTC)") + 1)
+        self.assertIsInstance(created_cell.value, datetime)
+        self.assertEqual(created_cell.number_format, "dd.mm.yyyy hh:mm")
 
     def test_frontend_never_contains_the_std_bearer_token_setting(self) -> None:
         frontend = Path(__file__).resolve().parents[2] / "frontend" / "src"
