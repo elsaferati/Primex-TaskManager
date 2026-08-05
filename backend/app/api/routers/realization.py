@@ -27,6 +27,7 @@ from app.models.realization import (
     RealizationPersonResult,
 )
 from app.models.task import Task
+from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.schemas.realization import (
@@ -54,6 +55,7 @@ from app.services.realization_access import (
 from app.services.realization_calculator import build_live_questions, calculate_weekly_period
 from app.services.realization_ai import RealizationAIError, analyze_realization
 from app.services.realization_daily import calculate_daily_period
+from app.services.realization_evidence import _snapshot_tasks
 from app.services.realization_excel import build_realization_workbook
 from app.services.realization_periods import (
     RealizationWorkflowError,
@@ -313,9 +315,11 @@ async def _weekly_response(
     daily_tasks_by_user: dict[uuid.UUID, dict[str, dict]] = {}
     for daily_result, daily_period in daily_rows:
         daily_facts = daily_result.facts_json or {}
+        day_tasks = [dict(task) for task in daily_facts.get("tasks") or []]
         daily_by_user.setdefault(daily_result.user_id, []).append(
             {
                 "date": daily_period.start_date.isoformat(),
+                "has_snapshot": True,
                 "daily_progress_percent": daily_facts.get("daily_progress_percent", 0),
                 "weekly_progress_percent": daily_facts.get("weekly_progress_percent", 0),
                 "planned_count": daily_facts.get(
@@ -328,12 +332,139 @@ async def _weekly_response(
                 "weekly_completed_count": daily_facts.get("weekly_completed_count", 0),
                 "additional_count": daily_result.additional_count,
                 "attendance": daily_facts.get("attendance") or [],
+                "tasks": day_tasks,
             }
         )
-        for task in daily_facts.get("tasks") or []:
+        for task in day_tasks:
             task_key = str(task.get("task_id") or task.get("match_key") or "")
             if task_key:
                 daily_tasks_by_user.setdefault(daily_result.user_id, {})[task_key] = task
+
+    planned_tasks_by_user_day: dict[uuid.UUID, dict[str, list[dict]]] = {}
+    if period.planned_snapshot_id is not None:
+        planned_snapshot = await db.get(WeeklyPlannerSnapshot, period.planned_snapshot_id)
+        if planned_snapshot is not None:
+            for task in _snapshot_tasks(planned_snapshot).values():
+                occurrences = task.get("occurrences") or []
+                if not occurrences and task.get("planned_due_date"):
+                    occurrences = [
+                        {
+                            "day": task["planned_due_date"].date(),
+                            "time_slot": task.get("finish_period"),
+                            "assignee_id": None,
+                        }
+                    ]
+                for assignee in task.get("assignees") or []:
+                    user_id = assignee.get("assignee_id")
+                    if user_id is None:
+                        continue
+                    for occurrence in occurrences:
+                        occurrence_day = occurrence.get("day")
+                        occurrence_user_id = occurrence.get("assignee_id")
+                        if (
+                            occurrence_day is None
+                            or occurrence_day < period.start_date
+                            or occurrence_day > period.end_date
+                            or occurrence_user_id not in {None, user_id}
+                        ):
+                            continue
+                        fact = {
+                            "match_key": task["match_key"],
+                            "task_id": str(task["task_id"]) if task.get("task_id") else None,
+                            "title": task["title"],
+                            "project_id": str(task["project_id"]) if task.get("project_id") else None,
+                            "project_title": task.get("project_title"),
+                            "source_type": task.get("source_type") or "project",
+                            "classification": "planned",
+                            "status": task.get("status") or "TODO",
+                            "daily_progress": [],
+                            "attribution": "planned_today",
+                            "planned_occurrences": [
+                                {
+                                    "day": occurrence_day.isoformat(),
+                                    "time_slot": occurrence.get("time_slot"),
+                                    "assignee_id": str(user_id),
+                                }
+                            ],
+                        }
+                        day_key = occurrence_day.isoformat()
+                        planned_tasks_by_user_day.setdefault(user_id, {}).setdefault(day_key, []).append(fact)
+
+    for row in visible:
+        timeline = daily_by_user.setdefault(row.user_id, [])
+        timeline_by_date = {item["date"]: item for item in timeline}
+        current_day = period.start_date
+        while current_day <= period.end_date:
+            if _is_working_day(current_day):
+                day_key = current_day.isoformat()
+                planned_tasks = planned_tasks_by_user_day.get(row.user_id, {}).get(day_key, [])
+                item = timeline_by_date.get(day_key)
+                if item is None:
+                    item = {
+                        "date": day_key,
+                        "has_snapshot": False,
+                        "daily_progress_percent": 0,
+                        "weekly_progress_percent": 0,
+                        "planned_count": len(planned_tasks),
+                        "completed_count": 0,
+                        "weekly_planned_count": 0,
+                        "weekly_completed_count": 0,
+                        "additional_count": 0,
+                        "attendance": [],
+                        "tasks": planned_tasks,
+                    }
+                    timeline.append(item)
+                    timeline_by_date[day_key] = item
+                else:
+                    actual_tasks = item.get("tasks") or []
+                    actual_by_key = {
+                        str(task.get("task_id") or task.get("match_key") or ""): task
+                        for task in actual_tasks
+                    }
+                    merged_tasks = []
+                    planned_keys: set[str] = set()
+                    for planned_task in planned_tasks:
+                        task_key = str(
+                            planned_task.get("task_id") or planned_task.get("match_key") or ""
+                        )
+                        planned_keys.add(task_key)
+                        merged_tasks.append({**planned_task, **actual_by_key.get(task_key, {})})
+                    merged_tasks.extend(
+                        task
+                        for task in actual_tasks
+                        if str(task.get("task_id") or task.get("match_key") or "") not in planned_keys
+                    )
+                    item["tasks"] = merged_tasks
+            current_day += timedelta(days=1)
+        timeline.sort(key=lambda item: item["date"])
+
+    visible_task_ids: set[uuid.UUID] = set()
+    for row in visible:
+        for timeline_item in daily_by_user.get(row.user_id, []):
+            for task in timeline_item.get("tasks") or []:
+                try:
+                    visible_task_ids.add(uuid.UUID(str(task.get("task_id"))))
+                except (TypeError, ValueError):
+                    continue
+    task_comment_map = {
+        comment.task_id: comment.comment
+        for comment in (
+            await db.execute(
+                select(TaskUserComment).where(
+                    TaskUserComment.task_id.in_(visible_task_ids),
+                    TaskUserComment.user_id == user.id,
+                )
+            )
+        ).scalars().all()
+    } if visible_task_ids else {}
+    for row in visible:
+        for timeline_item in daily_by_user.get(row.user_id, []):
+            for task in timeline_item.get("tasks") or []:
+                try:
+                    task_uuid = uuid.UUID(str(task.get("task_id")))
+                except (TypeError, ValueError):
+                    task_uuid = None
+                task["user_comment"] = task_comment_map.get(task_uuid) if task_uuid else None
     people: list[RealizationPersonWorkflowOut] = []
     for row in visible:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
@@ -1046,14 +1177,35 @@ async def analyze_person_result(
         await db.execute(
             select(RealizationPersonResult).where(
                 RealizationPersonResult.id == result_id,
-                RealizationPersonResult.period_id == period.id,
             )
         )
     ).scalar_one_or_none()
-    if result is None:
+    if result is None or result.department_id != period.department_id:
         raise HTTPException(status_code=404, detail="Person result not found")
+    if result.period_id != period.id:
+        source_period = await _period(db, result.period_id)
+        if (
+            source_period.period_type != "DAILY"
+            or source_period.department_id != period.department_id
+            or source_period.start_date < period.start_date
+            or source_period.end_date > period.end_date
+        ):
+            raise HTTPException(status_code=404, detail="Person result not found")
+    department = await db.get(Department, period.department_id)
+    weekly = await _weekly_response(
+        db,
+        period=period,
+        user=user,
+        department_name=department.name if department else None,
+    )
+    enriched_result = next((item for item in weekly.people if item.id == result.id), None)
+    analysis_facts = enriched_result.facts_json if enriched_result else (result.facts_json or {})
     try:
-        analysis = await analyze_realization(str(result.id), result.facts_json or {})
+        analysis = await analyze_realization(
+            str(result.id),
+            analysis_facts,
+            suggested_level=result.suggested_level,
+        )
     except RealizationAIError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     facts = dict(result.facts_json or {})

@@ -692,6 +692,7 @@ export interface RealizationTaskFact {
   attribution?: "planned_owner" | "actual_worker" | "additional_owner" | "planned_today" | "added_after_weekly_plan"
   meeting_origin_id?: string | null
   status_progress_inconsistent?: boolean
+  user_comment?: string | null
 }
 
 export interface RealizationObservationFact {
@@ -743,6 +744,7 @@ export interface RealizationPersonResult {
     report_mode?: "LIVE_DAILY" | "FINAL_WEEKLY"
     daily_timeline?: Array<{
       date: string
+      has_snapshot?: boolean
       daily_progress_percent: number
       weekly_progress_percent: number
       planned_count: number
@@ -752,6 +754,7 @@ export interface RealizationPersonResult {
       additional_count: number
       weekly_additional_count?: number
       attendance: Array<{ id?: string; type: string; details?: string | null }>
+      tasks?: RealizationTaskFact[]
     }>
     project_progress?: Array<{
       project_id: string

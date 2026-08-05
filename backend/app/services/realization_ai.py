@@ -88,11 +88,105 @@ def _output_text(payload: dict[str, Any]) -> str:
     raise RealizationAIError("AI response did not contain structured output")
 
 
-async def analyze_realization(result_id: str, facts: dict[str, Any]) -> dict[str, Any]:
-    if not settings.REALIZATION_AI_ENABLED:
-        raise RealizationAIError("Realization AI is disabled")
-    if not settings.OPENAI_API_KEY:
-        raise RealizationAIError("OPENAI_API_KEY is not configured")
+def _rule_based_analysis(
+    facts: dict[str, Any], *, suggested_level: str | None = None
+) -> dict[str, Any]:
+    """Return a useful, evidence-only analysis when external AI is unavailable."""
+    counters = facts.get("counters") or {}
+    planned = int(facts.get("weekly_planned_count", counters.get("weekly_planned_count", 0)) or 0)
+    completed = int(
+        facts.get("weekly_completed_count", counters.get("weekly_completed_count", 0)) or 0
+    )
+    additional = int(
+        facts.get("weekly_additional_count", counters.get("weekly_additional_count", 0)) or 0
+    )
+    progress = float(
+        facts.get("weekly_progress_percent")
+        or (round(completed * 100 / planned, 1) if planned else 0)
+    )
+    observations = [
+        item for item in facts.get("observations") or [] if item.get("verified") is True
+    ]
+    positive_observations = [item for item in observations if item.get("marker") == "POSITIVE"]
+    negative_observations = [item for item in observations if item.get("marker") == "NEGATIVE"]
+    questions = facts.get("questions") or []
+    missing_questions = [
+        str(question.get("label") or question.get("key") or "Evidencë e pakonfirmuar")
+        for question in questions
+        if question.get("source_status") in {"AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"}
+    ]
+
+    positives: list[str] = []
+    if completed:
+        positives.append(f"Janë përfunduar {completed} nga {planned} detyrat e planifikuara ({progress:g}%).")
+    if additional:
+        positives.append(f"Janë regjistruar {additional} detyra të shtuara gjatë javës, të ndara nga plani bazë.")
+    if positive_observations:
+        positives.append(f"Ka {len(positive_observations)} evidenca pozitive të verifikuara.")
+
+    remaining = max(0, planned - completed)
+    problems: list[str] = []
+    if remaining:
+        problems.append(f"Kanë mbetur {remaining} detyra të planit javor pa u përfunduar.")
+    if negative_observations:
+        problems.append(f"Ka {len(negative_observations)} evidenca negative të verifikuara që kërkojnë vëmendje.")
+    if not planned:
+        problems.append("Nuk ka detyra të planifikuara për të matur realizimin javor.")
+
+    if suggested_level not in {"A+", "A", "B", "C", "M", "D", "E"}:
+        if negative_observations and progress < 80:
+            suggested_level = "D"
+        elif progress >= 100 and positive_observations:
+            suggested_level = "A"
+        elif progress >= 90:
+            suggested_level = "B"
+        elif progress >= 70:
+            suggested_level = "C"
+        elif progress >= 50:
+            suggested_level = "M"
+        else:
+            suggested_level = "D"
+
+    snapshot_days = sum(
+        bool(item.get("has_snapshot", True)) for item in facts.get("daily_timeline") or []
+    )
+    evidence_coverage = min(1.0, (snapshot_days / 5) + (len(observations) * 0.05))
+    confidence = round(min(0.92, 0.55 + evidence_coverage * 0.35), 2)
+    summary_parts = [
+        f"Barazimi javor është {completed}/{planned} detyra të planifikuara të përfunduara ({progress:g}%)."
+    ]
+    if additional:
+        summary_parts.append(f"{additional} detyra shtesë raportohen veçmas dhe nuk mbulojnë detyrat e pambyllura.")
+    if missing_questions:
+        summary_parts.append(f"Para vlerësimit final duhen konfirmuar {len(missing_questions)} pika nga menaxheri.")
+
+    evidence_ids = sorted(
+        {
+            str(value)
+            for item in facts.get("tasks") or []
+            for value in [item.get("task_id") or item.get("match_key")]
+            if value
+        }
+        | {str(item["id"]) for item in observations if item.get("id")}
+    )
+    return {
+        "summary": " ".join(summary_parts),
+        "positives": positives,
+        "problems": problems,
+        "missing_evidence": missing_questions,
+        "suggested_level": suggested_level,
+        "confidence": confidence,
+        "evidence_ids": evidence_ids,
+        "model": "primeflow-evidence-engine-v1",
+        "advisory_only": True,
+    }
+
+
+async def analyze_realization(
+    result_id: str, facts: dict[str, Any], *, suggested_level: str | None = None
+) -> dict[str, Any]:
+    if not settings.REALIZATION_AI_ENABLED or not settings.OPENAI_API_KEY:
+        return _rule_based_analysis(facts, suggested_level=suggested_level)
 
     system_prompt = (
         "You audit a PrimeFlow weekly realization result. Use only supplied evidence. "
@@ -135,8 +229,8 @@ async def analyze_realization(result_id: str, facts: dict[str, Any]) -> dict[str
             )
         response.raise_for_status()
         analysis = json.loads(_output_text(response.json()))
-    except (httpx.HTTPError, ValueError, TypeError) as exc:
-        raise RealizationAIError(f"AI analysis failed: {exc}") from exc
+    except (httpx.HTTPError, ValueError, TypeError):
+        return _rule_based_analysis(facts, suggested_level=suggested_level)
     analysis["model"] = settings.REALIZATION_AI_MODEL
     analysis["advisory_only"] = True
     return analysis

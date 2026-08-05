@@ -3142,7 +3142,12 @@ async def update_task_user_comment(
         )).scalar_one_or_none() is not None
     )
     if not is_assigned:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="You can only comment on tasks assigned to you")
+        if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="You can only comment on tasks assigned to you",
+            )
+        ensure_department_access(user, task.department_id)
     
     # Get or create user comment
     user_comment = (

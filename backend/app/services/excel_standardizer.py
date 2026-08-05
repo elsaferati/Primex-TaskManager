@@ -600,11 +600,35 @@ def standardize_workbook(
         for source_row in range(sheet_analysis.source_header_row, source_last_data_row + 1):
             for source_col in range(first_col, last_col + 1):
                 source_cell = source_sheet.cell(source_row, source_col)
-                if source_cell.alignment.horizontal != "left" or source_cell.alignment.vertical != "bottom":
+                try:
+                    source_alignment = source_cell.alignment
+                except (AttributeError, IndexError, KeyError, TypeError):
+                    # Excel can still open workbooks whose style table contains a
+                    # dangling reference. Treat that source style as non-standard
+                    # instead of aborting the whole conversion.
+                    source_alignment = None
+                if (
+                    source_alignment is None
+                    or source_alignment.horizontal != "left"
+                    or source_alignment.vertical != "bottom"
+                ):
                     misaligned += 1
-                if isinstance(source_cell.value, str) and not source_cell.alignment.wrap_text:
+                if isinstance(source_cell.value, str) and (source_alignment is None or not source_alignment.wrap_text):
                     not_wrapped += 1
-                if any(side.style is None for side in (source_cell.border.left, source_cell.border.right, source_cell.border.top, source_cell.border.bottom)):
+                try:
+                    source_border = source_cell.border
+                    border_missing = any(
+                        side.style is None
+                        for side in (
+                            source_border.left,
+                            source_border.right,
+                            source_border.top,
+                            source_border.bottom,
+                        )
+                    )
+                except (AttributeError, IndexError, KeyError, TypeError):
+                    border_missing = True
+                if border_missing:
                     missing_border += 1
 
         for row in range(6, final_row + 1):
