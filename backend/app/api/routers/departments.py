@@ -1,6 +1,11 @@
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends
+import os
+import re
+import uuid
+from pathlib import Path
+
+from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
@@ -14,6 +19,17 @@ from app.schemas.department import DepartmentOut
 router = APIRouter()
 
 
+def _clients_path_for_department(department: Department) -> Path | None:
+    lookup_key = re.sub(r"[^A-Z0-9]+", "_", (department.code or department.name or "").upper()).strip("_")
+    configured_path = os.getenv(f"CLIENTS_PATH_{lookup_key}")
+    identity = f"{department.code or ''} {department.name or ''}".upper()
+    if not configured_path and "DEVELOP" in identity:
+        configured_path = os.getenv("DEVELOPMENT_CLIENTS_PATH", r"Z:\10_ZHVILLIM\05_CLIENTS")
+    if not configured_path and "PRODUCT" in identity:
+        configured_path = os.getenv("PRODUCT_CLIENTS_PATH", r"Y:\05_CLIENTS")
+    return Path(configured_path) if configured_path else None
+
+
 @router.get("", response_model=list[DepartmentOut])
 async def list_departments(db: AsyncSession = Depends(get_db), _=Depends(get_current_user)) -> list[DepartmentOut]:
     departments = (
@@ -24,4 +40,61 @@ async def list_departments(db: AsyncSession = Depends(get_db), _=Depends(get_cur
         )
     ).scalars().all()
     return [DepartmentOut(id=d.id, name=d.name, code=d.code) for d in departments]
+
+
+@router.get("/{department_id}/file-clients", response_model=list[str])
+async def list_department_file_clients(
+    department_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user),
+) -> list[str]:
+    department = (
+        await db.execute(select(Department).where(Department.id == department_id))
+    ).scalar_one_or_none()
+    if department is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+
+    clients_path = _clients_path_for_department(department)
+    if clients_path is None:
+        return []
+    try:
+        return sorted(
+            [entry.name for entry in clients_path.iterdir() if entry.is_dir() and not entry.name.startswith(".")],
+            key=str.casefold,
+        )
+    except (OSError, PermissionError):
+        return []
+
+
+@router.get("/{department_id}/file-clients/{client_name}/platforms", response_model=list[str])
+async def list_department_file_client_platforms(
+    department_id: uuid.UUID,
+    client_name: str,
+    db: AsyncSession = Depends(get_db),
+    _=Depends(get_current_user),
+) -> list[str]:
+    department = (
+        await db.execute(select(Department).where(Department.id == department_id))
+    ).scalar_one_or_none()
+    if department is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+    if client_name != Path(client_name).name or client_name in {".", ".."}:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid client name")
+
+    clients_path = _clients_path_for_department(department)
+    if clients_path is None:
+        return []
+    try:
+        known_clients = {entry.name for entry in clients_path.iterdir() if entry.is_dir() and not entry.name.startswith(".")}
+        if client_name not in known_clients:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Client not found")
+        platforms_path = clients_path / client_name / "03_PLATFORMS"
+        return sorted(
+            [entry.name for entry in platforms_path.iterdir() if entry.is_dir() and not entry.name.startswith(".")],
+            key=str.casefold,
+        )
+    except HTTPException:
+        raise
+    except (OSError, PermissionError):
+        return []
 
