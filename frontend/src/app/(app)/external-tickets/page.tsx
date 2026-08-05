@@ -44,6 +44,7 @@ import {
 } from "@/components/ui/sheet"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
+import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { cn } from "@/lib/utils"
 
@@ -210,6 +211,7 @@ function userInitials(label: string) {
 
 export default function ExternalTicketsPage() {
   const { apiFetch, user } = useAuth()
+  const confirm = useConfirm()
   const [data, setData] = React.useState<ListResponse>(EMPTY_RESPONSE)
   const [page, setPage] = React.useState(1)
   const [searchInput, setSearchInput] = React.useState("")
@@ -335,7 +337,13 @@ export default function ExternalTicketsPage() {
 
   const markNoAction = async () => {
     if (!selectedIds.length) return
-    if (!window.confirm(`Të shënohen ${selectedIds.length} ticket-a si “S’ka nevojë për rregullim”?`)) return
+    const confirmed = await confirm({
+      title: "S’ka nevojë për rregullim",
+      description: `Të shënohen ${selectedIds.length} ticket-a si pa nevojë për rregullim?`,
+      confirmLabel: "Po, konfirmo",
+      cancelLabel: "Anulo",
+    })
+    if (!confirmed) return
     const response = await apiFetch("/external-tickets/reviews/no-action", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -352,7 +360,13 @@ export default function ExternalTicketsPage() {
 
   const markDetailNoAction = async () => {
     if (!detail || detail.review_status !== "PENDING") return
-    if (!window.confirm(`Ticket ${detail.order_ticket_number || detail.issue_number || ""} nuk ka nevojë për rregullim?`)) return
+    const confirmed = await confirm({
+      title: "S’ka nevojë për rregullim",
+      description: `Konfirmo që ticket ${detail.order_ticket_number || detail.issue_number || ""} nuk ka nevojë për rregullim.`,
+      confirmLabel: "Po, konfirmo",
+      cancelLabel: "Anulo",
+    })
+    if (!confirmed) return
     setMarkingDetailNoAction(true)
     const response = await apiFetch("/external-tickets/reviews/no-action", {
       method: "POST",

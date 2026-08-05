@@ -32,7 +32,6 @@ import {
   Activity,
   ChevronDown,
   ScrollText,
-  TicketCheck,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -105,11 +104,6 @@ const navGroups: NavGroup[] = [
         label: "Development",
         icon: Code2,
         match: ["/departments/development", "/projects/dev"],
-      },
-      {
-        href: "/external-tickets",
-        label: "STD Tickets EXT",
-        icon: TicketCheck,
       },
       {
         href: "/departments/project-content-manager",

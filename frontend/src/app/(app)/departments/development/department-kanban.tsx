@@ -6795,6 +6795,9 @@ export default function DepartmentKanban() {
                   </button>
                 )
               })}
+              <Link href="/external-tickets" className="chip">
+                STD Tickets EXT
+              </Link>
             </div>
             {activeTab === "all" ? (
               <div className="chip-row all-range-chip-row all-range-chip-row-dev">
