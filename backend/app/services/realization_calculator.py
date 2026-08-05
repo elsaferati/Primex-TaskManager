@@ -44,6 +44,22 @@ QUESTION_LABELS = {
     "comments": "Komente",
 }
 
+REPORT_QUESTION_SECTIONS = [
+    ("1. DETYRAT", ["task_status", "new_tasks_added", "approved_postponement"]),
+    (
+        "2. ANGAZHIMI",
+        ["requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal"],
+    ),
+    (
+        "3. DISIPLINA DHE PËRGJEGJËSIA",
+        ["respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences"],
+    ),
+    (
+        "4. NDIKIMI POZITIV / NEGATIV",
+        ["week_positive", "week_problems", "affected_other_plan", "repeated_after_clarification"],
+    ),
+]
+
 
 def _question(
     key: str,
@@ -64,6 +80,269 @@ def _question(
         "evidence_ids": evidence_ids or [],
         "explanation": explanation,
     }
+
+
+def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
+    """Build all reference questions from live daily facts without guessing."""
+    counters = person.get("counters") or {}
+    tasks = person.get("tasks") or []
+    observations = person.get("observations") or []
+    timeline = person.get("daily_timeline") or []
+    verified = [item for item in observations if item.get("verified") is True]
+    positive = [item for item in verified if item.get("marker") == "POSITIVE"]
+    negative = [item for item in verified if item.get("marker") == "NEGATIVE"]
+
+    def ids(items: list[dict[str, Any]]) -> list[str]:
+        return [str(item["id"]) for item in items if item.get("id")]
+
+    def category(items: list[dict[str, Any]], value: str) -> list[dict[str, Any]]:
+        return [item for item in items if item.get("category") == value]
+
+    task_ids = sorted({str(item["task_id"]) for item in tasks if item.get("task_id")})
+    added_ids = sorted(
+        {
+            str(item["task_id"])
+            for item in tasks
+            if item.get("task_id")
+            and item.get("attribution") == "added_after_weekly_plan"
+        }
+    )
+    latest = max(timeline, key=lambda item: str(item.get("date") or ""), default={})
+
+    def count(name: str, fallback: int = 0) -> int:
+        return int(person.get(name, counters.get(name, fallback)) or 0)
+
+    weekly_planned = count("weekly_planned_count")
+    weekly_completed = count("weekly_completed_count")
+    weekly_added = count("weekly_additional_count")
+    weekly_fast = count("weekly_fast_task_count")
+    today_planned = count("daily_planned_count", int(latest.get("planned_count") or 0))
+    today_completed = count(
+        "daily_completed_count", int(latest.get("completed_count") or 0)
+    )
+
+    timeline_attendance = [
+        item
+        for snapshot in timeline
+        for item in snapshot.get("attendance") or []
+    ]
+    raw_attendance = person.get("attendance") or []
+    if isinstance(raw_attendance, dict):
+        fallback_attendance = [
+            {"id": str(attendance_id), **(item if isinstance(item, dict) else {})}
+            for attendance_id, item in raw_attendance.items()
+        ]
+    elif isinstance(raw_attendance, list):
+        fallback_attendance = [item for item in raw_attendance if isinstance(item, dict)]
+    else:
+        fallback_attendance = []
+    attendance = timeline_attendance or fallback_attendance
+    tardiness = sum(
+        str(item.get("type") or "").upper() == "VONESE" for item in attendance
+    )
+    raw_absences = [
+        item
+        for item in attendance
+        if str(item.get("type") or "").upper() == "MUNGESE"
+    ]
+    verified_absences = category(verified, "ABSENCE")
+    unexcused_absences = [
+        item
+        for item in verified_absences
+        if str((item.get("evidence_json") or {}).get("classification") or "").upper()
+        == "UNEXCUSED"
+    ]
+    requested = [
+        item
+        for item in category(positive, "EXTRA_TASK")
+        if (item.get("evidence_json") or {}).get("kind") == "REQUESTED_EXTRA_TASK"
+    ]
+    helped = category(positive, "HELPED_COLLEAGUE")
+    proposals = category(positive, "PROPOSAL")
+    missed_meetings = category(negative, "MISSED_MEETING")
+    blockers = [
+        item
+        for item in category(negative, "BLOCKER")
+        if (item.get("evidence_json") or {}).get("affected_user_id")
+    ]
+    repeated = category(negative, "REPEATED_PROBLEM")
+    engagement = sorted(
+        {
+            str(item.get("category"))
+            for item in positive
+            if item.get("category")
+            in {"EXTRA_TASK", "QUALITY", "TIME_SAVED", "HELPED_COLLEAGUE", "PROPOSAL"}
+        }
+    )
+    positive_comments = [
+        str(item["comment"]).strip()
+        for item in positive
+        if item.get("comment") and str(item["comment"]).strip()
+    ]
+    problem_comments = [
+        str(item["comment"]).strip()
+        for item in negative
+        if item.get("comment") and str(item["comment"]).strip()
+    ]
+    postponements = [item for item in tasks if item.get("postponement")]
+    approved = [
+        item for item in postponements if item.get("postponement") == "approved_postponement"
+    ]
+    unapproved = [
+        item
+        for item in postponements
+        if item.get("postponement") in {"unapproved_postponement", "rejected_postponement"}
+    ]
+    postponement_ids = sorted(
+        {
+            str(evidence_id)
+            for item in postponements
+            for evidence_id in item.get("postponement_evidence_ids") or []
+        }
+    )
+
+    return [
+        _question(
+            "task_status",
+            {
+                "weekly_planned": weekly_planned,
+                "weekly_completed": weekly_completed,
+                "weekly_remaining": max(0, weekly_planned - weekly_completed),
+                "today_planned": today_planned,
+                "today_completed": today_completed,
+                "today_in_progress": counters.get("in_progress_count", 0),
+                "today_no_progress": counters.get("no_progress_count", 0),
+            },
+            evidence_ids=task_ids,
+            answer_type="object",
+        ),
+        _question(
+            "new_tasks_added",
+            {"yes": weekly_added > 0, "count": weekly_added, "fast_tasks": weekly_fast},
+            evidence_ids=added_ids,
+            answer_type="object",
+        ),
+        _question(
+            "approved_postponement",
+            {
+                "approved": len(approved),
+                "unapproved": len(unapproved),
+                "needs_confirmation": not postponements,
+            },
+            source_status="AUTO" if postponements else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=postponement_ids,
+            explanation="Pa evidencë aprovimi, shtyrja duhet konfirmuar nga menaxheri.",
+            answer_type="object",
+        ),
+        _question(
+            "requested_extra_tasks",
+            True if requested else None,
+            source_status="AUTO" if requested else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(requested),
+            explanation="Kërkon evidencë se personi i ka kërkuar vetë detyrat shtesë.",
+            answer_type="boolean",
+        ),
+        _question(
+            "helped_colleague",
+            True if helped else None,
+            source_status="AUTO" if helped else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(helped),
+            explanation="Kërkon kolegun e ndihmuar dhe argument të verifikueshëm.",
+            answer_type="boolean",
+        ),
+        _question(
+            "extra_engagement",
+            {"verified_categories": engagement, "additional_tasks_candidate": weekly_added},
+            source_status="AUTO" if engagement else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(positive),
+            explanation="Taskat shtesë janë kandidat; angazhimi ekstra llogaritet pas verifikimit.",
+            answer_type="object",
+        ),
+        _question(
+            "gave_proposal",
+            True if proposals else None,
+            source_status="AUTO" if proposals else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(proposals),
+            explanation="Propozimi duhet të ketë përshkrim ose evidencë.",
+            answer_type="boolean",
+        ),
+        _question(
+            "respected_meetings",
+            False if missed_meetings else None,
+            source_status="AUTO" if missed_meetings else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(missed_meetings),
+            explanation=(
+                "Ka evidencë për takim të humbur."
+                if missed_meetings
+                else "Pa evidencë negative; menaxheri konfirmon respektimin e takimeve."
+            ),
+            answer_type="boolean",
+        ),
+        _question(
+            "closed_tasks",
+            {
+                "all_closed": weekly_planned > 0 and weekly_completed >= weekly_planned,
+                "closed": weekly_completed,
+                "planned": weekly_planned,
+                "remaining": max(0, weekly_planned - weekly_completed),
+            },
+            evidence_ids=task_ids,
+            explanation="Gjendje operative deri në snapshot-in e fundit, jo FINAL.",
+            answer_type="object",
+        ),
+        _question(
+            "frequent_delays",
+            {"attendance_tardiness": tardiness, "frequent": tardiness >= 3, "threshold": 3},
+            evidence_ids=[str(item.get("id")) for item in attendance if item.get("id")],
+            answer_type="object",
+        ),
+        _question(
+            "unexpected_absences",
+            len(unexcused_absences) if not raw_absences or verified_absences else None,
+            source_status=(
+                "AUTO" if not raw_absences or verified_absences else "AUTO_NEEDS_CONFIRMATION"
+            ),
+            evidence_ids=ids(verified_absences),
+            explanation=(
+                "Mungesa duhet klasifikuar si e arsyetuar ose e papritur."
+                if raw_absences and not verified_absences
+                else ""
+            ),
+            answer_type="integer",
+        ),
+        _question(
+            "week_positive",
+            positive_comments or None,
+            source_status="AUTO" if positive_comments else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(positive),
+            explanation="Plotësohet nga evidenca pozitive ose nga menaxheri.",
+            answer_type="list",
+        ),
+        _question(
+            "week_problems",
+            problem_comments or None,
+            source_status="AUTO" if problem_comments else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(negative),
+            explanation="Pa evidencë sistemi nuk pretendon se ka ose nuk ka problem.",
+            answer_type="list",
+        ),
+        _question(
+            "affected_other_plan",
+            True if blockers else None,
+            source_status="AUTO" if blockers else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(blockers),
+            explanation="Kërkon personin e prekur dhe nivelin e ndikimit.",
+            answer_type="boolean",
+        ),
+        _question(
+            "repeated_after_clarification",
+            True if repeated else None,
+            source_status="AUTO" if repeated else "AUTO_NEEDS_CONFIRMATION",
+            evidence_ids=ids(repeated),
+            explanation="Kërkon problemin, sqarimin paraprak dhe koment.",
+            answer_type="boolean",
+        ),
+    ]
 
 
 def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> list[dict[str, Any]]:

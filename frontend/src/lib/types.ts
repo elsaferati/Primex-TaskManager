@@ -734,13 +734,23 @@ export interface RealizationPersonResult {
     decision?: { triggered_rule?: string; reasons?: string[] }
     weekly_progress_percent?: number
     daily_progress_percent?: number
+    daily_planned_count?: number
+    daily_completed_count?: number
+    weekly_planned_count?: number
+    weekly_completed_count?: number
+    weekly_additional_count?: number
+    weekly_fast_task_count?: number
+    report_mode?: "LIVE_DAILY" | "FINAL_WEEKLY"
     daily_timeline?: Array<{
       date: string
       daily_progress_percent: number
       weekly_progress_percent: number
       planned_count: number
       completed_count: number
+      weekly_planned_count?: number
+      weekly_completed_count?: number
       additional_count: number
+      weekly_additional_count?: number
       attendance: Array<{ id?: string; type: string; details?: string | null }>
     }>
     project_progress?: Array<{

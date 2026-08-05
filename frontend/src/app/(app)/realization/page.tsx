@@ -48,6 +48,7 @@ import type {
   Department,
   RealizationAIAnalysis,
   RealizationLevel,
+  RealizationPersonResult,
   RealizationQuestion,
   RealizationWeeklyResponse,
 } from "@/lib/types"
@@ -71,6 +72,40 @@ const LEVEL_SYMBOL: Record<RealizationLevel, "+" | "+/-" | "-"> = {
   D: "-",
   E: "-",
 }
+
+const TASK_SOURCE_LABEL: Record<string, string> = {
+  system: "Sistem",
+  project: "Projekt",
+  fast: "Fast task",
+}
+
+const TASK_STATUS_LABEL: Record<string, string> = {
+  completed: "Mbyllur",
+  completed_on_time: "Mbyllur në kohë",
+  completed_late: "Mbyllur me vonesë",
+  in_progress: "Në progres",
+  no_progress: "Pa progres",
+  pending_confirmation: "Në pritje të konfirmimit",
+}
+
+const QUESTION_SECTIONS = [
+  {
+    title: "1. Detyrat",
+    keys: ["task_status", "new_tasks_added", "approved_postponement"],
+  },
+  {
+    title: "2. Angazhimi",
+    keys: ["requested_extra_tasks", "helped_colleague", "extra_engagement", "gave_proposal"],
+  },
+  {
+    title: "3. Disiplina dhe përgjegjësia",
+    keys: ["respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences"],
+  },
+  {
+    title: "4. Ndikimi pozitiv / negativ",
+    keys: ["week_positive", "week_problems", "affected_other_plan", "repeated_after_clarification"],
+  },
+] as const
 
 const WEEK_DAYS = ["Hënë", "Martë", "Mërkurë", "Enjte", "Premte"]
 
@@ -105,6 +140,25 @@ function displayValue(value: unknown): string {
       .join(" · ")
   }
   return String(value)
+}
+
+function weeklyPlanned(person: RealizationPersonResult) {
+  return person.facts_json.weekly_planned_count ?? person.planned_count
+}
+
+function weeklyCompleted(person: RealizationPersonResult) {
+  return (
+    person.facts_json.weekly_completed_count
+    ?? person.completed_on_time_count + person.completed_late_count
+  )
+}
+
+function weeklyAdditional(person: RealizationPersonResult) {
+  return person.facts_json.weekly_additional_count ?? person.additional_count
+}
+
+function cleanTaskTitle(value: string) {
+  return value.replace(/\[\[\/?[a-z_]+\]\]/gi, "").replace(/\s+/g, " ").trim()
 }
 
 async function errorMessage(response: Response) {
@@ -163,6 +217,9 @@ function QuestionRow({ question }: { question: RealizationQuestion }) {
   const needsConfirmation = ["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(
     question.source_status
   )
+  const visibleValue = needsConfirmation && finalValue == null
+    ? "Për konfirmim nga menaxheri"
+    : displayValue(finalValue)
   return (
     <div className="grid gap-2 border-b py-4 last:border-b-0 md:grid-cols-[minmax(220px,0.9fr)_minmax(260px,1.4fr)]">
       <div>
@@ -179,7 +236,7 @@ function QuestionRow({ question }: { question: RealizationQuestion }) {
         </div>
       </div>
       <div>
-        <p className="text-sm leading-6 text-foreground/90">{displayValue(finalValue)}</p>
+        <p className={cn("text-sm leading-6", needsConfirmation && finalValue == null ? "font-medium text-amber-700 dark:text-amber-300" : "text-foreground/90")}>{visibleValue}</p>
         {question.explanation ? (
           <p className="mt-1 text-xs leading-5 text-muted-foreground">{question.explanation}</p>
         ) : null}
@@ -225,7 +282,7 @@ export default function RealizationPage() {
     const preferred = user?.role === "MANAGER" ? user.department_id : departmentId
     const next = rows.find((row) => row.id === preferred)?.id || rows[0]?.id || ""
     if (!departmentId || user?.role === "MANAGER") setDepartmentId(next)
-  }, [apiFetch, departmentId, user?.department_id, user?.role])
+  }, [apiFetch, departmentId, user])
 
   const loadReport = React.useCallback(async () => {
     if (!departmentId) return
@@ -248,10 +305,14 @@ export default function RealizationPage() {
   }, [apiFetch, departmentId, weekStart])
 
   React.useEffect(() => {
+    // Data loading is asynchronous; state updates happen only after the request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (!authLoading && user && ["ADMIN", "MANAGER"].includes(user.role)) void loadDepartments()
   }, [authLoading, loadDepartments, user])
 
   React.useEffect(() => {
+    // Data loading is asynchronous; state updates happen only after the request resolves.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (departmentId) void loadReport()
   }, [departmentId, loadReport])
 
@@ -385,7 +446,7 @@ export default function RealizationPage() {
   }
 
   const evidenceMarker = React.useMemo(() => {
-    if (["QUALITY", "PROPOSAL", "HELPED_COLLEAGUE", "TIME_SAVED", "EXTRA_TASK"].includes(evidenceCategory)) {
+    if (["QUALITY", "PROPOSAL", "HELPED_COLLEAGUE", "TIME_SAVED", "EXTRA_TASK", "REQUESTED_EXTRA_TASK"].includes(evidenceCategory)) {
       return "POSITIVE"
     }
     if (["REPEATED_PROBLEM", "MISSED_MEETING", "BLOCKER"].includes(evidenceCategory)) return "NEGATIVE"
@@ -397,6 +458,7 @@ export default function RealizationPage() {
     if (!selected || !data) return
     const evidenceJson: Record<string, unknown> = {}
     let scopeType = "PERSON"
+    let apiCategory = evidenceCategory
     if (evidenceCategory === "ABSENCE") {
       evidenceJson.classification = absenceClass
       evidenceJson.date = evidenceDate
@@ -415,6 +477,9 @@ export default function RealizationPage() {
       evidenceJson.replaces_unfinished_planned_task = false
       evidenceJson.duplicate = false
       scopeType = "TASK"
+    } else if (evidenceCategory === "REQUESTED_EXTRA_TASK") {
+      apiCategory = "EXTRA_TASK"
+      evidenceJson.kind = "REQUESTED_EXTRA_TASK"
     }
     if (evidenceCategory === "REPEATED_PROBLEM" && !relatedId.trim()) {
       toast.error("Vendos çelësin e problemit të përsëritur")
@@ -440,7 +505,7 @@ export default function RealizationPage() {
           user_id: selected.user_id,
           department_id: departmentId,
           marker: evidenceMarker,
-          category: evidenceCategory,
+          category: apiCategory,
           repeat_key: evidenceCategory === "REPEATED_PROBLEM" ? relatedId : null,
           comment: evidenceComment || null,
           evidence_json: evidenceJson,
@@ -508,19 +573,19 @@ export default function RealizationPage() {
   }
 
   const people = data?.people || []
-  const averageProgress = people.length
-    ? Math.round(people.reduce((sum, person) => sum + (person.facts_json.weekly_progress_percent || 0), 0) / people.length)
-    : 0
-  const totalPlanned = people.reduce((sum, person) => sum + person.planned_count, 0)
-  const totalClosed = people.reduce(
-    (sum, person) => sum + person.completed_on_time_count + person.completed_late_count,
-    0
-  )
-  const totalAdditional = people.reduce((sum, person) => sum + person.additional_count, 0)
+  const totalPlanned = people.reduce((sum, person) => sum + weeklyPlanned(person), 0)
+  const totalClosed = people.reduce((sum, person) => sum + weeklyCompleted(person), 0)
+  const averageProgress = totalPlanned ? Math.round((totalClosed * 100) / totalPlanned) : 0
+  const totalAdditional = people.reduce((sum, person) => sum + weeklyAdditional(person), 0)
   const needsReview = people.reduce((sum, person) => sum + (person.facts_json.needs_review?.length || 0), 0)
   const grade = selected?.final_level || selected?.suggested_level || null
   const selectedQuestions = selected?.facts_json.questions || []
   const aiAnalysis = selected?.facts_json.ai_analysis
+  const selectedWeeklyPlanned = selected ? weeklyPlanned(selected) : 0
+  const selectedWeeklyCompleted = selected ? weeklyCompleted(selected) : 0
+  const selectedWeeklyAdditional = selected ? weeklyAdditional(selected) : 0
+  const selectedDailyPlanned = selected?.facts_json.daily_planned_count ?? selected?.planned_count ?? 0
+  const isLive = data ? !data.has_final_snapshot : true
 
   return (
     <div className="mx-auto w-full max-w-[1720px] space-y-6 pb-12">
@@ -590,15 +655,36 @@ export default function RealizationPage() {
         </div>
       ) : null}
 
+      <Card className="border-blue-200/80 bg-blue-50/50 shadow-sm dark:border-blue-900 dark:bg-blue-950/20">
+        <CardContent className="grid gap-4 py-4 md:grid-cols-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">1 · Java</p>
+            <p className="mt-1 text-sm">Taskat e planit javor të mbyllura deri sot / të gjitha taskat e planit javor.</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">2 · Sot</p>
+            <p className="mt-1 text-sm">Taskat e planifikuara pikërisht për atë ditë dhe statusi i tyre në snapshot.</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">3 · Shtesë</p>
+            <p className="mt-1 text-sm">Taska të krijuara pas PLANNED; shfaqen veç dhe nuk maskojnë taskat e pambyllura.</p>
+          </div>
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wide text-blue-700 dark:text-blue-300">4 · Final</p>
+            <p className="mt-1 text-sm">Shkronja dhe “në kohë/me vonesë” dalin vetëm pas FINAL-it dhe rishikimit.</p>
+          </div>
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
-        <MetricCard icon={Target} label="Progresi javor" value={`${averageProgress}%`} note={`${totalClosed}/${totalPlanned} detyra të mbyllura`} />
+        <MetricCard icon={Target} label="Progresi javor i ekipit" value={`${averageProgress}%`} note={`${totalClosed}/${totalPlanned} taska të planit javor të mbyllura`} />
         <MetricCard
           icon={UserCheck}
           label="Persona"
           value={people.length}
           note={`${data?.department_name || "Departamenti"} · vetëm aktivë, pa PV/FEST`}
         />
-        <MetricCard icon={Sparkles} label="Detyra shtesë" value={totalAdditional} note="Pas snapshot-it PLANNED" />
+        <MetricCard icon={Sparkles} label="Detyra shtesë" value={totalAdditional} note="Të akumuluara pas snapshot-it PLANNED" />
         <MetricCard icon={AlertTriangle} label="Për konfirmim" value={needsReview} note="Pa hamendësim automatik" />
       </div>
 
@@ -622,6 +708,8 @@ export default function RealizationPage() {
             {people.map((person) => {
               const personGrade = person.final_level || person.suggested_level
               const progress = person.facts_json.weekly_progress_percent || 0
+              const personWeeklyPlanned = weeklyPlanned(person)
+              const personWeeklyCompleted = weeklyCompleted(person)
               return (
                 <button
                   key={person.id}
@@ -633,7 +721,7 @@ export default function RealizationPage() {
                   )}
                 >
                   <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0"><p className="truncate font-semibold">{person.user_name}</p><p className="mt-0.5 text-xs text-muted-foreground">{person.completed_on_time_count + person.completed_late_count}/{person.planned_count} të realizuara</p></div>
+                    <div className="min-w-0"><p className="truncate font-semibold">{person.user_name}</p><p className="mt-0.5 text-xs text-muted-foreground">Java: {personWeeklyCompleted}/{personWeeklyPlanned} të mbyllura</p></div>
                     <div className="flex items-center gap-2">
                       {personGrade ? <Badge className={cn("min-w-10 justify-center border", LEVEL_STYLE[personGrade])}>{personGrade}</Badge> : null}
                       <ChevronRight className="h-4 w-4 text-muted-foreground" />
@@ -671,11 +759,22 @@ export default function RealizationPage() {
                   <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">Progresi i javës</h2><span className="text-2xl font-semibold">{selected.facts_json.weekly_progress_percent || 0}%</span></div>
                   <ProgressBar value={selected.facts_json.weekly_progress_percent || 0} className="h-3" />
                   <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    {[
-                      ["Planifikuar", selected.planned_count], ["Në kohë", selected.completed_on_time_count],
-                      ["Me vonesë", selected.completed_late_count], ["Shtesë", selected.additional_count],
-                    ].map(([label, value]) => <div key={String(label)} className="rounded-lg border bg-muted/25 px-3 py-2"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>)}
+                    {(isLive
+                      ? [
+                          ["Në planin javor", selectedWeeklyPlanned],
+                          ["Të mbyllura deri sot", selectedWeeklyCompleted],
+                          ["Planifikuar sot", selectedDailyPlanned],
+                          ["Shtesë gjatë javës", selectedWeeklyAdditional],
+                        ]
+                      : [
+                          ["Planifikuar", selected.planned_count],
+                          ["Në kohë", selected.completed_on_time_count],
+                          ["Me vonesë", selected.completed_late_count],
+                          ["Shtesë", selected.additional_count],
+                        ]
+                    ).map(([label, value]) => <div key={String(label)} className="rounded-lg border bg-muted/25 px-3 py-2"><p className="text-xs text-muted-foreground">{label}</p><p className="mt-1 text-lg font-semibold">{value}</p></div>)}
                   </div>
+                  {isLive ? <p className="mt-2 text-xs text-muted-foreground">Ky është progres operativ deri në snapshot-in e fundit; klasifikimi “në kohë/me vonesë” bëhet në FINAL.</p> : null}
                 </section>
 
                 <section>
@@ -684,7 +783,7 @@ export default function RealizationPage() {
                     {WEEK_DAYS.map((label, index) => {
                       const day = addDays(weekStart, index)
                       const snapshot = selected.facts_json.daily_timeline?.find((item) => item.date === day)
-                      return <div key={day} className={cn("rounded-xl border p-3", snapshot ? "bg-card" : "border-dashed bg-muted/20")}><p className="text-xs font-semibold">{label}</p><p className="mt-2 text-2xl font-semibold">{snapshot ? `${snapshot.weekly_progress_percent}%` : "—"}</p><p className="mt-1 text-[11px] text-muted-foreground">{snapshot ? `Dita ${snapshot.daily_progress_percent}% · +${snapshot.additional_count}` : "Pa snapshot"}</p>{snapshot?.attendance?.length ? <Badge variant="destructive" className="mt-2 text-[10px]">{snapshot.attendance.map((item) => item.type).join(", ")}</Badge> : null}</div>
+                      return <div key={day} className={cn("rounded-xl border p-3", snapshot ? "bg-card" : "border-dashed bg-muted/20")}><p className="text-xs font-semibold">{label}</p><p className="mt-2 text-2xl font-semibold">{snapshot ? `${snapshot.weekly_progress_percent}%` : "—"}</p><p className="mt-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{snapshot ? "Java deri atë ditë" : "Pa snapshot"}</p><p className="mt-1 text-[11px] text-muted-foreground">{snapshot ? `Sot ${snapshot.completed_count}/${snapshot.planned_count} (${snapshot.daily_progress_percent}%) · +${snapshot.additional_count}` : "Snapshot-i ruhet në 16:20"}</p>{snapshot?.attendance?.length ? <Badge variant="destructive" className="mt-2 text-[10px]">{snapshot.attendance.map((item) => item.type).join(", ")}</Badge> : null}</div>
                     })}
                   </div>
                 </section>
@@ -700,9 +799,34 @@ export default function RealizationPage() {
                   </section>
                 ) : null}
 
-                <section><h2 className="mb-1 font-semibold">Pyetjet dhe argumentimi</h2><p className="mb-2 text-xs text-muted-foreground">AUTO = nga databaza; kërkon konfirmim = sistemi nuk pretendon diçka pa provë.</p><div>{selectedQuestions.map((question) => <QuestionRow key={question.key} question={question} />)}</div></section>
+                <section>
+                  <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
+                    <div>
+                      <h2 className="font-semibold">Pyetjet dhe argumentimi</h2>
+                      <p className="mt-1 text-xs text-muted-foreground">Të 15 pyetjet e barazimit: automatike kur ka prova; për konfirmim kur kërkohet gjykim njerëzor.</p>
+                    </div>
+                    <Badge variant="outline">
+                      {selectedQuestions.filter((question) => !["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(question.source_status)).length} automatike · {selectedQuestions.filter((question) => ["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(question.source_status)).length} për konfirmim
+                    </Badge>
+                  </div>
+                  <div className="grid gap-4 xl:grid-cols-2">
+                    {QUESTION_SECTIONS.map((section) => {
+                      const questions = section.keys
+                        .map((key) => selectedQuestions.find((question) => question.key === key))
+                        .filter((question): question is RealizationQuestion => Boolean(question))
+                      return (
+                        <div key={section.title} className="overflow-hidden rounded-xl border bg-card">
+                          <div className="border-b bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">{section.title}</div>
+                          <div className="px-4">
+                            {questions.map((question) => <QuestionRow key={question.key} question={question} />)}
+                          </div>
+                        </div>
+                      )
+                    })}
+                  </div>
+                </section>
 
-                <section><h2 className="mb-3 font-semibold">Evidenca e taskave</h2><div className="max-h-72 overflow-y-auto rounded-xl border"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 font-medium">Detyra</th><th className="px-3 py-2 font-medium">Burimi</th><th className="px-3 py-2 font-medium">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t"><td className="px-3 py-2"><p className="font-medium">{task.title}</p><p className="text-[11px] text-muted-foreground">{task.task_id || task.match_key}</p></td><td className="px-3 py-2">{task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{task.classification}</Badge></td></tr>)}</tbody></table></div></section>
+                <section><h2 className="mb-3 font-semibold">Evidenca e taskave</h2><div className="max-h-72 overflow-y-auto rounded-xl border"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 font-medium">Detyra</th><th className="px-3 py-2 font-medium">Burimi</th><th className="px-3 py-2 font-medium">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t"><td className="px-3 py-2"><p className="font-medium">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-muted-foreground">{task.task_id || task.match_key}</p></td><td className="px-3 py-2">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></section>
 
                 {user.role === "ADMIN" && data ? <div className="flex flex-wrap justify-end gap-2 border-t pt-5">{data.period.status === "REVIEWED" ? <Button variant="outline" onClick={() => void run("approve", `/realization/periods/${data.period.id}/approve`, { method: "POST" })} disabled={!!action}><ShieldCheck className="h-4 w-4" /> Aprovo raportin</Button> : null}{data.period.status === "APPROVED" ? <Button variant="destructive" onClick={() => void run("lock", `/realization/periods/${data.period.id}/lock`, { method: "POST" })} disabled={!!action}><LockKeyhole className="h-4 w-4" /> Blloko përfundimisht</Button> : null}</div> : null}
               </CardContent>
@@ -728,7 +852,7 @@ export default function RealizationPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader><DialogTitle>Shto evidencë të verifikueshme</DialogTitle><DialogDescription>Evidenca verifikohet menjëherë nga llogaria menaxheriale dhe rikalkulon automatikisht raportin.</DialogDescription></DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1.5"><Label>Kategoria</Label><Select value={evidenceCategory} onValueChange={setEvidenceCategory}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{[["QUALITY", "Cilësi / angazhim ekstra"], ["PROPOSAL", "Propozim"], ["HELPED_COLLEAGUE", "Ndihmoi koleg"], ["EXTRA_TASK", "Detyrë shtesë e përfunduar"], ["REPEATED_PROBLEM", "Problem i përsëritur"], ["BLOCKER", "I prishi planin kolegut"], ["MISSED_MEETING", "Takim i humbur"], ["ABSENCE", "Mungesë / pushim"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1.5"><Label>Kategoria</Label><Select value={evidenceCategory} onValueChange={setEvidenceCategory}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{[["QUALITY", "Cilësi / angazhim ekstra"], ["PROPOSAL", "Propozim"], ["REQUESTED_EXTRA_TASK", "Kërkoi detyra shtesë"], ["HELPED_COLLEAGUE", "Ndihmoi koleg"], ["EXTRA_TASK", "Detyrë shtesë e përfunduar"], ["REPEATED_PROBLEM", "Problem i përsëritur"], ["BLOCKER", "I prishi planin kolegut"], ["MISSED_MEETING", "Takim i humbur"], ["ABSENCE", "Mungesë / pushim"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
             {evidenceCategory === "ABSENCE" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Klasifikimi</Label><Select value={absenceClass} onValueChange={setAbsenceClass}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="UNEXCUSED">E papritur / pa aprovim</SelectItem><SelectItem value="APPROVED_PERSONAL">Personale e aprovuar</SelectItem><SelectItem value="ANNUAL_LEAVE">Pushim vjetor</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label>Data</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></div> : null}
             {evidenceCategory === "MISSED_MEETING" ? <><div className="space-y-1.5"><Label>ID e takimit</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div><div className="space-y-1.5"><Label>Data e takimit</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></> : null}
             {evidenceCategory === "BLOCKER" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>ID e personit të prekur</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div><div className="space-y-1.5"><Label>Ndikimi</Label><Select value={impactLevel} onValueChange={setImpactLevel}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MINOR">I vogël</SelectItem><SelectItem value="MAJOR">I madh</SelectItem><SelectItem value="MULTIPLE_PEOPLE">Disa persona</SelectItem></SelectContent></Select></div></div> : null}

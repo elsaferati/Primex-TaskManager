@@ -22,7 +22,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
-from app.services.realization_calculator import build_project_progress
+from app.services.realization_calculator import build_live_questions, build_project_progress
 from app.services.realization_evidence import _snapshot_tasks
 from app.services.realization_people import load_active_users_and_common_leave
 from app.services.realization_periods import require_recalculable, transition_period
@@ -200,6 +200,8 @@ async def calculate_daily_period(
 
     weekly_task_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
     weekly_completed_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
+    weekly_additional_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
+    weekly_fast_task_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
     for key, raw in planned.items():
         task = task_by_id.get(raw.get("task_id"))
         progress = daily_progress.get(raw.get("task_id"))
@@ -247,6 +249,12 @@ async def calculate_daily_period(
             continue
         if _local_date(task.created_at) > day:  # type: ignore[operator]
             continue
+        for user_id in assignees.get(task.id, set()):
+            if user_id not in people:
+                continue
+            weekly_additional_keys_by_user[user_id].add(str(task.id))
+            if not task.project_id and not task.system_template_origin_id:
+                weekly_fast_task_keys_by_user[user_id].add(str(task.id))
         if not (
             _local_date(task.created_at) == day
             or _local_date(task.completed_at) == day
@@ -319,52 +327,27 @@ async def calculate_daily_period(
         completed_today = int(counters.get("completed_count", 0))
         weekly_total = len(weekly_task_keys_by_user[user_id])
         weekly_completed = len(weekly_completed_by_user[user_id])
+        counters["daily_planned_count"] = planned_today
+        counters["daily_completed_count"] = completed_today
+        counters["weekly_planned_count"] = weekly_total
+        counters["weekly_completed_count"] = weekly_completed
+        counters["weekly_additional_count"] = len(weekly_additional_keys_by_user[user_id])
+        counters["weekly_fast_task_count"] = len(weekly_fast_task_keys_by_user[user_id])
         person["counters"] = counters
+        person["daily_planned_count"] = planned_today
+        person["daily_completed_count"] = completed_today
+        person["weekly_planned_count"] = weekly_total
+        person["weekly_completed_count"] = weekly_completed
+        person["weekly_additional_count"] = len(weekly_additional_keys_by_user[user_id])
+        person["weekly_fast_task_count"] = len(weekly_fast_task_keys_by_user[user_id])
         person["daily_progress_percent"] = (
-            round(completed_today * 100.0 / planned_today, 1) if planned_today else 100.0
+            round(completed_today * 100.0 / planned_today, 1) if planned_today else 0.0
         )
         person["weekly_progress_percent"] = (
-            round(weekly_completed * 100.0 / weekly_total, 1) if weekly_total else 100.0
+            round(weekly_completed * 100.0 / weekly_total, 1) if weekly_total else 0.0
         )
         person["project_progress"] = build_project_progress(person["tasks"])
-        person["questions"] = [
-            {
-                "key": "task_status",
-                "label": "Statusi i detyrave të planifikuara për ditën",
-                "auto_value": {
-                    "planned": planned_today,
-                    "completed": completed_today,
-                    "in_progress": counters.get("in_progress_count", 0),
-                    "no_progress": counters.get("no_progress_count", 0),
-                },
-                "source_status": "AUTO",
-                "evidence_ids": [task["task_id"] for task in person["tasks"] if task.get("task_id")],
-            },
-            {
-                "key": "new_tasks_added",
-                "label": "Detyra të reja të shtuara pas planit javor?",
-                "auto_value": {
-                    "count": counters.get("additional_count", 0),
-                    "fast_tasks": counters.get("fast_task_count", 0),
-                },
-                "source_status": "AUTO",
-                "evidence_ids": [
-                    task["task_id"] for task in person["tasks"]
-                    if task.get("attribution") == "added_after_weekly_plan" and task.get("task_id")
-                ],
-            },
-            {
-                "key": "attendance",
-                "label": "Pushim, mungesë ose vonesë?",
-                "auto_value": person["attendance"],
-                "source_status": (
-                    "AUTO_NEEDS_CONFIRMATION"
-                    if counters.get("absence_needs_review_count", 0)
-                    else "AUTO"
-                ),
-                "evidence_ids": [item["id"] for item in person["attendance"]],
-            },
-        ]
+        person["questions"] = build_live_questions(person)
         result = existing.get(user_id)
         if result is None:
             result = RealizationPersonResult(
