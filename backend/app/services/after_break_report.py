@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import CommonApprovalStatus, GaNoteStatus
 from app.models.ga_note import GaNote
+from app.models.question_library import QuestionCategory, QuestionDefinition
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.user import User
@@ -177,24 +178,22 @@ async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
     return rows
 
 
-def _waiting_confirmation_rows(
-    tasks: list[Task],
-    names: dict[Any, str],
-    assignee_ids_by_task: dict[Any, set[Any]],
-) -> list[list[str]]:
-    pending = [
-        task for task in tasks
-        if str(task.status or "").upper() == "WAITING_CONFIRMATION" and _is_open(task)
-    ]
-    ordered = sorted(pending, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _display_title(task.title)))
+async def _question_library_rows(db: AsyncSession) -> list[list[str]]:
+    rows = (
+        await db.execute(
+            select(QuestionCategory.name, QuestionDefinition.text)
+            .join(QuestionDefinition, QuestionDefinition.category_id == QuestionCategory.id)
+            .order_by(
+                QuestionCategory.sort_order,
+                QuestionCategory.name,
+                QuestionDefinition.sort_order,
+                QuestionDefinition.created_at,
+            )
+        )
+    ).all()
     return [
-        [
-            str(index),
-            _task_owners(task, names, assignee_ids_by_task),
-            _display_title(task.title),
-            _initials(names.get(task.confirmation_assignee_id)),
-        ]
-        for index, task in enumerate(ordered, start=1)
+        [str(index), _display_title(category_name), _display_title(question_text)]
+        for index, (category_name, question_text) in enumerate(rows, start=1)
     ]
 
 
@@ -324,8 +323,8 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         "",
         *_ascii_table(
             "PYETJE PER KONFIRMIM",
-            [("NR", 2), ("WHO", 20), ("TITLE", 56), ("PER", 10)],
-            _waiting_confirmation_rows(tasks, names, assignee_ids_by_task),
+            [("NR", 2), ("LISTA", 28), ("PYETJA", 56)],
+            await _question_library_rows(db),
         ),
     ]
     section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
@@ -367,22 +366,31 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
         for index, section in enumerate(sections, 1)
     )
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><style>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
 body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
 h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
 h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 @media only screen and (max-width:600px){{
 body{{padding:8px}}
-h1{{font-size:18px}}
-h2{{font-size:13px}}
-pre{{font-size:12px;padding:10px}}
-.report-table th,.report-table td{{padding:5px 6px}}
+table,tbody,tr,td,div,pre{{max-width:100%!important;box-sizing:border-box!important}}
+h1{{font-size:18px!important;line-height:1.2!important;white-space:normal!important}}
+h2{{font-size:13px!important;line-height:1.25!important;white-space:normal!important;word-break:normal!important;overflow-wrap:anywhere!important}}
+pre{{font-size:12px!important;padding:10px!important}}
+.report-table th,.report-table td{{font-size:12px!important;padding:4px 5px!important;line-height:1.3!important}}
 }}
-</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px;">
+@media only screen and (max-width:600px){{
+.report-table,.report-table thead,.report-table tbody,.report-table tr,.report-table th,.report-table td{{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;table-layout:fixed!important}}
+.report-table colgroup,.report-table thead{{display:none!important}}
+.report-table tr{{border:1px solid #cbd5e1!important;margin:0 0 8px!important}}
+.report-table td{{border:0!important;border-bottom:1px solid #e5e7eb!important;white-space:normal!important;word-break:break-all!important;overflow-wrap:anywhere!important}}
+.report-table td:last-child{{border-bottom:0!important}}
+.report-table td:before{{content:attr(data-label) ': ';display:inline!important;font-weight:700!important;color:#111827!important}}
+}}
+</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:8px;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
 <tr><td align="center" style="padding:0;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:980px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
-<tr><td style="padding:24px;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<tr><td style="padding:14px;">
 <h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
 <p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y}</p>
 {section_html}

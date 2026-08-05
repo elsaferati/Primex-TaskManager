@@ -38,7 +38,7 @@ SECTION_TITLES = [
     "N- (GA) SHIKOHET COMMON VIEW NESER, VETEM DETYRAT E REJA ME TE KALTER, 08:00 DHE ME DEADLINE?",
     "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?",
     "N- A KA DETYRA 1H PA SLOT?",
-    "(GA/KA) KUSH KA DET PERSONALISHT?",
+    "N- (GA/KA) KUSH KA DET PERSONALISHT?",
 ]
 PERSONAL_GA_KA = re.compile(r"(^|[^A-Z])(GA|KA)([^A-Z]|$)|/[GK]A\s*:", re.I)
 TECHNICAL_BLOCK = re.compile(r"\[\[\s*added\s*\]\].*?\[\[\s*/\s*added\s*\]\]", re.I | re.S)
@@ -851,27 +851,30 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     column_widths = _email_column_widths(header)
     header_cell_style = (
         "background:#e5e7eb;color:#111827;text-align:left;font-weight:700;"
-        "border:1px solid #cbd5e1;padding:6px 8px;vertical-align:top;"
+        "border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top;"
     )
     body_bg, body_color = _table_tone_styles(tone)
     body_cell_style = (
         f"background:{body_bg};color:{body_color};border:1px solid #cbd5e1;"
-        "padding:6px 8px;vertical-align:top;"
+        "padding:4px 5px;vertical-align:top;"
     )
     canceled_cell_style = (
         "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
-        "padding:6px 8px;vertical-align:top;"
+        "padding:4px 5px;vertical-align:top;"
     )
     not_discussed_cell_style = (
         "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
-        "padding:6px 8px;vertical-align:top;"
+        "padding:4px 5px;vertical-align:top;"
     )
     header_html = "".join(
-        f"<th width=\"{column_widths[index]}%\" style=\"{header_cell_style}{_email_column_cell_style(cell)}\">"
+        f"<th{_email_column_width_attr(column_widths[index])} style=\"{header_cell_style}{_email_column_width_style(column_widths[index])}{_email_column_cell_style(cell)}\">"
         f"{html.escape(cell)}</th>"
         for index, cell in enumerate(header)
     )
-    colgroup_html = "".join(f"<col width=\"{width}%\" style=\"width:{width}%;\" />" for width in column_widths)
+    colgroup_html = "".join(
+        f"<col{_email_column_width_attr(width)} style=\"{_email_column_width_style(width)}\" />"
+        for width in column_widths
+    )
     canceled_index = next((index for index, cell in enumerate(header) if cell.upper() == "ANULUAR"), None)
     disk_index = next((index for index, cell in enumerate(header) if cell.upper() == "DISK"), None)
     table_class = f"report-table report-table-{tone}" if tone else "report-table"
@@ -892,7 +895,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         body_html_parts.append(
             "<tr>"
             + "".join(
-                f"<td width=\"{column_widths[index]}%\" style=\"{cell_style}{_email_column_cell_style(header[index])}\">"
+                f"<td data-label=\"{html.escape(header[index])}\"{_email_column_width_attr(column_widths[index])} style=\"{cell_style}{_email_column_width_style(column_widths[index])}{_email_column_cell_style(header[index])}\">"
                 f"{html.escape(cell).replace(chr(10), '<br>')}</td>"
                 for index, cell in enumerate(row)
             )
@@ -912,65 +915,51 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         "style=\"width:100%;border-collapse:collapse;margin:8px 0 12px;\">"
         f"{caption_html}<tr><td style=\"padding:0;\">"
         f"<table class=\"{table_class}\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
-        "style=\"width:100%;border-collapse:collapse;table-layout:fixed;font-size:13px;font-family:Arial,sans-serif;\">"
+        "style=\"width:100%;border-collapse:collapse;table-layout:auto;font-size:12px;line-height:1.3;font-family:Arial,sans-serif;\">"
         f"<colgroup>{colgroup_html}</colgroup><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
         "</td></tr></table>"
     )
 
 
+def _email_column_width_attr(width: str) -> str:
+    return "" if width == "auto" else f" width=\"{width}\""
+
+
+def _email_column_width_style(width: str) -> str:
+    return "" if width == "auto" else f"width:{width}px;"
+
+
 def _email_column_cell_style(header_cell: str) -> str:
     name = header_cell.strip().upper()
-    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "MBAJTUR", "ANULUAR", "PA STATUS"}:
+    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "DATA", "DATE", "MBAJTUR", "ANULUAR", "PA STATUS"}:
         return "white-space:nowrap;"
     if name == "WHO":
         return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
     return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
 
 
-def _email_column_widths(header: list[str]) -> list[int]:
+def _email_column_widths(header: list[str]) -> list[str]:
     """Give utility columns only the space they need; reserve the rest for title/note text."""
     if not header:
         return []
     fixed_by_name = {
-        "NR": 4,
-        "WHO": 8,
-        "FROM": 9,
-        "TIME": 8,
-        "ORA": 8,
-        "KOHA": 8,
-        "DISK": 7,
-        "LATE": 10,
-        "MBAJTUR": 8,
-        "ANULUAR": 8,
-        "PA STATUS": 9,
+        "NR": "28",
+        "WHO": "44",
+        "FROM": "44",
+        "TIME": "46",
+        "ORA": "46",
+        "KOHA": "46",
+        "DATA": "62",
+        "DATE": "62",
+        "DISK": "42",
+        "LATE": "54",
+        "MBAJTUR": "58",
+        "ANULUAR": "58",
+        "PA STATUS": "64",
     }
     content_names = {"TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"}
     normalized = [cell.strip().upper() for cell in header]
-    content_indexes = [index for index, name in enumerate(normalized) if name in content_names]
-    widths: list[int | None] = []
-    fixed_total = 0
-    for name in normalized:
-        if name in content_names:
-            widths.append(None)
-            continue
-        width = fixed_by_name.get(name, 10)
-        widths.append(width)
-        fixed_total += width
-    if content_indexes:
-        remaining = max(35, 100 - fixed_total)
-        share = max(1, remaining // len(content_indexes))
-        for index in content_indexes:
-            widths[index] = share
-    unresolved = [index for index, width in enumerate(widths) if width is None]
-    if unresolved:
-        share = max(1, (100 - fixed_total) // len(unresolved))
-        for index in unresolved:
-            widths[index] = share
-    total = sum(int(width or 0) for width in widths)
-    if total != 100 and widths:
-        target_index = content_indexes[0] if content_indexes else len(widths) - 1
-        widths[target_index] = max(1, int(widths[target_index] or 1) + (100 - total))
-    return [int(width or 1) for width in widths]
+    return ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
 
 
 def _primary_text_column_index(header: list[str]) -> int:
@@ -1114,22 +1103,31 @@ def render_html(subject: str, report_day: date, tomorrow: date, sections: list[d
         for index, section in enumerate(sections, 1)
     )
     return f"""<!doctype html>
-<html><head><meta charset="utf-8"><style>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
 body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
 h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
 h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 @media only screen and (max-width:600px){{
 body{{padding:8px}}
-h1{{font-size:18px}}
-h2{{font-size:13px}}
-pre{{font-size:12px;padding:10px}}
-.report-table th,.report-table td{{padding:5px 6px}}
+table,tbody,tr,td,div,pre{{max-width:100%!important;box-sizing:border-box!important}}
+h1{{font-size:18px!important;line-height:1.2!important;white-space:normal!important}}
+h2{{font-size:13px!important;line-height:1.25!important;white-space:normal!important;word-break:normal!important;overflow-wrap:anywhere!important}}
+pre{{font-size:12px!important;padding:10px!important}}
+.report-table th,.report-table td{{font-size:12px!important;padding:4px 5px!important;line-height:1.3!important}}
 }}
-</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px;">
+@media only screen and (max-width:600px){{
+.report-table,.report-table thead,.report-table tbody,.report-table tr,.report-table th,.report-table td{{display:block!important;width:100%!important;max-width:100%!important;min-width:0!important;box-sizing:border-box!important;table-layout:fixed!important}}
+.report-table colgroup,.report-table thead{{display:none!important}}
+.report-table tr{{border:1px solid #cbd5e1!important;margin:0 0 8px!important}}
+.report-table td{{border:0!important;border-bottom:1px solid #e5e7eb!important;white-space:normal!important;word-break:break-all!important;overflow-wrap:anywhere!important}}
+.report-table td:last-child{{border-bottom:0!important}}
+.report-table td:before{{content:attr(data-label) ': ';display:inline!important;font-weight:700!important;color:#111827!important}}
+}}
+</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:8px;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
 <tr><td align="center" style="padding:0;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:980px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
-<tr><td style="padding:24px;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<tr><td style="padding:14px;">
 <h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
 <p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>
 {section_html}
