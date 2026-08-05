@@ -29,6 +29,7 @@ from app.services.system_task_schedule import matches_template_date
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
+    "A JEMI BRENDA MESATARES ME PROJEKTE/",
     "(GA) M3 DET GA MBYLLJA ME HV?",
     "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3",
     "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?",
@@ -335,16 +336,17 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     section_6 = await _today_meeting_status_section(db, today_meetings, report_day)
 
     sections = [
-        {"title": SECTION_TITLES[0], "body": finance_section},
-        {"title": SECTION_TITLES[1], "body": std_tickets_section},
-        {"title": SECTION_TITLES[2], "body": _normalize_section(section_1)},
-        {"title": SECTION_TITLES[3], "body": _normalize_section(_m3_status_table("TODO", today_todo, names))},
-        {"title": SECTION_TITLES[7], "body": section_6},
-        {"title": SECTION_TITLES[4], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
-        {"title": SECTION_TITLES[6], "body": _normalize_section(section_5)},
-        {"title": SECTION_TITLES[5], "body": _normalize_section(section_4)},
-        {"title": SECTION_TITLES[8], "body": _normalize_section(_m3_status_table("1H PA SLOT", one_h_no_slot, names))},
-        {"title": SECTION_TITLES[9], "body": _normalize_section(_m3_status_table("PERSONAL GA/KA", personal_ga_ka, names))},
+        {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[1], "body": finance_section},
+        {"title": SECTION_TITLES[2], "body": std_tickets_section},
+        {"title": SECTION_TITLES[3], "body": _normalize_section(section_1)},
+        {"title": SECTION_TITLES[4], "body": _normalize_section(_m3_status_table("TODO", today_todo, names))},
+        {"title": SECTION_TITLES[8], "body": section_6},
+        {"title": SECTION_TITLES[5], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
+        {"title": SECTION_TITLES[7], "body": _normalize_section(section_5)},
+        {"title": SECTION_TITLES[6], "body": _normalize_section(section_4)},
+        {"title": SECTION_TITLES[9], "body": _normalize_section(_m3_status_table("1H PA SLOT", one_h_no_slot, names))},
+        {"title": SECTION_TITLES[10], "body": _normalize_section(_m3_status_table("PERSONAL GA/KA", personal_ga_ka, names))},
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
@@ -451,28 +453,25 @@ def _meeting_group_title(title: str) -> list[str]:
 
 
 def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: dict[Any, str]) -> list[str]:
-    border = "+----+-------+------------------------------------------------------------------+----------+----------+-----------+"
+    border = "+----+-------+----------+------------------------------------------------------------------+"
     rows = [
         border,
-        f"| {'NR':<2} | {'TIME':<5} | {'TITLE':<64} | {'MBAJTUR':<8} | {'ANULUAR':<8} | {'PA STATUS':<9} |",
+        f"| {'NR':<2} | {'TIME':<5} | {'MBAJTUR?':<8} | {'TITLE':<64} |",
         border,
     ]
     if not meetings:
-        rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje takim)':<64} | {'':<8} | {'':<8} | {'':<9} |")
+        rows.append(f"| {'-':<2} | {'-':<5} | {'':<8} | {'(Asnje takim)':<64} |")
         rows.append(border)
         return rows
     for index, meeting in enumerate(sorted(meetings, key=lambda item: item.starts_at or datetime.min), start=1):
         status = status_by_meeting.get(meeting.id, "")
         title_lines = _wrap_fixed_width(meeting.title or "-", 64)
-        held = "✓" if status == "held" else ""
-        canceled = "✓" if status == "canceled" else ""
-        no_status = "✓" if status == "" else ""
+        status_icon = "\u2713" if status == "held" else "\u2715" if status == "canceled" else ""
         rows.append(
-            f"| {index:<2} | {_local_time(meeting.starts_at):<5} | {title_lines[0]:<64} | "
-            f"{held:<8} | {canceled:<8} | {no_status:<9} |"
+            f"| {index:<2} | {_local_time(meeting.starts_at):<5} | {status_icon:<8} | {title_lines[0]:<64} |"
         )
         for line in title_lines[1:]:
-            rows.append(f"| {'':<2} | {'':<5} | {line:<64} | {'':<8} | {'':<8} | {'':<9} |")
+            rows.append(f"| {'':<2} | {'':<5} | {'':<8} | {line:<64} |")
         rows.append(border)
     return rows
 
@@ -876,6 +875,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         for width in column_widths
     )
     canceled_index = next((index for index, cell in enumerate(header) if cell.upper() == "ANULUAR"), None)
+    meeting_status_index = next((index for index, cell in enumerate(header) if cell.upper() == "MBAJTUR?"), None)
     disk_index = next((index for index, cell in enumerate(header) if cell.upper() == "DISK"), None)
     table_class = f"report-table report-table-{tone}" if tone else "report-table"
     body_html_parts = []
@@ -892,13 +892,29 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             and row[disk_index].strip().upper() == "NO"
         )
         cell_style = not_discussed_cell_style if is_not_discussed_note else canceled_cell_style if is_canceled else body_cell_style
+        row_cells = []
+        for index, cell in enumerate(row):
+            current_cell_style = cell_style
+            current_cell = cell
+            if meeting_status_index is not None and index == meeting_status_index:
+                symbol = cell.strip()
+                if symbol == "\u2713":
+                    current_cell_style = (
+                        "background:#f8fafc;color:#047857;border:1px solid #cbd5e1;"
+                        "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
+                    )
+                elif symbol == "\u2715":
+                    current_cell_style = (
+                        "background:#f8fafc;color:#dc2626;border:1px solid #cbd5e1;"
+                        "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
+                    )
+            row_cells.append(
+                f"<td data-label=\"{html.escape(header[index])}\"{_email_column_width_attr(column_widths[index])} style=\"{current_cell_style}{_email_column_width_style(column_widths[index])}{_email_column_cell_style(header[index])}\">"
+                f"{html.escape(current_cell).replace(chr(10), '<br>')}</td>"
+            )
         body_html_parts.append(
             "<tr>"
-            + "".join(
-                f"<td data-label=\"{html.escape(header[index])}\"{_email_column_width_attr(column_widths[index])} style=\"{cell_style}{_email_column_width_style(column_widths[index])}{_email_column_cell_style(header[index])}\">"
-                f"{html.escape(cell).replace(chr(10), '<br>')}</td>"
-                for index, cell in enumerate(row)
-            )
+            + "".join(row_cells)
             + "</tr>"
         )
     body_html = "".join(body_html_parts)
@@ -931,7 +947,7 @@ def _email_column_width_style(width: str) -> str:
 
 def _email_column_cell_style(header_cell: str) -> str:
     name = header_cell.strip().upper()
-    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "DATA", "DATE", "MBAJTUR", "ANULUAR", "PA STATUS"}:
+    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "DATA", "DATE", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
         return "white-space:nowrap;"
     if name == "WHO":
         return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
@@ -943,9 +959,9 @@ def _email_column_widths(header: list[str]) -> list[str]:
     if not header:
         return []
     fixed_by_name = {
-        "NR": "28",
-        "WHO": "44",
-        "FROM": "44",
+        "NR": "24",
+        "WHO": "34",
+        "FROM": "38",
         "TIME": "46",
         "ORA": "46",
         "KOHA": "46",
@@ -954,12 +970,16 @@ def _email_column_widths(header: list[str]) -> list[str]:
         "DISK": "42",
         "LATE": "54",
         "MBAJTUR": "58",
+        "MBAJTUR?": "62",
         "ANULUAR": "58",
         "PA STATUS": "64",
     }
     content_names = {"TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"}
     normalized = [cell.strip().upper() for cell in header]
-    return ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
+    widths = ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
+    if normalized and not any(name in content_names for name in normalized):
+        widths[-1] = "auto"
+    return widths
 
 
 def _primary_text_column_index(header: list[str]) -> int:

@@ -34,9 +34,13 @@ from app.services.meetings_report import (
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
 SECTION_TITLES = [
+    "DET NGA EMAIL/ PX INFO & ZHVILLIM",
+    "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU",
+    "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?",
+    "PIKAT E BORDIT/DISKUTO APLIKANTAT",
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
-    "NOTES TE REJA ME TE KALTER DHE DISSCUSED?",
+    "NOTES TE REJA ME TE KALTER DHE DISSCUSED",
 ]
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
@@ -292,9 +296,9 @@ async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]
     return [
         [
             str(index),
-            _initials(names.get(note.created_by)),
-            _note_text(note.content),
             "YES" if note.is_discussed else "NO",
+            _note_text(note.content),
+            _initials(names.get(note.created_by)),
             _local_time(note.created_at),
         ]
         for index, note in enumerate(ordered, start=1)
@@ -330,21 +334,29 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
     section_3 = _ascii_table(
         "NOTES",
-        [("NR", 2), ("FROM", 8), ("NOTE", 60), ("DISK", 4), ("TIME", 5)],
+        [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME", 5)],
         await _blue_note_rows(db, report_day),
     )
 
     sections = [
-        {"title": SECTION_TITLES[0], "body": _normalize_section(section_1)},
-        {"title": SECTION_TITLES[1], "body": _normalize_section(section_2)},
-        {"title": SECTION_TITLES[2], "body": _normalize_section(section_3)},
+        {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[1], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[2], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[3], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[4], "body": _normalize_section(section_1)},
+        {"title": SECTION_TITLES[5], "body": _normalize_section(section_2)},
+        {"title": SECTION_TITLES[6], "body": _normalize_section(section_3)},
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
         "counts": {
-            SECTION_TITLES[0]: len(section_1),
-            SECTION_TITLES[1]: len(section_2),
-            SECTION_TITLES[2]: len(section_3),
+            SECTION_TITLES[0]: 0,
+            SECTION_TITLES[1]: 0,
+            SECTION_TITLES[2]: 0,
+            SECTION_TITLES[3]: 0,
+            SECTION_TITLES[4]: len(section_1),
+            SECTION_TITLES[5]: len(section_2),
+            SECTION_TITLES[6]: len(section_3),
         },
     }
     return sections, snapshot
