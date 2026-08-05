@@ -36,7 +36,7 @@ from app.models.project_planner_exclusion import ProjectPlannerExclusion
 from app.models.project_phase_checklist_item import ProjectPhaseChecklistItem
 from app.models.project_member import ProjectMember
 from app.models.project_prompt import ProjectPrompt
-from app.models.std_feedback_ticket import StdFeedbackTicket
+from app.models.std_feedback_ticket import StdFeedbackSyncState, StdFeedbackTicket
 from app.models.question_library import (
     QuestionCategory,
     QuestionDefinition,
@@ -120,6 +120,7 @@ __all__ = [
     "ProjectMember",
     "ProjectPrompt",
     "StdFeedbackTicket",
+    "StdFeedbackSyncState",
     "QuestionCategory",
     "QuestionDefinition",
     "QuestionStatusEvent",

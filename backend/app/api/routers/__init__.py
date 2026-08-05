@@ -39,6 +39,7 @@ from app.api.routers.after_break_report import router as after_break_report_rout
 from app.api.routers.realization import router as realization_router
 from app.api.routers.weekly_planning_audit import router as weekly_planning_audit_router
 from app.api.routers.standards import router as standards_router
+from app.api.routers.external_tickets import router as external_tickets_router
 
 
 api_router = APIRouter()
@@ -85,4 +86,5 @@ api_router.include_router(
     tags=["reports", "weekly-planning-audit"],
 )
 api_router.include_router(standards_router, prefix="/standards", tags=["standards"])
+api_router.include_router(external_tickets_router, prefix="/external-tickets", tags=["external-tickets"])
 

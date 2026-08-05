@@ -32,6 +32,7 @@ import {
   Activity,
   ChevronDown,
   ScrollText,
+  TicketCheck,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -152,6 +153,7 @@ const navGroups: NavGroup[] = [
     icon: BarChart3,
     items: [
       { href: "/system-task-instances", label: "System Tasks Report", icon: Layers },
+      { href: "/external-tickets", label: "STD Tickets EXT", icon: TicketCheck },
       { href: "/meetings-report", label: "Mbyllja e dites M3", icon: MailCheck },
       { href: "/after-break-report", label: "Permbledhja pas pauzes", icon: MailCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },
