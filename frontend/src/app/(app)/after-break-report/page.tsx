@@ -1,19 +1,21 @@
 "use client"
 
 import * as React from "react"
-import { Eye, RefreshCw, Save, Send, Settings } from "lucide-react"
+import { Eye, History, Pencil, RefreshCw, Save, Send, Settings } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/lib/auth"
 
 type Section = { title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
+type EditingSection = { index: number; lines: string[] }
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -34,9 +36,47 @@ type Draft = {
   last_error?: string | null
   updated_at?: string | null
 }
+type DeliveryHistory = {
+  id: string
+  report_date: string
+  subject: string
+  recipients: Recipients
+  status: string
+  sent_at: string | null
+  gmail_message_id?: string | null
+  last_error?: string | null
+}
 
 const API = "/after-break-report"
 const REPORT_LABEL = "Permbledhja pas pauzes"
+
+function sectionPreviewText(value: string) {
+  const cleaned = value.trim()
+  if (!cleaned) return "No content"
+  return cleaned
+}
+
+function sectionEditorLines(value: string) {
+  return value.split(/\r?\n/)
+}
+
+function isRuleLine(value: string) {
+  const trimmed = value.trim()
+  return Boolean(trimmed) && /^[+\-\s]+$/.test(trimmed)
+}
+
+function tableCells(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null
+  return trimmed.slice(1, -1).split("|").map((cell) => cell.trim())
+}
+
+function updateTableCell(line: string, cellIndex: number, value: string) {
+  const cells = tableCells(line)
+  if (!cells) return line
+  const nextCells = cells.map((cell, index) => index === cellIndex ? value : cell)
+  return `| ${nextCells.join(" | ")} |`
+}
 
 function todayIso() {
   return new Date().toISOString().slice(0, 10)
@@ -57,6 +97,15 @@ function parseRecipients(value: string) {
     rows.push(email)
   }
   return rows
+}
+
+function recipientsSummary(recipients: Recipients) {
+  const groups = [
+    recipients.to.length ? `To: ${recipients.to.join(", ")}` : "",
+    recipients.cc.length ? `Cc: ${recipients.cc.join(", ")}` : "",
+    recipients.bcc.length ? `Bcc: ${recipients.bcc.join(", ")}` : "",
+  ].filter(Boolean)
+  return groups.join(" | ") || "-"
 }
 
 function formatDateTimeInTimezone(value: string | null | undefined, timezone: string) {
@@ -99,7 +148,9 @@ async function responseError(res: Response) {
 export default function AfterBreakReportPage() {
   const { apiFetch, loading: authLoading, user } = useAuth()
   const canAccess = !authLoading && Boolean(user)
-  const canEdit = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN"
+  const canEdit = Boolean(user)
+  const canManageDelivery = isAdmin
   const [reportDate, setReportDate] = React.useState(todayIso())
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)
@@ -110,6 +161,9 @@ export default function AfterBreakReportPage() {
   const [settings, setSettings] = React.useState<ReportSettings | null>(null)
   const [settingsInputs, setSettingsInputs] = React.useState<RecipientInputs>({ to: "", cc: "", bcc: "" })
   const [savingSettings, setSavingSettings] = React.useState(false)
+  const [editingSection, setEditingSection] = React.useState<EditingSection | null>(null)
+  const [history, setHistory] = React.useState<DeliveryHistory[]>([])
+  const [loadingHistory, setLoadingHistory] = React.useState(false)
 
   const applyDraft = React.useCallback((nextDraft: Draft | null) => {
     setDraft(nextDraft)
@@ -148,22 +202,39 @@ export default function AfterBreakReportPage() {
   }, [apiFetch, applyDraft, canAccess, reportDate])
 
   const loadSettings = React.useCallback(async () => {
-    if (!canAccess) return
+    if (!canManageDelivery) return
     try {
       const res = await apiFetch(`${API}/settings`)
       if (!res.ok) throw new Error(await responseError(res))
       applySettings(await res.json())
     } catch (error) {
-      if (canAccess) toast.error(`Unable to load ${REPORT_LABEL} settings`, { description: String(error) })
+      if (canManageDelivery) toast.error(`Unable to load ${REPORT_LABEL} settings`, { description: String(error) })
     }
-  }, [apiFetch, applySettings, canAccess])
+  }, [apiFetch, applySettings, canManageDelivery])
+
+  const loadHistory = React.useCallback(async () => {
+    if (!canManageDelivery) return
+    setLoadingHistory(true)
+    try {
+      const res = await apiFetch(`${API}/history?limit=50`)
+      if (!res.ok) throw new Error(await responseError(res))
+      setHistory(await res.json())
+    } catch (error) {
+      toast.error("Unable to load send history", { description: String(error) })
+    } finally {
+      setLoadingHistory(false)
+    }
+  }, [apiFetch, canManageDelivery])
 
   React.useEffect(() => {
     if (canAccess) {
       void loadDraft()
-      void loadSettings()
+      if (canManageDelivery) {
+        void loadSettings()
+        void loadHistory()
+      }
     }
-  }, [canAccess, loadDraft, loadSettings])
+  }, [canAccess, canManageDelivery, loadDraft, loadSettings, loadHistory])
 
   const generate = async () => {
     if (!canAccess) return
@@ -215,7 +286,7 @@ export default function AfterBreakReportPage() {
   }
 
   const sendDraft = async () => {
-    if (!draft || !canEdit) return
+    if (!draft || !canManageDelivery) return
     setSending(true)
     try {
       const savedDraft = await save()
@@ -224,6 +295,7 @@ export default function AfterBreakReportPage() {
       if (!res.ok) throw new Error(await responseError(res))
       const data = await res.json()
       applyDraft(data)
+      void loadHistory()
       toast.success(`${REPORT_LABEL} sent`, { description: data.gmail_message_id || undefined })
     } catch (error) {
       toast.error("Send failed", { description: String(error) })
@@ -239,6 +311,37 @@ export default function AfterBreakReportPage() {
         sectionIndex === index ? { ...section, body } : section
       )
       return { ...current, sections }
+    })
+  }
+
+  const openSectionEditor = (index: number) => {
+    if (!draft) return
+    setEditingSection({ index, lines: sectionEditorLines(draft.sections[index]?.body || "") })
+  }
+
+  const applySectionEditor = () => {
+    if (!editingSection) return
+    updateSection(editingSection.index, editingSection.lines.join("\n"))
+    setEditingSection(null)
+  }
+
+  const updateSectionEditorLine = (lineIndex: number, value: string) => {
+    setEditingSection((current) => {
+      if (!current) return current
+      return {
+        ...current,
+        lines: current.lines.map((line, index) => index === lineIndex ? value : line),
+      }
+    })
+  }
+
+  const updateSectionEditorCell = (lineIndex: number, cellIndex: number, value: string) => {
+    setEditingSection((current) => {
+      if (!current) return current
+      return {
+        ...current,
+        lines: current.lines.map((line, index) => index === lineIndex ? updateTableCell(line, cellIndex, value) : line),
+      }
     })
   }
 
@@ -262,7 +365,7 @@ export default function AfterBreakReportPage() {
   }
 
   const saveSettings = async () => {
-    if (!settings || !canEdit) return
+    if (!settings || !canManageDelivery) return
     setSavingSettings(true)
     try {
       const res = await apiFetch(`${API}/settings`, {
@@ -299,6 +402,13 @@ export default function AfterBreakReportPage() {
         </div>
       </div>
 
+      <Tabs defaultValue="report" className="gap-5">
+        <TabsList className="h-10 rounded-md">
+          <TabsTrigger value="report"><Pencil /> Report</TabsTrigger>
+          {canManageDelivery ? <TabsTrigger value="history"><History /> Send history</TabsTrigger> : null}
+        </TabsList>
+
+        <TabsContent value="report" className="space-y-5">
       <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-[220px_1fr_auto]">
         <div>
           <Label>Date</Label>
@@ -322,7 +432,7 @@ export default function AfterBreakReportPage() {
           <Button variant="outline" onClick={() => void previewDraft()} disabled={!draft || saving}>
             <Eye /> Preview
           </Button>
-          {canEdit ? (
+          {canManageDelivery ? (
             <Button onClick={() => void sendDraft()} disabled={!draft || sending}>
               <Send /> Send
             </Button>
@@ -330,6 +440,7 @@ export default function AfterBreakReportPage() {
         </div>
       </div>
 
+      {canManageDelivery ? (
       <div className="grid gap-3 rounded-lg border bg-white p-4 md:grid-cols-3">
         <div>
           <Label>To</Label>
@@ -359,8 +470,9 @@ export default function AfterBreakReportPage() {
           />
         </div>
       </div>
+      ) : null}
 
-      {settings ? (
+      {canManageDelivery && settings ? (
         <div className="space-y-3 rounded-lg border bg-white p-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
@@ -375,8 +487,7 @@ export default function AfterBreakReportPage() {
               type="button"
               aria-pressed={settings.is_active}
               aria-label={settings.is_active ? "Turn automatic send off" : "Turn automatic send on"}
-              onClick={() => canEdit && setSettings({ ...settings, is_active: !settings.is_active })}
-              disabled={!canEdit}
+              onClick={() => setSettings({ ...settings, is_active: !settings.is_active })}
               className={
                 settings.is_active
                   ? "relative h-8 w-14 rounded-full bg-emerald-500 p-1 transition-colors disabled:cursor-not-allowed disabled:opacity-50"
@@ -395,11 +506,11 @@ export default function AfterBreakReportPage() {
           <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
             <div>
               <Label>Send time</Label>
-              <Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} readOnly={!canEdit} />
+              <Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} />
             </div>
             <div>
               <Label>Timezone</Label>
-              <Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} readOnly={!canEdit} />
+              <Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} />
             </div>
             <div>
               <Label>Days</Label>
@@ -410,7 +521,6 @@ export default function AfterBreakReportPage() {
                     type="button"
                     variant={settings.weekdays.includes(day) ? "default" : "outline"}
                     onClick={() => toggleWeekday(day)}
-                    disabled={!canEdit}
                   >
                     {label}
                   </Button>
@@ -421,26 +531,24 @@ export default function AfterBreakReportPage() {
           <div className="grid gap-3 md:grid-cols-3">
             <div>
               <Label>Default To</Label>
-              <Input value={settingsInputs.to} onChange={(event) => updateSettingsRecipients("to", event.target.value)} readOnly={!canEdit} />
+              <Input value={settingsInputs.to} onChange={(event) => updateSettingsRecipients("to", event.target.value)} />
             </div>
             <div>
               <Label>Default Cc</Label>
-              <Input value={settingsInputs.cc} onChange={(event) => updateSettingsRecipients("cc", event.target.value)} readOnly={!canEdit} />
+              <Input value={settingsInputs.cc} onChange={(event) => updateSettingsRecipients("cc", event.target.value)} />
             </div>
             <div>
               <Label>Default Bcc</Label>
-              <Input value={settingsInputs.bcc} onChange={(event) => updateSettingsRecipients("bcc", event.target.value)} readOnly={!canEdit} />
+              <Input value={settingsInputs.bcc} onChange={(event) => updateSettingsRecipients("bcc", event.target.value)} />
             </div>
           </div>
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div className="text-sm text-muted-foreground">
               Last automatic run: {formatDateTimeInTimezone(settings.last_run_date, settings.timezone)}
             </div>
-            {canEdit ? (
               <Button variant="outline" onClick={() => void saveSettings()} disabled={savingSettings}>
                 <Save /> Save settings
               </Button>
-            ) : null}
           </div>
         </div>
       ) : null}
@@ -463,17 +571,77 @@ export default function AfterBreakReportPage() {
           </div>
 
           <div className="space-y-4">
-            {draft.sections.map((section, index) => (
-              <div key={`${section.title}-${index}`} className="rounded-lg border bg-white p-4">
-                <Label className="text-sm font-semibold">{index + 1}. {section.title}</Label>
-                <Textarea
-                  className="mt-3 min-h-[150px] font-mono text-sm"
-                  value={section.body}
-                  onChange={(event) => updateSection(index, event.target.value)}
-                  readOnly={!canEdit}
-                />
-              </div>
-            ))}
+            {draft.sections.map((section, index) => {
+              const isEditing = editingSection?.index === index
+              return (
+                <div key={`${section.title}-${index}`} className="rounded-lg border bg-white p-4 shadow-sm">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        {section.body.trim().split(/\s+/).filter(Boolean).length} words
+                      </div>
+                    </div>
+                    {canEdit ? (
+                      isEditing ? (
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={() => setEditingSection(null)}>
+                            Cancel
+                          </Button>
+                          <Button size="sm" onClick={applySectionEditor}>
+                            <Save className="h-4 w-4" /> Apply
+                          </Button>
+                        </div>
+                      ) : (
+                        <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
+                          <Pencil className="h-4 w-4" /> Edit
+                        </Button>
+                      )
+                    ) : null}
+                  </div>
+
+                  {isEditing ? (
+                    <div className="mt-3 space-y-2 rounded-md border bg-slate-50 p-3">
+                      <Label className="text-xs text-muted-foreground">Edit fields</Label>
+                      <div className="max-h-[560px] space-y-2 overflow-auto pr-1">
+                        {editingSection.lines.map((line, lineIndex) => {
+                          const cells = tableCells(line)
+                          if (!line.trim()) return <div key={lineIndex} className="h-3" />
+                          if (isRuleLine(line)) {
+                            return <div key={lineIndex} className="h-px bg-border" />
+                          }
+                          if (cells) {
+                            return (
+                              <div key={lineIndex} className="grid gap-2 md:grid-cols-4">
+                                {cells.map((cell, cellIndex) => (
+                                  <Input
+                                    key={cellIndex}
+                                    className={cellIndex >= 2 ? "md:col-span-2" : ""}
+                                    value={cell}
+                                    onChange={(event) => updateSectionEditorCell(lineIndex, cellIndex, event.target.value)}
+                                  />
+                                ))}
+                              </div>
+                            )
+                          }
+                          return (
+                            <Input
+                              key={lineIndex}
+                              value={line}
+                              onChange={(event) => updateSectionEditorLine(lineIndex, event.target.value)}
+                            />
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ) : (
+                    <pre className="mt-3 overflow-x-auto rounded-md border bg-slate-50 p-3 font-mono text-xs leading-5 text-slate-900">
+                      {sectionPreviewText(section.body)}
+                    </pre>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </>
       ) : (
@@ -481,6 +649,52 @@ export default function AfterBreakReportPage() {
           No draft for this date. Generate one to start editing.
         </div>
       )}
+        </TabsContent>
+
+        {canManageDelivery ? (
+          <TabsContent value="history" className="space-y-3">
+            <div className="flex items-center justify-between">
+              <div>
+                <h2 className="font-semibold">Report delivery history</h2>
+                <p className="text-sm text-muted-foreground">Last 50 sent reports</p>
+              </div>
+              <Button variant="outline" size="sm" onClick={() => void loadHistory()} disabled={loadingHistory}>
+                <RefreshCw className={loadingHistory ? "animate-spin" : ""} /> Refresh
+              </Button>
+            </div>
+            <div className="rounded-md border bg-white">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Date</TableHead>
+                    <TableHead>Sent at</TableHead>
+                    <TableHead>Recipients</TableHead>
+                    <TableHead>Subject</TableHead>
+                    <TableHead>Status</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {history.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell className="font-medium">{item.report_date}</TableCell>
+                      <TableCell>{formatDateTimeInTimezone(item.sent_at, settings?.timezone || "Europe/Tirane")}</TableCell>
+                      <TableCell className="max-w-[420px] whitespace-normal">{recipientsSummary(item.recipients)}</TableCell>
+                      <TableCell className="max-w-[420px] truncate">{item.subject}</TableCell>
+                      <TableCell>{item.last_error ? "ERROR" : item.status}</TableCell>
+                    </TableRow>
+                  ))}
+                  {loadingHistory ? (
+                    <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">Loading history...</TableCell></TableRow>
+                  ) : null}
+                  {!loadingHistory && history.length === 0 ? (
+                    <TableRow><TableCell colSpan={5} className="h-24 text-center text-muted-foreground">No sent reports yet.</TableCell></TableRow>
+                  ) : null}
+                </TableBody>
+              </Table>
+            </div>
+          </TabsContent>
+        ) : null}
+      </Tabs>
 
       <Dialog open={Boolean(preview)} onOpenChange={(open) => !open && setPreview(null)}>
         <DialogContent className="max-w-5xl">
@@ -490,6 +704,7 @@ export default function AfterBreakReportPage() {
           {preview ? <iframe title={`${REPORT_LABEL} preview`} srcDoc={preview.html} className="h-[650px] w-full rounded border bg-white" /> : null}
         </DialogContent>
       </Dialog>
+
     </div>
   )
 }

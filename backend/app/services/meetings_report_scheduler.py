@@ -84,8 +84,8 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
             logger.warning("meetings_report_scheduler_skipped reason=no_to_recipients")
             return False
 
-        tomorrow, sections, snapshot = await build_meetings_report_sections(db, report_day)
         if row is None:
+            tomorrow, sections, snapshot = await build_meetings_report_sections(db, report_day)
             row = MeetingsReportDraft(
                 report_date=report_day,
                 tomorrow_date=tomorrow,
@@ -97,11 +97,8 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
             db.add(row)
             await db.flush()
         else:
-            row.tomorrow_date = tomorrow
             row.subject = row.subject or subject_for(report_day)
             row.recipients = recipients
-            row.sections = sections
-            row.generated_snapshot = snapshot
 
         plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, row.sections)
         html_body = render_html(row.subject, row.report_date, row.tomorrow_date, row.sections)

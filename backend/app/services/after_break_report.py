@@ -10,7 +10,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import CommonApprovalStatus, GaNoteStatus
 from app.models.ga_note import GaNote
-from app.models.question_library import QuestionCategory, QuestionDefinition
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.user import User
@@ -42,6 +41,10 @@ SECTION_TITLES = [
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED",
 ]
+MANUAL_SECTION_TITLES = set(SECTION_TITLES[:4])
+SECTION_TITLE_ALIASES = {
+    "NOTES TE REJA ME TE KALTER DHE DISSCUSED?": SECTION_TITLES[6],
+}
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
 PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
@@ -182,23 +185,50 @@ async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
     return rows
 
 
-async def _question_library_rows(db: AsyncSession) -> list[list[str]]:
-    rows = (
-        await db.execute(
-            select(QuestionCategory.name, QuestionDefinition.text)
-            .join(QuestionDefinition, QuestionDefinition.category_id == QuestionCategory.id)
-            .order_by(
-                QuestionCategory.sort_order,
-                QuestionCategory.name,
-                QuestionDefinition.sort_order,
-                QuestionDefinition.created_at,
-            )
-        )
-    ).all()
-    return [
-        [str(index), _display_title(category_name), _display_title(question_text)]
-        for index, (category_name, question_text) in enumerate(rows, start=1)
-    ]
+def _remove_question_library_dump(body: str) -> str:
+    lines = (body or "").splitlines()
+    marker_index = next(
+        (
+            index
+            for index, line in enumerate(lines)
+            if line.strip().upper().startswith("PYETJE PER KONFIRMIM")
+        ),
+        -1,
+    )
+    if marker_index < 0:
+        return body
+    return "\n".join([*lines[:marker_index], "", "PYETJE PER KONFIRMIM: 0"]).strip()
+
+
+def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    by_title: dict[str, str] = {}
+    extras: list[dict[str, str]] = []
+    for section in sections or []:
+        raw_title = str(section.get("title") or "").strip()
+        title = SECTION_TITLE_ALIASES.get(raw_title, raw_title)
+        body = str(section.get("body") or "")
+        if title == SECTION_TITLES[4]:
+            body = _remove_question_library_dump(body)
+        if title in SECTION_TITLES and title not in by_title:
+            by_title[title] = body
+        elif title:
+            extras.append({"title": title, "body": body})
+
+    normalized: list[dict[str, str]] = []
+    for title in SECTION_TITLES:
+        if title in by_title:
+            body = by_title[title]
+        elif title in MANUAL_SECTION_TITLES:
+            body = "(Ploteso manualisht)"
+        elif title == SECTION_TITLES[4]:
+            body = "\n".join(["NEW SYSTEM TASKS: 0", "", "PYETJE PER KONFIRMIM: 0"])
+        elif title == SECTION_TITLES[5]:
+            body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WAITING CONFIRMATION: 0", "", "DONE: 0"])
+        else:
+            body = "NOTES: 0"
+        normalized.append({"title": title, "body": body})
+    normalized.extend(extras)
+    return normalized
 
 
 async def _personal_section(
@@ -325,11 +355,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             await _new_system_task_rows(db),
         ),
         "",
-        *_ascii_table(
-            "PYETJE PER KONFIRMIM",
-            [("NR", 2), ("LISTA", 28), ("PYETJA", 56)],
-            await _question_library_rows(db),
-        ),
+        "PYETJE PER KONFIRMIM: 0",
     ]
     section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
     section_3 = _ascii_table(

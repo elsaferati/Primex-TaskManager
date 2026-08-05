@@ -41,6 +41,25 @@ SECTION_TITLES = [
     "N- A KA DETYRA 1H PA SLOT?",
     "N- (GA/KA) KUSH KA DET PERSONALISHT?",
 ]
+DISPLAY_SECTION_TITLES = [
+    SECTION_TITLES[0],
+    SECTION_TITLES[1],
+    SECTION_TITLES[2],
+    SECTION_TITLES[3],
+    SECTION_TITLES[4],
+    SECTION_TITLES[8],
+    SECTION_TITLES[5],
+    SECTION_TITLES[7],
+    SECTION_TITLES[6],
+    SECTION_TITLES[9],
+    SECTION_TITLES[10],
+]
+MANUAL_SECTION_TITLES = {
+    SECTION_TITLES[0],
+}
+SECTION_TITLE_ALIASES = {
+    "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[10],
+}
 PERSONAL_GA_KA = re.compile(r"(^|[^A-Z])(GA|KA)([^A-Z]|$)|/[GK]A\s*:", re.I)
 TECHNICAL_BLOCK = re.compile(r"\[\[\s*added\s*\]\].*?\[\[\s*/\s*added\s*\]\]", re.I | re.S)
 TECHNICAL_TAG = re.compile(r"\[\[\s*/?\s*added\s*\]\]", re.I)
@@ -57,6 +76,31 @@ def next_working_day(day: date) -> date:
 
 def subject_for(day: date) -> str:
     return f"PrimeFlow Mbyllja e dites M3 - {day:%d.%m.%Y}"
+
+
+def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """Keep saved drafts aligned with the current M3 question list without losing edits."""
+    existing_sections = sections or []
+    by_title: dict[str, dict[str, str]] = {}
+    unknown_sections: list[dict[str, str]] = []
+    for section in existing_sections:
+        title = SECTION_TITLE_ALIASES.get(str(section.get("title") or "").strip(), str(section.get("title") or "").strip())
+        if not title:
+            continue
+        normalized = {"title": title, "body": str(section.get("body") or "")}
+        if title in DISPLAY_SECTION_TITLES and title not in by_title:
+            by_title[title] = normalized
+        else:
+            unknown_sections.append(normalized)
+
+    ordered: list[dict[str, str]] = []
+    for title in DISPLAY_SECTION_TITLES:
+        if title in by_title:
+            ordered.append(by_title[title])
+        elif title in MANUAL_SECTION_TITLES:
+            ordered.append({"title": title, "body": "(Ploteso manualisht)"})
+
+    return ordered + unknown_sections
 
 
 def _local_date(value: datetime | date | None) -> date | None:
@@ -846,6 +890,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     if not table_rows:
         return ""
     header, body_rows = table_rows[0], table_rows[1:]
+    header, body_rows = _normalize_meeting_status_table(header, body_rows)
     body_rows = _merge_ascii_continuation_rows(header, body_rows)
     column_widths = _email_column_widths(header)
     header_cell_style = (
@@ -935,6 +980,45 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         f"<colgroup>{colgroup_html}</colgroup><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
         "</td></tr></table>"
     )
+
+
+def _normalize_meeting_status_table(header: list[str], body_rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
+    """Render older saved meeting drafts with the current compact status column."""
+    normalized = [cell.strip().upper() for cell in header]
+    if not {"MBAJTUR", "ANULUAR", "PA STATUS"}.issubset(set(normalized)):
+        return header, body_rows
+    if "TITLE" not in normalized:
+        return header, body_rows
+
+    def cell_at(row: list[str], name: str) -> str:
+        try:
+            index = normalized.index(name)
+        except ValueError:
+            return ""
+        return row[index].strip() if len(row) > index else ""
+
+    new_header: list[str] = []
+    for cell in header:
+        name = cell.strip().upper()
+        if name in {"MBAJTUR", "ANULUAR", "PA STATUS"}:
+            continue
+        if name == "TITLE":
+            new_header.append("MBAJTUR?")
+        new_header.append(cell)
+
+    new_rows: list[list[str]] = []
+    for row in body_rows:
+        status_icon = "\u2713" if cell_at(row, "MBAJTUR") else "\u2715" if cell_at(row, "ANULUAR") else ""
+        new_row: list[str] = []
+        for index, cell in enumerate(header):
+            name = cell.strip().upper()
+            if name in {"MBAJTUR", "ANULUAR", "PA STATUS"}:
+                continue
+            if name == "TITLE":
+                new_row.append(status_icon)
+            new_row.append(row[index] if len(row) > index else "")
+        new_rows.append(new_row)
+    return new_header, new_rows
 
 
 def _email_column_width_attr(width: str) -> str:

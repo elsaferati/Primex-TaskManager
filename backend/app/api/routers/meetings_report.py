@@ -4,18 +4,19 @@ import uuid
 from datetime import date, datetime
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.user import User
 from app.services.meetings_report import (
     build_meetings_report_sections,
+    normalize_meetings_report_sections,
     render_html,
     render_plain_text,
     send_meetings_report,
@@ -137,7 +138,7 @@ def _draft(row: MeetingsReportDraft) -> dict:
         "tomorrow_date": row.tomorrow_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": row.sections,
+        "sections": normalize_meetings_report_sections(row.sections),
         "generated_snapshot": row.generated_snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
@@ -149,10 +150,18 @@ def _draft(row: MeetingsReportDraft) -> dict:
     }
 
 
+async def _normalize_saved_draft_sections(db: AsyncSession, row: MeetingsReportDraft) -> None:
+    normalized = normalize_meetings_report_sections(row.sections)
+    if normalized != row.sections:
+        row.sections = normalized
+        await db.commit()
+        await db.refresh(row)
+
+
 @router.get("/settings")
 async def get_settings(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_meetings_report_user),
+    _: User = Depends(require_admin),
 ) -> dict:
     return _settings(await _get_or_create_settings(db))
 
@@ -161,7 +170,7 @@ async def get_settings(
 async def update_settings(
     payload: SettingsPayload,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_meetings_report_editor),
+    _: User = Depends(require_admin),
 ) -> dict:
     if any(day < 0 or day > 6 for day in payload.weekdays):
         raise HTTPException(status_code=400, detail="Weekdays must be numbers from 0 to 6")
@@ -180,6 +189,35 @@ async def update_settings(
     return _settings(row)
 
 
+@router.get("/history")
+async def get_delivery_history(
+    limit: int = Query(default=50, ge=1, le=200),
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_meetings_report_user),
+) -> list[dict]:
+    rows = (
+        await db.execute(
+            select(MeetingsReportDraft)
+            .where(MeetingsReportDraft.sent_at.is_not(None))
+            .order_by(MeetingsReportDraft.sent_at.desc())
+            .limit(limit)
+        )
+    ).scalars().all()
+    return [
+        {
+            "id": str(row.id),
+            "report_date": row.report_date.isoformat(),
+            "subject": row.subject,
+            "recipients": normalize_recipients(row.recipients),
+            "status": row.status,
+            "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+            "gmail_message_id": row.gmail_message_id,
+            "last_error": row.last_error,
+        }
+        for row in rows
+    ]
+
+
 @router.get("")
 async def get_draft(
     report_date: date,
@@ -191,6 +229,7 @@ async def get_draft(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
+    await _normalize_saved_draft_sections(db, row)
     return _draft(row)
 
 
@@ -214,7 +253,7 @@ async def generate_draft(
             tomorrow_date=tomorrow,
             subject=subject_for(report_date),
             recipients=normalize_recipients(recipients),
-            sections=sections,
+            sections=normalize_meetings_report_sections(sections),
             generated_snapshot=snapshot,
             created_by_user_id=user.id,
             updated_by_user_id=user.id,
@@ -225,7 +264,7 @@ async def generate_draft(
         row.subject = subject_for(report_date)
         if not normalize_recipients(row.recipients)["to"]:
             row.recipients = normalize_recipients(recipients)
-        row.sections = sections
+        row.sections = normalize_meetings_report_sections(sections)
         row.generated_snapshot = snapshot
         row.status = "DRAFT"
         row.last_error = None
@@ -240,17 +279,23 @@ async def update_draft(
     draft_id: uuid.UUID,
     payload: DraftUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_meetings_report_editor),
+    user: User = Depends(require_meetings_report_user),
 ) -> dict:
     row = await db.get(MeetingsReportDraft, draft_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
+    can_manage_delivery = _can_edit_meetings_report(user)
+    if payload.recipients is not None and not can_manage_delivery:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only admin or manager can change delivery details",
+        )
     if payload.subject is not None:
         row.subject = payload.subject
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
-        row.sections = [section.model_dump() for section in payload.sections]
+        row.sections = normalize_meetings_report_sections([section.model_dump() for section in payload.sections])
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()

@@ -9,13 +9,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_admin
 from app.db import get_db
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.user import User
 from app.services.after_break_report import (
     build_after_break_report_sections,
+    normalize_after_break_report_sections,
     render_html,
     render_plain_text,
     send_after_break_report,
@@ -130,7 +131,7 @@ def _draft(row: AfterBreakReportDraft) -> dict:
         "report_date": row.report_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": row.sections,
+        "sections": normalize_after_break_report_sections(row.sections),
         "generated_snapshot": row.generated_snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
@@ -142,10 +143,23 @@ def _draft(row: AfterBreakReportDraft) -> dict:
     }
 
 
+def _delivery_history(row: AfterBreakReportDraft) -> dict:
+    return {
+        "id": str(row.id),
+        "report_date": row.report_date.isoformat(),
+        "subject": row.subject,
+        "recipients": normalize_recipients(row.recipients),
+        "status": row.status,
+        "sent_at": row.sent_at.isoformat() if row.sent_at else None,
+        "gmail_message_id": row.gmail_message_id,
+        "last_error": row.last_error,
+    }
+
+
 @router.get("/settings")
 async def get_settings(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_after_break_report_user),
+    _: User = Depends(require_admin),
 ) -> dict:
     return _settings(await _get_or_create_settings(db))
 
@@ -154,7 +168,7 @@ async def get_settings(
 async def update_settings(
     payload: SettingsPayload,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_after_break_report_editor),
+    _: User = Depends(require_admin),
 ) -> dict:
     if any(day < 0 or day > 6 for day in payload.weekdays):
         raise HTTPException(status_code=400, detail="Weekdays must be numbers from 0 to 6")
@@ -173,6 +187,24 @@ async def update_settings(
     return _settings(row)
 
 
+@router.get("/history")
+async def get_delivery_history(
+    limit: int = 50,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_admin),
+) -> list[dict]:
+    capped_limit = min(max(limit, 1), 100)
+    rows = (
+        await db.execute(
+            select(AfterBreakReportDraft)
+            .where(AfterBreakReportDraft.sent_at.is_not(None))
+            .order_by(AfterBreakReportDraft.sent_at.desc())
+            .limit(capped_limit)
+        )
+    ).scalars().all()
+    return [_delivery_history(row) for row in rows]
+
+
 @router.get("")
 async def get_draft(
     report_date: date,
@@ -184,6 +216,11 @@ async def get_draft(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
+    normalized_sections = normalize_after_break_report_sections(row.sections)
+    if normalized_sections != row.sections:
+        row.sections = normalized_sections
+        await db.commit()
+        await db.refresh(row)
     return _draft(row)
 
 
@@ -231,7 +268,7 @@ async def update_draft(
     draft_id: uuid.UUID,
     payload: DraftUpdate,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_after_break_report_editor),
+    user: User = Depends(require_after_break_report_user),
 ) -> dict:
     row = await db.get(AfterBreakReportDraft, draft_id)
     if row is None:
@@ -241,7 +278,7 @@ async def update_draft(
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
-        row.sections = [section.model_dump() for section in payload.sections]
+        row.sections = normalize_after_break_report_sections([section.model_dump() for section in payload.sections])
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()
@@ -268,7 +305,7 @@ async def preview_draft(
 async def send_draft(
     draft_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_after_break_report_editor),
+    user: User = Depends(require_admin),
 ) -> dict:
     row = await db.get(AfterBreakReportDraft, draft_id)
     if row is None:
