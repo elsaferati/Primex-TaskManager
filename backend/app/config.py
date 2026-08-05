@@ -36,7 +36,17 @@ class Settings(BaseSettings):
     WEEKLY_PLANNING_AUDIT_RECIPIENTS: str = (
         "130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com"
     )
-    STD_PRIMEFLOW_API_BASE_URL: str = "https://std.primexeu.com/api/integrations/primeflow/v1"
+    STD_FEEDBACK_API_BASE_URL: str = "https://std.primexeu.com/api/integrations/primeflow/v1"
+    STD_FEEDBACK_API_TOKEN: str | None = None
+    STD_FEEDBACK_SYNC_ENABLED: bool = True
+    STD_FEEDBACK_SYNC_INTERVAL_MINUTES: int = 5
+    STD_FEEDBACK_EXTERNAL_DOMAINS: str = "staudmoebel.de"
+    STD_FEEDBACK_PROJECT_KEYWORDS: str = "STD"
+    STD_FEEDBACK_REQUEST_TIMEOUT_SECONDS: int = 30
+    STD_FEEDBACK_REQUEST_RETRIES: int = 3
+
+    # Legacy names remain readable during a rolling server deployment.
+    STD_PRIMEFLOW_API_BASE_URL: str | None = None
     STD_PRIMEFLOW_API_TOKEN: str | None = None
     REPORT_STORAGE_DIR: str = "uploads/reports"
     REPORT_RETENTION_DAYS: int = 90
@@ -110,6 +120,22 @@ class Settings(BaseSettings):
         if value == "none" and not self.auth_cookie_secure:
             return "lax"
         return value
+
+    @property
+    def std_feedback_external_domain_list(self) -> list[str]:
+        return [
+            value.strip().lower().lstrip("@")
+            for value in self.STD_FEEDBACK_EXTERNAL_DOMAINS.split(",")
+            if value.strip()
+        ]
+
+    @property
+    def std_feedback_project_keyword_list(self) -> list[str]:
+        return [
+            value.strip().lower()
+            for value in self.STD_FEEDBACK_PROJECT_KEYWORDS.split(",")
+            if value.strip()
+        ]
 
 
 settings = Settings()

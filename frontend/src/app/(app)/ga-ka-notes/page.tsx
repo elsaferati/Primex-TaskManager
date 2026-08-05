@@ -78,6 +78,11 @@ type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | Normaliz
 type ContentFilter = "all" | "emails"
 type TextMarkRange = { start: number; end: number }
 type DoneMarkRange = TextMarkRange
+type ParsedMarkedNoteContent = {
+  text: string
+  doneRanges: TextMarkRange[]
+  addedRanges: TextMarkRange[]
+}
 type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "DONE"
 type GaAssigneeTaskType = "NORMAL" | "HIGH" | "1H" | "R1" | "PERSONAL" | "BLLOK"
 type GaNotesTableNote = GaNote & { source?: "GA_KA" | "PX_JAV" }
@@ -140,11 +145,7 @@ function gaAssigneeTaskType(task: Task): GaAssigneeTaskType {
   return "NORMAL"
 }
 
-function parseMarkedNoteContent(content?: string | null): {
-  text: string
-  doneRanges: TextMarkRange[]
-  addedRanges: TextMarkRange[]
-} {
+function parseMarkedNoteContent(content?: string | null): ParsedMarkedNoteContent {
   if (!content) return { text: "", doneRanges: [], addedRanges: [] }
   const doneRanges: DoneMarkRange[] = []
   const addedRanges: TextMarkRange[] = []
@@ -344,6 +345,74 @@ function addInsertedTextRange(previousText: string, nextText: string, ranges: Te
   return normalizeAddedRanges(nextText, [...adjustedRanges, { start: prefixLength, end: nextChangeEnd }])
 }
 
+function getNumberedListProgress(text: string, doneRanges: TextMarkRange[]) {
+  const normalizedDoneRanges = normalizeTextRanges(doneRanges)
+  let completed = 0
+  let total = 0
+  let lineStart = 0
+
+  for (const line of text.split("\n")) {
+    const orderedMatch = line.match(/^\s*\d+\.\s+/)
+    if (orderedMatch) {
+      const itemStart = lineStart + orderedMatch[0].length
+      const itemEnd = lineStart + line.length
+      const meaningfulPositions: number[] = []
+
+      for (let position = itemStart; position < itemEnd; position += 1) {
+        const character = text[position]
+        if (!/\s/.test(character) && character !== "*") {
+          meaningfulPositions.push(position)
+        }
+      }
+
+      if (meaningfulPositions.length > 0) {
+        total += 1
+        const isCompleted = meaningfulPositions.every((position) =>
+          normalizedDoneRanges.some((range) => range.start <= position && range.end > position)
+        )
+        if (isCompleted) completed += 1
+      }
+    }
+
+    lineStart += line.length + 1
+  }
+
+  return total > 0 ? { completed, total } : null
+}
+
+function synchronizeNumberedListProgress(parsed: ParsedMarkedNoteContent): ParsedMarkedNoteContent {
+  const progress = getNumberedListProgress(parsed.text, parsed.doneRanges)
+  if (!progress) return parsed
+
+  const lines = parsed.text.split("\n")
+  const titleLineIndex = lines.findIndex((line) => line.trim() && !/^\s*\d+\.\s+/.test(line))
+  if (titleLineIndex === -1) return parsed
+
+  const titleLine = lines[titleLineIndex]
+  const titleMatch = titleLine.match(
+    /^(\s*[A-Za-zÀ-ž]{1,5}(?:\s*\/\s*[A-Za-zÀ-ž]{1,5})?\s*:\s*(?:[A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9/_-]{0,11}\s*-\s*)?)(?:(\d{1,3}(?:\s*\/\s*\d{1,3})?)(?:\s+|$))?/
+  )
+  if (!titleMatch) return parsed
+
+  const progressLabel = progress.completed > 0 ? `${progress.completed}/${progress.total}` : String(progress.total)
+  const titleSuffix = titleLine.slice(titleMatch[0].length)
+  const nextTitleLine = `${titleMatch[1]}${progressLabel}${titleSuffix ? ` ${titleSuffix}` : ""}`
+  if (nextTitleLine === titleLine) return parsed
+
+  lines[titleLineIndex] = nextTitleLine
+  const nextText = lines.join("\n")
+
+  return {
+    text: nextText,
+    doneRanges: adjustTextRangesForTextChange(parsed.text, nextText, parsed.doneRanges),
+    addedRanges: adjustTextRangesForTextChange(parsed.text, nextText, parsed.addedRanges),
+  }
+}
+
+function parseMarkedNoteContentWithProgress(content?: string | null) {
+  return synchronizeNumberedListProgress(parseMarkedNoteContent(content))
+}
+
 function getNoteMarkClass(isDone: boolean, isAdded: boolean) {
   if (isDone && isAdded) {
     return "rounded bg-blue-100 px-1 text-emerald-900 ring-1 ring-blue-300 line-through decoration-emerald-700 decoration-2"
@@ -357,7 +426,7 @@ function getNoteMarkClass(isDone: boolean, isAdded: boolean) {
 
 function renderMarkedNoteContent(content?: string | null) {
   if (!content) return "-"
-  const parsed = parseMarkedNoteContent(content)
+  const parsed = parseMarkedNoteContentWithProgress(content)
   return renderNoteContentWithRanges(parsed.text, parsed.doneRanges, parsed.addedRanges)
 }
 
@@ -1464,6 +1533,11 @@ export default function GaKaNotesPage() {
       toast.error("Content is required")
       return
     }
+    const contentWithProgress = synchronizeNumberedListProgress({
+      text: content.trim(),
+      doneRanges: [],
+      addedRanges: [],
+    }).text
     // Use URL parameters if present, otherwise determine based on user role
     const departmentForNote = searchParams.get("department_id") || null
     const projectForNote = searchParams.get("project_id") || null
@@ -1487,7 +1561,7 @@ export default function GaKaNotesPage() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: content.trim(),
+          content: contentWithProgress,
           note_type: noteType,
           priority: priority === "NONE" ? null : priority,
           department_id: finalDepartmentId,
@@ -1539,7 +1613,7 @@ export default function GaKaNotesPage() {
   }
 
   const openEditNote = (note: GaNote) => {
-    const parsedContent = parseMarkedNoteContent(note.content)
+    const parsedContent = parseMarkedNoteContentWithProgress(note.content)
     setEditNoteId(note.id)
     setEditContent(parsedContent.text)
     setEditDoneRanges(parsedContent.doneRanges)
@@ -1665,7 +1739,7 @@ export default function GaKaNotesPage() {
   }
 
   const markSelectedNoteTextDone = async (note: GaNote) => {
-    const parsedContent = parseMarkedNoteContent(note.content)
+    const parsedContent = parseMarkedNoteContentWithProgress(note.content)
     const selectionRange = getNoteSelectionRange(note.id)
     if (!selectionRange) {
       toast.error("Select text inside the note to mark done")
@@ -1678,7 +1752,10 @@ export default function GaKaNotesPage() {
       return
     }
 
-    const nextRanges = toggleDoneRange(parsedContent.doneRanges, selectionRange)
+    const nextContent = synchronizeNumberedListProgress({
+      ...parsedContent,
+      doneRanges: toggleDoneRange(parsedContent.doneRanges, selectionRange),
+    })
 
     setMarkingSelectedNoteId(note.id)
     try {
@@ -1687,7 +1764,11 @@ export default function GaKaNotesPage() {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          content: serializeMarkedNoteContent(parsedContent.text, nextRanges, parsedContent.addedRanges).trim(),
+          content: serializeMarkedNoteContent(
+            nextContent.text,
+            nextContent.doneRanges,
+            nextContent.addedRanges
+          ).trim(),
         }),
       })
       if (!res?.ok) {
@@ -1723,7 +1804,16 @@ export default function GaKaNotesPage() {
     }
     setSavingEdit(true)
     try {
-      const serializedContent = serializeMarkedNoteContent(editContent, editDoneRanges, editAddedRanges).trim()
+      const editContentWithProgress = synchronizeNumberedListProgress({
+        text: editContent,
+        doneRanges: editDoneRanges,
+        addedRanges: editAddedRanges,
+      })
+      const serializedContent = serializeMarkedNoteContent(
+        editContentWithProgress.text,
+        editContentWithProgress.doneRanges,
+        editContentWithProgress.addedRanges
+      ).trim()
       const taskInfo = noteTaskInfo.get(editNoteId)
       const currentNote = notes.find((note) => note.id === editNoteId) || null
       if (taskInfo?.taskId && editTaskAssigneeIds.length === 0) {
@@ -3986,7 +4076,18 @@ export default function GaKaNotesPage() {
               <div className="space-y-1">
                 <Label className="text-xs text-muted-foreground">Preview</Label>
                 <div className="min-h-[120px] max-h-[32vh] overflow-y-auto whitespace-pre-wrap break-words rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-sm leading-normal">
-                  {renderNoteContentWithRanges(editContent, editDoneRanges, editAddedRanges)}
+                  {(() => {
+                    const previewContent = synchronizeNumberedListProgress({
+                      text: editContent,
+                      doneRanges: editDoneRanges,
+                      addedRanges: editAddedRanges,
+                    })
+                    return renderNoteContentWithRanges(
+                      previewContent.text,
+                      previewContent.doneRanges,
+                      previewContent.addedRanges
+                    )
+                  })()}
                 </div>
               </div>
             </div>

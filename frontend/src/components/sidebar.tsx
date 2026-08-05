@@ -32,6 +32,7 @@ import {
   Activity,
   ChevronDown,
   ScrollText,
+  TicketCheck,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -72,6 +73,11 @@ const primaryItems: NavItem[] = [
     href: "/ga-ka-notes",
     label: "GA/KA Notes",
     icon: StickyNote,
+  },
+  {
+    href: "/external-tickets",
+    label: "External Tickets",
+    icon: TicketCheck,
   },
   {
     href: "/next-week-plan",

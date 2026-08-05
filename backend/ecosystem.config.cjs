@@ -24,6 +24,17 @@ const sharedEnv = {
     "130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com",
   REPORT_STORAGE_DIR: process.env.REPORT_STORAGE_DIR ?? "uploads/reports",
   REPORT_RETENTION_DAYS: process.env.REPORT_RETENTION_DAYS ?? "90",
+  STD_FEEDBACK_API_BASE_URL:
+    process.env.STD_FEEDBACK_API_BASE_URL ??
+    "https://std.primexeu.com/api/integrations/primeflow/v1",
+  STD_FEEDBACK_API_TOKEN: process.env.STD_FEEDBACK_API_TOKEN ?? "",
+  STD_FEEDBACK_SYNC_ENABLED: process.env.STD_FEEDBACK_SYNC_ENABLED ?? "true",
+  STD_FEEDBACK_SYNC_INTERVAL_MINUTES:
+    process.env.STD_FEEDBACK_SYNC_INTERVAL_MINUTES ?? "5",
+  STD_FEEDBACK_EXTERNAL_DOMAINS:
+    process.env.STD_FEEDBACK_EXTERNAL_DOMAINS ?? "staudmoebel.de",
+  STD_FEEDBACK_PROJECT_KEYWORDS:
+    process.env.STD_FEEDBACK_PROJECT_KEYWORDS ?? "STD",
   EMAIL_HOST: process.env.EMAIL_HOST ?? "smtp.gmail.com",
   EMAIL_PORT: process.env.EMAIL_PORT ?? "587",
   EMAIL_USER: process.env.EMAIL_USER ?? "",
@@ -59,6 +70,8 @@ module.exports = {
         ...sharedEnv,
         // Only one API instance should run the weekly system-task scheduler.
         SYSTEM_TASK_SCHEDULER_ENABLED: "false",
+        // The primary API owns the STD sync loop; the public fallback stays read-only.
+        STD_FEEDBACK_SYNC_ENABLED: "false",
       },
     },
     {

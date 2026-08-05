@@ -56,7 +56,8 @@ async def _startup() -> None:
         scheduler_task = asyncio.create_task(run_system_task_scheduler_forever())
     meetings_report_scheduler_task = asyncio.create_task(run_meetings_report_scheduler_forever())
     after_break_report_scheduler_task = asyncio.create_task(run_after_break_report_scheduler_forever())
-    std_feedback_sync_task = asyncio.create_task(run_std_feedback_ticket_sync_forever())
+    if settings.STD_FEEDBACK_SYNC_ENABLED:
+        std_feedback_sync_task = asyncio.create_task(run_std_feedback_ticket_sync_forever())
 
 
 @app.on_event("shutdown")
