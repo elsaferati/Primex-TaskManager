@@ -162,9 +162,6 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/system-task-instances", label: "System Tasks Report", icon: Layers },
       { href: "/external-tickets", label: "STD Tickets EXT", icon: TicketCheck },
-      { href: "/morning-report", label: "Start of Day M1", icon: MailCheck },
-      { href: "/meetings-report", label: "End of Day M3", icon: MailCheck },
-      { href: "/after-break-report", label: "Post-Break Summary", icon: MailCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
       {
