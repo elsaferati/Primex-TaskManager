@@ -19,6 +19,17 @@ type MonthlyResponse = {
   summary: MonthlySummary
 }
 
+function formatPlannerDay(value: string) {
+  const parsed = new Date(`${value}T00:00:00`)
+  if (Number.isNaN(parsed.getTime())) return value
+  return parsed.toLocaleDateString("en-GB", {
+    weekday: "long",
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+  })
+}
+
 export default function MonthlyPlannerPage() {
   const { apiFetch, user } = useAuth()
   const now = new Date()
@@ -30,37 +41,77 @@ export default function MonthlyPlannerPage() {
   const [departmentId, setDepartmentId] = React.useState<string>("")
   const [userId, setUserId] = React.useState<string>(ALL_USERS_VALUE)
   const [data, setData] = React.useState<MonthlyResponse | null>(null)
+  const [filtersReady, setFiltersReady] = React.useState(false)
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
 
   React.useEffect(() => {
+    if (!user) return
+    let cancelled = false
+
     const boot = async () => {
-      const depRes = await apiFetch("/departments")
-      if (depRes.ok) {
-        const deps = (await depRes.json()) as Department[]
-        setDepartments(deps)
-        const initialDep = user?.department_id || deps[0]?.id || ""
-        setDepartmentId(initialDep)
-      }
-      if (user?.role !== "STAFF") {
-        const uRes = await apiFetch("/users")
-        if (uRes.ok) setUsers((await uRes.json()) as User[])
-      }
+      const [depRes, userRes] = await Promise.all([
+        apiFetch("/departments"),
+        user.role !== "STAFF" ? apiFetch("/users") : Promise.resolve(null),
+      ])
+      if (cancelled) return
+
+      const deps = depRes.ok ? ((await depRes.json()) as Department[]) : []
+      const loadedUsers = userRes?.ok ? ((await userRes.json()) as User[]) : []
+      if (cancelled) return
+
+      setDepartments(deps)
+      setDepartmentId(user.department_id || deps[0]?.id || "")
+      setUsers(loadedUsers)
+      setFiltersReady(true)
     }
     void boot()
+
+    return () => {
+      cancelled = true
+    }
   }, [apiFetch, user])
 
   React.useEffect(() => {
+    if (!user || !filtersReady) return
+    let active = true
+
     const load = async () => {
-      const qs = new URLSearchParams()
-      qs.set("year", year)
-      qs.set("month", month)
-      if (departmentId) qs.set("department_id", departmentId)
-      if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
-      const res = await apiFetch(`/planners/monthly?${qs.toString()}`)
-      if (!res.ok) return
-      setData((await res.json()) as MonthlyResponse)
+      setLoading(true)
+      setError(null)
+      try {
+        const qs = new URLSearchParams()
+        qs.set("year", year)
+        qs.set("month", month)
+        if (departmentId) qs.set("department_id", departmentId)
+        if (userId && userId !== ALL_USERS_VALUE) qs.set("user_id", userId)
+        const res = await apiFetch(`/planners/monthly?${qs.toString()}`)
+        if (!res.ok) {
+          let detail = "Could not load the monthly planner."
+          try {
+            const payload = (await res.json()) as { detail?: string }
+            if (payload.detail) detail = payload.detail
+          } catch {
+            // Keep the fallback message when the API does not return JSON.
+          }
+          throw new Error(`${detail} (${res.status})`)
+        }
+        const responseData = (await res.json()) as MonthlyResponse
+        if (active) setData(responseData)
+      } catch (loadError) {
+        if (active) {
+          setError(loadError instanceof Error ? loadError.message : "Could not load the monthly planner.")
+        }
+      } finally {
+        if (active) setLoading(false)
+      }
     }
     void load()
-  }, [apiFetch, year, month, departmentId, userId])
+
+    return () => {
+      active = false
+    }
+  }, [apiFetch, year, month, departmentId, filtersReady, user, userId])
 
   const tasksByDay = React.useMemo(() => {
     const map = new Map<string, Task[]>()
@@ -135,7 +186,11 @@ export default function MonthlyPlannerPage() {
         ) : null}
       </div>
 
-      {data ? (
+      {loading && data ? <div className="text-sm text-muted-foreground">Updating planner...</div> : null}
+
+      {!data && error ? (
+        <div className="text-sm text-red-600">{error}</div>
+      ) : data ? (
         <div className="space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
             <Card>
@@ -164,21 +219,32 @@ export default function MonthlyPlannerPage() {
             <CardHeader>
               <CardTitle className="text-sm">List view</CardTitle>
             </CardHeader>
-            <CardContent className="space-y-4">
-              {Array.from(tasksByDay.entries())
-                .sort((a, b) => a[0].localeCompare(b[0]))
-                .map(([d, list]) => (
-                  <div key={d}>
-                    <div className="mb-1 text-sm font-medium">{d}</div>
-                    <div className="space-y-1">
-                      {list.map((t) => (
-                        <Link key={t.id} href={`/tasks/${t.id}`} className="block text-sm hover:underline">
-                          {t.title}
-                        </Link>
-                      ))}
-                    </div>
-                  </div>
-                ))}
+            <CardContent>
+              <div className="space-y-3">
+                {Array.from(tasksByDay.entries())
+                  .sort((a, b) => a[0].localeCompare(b[0]))
+                  .map(([d, list]) => (
+                    <section key={d} className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+                      <div className="flex items-center justify-between gap-3 border-b border-slate-200 bg-slate-50 px-3 py-2">
+                        <div className="text-sm font-semibold text-slate-700">{formatPlannerDay(d)}</div>
+                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-xs font-semibold text-slate-600">
+                          {list.length}
+                        </span>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                        {list.map((t) => (
+                          <Link
+                            key={t.id}
+                            href={`/tasks/${t.id}`}
+                            className="block px-3 py-2.5 text-sm text-slate-700 transition-colors hover:bg-blue-50 hover:text-blue-700"
+                          >
+                            {t.title}
+                          </Link>
+                        ))}
+                      </div>
+                    </section>
+                  ))}
+              </div>
               {!tasksByDay.size ? <div className="text-sm text-muted-foreground">No tasks scheduled.</div> : null}
             </CardContent>
           </Card>

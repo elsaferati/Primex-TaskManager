@@ -24,9 +24,15 @@ def _clients_path_for_department(department: Department) -> Path | None:
     configured_path = os.getenv(f"CLIENTS_PATH_{lookup_key}")
     identity = f"{department.code or ''} {department.name or ''}".upper()
     if not configured_path and "DEVELOP" in identity:
-        configured_path = os.getenv("DEVELOPMENT_CLIENTS_PATH", r"Z:\10_ZHVILLIM\05_CLIENTS")
+        configured_path = os.getenv(
+            "DEVELOPMENT_CLIENTS_PATH",
+            r"\\192.168.10.8\Files\10_ZHVILLIM\05_CLIENTS",
+        )
     if not configured_path and "PRODUCT" in identity:
-        configured_path = os.getenv("PRODUCT_CLIENTS_PATH", r"Y:\05_CLIENTS")
+        configured_path = os.getenv(
+            "PRODUCT_CLIENTS_PATH",
+            r"\\192.168.10.8\Klientat\05_CLIENTS",
+        )
     return Path(configured_path) if configured_path else None
 
 

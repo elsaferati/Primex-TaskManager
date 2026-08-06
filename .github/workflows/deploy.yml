@@ -103,6 +103,8 @@ jobs:
           echo APP_TIMEZONE=Europe/Budapest >> backend\.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend\.env
           echo FRONTEND_URL=https://primeflow.primexeu.com >> backend\.env
+          echo DEVELOPMENT_CLIENTS_PATH=\\192.168.10.8\Files\10_ZHVILLIM\05_CLIENTS >> backend\.env
+          echo PRODUCT_CLIENTS_PATH=\\192.168.10.8\Klientat\05_CLIENTS >> backend\.env
           echo PRIMEFLOW_API_BASE_URL=https://api-flow.primexeu.com >> backend\.env
           echo PRIMEFLOW_WEB_BASE_URL=https://primeflow.primexeu.com >> backend\.env
           echo PRIMEFLOW_MCP_TRANSPORT=sse >> backend\.env

@@ -139,6 +139,7 @@ export default function DashboardPage() {
                 <Link
                   key={link.href}
                   href={link.href}
+                  prefetch
                   className={cn(
                     "flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm",
                     "text-slate-700 hover:bg-slate-50 hover:text-slate-900",

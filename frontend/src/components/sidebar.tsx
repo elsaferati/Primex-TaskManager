@@ -76,7 +76,7 @@ const primaryItems: NavItem[] = [
   },
   {
     href: "/next-week-plan",
-    label: "PX JAV",
+    label: "Next Week Plan",
     icon: CalendarClock,
   },
 ]
@@ -87,9 +87,9 @@ const navGroups: NavGroup[] = [
     label: "Tasks",
     icon: ListTodo,
     items: [
-      { href: "/primeflow-classifications", label: "Klasifikime", icon: Layers },
-      { href: "/primeflow-pyetje", label: "Pyetje", icon: ClipboardCheck },
-      { href: "/waiting-confirmation-ga", label: "Waiting Conf GA", icon: Clock3 },
+      { href: "/primeflow-classifications", label: "Classifications", icon: Layers },
+      { href: "/primeflow-pyetje", label: "Questions", icon: ClipboardCheck },
+      { href: "/waiting-confirmation-ga", label: "GA Awaiting Confirmation", icon: Clock3 },
       { href: "/admin-tasks", label: "Admin Tasks", icon: ClipboardCheck },
       { href: "/system-tasks", label: "System Tasks", icon: Layers },
       { href: "/open-tasks", label: "Open Tasks", icon: ListTodo },
@@ -97,7 +97,7 @@ const navGroups: NavGroup[] = [
   },
   {
     id: "departments",
-    label: "Departamentet",
+    label: "Departments",
     icon: Briefcase,
     items: [
       {
@@ -120,7 +120,7 @@ const navGroups: NavGroup[] = [
       },
       {
         href: "/departments/human-resource",
-        label: "Human Resource",
+        label: "Human Resources",
         icon: Briefcase,
         match: ["/departments/human-resource"],
       },
@@ -134,14 +134,14 @@ const navGroups: NavGroup[] = [
   },
   {
     id: "planning",
-    label: "Planifikimi",
+    label: "Planning",
     icon: CalendarDays,
     items: [
       { href: "/weekly-planner", label: "Weekly Planner", icon: CalendarDays },
       { href: "/monthly-planner", label: "Monthly Planner", icon: CalendarRange },
       {
         href: "/realization",
-        label: "Realizimi",
+        label: "Realization",
         icon: Activity,
         roles: ["ADMIN", "MANAGER"],
       },
@@ -149,19 +149,19 @@ const navGroups: NavGroup[] = [
   },
   {
     id: "reports",
-    label: "Raporte & Kontroll",
+    label: "Reports & Control",
     icon: BarChart3,
     items: [
       { href: "/system-task-instances", label: "System Tasks Report", icon: Layers },
       { href: "/external-tickets", label: "STD Tickets EXT", icon: TicketCheck },
-      { href: "/morning-report", label: "Hapja e dites M1", icon: MailCheck },
-      { href: "/meetings-report", label: "Mbyllja e dites M3", icon: MailCheck },
-      { href: "/after-break-report", label: "Permbledhja pas pauzes", icon: MailCheck },
+      { href: "/morning-report", label: "Start of Day M1", icon: MailCheck },
+      { href: "/meetings-report", label: "End of Day M3", icon: MailCheck },
+      { href: "/after-break-report", label: "Post-Break Summary", icon: MailCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
       {
         href: "/reports/weekly-planning-audit",
-        label: "Kontrolli PLNF JAV",
+        label: "Weekly Planning Check",
         icon: FileSpreadsheet,
         roles: ["ADMIN", "MANAGER"],
       },
@@ -175,7 +175,7 @@ const navGroups: NavGroup[] = [
   },
   {
     id: "administration",
-    label: "Administrimi",
+    label: "Administration",
     icon: Settings,
     items: [
       { href: "/platforms", label: "PrimexEU Links", icon: Shield },
@@ -480,7 +480,7 @@ export function Sidebar({ role }: { role: UserRole }) {
             aria-expanded={standardsOpen}
           >
             <ScrollText className={cn("h-4 w-4 shrink-0", standardsActive ? "text-primary" : "text-muted-foreground")} />
-            <span className="flex-1 text-left">STANDARDET</span>
+            <span className="flex-1 text-left normal-case">Standards</span>
             <ChevronDown className={cn("h-4 w-4 transition-transform", standardsOpen && "rotate-180")} />
           </button>
           {standardsOpen ? (
