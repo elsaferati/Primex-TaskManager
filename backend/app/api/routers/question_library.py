@@ -80,7 +80,7 @@ def _user_initials(full_name: str | None) -> str:
 
 
 def _is_question_participant(user: User) -> bool:
-    return user.is_active and _user_initials(user.full_name) not in {"GA", "KA"}
+    return user.is_active and _user_initials(user.full_name) not in {"GA", "KA", "HV"}
 
 
 def _question_task_title(text: str) -> str:

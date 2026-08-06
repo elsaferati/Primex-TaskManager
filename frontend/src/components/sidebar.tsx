@@ -79,7 +79,7 @@ const primaryItems: NavItem[] = [
   },
   {
     href: "/ga-ka-notes",
-    label: "GA/KA Notes",
+    label: "Notes",
     icon: StickyNote,
   },
   {
