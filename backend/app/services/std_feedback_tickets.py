@@ -507,14 +507,24 @@ async def std_tickets_report_section(db: AsyncSession, report_day: date) -> str:
         )
     ).scalar_one()
 
-    return "\n".join(
-        [
-            f"Totali i tiketave te hapurat: {int(total_opened or 0)}",
-            f"Tiketa sot: {int(opened_today or 0)}",
-            f"Mbyllura sot: {int(closed_today or 0)}",
-            f"Rregulluar sot: {int(done_today or 0)}",
-        ]
-    )
+    rows = [
+        ("Totali i tiketave te hapurat", int(total_opened or 0)),
+        ("Tiketa sot", int(opened_today or 0)),
+        ("Mbyllura sot", int(closed_today or 0)),
+        ("Rregulluar sot", int(done_today or 0)),
+    ]
+    tip_width = max(len("TIPI"), max(len(label) for label, _ in rows))
+    count_width = max(len("COUNT"), max(len(str(count)) for _, count in rows))
+    border = f"+----+{'-' * (tip_width + 2)}+{'-' * (count_width + 2)}+"
+    lines = [
+        border,
+        f"| {'NR':<2} | {'TIPI':<{tip_width}} | {'COUNT':<{count_width}} |",
+        border,
+    ]
+    for index, (label, count) in enumerate(rows, start=1):
+        lines.append(f"| {index:<2} | {label:<{tip_width}} | {str(count):<{count_width}} |")
+        lines.append(border)
+    return "\n".join(lines)
 
 
 async def run_std_feedback_ticket_sync_forever() -> None:

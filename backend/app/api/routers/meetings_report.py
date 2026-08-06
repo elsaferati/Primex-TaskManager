@@ -23,6 +23,7 @@ from app.services.meetings_report import (
     send_meetings_report,
     subject_for,
 )
+from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
 from app.services.report_section_merge import preserve_manual_sections
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -140,7 +141,14 @@ def _draft(row: MeetingsReportDraft) -> dict:
         "tomorrow_date": row.tomorrow_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": normalize_meetings_report_sections(row.sections),
+        "sections": [
+            {
+                "title": str(section.get("title") or "").strip(),
+                "body": str(section.get("body") or ""),
+            }
+            for section in (row.sections or [])
+            if str(section.get("title") or "").strip()
+        ],
         "generated_snapshot": row.generated_snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
@@ -153,9 +161,17 @@ def _draft(row: MeetingsReportDraft) -> dict:
 
 
 async def _normalize_saved_draft_sections(db: AsyncSession, row: MeetingsReportDraft) -> None:
-    normalized = normalize_meetings_report_sections(row.sections)
-    if normalized != row.sections:
-        row.sections = normalized
+    sections = [
+        {
+            "title": str(section.get("title") or "").strip(),
+            "body": str(section.get("body") or ""),
+        }
+        for section in (row.sections or [])
+        if str(section.get("title") or "").strip()
+    ]
+    sections = await merge_common_view_manual_sections(db, sections, "meetings", row.sections)
+    if sections != row.sections:
+        row.sections = sections
         await db.commit()
         await db.refresh(row)
 
@@ -251,6 +267,9 @@ async def generate_draft(
     ).scalar_one_or_none()
     if row is not None:
         sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
+    sections = await merge_common_view_manual_sections(
+        db, sections, "meetings", row.sections if row is not None else None
+    )
     if row is None:
         row = MeetingsReportDraft(
             report_date=report_date,
@@ -299,7 +318,14 @@ async def update_draft(
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
-        row.sections = normalize_meetings_report_sections([section.model_dump() for section in payload.sections])
+        # Keep user-edited question titles as saved (do not remap via normalize).
+        row.sections = [
+            {
+                "title": (section.title or "").strip() or "Untitled",
+                "body": section.body or "",
+            }
+            for section in payload.sections
+        ]
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()

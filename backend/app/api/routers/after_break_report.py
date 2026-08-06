@@ -24,6 +24,7 @@ from app.services.after_break_report import (
     send_after_break_report,
     subject_for,
 )
+from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
 from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 from app.services.primeflow_report import report_timezone
@@ -134,7 +135,16 @@ def _draft(row: AfterBreakReportDraft, sections: list[dict[str, str]] | None = N
         "report_date": row.report_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": sections if sections is not None else normalize_after_break_report_sections(row.sections),
+        "sections": sections
+        if sections is not None
+        else [
+            {
+                "title": str(section.get("title") or "").strip(),
+                "body": str(section.get("body") or ""),
+            }
+            for section in (row.sections or [])
+            if str(section.get("title") or "").strip()
+        ],
         "generated_snapshot": row.generated_snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
@@ -147,9 +157,16 @@ def _draft(row: AfterBreakReportDraft, sections: list[dict[str, str]] | None = N
 
 
 async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) -> dict:
-    sections = await apply_1h_confirmation_questions(
-        db, normalize_after_break_report_sections(row.sections)
-    )
+    sections = [
+        {
+            "title": str(section.get("title") or "").strip(),
+            "body": str(section.get("body") or ""),
+        }
+        for section in (row.sections or [])
+        if str(section.get("title") or "").strip()
+    ]
+    sections = await apply_1h_confirmation_questions(db, sections)
+    sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
     return _draft(row, sections)
 
 
@@ -226,11 +243,18 @@ async def get_draft(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
-    normalized_sections = await apply_1h_confirmation_questions(
-        db, normalize_after_break_report_sections(row.sections)
-    )
-    if normalized_sections != row.sections:
-        row.sections = normalized_sections
+    sections = [
+        {
+            "title": str(section.get("title") or "").strip(),
+            "body": str(section.get("body") or ""),
+        }
+        for section in (row.sections or [])
+        if str(section.get("title") or "").strip()
+    ]
+    sections = await apply_1h_confirmation_questions(db, sections)
+    sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
+    if sections != row.sections:
+        row.sections = sections
         await db.commit()
         await db.refresh(row)
     return await _draft_with_questions(db, row)
@@ -250,8 +274,10 @@ async def generate_draft(
     row = (
         await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_date))
     ).scalar_one_or_none()
+    existing_sections = row.sections if row is not None else None
     if row is not None:
         sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
+    sections = await merge_common_view_manual_sections(db, sections, "after_break", existing_sections)
     if row is None:
         row = AfterBreakReportDraft(
             report_date=report_date,
@@ -292,10 +318,15 @@ async def update_draft(
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
-        row.sections = await apply_1h_confirmation_questions(
-            db,
-            normalize_after_break_report_sections([section.model_dump() for section in payload.sections]),
-        )
+        # Keep user-edited question titles as saved (do not remap via normalize).
+        saved = [
+            {
+                "title": (section.title or "").strip() or "Untitled",
+                "body": section.body or "",
+            }
+            for section in payload.sections
+        ]
+        row.sections = await apply_1h_confirmation_questions(db, saved)
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()

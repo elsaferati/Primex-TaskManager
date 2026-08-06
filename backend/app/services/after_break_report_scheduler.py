@@ -75,8 +75,12 @@ async def run_after_break_report_scheduler_once(now: datetime | None = None) -> 
         # Always rebuild from live data at send time so auto-filled sections stay current.
         # Keep any manual answers already saved on today's draft.
         sections, snapshot = await build_after_break_report_sections(db, report_day)
+        existing_sections = row.sections if row is not None else None
         if row is not None:
             sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
+        from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
+
+        sections = await merge_common_view_manual_sections(db, sections, "after_break", existing_sections)
         if row is None:
             row = AfterBreakReportDraft(
                 report_date=report_day,

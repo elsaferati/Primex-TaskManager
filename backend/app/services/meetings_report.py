@@ -102,7 +102,11 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
         elif title in MANUAL_SECTION_TITLES:
             ordered.append({"title": title, "body": "(Ploteso manualisht)"})
 
-    return ordered + unknown_sections
+    # Keep Common View–synced manuals with the other manuals (before auto sections).
+    manual_count = len(MANUAL_SECTION_TITLES)
+    if not unknown_sections:
+        return ordered
+    return ordered[:manual_count] + unknown_sections + ordered[manual_count:]
 
 
 def _local_date(value: datetime | date | None) -> date | None:
@@ -1142,7 +1146,7 @@ def render_plain_text(subject: str, report_day: date, tomorrow: date, sections: 
     blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", f"Neser: {tomorrow:%d.%m.%Y}", ""]
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = "MANUAL QUESTIONS" if section["title"] in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
+        group = _section_group_label(section["title"])
         if group != current_group:
             blocks.append(group)
             current_group = group
@@ -1153,7 +1157,9 @@ def render_plain_text(subject: str, report_day: date, tomorrow: date, sections: 
 
 
 def _section_group_label(title: str) -> str:
-    return "MANUAL QUESTIONS" if title in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
+    from app.services.meeting_point_manual_sync import section_group_label
+
+    return section_group_label("meetings", title)
 
 
 def _render_group_label_html(label: str) -> str:

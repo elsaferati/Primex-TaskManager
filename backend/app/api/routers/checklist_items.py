@@ -33,6 +33,7 @@ from app.schemas.checklist_item import (
 from app.schemas.project_phase_checklist_item import (
     ProjectPhaseChecklistItemOut,
 )
+from app.services.meeting_point_manual_sync import sync_checklist_item_manual_question
 
 
 router = APIRouter()
@@ -1650,6 +1651,13 @@ async def create_checklist_item(
                 assignee = ChecklistItemAssignee(checklist_item_id=item.id, user_id=user_id)
                 db.add(assignee)
 
+    await sync_checklist_item_manual_question(
+        db,
+        checklist,
+        title=item.title,
+        action="upsert",
+    )
+
     await db.commit()
     item = (
         await db.execute(
@@ -1719,6 +1727,9 @@ async def update_checklist_item(
     ).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist item not found")
+
+    previous_title = item.title
+    checklist = None
 
     if item.checklist_id is not None:
         checklist = (
@@ -1834,6 +1845,15 @@ async def update_checklist_item(
                     assignee = ChecklistItemAssignee(checklist_item_id=item.id, user_id=user_id)
                     db.add(assignee)
 
+    if payload.title is not None and (previous_title or "") != (item.title or ""):
+        await sync_checklist_item_manual_question(
+            db,
+            checklist,
+            title=item.title,
+            previous_title=previous_title,
+            action="upsert",
+        )
+
     await db.commit()
     item = (
         await db.execute(
@@ -1873,6 +1893,7 @@ async def delete_checklist_item(
     item = (await db.execute(select(ChecklistItem).where(ChecklistItem.id == item_id))).scalar_one_or_none()
     if item is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Checklist item not found")
+    checklist = None
     if item.checklist_id is not None:
         checklist = (
             await db.execute(select(Checklist).where(Checklist.id == item.checklist_id))
@@ -1928,10 +1949,18 @@ async def delete_checklist_item(
 
     deleted_checklist_id = item.checklist_id
     deleted_position = item.position
+    deleted_title = item.title
+    deleted_checklist = checklist if item.checklist_id is not None else None
     path_filter = (
         ChecklistItem.path.is_(None)
         if item.path is None
         else ChecklistItem.path == item.path
+    )
+    await sync_checklist_item_manual_question(
+        db,
+        deleted_checklist,
+        title=deleted_title,
+        action="delete",
     )
     await db.delete(item)
     # Keep numbering contiguous.

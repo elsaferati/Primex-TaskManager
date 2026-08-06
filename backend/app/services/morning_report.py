@@ -161,6 +161,7 @@ def _canonical_section_title(raw_title: str) -> str | None:
 
 def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     by_title: dict[str, str] = {}
+    extras: list[dict[str, str]] = []
     for section in sections or []:
         raw_title = str(section.get("title") or "").strip()
         title = _canonical_section_title(raw_title)
@@ -175,16 +176,23 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
                 by_title[SECTION_TITLES[0]] = emails_body
             continue
         if title is None:
+            if raw_title:
+                extras.append({"title": raw_title, "body": body})
             continue
         if title == SECTION_TITLES[0]:
             body = _separate_keyed_prompt_lines(body) or _emails_default_body()
         if title not in by_title:
             by_title[title] = body
 
-    return [
+    # Keep Common View–synced manuals after built-in manuals and before auto sections.
+    known = [
         {"title": title, "body": by_title.get(title, _default_body(title))}
         for title in SECTION_TITLES
     ]
+    manual_count = len(MANUAL_SECTION_TITLES)
+    if not extras:
+        return known
+    return known[:manual_count] + extras + known[manual_count:]
 
 
 def _entry_day(entry: CommonEntry) -> date | None:
@@ -400,14 +408,12 @@ async def build_morning_report_sections(
 
 
 def render_plain_text(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
+    from app.services.meeting_point_manual_sync import section_group_label
+
     blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", ""]
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = (
-            "MANUAL QUESTIONS"
-            if section["title"] in MANUAL_SECTION_TITLES
-            else "AUTO-FILLED FROM PRIMEFLOW"
-        )
+        group = section_group_label("morning", section["title"])
         if group != current_group:
             blocks.append(group)
             current_group = group
@@ -418,6 +424,7 @@ def render_plain_text(subject: str, report_day: date, sections: list[dict[str, s
 
 
 def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
+    from app.services.meeting_point_manual_sync import section_group_label
     from app.services.meetings_report import (
         _render_group_label_html,
         _render_section_block_html,
@@ -427,11 +434,7 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
     section_chunks: list[str] = []
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = (
-            "MANUAL QUESTIONS"
-            if section["title"] in MANUAL_SECTION_TITLES
-            else "AUTO-FILLED FROM PRIMEFLOW"
-        )
+        group = section_group_label("morning", section["title"])
         if group != current_group:
             section_chunks.append(_render_group_label_html(group))
             current_group = group

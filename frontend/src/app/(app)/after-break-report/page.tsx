@@ -21,7 +21,7 @@ import { useAuth } from "@/lib/auth"
 type Section = { title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
-type EditingSection = { index: number; lines: string[] }
+type EditingSection = { index: number; title: string; lines: string[] }
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -43,12 +43,22 @@ type Draft = {
   updated_at?: string | null
 }
 
-function sectionGroupLabel(index: number) {
-  return index < 4 ? "Manual questions" : "Auto-filled from PrimeFlow"
+function sectionGroupLabel(title: string, index: number) {
+  if (index < 4) return "Manual questions"
+  const knownAuto = [
+    "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
+    "(GA/KA) KUSH KA DET PERSONALISHT?",
+    "NOTES TE REJA ME TE KALTER DHE DISSCUSED",
+  ]
+  const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
+  const key = compact(title)
+  if (knownAuto.some((auto) => compact(auto) === key)) return "Auto-filled from PrimeFlow"
+  return "Manual questions"
 }
 
-function shouldShowSectionGroup(index: number) {
-  return index === 0 || sectionGroupLabel(index) !== sectionGroupLabel(index - 1)
+function shouldShowSectionGroup(sections: Section[], index: number) {
+  if (index === 0) return true
+  return sectionGroupLabel(sections[index].title, index) !== sectionGroupLabel(sections[index - 1].title, index - 1)
 }
 type DeliveryHistory = {
   id: string
@@ -309,13 +319,23 @@ export default function AfterBreakReportPage() {
 
   const openSectionEditor = (index: number) => {
     if (!draft) return
-    setEditingSection({ index, lines: reportSectionEditorLines(draft.sections[index]?.body || "") })
+    setEditingSection({
+      index,
+      title: draft.sections[index]?.title || "",
+      lines: reportSectionEditorLines(draft.sections[index]?.body || ""),
+    })
   }
 
   const applySectionEditor = (lines: string[]) => {
     if (!editingSection || !draft) return
     const sections = draft.sections.map((section, index) =>
-      index === editingSection.index ? { ...section, body: lines.join("\n") } : section
+      index === editingSection.index
+        ? {
+            ...section,
+            title: editingSection.title.trim() || section.title,
+            body: lines.join("\n"),
+          }
+        : section
     )
     const nextDraft = { ...draft, sections }
     setDraft(nextDraft)
@@ -553,18 +573,36 @@ export default function AfterBreakReportPage() {
               const isEditing = editingSection?.index === index
               return (
                 <React.Fragment key={`${section.title}-${index}`}>
-                  {shouldShowSectionGroup(index) ? (
+                  {shouldShowSectionGroup(draft.sections, index) ? (
                     <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                      {sectionGroupLabel(index)}
+                      {sectionGroupLabel(section.title, index)}
                     </div>
                   ) : null}
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
                     <div className="flex flex-wrap items-start justify-between gap-3">
-                      <div>
-                        <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
-                        <div className="mt-1 text-xs text-muted-foreground">
-                          {section.body.trim().split(/\s+/).filter(Boolean).length} words
-                        </div>
+                      <div className="min-w-0 flex-1">
+                        {isEditing ? (
+                          <div className="flex items-start gap-2">
+                            <span className="mt-2 text-sm font-semibold tabular-nums">{index + 1}.</span>
+                            <Input
+                              value={editingSection.title}
+                              onChange={(event) =>
+                                setEditingSection((current) =>
+                                  current ? { ...current, title: event.target.value } : current
+                                )
+                              }
+                              className="font-semibold"
+                              placeholder="Shkruaj pyetjen..."
+                            />
+                          </div>
+                        ) : (
+                          <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
+                        )}
+                        {!isEditing ? (
+                          <div className="mt-1 text-xs text-muted-foreground">
+                            {section.body.trim().split(/\s+/).filter(Boolean).length} words
+                          </div>
+                        ) : null}
                       </div>
                       {canEdit && !isEditing ? (
                         <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>

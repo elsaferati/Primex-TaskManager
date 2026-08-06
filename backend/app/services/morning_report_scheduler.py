@@ -76,6 +76,7 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
         # Always rebuild from live data at send time so auto-filled sections stay current.
         # Keep any manual answers already saved on today's draft.
         sections, snapshot = await build_morning_report_sections(db, report_day)
+        existing_sections = row.sections if row is not None else None
         if row is not None:
             sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
             existing_by_title = {
@@ -96,6 +97,9 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
                 }
                 for section in sections
             ]
+        from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
+
+        sections = await merge_common_view_manual_sections(db, sections, "morning", existing_sections)
         if row is None:
             row = MorningReportDraft(
                 report_date=report_day,

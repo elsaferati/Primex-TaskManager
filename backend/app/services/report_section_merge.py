@@ -8,19 +8,26 @@ def preserve_manual_sections(
     existing: list[dict[str, Any]] | None,
     manual_titles: set[str],
 ) -> list[dict[str, str]]:
-    """Keep saved manual answers when regenerating the same report day."""
+    """Keep saved manual answers (and renamed titles) when regenerating the same report day."""
+    existing_list = list(existing or [])
     existing_by_title: dict[str, str] = {}
-    for section in existing or []:
+    for section in existing_list:
         title = str(section.get("title") or "").strip()
         if title and title not in existing_by_title:
             existing_by_title[title] = str(section.get("body") or "")
 
     merged: list[dict[str, str]] = []
-    for section in generated:
+    for index, section in enumerate(generated):
         title = str(section.get("title") or "")
         body = str(section.get("body") or "")
-        if title in manual_titles and title in existing_by_title:
-            body = existing_by_title[title]
+        if title in manual_titles:
+            if index < len(existing_list):
+                previous_title = str(existing_list[index].get("title") or "").strip()
+                if previous_title:
+                    title = previous_title
+                    body = str(existing_list[index].get("body") or "")
+            elif title in existing_by_title:
+                body = existing_by_title[title]
         merged.append({"title": title, "body": body})
     return merged
 

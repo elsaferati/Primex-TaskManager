@@ -16,6 +16,8 @@ const HEADER_LABELS = new Set([
   "PER",
   "TITLE",
   "NOTE",
+  "TIPI",
+  "COUNT",
   "DISK",
   "TIME",
   "ORA",
@@ -74,12 +76,14 @@ function isHeaderCells(cells: string[]) {
 
 function compactWidthForHeader(header: string) {
   const value = normalizeHeader(header)
-  if (value === "NR") return "32px"
+  if (value === "NR") return "48px"
   if (value === "WHO" || value === "FROM" || value === "PER") return "64px"
   if (value === "DISK") return "58px"
   if (value === "TIME") return "76px"
   if (value === "DATA" || value === "DATE") return "96px"
   if (value === "LATE") return "88px"
+  if (value === "COUNT") return "72px"
+  if (value === "TIPI") return "auto"
   if (value === "MBAJTUR?" || value === "MBAJTUR" || value === "ANULUAR" || value === "PA STATUS") return "78px"
   if (value === "TITLE" || value === "NOTE") return "minmax(280px, 1fr)"
   return "minmax(90px, auto)"
@@ -87,6 +91,15 @@ function compactWidthForHeader(header: string) {
 
 function tableGridTemplate(cells: string[]) {
   return cells.map(compactWidthForHeader).join(" ")
+}
+
+function isCompactMetricTable(headers: string[]) {
+  const normalized = headers.map(normalizeHeader)
+  return normalized.includes("TIPI") && normalized.includes("COUNT") && !normalized.includes("TITLE")
+}
+
+function trimTableCell(value: string) {
+  return value.replace(/\s+/g, " ").trim()
 }
 
 function tableGridTemplates(lines: string[]) {
@@ -439,85 +452,189 @@ export function ReportSectionPreview({ body }: { body: string }) {
   })
   flushTable()
 
-  return (
-    <div className="mt-3 overflow-x-auto rounded-md border bg-white">
-      <div className="min-w-[560px] text-xs leading-5 text-slate-950">
-        {previewItems.map((item) => {
-          if (item.kind === "blank") return <div key={item.key} className="h-2" />
-          if (item.kind === "label") {
-            const keyed = splitKeyedLabel(item.text)
-            if (keyed) {
-              return (
-                <div key={item.key} className="border-b border-slate-200 bg-slate-50 px-3 py-2 uppercase tracking-normal">
-                  <span className="font-semibold">{keyed.label}</span>
-                  {keyed.rest ? <span>{` ${keyed.rest}`}</span> : null}
-                </div>
-              )
-            }
-            return (
-              <div key={item.key} className="border-b border-slate-200 bg-slate-50 px-3 py-2 font-semibold uppercase tracking-normal">
-                {item.text}
-              </div>
-            )
-          }
-          if (item.kind === "text") {
-            const keyed = splitKeyedLabel(item.text)
-            if (keyed) {
-              return (
-                <div key={item.key} className="border-b border-slate-200 bg-white px-3 py-2.5">
-                  <span className="font-semibold">{keyed.label}</span>
-                  {keyed.rest ? <span className="whitespace-pre-wrap break-words">{` ${keyed.rest}`}</span> : null}
-                </div>
-              )
-            }
-            if (item.guidance || isGuidanceLine(item.text)) {
-              const question = isGuidanceLine(item.text) ? null : item.text
-              const guidance = item.guidance || item.text.trim()
-              return (
-                <div key={item.key} className="border-b border-slate-200 bg-white px-3 py-2">
-                  {question ? (
-                    <div className="whitespace-pre-wrap break-words">{question}</div>
-                  ) : null}
-                  <div
-                    className={`pl-4 text-[11px] italic leading-snug text-slate-500 ${
-                      question ? "mt-0.5" : ""
-                    }`}
-                  >
-                    <span className="whitespace-pre-wrap break-words">{guidance}</span>
-                  </div>
-                </div>
-              )
-            }
-            return <React.Fragment key={item.key}>{renderKeyedLine(item.text)}</React.Fragment>
-          }
+  type TablePreviewItem = Extract<PreviewItem, { kind: "table" }>
 
-          const tone = item.isHeader
-            ? "bg-slate-200 font-semibold"
-            : rowTone(item.label, item.cells, item.headers)
-          const visible = withoutStatusColumn(item.headers, item.cells)
-          const template =
-            visible.headers.length !== item.headers.length
-              ? tableGridTemplate(visible.headers)
-              : item.template
+  const renderTableRow = (item: TablePreviewItem) => {
+    const tone = item.isHeader
+      ? "bg-slate-200 font-semibold"
+      : rowTone(item.label, item.cells, item.headers)
+    const visible = withoutStatusColumn(item.headers, item.cells)
+    const template =
+      visible.headers.length !== item.headers.length
+        ? tableGridTemplate(visible.headers)
+        : item.template
+    return (
+      <div
+        key={item.key}
+        className={`grid border-b border-slate-200 last:border-b-0 ${tone}`}
+        style={{ gridTemplateColumns: template }}
+      >
+        {visible.cells.map((cell, cellIndex) => {
+          const header = normalizeHeader(visible.headers[cellIndex] || "")
           return (
             <div
-              key={item.key}
-              className={`grid border-b border-slate-200 last:border-b-0 ${tone}`}
-              style={{ gridTemplateColumns: template }}
+              key={cellIndex}
+              className={`border-r border-slate-200 px-2 py-1.5 last:border-r-0 ${
+                item.isHeader ? "" : diskCellTone(visible.headers, visible.cells, cellIndex)
+              }`}
             >
-              {visible.cells.map((cell, cellIndex) => (
-                <div
-                  key={cellIndex}
-                  className={`border-r border-slate-200 px-2 py-1.5 last:border-r-0 ${
-                    item.isHeader ? "" : diskCellTone(visible.headers, visible.cells, cellIndex)
-                  }`}
-                >
-                  <span className="whitespace-pre-wrap break-words">{cell || "-"}</span>
-                </div>
-              ))}
+              <span
+                className={
+                  header === "NR" || header === "WHO" || header === "COUNT"
+                    ? "whitespace-nowrap"
+                    : "whitespace-pre-wrap break-words"
+                }
+              >
+                {cell || "-"}
+              </span>
             </div>
           )
         })}
+      </div>
+    )
+  }
+
+  const renderCompactMetricTable = (rows: TablePreviewItem[], key: string) => {
+    const headers = withoutStatusColumn(rows[0].headers, rows[0].cells).headers
+    return (
+      <div key={key} className="w-max max-w-full border-b border-slate-200 last:border-b-0">
+        <table className="border-collapse text-xs leading-5 text-slate-950">
+          <thead>
+            {rows
+              .filter((row) => row.isHeader)
+              .map((row) => {
+                const visible = withoutStatusColumn(row.headers, row.cells)
+                return (
+                  <tr key={row.key} className="bg-slate-200 font-semibold">
+                    {visible.cells.map((cell, cellIndex) => {
+                      const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
+                      return (
+                        <th
+                          key={cellIndex}
+                          className={`border-b border-r border-slate-300 px-2.5 py-1.5 text-left whitespace-nowrap ${
+                            header === "COUNT" ? "text-right" : ""
+                          } ${header === "NR" ? "w-10" : ""} ${header === "COUNT" ? "w-16" : ""}`}
+                        >
+                          {trimTableCell(cell) || "-"}
+                        </th>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
+          </thead>
+          <tbody>
+            {rows
+              .filter((row) => !row.isHeader)
+              .map((row) => {
+                const visible = withoutStatusColumn(row.headers, row.cells)
+                const tone = rowTone(row.label, row.cells, row.headers)
+                return (
+                  <tr key={row.key} className={tone}>
+                    {visible.cells.map((cell, cellIndex) => {
+                      const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
+                      return (
+                        <td
+                          key={cellIndex}
+                          className={`border-b border-r border-slate-200 px-2.5 py-1.5 ${
+                            header === "COUNT" ? "text-right tabular-nums whitespace-nowrap" : "whitespace-nowrap"
+                          }`}
+                        >
+                          {trimTableCell(cell) || "-"}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
+          </tbody>
+        </table>
+      </div>
+    )
+  }
+
+  const hasWideTable = previewItems.some(
+    (item) => item.kind === "table" && !isCompactMetricTable(item.headers),
+  )
+
+  const renderedItems: React.ReactNode[] = []
+  for (let index = 0; index < previewItems.length; index += 1) {
+    const item = previewItems[index]
+    if (item.kind === "blank") {
+      renderedItems.push(<div key={item.key} className="h-2" />)
+      continue
+    }
+    if (item.kind === "label") {
+      const keyed = splitKeyedLabel(item.text)
+      if (keyed) {
+        renderedItems.push(
+          <div key={item.key} className="border-b border-slate-200 bg-slate-50 px-3 py-2 uppercase tracking-normal">
+            <span className="font-semibold">{keyed.label}</span>
+            {keyed.rest ? <span>{` ${keyed.rest}`}</span> : null}
+          </div>,
+        )
+      } else {
+        renderedItems.push(
+          <div key={item.key} className="border-b border-slate-200 bg-slate-50 px-3 py-2 font-semibold uppercase tracking-normal">
+            {item.text}
+          </div>,
+        )
+      }
+      continue
+    }
+    if (item.kind === "text") {
+      const keyed = splitKeyedLabel(item.text)
+      if (keyed) {
+        renderedItems.push(
+          <div key={item.key} className="border-b border-slate-200 bg-white px-3 py-2.5">
+            <span className="font-semibold">{keyed.label}</span>
+            {keyed.rest ? <span className="whitespace-pre-wrap break-words">{` ${keyed.rest}`}</span> : null}
+          </div>,
+        )
+        continue
+      }
+      if (item.guidance || isGuidanceLine(item.text)) {
+        const question = isGuidanceLine(item.text) ? null : item.text
+        const guidance = item.guidance || item.text.trim()
+        renderedItems.push(
+          <div key={item.key} className="border-b border-slate-200 bg-white px-3 py-2">
+            {question ? <div className="whitespace-pre-wrap break-words">{question}</div> : null}
+            <div
+              className={`pl-4 text-[11px] italic leading-snug text-slate-500 ${
+                question ? "mt-0.5" : ""
+              }`}
+            >
+              <span className="whitespace-pre-wrap break-words">{guidance}</span>
+            </div>
+          </div>,
+        )
+        continue
+      }
+      renderedItems.push(<React.Fragment key={item.key}>{renderKeyedLine(item.text)}</React.Fragment>)
+      continue
+    }
+
+    if (isCompactMetricTable(item.headers)) {
+      const group: TablePreviewItem[] = [item]
+      while (
+        index + 1 < previewItems.length &&
+        previewItems[index + 1].kind === "table" &&
+        isCompactMetricTable((previewItems[index + 1] as TablePreviewItem).headers)
+      ) {
+        index += 1
+        group.push(previewItems[index] as TablePreviewItem)
+      }
+      renderedItems.push(renderCompactMetricTable(group, group[0].key))
+      continue
+    }
+
+    renderedItems.push(renderTableRow(item))
+  }
+
+  return (
+    <div className="mt-3 overflow-x-auto rounded-md border bg-white">
+      <div className={`${hasWideTable ? "min-w-[560px]" : "w-max max-w-full"} text-xs leading-5 text-slate-950`}>
+        {renderedItems}
       </div>
     </div>
   )
@@ -633,10 +750,16 @@ export function ReportSectionFieldEditor({
           if (cells) {
             const isHeader = isHeaderCells(cells)
             const template = templates.get(lineIndex) || tableGridTemplate(cells)
+            const block = tableBlocks.find(
+              (entry) => entry.headerIndex === lineIndex || entry.rowIndexes.includes(lineIndex),
+            )
+            const headerCells = block ? tableCells(draftLines[block.headerIndex]) : cells
+            const headers = (headerCells || cells).map(normalizeHeader)
+            const compact = isCompactMetricTable(headers)
             return (
               <div key={`table-${lineIndex}`} className="overflow-x-auto">
                 <div
-                  className="grid min-w-[560px] items-center gap-2"
+                  className={`grid items-center gap-2 ${compact ? "w-max" : "min-w-[560px]"}`}
                   style={{ gridTemplateColumns: `${template} 42px` }}
                 >
                   {cells.map((cell, cellIndex) =>

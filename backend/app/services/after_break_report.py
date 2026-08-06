@@ -7,11 +7,12 @@ from typing import Any
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import CommonApprovalStatus, GaNoteStatus
+from app.models.enums import CommonApprovalStatus, GaNoteStatus, TaskStatus
 from app.models.ga_note import GaNote
-from app.models.question_library import QuestionCategory, QuestionDefinition
+from app.models.question_library import QuestionCategory, QuestionDefinition, QuestionUserStatus
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.user import User
 from app.services.meetings_report import (
     PERSONAL_GA,
@@ -33,7 +34,6 @@ from app.services.meetings_report import (
     common_view_task_sort_key,
     send_meetings_report,
 )
-from app.services.primeflow_report import REMINDER_CATEGORY_NORMALIZED
 
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
@@ -193,25 +193,89 @@ def _format_confirmation_questions(questions: list[tuple[str, str]]) -> list[str
 
 
 async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, str]]:
-    category = await db.scalar(
-        select(QuestionCategory).where(
-            QuestionCategory.normalized_name == REMINDER_CATEGORY_NORMALIZED
-        )
-    )
-    if category is None:
-        return []
+    """Load unconfirmed View Question tasks for M2 PYETJE PER KONFIRMIM.
+
+    Only questions that created an assignee task (from any Questions category)
+    appear here. Template/library questions without a task are excluded.
+    Once every assigned user marks the question done (or the task is DONE),
+    it is omitted.
+    """
     rows = (
         await db.execute(
             select(QuestionDefinition)
-            .where(QuestionDefinition.category_id == category.id)
-            .order_by(QuestionDefinition.sort_order, QuestionDefinition.created_at)
+            .join(QuestionCategory, QuestionCategory.id == QuestionDefinition.category_id)
+            .where(QuestionDefinition.task_id.is_not(None))
+            .order_by(
+                QuestionDefinition.created_at.asc(),
+                QuestionCategory.sort_order,
+                QuestionDefinition.sort_order,
+            )
         )
     ).scalars().all()
-    return [
-        (row.text.strip(), (row.guidance or "").strip())
-        for row in rows
-        if row.text and row.text.strip()
-    ]
+    if not rows:
+        return []
+
+    question_ids = [row.id for row in rows]
+    task_ids = {row.task_id for row in rows if row.task_id is not None}
+    if not task_ids:
+        return []
+
+    assignees_by_task: dict = {task_id: set() for task_id in task_ids}
+    for task_id, user_id in (
+        await db.execute(
+            select(TaskAssignee.task_id, TaskAssignee.user_id).where(
+                TaskAssignee.task_id.in_(task_ids)
+            )
+        )
+    ).all():
+        assignees_by_task.setdefault(task_id, set()).add(user_id)
+
+    done_task_ids = set(
+        (
+            await db.execute(
+                select(Task.id).where(
+                    Task.id.in_(task_ids),
+                    Task.status == TaskStatus.DONE,
+                )
+            )
+        ).scalars().all()
+    )
+
+    done_pairs = {
+        (question_id, user_id)
+        for question_id, user_id in (
+            await db.execute(
+                select(QuestionUserStatus.question_id, QuestionUserStatus.user_id).where(
+                    QuestionUserStatus.question_id.in_(question_ids),
+                    QuestionUserStatus.status == TaskStatus.DONE.value,
+                )
+            )
+        ).all()
+    }
+
+    pending: list[tuple[str, str]] = []
+    seen_text: set[str] = set()
+    for row in rows:
+        text = (row.text or "").strip()
+        if not text:
+            continue
+        text_key = text.casefold()
+        if text_key in seen_text:
+            continue
+
+        linked_task_id = row.task_id
+        if linked_task_id is None:
+            continue
+        if linked_task_id in done_task_ids:
+            continue
+
+        assignees = assignees_by_task.get(linked_task_id, set())
+        if assignees and all((row.id, user_id) in done_pairs for user_id in assignees):
+            continue
+
+        seen_text.add(text_key)
+        pending.append((text, (row.guidance or "").strip()))
+    return pending
 
 
 def _replace_confirmation_questions_block(body: str, question_lines: list[str]) -> str:
@@ -255,8 +319,11 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         else:
             body = "NOTES: 0"
         normalized.append({"title": title, "body": body})
-    normalized.extend(extras)
-    return normalized
+    # Keep Common View–synced manuals with the other manuals (before auto sections).
+    manual_count = len(MANUAL_SECTION_TITLES)
+    if not extras:
+        return normalized
+    return normalized[:manual_count] + extras + normalized[manual_count:]
 
 
 async def apply_1h_confirmation_questions(
@@ -444,7 +511,7 @@ def render_plain_text(subject: str, report_day: date, sections: list[dict[str, s
     blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", ""]
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = "MANUAL QUESTIONS" if section["title"] in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
+        group = _section_group_label(section["title"])
         if group != current_group:
             blocks.append(group)
             current_group = group
@@ -453,7 +520,9 @@ def render_plain_text(subject: str, report_day: date, sections: list[dict[str, s
 
 
 def _section_group_label(title: str) -> str:
-    return "MANUAL QUESTIONS" if title in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
+    from app.services.meeting_point_manual_sync import section_group_label
+
+    return section_group_label("after_break", title)
 
 
 def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
