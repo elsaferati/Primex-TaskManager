@@ -23,6 +23,7 @@ from app.services.common_leave import parse_common_view_annual_leave
 from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
+    _all_participant_user_ids,
     _assignee_names,
     _bz_alignment_lines,
     _effective_task_assignee_ids,
@@ -293,13 +294,26 @@ async def _day_context_section(
     today_tasks = [task for task in tasks if _belongs_to_day(task, report_day) and _is_open(task)]
     bz_tasks = [task for task in today_tasks if re.search(r"\bBZ\b", task.title or "", re.I)]
     blocked_tasks = [task for task in today_tasks if task.is_bllok]
+    all_participant_ids = await _all_participant_user_ids(db)
     bz_lines = await _bz_alignment_lines(
         db, report_day, tasks, names, assignee_ids_by_task, include_status=True
     )
-    bz_lines = bz_lines or _task_lines(bz_tasks, names, assignee_ids_by_task, include_status=True)
+    bz_lines = bz_lines or _task_lines(
+        bz_tasks,
+        names,
+        assignee_ids_by_task,
+        include_status=True,
+        all_participant_ids=all_participant_ids,
+    )
     block_lines = [
         *common_block_lines,
-        *_task_lines(blocked_tasks, names, assignee_ids_by_task, include_status=True),
+        *_task_lines(
+            blocked_tasks,
+            names,
+            assignee_ids_by_task,
+            include_status=True,
+            all_participant_ids=all_participant_ids,
+        ),
     ]
     bz_lines = list(dict.fromkeys(line for line in bz_lines if line and not line.startswith("(")))
     block_lines = list(dict.fromkeys(line for line in block_lines if line and not line.startswith("(")))

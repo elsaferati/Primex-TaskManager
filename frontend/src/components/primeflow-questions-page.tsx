@@ -675,11 +675,12 @@ export function PrimeflowQuestionsPage() {
                 const understoodUsers = question.statuses.filter((item) => item.status === "DONE")
                 const notUnderstoodUsers = question.statuses.filter((item) => item.status === "X")
                 const usersWithStatus = new Set(question.statuses.map((item) => item.user_id))
-                const pendingUsers = statusUsers.filter(
-                  (item) =>
-                    !["GA", "KA"].includes(initials(item.full_name || "")) &&
-                    !usersWithStatus.has(item.id)
+                const participantUsers = statusUsers.filter(
+                  (item) => !["GA", "KA", "HV"].includes(initials(item.full_name || ""))
                 )
+                const pendingUsers = participantUsers.filter((item) => !usersWithStatus.has(item.id))
+                const awaitingIsAll =
+                  pendingUsers.length > 0 && pendingUsers.length === participantUsers.length
                 const isQuestionDone = question.is_done
                 return (
                   <tr key={question.id} className="border-t border-[#183b68] bg-[#f7fbff] align-middle">
@@ -742,7 +743,11 @@ export function PrimeflowQuestionsPage() {
                               </Badge>
                             )}
                           </div>
-                          {question.guidance && <span className="whitespace-pre-wrap text-xs font-normal text-muted-foreground">{question.guidance}</span>}
+                          {question.guidance && (
+                            <span className="mt-0.5 block whitespace-pre-wrap pl-0 text-xs font-normal italic leading-snug text-slate-500">
+                              {question.guidance}
+                            </span>
+                          )}
                         </div>
                       )}
                     </td>
@@ -781,6 +786,14 @@ export function PrimeflowQuestionsPage() {
                         <td className="border-r border-[#183b68] px-3 py-3 text-center">
                           {!statusUsersLoaded ? (
                             <Loader2 className="mx-auto size-4 animate-spin text-muted-foreground" />
+                          ) : awaitingIsAll ? (
+                            <Badge
+                              variant="outline"
+                              className="border-amber-300 bg-amber-50 font-semibold text-amber-800"
+                              title="Të gjithë përdoruesit"
+                            >
+                              ALL
+                            </Badge>
                           ) : pendingUsers.length ? (
                             <div className="flex flex-wrap justify-center gap-1">
                               {pendingUsers.map((item) => (

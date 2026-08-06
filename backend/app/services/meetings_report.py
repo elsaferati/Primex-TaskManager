@@ -164,6 +164,15 @@ def _initials(name: str | None) -> str:
     return "".join(part[0] for part in parts).upper() or "-"
 
 
+def _is_report_all_participant(user: User) -> bool:
+    return user.is_active and _initials(user.full_name) not in {"GA", "KA", "HV"}
+
+
+async def _all_participant_user_ids(db: AsyncSession) -> set[Any]:
+    users = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
+    return {user.id for user in users if _is_report_all_participant(user)}
+
+
 async def _assignee_names(db: AsyncSession, tasks: list[Task]) -> dict[Any, str]:
     user_ids = {task.assigned_to for task in tasks if task.assigned_to}
     task_ids = [task.id for task in tasks]
@@ -205,12 +214,64 @@ async def _users_by_initials(db: AsyncSession, initials: str) -> list[User]:
     ]
 
 
-def _task_owners(task: Task, names: dict[Any, str], assignee_ids_by_task: dict[Any, set[Any]] | None = None) -> str:
-    assignee_ids = assignee_ids_by_task.get(task.id, set()) if assignee_ids_by_task else set()
+def _task_owners(
+    task: Task,
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]] | None = None,
+    *,
+    all_participant_ids: set[Any] | None = None,
+) -> str:
+    assignee_ids = set(assignee_ids_by_task.get(task.id, set()) if assignee_ids_by_task else set())
     if not assignee_ids and task.assigned_to:
         assignee_ids = {task.assigned_to}
+    if all_participant_ids and assignee_ids and all_participant_ids.issubset(assignee_ids):
+        return "ALL"
     owners = sorted({_initials(names.get(user_id)) for user_id in assignee_ids if _initials(names.get(user_id)) != "-"})
     return " ".join(owners) or _initials(names.get(task.assigned_to))
+
+
+def common_view_task_sort_key(
+    task: Task,
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]] | None = None,
+    *,
+    all_participant_ids: set[Any] | None = None,
+) -> tuple:
+    """Mirror Common View compareTaskOrder for report task tables (M1/M2/M3)."""
+    owner = _task_owners(task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids)
+    return (
+        0 if bool(task.is_deadline_important) else 1,
+        0 if re.search(r"\b0?8:00\b", task.title or "") else 1,
+        owner.casefold(),
+        task.fast_task_order if task.fast_task_order is not None else 10**9,
+        _clean_task_title(task.title).casefold(),
+        str(task.created_at or ""),
+    )
+
+
+# Backwards-compatible alias used by older call sites / tests.
+_m3_task_sort_key = common_view_task_sort_key
+
+
+def common_view_item_sort_key(item: dict[str, Any]) -> tuple:
+    """Same ordering for Common View payload dicts used in report fallbacks."""
+    owner = _common_owner(item)
+    title = _common_title(item)
+    important = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
+    eight_am = bool(re.search(r"\b0?8:00\b", title))
+    order = item.get("fast_task_order")
+    if order is None:
+        order = item.get("fastTaskOrder")
+    if not isinstance(order, int):
+        order = 10**9
+    return (
+        0 if important else 1,
+        0 if eight_am else 1,
+        owner.casefold(),
+        order,
+        title.casefold(),
+        str(item.get("created_at") or item.get("createdAt") or ""),
+    )
 
 
 def _task_line(
@@ -219,8 +280,11 @@ def _task_line(
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     *,
     include_status: bool = False,
+    all_participant_ids: set[Any] | None = None,
 ) -> str:
-    owner = _task_owners(task, names, assignee_ids_by_task)
+    owner = _task_owners(
+        task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+    )
     title = _clean_task_title(task.title)
     line = f"- {owner}: {title}"
     if include_status:
@@ -250,6 +314,8 @@ def _m3_status_table(
     *,
     include_late_days: bool = False,
     with_status: bool = False,
+    assignee_ids_by_task: dict[Any, set[Any]] | None = None,
+    all_participant_ids: set[Any] | None = None,
 ) -> list[str]:
     if include_late_days:
         border = "+----+-------+------------------------------------------------------------------+--------------+"
@@ -270,8 +336,16 @@ def _m3_status_table(
             rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
         rows.append(border)
         return rows
-    for index, task in enumerate(sorted(tasks, key=lambda item: (_initials(names.get(item.assigned_to)), _clean_task_title(item.title))), start=1):
-        owner = _initials(names.get(task.assigned_to))
+    ordered = sorted(
+        tasks,
+        key=lambda item: common_view_task_sort_key(
+            item, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+        ),
+    )
+    for index, task in enumerate(ordered, start=1):
+        owner = _task_owners(
+            task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+        )
         display_title = _clean_task_title(task.title)
         title_lines = _wrap_fixed_width(display_title, 64)
         status = _normalize_report_status(task.status) if with_status else None
@@ -293,7 +367,10 @@ def _m3_status_table(
 def _task_late_lines(tasks: list[Task], names: dict[Any, str]) -> list[str]:
     if not tasks:
         return ["(Asnje detyre)"]
-    ordered = sorted(tasks, key=lambda item: (-_late_days(item), _clean_task_title(item.title)))
+    ordered = sorted(
+        tasks,
+        key=lambda item: (-_late_days(item), *common_view_task_sort_key(item, names, None)),
+    )
     return [_task_line_with_late_days(task, names) for task in ordered]
 
 
@@ -339,6 +416,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     tasks = (await db.execute(task_stmt)).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    all_participant_ids = await _all_participant_user_ids(db)
     finance_section = await _m3_finance_ga_section(db, tasks, names, report_day)
     std_tickets_section = await std_tickets_report_section(db, report_day)
 
@@ -390,10 +468,14 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         if start_date <= tomorrow <= end_date:
             leave_tomorrow.append((entry, full_day, start_time, end_time, note, is_all_users))
 
+    table_kwargs = {
+        "assignee_ids_by_task": assignee_ids_by_task,
+        "all_participant_ids": all_participant_ids,
+    }
     section_1 = [
-        *_m3_status_table("IN PROGRESS", system_in_progress, names),
+        *_m3_status_table("IN PROGRESS", system_in_progress, names, **table_kwargs),
         "",
-        *_m3_status_table("LATE", system_late, names, include_late_days=True),
+        *_m3_status_table("LATE", system_late, names, include_late_days=True, **table_kwargs),
     ]
     section_4 = _tomorrow_common_section(
         common_items=common_items,
@@ -401,16 +483,20 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         fallback_external=_meeting_lines(external_meetings),
         fallback_internal=_meeting_lines(internal_meetings),
         fallback_bz=bz_alignment_lines
-        or _task_lines(bz_tasks, names, assignee_ids_by_task, include_status=True),
-        fallback_blocked=_task_lines(blocked, names, assignee_ids_by_task, include_status=True),
+        or _task_lines(
+            bz_tasks, names, assignee_ids_by_task, include_status=True, all_participant_ids=all_participant_ids
+        ),
+        fallback_blocked=_task_lines(
+            blocked, names, assignee_ids_by_task, include_status=True, all_participant_ids=all_participant_ids
+        ),
         with_status=True,
     )
     section_5 = [
-        *_m3_status_table("DETYRAT E REJA", new_tomorrow, names),
+        *_m3_status_table("DETYRAT E REJA", new_tomorrow, names, **table_kwargs),
         "",
-        *_m3_status_table("08:00", at_0800, names),
+        *_m3_status_table("08:00", at_0800, names, **table_kwargs),
         "",
-        *_m3_status_table("ME DEADLINE", deadline, names),
+        *_m3_status_table("ME DEADLINE", deadline, names, **table_kwargs),
     ]
     section_6 = await _today_meeting_status_section(db, today_meetings, report_day)
 
@@ -419,13 +505,26 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         {"title": SECTION_TITLES[1], "body": finance_section},
         {"title": SECTION_TITLES[2], "body": std_tickets_section},
         {"title": SECTION_TITLES[3], "body": _normalize_section(section_1)},
-        {"title": SECTION_TITLES[4], "body": _normalize_section(_m3_status_table("TODO", today_todo, names))},
+        {
+            "title": SECTION_TITLES[4],
+            "body": _normalize_section(_m3_status_table("TODO", today_todo, names, **table_kwargs)),
+        },
         {"title": SECTION_TITLES[8], "body": section_6},
         {"title": SECTION_TITLES[5], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
         {"title": SECTION_TITLES[7], "body": _normalize_section(section_5)},
         {"title": SECTION_TITLES[6], "body": _normalize_section(section_4)},
-        {"title": SECTION_TITLES[9], "body": _normalize_section(_m3_status_table("1H PA SLOT", one_h_no_slot, names, with_status=True))},
-        {"title": SECTION_TITLES[10], "body": _normalize_section(_m3_status_table("PERSONAL GA", personal_ga, names, with_status=True))},
+        {
+            "title": SECTION_TITLES[9],
+            "body": _normalize_section(
+                _m3_status_table("1H PA SLOT", one_h_no_slot, names, with_status=True, **table_kwargs)
+            ),
+        },
+        {
+            "title": SECTION_TITLES[10],
+            "body": _normalize_section(
+                _m3_status_table("PERSONAL GA", personal_ga, names, with_status=True, **table_kwargs)
+            ),
+        },
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
@@ -456,14 +555,37 @@ def _task_lines(
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     *,
     include_status: bool = False,
+    all_participant_ids: set[Any] | None = None,
 ) -> list[str]:
     if not tasks:
         return ["(Asnje detyre)"]
-    ordered = sorted(tasks, key=lambda task: (_task_owners(task, names, assignee_ids_by_task), task.title or ""))
-    return [_task_line(task, names, assignee_ids_by_task, include_status=include_status) for task in ordered]
+    ordered = sorted(
+        tasks,
+        key=lambda task: common_view_task_sort_key(
+            task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+        ),
+    )
+    return [
+        _task_line(
+            task,
+            names,
+            assignee_ids_by_task,
+            include_status=include_status,
+            all_participant_ids=all_participant_ids,
+        )
+        for task in ordered
+    ]
 
 
-def _status_group_section(title: str, tasks: list[Task], names: dict[Any, str], report_day: date) -> list[str]:
+def _status_group_section(
+    title: str,
+    tasks: list[Task],
+    names: dict[Any, str],
+    report_day: date,
+    *,
+    assignee_ids_by_task: dict[Any, set[Any]] | None = None,
+    all_participant_ids: set[Any] | None = None,
+) -> list[str]:
     today_tasks = [task for task in tasks if _task_day(task) == report_day]
     todo = [task for task in today_tasks if str(task.status or "").upper() == "TODO" and _is_open(task)]
     in_progress = [task for task in today_tasks if str(task.status or "").upper() == "IN_PROGRESS" and _is_open(task)]
@@ -473,20 +595,25 @@ def _status_group_section(title: str, tasks: list[Task], names: dict[Any, str], 
         and (_task_day(task) == report_day or _local_date(task.completed_at) == report_day)
     ]
     late = [task for task in tasks if _is_open(task) and _late_days(task) > 0]
+    table_kwargs = {
+        "assignee_ids_by_task": assignee_ids_by_task,
+        "all_participant_ids": all_participant_ids,
+    }
     return [
         f"{title}:",
-        *_m3_status_table("TODO", todo, names),
+        *_m3_status_table("TODO", todo, names, **table_kwargs),
         "",
-        *_m3_status_table("IN PROGRESS", in_progress, names),
+        *_m3_status_table("IN PROGRESS", in_progress, names, **table_kwargs),
         "",
-        *_m3_status_table("DONE", done, names),
+        *_m3_status_table("DONE", done, names, **table_kwargs),
         "",
-        *_m3_status_table("LATE", late, names, include_late_days=True),
+        *_m3_status_table("LATE", late, names, include_late_days=True, **table_kwargs),
     ]
 
 
 async def _m3_finance_ga_section(db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date) -> str:
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    all_participant_ids = await _all_participant_user_ids(db)
     ga_users = await _users_by_initials(db, "GA")
     ga_user_ids = {user.id for user in ga_users}
     ga_tasks = [
@@ -514,9 +641,23 @@ async def _m3_finance_ga_section(db: AsyncSession, tasks: list[Task], names: dic
         ]
 
     return _normalize_section([
-        *_status_group_section("GA TASKS", ga_tasks, names, report_day),
+        *_status_group_section(
+            "GA TASKS",
+            ga_tasks,
+            names,
+            report_day,
+            assignee_ids_by_task=assignee_ids_by_task,
+            all_participant_ids=all_participant_ids,
+        ),
         "",
-        *_status_group_section("HV TASKS", hv_tasks, names, report_day),
+        *_status_group_section(
+            "HV TASKS",
+            hv_tasks,
+            names,
+            report_day,
+            assignee_ids_by_task=assignee_ids_by_task,
+            all_participant_ids=all_participant_ids,
+        ),
     ])
 
 
@@ -539,7 +680,13 @@ def _dedupe_system_task_rows(tasks: list[Task]) -> list[Task]:
         existing = by_key.get(key)
         if existing is None or _late_days(task) > _late_days(existing):
             by_key[key] = task
-    return sorted(by_key.values(), key=lambda task: (-_late_days(task), _clean_task_title(task.title)))
+    return sorted(
+        by_key.values(),
+        key=lambda task: (
+            -_late_days(task),
+            *common_view_task_sort_key(task, {}, None),
+        ),
+    )
 
 
 def _meeting_lines(meetings: list[Meeting]) -> list[str]:
@@ -632,6 +779,9 @@ def _common_title(item: dict[str, Any]) -> str:
 
 
 def _common_owner(item: dict[str, Any]) -> str:
+    person = str(item.get("person") or item.get("owner") or item.get("employee") or item.get("assignee_name") or "").strip()
+    if person.upper() == "ALL":
+        return "ALL"
     assignees = item.get("assignees") or item.get("assigned_users") or item.get("owners")
     if isinstance(assignees, list):
         initials = []
@@ -654,7 +804,7 @@ def _common_owner(item: dict[str, Any]) -> str:
         ]
         if initials:
             return " ".join(dict.fromkeys(initials))
-    return _initials(str(item.get("person") or item.get("owner") or item.get("employee") or item.get("assignee_name") or ""))
+    return _initials(person)
 
 
 def _common_task_status(item: dict[str, Any]) -> str:
@@ -663,7 +813,7 @@ def _common_task_status(item: dict[str, Any]) -> str:
 
 
 def _common_task_lines(items: list[dict[str, Any]], day: date, *, include_status: bool = False) -> list[str]:
-    lines = []
+    rows: list[dict[str, Any]] = []
     seen = set()
     for item in items:
         if _item_date(item) != day:
@@ -674,6 +824,12 @@ def _common_task_lines(items: list[dict[str, Any]], day: date, *, include_status
         if key in seen:
             continue
         seen.add(key)
+        rows.append(item)
+    rows.sort(key=common_view_item_sort_key)
+    lines = []
+    for item in rows:
+        title = _common_title(item)
+        owner = _common_owner(item)
         if include_status:
             lines.append(f"- [{_common_task_status(item)}] {owner}: {title}")
         else:
@@ -1414,6 +1570,17 @@ def _render_keyed_prompt_html(line: str) -> str:
     )
 
 
+def _is_guidance_line(line: str) -> bool:
+    stripped = line.strip()
+    if not stripped or re.match(r"^\d+\.\s", stripped):
+        return False
+    if re.match(r"^([A-Z][A-Z0-9 /&()?.+-]*:)\s*(.*)$", stripped):
+        return False
+    return bool(re.match(r"^\s{2,}\S", line)) or (
+        stripped == stripped.upper() and any(ch.isalpha() for ch in stripped) and len(stripped) > 12
+    )
+
+
 def _render_text_block_html(lines: list[str]) -> str:
     non_empty = [line for line in lines if line.strip()]
     if non_empty and all(_is_keyed_prompt_line(line) for line in non_empty):
@@ -1431,6 +1598,10 @@ def _render_text_block_html(lines: list[str]) -> str:
             rendered_lines.append(rendered)
         elif stripped and len(stripped) <= 45 and stripped.endswith((": 0", ":")):
             rendered_lines.append(f"<strong>{html.escape(line)}</strong>")
+        elif _is_guidance_line(line):
+            rendered_lines.append(
+                f"<span style=\"color:#64748b;font-style:italic;font-size:12px;\">{html.escape(stripped)}</span>"
+            )
         else:
             rendered_lines.append(html.escape(line))
     return (

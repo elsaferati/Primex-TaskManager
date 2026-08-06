@@ -147,9 +147,25 @@ function splitKeyedLabel(value: string): { label: string; rest: string } | null 
   return { label: match[1], rest: match[2] }
 }
 
+function isGuidanceLine(value: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return false
+  if (/^\d+\.\s/.test(trimmed)) return false
+  if (isFixedEditorLabel(trimmed)) return false
+  // Indented guidance under numbered questions, or ALL-CAPS reminder lines.
+  return /^\s{2,}\S/.test(value) || (trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed) && trimmed.length > 12)
+}
+
 function renderKeyedLine(text: string, className = "px-3 py-2") {
   const keyed = splitKeyedLabel(text)
   if (!keyed) {
+    if (isGuidanceLine(text)) {
+      return (
+        <div className={`${className} pt-0 text-xs italic leading-snug text-slate-500`}>
+          <span className="whitespace-pre-wrap break-words">{text.trim()}</span>
+        </div>
+      )
+    }
     return (
       <div className={className}>
         <span className="whitespace-pre-wrap break-words">{text}</span>
@@ -415,6 +431,13 @@ export function ReportSectionPreview({ body }: { body: string }) {
                 <div key={item.key} className="border-b border-slate-200 bg-white px-3 py-2.5">
                   <span className="font-semibold">{keyed.label}</span>
                   {keyed.rest ? <span className="whitespace-pre-wrap break-words">{` ${keyed.rest}`}</span> : null}
+                </div>
+              )
+            }
+            if (isGuidanceLine(item.text)) {
+              return (
+                <div key={item.key} className="border-b border-slate-200 bg-white px-3 pb-2 pt-0 text-xs italic leading-snug text-slate-500">
+                  <span className="whitespace-pre-wrap break-words">{item.text.trim()}</span>
                 </div>
               )
             }

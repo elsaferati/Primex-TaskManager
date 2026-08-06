@@ -16,6 +16,7 @@ from app.models.user import User
 from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
+    _all_participant_user_ids,
     _assignee_names,
     _clean_task_title as _display_title,
     _effective_task_assignee_ids,
@@ -29,6 +30,7 @@ from app.services.meetings_report import (
     _task_owners,
     _wrap_fixed_width,
     _wrap_report_email_html,
+    common_view_task_sort_key,
     send_meetings_report,
 )
 from app.services.primeflow_report import REMINDER_CATEGORY_NORMALIZED
@@ -185,7 +187,7 @@ def _format_confirmation_questions(questions: list[tuple[str, str]]) -> list[str
     for index, (text, guidance) in enumerate(questions, 1):
         lines.append(f"{index}. {text}")
         if guidance:
-            lines.append(guidance)
+            lines.append(f"   {guidance}")
     return lines
 
 
@@ -282,6 +284,7 @@ async def _personal_section(
     title_pattern: re.Pattern[str] = PERSONAL_GA,
 ) -> list[str]:
     personal = [task for task in tasks if task.is_personal and _belongs_to_day(task, report_day)]
+    all_participant_ids = await _all_participant_user_ids(db)
 
     # Common View shows the originating GA/KA note text for note-based tasks, not the task title.
     note_ids = {task.ga_note_origin_id for task in personal if task.ga_note_origin_id}
@@ -314,10 +317,18 @@ async def _personal_section(
     for label, key in groups:
         ordered = sorted(
             grouped.get(key, []),
-            key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _title(task)),
+            key=lambda task: common_view_task_sort_key(
+                task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+            ),
         )
         rows_values = [
-            [str(index), _task_owners(task, names, assignee_ids_by_task), _title(task)]
+            [
+                str(index),
+                _task_owners(
+                    task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+                ),
+                _title(task),
+            ]
             for index, task in enumerate(ordered, start=1)
         ]
         if lines:

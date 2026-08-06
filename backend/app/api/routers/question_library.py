@@ -611,6 +611,7 @@ async def export_question_category_excel(
             participant_names[user_id]
             for user_id in participant_ids - responded_ids
         ] if participants else []
+        awaiting_label = "ALL" if participants and len(awaiting) == len(participants) and awaiting else ", ".join(sorted(awaiting))
         checked_today = [item.full_name for item in question.daily_signoffs]
         values = [
             row_index - 3,
@@ -618,7 +619,7 @@ async def export_question_category_excel(
             question.guidance or "",
             ", ".join(sorted(understood)),
             ", ".join(sorted(needs_clarification)),
-            ", ".join(sorted(awaiting)),
+            awaiting_label,
             ", ".join(sorted(checked_today)),
             "PO" if question.is_done else "JO",
         ]

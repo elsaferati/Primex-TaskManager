@@ -511,8 +511,8 @@ async def std_tickets_report_section(db: AsyncSession, report_day: date) -> str:
         [
             f"Totali i tiketave te hapurat: {int(total_opened or 0)}",
             f"Tiketa sot: {int(opened_today or 0)}",
-            f"mbyllura sot: {int(closed_today or 0)}",
-            f"rregulluar sot: {int(done_today or 0)}",
+            f"Mbyllura sot: {int(closed_today or 0)}",
+            f"Rregulluar sot: {int(done_today or 0)}",
         ]
     )
 
