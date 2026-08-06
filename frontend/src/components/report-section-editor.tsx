@@ -175,17 +175,25 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   if (resolvedStatus.includes("IN PROGRESS")) return "bg-yellow-100"
   if (resolvedStatus === "TODO") return "bg-pink-200"
   if (resolvedStatus === "DONE") return "bg-green-100"
-  const diskIndex = headers.findIndex((header) => normalizeHeader(header) === "DISK")
-  const diskValue = diskIndex >= 0 ? cells[diskIndex]?.trim().toUpperCase() : ""
-  if (diskValue === "NO") return "bg-red-100 text-red-800"
   if (normalizedLabel.includes("DEADLINE")) return "bg-red-600 text-white"
   if (normalizedLabel.includes("LATE")) return "bg-red-100"
   if (normalizedLabel.includes("TODO") || normalizedLabel.includes("DETYRAT E REJA")) return "bg-pink-200"
   if (normalizedLabel.includes("IN PROGRESS")) return "bg-yellow-100"
   if (normalizedLabel.includes("WAITING")) return "bg-orange-100 text-orange-900"
-  if (normalizedLabel.includes("DONE") || diskValue === "YES") return "bg-green-100"
-  if (normalizedLabel.includes("NOTES")) return "bg-blue-100"
+  if (normalizedLabel.includes("DONE")) return "bg-green-100"
+  // NOTES stay blue; DISK yes/no colors only the DISK cell (see diskCellTone).
+  if (normalizedLabel.includes("NOTES") || headers.some((header) => normalizeHeader(header) === "NOTE")) {
+    return "bg-blue-100"
+  }
   return "bg-white"
+}
+
+function diskCellTone(headers: string[], cells: string[], cellIndex: number) {
+  if (normalizeHeader(headers[cellIndex] || "") !== "DISK") return ""
+  const value = cells[cellIndex]?.trim().toUpperCase()
+  if (value === "YES") return "bg-green-100 text-green-800 font-semibold text-center"
+  if (value === "NO") return "bg-red-100 text-red-800 font-semibold text-center"
+  return "text-center"
 }
 
 function splitStatusMarker(value: string) {
@@ -428,7 +436,12 @@ export function ReportSectionPreview({ body }: { body: string }) {
               style={{ gridTemplateColumns: template }}
             >
               {visible.cells.map((cell, cellIndex) => (
-                <div key={cellIndex} className="border-r border-slate-200 px-2 py-1.5 last:border-r-0">
+                <div
+                  key={cellIndex}
+                  className={`border-r border-slate-200 px-2 py-1.5 last:border-r-0 ${
+                    item.isHeader ? "" : diskCellTone(visible.headers, visible.cells, cellIndex)
+                  }`}
+                >
                   <span className="whitespace-pre-wrap break-words">{cell || "-"}</span>
                 </div>
               ))}

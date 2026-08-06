@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html
 import re
 from datetime import date, timedelta
 from typing import Any
@@ -10,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import CommonApprovalStatus, GaNoteStatus
 from app.models.ga_note import GaNote
+from app.models.question_library import QuestionCategory, QuestionDefinition
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.user import User
@@ -24,11 +24,14 @@ from app.services.meetings_report import (
     _local_date,
     _local_time,
     _normalize_section,
-    _render_section_body_html,
+    _render_group_label_html,
+    _render_section_block_html,
     _task_owners,
     _wrap_fixed_width,
+    _wrap_report_email_html,
     send_meetings_report,
 )
+from app.services.primeflow_report import REMINDER_CATEGORY_NORMALIZED
 
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
@@ -175,7 +178,40 @@ async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
     return rows
 
 
-def _remove_question_library_dump(body: str) -> str:
+def _format_confirmation_questions(questions: list[tuple[str, str]]) -> list[str]:
+    if not questions:
+        return ["PYETJE PER KONFIRMIM: 0"]
+    lines = ["PYETJE PER KONFIRMIM:"]
+    for index, (text, guidance) in enumerate(questions, 1):
+        lines.append(f"{index}. {text}")
+        if guidance:
+            lines.append(guidance)
+    return lines
+
+
+async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, str]]:
+    category = await db.scalar(
+        select(QuestionCategory).where(
+            QuestionCategory.normalized_name == REMINDER_CATEGORY_NORMALIZED
+        )
+    )
+    if category is None:
+        return []
+    rows = (
+        await db.execute(
+            select(QuestionDefinition)
+            .where(QuestionDefinition.category_id == category.id)
+            .order_by(QuestionDefinition.sort_order, QuestionDefinition.created_at)
+        )
+    ).scalars().all()
+    return [
+        (row.text.strip(), (row.guidance or "").strip())
+        for row in rows
+        if row.text and row.text.strip()
+    ]
+
+
+def _replace_confirmation_questions_block(body: str, question_lines: list[str]) -> str:
     lines = (body or "").splitlines()
     marker_index = next(
         (
@@ -185,9 +221,10 @@ def _remove_question_library_dump(body: str) -> str:
         ),
         -1,
     )
-    if marker_index < 0:
-        return body
-    return "\n".join([*lines[:marker_index], "", "PYETJE PER KONFIRMIM: 0"]).strip()
+    head = list(lines[:marker_index] if marker_index >= 0 else lines)
+    while head and not head[-1].strip():
+        head.pop()
+    return "\n".join([*head, "", *question_lines]).strip()
 
 
 def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
@@ -197,8 +234,6 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         raw_title = str(section.get("title") or "").strip()
         title = SECTION_TITLE_ALIASES.get(raw_title, raw_title)
         body = str(section.get("body") or "")
-        if title == SECTION_TITLES[4]:
-            body = _remove_question_library_dump(body)
         if title in SECTION_TITLES and title not in by_title:
             by_title[title] = body
         elif title:
@@ -219,6 +254,23 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         normalized.append({"title": title, "body": body})
     normalized.extend(extras)
     return normalized
+
+
+async def apply_1h_confirmation_questions(
+    db: AsyncSession, sections: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Keep NEW SYSTEM TASKS; refresh PYETJE PER KONFIRMIM from PYETJET PER 1H."""
+    question_lines = _format_confirmation_questions(await _load_1h_confirmation_questions(db))
+    updated: list[dict[str, str]] = []
+    for section in sections:
+        if section.get("title") == SECTION_TITLES[4]:
+            updated.append({
+                "title": section["title"],
+                "body": _replace_confirmation_questions_block(section.get("body") or "", question_lines),
+            })
+        else:
+            updated.append(section)
+    return updated
 
 
 async def _personal_section(
@@ -343,7 +395,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             await _new_system_task_rows(db),
         ),
         "",
-        "PYETJE PER KONFIRMIM: 0",
+        *_format_confirmation_questions(await _load_1h_confirmation_questions(db)),
     ]
     section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
     section_3 = _ascii_table(
@@ -392,16 +444,6 @@ def _section_group_label(title: str) -> str:
     return "MANUAL QUESTIONS" if title in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
 
 
-def _render_group_label_html(label: str) -> str:
-    return (
-        "<div style=\"margin:22px 0 10px;padding:9px 11px;background:#f1f5f9;"
-        "border:1px solid #d7dee8;color:#334155;font-family:Arial,sans-serif;"
-        "font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;\">"
-        f"{html.escape(label)}"
-        "</div>"
-    )
-
-
 def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
     section_chunks: list[str] = []
     current_group = ""
@@ -411,37 +453,13 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
             section_chunks.append(_render_group_label_html(group))
             current_group = group
         section_chunks.append(
-            "<div style=\"margin:22px 0 0;\">"
-            f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">{index}. {html.escape(section['title'])}</h2>"
-            f"{_render_section_body_html(section.get('body') or '')}"
-            "</div>"
+            _render_section_block_html(index, section["title"], section.get("body") or "")
         )
-    section_html = "".join(section_chunks)
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
-body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
-h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
-h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
-@media only screen and (max-width:600px){{
-body{{padding:8px}}
-table,tbody,tr,td,div,pre{{max-width:100%!important;box-sizing:border-box!important}}
-h1{{font-size:18px!important;line-height:1.2!important;white-space:normal!important}}
-h2{{font-size:13px!important;line-height:1.25!important;white-space:normal!important;word-break:normal!important;overflow-wrap:anywhere!important}}
-pre{{font-size:12px!important;padding:10px!important}}
-.report-table{{width:100%!important;table-layout:auto!important}}
-.report-table th,.report-table td{{font-size:11px!important;padding:3px 4px!important;line-height:1.25!important;word-break:normal!important;overflow-wrap:break-word!important}}
-}}
-</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:8px;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
-<tr><td align="center" style="padding:0;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
-<tr><td style="padding:14px;">
-<h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
-<p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y}</p>
-{section_html}
-</td></tr></table>
-</td></tr></table>
-</body></html>"""
+    return _wrap_report_email_html(
+        subject,
+        f"Sot: {report_day:%d.%m.%Y}",
+        "".join(section_chunks),
+    )
 
 
 async def send_after_break_report(subject: str, recipients: dict[str, list[str]], plain_text: str, html_body: str) -> dict[str, Any]:

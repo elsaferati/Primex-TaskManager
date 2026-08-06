@@ -25,6 +25,8 @@ REPORT_TYPE = "primeflow_1h"
 SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
+REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
+REMINDER_SECTION_TITLE = "PYETJET PER 1H"
 TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
 ADDED_TAGS = re.compile(r"\[\[\s*/?\s*added\s*\]\]", re.IGNORECASE)
 DONE_BLOCK = re.compile(r"\[\[\s*done\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]", re.IGNORECASE | re.DOTALL)
@@ -62,6 +64,11 @@ class ReportSection(BaseModel):
     employees: list[ReportEmployee] = Field(default_factory=list)
 
 
+class ReportReminderQuestion(BaseModel):
+    text: str
+    guidance: str = ""
+
+
 class ReportDocument(BaseModel):
     subject: str
     report_date: date
@@ -70,6 +77,7 @@ class ReportDocument(BaseModel):
     source_generated_at: datetime
     recipients: dict[str, list[str]]
     sections: list[ReportSection]
+    reminders: list[ReportReminderQuestion] = Field(default_factory=list)
     truncated: bool = False
 
     @property
@@ -122,6 +130,15 @@ def split_numbered_text(value: str) -> tuple[str, list[str]]:
         for index, match in enumerate(matches)
     ]
     return heading, items
+
+
+def split_task_display(title: str) -> tuple[str, list[str]]:
+    """First line stays the black title; every following line renders grey."""
+    heading, numbered_items = split_numbered_text(title)
+    heading_lines = [line.strip() for line in heading.splitlines() if line.strip()]
+    if not heading_lines:
+        return "", numbered_items
+    return heading_lines[0], [*heading_lines[1:], *numbered_items]
 
 
 def done_ranges(value: str, marked_source: str) -> list[tuple[int, int]]:
@@ -234,7 +251,11 @@ def _document_section(title: str, tasks: list[dict[str, Any]]) -> ReportSection:
 
 
 def build_report_document(
-    data: dict[str, Any], report_day: date, slot: str, recipients: dict[str, list[str]] | None = None,
+    data: dict[str, Any],
+    report_day: date,
+    slot: str,
+    recipients: dict[str, list[str]] | None = None,
+    reminders: list[ReportReminderQuestion] | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
@@ -281,11 +302,19 @@ def build_report_document(
         source_generated_at=source_generated,
         recipients=recipients or {"to": [], "cc": [], "bcc": []},
         sections=[_document_section(title, tasks) for title, tasks in definitions],
+        reminders=list(reminders or []),
     )
 
 
 def render_plain_text(document: ReportDocument) -> str:
     blocks = [document.subject, f"Generated: {document.generated_at.isoformat()}", ""]
+    if document.reminders:
+        reminder_lines = [REMINDER_SECTION_TITLE]
+        for index, question in enumerate(document.reminders, 1):
+            reminder_lines.append(f"{index}. {question.text}")
+            if question.guidance:
+                reminder_lines.append(question.guidance)
+        blocks.append("\n".join(reminder_lines))
     for section in document.sections:
         lines = [section.title]
         if not section.employees:
@@ -293,10 +322,10 @@ def render_plain_text(document: ReportDocument) -> str:
         for employee in section.employees:
             lines.append(employee.name)
             for task in employee.tasks:
-                heading, numbered_items = split_numbered_text(task.title)
+                heading, detail_lines = split_task_display(task.title)
                 if heading:
                     lines.append(heading)
-                lines.extend(numbered_items)
+                lines.extend(detail_lines)
                 if task.description:
                     lines.append(task.description)
         blocks.append("\n".join(lines))
@@ -316,24 +345,42 @@ def render_html(document: ReportDocument) -> str:
         return "".join(parts)
 
     sections = []
+    if document.reminders:
+        reminder_cards = []
+        for index, question in enumerate(document.reminders, 1):
+            guidance = (
+                f"<div class='detail' style='color:#64748b'>{html.escape(question.guidance).replace(chr(10), '<br>')}</div>"
+                if question.guidance else ""
+            )
+            reminder_cards.append(
+                f"<article class='task reminder' style='background:#f8fafc;border-color:#64748b'>"
+                f"<div class='task-title' style='color:#050505'>"
+                f"{index}. {html.escape(question.text)}</div>{guidance}</article>"
+            )
+        sections.append(
+            f"<section><div class='section-title'>{html.escape(REMINDER_SECTION_TITLE)}</div>"
+            f"{''.join(reminder_cards)}</section>"
+        )
     for section in document.sections:
         employees = []
         for employee_index, employee in enumerate(section.employees, 1):
             task_cards = []
             for task in employee.tasks:
-                background, foreground, accent = STATUS_COLORS[task.status]
-                heading, numbered_items = split_numbered_text(task.title)
+                background, _, accent = STATUS_COLORS[task.status]
+                heading, detail_lines = split_task_display(task.title)
                 detail_html = "".join(
-                    f"<div class='numbered'>{marked_html(item, task.marked_title)}</div>"
-                    for item in numbered_items
+                    f"<div class='detail' style='color:#64748b'>{marked_html(item, task.marked_title)}</div>"
+                    for item in detail_lines
                 )
                 description = (
-                    f"<div class='description'>{marked_html(task.description, task.marked_description)}</div>"
+                    f"<div class='detail' style='color:#64748b'>"
+                    f"{marked_html(task.description, task.marked_description)}</div>"
                     if task.description else ""
                 )
                 task_cards.append(
-                    f"<article class='task' style='background:{background};color:{foreground};border-color:{accent}'>"
-                    f"<div class='task-title'>{marked_html(heading or task.title, task.marked_title)}</div>"
+                    f"<article class='task' style='background:{background};border-color:{accent}'>"
+                    f"<div class='task-title' style='color:#050505'>"
+                    f"{marked_html(heading or task.title, task.marked_title)}</div>"
                     f"{detail_html}{description}</article>"
                 )
             employees.append(
@@ -353,7 +400,8 @@ def render_html(document: ReportDocument) -> str:
         "section{margin:0 0 24px}.section-title{background:#eef2ff;border-left:5px solid #2563eb;padding:11px 14px;font-size:18px;font-weight:800}"
         ".employee{margin:14px 0}.employee-name{font-size:16px;font-weight:800;margin:0 0 8px}"
         ".task{border:1px solid;border-left-width:5px;border-radius:7px;padding:12px 14px;margin:8px 0;box-sizing:border-box}"
-        ".task-title{font-weight:800;font-size:14px;color:#050505;word-break:break-word}.numbered,.description{font-size:13px;color:#64748b;font-weight:400;margin-top:5px;word-break:break-word}"
+        ".task-title{font-weight:800;font-size:14px;color:#050505;word-break:break-word}"
+        ".detail{font-size:13px;color:#64748b;font-weight:400;margin-top:5px;word-break:break-word}"
         ".done{text-decoration:line-through;text-decoration-thickness:2px}.empty{color:#64748b;padding:12px}"
         "@media(max-width:600px){.shell{padding:0}.header{border-radius:0;padding:16px}.header h1{font-size:20px}"
         ".content{padding:12px}.section-title{font-size:16px}.task{padding:10px}.task-title{font-size:13px}}</style>"
@@ -397,6 +445,29 @@ def render_docx(document: ReportDocument) -> bytes:
     meta = title_cell.add_paragraph(f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks")
     meta.runs[0].font.size = Pt(9)
     meta.runs[0].font.color.rgb = RGBColor(255, 255, 255)
+    if document.reminders:
+        doc.add_paragraph()
+        reminder_header = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(reminder_header, "#eef2ff")
+        reminder_run = reminder_header.paragraphs[0].add_run(REMINDER_SECTION_TITLE)
+        reminder_run.bold = True
+        reminder_run.font.size = Pt(13)
+        for index, question in enumerate(document.reminders, 1):
+            card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
+            shade(card_cell, "#f8fafc")
+            add_marked_runs(
+                card_cell.paragraphs[0],
+                f"{index}. {question.text}",
+                f"{index}. {question.text}",
+                bold=True,
+                color="#050505",
+            )
+            if question.guidance:
+                guidance = card_cell.add_paragraph()
+                add_marked_runs(
+                    guidance, question.guidance, question.guidance, bold=False, color="#64748b"
+                )
+            doc.add_paragraph().paragraph_format.space_after = Pt(0)
     for section in document.sections:
         doc.add_paragraph()
         section_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
@@ -417,9 +488,9 @@ def render_docx(document: ReportDocument) -> bytes:
                 background, _, _ = STATUS_COLORS[task.status]
                 card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
                 shade(card_cell, background)
-                heading, numbered_items = split_numbered_text(task.title)
+                heading, detail_lines = split_task_display(task.title)
                 add_marked_runs(card_cell.paragraphs[0], heading or task.title, task.marked_title, bold=True, color="#050505")
-                for item in numbered_items:
+                for item in detail_lines:
                     detail = card_cell.add_paragraph()
                     detail.paragraph_format.space_after = Pt(2)
                     add_marked_runs(detail, item, task.marked_title, bold=False, color="#64748b")
@@ -454,10 +525,21 @@ def render_png(document: ReportDocument) -> bytes:
             strike_y = (bounds[1] + bounds[3]) // 2
             draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
 
-    estimated_lines = 8 + len(document.sections) * 3 + sum(
-        3 + sum(4 + len(textwrap.wrap(task.title, 85)) + len(textwrap.wrap(task.description, 90))
-                for task in employee.tasks)
-        for section in document.sections for employee in section.employees
+    estimated_lines = (
+        8
+        + len(document.sections) * 3
+        + sum(
+            2 + len(textwrap.wrap(question.text, 90)) + len(textwrap.wrap(question.guidance or "", 95))
+            for question in document.reminders
+        )
+        + sum(
+            3 + sum(
+                4 + len(textwrap.wrap(task.title, 85)) + len(textwrap.wrap(task.description, 90))
+                for task in employee.tasks
+            )
+            for section in document.sections
+            for employee in section.employees
+        )
     )
     height = max(650, 140 + estimated_lines * 30)
     image = Image.new("RGB", (width, height), "white")
@@ -466,6 +548,32 @@ def render_png(document: ReportDocument) -> bytes:
     draw.text((margin + 24, 55), document.subject, fill="white", font=heading)
     draw.text((margin + 24, 99), f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks", fill="white", font=font)
     y = 160
+    if document.reminders:
+        draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
+        draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
+        draw.text((margin + 18, y + 11), REMINDER_SECTION_TITLE, fill="#0f172a", font=bold)
+        y += 62
+        for index, question in enumerate(document.reminders, 1):
+            title_lines = textwrap.wrap(f"{index}. {question.text}", 95) or [""]
+            guidance_lines = textwrap.wrap(question.guidance, 105) if question.guidance else []
+            card_height = 25 + 28 * (len(title_lines) + len(guidance_lines))
+            draw.rounded_rectangle(
+                (margin + 5, y, width - margin, y + card_height),
+                radius=8,
+                fill="#f8fafc",
+                outline="#64748b",
+                width=2,
+            )
+            draw.rectangle((margin + 5, y + 4, margin + 11, y + card_height - 4), fill="#64748b")
+            line_y = y + 12
+            for line in title_lines:
+                draw.text((margin + 25, line_y), line, fill="#050505", font=bold)
+                line_y += 28
+            for line in guidance_lines:
+                draw.text((margin + 25, line_y), line, fill="#64748b", font=font)
+                line_y += 28
+            y += card_height + 12
+        y += 14
     for section in document.sections:
         draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
         draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
@@ -479,21 +587,21 @@ def render_png(document: ReportDocument) -> bytes:
             y += 38
             for task in employee.tasks:
                 background, _, accent = STATUS_COLORS[task.status]
-                task_heading, numbered_items = split_numbered_text(task.title)
+                task_heading, detail_items = split_task_display(task.title)
                 title_lines = textwrap.wrap(task_heading or task.title, 95) or [""]
-                numbered_lines = [
-                    line for item in numbered_items
+                detail_lines = [
+                    line for item in detail_items
                     for line in (textwrap.wrap(item, 105, subsequent_indent="   ") or [""])
                 ]
                 description_lines = textwrap.wrap(task.description, 105) if task.description else []
-                card_height = 25 + 28 * (len(title_lines) + len(numbered_lines) + len(description_lines))
+                card_height = 25 + 28 * (len(title_lines) + len(detail_lines) + len(description_lines))
                 draw.rounded_rectangle((margin + 5, y, width - margin, y + card_height), radius=8, fill=background, outline=accent, width=2)
                 draw.rectangle((margin + 5, y + 4, margin + 11, y + card_height - 4), fill=accent)
                 line_y = y + 12
                 for line in title_lines:
                     draw_line_with_marks(margin + 25, line_y, line, task.marked_title, bold, "#050505")
                     line_y += 28
-                for line in numbered_lines:
+                for line in detail_lines:
                     draw_line_with_marks(margin + 25, line_y, line, task.marked_title, font, "#64748b")
                     line_y += 28
                 for line in description_lines:
@@ -619,9 +727,10 @@ class GmailService:
             message["Cc"] = ", ".join(recipient_map["cc"])
         if recipient_map["bcc"]:
             message["Bcc"] = ", ".join(recipient_map["bcc"])
-        message.set_content(body)
+        message.set_content(body, charset="utf-8")
         if html_body:
-            message.add_alternative(html_body, subtype="html")
+            # multipart/alternative with HTML last — Outlook/Gmail prefer the last part.
+            message.add_alternative(html_body, subtype="html", charset="utf-8")
         for filename, content, mime_type in attachments or []:
             maintype, subtype = mime_type.split("/", 1)
             message.add_attachment(content, maintype=maintype, subtype=subtype, filename=filename)

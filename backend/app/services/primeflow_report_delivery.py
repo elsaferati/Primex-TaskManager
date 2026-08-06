@@ -17,8 +17,10 @@ from app.db import SessionLocal
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
+from app.models.question_library import QuestionCategory, QuestionDefinition
 from app.services.primeflow_report import (
-    GmailService, GmailVerificationError, PrimeFlowClient, ReportDocument, build_report_document,
+    GmailService, GmailVerificationError, PrimeFlowClient, REMINDER_CATEGORY_NORMALIZED,
+    ReportDocument, ReportReminderQuestion, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
 
@@ -58,13 +60,39 @@ async def configured_recipients() -> dict[str, list[str]]:
     return result
 
 
+async def load_1h_reminder_questions() -> list[ReportReminderQuestion]:
+    async with SessionLocal() as db:
+        category = await db.scalar(
+            select(QuestionCategory).where(
+                QuestionCategory.normalized_name == REMINDER_CATEGORY_NORMALIZED
+            )
+        )
+        if category is None:
+            return []
+        rows = (
+            await db.execute(
+                select(QuestionDefinition)
+                .where(QuestionDefinition.category_id == category.id)
+                .order_by(QuestionDefinition.sort_order, QuestionDefinition.created_at)
+            )
+        ).scalars().all()
+    return [
+        ReportReminderQuestion(text=row.text.strip(), guidance=(row.guidance or "").strip())
+        for row in rows
+        if row.text and row.text.strip()
+    ]
+
+
 async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] | None = None) -> ReportDocument:
     client = PrimeFlowClient(
         os.environ["PRIMEFLOW_API_BASE_URL"].rstrip("/"),
         os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
     )
     data = await client.common_view(day)
-    return build_report_document(data, day, slot, recipients or await configured_recipients())
+    reminders = await load_1h_reminder_questions()
+    return build_report_document(
+        data, day, slot, recipients or await configured_recipients(), reminders=reminders,
+    )
 
 
 async def deliver_report(

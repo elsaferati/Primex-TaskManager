@@ -14,7 +14,7 @@ from app.services.primeflow_report import (
     GmailService, STATUS_MARKERS, build_report, clean_description, clean_title, employee_initials,
     exact_subject, filter_tasks,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
-    render_plain_text, render_png, report_subject,
+    render_plain_text, render_png, report_subject, ReportReminderQuestion, REMINDER_SECTION_TITLE,
 )
 
 
@@ -118,12 +118,60 @@ class PrimeFlowReportTests(unittest.TestCase):
         }
         document = build_report_document(data, date(2026, 7, 28), "10:00")
         html = render_html(document)
-        self.assertIn("<div class='task-title'>PF ASSISTANT</div>", html)
-        self.assertIn("<div class='numbered'>1. First item</div>", html)
+        self.assertIn("<div class='task-title' style='color:#050505'>PF ASSISTANT</div>", html)
+        self.assertIn("<div class='detail' style='color:#64748b'>1. First item</div>", html)
         self.assertIn("<span class='done'>Finished item</span>", html)
         self.assertNotIn("Përshkrimi:", html)
         self.assertNotIn("Pa përshkrim", html)
         self.assertNotIn("TODO", html)
+
+    def test_multiline_title_details_render_grey(self) -> None:
+        data = {
+            "generated_at": "2026-08-06T11:00:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [{
+                "id": "dv", "date": "2026-08-06", "slot": "11:00",
+                "person": "Denis", "status": "IN_PROGRESS",
+                "task_title": "DV: MST: AKINEA VS PIM\n31 CUSHT- Prezentimi\n34 steps manual working",
+                "description": "Rregullohet dizajni",
+            }]},
+        }
+        html = render_html(build_report_document(data, date(2026, 8, 6), "11:00"))
+        self.assertIn(
+            "<div class='task-title' style='color:#050505'>DV: MST: AKINEA VS PIM</div>",
+            html,
+        )
+        self.assertIn("<div class='detail' style='color:#64748b'>31 CUSHT- Prezentimi</div>", html)
+        self.assertIn("<div class='detail' style='color:#64748b'>34 steps manual working</div>", html)
+        self.assertIn("<div class='detail' style='color:#64748b'>Rregullohet dizajni</div>", html)
+        self.assertNotIn("color:#111827", html)
+
+    def test_reminder_questions_render_at_start(self) -> None:
+        data = {
+            "generated_at": "2026-08-06T11:00:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [{
+                "id": "t1", "date": "2026-08-06", "slot": "11:00",
+                "person": "Denis", "status": "TODO", "title": "Task one", "description": "",
+            }]},
+        }
+        reminders = [
+            ReportReminderQuestion(
+                text="A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?",
+                guidance="DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!",
+            ),
+            ReportReminderQuestion(text="Nese jo, pse?"),
+        ]
+        document = build_report_document(data, date(2026, 8, 6), "11:00", reminders=reminders)
+        plain = render_plain_text(document)
+        html = render_html(document)
+        self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("SLOTI 06.08.2026 11:00"))
+        self.assertIn("1. A eshte perfunduar detyra", plain)
+        self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", plain)
+        self.assertIn(REMINDER_SECTION_TITLE, html)
+        self.assertIn("1. A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?", html)
+        self.assertIn("<div class='detail' style='color:#64748b'>DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!</div>", html)
+        self.assertLess(html.index(REMINDER_SECTION_TITLE), html.index("SLOTI 06.08.2026 11:00"))
 
     def test_truncation_blocks_report(self) -> None:
         with self.assertRaisesRegex(ValueError, "truncated"):

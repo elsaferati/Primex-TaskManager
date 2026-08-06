@@ -16,6 +16,7 @@ from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.user import User
 from app.services.after_break_report import (
     MANUAL_SECTION_TITLES,
+    apply_1h_confirmation_questions,
     build_after_break_report_sections,
     normalize_after_break_report_sections,
     render_html,
@@ -127,13 +128,13 @@ def _settings(row: AfterBreakReportSettings) -> dict:
     }
 
 
-def _draft(row: AfterBreakReportDraft) -> dict:
+def _draft(row: AfterBreakReportDraft, sections: list[dict[str, str]] | None = None) -> dict:
     return {
         "id": str(row.id),
         "report_date": row.report_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": normalize_after_break_report_sections(row.sections),
+        "sections": sections if sections is not None else normalize_after_break_report_sections(row.sections),
         "generated_snapshot": row.generated_snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
@@ -143,6 +144,13 @@ def _draft(row: AfterBreakReportDraft) -> dict:
         "created_at": row.created_at.isoformat() if row.created_at else None,
         "updated_at": row.updated_at.isoformat() if row.updated_at else None,
     }
+
+
+async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) -> dict:
+    sections = await apply_1h_confirmation_questions(
+        db, normalize_after_break_report_sections(row.sections)
+    )
+    return _draft(row, sections)
 
 
 def _delivery_history(row: AfterBreakReportDraft) -> dict:
@@ -218,12 +226,14 @@ async def get_draft(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
-    normalized_sections = normalize_after_break_report_sections(row.sections)
+    normalized_sections = await apply_1h_confirmation_questions(
+        db, normalize_after_break_report_sections(row.sections)
+    )
     if normalized_sections != row.sections:
         row.sections = normalized_sections
         await db.commit()
         await db.refresh(row)
-    return _draft(row)
+    return await _draft_with_questions(db, row)
 
 
 @router.post("/generate")
@@ -264,7 +274,7 @@ async def generate_draft(
         row.updated_by_user_id = user.id
     await db.commit()
     await db.refresh(row)
-    return _draft(row)
+    return await _draft_with_questions(db, row)
 
 
 @router.patch("/{draft_id}")
@@ -282,12 +292,15 @@ async def update_draft(
     if payload.recipients is not None:
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
-        row.sections = normalize_after_break_report_sections([section.model_dump() for section in payload.sections])
+        row.sections = await apply_1h_confirmation_questions(
+            db,
+            normalize_after_break_report_sections([section.model_dump() for section in payload.sections]),
+        )
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()
     await db.refresh(row)
-    return _draft(row)
+    return await _draft_with_questions(db, row)
 
 
 @router.get("/{draft_id}/preview")
@@ -299,9 +312,12 @@ async def preview_draft(
     row = await db.get(AfterBreakReportDraft, draft_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
+    sections = await apply_1h_confirmation_questions(
+        db, normalize_after_break_report_sections(row.sections)
+    )
     return {
-        "plain_text": render_plain_text(row.subject, row.report_date, row.sections),
-        "html": render_html(row.subject, row.report_date, row.sections),
+        "plain_text": render_plain_text(row.subject, row.report_date, sections),
+        "html": render_html(row.subject, row.report_date, sections),
     }
 
 
@@ -317,8 +333,12 @@ async def send_draft(
     recipients = normalize_recipients(row.recipients)
     if not recipients["to"]:
         raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
-    plain_text = render_plain_text(row.subject, row.report_date, row.sections)
-    html_body = render_html(row.subject, row.report_date, row.sections)
+    sections = await apply_1h_confirmation_questions(
+        db, normalize_after_break_report_sections(row.sections)
+    )
+    row.sections = sections
+    plain_text = render_plain_text(row.subject, row.report_date, sections)
+    html_body = render_html(row.subject, row.report_date, sections)
     try:
         _validate_gmail_config()
         message = await send_after_break_report(row.subject, recipients, plain_text, html_body)
@@ -334,4 +354,4 @@ async def send_draft(
     row.updated_by_user_id = user.id
     await db.commit()
     await db.refresh(row)
-    return _draft(row)
+    return await _draft_with_questions(db, row)

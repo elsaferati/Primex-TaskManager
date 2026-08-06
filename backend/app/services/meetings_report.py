@@ -1001,13 +1001,73 @@ def _section_group_label(title: str) -> str:
 
 
 def _render_group_label_html(label: str) -> str:
+    # Table cell (not a bare div) so Outlook desktop keeps the band visible.
     return (
-        "<div style=\"margin:22px 0 10px;padding:9px 11px;background:#f1f5f9;"
-        "border:1px solid #d7dee8;color:#334155;font-family:Arial,sans-serif;"
-        "font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;\">"
+        "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+        "style=\"width:100%;border-collapse:collapse;margin:22px 0 10px;\">"
+        "<tr><td style=\"padding:9px 11px;background:#f1f5f9;border:1px solid #d7dee8;"
+        "color:#334155;font-family:Arial,sans-serif;font-size:12px;font-weight:700;"
+        "text-transform:uppercase;letter-spacing:.02em;\">"
         f"{html.escape(label)}"
-        "</div>"
+        "</td></tr></table>"
     )
+
+
+def _render_section_block_html(index: int, title: str, body: str) -> str:
+    return (
+        "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+        "style=\"width:100%;border-collapse:collapse;margin:22px 0 0;\">"
+        "<tr><td style=\"padding:0;\">"
+        f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">"
+        f"{index}. {html.escape(title)}</h2>"
+        f"{_render_section_body_html(body)}"
+        "</td></tr></table>"
+    )
+
+
+def _wrap_report_email_html(subject: str, subtitle_html: str, section_html: str) -> str:
+    """Outlook-safe HTML shell shared by M1 / M2 / M3.
+
+    Outlook desktop (Word engine) ignores many CSS rules and max-width. Use a fixed
+    width=600 table, inline styles, and avoid media queries that force all cells to
+    max-width:100% (that collapses report tables in Outlook).
+    """
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!--[if mso]>
+<style type="text/css">
+table, td {{ font-family: Arial, sans-serif !important; }}
+</style>
+<![endif]-->
+<style>
+body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
+h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
+h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
+@media only screen and (max-width:600px){{
+body{{padding:8px!important}}
+h1{{font-size:18px!important;line-height:1.2!important}}
+h2{{font-size:13px!important;line-height:1.25!important}}
+pre{{font-size:12px!important;padding:10px!important}}
+.report-table th,.report-table td{{font-size:11px!important;padding:3px 4px!important;line-height:1.25!important}}
+}}
+</style></head>
+<body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:0;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
+<tr><td align="center" style="padding:16px 8px;">
+<!--[if mso]>
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0"><tr><td>
+<![endif]-->
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:100%;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<tr><td style="padding:16px 18px;font-family:Arial,sans-serif;">
+<h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
+<p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">{subtitle_html}</p>
+{section_html}
+</td></tr></table>
+<!--[if mso]>
+</td></tr></table>
+<![endif]-->
+</td></tr></table>
+</body></html>"""
 
 
 def _parse_ascii_cells(line: str) -> list[str]:
@@ -1248,17 +1308,19 @@ def _email_column_widths(header: list[str]) -> list[str]:
     """Give utility columns only the space they need; reserve the rest for title/note text."""
     if not header:
         return []
+    # Pixel widths must stay usable in Outlook (Word), which honors width= attributes
+    # literally — too-narrow WHO/FROM columns make multi-initial rows unreadable.
     fixed_by_name = {
-        "NR": "24",
-        "WHO": "34",
-        "FROM": "38",
-        "TIME": "46",
-        "ORA": "46",
-        "KOHA": "46",
-        "DATA": "62",
-        "DATE": "62",
-        "DISK": "42",
-        "LATE": "54",
+        "NR": "32",
+        "WHO": "88",
+        "FROM": "64",
+        "TIME": "52",
+        "ORA": "52",
+        "KOHA": "52",
+        "DATA": "68",
+        "DATE": "68",
+        "DISK": "48",
+        "LATE": "58",
         "MBAJTUR": "58",
         "MBAJTUR?": "62",
         "ANULUAR": "58",
@@ -1344,9 +1406,11 @@ def _render_keyed_prompt_html(line: str) -> str:
     else:
         rendered = html.escape(stripped)
     return (
-        "<div style=\"background:#f8fafc;border:1px solid #e5e7eb;padding:8px 10px;"
-        "margin:0 0 8px;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#0f172a;\">"
-        f"{rendered}</div>"
+        "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+        "style=\"width:100%;border-collapse:collapse;margin:0 0 8px;\">"
+        "<tr><td style=\"background:#f8fafc;border:1px solid #e5e7eb;padding:8px 10px;"
+        "font-family:Arial,sans-serif;font-size:13px;line-height:1.45;color:#0f172a;\">"
+        f"{rendered}</td></tr></table>"
     )
 
 
@@ -1446,37 +1510,13 @@ def render_html(subject: str, report_day: date, tomorrow: date, sections: list[d
             section_chunks.append(_render_group_label_html(group))
             current_group = group
         section_chunks.append(
-            "<div style=\"margin:22px 0 0;\">"
-            f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">{index}. {html.escape(section['title'])}</h2>"
-            f"{_render_section_body_html(section.get('body') or '')}"
-            "</div>"
+            _render_section_block_html(index, section["title"], section.get("body") or "")
         )
-    section_html = "".join(section_chunks)
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
-body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
-h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
-h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
-@media only screen and (max-width:600px){{
-body{{padding:8px}}
-table,tbody,tr,td,div,pre{{max-width:100%!important;box-sizing:border-box!important}}
-h1{{font-size:18px!important;line-height:1.2!important;white-space:normal!important}}
-h2{{font-size:13px!important;line-height:1.25!important;white-space:normal!important;word-break:normal!important;overflow-wrap:anywhere!important}}
-pre{{font-size:12px!important;padding:10px!important}}
-.report-table{{width:100%!important;table-layout:auto!important}}
-.report-table th,.report-table td{{font-size:11px!important;padding:3px 4px!important;line-height:1.25!important;word-break:normal!important;overflow-wrap:break-word!important}}
-}}
-</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:8px;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
-<tr><td align="center" style="padding:0;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
-<tr><td style="padding:14px;">
-<h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
-<p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}</p>
-{section_html}
-</td></tr></table>
-</td></tr></table>
-</body></html>"""
+    return _wrap_report_email_html(
+        subject,
+        f"Sot: {report_day:%d.%m.%Y} &nbsp; Neser: {tomorrow:%d.%m.%Y}",
+        "".join(section_chunks),
+    )
 
 
 async def send_meetings_report(subject: str, recipients: dict[str, list[str]], plain_text: str, html_body: str) -> dict[str, Any]:

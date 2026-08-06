@@ -404,9 +404,11 @@ def render_plain_text(subject: str, report_day: date, sections: list[dict[str, s
 
 
 def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
-    import html
-
-    from app.services.meetings_report import _render_section_body_html
+    from app.services.meetings_report import (
+        _render_group_label_html,
+        _render_section_block_html,
+        _wrap_report_email_html,
+    )
 
     section_chunks: list[str] = []
     current_group = ""
@@ -417,47 +419,16 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
             else "AUTO-FILLED FROM PRIMEFLOW"
         )
         if group != current_group:
-            section_chunks.append(
-                "<div style=\"margin:22px 0 10px;padding:9px 11px;background:#f1f5f9;"
-                "border:1px solid #d7dee8;color:#334155;font-family:Arial,sans-serif;"
-                "font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;\">"
-                f"{html.escape(group)}"
-                "</div>"
-            )
+            section_chunks.append(_render_group_label_html(group))
             current_group = group
         section_chunks.append(
-            "<div style=\"margin:22px 0 0;\">"
-            f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">"
-            f"{index}. {html.escape(section['title'])}</h2>"
-            f"{_render_section_body_html(section.get('body') or '')}"
-            "</div>"
+            _render_section_block_html(index, section["title"], section.get("body") or "")
         )
-    section_html = "".join(section_chunks)
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
-body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
-h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
-h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
-@media only screen and (max-width:600px){{
-body{{padding:8px}}
-table,tbody,tr,td,div,pre{{max-width:100%!important;box-sizing:border-box!important}}
-h1{{font-size:18px!important;line-height:1.2!important;white-space:normal!important}}
-h2{{font-size:13px!important;line-height:1.25!important;white-space:normal!important;word-break:normal!important;overflow-wrap:anywhere!important}}
-pre{{font-size:12px!important;padding:10px!important}}
-.report-table{{width:100%!important;table-layout:auto!important}}
-.report-table th,.report-table td{{font-size:11px!important;padding:3px 4px!important;line-height:1.25!important;word-break:normal!important;overflow-wrap:break-word!important}}
-}}
-</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:8px;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
-<tr><td align="center" style="padding:0;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
-<tr><td style="padding:14px;">
-<h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
-<p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y}</p>
-{section_html}
-</td></tr></table>
-</td></tr></table>
-</body></html>"""
+    return _wrap_report_email_html(
+        subject,
+        f"Sot: {report_day:%d.%m.%Y}",
+        "".join(section_chunks),
+    )
 
 
 async def send_morning_report(
