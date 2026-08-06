@@ -15,6 +15,7 @@ from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.user import User
 from app.services.meetings_report import (
+    MANUAL_SECTION_TITLES,
     build_meetings_report_sections,
     normalize_meetings_report_sections,
     render_html,
@@ -22,6 +23,7 @@ from app.services.meetings_report import (
     send_meetings_report,
     subject_for,
 )
+from app.services.report_section_merge import preserve_manual_sections
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report_delivery import configured_recipients
@@ -247,6 +249,8 @@ async def generate_draft(
     row = (
         await db.execute(select(MeetingsReportDraft).where(MeetingsReportDraft.report_date == report_date))
     ).scalar_one_or_none()
+    if row is not None:
+        sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
     if row is None:
         row = MeetingsReportDraft(
             report_date=report_date,

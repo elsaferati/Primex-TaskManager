@@ -11,7 +11,6 @@ from app.models.common_entry import CommonEntry
 from app.models.enums import CommonCategory
 from app.models.meeting import Meeting
 from app.models.task import Task
-from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.services.after_break_report import (
     _ascii_table,
@@ -19,12 +18,11 @@ from app.services.after_break_report import (
     _blue_note_rows,
     _display_title,
     _personal_section,
-    render_html as _render_html,
-    render_plain_text as _render_plain_text,
 )
 from app.services.common_leave import parse_common_view_annual_leave
 from app.services.meetings_report import (
-    PERSONAL_GA_KA,
+    PERSONAL_GA,
+    TECHNICAL_TAG,
     _assignee_names,
     _bz_alignment_lines,
     _effective_task_assignee_ids,
@@ -32,53 +30,67 @@ from app.services.meetings_report import (
     _is_open,
     _leave_lines,
     _local_date,
-    _local_time,
     _meeting_lines,
     _meeting_occurs_on_date,
     _normalize_section,
+    _strip_status_markers,
     _task_lines,
     _tomorrow_meeting_table,
     _tomorrow_task_table,
-    _users_by_initials,
     send_meetings_report,
 )
 
 REPORT_TYPE = "morning_report"
 REPORT_LABEL = "Hapja e dites M1"
 SECTION_TITLES = [
-    "(GA) VONESA/MUNGESA. A NDRYSHON PLANI PER SOT?",
+    # Manual answers first
     (
-        "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET "
-        "DETYRE? EM: INFO PX (KO SPAM), EM:INFO HF, (KO SPAM) EM: PRIMEX EU (GMAIL-KO SPAM), "
+        "(GA) EM: INFO PX (KO SPAM), EM: INFO HF (KO SPAM), EM: PRIMEX EU (GMAIL-KO SPAM). "
         "VENDOS DET: STATUS (1H: EM(08:00),08:00,DL,AM,AM&PM,PM/P/R1)"
     ),
     "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
+    # Auto-filled from PrimeFlow
+    "(GA) VONESA/MUNGESA. A NDRYSHON PLANI PER SOT?",
+    "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET DETYRE?",
     "PV/FESTA EXTERNE/TAKIMET EXTERNE/ TAKIME INTERNE/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
 ]
+MANUAL_SECTION_TITLES = set(SECTION_TITLES[:2])
+LEGACY_NOTES_TITLE = (
+    "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET "
+    "DETYRE? EM: INFO PX (KO SPAM), EM:INFO HF, (KO SPAM) EM: PRIMEX EU (GMAIL-KO SPAM), "
+    "VENDOS DET: STATUS (1H: EM(08:00),08:00,DL,AM,AM&PM,PM/P/R1)"
+)
+SECTION_TITLE_ALIASES = {
+    LEGACY_NOTES_TITLE: SECTION_TITLES[3],
+}
 
 
 def subject_for(day: date) -> str:
     return f"PrimeFlow Hapja e dites M1 - {day:%d.%m.%Y}"
 
 
+def _emails_default_body() -> str:
+    return "\n\n".join(
+        [
+            "EMAIL INFO PX (KO SPAM): (Ploteso manualisht)",
+            "EMAIL INFO HF (KO SPAM): (Ploteso manualisht)",
+            "EMAIL PRIMEX EU / GMAIL (KO SPAM): (Ploteso manualisht)",
+            "STATUSI I DETYRAVE 1H/08:00/DL/AM/AM&PM/PM/P/R1: (Ploteso manualisht)",
+        ]
+    )
+
+
 def _default_body(title: str) -> str:
     if title == SECTION_TITLES[0]:
-        return "\n".join(["VONESA: 0", "", "MUNGESA: 0", "", "NDRYSHON PLANI: (Ploteso manualisht)"])
+        return _emails_default_body()
     if title == SECTION_TITLES[1]:
-        return "\n".join(
-            [
-                "NOTES: 0",
-                "",
-                "EMAIL INFO PX (KO SPAM): (Ploteso manualisht)",
-                "EMAIL INFO HF (KO SPAM): (Ploteso manualisht)",
-                "EMAIL PRIMEX EU / GMAIL (KO SPAM): (Ploteso manualisht)",
-                "STATUSI I DETYRAVE: (Ploteso manualisht)",
-            ]
-        )
+        return "(Ploteso manualisht)"
     if title == SECTION_TITLES[2]:
-        return "GA REPLIES: 0"
+        return "\n".join(["VONESA: 0", "", "MUNGESA: 0", "", "NDRYSHON PLANI: (Ploteso manualisht)"])
     if title == SECTION_TITLES[3]:
+        return "NOTES: 0"
+    if title == SECTION_TITLES[4]:
         return "\n\n".join(
             [
                 "PV: 0",
@@ -92,12 +104,48 @@ def _default_body(title: str) -> str:
     return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
 
 
+def _is_manual_email_line(line: str) -> bool:
+    upper = line.strip().upper()
+    return upper.startswith("EMAIL ") or upper.startswith("STATUSI I DETYRAVE")
+
+
+def _split_notes_and_emails(body: str) -> tuple[str, str]:
+    note_lines: list[str] = []
+    email_lines: list[str] = []
+    for line in (body or "").splitlines():
+        if _is_manual_email_line(line):
+            email_lines.append(line.strip())
+        else:
+            note_lines.append(line)
+    notes_body = "\n".join(note_lines).strip() or "NOTES: 0"
+    emails_body = "\n\n".join(line for line in email_lines if line).strip() or _emails_default_body()
+    return notes_body, emails_body
+
+
+def _separate_keyed_prompt_lines(body: str) -> str:
+    """Keep one blank line between uppercase KEY: value prompts for readability."""
+    parts = [line.strip() for line in (body or "").splitlines() if line.strip()]
+    return "\n\n".join(parts) if parts else body
+
+
 def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     by_title: dict[str, str] = {}
     extras: list[dict[str, str]] = []
     for section in sections or []:
-        title = str(section.get("title") or "").strip()
+        raw_title = str(section.get("title") or "").strip()
+        title = SECTION_TITLE_ALIASES.get(raw_title, raw_title)
         body = str(section.get("body") or "")
+        if raw_title == LEGACY_NOTES_TITLE or (
+            title == SECTION_TITLES[3] and any(_is_manual_email_line(line) for line in body.splitlines())
+        ):
+            notes_body, emails_body = _split_notes_and_emails(body)
+            if SECTION_TITLES[3] not in by_title:
+                by_title[SECTION_TITLES[3]] = notes_body
+            if SECTION_TITLES[0] not in by_title:
+                by_title[SECTION_TITLES[0]] = emails_body
+            continue
+        if title == SECTION_TITLES[0]:
+            body = _separate_keyed_prompt_lines(body) or _emails_default_body()
         if title in SECTION_TITLES and title not in by_title:
             by_title[title] = body
         elif title:
@@ -130,7 +178,7 @@ def _entry_person(entry: CommonEntry, names: dict[Any, str]) -> str:
 
 
 def _clean_entry_note(value: str | None) -> str:
-    note = value or ""
+    note = TECHNICAL_TAG.sub("", value or "")
     note = re.sub(r"Date:\s*\d{4}-\d{2}-\d{2}", "", note, flags=re.I)
     note = re.sub(r"Start:\s*\d{1,2}:\d{2}", "", note, flags=re.I)
     note = re.sub(r"Until:\s*\d{1,2}:\d{2}", "", note, flags=re.I)
@@ -175,73 +223,16 @@ def _attendance_section(entries: list[CommonEntry], names: dict[Any, str], repor
 
 def _notes_section(note_rows: list[list[str]]) -> str:
     return _normalize_section(
-        [
-            *_ascii_table(
-                "NOTES",
-                [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME", 5)],
-                note_rows,
-            ),
-            "",
-            "EMAIL INFO PX (KO SPAM): (Ploteso manualisht)",
-            "EMAIL INFO HF (KO SPAM): (Ploteso manualisht)",
-            "EMAIL PRIMEX EU / GMAIL (KO SPAM): (Ploteso manualisht)",
-            "STATUSI I DETYRAVE 1H/08:00/DL/AM/AM&PM/PM/P/R1: (Ploteso manualisht)",
-        ]
+        _ascii_table(
+            "NOTES",
+            [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME", 5)],
+            note_rows,
+        )
     )
 
 
-async def _ga_reply_section(db: AsyncSession, tasks: list[Task], report_day: date) -> tuple[str, int]:
-    ga_users = await _users_by_initials(db, "GA")
-    ga_ids = {user.id for user in ga_users}
-    if not ga_ids:
-        return "GA REPLIES: 0", 0
-
-    comments = (
-        await db.execute(
-            select(TaskUserComment)
-            .where(TaskUserComment.user_id.in_(ga_ids))
-            .where(TaskUserComment.comment.is_not(None))
-        )
-    ).scalars().all()
-    task_by_id = {task.id: task for task in tasks}
-    rows: list[tuple[TaskUserComment, Task]] = []
-    creator_ids: set[Any] = set()
-    for comment in comments:
-        task = task_by_id.get(comment.task_id)
-        if task is None or not (comment.comment or "").strip():
-            continue
-        if _local_date(comment.updated_at or comment.created_at) != report_day:
-            continue
-        if task.created_by in ga_ids:
-            continue
-        rows.append((comment, task))
-        if task.created_by:
-            creator_ids.add(task.created_by)
-
-    creator_names: dict[Any, str] = {}
-    if creator_ids:
-        users = (await db.execute(select(User).where(User.id.in_(creator_ids)))).scalars().all()
-        creator_names = {user.id: user.full_name or user.username or user.email for user in users}
-
-    values = [
-        [
-            str(index),
-            _initials(creator_names.get(task.created_by)),
-            _display_title(task.title),
-            re.sub(r"\s+", " ", comment.comment or "").strip(),
-            _local_time(comment.updated_at or comment.created_at),
-        ]
-        for index, (comment, task) in enumerate(
-            sorted(rows, key=lambda item: item[0].updated_at or item[0].created_at), start=1
-        )
-    ]
-    return _normalize_section(
-        _ascii_table(
-            "GA REPLIES",
-            [("NR", 2), ("FROM", 8), ("TITLE", 42), ("REPLY", 50), ("TIME", 5)],
-            values,
-        )
-    ), len(values)
+def _emails_section() -> str:
+    return _emails_default_body()
 
 
 async def _day_context_section(
@@ -261,7 +252,9 @@ async def _day_context_section(
             if start <= report_day <= end:
                 leave_rows.append((entry, full_day, start_time, end_time, note, is_all_users))
         elif entry.category == CommonCategory.external_holiday and _entry_day(entry) == report_day:
-            holiday_rows.append([str(len(holiday_rows) + 1), entry.title, _clean_entry_note(entry.description)])
+            holiday_rows.append(
+                [str(len(holiday_rows) + 1), _display_title(entry.title), _clean_entry_note(entry.description)]
+            )
         elif entry.category == CommonCategory.blocks and _entry_day(entry) == report_day:
             common_block_lines.append(f"- {_entry_person(entry, names)}: {_display_title(entry.title)}")
 
@@ -273,9 +266,14 @@ async def _day_context_section(
     today_tasks = [task for task in tasks if _belongs_to_day(task, report_day) and _is_open(task)]
     bz_tasks = [task for task in today_tasks if re.search(r"\bBZ\b", task.title or "", re.I)]
     blocked_tasks = [task for task in today_tasks if task.is_bllok]
-    bz_lines = await _bz_alignment_lines(db, report_day, tasks, names, assignee_ids_by_task)
-    bz_lines = bz_lines or _task_lines(bz_tasks, names, assignee_ids_by_task)
-    block_lines = [*common_block_lines, *_task_lines(blocked_tasks, names, assignee_ids_by_task)]
+    bz_lines = await _bz_alignment_lines(
+        db, report_day, tasks, names, assignee_ids_by_task, include_status=True
+    )
+    bz_lines = bz_lines or _task_lines(bz_tasks, names, assignee_ids_by_task, include_status=True)
+    block_lines = [
+        *common_block_lines,
+        *_task_lines(blocked_tasks, names, assignee_ids_by_task, include_status=True),
+    ]
     bz_lines = list(dict.fromkeys(line for line in bz_lines if line and not line.startswith("(")))
     block_lines = list(dict.fromkeys(line for line in block_lines if line and not line.startswith("(")))
 
@@ -289,9 +287,9 @@ async def _day_context_section(
         "",
         *_tomorrow_meeting_table("TAKIMET INTERNE", _meeting_lines(internal_meetings)),
         "",
-        *_tomorrow_task_table("BZ ME GA", bz_lines),
+        *_tomorrow_task_table("BZ ME GA", bz_lines, with_status=True),
         "",
-        *_tomorrow_task_table("BLLOK", block_lines),
+        *_tomorrow_task_table("BLLOK", block_lines, with_status=True),
     ]
     count = len(leave_rows) + len(holiday_rows) + len(today_meetings) + len(bz_lines) + len(block_lines)
     return _normalize_section(lines), count
@@ -324,47 +322,115 @@ async def build_morning_report_sections(
         users = (await db.execute(select(User).where(User.id.in_(entry_user_ids)))).scalars().all()
         names.update({user.id: user.full_name or user.username or user.email for user in users})
 
-    note_rows = await _blue_note_rows(db, report_day)
-    ga_replies, ga_reply_count = await _ga_reply_section(db, tasks, report_day)
+    note_rows = await _blue_note_rows(db)
     day_context, day_context_count = await _day_context_section(
         db, entries, names, tasks, assignee_ids_by_task, report_day
     )
     personal = await _personal_section(
-        db, tasks, names, assignee_ids_by_task, report_day, title_pattern=PERSONAL_GA_KA
+        db, tasks, names, assignee_ids_by_task, report_day, title_pattern=PERSONAL_GA
     )
 
     attendance = _attendance_section(entries, names, report_day)
     sections = [
-        {"title": SECTION_TITLES[0], "body": attendance},
-        {"title": SECTION_TITLES[1], "body": _notes_section(note_rows)},
-        {"title": SECTION_TITLES[2], "body": ga_replies},
-        {"title": SECTION_TITLES[3], "body": day_context},
-        {"title": SECTION_TITLES[4], "body": _normalize_section(personal)},
+        {"title": SECTION_TITLES[0], "body": _emails_section()},
+        {"title": SECTION_TITLES[1], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[2], "body": attendance},
+        {"title": SECTION_TITLES[3], "body": _notes_section(note_rows)},
+        {"title": SECTION_TITLES[4], "body": day_context},
+        {"title": SECTION_TITLES[5], "body": _normalize_section(personal)},
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
         "counts": {
-            SECTION_TITLES[0]: sum(
+            SECTION_TITLES[0]: 0,
+            SECTION_TITLES[1]: 0,
+            SECTION_TITLES[2]: sum(
                 1
                 for entry in entries
                 if entry.category in {CommonCategory.delays, CommonCategory.absences}
                 and _entry_day(entry) == report_day
             ),
-            SECTION_TITLES[1]: len(note_rows),
-            SECTION_TITLES[2]: ga_reply_count,
-            SECTION_TITLES[3]: day_context_count,
-            SECTION_TITLES[4]: sum(1 for line in personal if re.match(r"^\|\s+\d+\s+\|", line)),
+            SECTION_TITLES[3]: len(note_rows),
+            SECTION_TITLES[4]: day_context_count,
+            SECTION_TITLES[5]: sum(1 for line in personal if re.match(r"^\|\s+\d+\s+\|", line)),
         },
     }
     return sections, snapshot
 
 
 def render_plain_text(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
-    return _render_plain_text(subject, report_day, sections)
+    blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", ""]
+    current_group = ""
+    for index, section in enumerate(sections, 1):
+        group = (
+            "MANUAL QUESTIONS"
+            if section["title"] in MANUAL_SECTION_TITLES
+            else "AUTO-FILLED FROM PRIMEFLOW"
+        )
+        if group != current_group:
+            blocks.append(group)
+            current_group = group
+        blocks.append(
+            f"{index}. {section['title']}\n{_strip_status_markers(section.get('body') or '')}".strip()
+        )
+    return "\n\n".join(blocks)
 
 
 def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
-    return _render_html(subject, report_day, sections)
+    import html
+
+    from app.services.meetings_report import _render_section_body_html
+
+    section_chunks: list[str] = []
+    current_group = ""
+    for index, section in enumerate(sections, 1):
+        group = (
+            "MANUAL QUESTIONS"
+            if section["title"] in MANUAL_SECTION_TITLES
+            else "AUTO-FILLED FROM PRIMEFLOW"
+        )
+        if group != current_group:
+            section_chunks.append(
+                "<div style=\"margin:22px 0 10px;padding:9px 11px;background:#f1f5f9;"
+                "border:1px solid #d7dee8;color:#334155;font-family:Arial,sans-serif;"
+                "font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;\">"
+                f"{html.escape(group)}"
+                "</div>"
+            )
+            current_group = group
+        section_chunks.append(
+            "<div style=\"margin:22px 0 0;\">"
+            f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">"
+            f"{index}. {html.escape(section['title'])}</h2>"
+            f"{_render_section_body_html(section.get('body') or '')}"
+            "</div>"
+        )
+    section_html = "".join(section_chunks)
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
+body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
+h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
+h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
+@media only screen and (max-width:600px){{
+body{{padding:8px}}
+table,tbody,tr,td,div,pre{{max-width:100%!important;box-sizing:border-box!important}}
+h1{{font-size:18px!important;line-height:1.2!important;white-space:normal!important}}
+h2{{font-size:13px!important;line-height:1.25!important;white-space:normal!important;word-break:normal!important;overflow-wrap:anywhere!important}}
+pre{{font-size:12px!important;padding:10px!important}}
+.report-table{{width:100%!important;table-layout:auto!important}}
+.report-table th,.report-table td{{font-size:11px!important;padding:3px 4px!important;line-height:1.25!important;word-break:normal!important;overflow-wrap:break-word!important}}
+}}
+</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:8px;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
+<tr><td align="center" style="padding:0;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<tr><td style="padding:14px;">
+<h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
+<p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y}</p>
+{section_html}
+</td></tr></table>
+</td></tr></table>
+</body></html>"""
 
 
 async def send_morning_report(

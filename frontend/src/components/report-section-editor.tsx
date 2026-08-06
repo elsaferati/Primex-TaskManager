@@ -5,6 +5,7 @@ import { Plus, Save, Trash2, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Textarea } from "@/components/ui/textarea"
 
 type EditorTableBlock = { headerIndex: number; rowIndexes: number[]; endIndex: number }
 
@@ -22,6 +23,7 @@ const HEADER_LABELS = new Set([
   "DATA",
   "DATE",
   "LATE",
+  "STATUS",
   "MBAJTUR",
   "MBAJTUR?",
   "ANULUAR",
@@ -44,14 +46,20 @@ function isRuleLine(value: string) {
 function tableCells(value: string) {
   const trimmed = value.trim()
   if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null
-  return trimmed.slice(1, -1).split("|").map((cell) => cell.trim())
+  // Strip only the single padding space from `| cell |` formatting so trailing
+  // spaces the user types are preserved while editing.
+  return trimmed.slice(1, -1).split("|").map((cell) => cell.replace(/^ /, "").replace(/ $/, ""))
+}
+
+function formatTableRow(cells: string[]) {
+  return `| ${cells.join(" | ")} |`
 }
 
 function updateTableCell(line: string, cellIndex: number, value: string) {
   const cells = tableCells(line)
   if (!cells) return line
-  cells[cellIndex] = value
-  return `| ${cells.join(" | ")} |`
+  cells[cellIndex] = value.replace(/\|/g, "")
+  return formatTableRow(cells)
 }
 
 function normalizeHeader(value: string) {
@@ -67,7 +75,7 @@ function isHeaderCells(cells: string[]) {
 function compactWidthForHeader(header: string) {
   const value = normalizeHeader(header)
   if (value === "NR") return "44px"
-  if (value === "WHO" || value === "FROM" || value === "PER") return "64px"
+  if (value === "WHO" || value === "FROM" || value === "PER") return "minmax(88px, 160px)"
   if (value === "DISK") return "58px"
   if (value === "TIME") return "76px"
   if (value === "DATA" || value === "DATE") return "96px"
@@ -130,8 +138,43 @@ function isFixedEditorLabel(value: string) {
   return Boolean(trimmed) && (trimmed.endsWith(":") || (trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed)))
 }
 
+/** Split "NDRYSHON PLANI: (Ploteso manualisht)" so the uppercase key stays bold even when the value has lowercase. */
+function splitKeyedLabel(value: string): { label: string; rest: string } | null {
+  const match = value.trim().match(/^([A-Z][A-Z0-9 /&()?.+-]*:)\s*(.*)$/)
+  if (!match) return null
+  const labelText = match[1].slice(0, -1)
+  if (!labelText || labelText !== labelText.toUpperCase()) return null
+  return { label: match[1], rest: match[2] }
+}
+
+function renderKeyedLine(text: string, className = "px-3 py-2") {
+  const keyed = splitKeyedLabel(text)
+  if (!keyed) {
+    return (
+      <div className={className}>
+        <span className="whitespace-pre-wrap break-words">{text}</span>
+      </div>
+    )
+  }
+  return (
+    <div className={className}>
+      <span className="font-semibold">{keyed.label}</span>
+      {keyed.rest ? <span className="whitespace-pre-wrap break-words">{` ${keyed.rest}`}</span> : null}
+    </div>
+  )
+}
+
 function rowTone(label: string, cells: string[], headers: string[]) {
   const normalizedLabel = label.toUpperCase()
+  const statusIndex = headers.findIndex((header) => normalizeHeader(header) === "STATUS")
+  const statusValue = statusIndex >= 0 ? cells[statusIndex]?.trim().toUpperCase().replace(/_/g, " ") : ""
+  const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
+  const titleStatus = titleIndex >= 0 ? splitStatusMarker(cells[titleIndex] || "").status : ""
+  const resolvedStatus = (titleStatus || statusValue).toUpperCase().replace(/_/g, " ")
+  if (resolvedStatus.includes("WAITING")) return "bg-orange-100 text-orange-900"
+  if (resolvedStatus.includes("IN PROGRESS")) return "bg-yellow-100"
+  if (resolvedStatus === "TODO") return "bg-pink-200"
+  if (resolvedStatus === "DONE") return "bg-green-100"
   const diskIndex = headers.findIndex((header) => normalizeHeader(header) === "DISK")
   const diskValue = diskIndex >= 0 ? cells[diskIndex]?.trim().toUpperCase() : ""
   if (diskValue === "NO") return "bg-red-100 text-red-800"
@@ -139,9 +182,79 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   if (normalizedLabel.includes("LATE")) return "bg-red-100"
   if (normalizedLabel.includes("TODO") || normalizedLabel.includes("DETYRAT E REJA")) return "bg-pink-200"
   if (normalizedLabel.includes("IN PROGRESS")) return "bg-yellow-100"
+  if (normalizedLabel.includes("WAITING")) return "bg-orange-100 text-orange-900"
   if (normalizedLabel.includes("DONE") || diskValue === "YES") return "bg-green-100"
   if (normalizedLabel.includes("NOTES")) return "bg-blue-100"
   return "bg-white"
+}
+
+function splitStatusMarker(value: string) {
+  const matches = [...value.matchAll(/\s*\[\[\s*st\s*:?\s*([A-Z_]+)\s*\]\]/gi)]
+  if (!matches.length) return { text: value, status: "" }
+  const status = matches[matches.length - 1][1].toUpperCase()
+  const text = value.replace(/\s*\[\[\s*st\s*:?\s*[A-Z_]+\s*\]\]/gi, "").replace(/\s+/g, " ").trim()
+  return { text, status }
+}
+
+function withoutStatusColumn(headers: string[], cells: string[]) {
+  const statusIndex = headers.findIndex((header) => normalizeHeader(header) === "STATUS")
+  const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
+  const nextHeaders = statusIndex >= 0 ? headers.filter((_, index) => index !== statusIndex) : headers
+  const nextCells = cells.map((cell, index) => {
+    if (statusIndex >= 0 && index === statusIndex) return null
+    if (titleIndex >= 0 && index === titleIndex) return splitStatusMarker(cell).text
+    return cell
+  }).filter((cell): cell is string => cell !== null)
+  return { headers: nextHeaders, cells: nextCells }
+}
+
+function primaryTextColumnIndex(headers: string[]) {
+  const normalized = headers.map(normalizeHeader)
+  for (const name of ["NOTE", "TITLE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"]) {
+    const index = normalized.indexOf(name)
+    if (index >= 0) return index
+  }
+  return Math.min(2, Math.max(headers.length - 1, 0))
+}
+
+function mergeContinuationTableRows(header: string[], rows: string[][]) {
+  if (!header.length || !rows.length) return rows
+  const width = header.length
+  const textIndex = primaryTextColumnIndex(header)
+  const nrIndex = header.findIndex((cell) => normalizeHeader(cell) === "NR")
+  const resolvedNrIndex = nrIndex >= 0 ? nrIndex : 0
+  const merged: string[][] = []
+
+  for (const row of rows) {
+    const normalized = [...row, ...Array(Math.max(0, width - row.length)).fill("")].slice(0, width)
+    const hasTextContinuation = Boolean(normalized[textIndex]?.trim())
+    const otherCellsEmpty = normalized.every((cell, index) => index === textIndex || !cell.trim())
+    const isWrappedRow =
+      merged.length > 0 &&
+      !normalized[resolvedNrIndex]?.trim() &&
+      normalized.some((cell) => cell.trim())
+
+    if (isWrappedRow) {
+      const previous = merged[merged.length - 1]
+      normalized.forEach((value, index) => {
+        const stripped = value.trim()
+        if (!stripped) return
+        previous[index] = previous[index]?.trim() ? `${previous[index]}\n${stripped}` : stripped
+      })
+      continue
+    }
+
+    if (merged.length > 0 && hasTextContinuation && otherCellsEmpty) {
+      const previous = merged[merged.length - 1]
+      const stripped = normalized[textIndex].trim()
+      previous[textIndex] = previous[textIndex]?.trim() ? `${previous[textIndex]}\n${stripped}` : stripped
+      continue
+    }
+
+    merged.push(normalized)
+  }
+
+  return merged
 }
 
 export function ReportSectionPreview({ body }: { body: string }) {
@@ -177,42 +290,148 @@ export function ReportSectionPreview({ body }: { body: string }) {
     { contexts: [], label: "", headers: [] },
   ).contexts
 
+  type PreviewItem =
+    | { kind: "blank"; key: string }
+    | { kind: "label"; key: string; text: string }
+    | { kind: "text"; key: string; text: string }
+    | { kind: "table"; key: string; isHeader: boolean; cells: string[]; template: string; label: string; headers: string[] }
+
+  const previewItems: PreviewItem[] = []
+  let pendingHeader: string[] | null = null
+  let pendingRows: string[][] = []
+  let pendingMeta: { label: string; headers: string[]; template: string; startIndex: number } | null = null
+
+  const flushTable = () => {
+    if (!pendingHeader || !pendingMeta) return
+    previewItems.push({
+      kind: "table",
+      key: `header-${pendingMeta.startIndex}`,
+      isHeader: true,
+      cells: pendingHeader,
+      template: pendingMeta.template,
+      label: pendingMeta.label,
+      headers: pendingMeta.headers,
+    })
+    mergeContinuationTableRows(pendingHeader, pendingRows).forEach((cells, rowIndex) => {
+      previewItems.push({
+        kind: "table",
+        key: `row-${pendingMeta!.startIndex}-${rowIndex}`,
+        isHeader: false,
+        cells,
+        template: pendingMeta!.template,
+        label: pendingMeta!.label,
+        headers: pendingMeta!.headers,
+      })
+    })
+    pendingHeader = null
+    pendingRows = []
+    pendingMeta = null
+  }
+
+  lines.forEach((line, index) => {
+    const trimmed = line.trim()
+    if (!trimmed) {
+      flushTable()
+      previewItems.push({ kind: "blank", key: `blank-${index}` })
+      return
+    }
+    if (isRuleLine(line)) return
+
+    const cells = tableCells(line)
+    if (cells) {
+      const isHeader = isHeaderCells(cells)
+      const context = lineContexts[index]
+      const template = templates.get(index) || tableGridTemplate(cells)
+      if (isHeader) {
+        flushTable()
+        pendingHeader = cells
+        pendingRows = []
+        pendingMeta = {
+          label: context.label,
+          headers: cells.map(normalizeHeader),
+          template,
+          startIndex: index,
+        }
+        return
+      }
+      if (pendingHeader) {
+        pendingRows.push(cells)
+        return
+      }
+      previewItems.push({
+        kind: "table",
+        key: `loose-${index}`,
+        isHeader: false,
+        cells,
+        template,
+        label: context.label,
+        headers: context.headers,
+      })
+      return
+    }
+
+    flushTable()
+    if (isFixedEditorLabel(line)) {
+      previewItems.push({ kind: "label", key: `label-${index}`, text: trimmed })
+      return
+    }
+    previewItems.push({ kind: "text", key: `text-${index}`, text: line })
+  })
+  flushTable()
+
   return (
     <div className="mt-3 overflow-x-auto rounded-md border bg-white">
       <div className="min-w-[560px] text-xs leading-5 text-slate-950">
-        {lines.map((line, index) => {
-          const trimmed = line.trim()
-          if (!trimmed) return <div key={index} className="h-2" />
-          if (isRuleLine(line)) return null
-
-          const cells = tableCells(line)
-          if (cells) {
-            const isHeader = isHeaderCells(cells)
-            const template = templates.get(index) || tableGridTemplate(cells)
-            const context = lineContexts[index]
-            const tone = isHeader ? "bg-slate-200 font-semibold" : rowTone(context.label, cells, context.headers)
+        {previewItems.map((item) => {
+          if (item.kind === "blank") return <div key={item.key} className="h-2" />
+          if (item.kind === "label") {
+            const keyed = splitKeyedLabel(item.text)
+            if (keyed) {
+              return (
+                <div key={item.key} className="border-b border-slate-200 bg-slate-50 px-3 py-2 uppercase tracking-normal">
+                  <span className="font-semibold">{keyed.label}</span>
+                  {keyed.rest ? <span>{` ${keyed.rest}`}</span> : null}
+                </div>
+              )
+            }
             return (
-              <div key={index} className={`grid border-b border-slate-200 last:border-b-0 ${tone}`} style={{ gridTemplateColumns: template }}>
-                {cells.map((cell, cellIndex) => (
-                  <div key={cellIndex} className="border-r border-slate-200 px-2 py-1.5 last:border-r-0">
-                    <span className="whitespace-pre-wrap break-words">{cell || "-"}</span>
-                  </div>
-                ))}
+              <div key={item.key} className="border-b border-slate-200 bg-slate-50 px-3 py-2 font-semibold uppercase tracking-normal">
+                {item.text}
               </div>
             )
           }
-
-          if (isFixedEditorLabel(line)) {
-            return (
-              <div key={index} className="border-b border-slate-200 bg-slate-50 px-3 py-2 font-semibold uppercase tracking-normal">
-                {trimmed}
-              </div>
-            )
+          if (item.kind === "text") {
+            const keyed = splitKeyedLabel(item.text)
+            if (keyed) {
+              return (
+                <div key={item.key} className="border-b border-slate-200 bg-white px-3 py-2.5">
+                  <span className="font-semibold">{keyed.label}</span>
+                  {keyed.rest ? <span className="whitespace-pre-wrap break-words">{` ${keyed.rest}`}</span> : null}
+                </div>
+              )
+            }
+            return <React.Fragment key={item.key}>{renderKeyedLine(item.text)}</React.Fragment>
           }
 
+          const tone = item.isHeader
+            ? "bg-slate-200 font-semibold"
+            : rowTone(item.label, item.cells, item.headers)
+          const visible = withoutStatusColumn(item.headers, item.cells)
+          const template =
+            visible.headers.length !== item.headers.length
+              ? tableGridTemplate(visible.headers)
+              : item.template
           return (
-            <div key={index} className="px-3 py-2">
-              <span className="whitespace-pre-wrap break-words">{line}</span>
+            <div
+              key={item.key}
+              className={`grid border-b border-slate-200 last:border-b-0 ${tone}`}
+              style={{ gridTemplateColumns: template }}
+            >
+              {visible.cells.map((cell, cellIndex) => (
+                <div key={cellIndex} className="border-r border-slate-200 px-2 py-1.5 last:border-r-0">
+                  <span className="whitespace-pre-wrap break-words">{cell || "-"}</span>
+                </div>
+              ))}
             </div>
           )
         })}
@@ -223,62 +442,105 @@ export function ReportSectionPreview({ body }: { body: string }) {
 
 export function ReportSectionFieldEditor({
   lines,
-  onChangeLines,
   onCancel,
   onSave,
 }: {
   lines: string[]
-  onChangeLines: (lines: string[]) => void
   onCancel: () => void
-  onSave: () => void
+  onSave: (lines: string[]) => void
 }) {
-  const tableBlocks = React.useMemo(() => editorTableBlocks(lines), [lines])
-  const tableRowIndexes = React.useMemo(() => new Set(tableBlocks.flatMap((block) => [block.headerIndex, ...block.rowIndexes])), [tableBlocks])
-  const addRowIndexes = React.useMemo(() => new Map(tableBlocks.map((block) => [block.endIndex, block.headerIndex])), [tableBlocks])
-  const templates = React.useMemo(() => tableGridTemplates(lines), [lines])
+  // Edit in local state only. Syncing every keystroke to the parent remounted
+  // fields when label heuristics flipped, and made typing feel like it "stopped".
+  const [draftLines, setDraftLines] = React.useState(() => (lines.length ? [...lines] : [""]))
+  const draftLinesRef = React.useRef(draftLines)
+  draftLinesRef.current = draftLines
+
+  const tableBlocks = React.useMemo(() => editorTableBlocks(draftLines), [draftLines])
+  const tableRowIndexes = React.useMemo(
+    () => new Set(tableBlocks.flatMap((block) => [block.headerIndex, ...block.rowIndexes])),
+    [tableBlocks],
+  )
+  const addRowIndexes = React.useMemo(
+    () => new Map(tableBlocks.map((block) => [block.endIndex, block.headerIndex])),
+    [tableBlocks],
+  )
+  const templates = React.useMemo(() => tableGridTemplates(draftLines), [draftLines])
+
+  const commitLines = React.useCallback((next: string[]) => {
+    const normalized = next.length ? next : [""]
+    draftLinesRef.current = normalized
+    setDraftLines(normalized)
+  }, [])
 
   const updateLine = (lineIndex: number, value: string) => {
-    onChangeLines(lines.map((line, index) => index === lineIndex ? value : line))
+    commitLines(draftLinesRef.current.map((line, index) => (index === lineIndex ? value : line)))
   }
 
   const updateCell = (lineIndex: number, cellIndex: number, value: string) => {
-    updateLine(lineIndex, updateTableCell(lines[lineIndex], cellIndex, value))
+    const current = draftLinesRef.current
+    commitLines(
+      current.map((line, index) => (index === lineIndex ? updateTableCell(line, cellIndex, value) : line)),
+    )
   }
 
   const removeLine = (lineIndex: number) => {
-    onChangeLines(lines.filter((_, index) => index !== lineIndex))
+    commitLines(draftLinesRef.current.filter((_, index) => index !== lineIndex))
   }
 
   const addRow = (headerIndex: number) => {
-    const headers = tableCells(lines[headerIndex]) || []
-    const emptyCells = headers.map((header, index) => normalizeHeader(header) === "NR" ? String(index + 1) : "")
-    const insertionIndex = tableBlocks.find((block) => block.headerIndex === headerIndex)?.endIndex ?? headerIndex + 1
-    onChangeLines([
-      ...lines.slice(0, insertionIndex),
-      `| ${emptyCells.join(" | ")} |`,
-      ...lines.slice(insertionIndex),
+    const current = draftLinesRef.current
+    const headers = tableCells(current[headerIndex]) || []
+    const emptyCells = headers.map((header, index) =>
+      normalizeHeader(header) === "NR" ? String(index + 1) : "",
+    )
+    const insertionIndex =
+      tableBlocks.find((block) => block.headerIndex === headerIndex)?.endIndex ?? headerIndex + 1
+    commitLines([
+      ...current.slice(0, insertionIndex),
+      formatTableRow(emptyCells),
+      ...current.slice(insertionIndex),
     ])
   }
 
   return (
     <div className="mt-3 space-y-3 rounded-md border bg-white p-3">
       <div className="flex items-center justify-end gap-2">
-        <Button variant="outline" size="sm" onClick={onCancel}>
+        <Button type="button" variant="outline" size="sm" onClick={onCancel}>
           <X className="h-4 w-4" /> Cancel
         </Button>
-        <Button size="sm" onClick={onSave}>
+        <Button type="button" size="sm" onClick={() => onSave(draftLinesRef.current)}>
           <Save className="h-4 w-4" /> Apply
         </Button>
       </div>
 
       <div className="max-h-[680px] space-y-2 overflow-auto pr-1">
-        {lines.map((line, lineIndex) => {
+        {draftLines.map((line, lineIndex) => {
           const trimmed = line.trim()
-          if (!trimmed) return <div key={lineIndex} className="h-2" />
+          if (!trimmed) {
+            // Keep blank lines editable. Clearing "(Ploteso manualisht)" used to
+            // replace the textarea with a non-editable spacer.
+            return (
+              <Textarea
+                key={`text-${lineIndex}`}
+                value={line}
+                rows={3}
+                className="min-h-16 resize-y"
+                placeholder="Shkruaj pergjigjen..."
+                autoFocus={draftLines.length === 1}
+                onChange={(event) => updateLine(lineIndex, event.target.value)}
+              />
+            )
+          }
           if (isRuleLine(line)) {
             const headerIndex = addRowIndexes.get(lineIndex)
             return headerIndex === undefined ? null : (
-              <Button key={lineIndex} type="button" variant="outline" size="sm" onClick={() => addRow(headerIndex)}>
+              <Button
+                key={`add-${lineIndex}`}
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => addRow(headerIndex)}
+              >
                 <Plus className="h-4 w-4" /> Add row
               </Button>
             )
@@ -289,11 +551,17 @@ export function ReportSectionFieldEditor({
             const isHeader = isHeaderCells(cells)
             const template = templates.get(lineIndex) || tableGridTemplate(cells)
             return (
-              <div key={lineIndex} className="overflow-x-auto">
-                <div className="grid min-w-[560px] items-center gap-2" style={{ gridTemplateColumns: `${template} 42px` }}>
-                  {cells.map((cell, cellIndex) => (
+              <div key={`table-${lineIndex}`} className="overflow-x-auto">
+                <div
+                  className="grid min-w-[560px] items-center gap-2"
+                  style={{ gridTemplateColumns: `${template} 42px` }}
+                >
+                  {cells.map((cell, cellIndex) =>
                     isHeader ? (
-                      <div key={cellIndex} className="rounded border bg-slate-100 px-2 py-2 text-xs font-semibold">
+                      <div
+                        key={cellIndex}
+                        className="rounded border bg-slate-100 px-2 py-2 text-xs font-semibold"
+                      >
                         {normalizeHeader(cell)}
                       </div>
                     ) : (
@@ -302,30 +570,34 @@ export function ReportSectionFieldEditor({
                         value={cell}
                         onChange={(event) => updateCell(lineIndex, cellIndex, event.target.value)}
                       />
-                    )
-                  ))}
+                    ),
+                  )}
                   {tableRowIndexes.has(lineIndex) && !isHeader ? (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => removeLine(lineIndex)} aria-label="Remove row">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => removeLine(lineIndex)}
+                      aria-label="Remove row"
+                    >
                       <Trash2 className="h-4 w-4" />
                     </Button>
-                  ) : <span />}
+                  ) : (
+                    <span />
+                  )}
                 </div>
               </div>
             )
           }
 
-          if (isFixedEditorLabel(line)) {
-            return (
-              <div key={lineIndex} className="rounded border bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-slate-700">
-                {trimmed}
-              </div>
-            )
-          }
-
+          // Always keep freeform lines editable. Treating ALL-CAPS / trailing ":" as
+          // read-only labels mid-keystroke unmounted the input and cut typing short.
           return (
-            <Input
-              key={lineIndex}
+            <Textarea
+              key={`text-${lineIndex}`}
               value={line}
+              rows={Math.min(6, Math.max(2, Math.ceil(line.length / 80) || 2))}
+              className="min-h-16 resize-y"
               onChange={(event) => updateLine(lineIndex, event.target.value)}
             />
           )

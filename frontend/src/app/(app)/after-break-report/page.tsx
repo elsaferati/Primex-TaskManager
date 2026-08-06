@@ -226,6 +226,9 @@ export default function AfterBreakReportPage() {
     if (!canAccess) return
     setLoading(true)
     try {
+      if (draft && canEdit) {
+        await save(draft)
+      }
       const res = await apiFetch(`${API}/generate?report_date=${reportDate}`, { method: "POST" })
       if (!res.ok) throw new Error(await responseError(res))
       applyDraft(await res.json())
@@ -237,14 +240,18 @@ export default function AfterBreakReportPage() {
     }
   }
 
-  const save = async (): Promise<Draft | null> => {
-    if (!draft || !canEdit) return draft
+  const save = async (draftToSave: Draft | null = draft): Promise<Draft | null> => {
+    if (!draftToSave || !canEdit) return draftToSave
     setSaving(true)
     try {
-      const res = await apiFetch(`${API}/${draft.id}`, {
+      const res = await apiFetch(`${API}/${draftToSave.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: draft.subject, recipients: draft.recipients, sections: draft.sections }),
+        body: JSON.stringify({
+          subject: draftToSave.subject,
+          recipients: draftToSave.recipients,
+          sections: draftToSave.sections,
+        }),
       })
       if (!res.ok) throw new Error(await responseError(res))
       const data = await res.json()
@@ -305,10 +312,15 @@ export default function AfterBreakReportPage() {
     setEditingSection({ index, lines: reportSectionEditorLines(draft.sections[index]?.body || "") })
   }
 
-  const applySectionEditor = () => {
-    if (!editingSection) return
-    updateSection(editingSection.index, editingSection.lines.join("\n"))
+  const applySectionEditor = (lines: string[]) => {
+    if (!editingSection || !draft) return
+    const sections = draft.sections.map((section, index) =>
+      index === editingSection.index ? { ...section, body: lines.join("\n") } : section
+    )
+    const nextDraft = { ...draft, sections }
+    setDraft(nextDraft)
     setEditingSection(null)
+    void save(nextDraft)
   }
 
   const updateRecipients = (kind: keyof Recipients, value: string) => {
@@ -563,10 +575,8 @@ export default function AfterBreakReportPage() {
 
                     {isEditing ? (
                       <ReportSectionFieldEditor
+                        key={`edit-${index}`}
                         lines={editingSection.lines}
-                        onChangeLines={(lines) =>
-                          setEditingSection((current) => current ? { ...current, lines } : current)
-                        }
                         onCancel={() => setEditingSection(null)}
                         onSave={applySectionEditor}
                       />

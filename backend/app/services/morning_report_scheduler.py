@@ -11,12 +11,15 @@ from app.db import SessionLocal
 from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.services.morning_report import (
+    MANUAL_SECTION_TITLES,
+    SECTION_TITLES,
     build_morning_report_sections,
     render_html,
     render_plain_text,
     send_morning_report,
     subject_for,
 )
+from app.services.report_section_merge import preserve_keyed_line, preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 
 logger = logging.getLogger(__name__)
@@ -70,8 +73,30 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
             logger.warning("morning_report_scheduler_skipped reason=no_to_recipients")
             return False
 
+        # Always rebuild from live data at send time so auto-filled sections stay current.
+        # Keep any manual answers already saved on today's draft.
+        sections, snapshot = await build_morning_report_sections(db, report_day)
+        if row is not None:
+            sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
+            existing_by_title = {
+                str(section.get("title") or ""): str(section.get("body") or "")
+                for section in (row.sections or [])
+            }
+            attendance_title = SECTION_TITLES[2]
+            sections = [
+                {
+                    **section,
+                    "body": preserve_keyed_line(
+                        section["body"],
+                        existing_by_title.get(section["title"]),
+                        "NDRYSHON PLANI",
+                    )
+                    if section["title"] == attendance_title
+                    else section["body"],
+                }
+                for section in sections
+            ]
         if row is None:
-            sections, snapshot = await build_morning_report_sections(db, report_day)
             row = MorningReportDraft(
                 report_date=report_day,
                 subject=subject_for(report_day),
@@ -84,12 +109,8 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
         else:
             row.subject = row.subject or subject_for(report_day)
             row.recipients = recipients
-            # A person may have completed the manual M1 fields before 08:00. Keep
-            # that saved version for automatic delivery instead of regenerating it.
-            if not row.sections:
-                sections, snapshot = await build_morning_report_sections(db, report_day)
-                row.sections = sections
-                row.generated_snapshot = snapshot
+            row.sections = sections
+            row.generated_snapshot = snapshot
 
         plain_text = render_plain_text(row.subject, row.report_date, row.sections)
         html_body = render_html(row.subject, row.report_date, row.sections)
