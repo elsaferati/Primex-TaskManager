@@ -24,6 +24,7 @@ from app.models.plan_note import PlanNote
 from app.models.notification import Notification
 from app.models.project import Project
 from app.models.project_planner_exclusion import ProjectPlannerExclusion
+from app.models.question_library import QuestionDefinition, QuestionStatusEvent, QuestionUserStatus
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_user_comment import TaskUserComment
@@ -662,6 +663,149 @@ async def _user_comments_for_tasks(
     return {task_id: comment for task_id, comment in rows}
 
 
+async def _question_ids_by_task(
+    db: AsyncSession,
+    tasks: list[Task],
+) -> dict[uuid.UUID, set[uuid.UUID]]:
+    task_ids = [task.id for task in tasks if task.question_origin_id is not None]
+    if not task_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(QuestionDefinition.task_id, QuestionDefinition.id).where(
+                QuestionDefinition.task_id.in_(task_ids)
+            )
+        )
+    ).all()
+    result: dict[uuid.UUID, set[uuid.UUID]] = {task_id: set() for task_id in task_ids}
+    for task_id, question_id in rows:
+        if task_id is not None:
+            result.setdefault(task_id, set()).add(question_id)
+    for task in tasks:
+        if task.question_origin_id is not None and not result.get(task.id):
+            result.setdefault(task.id, set()).add(task.question_origin_id)
+    return result
+
+
+async def _question_task_status_overrides(
+    db: AsyncSession,
+    tasks: list[Task],
+    user_id: uuid.UUID,
+) -> dict[uuid.UUID, TaskStatus]:
+    question_ids_by_task = await _question_ids_by_task(db, tasks)
+    all_question_ids = {
+        question_id
+        for question_ids in question_ids_by_task.values()
+        for question_id in question_ids
+    }
+    if not all_question_ids:
+        return {}
+    done_question_ids = set(
+        (
+            await db.execute(
+                select(QuestionUserStatus.question_id).where(
+                    QuestionUserStatus.question_id.in_(all_question_ids),
+                    QuestionUserStatus.user_id == user_id,
+                    QuestionUserStatus.status == TaskStatus.DONE.value,
+                )
+            )
+        ).scalars().all()
+    )
+    return {
+        task_id: TaskStatus.DONE
+        for task_id, question_ids in question_ids_by_task.items()
+        if question_ids and question_ids.issubset(done_question_ids)
+    }
+
+
+def _all_question_assignees_done(
+    question_ids: set[uuid.UUID],
+    assigned_user_ids: set[uuid.UUID],
+    done_pairs: set[tuple[uuid.UUID, uuid.UUID]],
+) -> bool:
+    return bool(question_ids and assigned_user_ids) and all(
+        (question_id, assignee_id) in done_pairs
+        for question_id in question_ids
+        for assignee_id in assigned_user_ids
+    )
+
+
+async def _set_question_task_user_completion(
+    db: AsyncSession,
+    *,
+    task: Task,
+    user: User,
+    is_done: bool,
+) -> TaskStatus | None:
+    question_ids = (await _question_ids_by_task(db, [task])).get(task.id, set())
+    if not question_ids:
+        return None
+
+    existing_rows = (
+        await db.execute(
+            select(QuestionUserStatus).where(
+                QuestionUserStatus.question_id.in_(question_ids),
+                QuestionUserStatus.user_id == user.id,
+            )
+        )
+    ).scalars().all()
+    existing_by_question = {row.question_id: row for row in existing_rows}
+    status_value = TaskStatus.DONE.value if is_done else None
+
+    for question_id in question_ids:
+        current = existing_by_question.get(question_id)
+        if is_done:
+            if current is None:
+                db.add(
+                    QuestionUserStatus(
+                        question_id=question_id,
+                        user_id=user.id,
+                        status=TaskStatus.DONE.value,
+                    )
+                )
+            else:
+                current.status = TaskStatus.DONE.value
+                current.updated_at = func.now()
+        elif current is not None:
+            await db.delete(current)
+        db.add(
+            QuestionStatusEvent(
+                question_id=question_id,
+                user_id=user.id,
+                user_full_name=user.full_name or user.username or user.email,
+                status=status_value,
+            )
+        )
+
+    await db.flush()
+    assigned_user_ids = set(
+        (
+            await db.execute(
+                select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
+            )
+        ).scalars().all()
+    )
+    done_pairs = set(
+        (
+            await db.execute(
+                select(QuestionUserStatus.question_id, QuestionUserStatus.user_id).where(
+                    QuestionUserStatus.question_id.in_(question_ids),
+                    QuestionUserStatus.user_id.in_(assigned_user_ids),
+                    QuestionUserStatus.status == TaskStatus.DONE.value,
+                )
+            )
+        ).all()
+    ) if assigned_user_ids else set()
+    all_assignees_done = _all_question_assignees_done(
+        question_ids,
+        assigned_user_ids,
+        done_pairs,
+    )
+    task.status = TaskStatus.DONE if all_assignees_done else TaskStatus.TODO
+    task.completed_at = datetime.now(timezone.utc) if all_assignees_done else None
+    return TaskStatus.DONE if is_done else None
+
+
 def _task_to_out(
     task: Task,
     assignees: list[TaskAssigneeOut],
@@ -1088,6 +1232,7 @@ async def list_tasks(
     tasks = (await db.execute(stmt.order_by(Task.created_at))).scalars().all()
     task_ids = [t.id for t in tasks]
     assignee_map, comment_map, alignment_map = await _task_list_metadata(db, task_ids, user.id)
+    question_status_overrides = await _question_task_status_overrides(db, tasks, user.id)
 
     out = []
     today = _as_local_date(datetime.now(timezone.utc)) or datetime.now(timezone.utc).date()
@@ -1096,6 +1241,10 @@ async def list_tasks(
         if is_mst_tt_project and t.phase in (ProjectPhaseStatus.PRODUCT.value, ProjectPhaseStatus.CONTROL.value):
             total, completed = _extract_total_and_completed(t.daily_products, t.internal_notes)
             status_override = _compute_status_from_completed(total, completed)
+        if t.id in question_status_overrides:
+            status_override = question_status_overrides[t.id]
+        if not include_done and status_override == TaskStatus.DONE:
+            continue
         # Important: for list views we keep task-local assignees (TaskAssignee rows).
         # Fast-task "group" membership is shown in the task details endpoint instead.
         # Otherwise each per-user copy would appear assigned to everyone in the group,
@@ -1348,6 +1497,9 @@ async def get_task(
         if project is not None and _is_mst_or_tt_project(project):
             total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
             status_override = _compute_status_from_completed(total, completed)
+    question_status_overrides = await _question_task_status_overrides(db, [task], user.id)
+    if task.id in question_status_overrides:
+        status_override = question_status_overrides[task.id]
 
     dto = _task_to_out(task, dto_assignees or [], status_override=status_override)
     rows = (
@@ -2260,6 +2412,14 @@ async def update_task(
     if not can_edit:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
+    question_status_requested = payload.status if task.question_origin_id is not None else None
+    question_status_override: TaskStatus | None = None
+    if question_status_requested is not None and not is_assigned_to_task:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Each assignee must update their own question task status",
+        )
+
     if task.ga_note_origin_id is not None or task.plan_note_origin_id is not None:
         normalized_status = _normalize_ga_note_task_status(task.status)
         current_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status).strip()
@@ -2326,6 +2486,15 @@ async def update_task(
     old_total, old_completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
     old_start_day = _as_local_date(task.start_date)
     old_due_day = _as_local_date(task.due_date)
+
+    if question_status_requested is not None:
+        question_status_override = await _set_question_task_user_completion(
+            db,
+            task=task,
+            user=user,
+            is_done=question_status_requested == TaskStatus.DONE,
+        )
+        payload = payload.model_copy(update={"status": None, "completed_at": None})
 
     # Track if status was explicitly set in payload to prevent auto-status from overriding it
     status_was_explicitly_set = payload.status is not None
@@ -3012,7 +3181,7 @@ async def update_task(
     if _uses_fast_task_group(task):
         group_map = await _assignees_for_fast_task_groups(db, [task.fast_task_group_id])
         dto_assignees = group_map.get(task.fast_task_group_id, dto_assignees)
-    dto = _task_to_out(task, dto_assignees or [])
+    dto = _task_to_out(task, dto_assignees or [], status_override=question_status_override)
     if alignment_set:
         dto.alignment_user_ids = payload.alignment_user_ids
     else:
