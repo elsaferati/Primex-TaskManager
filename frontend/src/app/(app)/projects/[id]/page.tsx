@@ -3840,14 +3840,22 @@ export default function ProjectPage() {
                 const sectionTasks = tasksByStatus[statusKey]
                 const statusLabelText = TASK_STATUS_LABELS[statusKey]
                 return (
-                  <div key={statusKey} className="rounded-xl border border-slate-200 bg-white">
+                  <div key={statusKey} className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
                     <div className="flex items-center justify-between border-b border-slate-200 px-4 py-2">
                       <div className="text-xs font-semibold uppercase text-slate-600">{statusLabelText}</div>
                       <Badge variant="secondary" className="text-xs">
                         {sectionTasks.length}
                       </Badge>
                     </div>
-                    <div className="divide-y">
+                    <div className="grid min-w-[1080px] grid-cols-[minmax(320px,1fr)_100px_140px_130px_110px_230px] gap-3 border-b border-slate-200 bg-slate-50 px-6 py-2.5 text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                      <div>Task Note</div>
+                      <div>Assignee</div>
+                      <div>Status</div>
+                      <div>Due Date</div>
+                      <div>Subtasks</div>
+                      <div>Actions</div>
+                    </div>
+                    <div className="min-w-[1080px] divide-y">
                       {sectionTasks.length ? (
                         sectionTasks.map((task) => {
                   // Get all assignees from the assignees array, fallback to assigned_to for backward compatibility
@@ -3882,7 +3890,7 @@ export default function ProjectPage() {
                       key={task.id}
                       className={`px-6 py-4 text-sm border-l-4 ${statusRowClass}`}
                     >
-                      <div className="grid grid-cols-5 gap-3">
+                      <div className="grid grid-cols-[minmax(320px,1fr)_100px_140px_130px_110px_230px] items-start gap-3">
                         <div className="font-medium flex items-center gap-2 flex-wrap">
                           <span>{task.title}</span>
                           {isDevelopmentProject && (
@@ -3968,7 +3976,7 @@ export default function ProjectPage() {
                             </SelectContent>
                           </Select>
                         </div>
-                        <div className="flex items-center gap-2 text-muted-foreground">
+                        <div className="flex items-center gap-2 whitespace-nowrap text-muted-foreground">
                           <span className={overdue ? "text-red-600 font-semibold" : undefined}>
                             {formatDateDisplay(task.due_date)}
                           </span>
@@ -3978,14 +3986,17 @@ export default function ProjectPage() {
                             </Badge>
                           ) : null}
                         </div>
-                        <div className="flex justify-end gap-2">
+                        <div>
                           <Button
                             size="sm"
                             variant="outline"
+                            className="w-full"
                             onClick={() => void toggleTaskChecklist(task.id)}
                           >
                             {isChecklistOpen ? "Hide" : "Subtasks"}
                           </Button>
+                        </div>
+                        <div className="flex items-center gap-2 whitespace-nowrap">
                           <Button
                             size="sm"
                             variant="outline"

@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { PanelLeftOpen, Trash2 } from "lucide-react"
+import { CheckCheck, PanelLeftOpen, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -36,6 +36,7 @@ export function Topbar() {
   const [sheetOpen, setSheetOpen] = React.useState(false)
   const [notifications, setNotifications] = React.useState<Notification[]>([])
   const [unreadCount, setUnreadCount] = React.useState(0)
+  const [markingAllRead, setMarkingAllRead] = React.useState(false)
   const [deletingAll, setDeletingAll] = React.useState(false)
   const [deletingIds, setDeletingIds] = React.useState<string[]>([])
   const isDev = process.env.NODE_ENV !== "production"
@@ -103,18 +104,31 @@ export function Topbar() {
       if (!open) return
 
       await loadAllNotifications()
-      const markReadRes = await apiFetch("/notifications/read-all", { method: "POST" })
-      if (markReadRes.ok) {
-        setUnreadCount(0)
-        setNotifications((current) =>
-          current.map((notification) =>
-            notification.read_at ? notification : { ...notification, read_at: new Date().toISOString() }
-          )
-        )
-      }
     },
-    [apiFetch, loadAllNotifications]
+    [loadAllNotifications]
   )
+
+  const handleMarkAllRead = React.useCallback(async () => {
+    if (markingAllRead || unreadCount === 0) return
+    setMarkingAllRead(true)
+    const trace = await requestWithTrace("/notifications/read-all", { method: "POST" })
+    if (!trace.response.ok) {
+      toast("Unable to mark notifications as read", {
+        description: await buildFailureDescription(trace, "Notifications could not be marked as read."),
+      })
+      setMarkingAllRead(false)
+      return
+    }
+
+    const readAt = new Date().toISOString()
+    setNotifications((current) =>
+      current.map((notification) =>
+        notification.read_at ? notification : { ...notification, read_at: readAt }
+      )
+    )
+    setUnreadCount(0)
+    setMarkingAllRead(false)
+  }, [buildFailureDescription, markingAllRead, requestWithTrace, unreadCount])
 
   const handleDeleteNotification = React.useCallback(
     async (notificationId: string) => {
@@ -225,12 +239,22 @@ export function Topbar() {
             </SheetHeader>
             <div className="min-h-0 flex-1 overflow-y-auto px-4 pb-4">
               {notifications.length ? (
-                <div className="mb-3 flex justify-end">
+                <div className="mb-3 flex flex-wrap justify-end gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    disabled={markingAllRead || deletingAll || unreadCount === 0}
+                    onClick={() => void handleMarkAllRead()}
+                  >
+                    <CheckCheck className="mr-1.5 h-4 w-4" />
+                    {markingAllRead ? "Marking..." : "Mark all as read"}
+                  </Button>
                   <Button
                     type="button"
                     variant="ghost"
                     size="sm"
-                    disabled={deletingAll}
+                    disabled={deletingAll || markingAllRead}
                     onClick={() => void handleDeleteAllNotifications()}
                   >
                     {deletingAll ? "Deleting..." : "Delete all"}
