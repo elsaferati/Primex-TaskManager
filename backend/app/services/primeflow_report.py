@@ -333,6 +333,8 @@ def render_plain_text(document: ReportDocument) -> str:
 
 
 def render_html(document: ReportDocument) -> str:
+    """Outlook-safe 1H HTML: nested tables, inline styles, bgcolor (Word engine)."""
+
     def marked_html(value: str, marked_source: str) -> str:
         ranges = done_ranges(value, marked_source)
         boundaries = sorted({0, len(value), *(point for item in ranges for point in item)})
@@ -340,75 +342,126 @@ def render_html(document: ReportDocument) -> str:
         for start, end in zip(boundaries, boundaries[1:]):
             content = html.escape(value[start:end]).replace(chr(10), "<br>")
             if any(left <= start and right >= end for left, right in ranges):
-                content = f"<span class='done'>{content}</span>"
+                content = (
+                    f"<span style=\"text-decoration:line-through;text-decoration-thickness:2px;\">"
+                    f"{content}</span>"
+                )
             parts.append(content)
         return "".join(parts)
 
-    sections = []
+    def detail_row(content: str) -> str:
+        return (
+            f"<div style=\"font-family:Arial,sans-serif;font-size:13px;line-height:1.4;"
+            f"color:#64748b;font-weight:400;margin:5px 0 0;\">{content}</div>"
+        )
+
+    def task_card(background: str, accent: str, title_html: str, body_html: str) -> str:
+        # Left accent as its own cell — Outlook ignores CSS border-left reliably.
+        return (
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+            "style=\"width:100%;border-collapse:collapse;margin:8px 0;\">"
+            "<tr>"
+            f"<td width=\"6\" bgcolor=\"{accent}\" style=\"width:6px;background-color:{accent};"
+            f"font-size:0;line-height:0;\">&nbsp;</td>"
+            f"<td bgcolor=\"{background}\" style=\"background-color:{background};border:1px solid {accent};"
+            f"border-left:0;padding:10px 12px;font-family:Arial,sans-serif;\">"
+            f"<div style=\"font-family:Arial,sans-serif;font-size:14px;line-height:1.35;"
+            f"font-weight:700;color:#050505;\">{title_html}</div>"
+            f"{body_html}"
+            "</td></tr></table>"
+        )
+
+    def section_title_block(title: str) -> str:
+        return (
+            "<table role=\"presentation\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
+            "style=\"width:100%;border-collapse:collapse;margin:18px 0 10px;\">"
+            "<tr>"
+            "<td width=\"6\" bgcolor=\"#2563eb\" style=\"width:6px;background-color:#2563eb;"
+            "font-size:0;line-height:0;\">&nbsp;</td>"
+            "<td bgcolor=\"#eef2ff\" style=\"background-color:#eef2ff;padding:11px 14px;"
+            "font-family:Arial,sans-serif;font-size:16px;font-weight:800;color:#0f172a;\">"
+            f"{html.escape(title)}"
+            "</td></tr></table>"
+        )
+
+    body_chunks: list[str] = []
     if document.reminders:
-        reminder_cards = []
+        body_chunks.append(section_title_block(REMINDER_SECTION_TITLE))
         for index, question in enumerate(document.reminders, 1):
             guidance = (
-                f"<div class='detail' style='color:#64748b'>{html.escape(question.guidance).replace(chr(10), '<br>')}</div>"
+                detail_row(html.escape(question.guidance).replace(chr(10), "<br>"))
                 if question.guidance else ""
             )
-            reminder_cards.append(
-                f"<article class='task reminder' style='background:#f8fafc;border-color:#64748b'>"
-                f"<div class='task-title' style='color:#050505'>"
-                f"{index}. {html.escape(question.text)}</div>{guidance}</article>"
+            body_chunks.append(
+                task_card(
+                    "#f8fafc",
+                    "#64748b",
+                    f"{index}. {html.escape(question.text)}",
+                    guidance,
+                )
             )
-        sections.append(
-            f"<section><div class='section-title'>{html.escape(REMINDER_SECTION_TITLE)}</div>"
-            f"{''.join(reminder_cards)}</section>"
-        )
+
     for section in document.sections:
-        employees = []
-        for employee_index, employee in enumerate(section.employees, 1):
-            task_cards = []
+        body_chunks.append(section_title_block(section.title))
+        if not section.employees:
+            body_chunks.append(
+                "<div style=\"font-family:Arial,sans-serif;color:#64748b;padding:8px 0;\">(Asnjë detyrë)</div>"
+            )
+        for employee in section.employees:
+            body_chunks.append(
+                f"<div style=\"font-family:Arial,sans-serif;font-size:15px;font-weight:800;"
+                f"color:#0f172a;margin:12px 0 6px;\">{html.escape(employee.name)}</div>"
+            )
             for task in employee.tasks:
                 background, _, accent = STATUS_COLORS[task.status]
                 heading, detail_lines = split_task_display(task.title)
                 detail_html = "".join(
-                    f"<div class='detail' style='color:#64748b'>{marked_html(item, task.marked_title)}</div>"
-                    for item in detail_lines
+                    detail_row(marked_html(item, task.marked_title)) for item in detail_lines
                 )
-                description = (
-                    f"<div class='detail' style='color:#64748b'>"
-                    f"{marked_html(task.description, task.marked_description)}</div>"
-                    if task.description else ""
+                if task.description:
+                    detail_html += detail_row(
+                        marked_html(task.description, task.marked_description)
+                    )
+                body_chunks.append(
+                    task_card(
+                        background,
+                        accent,
+                        marked_html(heading or task.title, task.marked_title),
+                        detail_html,
+                    )
                 )
-                task_cards.append(
-                    f"<article class='task' style='background:{background};border-color:{accent}'>"
-                    f"<div class='task-title' style='color:#050505'>"
-                    f"{marked_html(heading or task.title, task.marked_title)}</div>"
-                    f"{detail_html}{description}</article>"
-                )
-            employees.append(
-                f"<div class='employee'><div class='employee-name'>{html.escape(employee.name)}</div>"
-                f"{''.join(task_cards)}</div>"
-            )
-        employee_html = "".join(employees) or '<div class="empty">(Asnjë detyrë)</div>'
-        sections.append(
-            f"<section><div class='section-title'>{html.escape(section.title)}</div>"
-            f"{employee_html}</section>"
-        )
-    return (
-        "<!doctype html><html><head><meta charset='utf-8'><meta name='viewport' content='width=device-width,initial-scale=1'>"
-        "<style>body{margin:0;background:#f8fafc;font-family:Arial,'Segoe UI Emoji',sans-serif;color:#0f172a;line-height:1.4}"
-        ".shell{max-width:980px;margin:0 auto;padding:20px}.header{background:#8799b2;color:#fff;padding:20px 24px;border-radius:8px 8px 0 0}"
-        ".header h1{font-size:24px;margin:0 0 5px}.meta{font-size:13px;opacity:.95}.content{background:#fff;padding:20px}"
-        "section{margin:0 0 24px}.section-title{background:#eef2ff;border-left:5px solid #2563eb;padding:11px 14px;font-size:18px;font-weight:800}"
-        ".employee{margin:14px 0}.employee-name{font-size:16px;font-weight:800;margin:0 0 8px}"
-        ".task{border:1px solid;border-left-width:5px;border-radius:7px;padding:12px 14px;margin:8px 0;box-sizing:border-box}"
-        ".task-title{font-weight:800;font-size:14px;color:#050505;word-break:break-word}"
-        ".detail{font-size:13px;color:#64748b;font-weight:400;margin-top:5px;word-break:break-word}"
-        ".done{text-decoration:line-through;text-decoration-thickness:2px}.empty{color:#64748b;padding:12px}"
-        "@media(max-width:600px){.shell{padding:0}.header{border-radius:0;padding:16px}.header h1{font-size:20px}"
-        ".content{padding:12px}.section-title{font-size:16px}.task{padding:10px}.task-title{font-size:13px}}</style>"
-        "</head><body><div class='shell'>"
-        f"<div class='header'><h1>{html.escape(document.subject)}</h1><div class='meta'>Generated {document.generated_at.isoformat()} · "
-        f"{document.task_count} tasks</div></div><div class='content'>{''.join(sections)}</div></div></body></html>"
+
+    meta = (
+        f"Generated {html.escape(document.generated_at.isoformat())} · {document.task_count} tasks"
     )
+    return f"""<!doctype html>
+<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1.0">
+<!--[if mso]>
+<style type="text/css">
+table, td {{ font-family: Arial, sans-serif !important; }}
+</style>
+<![endif]-->
+</head>
+<body style="margin:0;padding:0;background:#f8fafc;font-family:Arial,sans-serif;color:#0f172a;">
+<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
+<tr><td align="center" style="padding:16px 8px;">
+<!--[if mso]>
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0"><tr><td>
+<![endif]-->
+<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:100%;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<tr><td bgcolor="#8799b2" style="background-color:#8799b2;padding:18px 20px;font-family:Arial,sans-serif;">
+<div style="font-family:Arial,sans-serif;font-size:22px;line-height:1.25;font-weight:700;color:#ffffff;margin:0 0 4px;">{html.escape(document.subject)}</div>
+<div style="font-family:Arial,sans-serif;font-size:13px;line-height:1.35;color:#ffffff;">{meta}</div>
+</td></tr>
+<tr><td style="padding:14px 16px;font-family:Arial,sans-serif;background:#ffffff;">
+{''.join(body_chunks)}
+</td></tr>
+</table>
+<!--[if mso]>
+</td></tr></table>
+<![endif]-->
+</td></tr></table>
+</body></html>"""
 
 
 def render_docx(document: ReportDocument) -> bytes:

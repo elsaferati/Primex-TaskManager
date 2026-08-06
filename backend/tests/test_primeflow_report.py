@@ -118,9 +118,11 @@ class PrimeFlowReportTests(unittest.TestCase):
         }
         document = build_report_document(data, date(2026, 7, 28), "10:00")
         html = render_html(document)
-        self.assertIn("<div class='task-title' style='color:#050505'>PF ASSISTANT</div>", html)
-        self.assertIn("<div class='detail' style='color:#64748b'>1. First item</div>", html)
-        self.assertIn("<span class='done'>Finished item</span>", html)
+        self.assertIn("PF ASSISTANT", html)
+        self.assertIn("1. First item", html)
+        self.assertIn("color:#64748b", html)
+        self.assertIn("text-decoration:line-through", html)
+        self.assertIn("Finished item", html)
         self.assertNotIn("Përshkrimi:", html)
         self.assertNotIn("Pa përshkrim", html)
         self.assertNotIn("TODO", html)
@@ -137,13 +139,12 @@ class PrimeFlowReportTests(unittest.TestCase):
             }]},
         }
         html = render_html(build_report_document(data, date(2026, 8, 6), "11:00"))
-        self.assertIn(
-            "<div class='task-title' style='color:#050505'>DV: MST: AKINEA VS PIM</div>",
-            html,
-        )
-        self.assertIn("<div class='detail' style='color:#64748b'>31 CUSHT- Prezentimi</div>", html)
-        self.assertIn("<div class='detail' style='color:#64748b'>34 steps manual working</div>", html)
-        self.assertIn("<div class='detail' style='color:#64748b'>Rregullohet dizajni</div>", html)
+        self.assertIn("DV: MST: AKINEA VS PIM", html)
+        self.assertIn("31 CUSHT- Prezentimi", html)
+        self.assertIn("34 steps manual working", html)
+        self.assertIn("Rregullohet dizajni", html)
+        self.assertIn("color:#64748b", html)
+        self.assertIn("bgcolor=\"#fef3c7\"", html)
         self.assertNotIn("color:#111827", html)
 
     def test_reminder_questions_render_at_start(self) -> None:
@@ -170,7 +171,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", plain)
         self.assertIn(REMINDER_SECTION_TITLE, html)
         self.assertIn("1. A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?", html)
-        self.assertIn("<div class='detail' style='color:#64748b'>DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!</div>", html)
+        self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", html)
+        self.assertIn("color:#64748b", html)
         self.assertLess(html.index(REMINDER_SECTION_TITLE), html.index("SLOTI 06.08.2026 11:00"))
 
     def test_truncation_blocks_report(self) -> None:
@@ -262,7 +264,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn(exact_title, plain)
         self.assertIn("1. Zeile\n\n2. Përshkrim EXACT", plain)
         self.assertIn(exact_title, html)
-        self.assertIn("@media(max-width:600px)", html)
+        self.assertIn("<!--[if mso]>", html)
+        self.assertIn('width="600"', html)
         self.assertIn("#fef3c7", html)
         with zipfile.ZipFile(io.BytesIO(docx)) as archive:
             xml = archive.read("word/document.xml").decode("utf-8")
