@@ -74,8 +74,8 @@ function isHeaderCells(cells: string[]) {
 
 function compactWidthForHeader(header: string) {
   const value = normalizeHeader(header)
-  if (value === "NR") return "44px"
-  if (value === "WHO" || value === "FROM" || value === "PER") return "minmax(88px, 160px)"
+  if (value === "NR") return "32px"
+  if (value === "WHO" || value === "FROM" || value === "PER") return "64px"
   if (value === "DISK") return "58px"
   if (value === "TIME") return "76px"
   if (value === "DATA" || value === "DATE") return "96px"
@@ -151,9 +151,13 @@ function isGuidanceLine(value: string) {
   const trimmed = value.trim()
   if (!trimmed) return false
   if (/^\d+\.\s/.test(trimmed)) return false
-  if (isFixedEditorLabel(trimmed)) return false
-  // Indented guidance under numbered questions, or ALL-CAPS reminder lines.
-  return /^\s{2,}\S/.test(value) || (trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed) && trimmed.length > 12)
+  // Indented lines under numbered questions are descriptions (even ALL-CAPS).
+  // Check indent before isFixedEditorLabel — otherwise ALL-CAPS guidance becomes a bold header.
+  return /^\s{2,}\S/.test(value)
+}
+
+function isNumberedQuestionLine(value: string) {
+  return /^\d+\.\s+\S/.test(value.trim())
 }
 
 function renderKeyedLine(text: string, className = "px-3 py-2") {
@@ -297,6 +301,13 @@ export function ReportSectionPreview({ body }: { body: string }) {
         }
       }
 
+      if (!cells && isGuidanceLine(line)) {
+        return {
+          ...state,
+          contexts: [...state.contexts, { label: state.label, headers: state.headers }],
+        }
+      }
+
       if (!cells && isFixedEditorLabel(line)) {
         const label = line.trim()
         return {
@@ -317,7 +328,7 @@ export function ReportSectionPreview({ body }: { body: string }) {
   type PreviewItem =
     | { kind: "blank"; key: string }
     | { kind: "label"; key: string; text: string }
-    | { kind: "text"; key: string; text: string }
+    | { kind: "text"; key: string; text: string; guidance?: string }
     | { kind: "table"; key: string; isHeader: boolean; cells: string[]; template: string; label: string; headers: string[] }
 
   const previewItems: PreviewItem[] = []
@@ -395,6 +406,31 @@ export function ReportSectionPreview({ body }: { body: string }) {
     }
 
     flushTable()
+    // Attach indented guidance to the previous numbered question (don't treat ALL-CAPS as a label).
+    if (isGuidanceLine(line)) {
+      const previous = previewItems[previewItems.length - 1]
+      if (previous?.kind === "text" && isNumberedQuestionLine(previous.text)) {
+        previous.guidance = previous.guidance
+          ? `${previous.guidance}\n${trimmed}`
+          : trimmed
+        return
+      }
+      previewItems.push({ kind: "text", key: `text-${index}`, text: line, guidance: trimmed })
+      return
+    }
+    // Legacy drafts: ALL-CAPS description under a numbered question, without indent.
+    const previous = previewItems[previewItems.length - 1]
+    if (
+      previous?.kind === "text" &&
+      isNumberedQuestionLine(previous.text) &&
+      trimmed === trimmed.toUpperCase() &&
+      /[A-Z]/.test(trimmed) &&
+      trimmed.length > 12 &&
+      !trimmed.endsWith(":")
+    ) {
+      previous.guidance = previous.guidance ? `${previous.guidance}\n${trimmed}` : trimmed
+      return
+    }
     if (isFixedEditorLabel(line)) {
       previewItems.push({ kind: "label", key: `label-${index}`, text: trimmed })
       return
@@ -434,10 +470,21 @@ export function ReportSectionPreview({ body }: { body: string }) {
                 </div>
               )
             }
-            if (isGuidanceLine(item.text)) {
+            if (item.guidance || isGuidanceLine(item.text)) {
+              const question = isGuidanceLine(item.text) ? null : item.text
+              const guidance = item.guidance || item.text.trim()
               return (
-                <div key={item.key} className="border-b border-slate-200 bg-white px-3 pb-2 pt-0 text-xs italic leading-snug text-slate-500">
-                  <span className="whitespace-pre-wrap break-words">{item.text.trim()}</span>
+                <div key={item.key} className="border-b border-slate-200 bg-white px-3 py-2">
+                  {question ? (
+                    <div className="whitespace-pre-wrap break-words">{question}</div>
+                  ) : null}
+                  <div
+                    className={`pl-4 text-[11px] italic leading-snug text-slate-500 ${
+                      question ? "mt-0.5" : ""
+                    }`}
+                  >
+                    <span className="whitespace-pre-wrap break-words">{guidance}</span>
+                  </div>
                 </div>
               )
             }

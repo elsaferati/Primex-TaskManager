@@ -313,7 +313,7 @@ def render_plain_text(document: ReportDocument) -> str:
         for index, question in enumerate(document.reminders, 1):
             reminder_lines.append(f"{index}. {question.text}")
             if question.guidance:
-                reminder_lines.append(question.guidance)
+                reminder_lines.append(f"   {question.guidance}")
         blocks.append("\n".join(reminder_lines))
     for section in document.sections:
         lines = [section.title]

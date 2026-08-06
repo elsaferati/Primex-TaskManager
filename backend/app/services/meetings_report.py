@@ -1464,19 +1464,18 @@ def _email_column_widths(header: list[str]) -> list[str]:
     """Give utility columns only the space they need; reserve the rest for title/note text."""
     if not header:
         return []
-    # Pixel widths must stay usable in Outlook (Word), which honors width= attributes
-    # literally — too-narrow WHO/FROM columns make multi-initial rows unreadable.
+    # Keep utility columns content-sized; TITLE/NOTE take the remaining width.
     fixed_by_name = {
-        "NR": "32",
-        "WHO": "88",
-        "FROM": "64",
-        "TIME": "52",
-        "ORA": "52",
-        "KOHA": "52",
-        "DATA": "68",
-        "DATE": "68",
-        "DISK": "48",
-        "LATE": "58",
+        "NR": "24",
+        "WHO": "34",
+        "FROM": "38",
+        "TIME": "46",
+        "ORA": "46",
+        "KOHA": "46",
+        "DATA": "62",
+        "DATE": "62",
+        "DISK": "42",
+        "LATE": "54",
         "MBAJTUR": "58",
         "MBAJTUR?": "62",
         "ANULUAR": "58",
@@ -1574,11 +1573,8 @@ def _is_guidance_line(line: str) -> bool:
     stripped = line.strip()
     if not stripped or re.match(r"^\d+\.\s", stripped):
         return False
-    if re.match(r"^([A-Z][A-Z0-9 /&()?.+-]*:)\s*(.*)$", stripped):
-        return False
-    return bool(re.match(r"^\s{2,}\S", line)) or (
-        stripped == stripped.upper() and any(ch.isalpha() for ch in stripped) and len(stripped) > 12
-    )
+    # Indented descriptions under numbered questions (even ALL-CAPS).
+    return bool(re.match(r"^\s{2,}\S", line))
 
 
 def _render_text_block_html(lines: list[str]) -> str:
@@ -1587,7 +1583,9 @@ def _render_text_block_html(lines: list[str]) -> str:
         return "".join(_render_keyed_prompt_html(line) for line in non_empty)
 
     rendered_lines = []
-    for line in lines:
+    index = 0
+    while index < len(lines):
+        line = lines[index]
         stripped = line.strip()
         keyed = re.match(r"^([A-Z][A-Z0-9 /&()?.+-]*:)\s*(.*)$", stripped)
         if keyed and keyed.group(1)[:-1] == keyed.group(1)[:-1].upper():
@@ -1598,12 +1596,27 @@ def _render_text_block_html(lines: list[str]) -> str:
             rendered_lines.append(rendered)
         elif stripped and len(stripped) <= 45 and stripped.endswith((": 0", ":")):
             rendered_lines.append(f"<strong>{html.escape(line)}</strong>")
+        elif re.match(r"^\d+\.\s", stripped):
+            # Keep question + following indented guidance in one visual unit.
+            block = html.escape(stripped)
+            while index + 1 < len(lines) and _is_guidance_line(lines[index + 1]):
+                index += 1
+                guidance = lines[index].strip()
+                block += (
+                    "<br>"
+                    f"<span style=\"display:inline-block;padding-left:1.1em;margin-top:2px;"
+                    f"color:#64748b;font-style:italic;font-size:12px;font-weight:normal;\">"
+                    f"{html.escape(guidance)}</span>"
+                )
+            rendered_lines.append(block)
         elif _is_guidance_line(line):
             rendered_lines.append(
-                f"<span style=\"color:#64748b;font-style:italic;font-size:12px;\">{html.escape(stripped)}</span>"
+                f"<span style=\"display:inline-block;padding-left:1.1em;color:#64748b;"
+                f"font-style:italic;font-size:12px;font-weight:normal;\">{html.escape(stripped)}</span>"
             )
         else:
             rendered_lines.append(html.escape(line))
+        index += 1
     return (
         "<pre style=\"white-space:pre-wrap;font-family:Arial,sans-serif;font-size:13px;line-height:1.45;"
         "background:#f8fafc;border:1px solid #e5e7eb;padding:12px;margin:0;\">"

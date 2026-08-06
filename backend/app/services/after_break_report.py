@@ -187,6 +187,7 @@ def _format_confirmation_questions(questions: list[tuple[str, str]]) -> list[str
     for index, (text, guidance) in enumerate(questions, 1):
         lines.append(f"{index}. {text}")
         if guidance:
+            # Keep indented so UI/email treat this as description, not a section label.
             lines.append(f"   {guidance}")
     return lines
 
