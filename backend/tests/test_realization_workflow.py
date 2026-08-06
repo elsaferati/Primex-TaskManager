@@ -11,6 +11,7 @@ from alembic.operations import Operations
 
 from app.models.enums import RealizationLevel, RealizationPeriodStatus
 from app.services.realization_calculator import build_questions
+from app.services.realization_daily import _include_nonplanned_weekly_task
 from app.services.realization_evidence import (
     _classify_planned_task,
     _planned_deadline,
@@ -141,6 +142,28 @@ class TestPolicy(unittest.TestCase):
 
 
 class TestWorkflow(unittest.TestCase):
+    def test_old_task_completed_this_week_is_included_in_live_report(self) -> None:
+        self.assertTrue(
+            _include_nonplanned_weekly_task(
+                created_at=datetime(2026, 7, 24, 9, tzinfo=timezone.utc),
+                planned_snapshot_at=datetime(2026, 8, 3, 8, tzinfo=timezone.utc),
+                completed_day=date(2026, 8, 5),
+                week_start=date(2026, 8, 3),
+                as_of_day=date(2026, 8, 6),
+            )
+        )
+
+    def test_old_incomplete_task_stays_outside_live_report(self) -> None:
+        self.assertFalse(
+            _include_nonplanned_weekly_task(
+                created_at=datetime(2026, 7, 24, 9, tzinfo=timezone.utc),
+                planned_snapshot_at=datetime(2026, 8, 3, 8, tzinfo=timezone.utc),
+                completed_day=None,
+                week_start=date(2026, 8, 3),
+                as_of_day=date(2026, 8, 6),
+            )
+        )
+
     def test_week_is_monday_to_friday(self) -> None:
         self.assertEqual(normalize_week_start(date(2026, 7, 30)), date(2026, 7, 27))
         self.assertEqual(weekly_end(date(2026, 7, 30)), date(2026, 7, 31))

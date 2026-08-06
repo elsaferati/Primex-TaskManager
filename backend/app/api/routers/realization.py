@@ -317,8 +317,12 @@ async def _weekly_response(
         } if visible else {}
     daily_by_user: dict[uuid.UUID, list[dict]] = {}
     daily_tasks_by_user: dict[uuid.UUID, dict[str, dict]] = {}
+    weekly_completed_tasks_by_user: dict[uuid.UUID, list[dict]] = {}
     for daily_result, daily_period in daily_rows:
         daily_facts = daily_result.facts_json or {}
+        weekly_completed_tasks_by_user[daily_result.user_id] = [
+            dict(task) for task in daily_facts.get("weekly_completed_tasks") or []
+        ]
         day_tasks = [dict(task) for task in daily_facts.get("tasks") or []]
         daily_by_user.setdefault(daily_result.user_id, []).append(
             {
@@ -512,6 +516,49 @@ async def _weekly_response(
                     item["tasks"] = merged_tasks
             current_day += timedelta(days=1)
         timeline.sort(key=lambda item: item["date"])
+
+        # The latest daily snapshot carries the cumulative list of every task
+        # completed during the week. Merge each one into its actual completion
+        # day so older tasks outside PLANNED remain visible without being
+        # misreported as newly added work.
+        timeline_by_date = {item["date"]: item for item in timeline}
+        for completed_task in weekly_completed_tasks_by_user.get(row.user_id, []):
+            completion_day = str(completed_task.get("completion_day") or "")
+            target = timeline_by_date.get(completion_day)
+            if target is None:
+                continue
+            task_key = str(
+                completed_task.get("task_id")
+                or completed_task.get("match_key")
+                or ""
+            )
+            if not task_key:
+                continue
+            target_tasks = target.setdefault("tasks", [])
+            existing_index = next(
+                (
+                    index
+                    for index, task in enumerate(target_tasks)
+                    if str(task.get("task_id") or task.get("match_key") or "")
+                    == task_key
+                ),
+                None,
+            )
+            if existing_index is None:
+                target_tasks.append(completed_task)
+            else:
+                existing_task = target_tasks[existing_index]
+                attribution = (
+                    "planned_today"
+                    if existing_task.get("attribution") == "planned_today"
+                    else completed_task.get("attribution")
+                )
+                target_tasks[existing_index] = {
+                    **existing_task,
+                    **completed_task,
+                    "attribution": attribution,
+                }
+            daily_tasks_by_user.setdefault(row.user_id, {})[task_key] = completed_task
 
     visible_task_ids: set[uuid.UUID] = set()
     for row in visible:

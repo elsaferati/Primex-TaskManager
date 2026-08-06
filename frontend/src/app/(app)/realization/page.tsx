@@ -88,6 +88,7 @@ const TASK_STATUS_LABEL: Record<string, string> = {
   completed: "Mbyllur",
   completed_on_time: "Mbyllur në kohë",
   completed_late: "Mbyllur me vonesë",
+  completed_outside_plan: "Mbyllur këtë javë jashtë planit bazë",
   in_progress: "Në progres",
   no_progress: "Pa progres",
   pending_confirmation: "Në pritje të konfirmimit",
@@ -127,6 +128,7 @@ function DayTaskCard({
   onComment: (task: RealizationTaskFact) => void
 }) {
   const additional = task.attribution === "added_after_weekly_plan"
+  const completedOutsidePlan = task.attribution === "completed_outside_weekly_plan"
   return (
     <div className={cn("rounded-lg border px-2.5 py-2 text-xs shadow-sm", taskPalette(task))}>
       <div className="flex items-start gap-2">
@@ -134,6 +136,9 @@ function DayTaskCard({
         <div className="flex shrink-0 items-center gap-1">
           {additional ? (
             <span className="rounded-full border border-current/25 bg-white/50 px-1.5 py-0.5 text-[9px] font-bold uppercase">E re</span>
+          ) : null}
+          {completedOutsidePlan ? (
+            <span className="rounded-full border border-current/25 bg-white/50 px-1.5 py-0.5 text-[9px] font-bold uppercase">Jashtë planit</span>
           ) : null}
           {task.task_id ? (
             <button
@@ -244,6 +249,10 @@ function weeklyCompleted(person: RealizationPersonResult) {
 
 function weeklyAdditional(person: RealizationPersonResult) {
   return person.facts_json.weekly_additional_count ?? person.additional_count
+}
+
+function weeklyAllCompleted(person: RealizationPersonResult) {
+  return person.facts_json.weekly_all_completed_count ?? weeklyCompleted(person)
 }
 
 function cleanTaskTitle(value: string) {
@@ -724,19 +733,21 @@ export default function RealizationPage() {
   const aiAnalysis = selected?.facts_json.ai_analysis
   const selectedWeeklyPlanned = selected ? weeklyPlanned(selected) : 0
   const selectedWeeklyCompleted = selected ? weeklyCompleted(selected) : 0
+  const selectedWeeklyAllCompleted = selected ? weeklyAllCompleted(selected) : 0
   const selectedWeeklyAdditional = selected ? weeklyAdditional(selected) : 0
   const isLive = data ? !data.has_final_snapshot : true
   const selectedTimeline = WEEK_DAYS.map((label, index) => {
     const date = addDays(weekStart, index)
     const snapshot = selected?.facts_json.daily_timeline?.find((item) => item.date === date)
     const tasks = snapshot?.tasks || []
-    const plannedTasks = tasks.filter((task) =>
-      task.attribution !== "added_after_weekly_plan" && task.attribution !== "system_schedule"
-    )
+    const plannedTasks = tasks.filter((task) => task.attribution === "planned_today")
     const additionalTasks = tasks.filter((task) => task.attribution === "added_after_weekly_plan")
-    const systemTasks = tasks.filter((task) => task.source_type === "system")
-    const completedTasks = plannedTasks.filter(taskIsCompleted)
-    const groups = groupDayTasks(tasks)
+    const systemTasks = tasks.filter((task) => task.attribution === "system_schedule")
+    const completionOnlyTasks = tasks.filter((task) =>
+      ["completed_from_weekly_plan", "completed_outside_weekly_plan"].includes(task.attribution || "")
+    )
+    const completedTasks = tasks.filter(taskIsCompleted)
+    const groups = groupDayTasks([...plannedTasks, ...additionalTasks, ...systemTasks, ...completionOnlyTasks])
     return {
       label,
       date,
@@ -744,6 +755,7 @@ export default function RealizationPage() {
       plannedTasks,
       additionalTasks,
       systemTasks,
+      completionOnlyTasks,
       completedTasks,
       remainingTasks: plannedTasks.filter((task) => !taskIsCompleted(task)),
       groups,
@@ -796,7 +808,7 @@ export default function RealizationPage() {
                 <SelectContent>
                   {people.map((person) => (
                     <SelectItem key={person.id} value={person.id}>
-                      {person.user_name} · {weeklyCompleted(person)}/{weeklyPlanned(person)}
+                      {person.user_name} · {weeklyAllCompleted(person)} kryer · {weeklyCompleted(person)}/{weeklyPlanned(person)} plan
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -849,7 +861,7 @@ export default function RealizationPage() {
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard icon={Target} label="Realizimi i personit" value={`${selected?.facts_json.weekly_progress_percent || 0}%`} note={selected?.user_name || "Zgjidh personin"} />
         <MetricCard icon={CalendarCheck} label="Në planin javor" value={selectedWeeklyPlanned} note="Plani bazë i ruajtur në PLANNED" />
-        <MetricCard icon={UserCheck} label="Të përfunduara" value={selectedWeeklyCompleted} note={`${Math.max(0, selectedWeeklyPlanned - selectedWeeklyCompleted)} detyra të planit kanë mbetur`} />
+        <MetricCard icon={UserCheck} label="Të përfunduara këtë javë" value={selectedWeeklyAllCompleted} note={`${selectedWeeklyCompleted} nga plani bazë · ${Math.max(0, selectedWeeklyAllCompleted - selectedWeeklyCompleted)} jashtë planit`} />
         <MetricCard icon={Sparkles} label="Shtuar gjatë javës" value={selectedWeeklyAdditional} note="Raportohen veç nga plani bazë" />
       </div>
 
@@ -939,7 +951,7 @@ export default function RealizationPage() {
                               ))}
                             </div>
                           ))}
-                          {!day.snapshot?.tasks?.length ? (
+                          {!day.plannedTasks.length && !day.additionalTasks.length && !day.systemTasks.length && !day.completionOnlyTasks.length ? (
                             <div className="flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed text-center text-xs text-muted-foreground">
                               <CircleDashed className="mb-2 h-5 w-5" />Nuk ka detyra për këtë ditë
                             </div>
