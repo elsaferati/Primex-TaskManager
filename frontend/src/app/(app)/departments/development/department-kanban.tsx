@@ -7830,6 +7830,18 @@ export default function DepartmentKanban() {
                     containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
                     className="min-w-[1200px] text-[11px]"
                   >
+                    <colgroup>
+                      <col />
+                      <col className="w-[82px]" />
+                      <col className="w-[64px]" />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                      <col />
+                    </colgroup>
                     <TableHeader>
                       <TableRow className="bg-slate-50">
                         {["NR", "PROJECT TITLE", "PHASE", "ASSIGNED", "TASK TITLE", "STATUS", "CREATED", "START", "DUE", "ACTIONS"].map((label) => (
@@ -7857,10 +7869,12 @@ export default function DepartmentKanban() {
                             <TableCell className={`${TODAY_TASK_CELL_CLASS} font-semibold text-slate-700`}>
                               {index + 1}
                             </TableCell>
-                            <TableCell className={`${TODAY_TASK_CELL_CLASS} whitespace-normal break-words`}>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} w-[82px] whitespace-normal break-words`}>
                               <div className={TODAY_TASK_TEXT_CLAMP_CLASS}>{projectTitle}</div>
                             </TableCell>
-                            <TableCell className={TODAY_TASK_CELL_CLASS}>{phaseLabel}</TableCell>
+                            <TableCell className={`${TODAY_TASK_CELL_CLASS} w-[64px] whitespace-normal break-words`}>
+                              {phaseLabel}
+                            </TableCell>
                             <TableCell className={TODAY_TASK_CELL_CLASS}>
                               {assignees.length ? (
                                 <div className="flex items-center gap-1">

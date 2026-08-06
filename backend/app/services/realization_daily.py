@@ -6,7 +6,7 @@ from datetime import date, datetime, time, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -130,11 +130,26 @@ async def calculate_daily_period(
     planned = _snapshot_tasks(planned_snapshot)
     planned_ids = {row["task_id"] for row in planned.values() if row.get("task_id")}
 
+    department_users, common_leave = await load_active_users_and_common_leave(
+        db,
+        department_id=period.department_id,
+        start_date=day,
+        end_date=day,
+    )
+    department_user_ids = {user.id for user in department_users}
+
     zone = ZoneInfo(settings.REALIZATION_TIMEZONE)
     day_end_local = datetime.combine(day, time.max, tzinfo=zone)
     day_end_utc = day_end_local.astimezone(timezone.utc)
     task_query = select(Task).where(
-        or_(Task.department_id == period.department_id, Task.id.in_(planned_ids)),
+        or_(
+            Task.department_id == period.department_id,
+            Task.id.in_(planned_ids),
+            and_(
+                Task.system_template_origin_id.is_not(None),
+                Task.assigned_to.in_(department_user_ids),
+            ),
+        ),
         Task.created_at <= day_end_utc,
     )
     tasks = (await db.execute(task_query)).scalars().all()
@@ -186,12 +201,6 @@ async def calculate_daily_period(
         if task.assigned_to:
             assignees[task.id].add(task.assigned_to)
 
-    department_users, common_leave = await load_active_users_and_common_leave(
-        db,
-        department_id=period.department_id,
-        start_date=day,
-        end_date=day,
-    )
     excluded_on_leave = {
         user_id for user_id, leave in common_leave.items() if day in leave.days
     }
@@ -304,6 +313,10 @@ async def calculate_daily_period(
             people[user_id]["tasks"].append(fact)
             people[user_id]["counters"]["planned_count"] += 1
             people[user_id]["counters"][f"{fact['classification']}_count"] += 1
+            if fact["source_type"] == "system":
+                people[user_id]["counters"]["system_task_count"] += 1
+                if fact["classification"] == "completed":
+                    people[user_id]["counters"]["system_task_completed_count"] += 1
 
     for task in tasks:
         if task.id in planned_ids:
@@ -326,42 +339,20 @@ async def calculate_daily_period(
         for user_id in assignees.get(task.id, set()):
             if user_id not in people:
                 continue
-            if created_after_plan:
-                weekly_additional_keys_by_user[user_id].add(str(task.id))
-                if not task.project_id and not task.system_template_origin_id:
-                    weekly_fast_task_keys_by_user[user_id].add(str(task.id))
-            if completed_this_week:
-                completion_fact = _task_fact(
-                    key=f"id:{task.id}",
-                    title=task.title,
-                    task=task,
-                    raw={
-                        "project_title": project_titles.get(task.project_id),
-                        "source_type": (
-                            "system" if task.system_template_origin_id else (
-                                "project" if task.project_id else "fast"
-                            )
-                        ),
-                    },
-                    progress=latest_progress.get(task.id),
-                    day=day,
-                    attribution=(
-                        "added_after_weekly_plan"
-                        if created_after_plan
-                        else "completed_outside_weekly_plan"
-                    ),
-                )
-                remember_weekly_completion(
-                    user_id=user_id,
-                    key=f"id:{task.id}",
-                    fact=completion_fact,
-                    completed_day=completed_day,
-                )
+            if is_system_task:
+                continue
+            weekly_additional_keys_by_user[user_id].add(str(task.id))
+            if not task.project_id and not task.system_template_origin_id:
+                weekly_fast_task_keys_by_user[user_id].add(str(task.id))
         if not (
             _local_date(task.created_at) == day
             or _local_date(task.completed_at) == day
             or task.id in daily_progress
-        ):
+        )
+        if is_system_task:
+            if scheduled_system_day != day and not has_activity_today:
+                continue
+        elif not has_activity_today:
             continue
         for user_id in assignees.get(task.id, set()):
             if user_id not in people:
@@ -380,10 +371,15 @@ async def calculate_daily_period(
                 },
                 progress=daily_progress.get(task.id),
                 day=day,
-                attribution="added_after_weekly_plan",
+                attribution="system_schedule" if is_system_task else "added_after_weekly_plan",
             )
             people[user_id]["tasks"].append(fact)
-            people[user_id]["counters"]["additional_count"] += 1
+            if is_system_task:
+                people[user_id]["counters"]["system_task_count"] += 1
+                if fact["classification"] == "completed":
+                    people[user_id]["counters"]["system_task_completed_count"] += 1
+            else:
+                people[user_id]["counters"]["additional_count"] += 1
             if fact["source_type"] == "fast":
                 people[user_id]["counters"]["fast_task_count"] += 1
 
@@ -477,6 +473,10 @@ async def calculate_daily_period(
         result.pending_count = int(counters.get("pending_confirmation_count", 0))
         result.no_progress_count = int(counters.get("no_progress_count", 0))
         result.additional_count = int(counters.get("additional_count", 0))
+        result.system_task_count = int(counters.get("system_task_count", 0))
+        result.system_task_completed_count = int(
+            counters.get("system_task_completed_count", 0)
+        )
         result.tardiness_count = int(counters.get("tardiness_count", 0))
         result.approved_absence_days = int(counters.get("approved_absence_days", 0))
         result.suggested_symbol = None

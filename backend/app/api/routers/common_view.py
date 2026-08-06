@@ -787,6 +787,12 @@ async def get_common_view(
                 product_content_dept_id = d.id
                 break
 
+        all_participant_ids = {
+            user.id
+            for user in users_map.values()
+            if user.is_active and _initials(user.full_name or user.username or "") not in {"GA", "KA", "HV"}
+        }
+
         priority_map: dict[uuid.UUID, dict[str, Any]] = {}
         for t in tasks:
             display_title = ga_note_titles.get(t.ga_note_origin_id) if t.ga_note_origin_id else None
@@ -798,7 +804,11 @@ async def get_common_view(
                     assignees = [user_for_task]
             assignee_id = t.assigned_to or (assignees[0].id if assignees else None)
             assignee_names = [u.full_name or u.username or u.email for u in assignees if u]
-            owner_label = ", ".join([n for n in assignee_names if n]) or "Unknown"
+            assignee_ids = {u.id for u in assignees if u}
+            if all_participant_ids and assignee_ids and all_participant_ids.issubset(assignee_ids):
+                owner_label = "ALL"
+            else:
+                owner_label = ", ".join([n for n in assignee_names if n]) or "Unknown"
             status_value = (t.status or "").lower()
             is_done = bool(t.completed_at) or status_value in {"done", "completed"}
             task_status = (t.status or ("DONE" if is_done else "TODO")).strip() or ("DONE" if is_done else "TODO")

@@ -156,6 +156,12 @@ function DayTaskCard({
           ) : null}
         </div>
       </div>
+      {task.user_comment ? (
+        <div className="mt-2 flex items-start gap-1.5 rounded-md border border-current/15 bg-white/55 px-2 py-1.5 text-[11px] font-medium leading-4">
+          <MessageSquare className="mt-0.5 h-3 w-3 shrink-0" />
+          <p className="min-w-0 whitespace-pre-wrap break-words">{task.user_comment}</p>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -365,7 +371,7 @@ export default function RealizationPage() {
   const [relatedId, setRelatedId] = React.useState("")
   const [impactLevel, setImpactLevel] = React.useState("MINOR")
   const [taskId, setTaskId] = React.useState("")
-  const autoSnapshotAttemptRef = React.useRef<string | null>(null)
+  const reportRequestRef = React.useRef(0)
 
   const selected = React.useMemo(
     () => data?.people.find((person) => person.id === selectedId) || data?.people[0] || null,
@@ -384,21 +390,51 @@ export default function RealizationPage() {
 
   const loadReport = React.useCallback(async () => {
     if (!departmentId) return
+    const requestId = ++reportRequestRef.current
     setLoading(true)
     try {
       const params = new URLSearchParams({ department_id: departmentId, week_start: weekStart })
-      const response = await apiFetch(`/realization/weekly?${params}`)
+      let response = await apiFetch(`/realization/weekly?${params}`)
       if (!response.ok) throw new Error(await errorMessage(response))
-      const payload = (await response.json()) as RealizationWeeklyResponse
+      let payload = (await response.json()) as RealizationWeeklyResponse
+
+      const currentWeek = mondayOf(new Date())
+      const canRefreshLive = (
+        weekStart === currentWeek
+        && payload.has_planned_snapshot
+        && !payload.has_final_snapshot
+        && ["OPEN", "CALCULATED"].includes(payload.period.status)
+      )
+      if (canRefreshLive) {
+        const todayParams = new URLSearchParams({
+          department_id: departmentId,
+          day: isoLocalDate(new Date()),
+        })
+        const liveResponse = await apiFetch(`/realization/daily/calculate?${todayParams}`, {
+          method: "POST",
+        })
+        if (liveResponse.ok) {
+          response = await apiFetch(`/realization/weekly?${params}`)
+          if (!response.ok) throw new Error(await errorMessage(response))
+          payload = (await response.json()) as RealizationWeeklyResponse
+        } else {
+          toast.warning("Gjendja live nuk u rifreskua", {
+            description: await errorMessage(liveResponse),
+          })
+        }
+      }
+
+      if (requestId !== reportRequestRef.current) return
       setData(payload)
       setSelectedId((current) =>
         payload.people.some((person) => person.id === current) ? current : payload.people[0]?.id || null
       )
     } catch (error) {
+      if (requestId !== reportRequestRef.current) return
       toast.error("Raporti nuk u ngarkua", { description: error instanceof Error ? error.message : undefined })
       setData(null)
     } finally {
-      setLoading(false)
+      if (requestId === reportRequestRef.current) setLoading(false)
     }
   }, [apiFetch, departmentId, weekStart])
 
@@ -410,6 +446,14 @@ export default function RealizationPage() {
   React.useEffect(() => {
     // Data loading is asynchronous; state updates happen only after the request resolves.
     if (departmentId) void loadReport()
+  }, [departmentId, loadReport])
+
+  React.useEffect(() => {
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible" && departmentId) void loadReport()
+    }
+    document.addEventListener("visibilitychange", refreshWhenVisible)
+    return () => document.removeEventListener("visibilitychange", refreshWhenVisible)
   }, [departmentId, loadReport])
 
   const run = React.useCallback(
@@ -436,46 +480,11 @@ export default function RealizationPage() {
     return run("calculate", `/realization/weekly/calculate?${params}`, { method: "POST" })
   }
 
-  const calculateToday = () => {
-    const today = isoLocalDate(new Date())
-    const params = new URLSearchParams({ department_id: departmentId, day: today })
-    return run("daily", `/realization/daily/calculate?${params}`, { method: "POST" })
+  const calculateToday = async () => {
+    setAction("daily")
+    await loadReport()
+    setAction(null)
   }
-
-  React.useEffect(() => {
-    if (!data || loading || action || !departmentId) return
-
-    const today = isoLocalDate(new Date())
-    const currentWeek = mondayOf(new Date())
-    const attemptKey = `${departmentId}:${today}`
-    const canRefreshCurrentWeek = ["OPEN", "CALCULATED"].includes(data.period.status)
-
-    if (
-      weekStart !== currentWeek ||
-      !data.has_planned_snapshot ||
-      !canRefreshCurrentWeek ||
-      autoSnapshotAttemptRef.current === attemptKey
-    ) {
-      return
-    }
-
-    autoSnapshotAttemptRef.current = attemptKey
-    void (async () => {
-      setAction("auto-daily")
-      try {
-        const params = new URLSearchParams({ department_id: departmentId, day: today })
-        const response = await apiFetch(`/realization/daily/calculate?${params}`, { method: "POST" })
-        if (!response.ok) throw new Error(await errorMessage(response))
-        await loadReport()
-      } catch (error) {
-        toast.error("Snapshot-i automatik ditor dështoi", {
-          description: error instanceof Error ? error.message : undefined,
-        })
-      } finally {
-        setAction(null)
-      }
-    })()
-  }, [action, apiFetch, data, departmentId, loadReport, loading, weekStart])
 
   const downloadExcel = async (allDepartments = false) => {
     setAction(allDepartments ? "export-all" : "export")
@@ -668,7 +677,27 @@ export default function RealizationPage() {
         body: JSON.stringify({ comment: taskComment.trim() || null }),
       })
       if (!response.ok) throw new Error(await errorMessage(response))
-      toast.success(taskComment.trim() ? "Komenti u ruajt" : "Komenti u largua")
+      const savedTask = (await response.json()) as { user_comment?: string | null }
+      const savedComment = savedTask.user_comment ?? (taskComment.trim() || null)
+      setData((current) => current ? {
+        ...current,
+        people: current.people.map((person) => ({
+          ...person,
+          facts_json: {
+            ...person.facts_json,
+            tasks: person.facts_json.tasks?.map((task) =>
+              task.task_id === commentTask.task_id ? { ...task, user_comment: savedComment } : task
+            ),
+            daily_timeline: person.facts_json.daily_timeline?.map((day) => ({
+              ...day,
+              tasks: day.tasks?.map((task) =>
+                task.task_id === commentTask.task_id ? { ...task, user_comment: savedComment } : task
+              ),
+            })),
+          },
+        })),
+      } : current)
+      toast.success(savedComment ? "Komenti u ruajt" : "Komenti u largua")
       setTaskCommentOpen(false)
       setCommentTask(null)
       await loadReport()
@@ -713,18 +742,14 @@ export default function RealizationPage() {
     const tasks = snapshot?.tasks || []
     const plannedTasks = tasks.filter((task) => task.attribution === "planned_today")
     const additionalTasks = tasks.filter((task) => task.attribution === "added_after_weekly_plan")
-    const completionOnlyTasks = tasks.filter((task) =>
-      ["completed_from_weekly_plan", "completed_outside_weekly_plan"].includes(task.attribution || "")
-    )
-    const completedTasks = tasks.filter(taskIsCompleted)
-    const groups = groupDayTasks([...plannedTasks, ...additionalTasks, ...completionOnlyTasks])
+    const completedTasks = plannedTasks.filter(taskIsCompleted)
+    const groups = groupDayTasks([...plannedTasks, ...additionalTasks])
     return {
       label,
       date,
       snapshot,
       plannedTasks,
       additionalTasks,
-      completionOnlyTasks,
       completedTasks,
       remainingTasks: plannedTasks.filter((task) => !taskIsCompleted(task)),
       groups,
@@ -789,7 +814,7 @@ export default function RealizationPage() {
               <RefreshCw className={cn("h-4 w-4", loading && "animate-spin")} /> Rifresko
             </Button>
             <Button variant="outline" onClick={() => void calculateToday()} disabled={!!action}>
-              {action === "daily" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Snapshot sot
+              {action === "daily" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Përditëso tani
             </Button>
             <Button onClick={() => void calculateWeekly()} disabled={!data?.can_calculate || !!action}>
               {action === "calculate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />} Kalkulo javën
@@ -898,10 +923,11 @@ export default function RealizationPage() {
                               <Badge variant="outline" className="text-[10px]">Në pritje</Badge>
                             )}
                           </div>
-                          <div className="mt-2 grid grid-cols-3 gap-1 text-center text-[10px]">
+                          <div className="mt-2 grid grid-cols-4 gap-1 text-center text-[10px]">
                             <div className="rounded bg-background px-1 py-1"><strong className="block text-sm">{day.plannedTasks.length}</strong>Plan</div>
                             <div className="rounded bg-emerald-50 px-1 py-1 text-emerald-800"><strong className="block text-sm">{day.completedTasks.length}</strong>Kryer</div>
                             <div className="rounded bg-blue-50 px-1 py-1 text-blue-800"><strong className="block text-sm">{day.additionalTasks.length}</strong>Shtesë</div>
+                            <div className="rounded bg-violet-50 px-1 py-1 text-violet-800"><strong className="block text-sm">{day.systemTasks.length}</strong>Sistem</div>
                           </div>
                         </div>
                         <div className="flex-1 space-y-2 p-2.5">
@@ -919,7 +945,7 @@ export default function RealizationPage() {
                               ))}
                             </div>
                           ))}
-                          {!day.plannedTasks.length && !day.additionalTasks.length && !day.completionOnlyTasks.length ? (
+                          {!day.plannedTasks.length && !day.additionalTasks.length ? (
                             <div className="flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed text-center text-xs text-muted-foreground">
                               <CircleDashed className="mb-2 h-5 w-5" />Nuk ka detyra për këtë ditë
                             </div>

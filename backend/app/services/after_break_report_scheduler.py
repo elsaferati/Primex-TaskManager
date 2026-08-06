@@ -11,12 +11,14 @@ from app.db import SessionLocal
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.services.after_break_report import (
+    MANUAL_SECTION_TITLES,
     build_after_break_report_sections,
     render_html,
     render_plain_text,
     send_after_break_report,
     subject_for,
 )
+from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 
 logger = logging.getLogger(__name__)
@@ -70,7 +72,11 @@ async def run_after_break_report_scheduler_once(now: datetime | None = None) -> 
             logger.warning("after_break_report_scheduler_skipped reason=no_to_recipients")
             return False
 
+        # Always rebuild from live data at send time so auto-filled sections stay current.
+        # Keep any manual answers already saved on today's draft.
         sections, snapshot = await build_after_break_report_sections(db, report_day)
+        if row is not None:
+            sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
         if row is None:
             row = AfterBreakReportDraft(
                 report_date=report_day,

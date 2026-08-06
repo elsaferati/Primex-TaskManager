@@ -4,7 +4,7 @@ import uuid
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -54,7 +54,11 @@ from app.services.realization_access import (
 )
 from app.services.realization_calculator import build_live_questions, calculate_weekly_period
 from app.services.realization_ai import RealizationAIError, analyze_realization
-from app.services.realization_daily import calculate_daily_period
+from app.services.realization_daily import (
+    _daily_classification,
+    _local_date,
+    calculate_daily_period,
+)
 from app.services.realization_evidence import _snapshot_tasks
 from app.services.realization_excel import build_realization_workbook
 from app.services.realization_periods import (
@@ -394,6 +398,63 @@ async def _weekly_response(
                         day_key = occurrence_day.isoformat()
                         planned_tasks_by_user_day.setdefault(user_id, {}).setdefault(day_key, []).append(fact)
 
+    # System-task templates may intentionally be hidden from the Weekly Planner,
+    # but Realization is an execution report and must include every generated
+    # occurrence assigned to the employee. Load these independently from the
+    # planner snapshot and place them on their effective due/run day.
+    system_tasks_by_user_day: dict[uuid.UUID, dict[str, list[dict]]] = {}
+    visible_user_ids = [row.user_id for row in visible]
+    if visible_user_ids:
+        range_start = datetime.combine(
+            period.start_date - timedelta(days=1), datetime.min.time(), tzinfo=timezone.utc
+        )
+        range_end = datetime.combine(
+            period.end_date + timedelta(days=2), datetime.min.time(), tzinfo=timezone.utc
+        )
+        effective_system_date = func.coalesce(Task.due_date, Task.origin_run_at, Task.start_date)
+        system_task_rows = (
+            await db.execute(
+                select(Task).where(
+                    Task.assigned_to.in_(visible_user_ids),
+                    Task.system_template_origin_id.is_not(None),
+                    Task.is_active.is_(True),
+                    effective_system_date >= range_start,
+                    effective_system_date < range_end,
+                )
+            )
+        ).scalars().all()
+        for system_task in system_task_rows:
+            if system_task.assigned_to is None:
+                continue
+            task_day = _local_date(
+                system_task.due_date or system_task.origin_run_at or system_task.start_date
+            )
+            if (
+                task_day is None
+                or task_day < period.start_date
+                or task_day > period.end_date
+                or not _is_working_day(task_day)
+            ):
+                continue
+            system_fact = {
+                "match_key": f"id:{system_task.id}",
+                "task_id": str(system_task.id),
+                "title": system_task.title,
+                "project_id": None,
+                "project_title": None,
+                "source_type": "system",
+                "classification": _daily_classification(system_task, None, task_day),
+                "status": system_task.status,
+                "daily_progress": [],
+                "attribution": "system_schedule",
+            }
+            system_tasks_by_user_day.setdefault(system_task.assigned_to, {}).setdefault(
+                task_day.isoformat(), []
+            ).append(system_fact)
+            daily_tasks_by_user.setdefault(system_task.assigned_to, {})[
+                str(system_task.id)
+            ] = system_fact
+
     for row in visible:
         timeline = daily_by_user.setdefault(row.user_id, [])
         timeline_by_date = {item["date"]: item for item in timeline}
@@ -402,8 +463,13 @@ async def _weekly_response(
             if _is_working_day(current_day):
                 day_key = current_day.isoformat()
                 planned_tasks = planned_tasks_by_user_day.get(row.user_id, {}).get(day_key, [])
+                scheduled_system_tasks = system_tasks_by_user_day.get(row.user_id, {}).get(day_key, [])
                 item = timeline_by_date.get(day_key)
                 if item is None:
+                    tasks_by_key = {
+                        str(task.get("task_id") or task.get("match_key") or ""): task
+                        for task in [*planned_tasks, *scheduled_system_tasks]
+                    }
                     item = {
                         "date": day_key,
                         "has_snapshot": False,
@@ -415,7 +481,7 @@ async def _weekly_response(
                         "weekly_completed_count": 0,
                         "additional_count": 0,
                         "attendance": [],
-                        "tasks": planned_tasks,
+                        "tasks": list(tasks_by_key.values()),
                     }
                     timeline.append(item)
                     timeline_by_date[day_key] = item
@@ -437,6 +503,15 @@ async def _weekly_response(
                         task
                         for task in actual_tasks
                         if str(task.get("task_id") or task.get("match_key") or "") not in planned_keys
+                    )
+                    merged_keys = {
+                        str(task.get("task_id") or task.get("match_key") or "")
+                        for task in merged_tasks
+                    }
+                    merged_tasks.extend(
+                        task
+                        for task in scheduled_system_tasks
+                        if str(task.get("task_id") or task.get("match_key") or "") not in merged_keys
                     )
                     item["tasks"] = merged_tasks
             current_day += timedelta(days=1)

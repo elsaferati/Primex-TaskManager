@@ -53,6 +53,14 @@ type DeliveryHistory = {
   last_error?: string | null
 }
 
+function sectionGroupLabel(index: number) {
+  return index < 2 ? "Manual questions" : "Auto-filled from PrimeFlow"
+}
+
+function shouldShowSectionGroup(index: number) {
+  return index === 0 || sectionGroupLabel(index) !== sectionGroupLabel(index - 1)
+}
+
 const API = "/morning-report"
 const REPORT_LABEL = "Hapja e dites M1"
 
@@ -220,6 +228,9 @@ export default function MorningReportPage() {
     if (!canAccess) return
     setLoading(true)
     try {
+      if (draft && canEdit) {
+        await save(draft)
+      }
       const res = await apiFetch(`${API}/generate?report_date=${reportDate}`, { method: "POST" })
       if (!res.ok) throw new Error(await responseError(res))
       applyDraft(await res.json())
@@ -231,14 +242,18 @@ export default function MorningReportPage() {
     }
   }
 
-  const save = async (): Promise<Draft | null> => {
-    if (!draft || !canEdit) return draft
+  const save = async (draftToSave: Draft | null = draft): Promise<Draft | null> => {
+    if (!draftToSave || !canEdit) return draftToSave
     setSaving(true)
     try {
-      const res = await apiFetch(`${API}/${draft.id}`, {
+      const res = await apiFetch(`${API}/${draftToSave.id}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ subject: draft.subject, recipients: draft.recipients, sections: draft.sections }),
+        body: JSON.stringify({
+          subject: draftToSave.subject,
+          recipients: draftToSave.recipients,
+          sections: draftToSave.sections,
+        }),
       })
       if (!res.ok) throw new Error(await responseError(res))
       const data = await res.json()
@@ -299,10 +314,15 @@ export default function MorningReportPage() {
     setEditingSection({ index, lines: reportSectionEditorLines(draft.sections[index]?.body || "") })
   }
 
-  const applySectionEditor = () => {
-    if (!editingSection) return
-    updateSection(editingSection.index, editingSection.lines.join("\n"))
+  const applySectionEditor = (lines: string[]) => {
+    if (!editingSection || !draft) return
+    const sections = draft.sections.map((section, index) =>
+      index === editingSection.index ? { ...section, body: lines.join("\n") } : section
+    )
+    const nextDraft = { ...draft, sections }
+    setDraft(nextDraft)
     setEditingSection(null)
+    void save(nextDraft)
   }
 
   const updateRecipients = (kind: keyof Recipients, value: string) => {
@@ -534,32 +554,39 @@ export default function MorningReportPage() {
             {draft.sections.map((section, index) => {
               const isEditing = editingSection?.index === index
               return (
-                <div key={`${section.title}-${index}`} className="rounded-lg border bg-white p-4 shadow-sm">
-                  <div className="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                      <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
-                      <div className="mt-1 text-xs text-muted-foreground">
-                        {section.body.trim().split(/\s+/).filter(Boolean).length} words
-                      </div>
+                <React.Fragment key={`${section.title}-${index}`}>
+                  {shouldShowSectionGroup(index) ? (
+                    <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
+                      {sectionGroupLabel(index)}
                     </div>
-                    {canEdit && !isEditing ? (
-                      <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
-                        <Pencil className="h-4 w-4" /> Edit
-                      </Button>
-                    ) : null}
-                  </div>
+                  ) : null}
+                  <div className="rounded-lg border bg-white p-4 shadow-sm">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold">{index + 1}. {section.title}</div>
+                        <div className="mt-1 text-xs text-muted-foreground">
+                          {section.body.trim().split(/\s+/).filter(Boolean).length} words
+                        </div>
+                      </div>
+                      {canEdit && !isEditing ? (
+                        <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}>
+                          <Pencil className="h-4 w-4" /> Edit
+                        </Button>
+                      ) : null}
+                    </div>
 
-                  {isEditing ? (
-                    <ReportSectionFieldEditor
-                      lines={editingSection.lines}
-                      onChangeLines={(lines) => setEditingSection((current) => current ? { ...current, lines } : current)}
-                      onCancel={() => setEditingSection(null)}
-                      onSave={applySectionEditor}
-                    />
-                  ) : (
-                    <ReportSectionPreview body={reportSectionPreviewText(section.body)} />
-                  )}
-                </div>
+                    {isEditing ? (
+                      <ReportSectionFieldEditor
+                        key={`edit-${index}`}
+                        lines={editingSection.lines}
+                        onCancel={() => setEditingSection(null)}
+                        onSave={applySectionEditor}
+                      />
+                    ) : (
+                      <ReportSectionPreview body={reportSectionPreviewText(section.body)} />
+                    )}
+                  </div>
+                </React.Fragment>
               )
             })}
           </div>

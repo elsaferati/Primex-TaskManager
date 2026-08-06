@@ -7,7 +7,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 import httpx
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
@@ -460,51 +460,61 @@ def ticket_files(ticket: StdFeedbackTicket) -> list[dict[str, Any]]:
     return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
 
 
-def _source_day(ticket: StdFeedbackTicket) -> date | None:
-    value = ticket.reported_at or ticket.source_updated_at
-    if value is None:
-        return None
-    if value.tzinfo:
-        return value.astimezone(report_timezone()).date()
-    return value.date()
-
-
-def _ticket_label(ticket: StdFeedbackTicket) -> str:
-    parts: list[str] = []
-    if ticket.issue_number is not None:
-        parts.append(f"#{ticket.issue_number}")
-    if ticket.order_ticket_number:
-        parts.append(ticket.order_ticket_number)
-    return " / ".join(parts) or ticket.external_id[:8]
-
-
-def _affected_fields_label(ticket: StdFeedbackTicket) -> str:
-    values = [str(value).strip() for value in (ticket.affected_fields or []) if str(value).strip()]
-    return ", ".join(values) if values else "-"
+def _status_is(*values: str):
+    return func.lower(StdFeedbackTicket.status).in_([value.casefold() for value in values])
 
 
 async def std_tickets_report_section(db: AsyncSession, report_day: date) -> str:
     start = datetime.combine(report_day, datetime.min.time()).replace(tzinfo=report_timezone())
     end = datetime.combine(report_day, datetime.max.time()).replace(tzinfo=report_timezone())
-    rows = (
-        await db.execute(
-            select(StdFeedbackTicket)
-            .where(
-                StdFeedbackTicket.is_external.is_(True),
-                or_(
-                    StdFeedbackTicket.reported_at.between(start, end),
-                    StdFeedbackTicket.reported_at.is_(None),
-                ),
-            )
-            .order_by(StdFeedbackTicket.issue_number.asc().nullslast(), StdFeedbackTicket.created_at.asc())
-        )
-    ).scalars().all()
-    tickets = [ticket for ticket in rows if _source_day(ticket) == report_day]
+    closed_on_day = or_(
+        StdFeedbackTicket.closed_at.between(start, end),
+        StdFeedbackTicket.closed_at.is_(None) & StdFeedbackTicket.source_updated_at.between(start, end),
+    )
 
-    lines = [f"{len(tickets)} tickets"]
-    for ticket in tickets:
-        lines.append(f"- {_ticket_label(ticket)}: {_affected_fields_label(ticket)}")
-    return "\n".join(lines)
+    total_opened = (
+        await db.execute(
+            select(func.count(StdFeedbackTicket.id)).where(
+                StdFeedbackTicket.is_external.is_(True),
+                _status_is("open"),
+            )
+        )
+    ).scalar_one()
+    opened_today = (
+        await db.execute(
+            select(func.count(StdFeedbackTicket.id)).where(
+                StdFeedbackTicket.is_external.is_(True),
+                StdFeedbackTicket.reported_at.between(start, end),
+            )
+        )
+    ).scalar_one()
+    closed_today = (
+        await db.execute(
+            select(func.count(StdFeedbackTicket.id)).where(
+                StdFeedbackTicket.is_external.is_(True),
+                _status_is("closed"),
+                closed_on_day,
+            )
+        )
+    ).scalar_one()
+    done_today = (
+        await db.execute(
+            select(func.count(StdFeedbackTicket.id)).where(
+                StdFeedbackTicket.is_external.is_(True),
+                _status_is("done"),
+                closed_on_day,
+            )
+        )
+    ).scalar_one()
+
+    return "\n".join(
+        [
+            f"Totali i tiketave te hapurat: {int(total_opened or 0)}",
+            f"Tiketa sot: {int(opened_today or 0)}",
+            f"Mbyllura sot: {int(closed_today or 0)}",
+            f"Rregulluar sot: {int(done_today or 0)}",
+        ]
+    )
 
 
 async def run_std_feedback_ticket_sync_forever() -> None:

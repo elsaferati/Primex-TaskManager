@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import html
 import re
 from datetime import date, timedelta
 from typing import Any
@@ -10,25 +9,31 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import CommonApprovalStatus, GaNoteStatus
 from app.models.ga_note import GaNote
+from app.models.question_library import QuestionCategory, QuestionDefinition
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.user import User
 from app.services.meetings_report import (
-    DUE_SUFFIX,
+    PERSONAL_GA,
     TECHNICAL_TAG,
-    TITLE_PREFIX,
+    _all_participant_user_ids,
     _assignee_names,
+    _clean_task_title as _display_title,
     _effective_task_assignee_ids,
     _initials,
     _is_open,
     _local_date,
     _local_time,
     _normalize_section,
-    _render_section_body_html,
+    _render_group_label_html,
+    _render_section_block_html,
     _task_owners,
     _wrap_fixed_width,
+    _wrap_report_email_html,
+    common_view_task_sort_key,
     send_meetings_report,
 )
+from app.services.primeflow_report import REMINDER_CATEGORY_NORMALIZED
 
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
@@ -47,7 +52,6 @@ SECTION_TITLE_ALIASES = {
 }
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
-PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
 PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("TITLE", 56)]
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
@@ -71,11 +75,16 @@ def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[l
         "| " + " | ".join(f"{name:<{width}}" for name, width in columns) + " |",
         border,
     ]
+    # Keep short identity columns on one line so one logical row is not split visually.
+    no_wrap = {"NR", "WHO", "FROM", "PER", "DISK", "TIME", "ORA", "KOHA", "DATA", "DATE", "LATE"}
     for values in rows_values:
-        wrapped = [
-            _wrap_fixed_width(value, width) if value.strip() else [""]
-            for value, (_, width) in zip(values, columns)
-        ]
+        wrapped = []
+        for value, (name, width) in zip(values, columns):
+            cleaned = re.sub(r"\s+", " ", value).strip() if value.strip() else ""
+            if name.upper() in no_wrap:
+                wrapped.append([cleaned])
+            else:
+                wrapped.append(_wrap_fixed_width(cleaned, width) if cleaned else [""])
         for position in range(max(len(cell) for cell in wrapped)):
             line_cells = [
                 cell[position] if position < len(cell) else ""
@@ -87,23 +96,9 @@ def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[l
 
 
 def _note_text(value: str | None) -> str:
+    """Strip [[added]]/[[done]] markers only; keep the wrapped text."""
     cleaned = TECHNICAL_TAG.sub("", value or "")
     return re.sub(r"\s+", " ", cleaned).strip() or "-"
-
-
-def _display_title(value: str | None) -> str:
-    """Like meetings_report._clean_task_title, but keeps text added after creation.
-
-    That text is wrapped in [[added]]..[[/added]] and carries the meaningful part of the
-    title (e.g. "DM/[[added]] GA: BZ GA - P/P PARA PF[[/added]]"), so only the markers go.
-    """
-    cleaned = TECHNICAL_TAG.sub("", value or "")
-    candidates = [line.strip() for line in cleaned.splitlines() if line.strip()]
-    title_line = next((line for line in candidates if TITLE_PREFIX.search(line)), "")
-    if not title_line:
-        title_line = next((line for line in candidates if not re.match(r"^\d+\.", line)), "")
-    title_line = DUE_SUFFIX.sub("", title_line)
-    return re.sub(r"\s+", " ", title_line).strip() or "-"
 
 
 def _task_covers_day(task: Task, day: date) -> bool:
@@ -185,7 +180,41 @@ async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
     return rows
 
 
-def _remove_question_library_dump(body: str) -> str:
+def _format_confirmation_questions(questions: list[tuple[str, str]]) -> list[str]:
+    if not questions:
+        return ["PYETJE PER KONFIRMIM: 0"]
+    lines = ["PYETJE PER KONFIRMIM:"]
+    for index, (text, guidance) in enumerate(questions, 1):
+        lines.append(f"{index}. {text}")
+        if guidance:
+            # Keep indented so UI/email treat this as description, not a section label.
+            lines.append(f"   {guidance}")
+    return lines
+
+
+async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, str]]:
+    category = await db.scalar(
+        select(QuestionCategory).where(
+            QuestionCategory.normalized_name == REMINDER_CATEGORY_NORMALIZED
+        )
+    )
+    if category is None:
+        return []
+    rows = (
+        await db.execute(
+            select(QuestionDefinition)
+            .where(QuestionDefinition.category_id == category.id)
+            .order_by(QuestionDefinition.sort_order, QuestionDefinition.created_at)
+        )
+    ).scalars().all()
+    return [
+        (row.text.strip(), (row.guidance or "").strip())
+        for row in rows
+        if row.text and row.text.strip()
+    ]
+
+
+def _replace_confirmation_questions_block(body: str, question_lines: list[str]) -> str:
     lines = (body or "").splitlines()
     marker_index = next(
         (
@@ -195,9 +224,10 @@ def _remove_question_library_dump(body: str) -> str:
         ),
         -1,
     )
-    if marker_index < 0:
-        return body
-    return "\n".join([*lines[:marker_index], "", "PYETJE PER KONFIRMIM: 0"]).strip()
+    head = list(lines[:marker_index] if marker_index >= 0 else lines)
+    while head and not head[-1].strip():
+        head.pop()
+    return "\n".join([*head, "", *question_lines]).strip()
 
 
 def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
@@ -207,8 +237,6 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         raw_title = str(section.get("title") or "").strip()
         title = SECTION_TITLE_ALIASES.get(raw_title, raw_title)
         body = str(section.get("body") or "")
-        if title == SECTION_TITLES[4]:
-            body = _remove_question_library_dump(body)
         if title in SECTION_TITLES and title not in by_title:
             by_title[title] = body
         elif title:
@@ -231,6 +259,23 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
     return normalized
 
 
+async def apply_1h_confirmation_questions(
+    db: AsyncSession, sections: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Keep NEW SYSTEM TASKS; refresh PYETJE PER KONFIRMIM from PYETJET PER 1H."""
+    question_lines = _format_confirmation_questions(await _load_1h_confirmation_questions(db))
+    updated: list[dict[str, str]] = []
+    for section in sections:
+        if section.get("title") == SECTION_TITLES[4]:
+            updated.append({
+                "title": section["title"],
+                "body": _replace_confirmation_questions_block(section.get("body") or "", question_lines),
+            })
+        else:
+            updated.append(section)
+    return updated
+
+
 async def _personal_section(
     db: AsyncSession,
     tasks: list[Task],
@@ -240,6 +285,7 @@ async def _personal_section(
     title_pattern: re.Pattern[str] = PERSONAL_GA,
 ) -> list[str]:
     personal = [task for task in tasks if task.is_personal and _belongs_to_day(task, report_day)]
+    all_participant_ids = await _all_participant_user_ids(db)
 
     # Common View shows the originating GA/KA note text for note-based tasks, not the task title.
     note_ids = {task.ga_note_origin_id for task in personal if task.ga_note_origin_id}
@@ -272,10 +318,18 @@ async def _personal_section(
     for label, key in groups:
         ordered = sorted(
             grouped.get(key, []),
-            key=lambda task: (_task_owners(task, names, assignee_ids_by_task), _title(task)),
+            key=lambda task: common_view_task_sort_key(
+                task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+            ),
         )
         rows_values = [
-            [str(index), _task_owners(task, names, assignee_ids_by_task), _title(task)]
+            [
+                str(index),
+                _task_owners(
+                    task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+                ),
+                _title(task),
+            ]
             for index, task in enumerate(ordered, start=1)
         ]
         if lines:
@@ -284,7 +338,8 @@ async def _personal_section(
     return lines
 
 
-async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]:
+async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
+    """All open blue notes: not converted, not closed, no active linked task (any day)."""
     notes = (
         await db.execute(
             select(GaNote)
@@ -305,15 +360,11 @@ async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]
             )
         ).scalars().all()
     )
-    today_notes = [
-        note for note in notes
-        if note.id not in linked_note_ids
-        and report_day in {_local_date(note.created_at), _local_date(note.updated_at)}
-    ]
-    if not today_notes:
+    open_notes = [note for note in notes if note.id not in linked_note_ids]
+    if not open_notes:
         return []
 
-    author_ids = {note.created_by for note in today_notes if note.created_by}
+    author_ids = {note.created_by for note in open_notes if note.created_by}
     names: dict[Any, str] = {}
     if author_ids:
         users = (await db.execute(select(User).where(User.id.in_(author_ids)))).scalars().all()
@@ -321,7 +372,7 @@ async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]
 
     # Discussed notes first, then the rest, each chronological.
     ordered = sorted(
-        today_notes,
+        open_notes,
         key=lambda note: (not note.is_discussed, note.created_at or note.updated_at),
     )
     return [
@@ -356,13 +407,13 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             await _new_system_task_rows(db),
         ),
         "",
-        "PYETJE PER KONFIRMIM: 0",
+        *_format_confirmation_questions(await _load_1h_confirmation_questions(db)),
     ]
     section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
     section_3 = _ascii_table(
         "NOTES",
         [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME", 5)],
-        await _blue_note_rows(db, report_day),
+        await _blue_note_rows(db),
     )
 
     sections = [
@@ -405,16 +456,6 @@ def _section_group_label(title: str) -> str:
     return "MANUAL QUESTIONS" if title in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
 
 
-def _render_group_label_html(label: str) -> str:
-    return (
-        "<div style=\"margin:22px 0 10px;padding:9px 11px;background:#f1f5f9;"
-        "border:1px solid #d7dee8;color:#334155;font-family:Arial,sans-serif;"
-        "font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.02em;\">"
-        f"{html.escape(label)}"
-        "</div>"
-    )
-
-
 def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
     section_chunks: list[str] = []
     current_group = ""
@@ -424,37 +465,13 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
             section_chunks.append(_render_group_label_html(group))
             current_group = group
         section_chunks.append(
-            "<div style=\"margin:22px 0 0;\">"
-            f"<h2 style=\"font-size:14px;margin:0 0 8px;color:#0f172a;font-family:Arial,sans-serif;\">{index}. {html.escape(section['title'])}</h2>"
-            f"{_render_section_body_html(section.get('body') or '')}"
-            "</div>"
+            _render_section_block_html(index, section["title"], section.get("body") or "")
         )
-    section_html = "".join(section_chunks)
-    return f"""<!doctype html>
-<html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><style>
-body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
-h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
-h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
-@media only screen and (max-width:600px){{
-body{{padding:8px}}
-table,tbody,tr,td,div,pre{{max-width:100%!important;box-sizing:border-box!important}}
-h1{{font-size:18px!important;line-height:1.2!important;white-space:normal!important}}
-h2{{font-size:13px!important;line-height:1.25!important;white-space:normal!important;word-break:normal!important;overflow-wrap:anywhere!important}}
-pre{{font-size:12px!important;padding:10px!important}}
-.report-table{{width:100%!important;table-layout:auto!important}}
-.report-table th,.report-table td{{font-size:11px!important;padding:3px 4px!important;line-height:1.25!important;word-break:normal!important;overflow-wrap:break-word!important}}
-}}
-</style></head><body style="font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:8px;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
-<tr><td align="center" style="padding:0;">
-<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;max-width:600px;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
-<tr><td style="padding:14px;">
-<h1 style="font-size:22px;margin:0 0 8px;font-family:Arial,sans-serif;color:#111827;">{html.escape(subject)}</h1>
-<p style="margin:0 0 18px;color:#475569;font-family:Arial,sans-serif;">Sot: {report_day:%d.%m.%Y}</p>
-{section_html}
-</td></tr></table>
-</td></tr></table>
-</body></html>"""
+    return _wrap_report_email_html(
+        subject,
+        f"Sot: {report_day:%d.%m.%Y}",
+        "".join(section_chunks),
+    )
 
 
 async def send_after_break_report(subject: str, recipients: dict[str, list[str]], plain_text: str, html_body: str) -> dict[str, Any]:

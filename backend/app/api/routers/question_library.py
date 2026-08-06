@@ -76,11 +76,13 @@ def _user_initials(full_name: str | None) -> str:
     parts = (full_name or "").strip().split()
     if not parts:
         return ""
+    if " ".join(parts).casefold() == "haris shaqiri":
+        return "HSH"
     return "".join(part[0] for part in parts)[:2].upper()
 
 
 def _is_question_participant(user: User) -> bool:
-    return user.is_active and _user_initials(user.full_name) not in {"GA", "KA"}
+    return user.is_active and _user_initials(user.full_name) not in {"GA", "KA", "HS"}
 
 
 def _question_task_title(text: str) -> str:
@@ -196,7 +198,8 @@ async def _refresh_question_task_status(
             for row in (
                 await db.execute(
                     select(QuestionUserStatus.question_id, QuestionUserStatus.user_id).where(
-                        QuestionUserStatus.question_id.in_(question_ids)
+                        QuestionUserStatus.question_id.in_(question_ids),
+                        QuestionUserStatus.status == TaskStatus.DONE.value,
                     )
                 )
             ).all()
@@ -611,6 +614,7 @@ async def export_question_category_excel(
             participant_names[user_id]
             for user_id in participant_ids - responded_ids
         ] if participants else []
+        awaiting_label = "ALL" if participants and len(awaiting) == len(participants) and awaiting else ", ".join(sorted(awaiting))
         checked_today = [item.full_name for item in question.daily_signoffs]
         values = [
             row_index - 3,
@@ -618,7 +622,7 @@ async def export_question_category_excel(
             question.guidance or "",
             ", ".join(sorted(understood)),
             ", ".join(sorted(needs_clarification)),
-            ", ".join(sorted(awaiting)),
+            awaiting_label,
             ", ".join(sorted(checked_today)),
             "PO" if question.is_done else "JO",
         ]

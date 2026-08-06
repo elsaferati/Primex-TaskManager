@@ -14,7 +14,7 @@ from app.services.primeflow_report import (
     GmailService, STATUS_MARKERS, build_report, clean_description, clean_title, employee_initials,
     exact_subject, filter_tasks,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
-    render_plain_text, render_png, report_subject,
+    render_plain_text, render_png, report_subject, ReportReminderQuestion, REMINDER_SECTION_TITLE,
 )
 
 
@@ -118,12 +118,62 @@ class PrimeFlowReportTests(unittest.TestCase):
         }
         document = build_report_document(data, date(2026, 7, 28), "10:00")
         html = render_html(document)
-        self.assertIn("<div class='task-title'>PF ASSISTANT</div>", html)
-        self.assertIn("<div class='numbered'>1. First item</div>", html)
-        self.assertIn("<span class='done'>Finished item</span>", html)
+        self.assertIn("PF ASSISTANT", html)
+        self.assertIn("1. First item", html)
+        self.assertIn("color:#64748b", html)
+        self.assertIn("text-decoration:line-through", html)
+        self.assertIn("Finished item", html)
         self.assertNotIn("Përshkrimi:", html)
         self.assertNotIn("Pa përshkrim", html)
         self.assertNotIn("TODO", html)
+
+    def test_multiline_title_details_render_grey(self) -> None:
+        data = {
+            "generated_at": "2026-08-06T11:00:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [{
+                "id": "dv", "date": "2026-08-06", "slot": "11:00",
+                "person": "Denis", "status": "IN_PROGRESS",
+                "task_title": "DV: MST: AKINEA VS PIM\n31 CUSHT- Prezentimi\n34 steps manual working",
+                "description": "Rregullohet dizajni",
+            }]},
+        }
+        html = render_html(build_report_document(data, date(2026, 8, 6), "11:00"))
+        self.assertIn("DV: MST: AKINEA VS PIM", html)
+        self.assertIn("31 CUSHT- Prezentimi", html)
+        self.assertIn("34 steps manual working", html)
+        self.assertIn("Rregullohet dizajni", html)
+        self.assertIn("color:#64748b", html)
+        self.assertIn("bgcolor=\"#fef3c7\"", html)
+        self.assertNotIn("color:#111827", html)
+
+    def test_reminder_questions_render_at_start(self) -> None:
+        data = {
+            "generated_at": "2026-08-06T11:00:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [{
+                "id": "t1", "date": "2026-08-06", "slot": "11:00",
+                "person": "Denis", "status": "TODO", "title": "Task one", "description": "",
+            }]},
+        }
+        reminders = [
+            ReportReminderQuestion(
+                text="A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?",
+                guidance="DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!",
+            ),
+            ReportReminderQuestion(text="Nese jo, pse?"),
+        ]
+        document = build_report_document(data, date(2026, 8, 6), "11:00", reminders=reminders)
+        plain = render_plain_text(document)
+        html = render_html(document)
+        self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("SLOTI 06.08.2026 11:00"))
+        self.assertIn("1. A eshte perfunduar detyra", plain)
+        self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", plain)
+        self.assertIn(REMINDER_SECTION_TITLE, html)
+        self.assertIn("1. A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?", html)
+        self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", html)
+        self.assertIn("color:#64748b", html)
+        self.assertLess(html.index(REMINDER_SECTION_TITLE), html.index("SLOTI 06.08.2026 11:00"))
 
     def test_truncation_blocks_report(self) -> None:
         with self.assertRaisesRegex(ValueError, "truncated"):
@@ -214,7 +264,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn(exact_title, plain)
         self.assertIn("1. Zeile\n\n2. Përshkrim EXACT", plain)
         self.assertIn(exact_title, html)
-        self.assertIn("@media(max-width:600px)", html)
+        self.assertIn("<!--[if mso]>", html)
+        self.assertIn('width="600"', html)
         self.assertIn("#fef3c7", html)
         with zipfile.ZipFile(io.BytesIO(docx)) as archive:
             xml = archive.read("word/document.xml").decode("utf-8")
