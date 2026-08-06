@@ -36,6 +36,20 @@ def _local_date(value: datetime | None) -> date | None:
     return localized.date()
 
 
+def _include_nonplanned_weekly_task(
+    *,
+    created_at: datetime,
+    planned_snapshot_at: datetime,
+    completed_day: date | None,
+    week_start: date,
+    as_of_day: date,
+) -> bool:
+    """Keep new work and every task actually completed inside the report week."""
+    return created_at >= planned_snapshot_at or bool(
+        completed_day is not None and week_start <= completed_day <= as_of_day
+    )
+
+
 def _daily_classification(
     task: Task | None,
     progress: TaskDailyProgress | None,
@@ -200,8 +214,39 @@ async def calculate_daily_period(
 
     weekly_task_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
     weekly_completed_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
+    weekly_all_completed_by_user: dict[uuid.UUID, dict[str, dict[str, Any]]] = defaultdict(dict)
     weekly_additional_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
     weekly_fast_task_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
+    week_start = planned_snapshot.week_start_date
+
+    progress_completion_day: dict[uuid.UUID, date] = {}
+    for row in progress_rows:
+        if str(row.daily_status or "").upper() != "DONE":
+            continue
+        previous = progress_completion_day.get(row.task_id)
+        if previous is None or row.day_date < previous:
+            progress_completion_day[row.task_id] = row.day_date
+
+    def completion_day(task: Task | None, raw: dict[str, Any] | None = None) -> date | None:
+        task_day = _local_date(task.completed_at) if task is not None else None
+        if task_day is not None:
+            return task_day
+        if task is not None and task.id in progress_completion_day:
+            return progress_completion_day[task.id]
+        return _local_date((raw or {}).get("completed_at"))
+
+    def remember_weekly_completion(
+        *,
+        user_id: uuid.UUID,
+        key: str,
+        fact: dict[str, Any],
+        completed_day: date | None,
+    ) -> None:
+        if completed_day is None or completed_day < week_start or completed_day > day:
+            return
+        fact["completion_day"] = completed_day.isoformat()
+        weekly_all_completed_by_user[user_id][key] = fact
+
     for key, raw in planned.items():
         task = task_by_id.get(raw.get("task_id"))
         progress = daily_progress.get(raw.get("task_id"))
@@ -229,6 +274,22 @@ async def calculate_daily_period(
             ) or (latest is not None and latest.daily_status == "DONE")
             if completed_as_of_day:
                 weekly_completed_by_user[user_id].add(key)
+                completed_day = completion_day(task, raw)
+                completion_fact = _task_fact(
+                    key=key,
+                    title=raw["title"],
+                    task=task,
+                    raw=raw,
+                    progress=latest,
+                    day=day,
+                    attribution="completed_from_weekly_plan",
+                )
+                remember_weekly_completion(
+                    user_id=user_id,
+                    key=key,
+                    fact=completion_fact,
+                    completed_day=completed_day,
+                )
             if not due_today:
                 continue
             fact = _task_fact(
@@ -245,16 +306,57 @@ async def calculate_daily_period(
             people[user_id]["counters"][f"{fact['classification']}_count"] += 1
 
     for task in tasks:
-        if task.id in planned_ids or task.created_at < planned_snapshot.created_at:
+        if task.id in planned_ids:
             continue
         if _local_date(task.created_at) > day:  # type: ignore[operator]
+            continue
+        created_after_plan = task.created_at >= planned_snapshot.created_at
+        completed_day = completion_day(task)
+        completed_this_week = bool(
+            completed_day is not None and week_start <= completed_day <= day
+        )
+        if not _include_nonplanned_weekly_task(
+            created_at=task.created_at,
+            planned_snapshot_at=planned_snapshot.created_at,
+            completed_day=completed_day,
+            week_start=week_start,
+            as_of_day=day,
+        ):
             continue
         for user_id in assignees.get(task.id, set()):
             if user_id not in people:
                 continue
-            weekly_additional_keys_by_user[user_id].add(str(task.id))
-            if not task.project_id and not task.system_template_origin_id:
-                weekly_fast_task_keys_by_user[user_id].add(str(task.id))
+            if created_after_plan:
+                weekly_additional_keys_by_user[user_id].add(str(task.id))
+                if not task.project_id and not task.system_template_origin_id:
+                    weekly_fast_task_keys_by_user[user_id].add(str(task.id))
+            if completed_this_week:
+                completion_fact = _task_fact(
+                    key=f"id:{task.id}",
+                    title=task.title,
+                    task=task,
+                    raw={
+                        "project_title": project_titles.get(task.project_id),
+                        "source_type": (
+                            "system" if task.system_template_origin_id else (
+                                "project" if task.project_id else "fast"
+                            )
+                        ),
+                    },
+                    progress=latest_progress.get(task.id),
+                    day=day,
+                    attribution=(
+                        "added_after_weekly_plan"
+                        if created_after_plan
+                        else "completed_outside_weekly_plan"
+                    ),
+                )
+                remember_weekly_completion(
+                    user_id=user_id,
+                    key=f"id:{task.id}",
+                    fact=completion_fact,
+                    completed_day=completed_day,
+                )
         if not (
             _local_date(task.created_at) == day
             or _local_date(task.completed_at) == day
@@ -327,10 +429,15 @@ async def calculate_daily_period(
         completed_today = int(counters.get("completed_count", 0))
         weekly_total = len(weekly_task_keys_by_user[user_id])
         weekly_completed = len(weekly_completed_by_user[user_id])
+        weekly_all_completed = len(weekly_all_completed_by_user[user_id])
         counters["daily_planned_count"] = planned_today
         counters["daily_completed_count"] = completed_today
         counters["weekly_planned_count"] = weekly_total
         counters["weekly_completed_count"] = weekly_completed
+        counters["weekly_all_completed_count"] = weekly_all_completed
+        counters["weekly_completed_outside_plan_count"] = max(
+            0, weekly_all_completed - weekly_completed
+        )
         counters["weekly_additional_count"] = len(weekly_additional_keys_by_user[user_id])
         counters["weekly_fast_task_count"] = len(weekly_fast_task_keys_by_user[user_id])
         person["counters"] = counters
@@ -338,6 +445,13 @@ async def calculate_daily_period(
         person["daily_completed_count"] = completed_today
         person["weekly_planned_count"] = weekly_total
         person["weekly_completed_count"] = weekly_completed
+        person["weekly_all_completed_count"] = weekly_all_completed
+        person["weekly_completed_outside_plan_count"] = max(
+            0, weekly_all_completed - weekly_completed
+        )
+        person["weekly_completed_tasks"] = list(
+            weekly_all_completed_by_user[user_id].values()
+        )
         person["weekly_additional_count"] = len(weekly_additional_keys_by_user[user_id])
         person["weekly_fast_task_count"] = len(weekly_fast_task_keys_by_user[user_id])
         person["daily_progress_percent"] = (

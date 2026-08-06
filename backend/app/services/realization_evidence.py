@@ -15,6 +15,7 @@ from app.models.audit_log import AuditLog
 from app.models.enums import AttendanceType
 from app.models.realization import RealizationObservation, RealizationPeriod
 from app.models.task import Task
+from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.services.realization_people import (
@@ -273,12 +274,45 @@ async def collect_weekly_evidence(
     task_ids = {
         task["task_id"] for task in [*planned.values(), *final.values()] if task["task_id"]
     }
+    completed_department_tasks = (
+        await db.execute(
+            select(Task).where(
+                Task.department_id == period.department_id,
+                Task.completed_at.is_not(None),
+                Task.completed_at <= final_snapshot.created_at,
+            )
+        )
+    ).scalars().all()
+    completed_department_tasks = [
+        task
+        for task in completed_department_tasks
+        if period.start_date
+        <= (_local(task.completed_at) or task.completed_at).date()
+        <= period.end_date
+    ]
+    completed_outside_snapshot_ids = {
+        task.id for task in completed_department_tasks if task.id not in task_ids
+    }
+    task_ids.update(completed_outside_snapshot_ids)
     tasks = (
         (await db.execute(select(Task).where(Task.id.in_(task_ids)))).scalars().all()
         if task_ids
         else []
     )
     task_map = {task.id: task for task in tasks}
+    outside_assignees: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    if completed_outside_snapshot_ids:
+        for assignment in (
+            await db.execute(
+                select(TaskAssignee).where(
+                    TaskAssignee.task_id.in_(completed_outside_snapshot_ids)
+                )
+            )
+        ).scalars().all():
+            outside_assignees[assignment.task_id].add(assignment.user_id)
+    for task in completed_department_tasks:
+        if task.id in completed_outside_snapshot_ids and task.assigned_to is not None:
+            outside_assignees[task.id].add(task.assigned_to)
     progress_rows = (
         (
             await db.execute(
@@ -686,6 +720,65 @@ async def collect_weekly_evidence(
             person["tasks"].append(fact)
             person["counters"]["additional_count"] += 1
             person["counters"][f"{classification}_count"] += 1
+
+    for task_id in completed_outside_snapshot_ids:
+        source = task_map.get(task_id)
+        if source is None:
+            continue
+        completed_day = (_local(source.completed_at) or source.completed_at).date()
+        fact = {
+            "match_key": f"id:{source.id}",
+            "task_id": source.id,
+            "title": source.title,
+            "project_title": None,
+            "project_id": source.project_id,
+            "source_type": (
+                "system" if source.system_template_origin_id else (
+                    "project" if source.project_id else "fast"
+                )
+            ),
+            "classification": "completed_outside_plan",
+            "status": source.status,
+            "completed_at": source.completed_at,
+            "completion_day": completed_day,
+            "daily_progress": [
+                {
+                    "id": row.id,
+                    "day": row.day_date,
+                    "completed_value": row.completed_value,
+                    "total_value": row.total_value,
+                    "completed_delta": row.completed_delta,
+                    "daily_status": row.daily_status,
+                    "finish_period": row.finish_period,
+                }
+                for row in progress_by_task.get(source.id, [])
+            ],
+            "introduced_after_baseline": False,
+            "created_after_baseline": False,
+            "meeting_origin_id": source.meeting_origin_id,
+            "attribution": "completed_outside_weekly_plan",
+        }
+        for user_id in outside_assignees.get(source.id, set()):
+            person = ensure_person(user_id, "Employee")
+            if person is None:
+                continue
+            person["tasks"].append(fact)
+            person["counters"]["completed_outside_plan_count"] += 1
+
+    completed_classes = {
+        "completed_on_time",
+        "completed_late",
+        "additional_completed",
+        "completed_outside_plan",
+    }
+    for person in people.values():
+        completed_keys = {
+            str(task.get("task_id") or task.get("match_key"))
+            for task in person["tasks"]
+            if task.get("classification") in completed_classes
+        }
+        person["counters"]["weekly_all_completed_count"] = len(completed_keys)
+        person["weekly_all_completed_count"] = len(completed_keys)
 
     observation_by_user: dict[uuid.UUID, list[RealizationObservation]] = defaultdict(list)
     for observation in evidence_observations:

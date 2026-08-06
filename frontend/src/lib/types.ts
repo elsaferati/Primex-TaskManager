@@ -689,7 +689,8 @@ export interface RealizationTaskFact {
   postponement?: string | null
   postponement_evidence_ids?: string[]
   reassignment?: boolean
-  attribution?: "planned_owner" | "actual_worker" | "additional_owner" | "planned_today" | "added_after_weekly_plan"
+  attribution?: "planned_owner" | "actual_worker" | "additional_owner" | "planned_today" | "added_after_weekly_plan" | "completed_from_weekly_plan" | "completed_outside_weekly_plan"
+  completion_day?: string | null
   meeting_origin_id?: string | null
   status_progress_inconsistent?: boolean
   user_comment?: string | null
@@ -739,6 +740,9 @@ export interface RealizationPersonResult {
     daily_completed_count?: number
     weekly_planned_count?: number
     weekly_completed_count?: number
+    weekly_all_completed_count?: number
+    weekly_completed_outside_plan_count?: number
+    weekly_completed_tasks?: RealizationTaskFact[]
     weekly_additional_count?: number
     weekly_fast_task_count?: number
     report_mode?: "LIVE_DAILY" | "FINAL_WEEKLY"
