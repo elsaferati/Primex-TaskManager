@@ -128,12 +128,41 @@ def _separate_keyed_prompt_lines(body: str) -> str:
     return "\n\n".join(parts) if parts else body
 
 
+def _compact_section_title(title: str) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", (title or "").upper())
+
+
+def _canonical_section_title(raw_title: str) -> str | None:
+    title = SECTION_TITLE_ALIASES.get(raw_title, raw_title).strip()
+    if title in SECTION_TITLES:
+        return title
+
+    compact = _compact_section_title(title)
+    for known in SECTION_TITLES:
+        if _compact_section_title(known) == compact:
+            return known
+
+    # Older drafts used near-identical wording for the emails / notes prompts.
+    if "VENDOSDETSTATUS" in compact or compact.startswith("GAEMINFO"):
+        return SECTION_TITLES[0]
+    if "NOTESTEREJA" in compact and "VENDOSDETSTATUS" not in compact:
+        return SECTION_TITLES[3]
+    if "AKAREPLYNGAGA" in compact:
+        return SECTION_TITLES[1]
+    if "VONESA" in compact and "MUNGESA" in compact:
+        return SECTION_TITLES[2]
+    if "BZMEGA" in compact and "BLLOK" in compact:
+        return SECTION_TITLES[4]
+    if "KUSHKADETPERSONALISHT" in compact:
+        return SECTION_TITLES[5]
+    return None
+
+
 def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     by_title: dict[str, str] = {}
-    extras: list[dict[str, str]] = []
     for section in sections or []:
         raw_title = str(section.get("title") or "").strip()
-        title = SECTION_TITLE_ALIASES.get(raw_title, raw_title)
+        title = _canonical_section_title(raw_title)
         body = str(section.get("body") or "")
         if raw_title == LEGACY_NOTES_TITLE or (
             title == SECTION_TITLES[3] and any(_is_manual_email_line(line) for line in body.splitlines())
@@ -144,19 +173,17 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
             if SECTION_TITLES[0] not in by_title:
                 by_title[SECTION_TITLES[0]] = emails_body
             continue
+        if title is None:
+            continue
         if title == SECTION_TITLES[0]:
             body = _separate_keyed_prompt_lines(body) or _emails_default_body()
-        if title in SECTION_TITLES and title not in by_title:
+        if title not in by_title:
             by_title[title] = body
-        elif title:
-            extras.append({"title": title, "body": body})
 
-    normalized = [
+    return [
         {"title": title, "body": by_title.get(title, _default_body(title))}
         for title in SECTION_TITLES
     ]
-    normalized.extend(extras)
-    return normalized
 
 
 def _entry_day(entry: CommonEntry) -> date | None:

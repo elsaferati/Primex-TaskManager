@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 import uuid
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -37,6 +37,7 @@ from app.services.std_feedback_tickets import (
     _needs_detail,
     _upsert_std_ticket,
     is_external_ticket_payload,
+    std_tickets_report_section,
     sync_std_feedback_tickets,
     ticket_comments,
     ticket_files,
@@ -120,6 +121,16 @@ def _ticket_payload(external_id: str, email: str, updated_at: str = "2026-08-03T
         "comments": [{"id": "c1", "body": "Please fix"}],
         "files": [{"id": "f1", "filename": "proof.png"}],
     }
+
+
+class TestStdFeedbackReportSection(unittest.IsolatedAsyncioTestCase):
+    async def test_report_section_summarizes_open_today_and_closed_counts(self) -> None:
+        db = _FakeDb(select_batches=[[100], [20], [2], [10]])
+        body = await std_tickets_report_section(db, date(2026, 8, 6))
+        self.assertEqual(
+            body,
+            "Totali i tiketave te hapurat: 100\nTiketa sot: 20\nmbyllura sot: 2\nrregulluar sot: 10",
+        )
 
 
 class TestStdFeedbackClient(unittest.IsolatedAsyncioTestCase):

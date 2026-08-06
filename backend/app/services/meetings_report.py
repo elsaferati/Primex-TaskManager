@@ -31,7 +31,7 @@ REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
     "A JEMI BRENDA MESATARES ME PROJEKTE/",
     "(GA) M3 DET GA MBYLLJA ME HV?",
-    "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3",
+    "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
     "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?",
     "DET. PA PROGRES (PINK)?",
     "N- (GA) PV/FESTE?",
@@ -58,6 +58,7 @@ MANUAL_SECTION_TITLES = {
     SECTION_TITLES[0],
 }
 SECTION_TITLE_ALIASES = {
+    "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[2],
     "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[10],
 }
 # Same rule for M1/M2/M3: personal rows only when the title marks GA (not KA).
@@ -994,6 +995,8 @@ def render_plain_text(subject: str, report_day: date, tomorrow: date, sections: 
         )
     return "\n\n".join(blocks)
 
+
+def _section_group_label(title: str) -> str:
     return "MANUAL QUESTIONS" if title in MANUAL_SECTION_TITLES else "AUTO-FILLED FROM PRIMEFLOW"
 
 

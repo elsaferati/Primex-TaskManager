@@ -93,6 +93,24 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("EMAIL INFO PX", sections[0]["body"])
         self.assertIn("NDRYSHON PLANI", sections[2]["body"])
 
+    def test_normalization_drops_duplicate_near_match_email_section(self) -> None:
+        variant_emails_title = (
+            "(GA) EM: INFO PX (KO SPAM), EM: INFO HF (KO SPAM), EM: PRIMEX EU (GMAIL KO SPAM). "
+            "VENDOS DET: STATUS (1H: EM(08:00), 08:00, DL, AM.AM&PM.PM/P/R1)"
+        )
+        sections = normalize_morning_report_sections(
+            [
+                {"title": SECTION_TITLES[0], "body": "EMAIL INFO PX (KO SPAM): first"},
+                {"title": variant_emails_title, "body": "EMAIL INFO PX (KO SPAM): duplicate"},
+                {"title": SECTION_TITLES[5], "body": "IN PROGRESS: 1"},
+            ]
+        )
+
+        self.assertEqual(len(sections), 6)
+        self.assertEqual([section["title"] for section in sections], SECTION_TITLES)
+        self.assertEqual(sections[0]["body"], "EMAIL INFO PX (KO SPAM): first")
+        self.assertEqual(sections[5]["body"], "IN PROGRESS: 1")
+
     def test_normalization_splits_legacy_notes_emails_into_manual_section(self) -> None:
         legacy_notes = (
             "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET "
@@ -108,7 +126,10 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             ]
         )
 
-        self.assertEqual(sections[0]["body"], "EMAIL INFO PX (KO SPAM): checked\nSTATUSI I DETYRAVE 1H: ok")
+        self.assertEqual(
+            sections[0]["body"],
+            "EMAIL INFO PX (KO SPAM): checked\n\nSTATUSI I DETYRAVE 1H: ok",
+        )
         self.assertIn("NOTES: 1", sections[3]["body"])
         self.assertNotIn("EMAIL INFO PX", sections[3]["body"])
 
