@@ -689,7 +689,7 @@ export interface RealizationTaskFact {
   postponement?: string | null
   postponement_evidence_ids?: string[]
   reassignment?: boolean
-  attribution?: "planned_owner" | "actual_worker" | "additional_owner" | "planned_today" | "added_after_weekly_plan" | "completed_from_weekly_plan" | "completed_outside_weekly_plan"
+  attribution?: "planned_owner" | "actual_worker" | "additional_owner" | "planned_today" | "added_after_weekly_plan" | "completed_from_weekly_plan" | "completed_outside_weekly_plan" | "system_schedule"
   completion_day?: string | null
   meeting_origin_id?: string | null
   status_progress_inconsistent?: boolean

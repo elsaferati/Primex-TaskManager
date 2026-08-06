@@ -319,16 +319,18 @@ async def calculate_daily_period(
                     people[user_id]["counters"]["system_task_completed_count"] += 1
 
     for task in tasks:
+        is_system_task = task.system_template_origin_id is not None
         if task.id in planned_ids:
             continue
         if _local_date(task.created_at) > day:  # type: ignore[operator]
             continue
+
         created_after_plan = task.created_at >= planned_snapshot.created_at
         completed_day = completion_day(task)
         completed_this_week = bool(
             completed_day is not None and week_start <= completed_day <= day
         )
-        if not _include_nonplanned_weekly_task(
+        if not is_system_task and not _include_nonplanned_weekly_task(
             created_at=task.created_at,
             planned_snapshot_at=planned_snapshot.created_at,
             completed_day=completed_day,
@@ -336,15 +338,47 @@ async def calculate_daily_period(
             as_of_day=day,
         ):
             continue
+
+        source_type = "system" if is_system_task else (
+            "project" if task.project_id else "fast"
+        )
         for user_id in assignees.get(task.id, set()):
             if user_id not in people:
                 continue
-            if is_system_task:
-                continue
-            weekly_additional_keys_by_user[user_id].add(str(task.id))
-            if not task.project_id and not task.system_template_origin_id:
-                weekly_fast_task_keys_by_user[user_id].add(str(task.id))
-        if not (
+            if not is_system_task and created_after_plan:
+                weekly_additional_keys_by_user[user_id].add(str(task.id))
+                if source_type == "fast":
+                    weekly_fast_task_keys_by_user[user_id].add(str(task.id))
+            if completed_this_week:
+                completion_fact = _task_fact(
+                    key=f"id:{task.id}",
+                    title=task.title,
+                    task=task,
+                    raw={
+                        "project_title": project_titles.get(task.project_id),
+                        "source_type": source_type,
+                    },
+                    progress=latest_progress.get(task.id),
+                    day=day,
+                    attribution=(
+                        "system_schedule"
+                        if is_system_task
+                        else (
+                            "added_after_weekly_plan"
+                            if created_after_plan
+                            else "completed_outside_weekly_plan"
+                        )
+                    ),
+                )
+                remember_weekly_completion(
+                    user_id=user_id,
+                    key=f"id:{task.id}",
+                    fact=completion_fact,
+                    completed_day=completed_day,
+                )
+
+        scheduled_system_day = _local_date(task.due_date or task.origin_run_at)
+        has_activity_today = (
             _local_date(task.created_at) == day
             or _local_date(task.completed_at) == day
             or task.id in daily_progress
@@ -354,6 +388,7 @@ async def calculate_daily_period(
                 continue
         elif not has_activity_today:
             continue
+
         for user_id in assignees.get(task.id, set()):
             if user_id not in people:
                 continue
@@ -363,15 +398,13 @@ async def calculate_daily_period(
                 task=task,
                 raw={
                     "project_title": project_titles.get(task.project_id),
-                    "source_type": (
-                        "system" if task.system_template_origin_id else (
-                            "project" if task.project_id else "fast"
-                        )
-                    ),
+                    "source_type": source_type,
                 },
                 progress=daily_progress.get(task.id),
                 day=day,
-                attribution="system_schedule" if is_system_task else "added_after_weekly_plan",
+                attribution=(
+                    "system_schedule" if is_system_task else "added_after_weekly_plan"
+                ),
             )
             people[user_id]["tasks"].append(fact)
             if is_system_task:

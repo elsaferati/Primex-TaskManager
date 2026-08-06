@@ -742,14 +742,20 @@ export default function RealizationPage() {
     const tasks = snapshot?.tasks || []
     const plannedTasks = tasks.filter((task) => task.attribution === "planned_today")
     const additionalTasks = tasks.filter((task) => task.attribution === "added_after_weekly_plan")
-    const completedTasks = plannedTasks.filter(taskIsCompleted)
-    const groups = groupDayTasks([...plannedTasks, ...additionalTasks])
+    const systemTasks = tasks.filter((task) => task.attribution === "system_schedule")
+    const completionOnlyTasks = tasks.filter((task) =>
+      ["completed_from_weekly_plan", "completed_outside_weekly_plan"].includes(task.attribution || "")
+    )
+    const completedTasks = tasks.filter(taskIsCompleted)
+    const groups = groupDayTasks([...plannedTasks, ...additionalTasks, ...systemTasks, ...completionOnlyTasks])
     return {
       label,
       date,
       snapshot,
       plannedTasks,
       additionalTasks,
+      systemTasks,
+      completionOnlyTasks,
       completedTasks,
       remainingTasks: plannedTasks.filter((task) => !taskIsCompleted(task)),
       groups,
@@ -945,7 +951,7 @@ export default function RealizationPage() {
                               ))}
                             </div>
                           ))}
-                          {!day.plannedTasks.length && !day.additionalTasks.length ? (
+                          {!day.plannedTasks.length && !day.additionalTasks.length && !day.systemTasks.length && !day.completionOnlyTasks.length ? (
                             <div className="flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed text-center text-xs text-muted-foreground">
                               <CircleDashed className="mb-2 h-5 w-5" />Nuk ka detyra për këtë ditë
                             </div>
