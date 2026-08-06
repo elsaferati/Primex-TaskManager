@@ -51,11 +51,19 @@ type NavItem = {
   roles?: UserRole[] 
 }
 
+type NavSubgroup = {
+  id: string
+  label: string
+  icon: LucideIcon
+  items: NavItem[]
+}
+
 type NavGroup = {
   id: string
   label: string
   icon: LucideIcon
   items: NavItem[]
+  subgroups?: NavSubgroup[]
 }
 
 const primaryItems: NavItem[] = [
@@ -170,6 +178,18 @@ const navGroups: NavGroup[] = [
         label: "1H Report Management",
         icon: MailCheck,
         roles: ["ADMIN"],
+      },
+    ],
+    subgroups: [
+      {
+        id: "mbledhje",
+        label: "Mbledhje",
+        icon: MailCheck,
+        items: [
+          { href: "/morning-report", label: "M1 Hapja e dites", icon: MailCheck },
+          { href: "/after-break-report", label: "M2 Permbledhja pas pauzes", icon: MailCheck },
+          { href: "/meetings-report", label: "M3 Mbyllja e dites", icon: MailCheck },
+        ],
       },
     ],
   },
@@ -320,20 +340,41 @@ export function Sidebar({ role }: { role: UserRole }) {
   const visibleGroups = React.useMemo(
     () =>
       navGroups
-        .map((group) => ({ ...group, items: group.items.filter(canViewItem) }))
-        .filter((group) => group.items.length > 0),
+        .map((group) => ({
+          ...group,
+          items: group.items.filter(canViewItem),
+          subgroups: (group.subgroups || [])
+            .map((subgroup) => ({ ...subgroup, items: subgroup.items.filter(canViewItem) }))
+            .filter((subgroup) => subgroup.items.length > 0),
+        }))
+        .filter((group) => group.items.length > 0 || (group.subgroups?.length ?? 0) > 0),
     [canViewItem]
   )
 
+  const groupHasActiveItem = React.useCallback(
+    (group: (typeof visibleGroups)[number]) =>
+      group.items.some(isItemActive) ||
+      (group.subgroups || []).some((subgroup) => subgroup.items.some(isItemActive)),
+    [isItemActive]
+  )
+
   const activeGroupId = React.useMemo(
-    () => visibleGroups.find((group) => group.items.some(isItemActive))?.id ?? null,
-    [isItemActive, visibleGroups]
+    () => visibleGroups.find((group) => groupHasActiveItem(group))?.id ?? null,
+    [groupHasActiveItem, visibleGroups]
   )
   const [openGroupId, setOpenGroupId] = React.useState<string | null>(null)
+  const [openSubgroupId, setOpenSubgroupId] = React.useState<string | null>(null)
 
   React.useEffect(() => {
     if (activeGroupId) setOpenGroupId(activeGroupId)
   }, [activeGroupId])
+
+  React.useEffect(() => {
+    const activeSubgroup = visibleGroups
+      .flatMap((group) => group.subgroups || [])
+      .find((subgroup) => subgroup.items.some(isItemActive))
+    if (activeSubgroup) setOpenSubgroupId(activeSubgroup.id)
+  }, [isItemActive, visibleGroups])
 
   const renderNavItem = (item: NavItem, nested = false) => {
     const active = isItemActive(item)
@@ -428,7 +469,7 @@ export function Sidebar({ role }: { role: UserRole }) {
 
         {visibleGroups.map((group) => {
           const isExpanded = openGroupId === group.id
-          const containsActiveItem = group.id === activeGroupId
+          const containsActiveItem = groupHasActiveItem(group)
 
           return (
             <div key={group.id}>
@@ -462,6 +503,82 @@ export function Sidebar({ role }: { role: UserRole }) {
 
               {isExpanded && (
                 <div id={`sidebar-group-${group.id}`} className="mt-1 space-y-1">
+                  {(group.subgroups || []).map((subgroup) => {
+                    const subgroupExpanded = openSubgroupId === subgroup.id
+                    const subgroupActive = subgroup.items.some(isItemActive)
+                    return (
+                      <div key={subgroup.id}>
+                        <button
+                          type="button"
+                          aria-expanded={subgroupExpanded}
+                          aria-controls={`sidebar-subgroup-${subgroup.id}`}
+                          onClick={() =>
+                            setOpenSubgroupId((current) => (current === subgroup.id ? null : subgroup.id))
+                          }
+                          className={cn(
+                            "group flex w-full items-center gap-3 rounded-md py-2.5 pl-9 pr-3 text-left text-sm font-medium transition-colors",
+                            "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                            subgroupActive ? "text-sidebar-accent-foreground" : "text-muted-foreground"
+                          )}
+                        >
+                          <subgroup.icon
+                            className={cn(
+                              "h-4 w-4 shrink-0 transition-colors",
+                              subgroupActive
+                                ? "text-primary"
+                                : "text-muted-foreground group-hover:text-foreground"
+                            )}
+                          />
+                          <span className="min-w-0 flex-1 truncate">{subgroup.label}</span>
+                          <ChevronDown
+                            className={cn(
+                              "h-4 w-4 shrink-0 transition-transform duration-200",
+                              subgroupExpanded && "rotate-180"
+                            )}
+                          />
+                        </button>
+                        {subgroupExpanded ? (
+                          <div id={`sidebar-subgroup-${subgroup.id}`} className="mt-1 space-y-1">
+                            {subgroup.items.map((item) => (
+                              <Link
+                                key={item.href}
+                                href={item.href}
+                                prefetch={false}
+                                onMouseEnter={() => {
+                                  router.prefetch(item.href)
+                                  prefetchDepartmentData(item.href)
+                                }}
+                                onFocus={() => {
+                                  router.prefetch(item.href)
+                                  prefetchDepartmentData(item.href)
+                                }}
+                                onClick={() => {
+                                  if (!isDesktop) setIsOpen(false)
+                                }}
+                                className={cn(
+                                  "group flex items-center gap-3 rounded-md py-2.5 pl-14 pr-3 text-sm font-medium transition-colors",
+                                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                                  isItemActive(item)
+                                    ? "bg-sidebar-accent text-sidebar-accent-foreground"
+                                    : "text-muted-foreground"
+                                )}
+                              >
+                                <item.icon
+                                  className={cn(
+                                    "h-4 w-4 shrink-0 transition-colors",
+                                    isItemActive(item)
+                                      ? "text-primary"
+                                      : "text-muted-foreground group-hover:text-foreground"
+                                  )}
+                                />
+                                <span className="min-w-0 truncate">{item.label}</span>
+                              </Link>
+                            ))}
+                          </div>
+                        ) : null}
+                      </div>
+                    )
+                  })}
                   {group.items.map((item) => renderNavItem(item, true))}
                 </div>
               )}

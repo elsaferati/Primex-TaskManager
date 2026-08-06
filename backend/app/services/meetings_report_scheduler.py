@@ -10,7 +10,15 @@ from sqlalchemy import select
 from app.db import SessionLocal
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
-from app.services.meetings_report import build_meetings_report_sections, render_html, render_plain_text, send_meetings_report, subject_for
+from app.services.meetings_report import (
+    MANUAL_SECTION_TITLES,
+    build_meetings_report_sections,
+    render_html,
+    render_plain_text,
+    send_meetings_report,
+    subject_for,
+)
+from app.services.report_section_merge import preserve_manual_sections
 
 logger = logging.getLogger(__name__)
 
@@ -84,8 +92,12 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
             logger.warning("meetings_report_scheduler_skipped reason=no_to_recipients")
             return False
 
+        # Always rebuild from live data at send time so auto-filled sections stay current.
+        # Keep any manual answers already saved on today's draft.
+        tomorrow, sections, snapshot = await build_meetings_report_sections(db, report_day)
+        if row is not None:
+            sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
         if row is None:
-            tomorrow, sections, snapshot = await build_meetings_report_sections(db, report_day)
             row = MeetingsReportDraft(
                 report_date=report_day,
                 tomorrow_date=tomorrow,
@@ -99,6 +111,9 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
         else:
             row.subject = row.subject or subject_for(report_day)
             row.recipients = recipients
+            row.tomorrow_date = tomorrow
+            row.sections = sections
+            row.generated_snapshot = snapshot
 
         plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, row.sections)
         html_body = render_html(row.subject, row.report_date, row.tomorrow_date, row.sections)

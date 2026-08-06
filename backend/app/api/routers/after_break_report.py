@@ -15,6 +15,7 @@ from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.user import User
 from app.services.after_break_report import (
+    MANUAL_SECTION_TITLES,
     build_after_break_report_sections,
     normalize_after_break_report_sections,
     render_html,
@@ -22,6 +23,7 @@ from app.services.after_break_report import (
     send_after_break_report,
     subject_for,
 )
+from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -238,6 +240,8 @@ async def generate_draft(
     row = (
         await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_date))
     ).scalar_one_or_none()
+    if row is not None:
+        sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
     if row is None:
         row = AfterBreakReportDraft(
             report_date=report_date,

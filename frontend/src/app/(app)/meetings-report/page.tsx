@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { CalendarDays, CheckCircle2, Clock3, Eye, History, Mail, Pencil, Plus, RefreshCw, Save, Send, Settings, ShieldCheck, Trash2 } from "lucide-react"
+import { CalendarDays, CheckCircle2, Clock3, Eye, History, Mail, Pencil, RefreshCw, Save, Send, Settings, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -9,6 +9,12 @@ import { Badge } from "@/components/ui/badge"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import {
+  ReportSectionFieldEditor,
+  ReportSectionPreview,
+  reportSectionEditorLines,
+  reportSectionPreviewText,
+} from "@/components/report-section-editor"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/lib/auth"
@@ -17,12 +23,6 @@ type Section = { title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; lines: string[] }
-type EditorTableBlock = {
-  headerIndex: number
-  rowIndexes: number[]
-  endIndex: number
-  borderLine: string
-}
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -67,91 +67,7 @@ const API = "/meetings-report"
 const REPORT_LABEL = "Mbyllja e dites M3"
 
 function sectionPreviewText(value: string) {
-  const cleaned = value.trim()
-  if (!cleaned) return "No content"
-  return cleaned
-}
-
-function sectionEditorLines(value: string) {
-  return value.split(/\r?\n/)
-}
-
-function isRuleLine(value: string) {
-  const trimmed = value.trim()
-  return Boolean(trimmed) && /^[+\-\s]+$/.test(trimmed)
-}
-
-function tableCells(value: string) {
-  const trimmed = value.trim()
-  if (!trimmed.startsWith("|") || !trimmed.endsWith("|")) return null
-  return trimmed.slice(1, -1).split("|").map((cell) => cell.trim())
-}
-
-function updateTableCell(line: string, cellIndex: number, value: string) {
-  const cells = tableCells(line)
-  if (!cells) return line
-  const nextCells = cells.map((cell, index) => index === cellIndex ? value : cell)
-  return `| ${nextCells.join(" | ")} |`
-}
-
-function editorTableBlocks(lines: string[]) {
-  const blocks: EditorTableBlock[] = []
-  let index = 0
-  while (index < lines.length) {
-    if (!isRuleLine(lines[index])) {
-      index += 1
-      continue
-    }
-    const startIndex = index
-    const cellIndexes: number[] = []
-    while (index < lines.length && (isRuleLine(lines[index]) || Boolean(tableCells(lines[index])))) {
-      if (tableCells(lines[index])) cellIndexes.push(index)
-      index += 1
-    }
-    if (cellIndexes.length) {
-      blocks.push({
-        headerIndex: cellIndexes[0],
-        rowIndexes: cellIndexes.slice(1),
-        endIndex: index - 1,
-        borderLine: lines[startIndex],
-      })
-    }
-  }
-  return blocks
-}
-
-function isEmptyGeneratedRow(cells: string[]) {
-  return cells.some((cell) => /\(Asnje (detyre|takim)\)/i.test(cell))
-}
-
-function isFixedEditorLabel(line: string) {
-  const trimmed = line.trim()
-  if (!trimmed) return false
-  return trimmed.endsWith(":") || (trimmed === trimmed.toUpperCase() && /[A-Z]/.test(trimmed))
-}
-
-function tableGridTemplate(cells: string[]) {
-  return cells.map((cell) => {
-    const label = cell.trim().toUpperCase()
-    if (label === "NR") return "56px"
-    if (label === "WHO") return "90px"
-    if (label === "TIME") return "86px"
-    if (label === "MBAJTUR?" || label === "MBAJTUR" || label === "ANULUAR" || label === "PA STATUS") return "105px"
-    if (label === "LATE") return "100px"
-    if (label === "TITLE") return "minmax(320px, 1fr)"
-    return "minmax(120px, 1fr)"
-  }).join(" ")
-}
-
-function tableGridTemplates(lines: string[]) {
-  let current = "minmax(120px, 1fr)"
-  return lines.map((line) => {
-    const cells = tableCells(line)
-    if (cells?.some((cell) => ["NR", "WHO", "TITLE", "TIME", "LATE", "MBAJTUR?"].includes(cell.toUpperCase()))) {
-      current = tableGridTemplate(cells)
-    }
-    return current
-  })
+  return reportSectionPreviewText(value)
 }
 
 function recipientsSummary(recipients: Recipients) {
@@ -161,44 +77,6 @@ function recipientsSummary(recipients: Recipients) {
     recipients.bcc.length ? `Bcc: ${recipients.bcc.join(", ")}` : "",
   ].filter(Boolean)
   return groups.join(" | ") || "-"
-}
-
-function ReportSectionPreview({ body }: { body: string }) {
-  const lines = sectionEditorLines(body)
-  const gridTemplates = tableGridTemplates(lines)
-  return (
-    <div className="mt-4 overflow-x-auto rounded-md border bg-white">
-      {lines.map((line, index) => {
-        const cells = tableCells(line)
-        const trimmed = line.trim()
-        if (!trimmed) return <div key={index} className="h-3 bg-slate-50" />
-        if (isRuleLine(line)) return null
-        if (cells) {
-          const isHeader = cells.some((cell) => ["NR", "WHO", "TITLE", "TIME", "LATE", "MBAJTUR?"].includes(cell.toUpperCase()))
-          return (
-            <div
-              key={index}
-              className={isHeader ? "grid min-w-[640px] border-b bg-slate-100 text-xs font-semibold text-slate-600" : "grid min-w-[640px] border-b last:border-b-0 text-sm text-slate-800"}
-              style={{ gridTemplateColumns: gridTemplates[index] }}
-            >
-              {cells.map((cell, cellIndex) => (
-                <div key={cellIndex} className="min-w-0 border-r px-3 py-2.5 last:border-r-0 whitespace-pre-wrap">
-                  {cell || "\u00a0"}
-                </div>
-              ))}
-            </div>
-          )
-        }
-        if (trimmed.endsWith(":")) {
-          return <div key={index} className="border-b bg-slate-50 px-3 py-2 text-xs font-semibold uppercase text-slate-600">{trimmed.slice(0, -1)}</div>
-        }
-        if (trimmed.startsWith("- ")) {
-          return <div key={index} className="border-b px-4 py-2.5 text-sm text-slate-800 last:border-b-0">{trimmed.slice(2)}</div>
-        }
-        return <div key={index} className="border-b px-4 py-2.5 text-sm text-slate-800 last:border-b-0">{trimmed}</div>
-      })}
-    </div>
-  )
 }
 
 function todayIso() {
@@ -343,9 +221,10 @@ export default function MeetingsReportPage() {
 
   const generate = async () => {
     if (!canAccess) return
-    if (draft && !window.confirm("Generate a fresh report and replace the saved content for this date?")) return
+    if (draft && !window.confirm("Refresh auto-filled sections for this date? Manual answers will be kept.")) return
     setLoading(true)
     try {
+      if (draft) await save(draft)
       const res = await apiFetch(`${API}/generate?report_date=${reportDate}`, { method: "POST" })
       if (!res.ok) throw new Error(await responseError(res))
       applyDraft(await res.json())
@@ -415,79 +294,19 @@ export default function MeetingsReportPage() {
     if (!draft) return
     setEditingSection({
       index,
-      lines: sectionEditorLines(draft.sections[index]?.body || ""),
+      lines: reportSectionEditorLines(draft.sections[index]?.body || ""),
     })
   }
 
-  const applySectionEditor = () => {
+  const applySectionEditor = (lines: string[]) => {
     if (!editingSection || !draft) return
     const sections = draft.sections.map((section, index) =>
-      index === editingSection.index ? { ...section, body: editingSection.lines.join("\n") } : section
+      index === editingSection.index ? { ...section, body: lines.join("\n") } : section
     )
     const nextDraft = { ...draft, sections }
     setDraft(nextDraft)
     setEditingSection(null)
     void save(nextDraft)
-  }
-
-  const updateSectionEditorLine = (lineIndex: number, value: string) => {
-    setEditingSection((current) => {
-      if (!current) return current
-      return {
-        ...current,
-        lines: current.lines.map((line, index) => index === lineIndex ? value : line),
-      }
-    })
-  }
-
-  const updateSectionEditorCell = (lineIndex: number, cellIndex: number, value: string) => {
-    setEditingSection((current) => {
-      if (!current) return current
-      return {
-        ...current,
-        lines: current.lines.map((line, index) => index === lineIndex ? updateTableCell(line, cellIndex, value) : line),
-      }
-    })
-  }
-
-  const addSectionEditorRow = (headerIndex: number) => {
-    setEditingSection((current) => {
-      if (!current) return current
-      const block = editorTableBlocks(current.lines).find((item) => item.headerIndex === headerIndex)
-      if (!block) return current
-      const headerCells = tableCells(current.lines[block.headerIndex]) || []
-      const nextCells = headerCells.map(() => "")
-      if (headerCells[0]?.trim().toUpperCase() === "NR") {
-        const numbers = block.rowIndexes
-          .map((rowIndex) => Number.parseInt(tableCells(current.lines[rowIndex])?.[0] || "", 10))
-          .filter(Number.isFinite)
-        nextCells[0] = String((numbers.length ? Math.max(...numbers) : 0) + 1)
-      }
-      const newRow = `| ${nextCells.join(" | ")} |`
-      const onlyRowIndex = block.rowIndexes.length === 1 ? block.rowIndexes[0] : null
-      if (onlyRowIndex !== null && isEmptyGeneratedRow(tableCells(current.lines[onlyRowIndex]) || [])) {
-        const lines = [...current.lines]
-        lines[onlyRowIndex] = newRow
-        return { ...current, lines }
-      }
-      const lines = [...current.lines]
-      if (block.rowIndexes.length) {
-        lines.splice(block.endIndex, 0, block.borderLine, newRow)
-      } else {
-        lines.splice(block.endIndex + 1, 0, newRow, block.borderLine)
-      }
-      return { ...current, lines }
-    })
-  }
-
-  const deleteSectionEditorRow = (lineIndex: number) => {
-    setEditingSection((current) => {
-      if (!current) return current
-      const lines = [...current.lines]
-      const removeCount = isRuleLine(lines[lineIndex + 1] || "") ? 2 : 1
-      lines.splice(lineIndex, removeCount)
-      return { ...current, lines }
-    })
   }
 
   const updateSettingsRecipients = (kind: keyof Recipients, value: string) => {
@@ -596,7 +415,6 @@ export default function MeetingsReportPage() {
               <div className="space-y-4">
                 {draft.sections.map((section, index) => {
                   const isEditing = editingSection?.index === index
-                  const editorBlocks = isEditing ? editorTableBlocks(editingSection!.lines) : []
                   return (
                     <React.Fragment key={`${section.title}-${index}`}>
                       {shouldShowSectionGroup(index) ? (
@@ -612,77 +430,21 @@ export default function MeetingsReportPage() {
                               <h2 className="text-sm font-semibold leading-5">{section.title}</h2>
                             </div>
                           </div>
-                          {isEditing ? (
-                            <div className="flex gap-2">
-                              <Button variant="outline" size="sm" onClick={() => setEditingSection(null)}>Cancel</Button>
-                              <Button size="sm" onClick={applySectionEditor}><Save /> Save</Button>
-                            </div>
-                          ) : (
+                          {!isEditing ? (
                             <Button variant="outline" size="sm" onClick={() => openSectionEditor(index)}><Pencil /> Edit</Button>
-                          )}
+                          ) : null}
                         </div>
 
                         {isEditing ? (
-                          <div className="mt-4 rounded-md border bg-slate-50 p-3">
-                            <div className="max-h-[620px] space-y-2 overflow-auto pr-1">
-                              {editingSection!.lines.map((line, lineIndex) => {
-                                const cells = tableCells(line)
-                                if (!line.trim()) return <div key={lineIndex} className="h-3" />
-                                if (isRuleLine(line)) {
-                                  const endingBlock = editorBlocks.find((block) => block.endIndex === lineIndex)
-                                  return endingBlock ? (
-                                    <div key={lineIndex} className="pb-2 pt-1">
-                                      <Button type="button" size="sm" variant="outline" onClick={() => addSectionEditorRow(endingBlock.headerIndex)}>
-                                        <Plus /> Add row
-                                      </Button>
-                                    </div>
-                                  ) : null
-                                }
-                                if (cells) {
-                                  const block = editorBlocks.find((item) => item.headerIndex === lineIndex || item.rowIndexes.includes(lineIndex))
-                                  const headerCells = block ? tableCells(editingSection!.lines[block.headerIndex]) || cells : cells
-                                  const isHeader = block?.headerIndex === lineIndex
-                                  return (
-                                    <div key={lineIndex} className="flex min-w-[680px] items-center gap-2">
-                                      <div className="grid flex-1 gap-2" style={{ gridTemplateColumns: tableGridTemplate(headerCells) }}>
-                                        {cells.map((cell, cellIndex) => (
-                                          isHeader ? (
-                                            <div key={cellIndex} className="flex h-9 items-center rounded-md border bg-slate-100 px-3 text-sm font-semibold text-slate-700">
-                                              {cell || "\u00a0"}
-                                            </div>
-                                          ) : (
-                                            <Input
-                                              key={cellIndex}
-                                              className="bg-white"
-                                              value={cell}
-                                              onChange={(event) => updateSectionEditorCell(lineIndex, cellIndex, event.target.value)}
-                                            />
-                                          )
-                                        ))}
-                                      </div>
-                                      {isHeader ? <div className="size-8 shrink-0" /> : (
-                                        <Button
-                                          type="button"
-                                          size="icon-sm"
-                                          variant="ghost"
-                                          aria-label="Delete row"
-                                          title="Delete row"
-                                          onClick={() => deleteSectionEditorRow(lineIndex)}
-                                        >
-                                          <Trash2 className="text-red-600" />
-                                        </Button>
-                                      )}
-                                    </div>
-                                  )
-                                }
-                                if (isFixedEditorLabel(line)) {
-                                  return <div key={lineIndex} className="rounded-md border bg-white px-3 py-2 text-sm font-semibold text-slate-700">{line}</div>
-                                }
-                                return <Input key={lineIndex} className="bg-white" value={line} onChange={(event) => updateSectionEditorLine(lineIndex, event.target.value)} />
-                              })}
-                            </div>
-                          </div>
-                        ) : <ReportSectionPreview body={sectionPreviewText(section.body)} />}
+                          <ReportSectionFieldEditor
+                            key={`edit-${index}`}
+                            lines={editingSection.lines}
+                            onCancel={() => setEditingSection(null)}
+                            onSave={applySectionEditor}
+                          />
+                        ) : (
+                          <ReportSectionPreview body={sectionPreviewText(section.body)} />
+                        )}
                       </section>
                     </React.Fragment>
                   )

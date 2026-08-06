@@ -14,10 +14,10 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.user import User
 from app.services.meetings_report import (
-    DUE_SUFFIX,
+    PERSONAL_GA,
     TECHNICAL_TAG,
-    TITLE_PREFIX,
     _assignee_names,
+    _clean_task_title as _display_title,
     _effective_task_assignee_ids,
     _initials,
     _is_open,
@@ -47,7 +47,6 @@ SECTION_TITLE_ALIASES = {
 }
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
-PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
 PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("TITLE", 56)]
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
@@ -71,11 +70,16 @@ def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[l
         "| " + " | ".join(f"{name:<{width}}" for name, width in columns) + " |",
         border,
     ]
+    # Keep short identity columns on one line so one logical row is not split visually.
+    no_wrap = {"NR", "WHO", "FROM", "PER", "DISK", "TIME", "ORA", "KOHA", "DATA", "DATE", "LATE"}
     for values in rows_values:
-        wrapped = [
-            _wrap_fixed_width(value, width) if value.strip() else [""]
-            for value, (_, width) in zip(values, columns)
-        ]
+        wrapped = []
+        for value, (name, width) in zip(values, columns):
+            cleaned = re.sub(r"\s+", " ", value).strip() if value.strip() else ""
+            if name.upper() in no_wrap:
+                wrapped.append([cleaned])
+            else:
+                wrapped.append(_wrap_fixed_width(cleaned, width) if cleaned else [""])
         for position in range(max(len(cell) for cell in wrapped)):
             line_cells = [
                 cell[position] if position < len(cell) else ""
@@ -87,23 +91,9 @@ def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[l
 
 
 def _note_text(value: str | None) -> str:
+    """Strip [[added]]/[[done]] markers only; keep the wrapped text."""
     cleaned = TECHNICAL_TAG.sub("", value or "")
     return re.sub(r"\s+", " ", cleaned).strip() or "-"
-
-
-def _display_title(value: str | None) -> str:
-    """Like meetings_report._clean_task_title, but keeps text added after creation.
-
-    That text is wrapped in [[added]]..[[/added]] and carries the meaningful part of the
-    title (e.g. "DM/[[added]] GA: BZ GA - P/P PARA PF[[/added]]"), so only the markers go.
-    """
-    cleaned = TECHNICAL_TAG.sub("", value or "")
-    candidates = [line.strip() for line in cleaned.splitlines() if line.strip()]
-    title_line = next((line for line in candidates if TITLE_PREFIX.search(line)), "")
-    if not title_line:
-        title_line = next((line for line in candidates if not re.match(r"^\d+\.", line)), "")
-    title_line = DUE_SUFFIX.sub("", title_line)
-    return re.sub(r"\s+", " ", title_line).strip() or "-"
 
 
 def _task_covers_day(task: Task, day: date) -> bool:
@@ -284,7 +274,8 @@ async def _personal_section(
     return lines
 
 
-async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]:
+async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
+    """All open blue notes: not converted, not closed, no active linked task (any day)."""
     notes = (
         await db.execute(
             select(GaNote)
@@ -305,15 +296,11 @@ async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]
             )
         ).scalars().all()
     )
-    today_notes = [
-        note for note in notes
-        if note.id not in linked_note_ids
-        and report_day in {_local_date(note.created_at), _local_date(note.updated_at)}
-    ]
-    if not today_notes:
+    open_notes = [note for note in notes if note.id not in linked_note_ids]
+    if not open_notes:
         return []
 
-    author_ids = {note.created_by for note in today_notes if note.created_by}
+    author_ids = {note.created_by for note in open_notes if note.created_by}
     names: dict[Any, str] = {}
     if author_ids:
         users = (await db.execute(select(User).where(User.id.in_(author_ids)))).scalars().all()
@@ -321,7 +308,7 @@ async def _blue_note_rows(db: AsyncSession, report_day: date) -> list[list[str]]
 
     # Discussed notes first, then the rest, each chronological.
     ordered = sorted(
-        today_notes,
+        open_notes,
         key=lambda note: (not note.is_discussed, note.created_at or note.updated_at),
     )
     return [
@@ -362,7 +349,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     section_3 = _ascii_table(
         "NOTES",
         [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME", 5)],
-        await _blue_note_rows(db, report_day),
+        await _blue_note_rows(db),
     )
 
     sections = [

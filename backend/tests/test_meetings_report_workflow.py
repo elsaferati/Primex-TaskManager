@@ -115,7 +115,7 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
         self.assertEqual(raised.exception.status_code, 403)
 
-    async def test_scheduler_sends_existing_saved_sections_without_regenerating(self) -> None:
+    async def test_scheduler_regenerates_sections_before_sending(self) -> None:
         timezone = ZoneInfo("Europe/Tirane")
         draft = make_draft()
         settings = SimpleNamespace(
@@ -128,7 +128,8 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             last_run_date=None,
         )
         db = SchedulerDb(settings, draft)
-        build = AsyncMock()
+        regenerated = [{"title": "Section", "body": "Fresh auto content"}]
+        build = AsyncMock(return_value=(date(2026, 8, 6), regenerated, {"counts": {}}))
         send = AsyncMock(return_value={"id": "gmail-id", "threadId": "thread-id"})
         render_plain = Mock(return_value="plain")
         render_html = Mock(return_value="html")
@@ -145,8 +146,9 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             )
 
         self.assertTrue(sent)
-        build.assert_not_awaited()
-        self.assertEqual(render_plain.call_args.args[3], [{"title": "Section", "body": "Saved user edit"}])
+        build.assert_awaited_once()
+        self.assertEqual(draft.sections, regenerated)
+        self.assertEqual(render_plain.call_args.args[3], regenerated)
         self.assertEqual(draft.recipients["to"], ["report@example.com"])
         self.assertEqual(draft.gmail_message_id, "gmail-id")
 

@@ -15,6 +15,8 @@ from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.models.user import User
 from app.services.morning_report import (
+    MANUAL_SECTION_TITLES,
+    SECTION_TITLES,
     build_morning_report_sections,
     normalize_morning_report_sections,
     render_html,
@@ -22,6 +24,7 @@ from app.services.morning_report import (
     send_morning_report,
     subject_for,
 )
+from app.services.report_section_merge import preserve_keyed_line, preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -238,6 +241,26 @@ async def generate_draft(
     row = (
         await db.execute(select(MorningReportDraft).where(MorningReportDraft.report_date == report_date))
     ).scalar_one_or_none()
+    if row is not None:
+        sections = preserve_manual_sections(sections, row.sections, MANUAL_SECTION_TITLES)
+        existing_by_title = {
+            str(section.get("title") or ""): str(section.get("body") or "")
+            for section in (row.sections or [])
+        }
+        attendance_title = SECTION_TITLES[2]
+        sections = [
+            {
+                **section,
+                "body": preserve_keyed_line(
+                    section["body"],
+                    existing_by_title.get(section["title"]),
+                    "NDRYSHON PLANI",
+                )
+                if section["title"] == attendance_title
+                else section["body"],
+            }
+            for section in sections
+        ]
     if row is None:
         row = MorningReportDraft(
             report_date=report_date,
