@@ -182,13 +182,13 @@ const navGroups: NavGroup[] = [
     ],
     subgroups: [
       {
-        id: "mbledhje",
-        label: "Mbledhje",
+        id: "meetings",
+        label: "Meetings",
         icon: MailCheck,
         items: [
-          { href: "/morning-report", label: "M1 Hapja e dites", icon: MailCheck },
-          { href: "/after-break-report", label: "M2 Permbledhja pas pauzes", icon: MailCheck },
-          { href: "/meetings-report", label: "M3 Mbyllja e dites", icon: MailCheck },
+          { href: "/morning-report", label: "M1 Start of Day", icon: MailCheck },
+          { href: "/after-break-report", label: "M2 Post-Break Summary", icon: MailCheck },
+          { href: "/meetings-report", label: "M3 End of Day", icon: MailCheck },
         ],
       },
     ],
