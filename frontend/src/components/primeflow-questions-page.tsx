@@ -108,6 +108,8 @@ const STATUS_OPTIONS: Array<{ value: QuestionStatus | null; label: string }> = [
 const NEW_QUESTION_DURATION_MS = 24 * 60 * 60 * 1000
 
 function initials(fullName: string) {
+  const normalizedName = fullName.trim().replace(/\s+/g, " ").toLocaleLowerCase()
+  if (normalizedName === "haris shaqiri") return "HSH"
   return fullName
     .trim()
     .split(/\s+/)
@@ -676,7 +678,7 @@ export function PrimeflowQuestionsPage() {
                 const notUnderstoodUsers = question.statuses.filter((item) => item.status === "X")
                 const usersWithStatus = new Set(question.statuses.map((item) => item.user_id))
                 const participantUsers = statusUsers.filter(
-                  (item) => !["GA", "KA", "HV"].includes(initials(item.full_name || ""))
+                  (item) => !["GA", "KA", "HS", "HV"].includes(initials(item.full_name || ""))
                 )
                 const pendingUsers = participantUsers.filter((item) => !usersWithStatus.has(item.id))
                 const awaitingIsAll =

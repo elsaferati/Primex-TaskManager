@@ -76,11 +76,13 @@ def _user_initials(full_name: str | None) -> str:
     parts = (full_name or "").strip().split()
     if not parts:
         return ""
+    if " ".join(parts).casefold() == "haris shaqiri":
+        return "HSH"
     return "".join(part[0] for part in parts)[:2].upper()
 
 
 def _is_question_participant(user: User) -> bool:
-    return user.is_active and _user_initials(user.full_name) not in {"GA", "KA", "HV"}
+    return user.is_active and _user_initials(user.full_name) not in {"GA", "KA", "HS"}
 
 
 def _question_task_title(text: str) -> str:
@@ -196,7 +198,8 @@ async def _refresh_question_task_status(
             for row in (
                 await db.execute(
                     select(QuestionUserStatus.question_id, QuestionUserStatus.user_id).where(
-                        QuestionUserStatus.question_id.in_(question_ids)
+                        QuestionUserStatus.question_id.in_(question_ids),
+                        QuestionUserStatus.status == TaskStatus.DONE.value,
                     )
                 )
             ).all()
