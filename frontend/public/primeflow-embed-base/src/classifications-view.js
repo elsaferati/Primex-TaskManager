@@ -97,10 +97,22 @@
   const config = {
     title: "Shënime të klasifikuara",
     currentUser: "AT",
-    categories: ["30_TRAJNIME", "40_DEFINIME", "50_RREGULLORE"],
+    categories: ["30_TRAJNIME", "40_DEFINIME", "50_RREGULLORE", "06_PROMPTS"],
     ...(window.PrimeFlowKlasifikimetConfig || {})
   };
+  const pageParams = new URLSearchParams(window.location.search);
+  config.currentUser = pageParams.get("user") || config.currentUser;
+  config.currentUserRole = String(pageParams.get("role") || config.currentUserRole || "STAFF").toUpperCase();
+  config.apiBaseUrl = String(pageParams.get("api") || "http://localhost:8000/api").replace(/\/$/, "");
   config.categories = config.categories.map(normalizeCategory);
+
+  function canDeleteNotes() {
+    return config.currentUserRole === "ADMIN" || config.currentUserRole === "MANAGER";
+  }
+
+  function canManageDocuments() {
+    return config.currentUserRole === "ADMIN" || config.currentUserRole === "MANAGER";
+  }
 
   const state = {
     activeCategory: [unclassifiedCategory, ...config.categories].includes(decodeURIComponent(window.location.hash.replace("#", ""))) ? decodeURIComponent(window.location.hash.replace("#", "")) : unclassifiedCategory,
@@ -108,8 +120,113 @@
     search: "",
     editingId: null,
     questionType: "All",
-    questionModalId: null
+    questionModalId: null,
+    draftDescription: "",
+    draftAttachments: [],
+    isDraggingFiles: false,
+    departments: [],
+    fileClientsByDepartment: {},
+    filePlatformsByClient: {},
+    referenceDataLoading: true,
+    documentPreviewId: null,
+    activeSheetCell: "A1"
   };
+
+  async function apiGet(path) {
+    const token = localStorage.getItem("primex_access_token");
+    const response = await fetch(`${config.apiBaseUrl}${path}`, {
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    });
+    if (!response.ok) throw new Error(`API request failed (${response.status})`);
+    return response.json();
+  }
+
+  async function loadReferenceData(root) {
+    try {
+      const departments = await apiGet("/departments");
+      state.departments = Array.isArray(departments) ? departments : [];
+      const clientLists = await Promise.all(state.departments.map(async (department) => {
+        try {
+          return [department.id, await apiGet(`/departments/${department.id}/file-clients`)];
+        } catch (_error) {
+          return [department.id, []];
+        }
+      }));
+      state.fileClientsByDepartment = Object.fromEntries(clientLists);
+      const platformLists = await Promise.all(clientLists.flatMap(([departmentId, clients]) => clients.map(async (client) => {
+        try {
+          return [`${departmentId}::${client}`, await apiGet(`/departments/${departmentId}/file-clients/${encodeURIComponent(client)}/platforms`)];
+        } catch (_error) {
+          return [`${departmentId}::${client}`, []];
+        }
+      })));
+      state.filePlatformsByClient = Object.fromEntries(platformLists);
+    } catch (error) {
+      console.error("Could not load departments/projects", error);
+    } finally {
+      state.referenceDataLoading = false;
+      render(root);
+    }
+  }
+
+  const attachmentDbName = "primeflow-note-attachments";
+  const attachmentStoreName = "files";
+
+  function openAttachmentDb() {
+    return new Promise((resolve, reject) => {
+      const request = indexedDB.open(attachmentDbName, 1);
+      request.onupgradeneeded = () => {
+        if (!request.result.objectStoreNames.contains(attachmentStoreName)) {
+          request.result.createObjectStore(attachmentStoreName, { keyPath: "id" });
+        }
+      };
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  }
+
+  async function storeAttachmentFiles(noteId, files) {
+    if (!files.length) return [];
+    const db = await openAttachmentDb();
+    const transaction = db.transaction(attachmentStoreName, "readwrite");
+    const store = transaction.objectStore(attachmentStoreName);
+    const attachments = files.map((file) => {
+      const attachment = {
+        id: `${noteId}-${crypto.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2)}`,
+        name: file.name,
+        size: file.size,
+        type: file.type,
+        lastModified: file.lastModified
+      };
+      store.put({ ...attachment, noteId, blob: file });
+      return attachment;
+    });
+    await new Promise((resolve, reject) => {
+      transaction.oncomplete = resolve;
+      transaction.onerror = () => reject(transaction.error);
+      transaction.onabort = () => reject(transaction.error);
+    });
+    db.close();
+    return attachments;
+  }
+
+  async function downloadAttachment(id) {
+    const db = await openAttachmentDb();
+    const transaction = db.transaction(attachmentStoreName, "readonly");
+    const request = transaction.objectStore(attachmentStoreName).get(id);
+    const record = await new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+    db.close();
+    if (!record || !record.blob) return;
+    const url = URL.createObjectURL(record.blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = record.name || "attachment";
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
 
   function loadNotes() {
     try {
@@ -161,6 +278,21 @@
     }).format(new Date(value));
   }
 
+  function formatFileSize(bytes) {
+    if (bytes < 1024) return `${bytes} B`;
+    if (bytes < 1024 * 1024) return `${Math.round(bytes / 1024)} KB`;
+    return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  }
+
+  function attachmentChipsHtml(note) {
+    const attachments = Array.isArray(note.attachments) ? note.attachments : [];
+    if (!attachments.length) return "";
+    return `<div class="notes-saved-attachments">${attachments.map((file) => `
+      <button class="notes-saved-attachment" data-action="download-attachment" data-attachment-id="${escapeHtml(file.id)}" type="button" title="Shkarko ${escapeHtml(file.name)}">
+        <span aria-hidden="true">&#128206;</span>${escapeHtml(file.name)}
+      </button>`).join("")}</div>`;
+  }
+
 
   function initialsFor(value) {
     return String(value || "-")
@@ -179,7 +311,7 @@
   function notesForCategory(category) {
     const search = state.search.trim().toLowerCase();
     return loadNotes().filter((note) => {
-      const categoryMatch = category === unclassifiedCategory ? !note.category : note.category === category;
+      const categoryMatch = category === unclassifiedCategory ? note.keepInNotes !== false : note.category === category;
       const statusMatch = state.status === "All" || note.status === state.status;
       const searchTarget = `${note.title} ${stripHtml(note.description)} ${note.createdBy || note.fromWho} ${note.discussed} ${note.category} ${note.questionType} ${note.questionText} ${JSON.stringify(note.questionAnswers || {})} ${JSON.stringify(note.questionAnswerEditors || {})} ${note.projectName} ${note.department} ${note.client} ${note.documentName} ${note.platform} ${note.filePath}`.toLowerCase();
       const searchMatch = !search || searchTarget.includes(search);
@@ -189,7 +321,7 @@
   }
 
   function countFor(category) {
-    return loadNotes().filter((note) => category === unclassifiedCategory ? !note.category : note.category === category).length;
+    return loadNotes().filter((note) => category === unclassifiedCategory ? note.keepInNotes !== false : note.category === category).length;
   }
 
   function questionTypeOptionsHtml(selected) {
@@ -215,50 +347,58 @@
     return `<input class="notes-input notes-cell-input ${extraClass || ""}" data-edit-field="${field}" data-id="${note.id}" value="${escapeHtml(note[field] || "")}" placeholder="${escapeHtml(placeholder)}">`;
   }
 
+  function rowTextInput(note, field, placeholder, extraClass) {
+    return `<input class="notes-input notes-cell-input ${extraClass || ""}" data-note-field="${field}" data-id="${note.id}" value="${escapeHtml(note[field] || "")}" placeholder="${escapeHtml(placeholder)}">`;
+  }
+
+  function departmentOptions(note) {
+    if (state.referenceDataLoading) return `<option value="">Duke u ngarkuar...</option>`;
+    const selectedId = note.departmentId || "";
+    const options = state.departments.map((department) => `
+      <option value="${escapeHtml(department.id)}" data-name="${escapeHtml(department.name)}"${department.id === selectedId || (!selectedId && note.department === department.name) ? " selected" : ""}>${escapeHtml(department.name)}</option>
+    `).join("");
+    return `<option value="">Zgjidh departamentin</option>${options}`;
+  }
+
+  function clientOptions(note, departmentId) {
+    if (state.referenceDataLoading) return `<option value="">Duke u ngarkuar...</option>`;
+    const clients = state.fileClientsByDepartment[departmentId] || [];
+    const savedClientMissing = note.client && !clients.includes(note.client);
+    return `<option value="">Zgjidh klientin</option>${savedClientMissing ? `<option value="${escapeHtml(note.client)}" selected>${escapeHtml(note.client)}</option>` : ""}${clients.map((client) => `<option value="${escapeHtml(client)}"${note.client === client ? " selected" : ""}>${escapeHtml(client)}</option>`).join("")}`;
+  }
+
+  function platformOptions(note, departmentId, client) {
+    if (state.referenceDataLoading) return `<option value="">Duke u ngarkuar...</option>`;
+    const platforms = state.filePlatformsByClient[`${departmentId}::${client}`] || [];
+    const savedPlatformMissing = note.platform && !platforms.includes(note.platform);
+    return `<option value="">Zgjidh platformën</option>${savedPlatformMissing ? `<option value="${escapeHtml(note.platform)}" selected>${escapeHtml(note.platform)}</option>` : ""}${platforms.map((platform) => `<option value="${escapeHtml(platform)}"${note.platform === platform ? " selected" : ""}>${escapeHtml(platform)}</option>`).join("")}`;
+  }
+
   function rows(notes) {
     if (!notes.length) {
-      return `<tr><td colspan="14" class="notes-empty">Nuk ka shënime në këtë klasifikim.</td></tr>`;
+      return `<tr><td colspan="${canDeleteNotes() ? 13 : 12}" class="notes-empty">Nuk ka shënime në këtë klasifikim.</td></tr>`;
     }
 
     return notes.map((note, index) => {
-      const isEditing = state.editingId === note.id;
-      const noteCell = isEditing
-        ? `<div class="notes-editor notes-editor-small" id="edit-description-${note.id}" contenteditable="true">${note.description || ""}</div>`
-        : `<div class="notes-note-stack"><div class="notes-description">${note.description || ""}</div><span class="notes-initials-dot" title="Last edit: ${escapeHtml(note.updatedBy || note.createdBy || note.fromWho || "-")}">${escapeHtml(initialsFor(note.updatedBy || note.createdBy || note.fromWho))}</span></div>`;
-      const discussedCell = isEditing
-        ? `<select class="notes-select notes-cell-select" data-edit-field="discussed" data-id="${note.id}"><option value="No"${(note.discussed || "No") === "No" ? " selected" : ""}>No</option><option value="Yes"${note.discussed === "Yes" ? " selected" : ""}>Yes</option></select>`
-        : escapeHtml(note.discussed || "No");
-      const categoryCell = isEditing
-        ? `<select class="notes-select notes-cell-select" data-edit-field="category" data-id="${note.id}">${categoryOptions(note.category || "")}</select>`
-        : escapeHtml(note.category || "-");
-      const isQuestionView = state.activeCategory === "Pyetje";
-      const questionOpenCell = note.questionType
-        ? `<button class="notes-mini-button" data-action="open-question-modal" data-id="${note.id}" type="button">Open</button>`
-        : `<span class="notes-muted-action">Zgjidh llojin</span>`;
-      const statusCell = isEditing
-        ? `<select class="notes-select notes-cell-select" data-edit-field="status" data-id="${note.id}"><option value="Open"${note.status === "Open" ? " selected" : ""}>Open</option><option value="Closed"${note.status === "Closed" ? " selected" : ""}>Closed</option></select>`
-        : `<span class="notes-badge ${note.status === "Open" ? "notes-badge-open" : "notes-badge-closed"}">${escapeHtml(note.status)}</span>`;
-
+      const dateValue = note.noteDate || String(note.createdAt || "").slice(0, 10);
+      const attachmentCount = Array.isArray(note.attachments) ? note.attachments.length : 0;
+      const selectedDepartment = state.departments.find((department) => department.id === note.departmentId || (!note.departmentId && department.name === note.department));
+      const selectedDepartmentId = selectedDepartment ? selectedDepartment.id : (note.departmentId || "");
       return `
-        <tr>
-          <td>${index + 1}</td>
-          <td class="notes-name-cell">${noteCell}</td>
-          ${isQuestionView ? `<td>${questionOpenCell}</td>` : `<td>${discussedCell}</td>`}
-          <td><span class="notes-badge">${escapeHtml(note.createdBy || note.fromWho || "-")}</span></td>
-          <td>${categoryCell}</td>
-          <td>${isEditing ? textInput(note, "projectName", "Project") : escapeHtml(note.projectName || "-")}</td>
-          <td>${isEditing ? textInput(note, "department", "Department") : escapeHtml(note.department || "-")}</td>
-          <td>${isEditing ? textInput(note, "client", "Client") : escapeHtml(note.client || "-")}</td>
-          <td>${isEditing ? textInput(note, "documentName", "Document") : escapeHtml(note.documentName || "-")}</td>
-          <td>${isEditing ? textInput(note, "platform", "Platform") : escapeHtml(note.platform || "-")}</td>
-          <td class="notes-path-cell">${isEditing ? textInput(note, "filePath", "Files path", "notes-path-input") : escapeHtml(note.filePath || "-")}</td>
-          <td>${formatDate(note.createdAt)}</td>
-          <td>${statusCell}</td>
-          <td><div class="notes-row-actions">
-            ${isEditing
-              ? `<button class="notes-mini-button" data-action="save-edit" data-id="${note.id}">Save</button><button class="notes-mini-button" data-action="cancel-edit">Cancel</button>`
-              : `<button class="notes-mini-button" data-action="edit" data-id="${note.id}">Edit</button>`}
-          </div></td>
+        <tr data-note-row="${note.id}">
+          <td class="notes-number-cell">${index + 1}</td>
+          <td class="notes-name-cell"><div class="notes-note-stack"><div class="notes-description">${note.description || ""}</div><span class="notes-initials-dot" title="${escapeHtml(note.updatedBy || note.createdBy || note.fromWho || "-")}">${escapeHtml(initialsFor(note.updatedBy || note.createdBy || note.fromWho))}</span></div></td>
+          <td class="notes-attachments-cell">${attachmentCount ? attachmentChipsHtml(note) : `<span class="notes-muted-action">Pa skedarë</span>`}</td>
+          <td><div class="notes-create-document-stack"><select class="notes-document-type" data-document-type="${note.id}" aria-label="Lloji i dokumentit"${note.documentSaved ? " disabled" : ""}><option value="word"${note.documentType !== "excel" ? " selected" : ""}>Word</option><option value="excel"${note.documentType === "excel" ? " selected" : ""}>Excel</option></select><button class="notes-create-document" data-action="create-document" data-id="${note.id}" type="button">${note.documentSaved ? `OPEN<br>${note.documentType === "excel" ? "EXCEL" : "WORD"}` : "CREATE<br>DOCUMENT"}</button></div></td>
+          <td>${rowTextInput(note, "documentName", "Emri i dokumentit")}</td>
+          <td><select class="notes-select notes-cell-select" data-note-field="category" data-id="${note.id}">${categoryOptions(note.category || "")}</select></td>
+          <td><select class="notes-select notes-cell-select" data-note-field="departmentId" data-id="${note.id}">${departmentOptions(note)}</select></td>
+          <td><select class="notes-select notes-cell-select" data-note-field="client" data-id="${note.id}"${selectedDepartmentId ? "" : " disabled"}>${clientOptions(note, selectedDepartmentId)}</select></td>
+          <td><select class="notes-select notes-cell-select" data-note-field="platform" data-id="${note.id}"${selectedDepartmentId && note.client ? "" : " disabled"}>${platformOptions(note, selectedDepartmentId, note.client || "")}</select></td>
+          <td><div class="notes-date-fields"><input class="notes-input notes-cell-input" data-note-field="noteDate" data-id="${note.id}" type="date" value="${escapeHtml(dateValue)}"></div></td>
+          <td>${rowTextInput(note, "filePath", "Shkruaj path", "notes-path-input")}</td>
+          <td><button class="notes-row-save ${note.lastSavedAt ? "notes-row-saved" : ""}" data-action="save-row" data-id="${note.id}" type="button">${note.lastSavedAt ? "SAVED" : "SAVE"}</button></td>
+          ${canDeleteNotes() ? `<td><button class="notes-row-delete" data-action="delete-row" data-id="${note.id}" type="button" title="Fshije shënimin"><span aria-hidden="true">&#128465;</span><small>DELETE</small></button></td>` : ""}
         </tr>
       `;
     }).join("");
@@ -336,6 +476,198 @@
       </div>
     `;
   }
+
+  function spreadsheetDataFor(note) {
+    if (note.spreadsheetData) return note.spreadsheetData;
+    return {
+      rows: 16,
+      cols: 8,
+      cells: {
+        A1: "TITULLI",
+        B1: "PËRSHKRIMI",
+        A2: escapeHtml(note.documentName || note.title || "Emri i dokumentit"),
+        B2: escapeHtml(stripHtml(note.description || "Përmbajtja e re..."))
+      }
+    };
+  }
+
+  function columnLetter(index) {
+    return String.fromCharCode(65 + index);
+  }
+
+  function excelPreviewHtml(note, editable) {
+    const sheet = spreadsheetDataFor(note);
+    const attachments = Array.isArray(note.attachments) ? note.attachments : [];
+    const columnHeaders = Array.from({ length: sheet.cols }, (_, column) => `<th>${columnLetter(column)}</th>`).join("");
+    const rows = Array.from({ length: sheet.rows }, (_, rowIndex) => {
+      const rowNumber = rowIndex + 1;
+      const cells = Array.from({ length: sheet.cols }, (_, column) => {
+        const key = `${columnLetter(column)}${rowNumber}`;
+        return `<td data-sheet-cell="${key}"${editable ? ` contenteditable="true"` : ""}>${sheet.cells[key] || ""}</td>`;
+      }).join("");
+      return `<tr><th>${rowNumber}</th>${cells}</tr>`;
+    }).join("");
+    return `
+      <div class="notes-excel-editor" data-sheet-rows="${sheet.rows}" data-sheet-cols="${sheet.cols}">
+        <header class="notes-excel-editor-head">
+          <div><h2>${escapeHtml(note.documentName || note.title || "DOKUMENT")}</h2><p>Materialet e vjetra shfaqen majtas; template-i ri ndërtohet djathtas.</p></div>
+          <div class="notes-excel-head-actions">
+            ${editable ? `<button data-action="sheet-add-row" type="button">+ SHTO RRESHT</button><button data-action="sheet-add-column" type="button">+ SHTO KOLONË</button><button class="danger" data-action="sheet-clear" type="button">PASTRO TEMPLATE</button><button class="success" data-action="save-document-preview" data-id="${note.id}" type="button">RUAJ DOKUMENTIN</button>` : ""}
+            <button class="primary" data-action="close-document-preview" type="button">MBYLL</button>
+          </div>
+        </header>
+        <div class="notes-excel-formatbar">
+          ${editable ? `<button data-sheet-command="bold" type="button"><strong>B</strong></button><button data-sheet-command="italic" type="button"><em>I</em></button><button data-sheet-command="underline" type="button"><u>U</u></button><button data-sheet-command="justifyLeft" type="button">Majtas</button><button data-sheet-command="justifyCenter" type="button">Qendër</button><button data-sheet-command="justifyRight" type="button">Djathtas</button>` : ""}
+          <span>${editable ? "Kliko në një qelizë dhe shkruaj direkt." : "Preview only"}</span>
+        </div>
+        <div class="notes-excel-workspace">
+          <aside class="notes-excel-materials"><h3>Materialet e vjetra</h3><p>Hape skedarin për referencë ose përdor <strong>IMPORT TO TEMPLATE</strong>.</p>${attachments.length ? attachments.map((file) => `<button data-action="download-attachment" data-attachment-id="${escapeHtml(file.id)}" type="button">&#128206; ${escapeHtml(file.name)}</button>`).join("") : `<div class="notes-excel-no-files">Nuk ka skedarë të ngarkuar.</div>`}</aside>
+          <main class="notes-excel-grid-area">
+            <div class="notes-excel-formula"><strong data-sheet-active-cell>A1</strong><input data-sheet-formula ${editable ? "" : "disabled"} value="${escapeHtml(stripHtml(sheet.cells.A1 || ""))}"></div>
+            <div class="notes-excel-grid-scroll"><table class="notes-excel-grid"><thead><tr><th></th>${columnHeaders}</tr></thead><tbody>${rows}</tbody></table></div>
+          </main>
+        </div>
+      </div>`;
+  }
+
+  function documentPreviewHtml() {
+    if (!state.documentPreviewId) return "";
+    const note = loadNotes().find((item) => item.id === state.documentPreviewId);
+    if (!note) return "";
+    const editable = canManageDocuments();
+    const type = note.documentType || "word";
+    if (type === "excel") {
+      return `<div class="notes-modal-backdrop notes-document-preview-backdrop"><section class="notes-modal notes-document-preview-modal notes-excel-fullscreen" role="dialog" aria-modal="true">${excelPreviewHtml(note, editable)}</section></div>`;
+    }
+    const content = note.documentContent || note.description || "<p></p>";
+    return `<div class="notes-modal-backdrop notes-document-preview-backdrop"><section class="notes-modal notes-document-preview-modal notes-word-fullscreen" role="dialog" aria-modal="true"><header class="notes-word-editor-head"><div><span class="notes-document-kind notes-document-kind-word">WORD</span>${editable ? `<input class="notes-input notes-document-title-input" data-document-title value="${escapeHtml(note.documentName || note.title || "Dokument")}">` : `<h2>${escapeHtml(note.documentName || note.title || "Dokument")}</h2>`}</div><div>${editable ? `<button class="success" data-action="save-document-preview" data-id="${note.id}" type="button">RUAJ DOKUMENTIN</button>` : ""}<button class="primary" data-action="close-document-preview" type="button">MBYLL</button></div></header><div class="notes-word-formatbar">${editable ? `<button data-sheet-command="bold" type="button"><strong>B</strong></button><button data-sheet-command="italic" type="button"><em>I</em></button><button data-sheet-command="underline" type="button"><u>U</u></button><button data-sheet-command="justifyLeft" type="button">Majtas</button><button data-sheet-command="justifyCenter" type="button">Qendër</button><button data-sheet-command="justifyRight" type="button">Djathtas</button>` : `<span>Preview only</span>`}</div><div class="notes-word-workspace"><div id="document-preview-editor" class="notes-document-editor"${editable ? ` contenteditable="true"` : ""}>${content}</div></div></section></div>`;
+  }
+
+  function classifiedRows(notes) {
+    if (!notes.length) {
+      return `<tr><td colspan="${canDeleteNotes() ? 11 : 10}" class="notes-empty">Nuk ka dokumente që përputhen me kërkimin ose filtrat.</td></tr>`;
+    }
+
+    return notes.map((note, index) => {
+      const attachments = Array.isArray(note.attachments) ? note.attachments : [];
+      return `
+        <tr data-note-row="${note.id}">
+          <td class="notes-number-cell">${index + 1}</td>
+          <td><button class="notes-document-link" data-action="create-document" data-id="${note.id}" type="button">${escapeHtml(note.documentName || note.title || "Pa emër")}</button></td>
+          <td>${attachments.length ? attachmentChipsHtml(note) : `<span class="notes-muted-action">Pa skedarë</span>`}</td>
+          <td>${escapeHtml(note.updatedBy || note.createdBy || note.fromWho || "-")}</td>
+          <td>${escapeHtml(note.department || "-")}</td>
+          <td>${escapeHtml(note.client || "-")}</td>
+          <td>${escapeHtml(note.platform || "-")}</td>
+          <td>${escapeHtml(note.noteDate || String(note.createdAt || "").slice(0, 10) || "-")}</td>
+          <td>${escapeHtml(note.filePath || "-")}</td>
+          <td><button class="notes-edit-document" data-action="create-document" data-id="${note.id}" type="button">EDIT DOCUMENT</button></td>
+          ${canDeleteNotes() ? `<td><button class="notes-row-delete" data-action="delete-row" data-id="${note.id}" type="button" title="Fshije dokumentin"><span aria-hidden="true">&#128465;</span></button></td>` : ""}
+        </tr>`;
+    }).join("");
+  }
+
+  function managementTableHtml(notes) {
+    return `<div class="notes-table-wrap">
+      <table class="notes-table notes-management-table">
+        <colgroup>
+          <col class="notes-col-number"><col class="notes-col-note"><col class="notes-col-attachments"><col class="notes-col-create"><col class="notes-col-document"><col class="notes-col-add-to"><col class="notes-col-department"><col class="notes-col-client"><col class="notes-col-platform"><col class="notes-col-date"><col class="notes-col-path"><col class="notes-col-save">${canDeleteNotes() ? `<col class="notes-col-delete">` : ""}
+        </colgroup>
+        <thead><tr><th>NR</th><th>Shënimi</th><th>Attachments</th><th>Create Document</th><th>Document Name</th><th>Add To</th><th>Departamenti</th><th>Client</th><th>Platform</th><th>Data</th><th>Path</th><th>Save</th>${canDeleteNotes() ? "<th>Delete</th>" : ""}</tr></thead>
+        <tbody>${rows(notes)}</tbody>
+      </table>
+    </div>`;
+  }
+
+  function classifiedTableHtml(notes) {
+    return `
+      <div class="notes-classified-search">
+        <label for="classified-search">Search</label>
+        <input id="classified-search" class="notes-input" data-action="search" value="${escapeHtml(state.search)}" placeholder="Kërko sipas shënimit, document name, client, platformë, datë, path ose file...">
+      </div>
+      <div class="notes-table-wrap">
+        <table class="notes-table notes-classified-table">
+          <thead><tr><th>NR</th><th>Document Name</th><th>Attachments</th><th>Who</th><th>Departamenti</th><th>Client</th><th>Platform</th><th>Data</th><th>Path</th><th>Edit</th>${canDeleteNotes() ? "<th>Delete</th>" : ""}</tr></thead>
+          <tbody>${classifiedRows(notes)}</tbody>
+        </table>
+      </div>
+      <p class="notes-classified-help">Search-i lart kërkon në të gjitha të dhënat.</p>`;
+  }
+
+  function composerHtml() {
+    return `
+      <section class="notes-composer ${state.isDraggingFiles ? "notes-composer-dragging" : ""}" data-drop-zone>
+        <div class="notes-composer-main">
+          <div id="classification-note-editor" class="notes-composer-editor" contenteditable="true" data-placeholder="Shkruaj një shënim...">${state.draftDescription}</div>
+          <div class="notes-composer-actions">
+            <label class="notes-attach-button" for="classification-note-files" title="Bashkëngjit file" aria-label="Bashkëngjit file">
+              <span aria-hidden="true">&#128206;</span>
+            </label>
+            <input id="classification-note-files" class="notes-file-input" type="file" multiple>
+            <span class="notes-drop-hint">Bashkëngjit ose tërhiq file këtu</span>
+            <button class="notes-button notes-button-primary notes-composer-save" data-action="save-new-note" type="button">Ruaj shënimin</button>
+          </div>
+          ${state.draftAttachments.length ? `<div class="notes-draft-files">${state.draftAttachments.map((file, index) => `
+            <span class="notes-draft-file"><span aria-hidden="true">&#128196;</span><span>${escapeHtml(file.name)}</span><small>${formatFileSize(file.size)}</small><button data-action="remove-draft-file" data-file-index="${index}" type="button" aria-label="Hiqe ${escapeHtml(file.name)}">&times;</button></span>
+          `).join("")}</div>` : ""}
+        </div>
+        <div class="notes-drop-overlay"><strong>Lësho file-t këtu</strong><span>Për t'i bashkëngjitur me shënimin</span></div>
+      </section>`;
+  }
+
+  async function saveNewNote(root) {
+    const editor = root.querySelector("#classification-note-editor");
+    const description = (editor ? editor.innerHTML : state.draftDescription).trim();
+    if (!stripHtml(description).trim() && !state.draftAttachments.length) {
+      if (editor) editor.focus();
+      return;
+    }
+    const id = crypto.randomUUID ? crypto.randomUUID() : `note-${Date.now()}`;
+    let attachments = [];
+    try {
+      attachments = await storeAttachmentFiles(id, state.draftAttachments);
+    } catch (error) {
+      console.error("Could not store attachments", error);
+      window.alert("File-t nuk u ruajtën. Provo përsëri.");
+      return;
+    }
+    const now = new Date().toISOString();
+    const notes = loadNotes();
+    notes.unshift({
+      id,
+      title: titleFromDescription(description) || (attachments[0] ? attachments[0].name : "Shënim i ri"),
+      description: description || "<p>Shënim me bashkëngjitje</p>",
+      category: "",
+      discussed: "No",
+      createdBy: config.currentUser,
+      fromWho: config.currentUser,
+      status: "Open",
+      createdAt: now,
+      updatedAt: now,
+      attachments
+    });
+    saveNotes(notes);
+    state.activeCategory = unclassifiedCategory;
+    state.draftDescription = "";
+    state.draftAttachments = [];
+    state.isDraggingFiles = false;
+    render(root);
+  }
+
+  function addDraftFiles(files, root) {
+    const incoming = Array.from(files || []);
+    const existingKeys = new Set(state.draftAttachments.map((file) => `${file.name}-${file.size}-${file.lastModified}`));
+    incoming.forEach((file) => {
+      const key = `${file.name}-${file.size}-${file.lastModified}`;
+      if (!existingKeys.has(key)) {
+        state.draftAttachments.push(file);
+        existingKeys.add(key);
+      }
+    });
+    state.isDraggingFiles = false;
+    render(root);
+  }
+
   function render(root) {
     const activeNotes = notesForCategory(state.activeCategory);
     const total = loadNotes().length;
@@ -369,6 +701,8 @@
             </div>
           </header>
 
+          ${composerHtml()}
+
           <section class="notes-section">
             <div class="notes-section-head">
               <h2 class="notes-section-title">Klasifikimet</h2>
@@ -390,34 +724,13 @@
               `).join("")}
             </div>
 
-            <div class="notes-table-wrap">
-              <table class="notes-table notes-table-clean notes-category-table">
-                <thead>
-                  <tr>
-                    <th>NR</th>
-                    <th>Shënimi</th>
-                    <th>Diskutuar</th>
-                    <th>Nga kush</th>
-                    <th>Save as</th>
-                    <th>Projekti</th>
-                    <th>Department</th>
-                    <th>Client</th>
-                    <th>Dokumenti</th>
-                    <th>Platforma</th>
-                    <th>Files path</th>
-                    <th>Data, Ora</th>
-                    <th>Status</th>
-                    <th>Edit</th>
-                  </tr>
-                </thead>
-                <tbody>${rows(activeNotes)}</tbody>
-              </table>
-            </div>
+            ${state.activeCategory === unclassifiedCategory ? managementTableHtml(activeNotes) : classifiedTableHtml(activeNotes)}
             </section>
           </div>
         </div>
       </section>
       ${questionModalHtml()}
+      ${documentPreviewHtml()}
     `;
   }
 
@@ -446,6 +759,130 @@
     render(root);
   }
 
+  function saveRow(root, id) {
+    const row = root.querySelector(`[data-note-row="${id}"]`);
+    if (!row) return;
+    const fields = {};
+    row.querySelectorAll("[data-note-field]").forEach((field) => {
+      fields[field.dataset.noteField] = field.value;
+    });
+    const departmentSelect = row.querySelector('[data-note-field="departmentId"]');
+    const clientSelect = row.querySelector('[data-note-field="client"]');
+    fields.department = departmentSelect?.selectedOptions[0]?.dataset.name || "";
+    fields.client = clientSelect?.value || "";
+    saveNotes(loadNotes().map((note) => note.id === id ? {
+      ...note,
+      ...fields,
+      keepInNotes: true,
+      lastSavedAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      updatedBy: config.currentUser
+    } : note));
+    render(root);
+  }
+
+  async function deleteNote(root, id) {
+    if (!canDeleteNotes()) return;
+    if (!window.confirm("A je i sigurt që dëshiron ta fshish këtë shënim?")) return;
+    const note = loadNotes().find((item) => item.id === id);
+    if (note && Array.isArray(note.attachments) && note.attachments.length) {
+      try {
+        const db = await openAttachmentDb();
+        const transaction = db.transaction(attachmentStoreName, "readwrite");
+        const store = transaction.objectStore(attachmentStoreName);
+        note.attachments.forEach((attachment) => store.delete(attachment.id));
+        await new Promise((resolve) => { transaction.oncomplete = resolve; });
+        db.close();
+      } catch (error) {
+        console.warn("Could not remove attachment files", error);
+      }
+    }
+    saveNotes(loadNotes().filter((item) => item.id !== id));
+    render(root);
+  }
+
+  function buildDocumentContent(note, type, row) {
+    if (note.documentContent && (type !== "excel" || note.documentContentVersion === 2)) return note.documentContent;
+    if (type !== "excel") return note.description || "<p></p>";
+    const departmentSelect = row?.querySelector('[data-note-field="departmentId"]');
+    const clientSelect = row?.querySelector('[data-note-field="client"]');
+    const department = departmentSelect?.selectedOptions[0]?.dataset.name || note.department || "";
+    const project = clientSelect?.value || note.client || "";
+    const platform = row?.querySelector('[data-note-field="platform"]')?.value || note.platform || "";
+    const noteDate = row?.querySelector('[data-note-field="noteDate"]')?.value || note.noteDate || "";
+    const filePath = row?.querySelector('[data-note-field="filePath"]')?.value || note.filePath || "";
+    const attachments = Array.isArray(note.attachments) ? note.attachments.map((file) => file.name).join(", ") : "";
+    return `<table class="notes-excel-sheet"><thead><tr class="notes-excel-letters"><th></th><th>A</th><th>B</th><th>C</th><th>D</th><th>E</th><th>F</th><th>G</th><th>H</th><th>I</th></tr><tr><th class="notes-excel-row-number"></th><th>NR</th><th>DOCUMENT NAME</th><th>ATTACHMENTS</th><th>WHO</th><th>DEPARTAMENTI</th><th>CLIENT</th><th>PLATFORM</th><th>DATA</th><th>PATH</th></tr></thead><tbody><tr><th class="notes-excel-row-number">1</th><td>1</td><td>${escapeHtml(note.documentName || note.title || "Dokument")}</td><td>${escapeHtml(attachments || "Pa skedarë")}</td><td>${escapeHtml(note.updatedBy || note.createdBy || note.fromWho || "-")}</td><td>${escapeHtml(department)}</td><td>${escapeHtml(project)}</td><td>${escapeHtml(platform)}</td><td>${escapeHtml(noteDate)}</td><td>${escapeHtml(filePath)}</td></tr></tbody></table>`;
+  }
+
+  function openDocumentPreview(root, id) {
+    const note = loadNotes().find((item) => item.id === id);
+    if (!note) return;
+    const row = root.querySelector(`[data-note-row="${id}"]`);
+    const type = row?.querySelector(`[data-document-type="${id}"]`)?.value || note.documentType || "word";
+    const documentName = row?.querySelector('[data-note-field="documentName"]')?.value || note.documentName || note.title || "Dokument";
+    const content = buildDocumentContent(note, type, row);
+    saveNotes(loadNotes().map((item) => item.id === id ? { ...item, documentName, documentType: type, documentContent: content, documentContentVersion: type === "excel" ? 2 : item.documentContentVersion } : item));
+    state.documentPreviewId = id;
+    render(root);
+  }
+
+  function saveDocumentPreview(root, id) {
+    if (!canManageDocuments()) return;
+    const currentNote = loadNotes().find((note) => note.id === id);
+    if (currentNote?.documentType === "excel") {
+      const sheetRoot = root.querySelector("[data-sheet-rows]");
+      const cells = {};
+      root.querySelectorAll("[data-sheet-cell]").forEach((cell) => {
+        if (cell.innerHTML.trim()) cells[cell.dataset.sheetCell] = cell.innerHTML;
+      });
+      saveNotes(loadNotes().map((note) => note.id === id ? {
+        ...note,
+        spreadsheetData: { rows: Number(sheetRoot?.dataset.sheetRows || 16), cols: Number(sheetRoot?.dataset.sheetCols || 8), cells },
+        documentSaved: true,
+        documentUpdatedAt: new Date().toISOString(),
+        documentUpdatedBy: config.currentUser
+      } : note));
+      state.documentPreviewId = null;
+      render(root);
+      return;
+    }
+    const editor = root.querySelector("#document-preview-editor");
+    const title = root.querySelector("[data-document-title]");
+    saveNotes(loadNotes().map((note) => note.id === id ? {
+      ...note,
+      documentName: title?.value.trim() || note.documentName || note.title || "Dokument",
+      documentContent: editor?.innerHTML || note.documentContent || note.description || "",
+      documentSaved: true,
+      documentUpdatedAt: new Date().toISOString(),
+      documentUpdatedBy: config.currentUser
+    } : note));
+    state.documentPreviewId = null;
+    render(root);
+  }
+
+  function resizeSpreadsheet(root, rowDelta, columnDelta) {
+    if (!canManageDocuments() || !state.documentPreviewId) return;
+    const note = loadNotes().find((item) => item.id === state.documentPreviewId);
+    if (!note) return;
+    const sheetRoot = root.querySelector("[data-sheet-rows]");
+    const cells = {};
+    root.querySelectorAll("[data-sheet-cell]").forEach((cell) => {
+      if (cell.innerHTML.trim()) cells[cell.dataset.sheetCell] = cell.innerHTML;
+    });
+    const spreadsheetData = { rows: Math.max(1, Number(sheetRoot?.dataset.sheetRows || 16) + rowDelta), cols: Math.min(26, Math.max(1, Number(sheetRoot?.dataset.sheetCols || 8) + columnDelta)), cells };
+    saveNotes(loadNotes().map((item) => item.id === note.id ? { ...item, spreadsheetData } : item));
+    render(root);
+  }
+
+  function clearSpreadsheet(root) {
+    if (!canManageDocuments() || !state.documentPreviewId || !window.confirm("Ta pastroj template-in?")) return;
+    const sheetRoot = root.querySelector("[data-sheet-rows]");
+    saveNotes(loadNotes().map((note) => note.id === state.documentPreviewId ? { ...note, spreadsheetData: { rows: Number(sheetRoot?.dataset.sheetRows || 16), cols: Number(sheetRoot?.dataset.sheetCols || 8), cells: {} } } : note));
+    state.activeSheetCell = "A1";
+    render(root);
+  }
+
 
   function saveQuestionModal(root, id) {
     const answers = {};
@@ -467,6 +904,11 @@
   }
   function bind(root) {
     root.addEventListener("click", (event) => {
+      const sheetCommand = event.target.closest("[data-sheet-command]");
+      if (sheetCommand && canManageDocuments()) {
+        document.execCommand(sheetCommand.dataset.sheetCommand, false, null);
+        return;
+      }
       const categoryButton = event.target.closest('[data-action="category"]');
       if (categoryButton) {
         state.activeCategory = categoryButton.dataset.category;
@@ -498,6 +940,23 @@
         render(root);
       }
       if (action.dataset.action === "save-question-modal") saveQuestionModal(root, action.dataset.id);
+      if (action.dataset.action === "save-new-note") saveNewNote(root);
+      if (action.dataset.action === "remove-draft-file") {
+        state.draftAttachments.splice(Number(action.dataset.fileIndex), 1);
+        render(root);
+      }
+      if (action.dataset.action === "download-attachment") downloadAttachment(action.dataset.attachmentId);
+      if (action.dataset.action === "create-document") openDocumentPreview(root, action.dataset.id);
+      if (action.dataset.action === "close-document-preview") {
+        state.documentPreviewId = null;
+        render(root);
+      }
+      if (action.dataset.action === "save-document-preview") saveDocumentPreview(root, action.dataset.id);
+      if (action.dataset.action === "sheet-add-row") resizeSpreadsheet(root, 1, 0);
+      if (action.dataset.action === "sheet-add-column") resizeSpreadsheet(root, 0, 1);
+      if (action.dataset.action === "sheet-clear") clearSpreadsheet(root);
+      if (action.dataset.action === "save-row") saveRow(root, action.dataset.id);
+      if (action.dataset.action === "delete-row") deleteNote(root, action.dataset.id);
       if (action.dataset.action === "edit") {
         state.editingId = action.dataset.id;
         render(root);
@@ -509,7 +968,43 @@
       }
     });
 
+    root.addEventListener("mousedown", (event) => {
+      if (event.target.closest("[data-sheet-command]")) event.preventDefault();
+    });
+
+    root.addEventListener("focusin", (event) => {
+      const cell = event.target.closest("[data-sheet-cell]");
+      if (!cell) return;
+      state.activeSheetCell = cell.dataset.sheetCell;
+      const label = root.querySelector("[data-sheet-active-cell]");
+      const formula = root.querySelector("[data-sheet-formula]");
+      if (label) label.textContent = state.activeSheetCell;
+      if (formula) formula.value = cell.textContent || "";
+    });
+
     root.addEventListener("input", (event) => {
+      if (event.target.matches("[data-sheet-cell]")) {
+        const formula = root.querySelector("[data-sheet-formula]");
+        if (formula) formula.value = event.target.textContent || "";
+        return;
+      }
+      if (event.target.matches("[data-sheet-formula]")) {
+        const cell = root.querySelector(`[data-sheet-cell="${state.activeSheetCell}"]`);
+        if (cell) cell.textContent = event.target.value;
+        return;
+      }
+      if (event.target.id === "classification-note-editor") {
+        state.draftDescription = event.target.innerHTML;
+        return;
+      }
+      const editedRow = event.target.closest("[data-note-row]");
+      if (editedRow) {
+        const saveButton = editedRow.querySelector('[data-action="save-row"]');
+        if (saveButton) {
+          saveButton.textContent = "SAVE";
+          saveButton.classList.remove("notes-row-saved");
+        }
+      }
       if (event.target.dataset.action !== "search") return;
       state.search = event.target.value;
       state.editingId = null;
@@ -517,6 +1012,42 @@
     });
 
     root.addEventListener("change", (event) => {
+      if (event.target.id === "classification-note-files") {
+        addDraftFiles(event.target.files, root);
+        return;
+      }
+      const editedRow = event.target.closest("[data-note-row]");
+      if (editedRow) {
+        const saveButton = editedRow.querySelector('[data-action="save-row"]');
+        if (saveButton) {
+          saveButton.textContent = "SAVE";
+          saveButton.classList.remove("notes-row-saved");
+        }
+      }
+      if (event.target.dataset.noteField === "departmentId") {
+        const row = event.target.closest("[data-note-row]");
+        const clientSelect = row?.querySelector('[data-note-field="client"]');
+        const platformSelect = row?.querySelector('[data-note-field="platform"]');
+        if (clientSelect) {
+          clientSelect.innerHTML = clientOptions({}, event.target.value);
+          clientSelect.disabled = !event.target.value;
+        }
+        if (platformSelect) {
+          platformSelect.innerHTML = platformOptions({}, "", "");
+          platformSelect.disabled = true;
+        }
+        return;
+      }
+      if (event.target.dataset.noteField === "client") {
+        const row = event.target.closest("[data-note-row]");
+        const departmentId = row?.querySelector('[data-note-field="departmentId"]')?.value || "";
+        const platformSelect = row?.querySelector('[data-note-field="platform"]');
+        if (platformSelect) {
+          platformSelect.innerHTML = platformOptions({}, departmentId, event.target.value);
+          platformSelect.disabled = !event.target.value;
+        }
+        return;
+      }
       if (event.target.dataset.action === "status") {
         state.status = event.target.value;
         state.editingId = null;
@@ -527,6 +1058,34 @@
         state.editingId = null;
         render(root);
       }
+    });
+
+    root.addEventListener("dragenter", (event) => {
+      const zone = event.target.closest("[data-drop-zone]");
+      if (!zone || !event.dataTransfer || !Array.from(event.dataTransfer.types).includes("Files")) return;
+      event.preventDefault();
+      if (!state.isDraggingFiles) {
+        state.draftDescription = root.querySelector("#classification-note-editor")?.innerHTML || state.draftDescription;
+        state.isDraggingFiles = true;
+        render(root);
+      }
+    });
+
+    root.addEventListener("dragover", (event) => {
+      if (event.target.closest("[data-drop-zone]")) event.preventDefault();
+    });
+
+    root.addEventListener("dragleave", (event) => {
+      const zone = event.target.closest("[data-drop-zone]");
+      if (!zone || zone.contains(event.relatedTarget)) return;
+      state.isDraggingFiles = false;
+      render(root);
+    });
+
+    root.addEventListener("drop", (event) => {
+      if (!event.target.closest("[data-drop-zone]")) return;
+      event.preventDefault();
+      addDraftFiles(event.dataTransfer.files, root);
     });
 
     window.addEventListener("storage", (event) => {
@@ -549,6 +1108,7 @@
     if (!root) return;
     render(root);
     bind(root);
+    loadReferenceData(root);
   }
 
   if (document.readyState === "loading") {
