@@ -77,6 +77,16 @@ const LEVEL_SYMBOL: Record<RealizationLevel, "+" | "+/-" | "-"> = {
   E: "-",
 }
 
+const LEVEL_GUIDE: Array<{ level: RealizationLevel; description: string }> = [
+  { level: "A+", description: "Plani i realizuar dhe të paktën 2 angazhime pozitive shtesë të verifikuara." },
+  { level: "A", description: "Plani i realizuar dhe të paktën 1 angazhim pozitiv shtesë i verifikuar." },
+  { level: "B", description: "Të gjitha obligimet e planit janë përfunduar në kohë." },
+  { level: "C", description: "Ka përfundime me vonesë, vonesa të shpeshta ose ndikim negativ të vogël." },
+  { level: "M", description: "Mungesë personale e aprovuar dhe obligimet e mbetura janë të mbuluara." },
+  { level: "D", description: "Ka obligime të pambyllura, shtyrje pa aprovim ose evidencë negative." },
+  { level: "E", description: "Nuk ka progres real ose ka mungesa të papritura mbi pragun e politikës." },
+]
+
 const TASK_SOURCE_LABEL: Record<string, string> = {
   system: "Sistem",
   project: "Projekt",
@@ -649,6 +659,16 @@ export default function RealizationPage() {
       )
       if (!response.ok) throw new Error(await errorMessage(response))
       const analysis = (await response.json()) as RealizationAIAnalysis
+      setData((current) => current ? {
+        ...current,
+        people: current.people.map((person) => person.id === selected.id ? {
+          ...person,
+          facts_json: {
+            ...person.facts_json,
+            ai_analysis: analysis,
+          },
+        } : person),
+      } : current)
       toast.success("Analiza inteligjente u gjenerua", {
         description: `Sugjerimi ${analysis.suggested_level}, siguria ${Math.round(analysis.confidence * 100)}%`,
       })
@@ -823,7 +843,7 @@ export default function RealizationPage() {
               {action === "daily" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Përditëso tani
             </Button>
             <Button onClick={() => void calculateWeekly()} disabled={!data?.can_calculate || !!action}>
-              {action === "calculate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />} Kalkulo javën
+              {action === "calculate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />} {data?.has_final_snapshot ? "Rikalkulo javën" : "Finalizo dhe vlerëso"}
             </Button>
             <Button variant="outline" onClick={() => void downloadExcel()} disabled={!people.length || !!action}>
               {action === "export" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Excel
@@ -864,6 +884,25 @@ export default function RealizationPage() {
         <MetricCard icon={UserCheck} label="Të përfunduara këtë javë" value={selectedWeeklyAllCompleted} note={`${selectedWeeklyCompleted} nga plani bazë · ${Math.max(0, selectedWeeklyAllCompleted - selectedWeeklyCompleted)} jashtë planit`} />
         <MetricCard icon={Sparkles} label="Shtuar gjatë javës" value={selectedWeeklyAdditional} note="Raportohen veç nga plani bazë" />
       </div>
+
+      <details className="overflow-hidden rounded-xl border bg-card shadow-sm">
+        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold">
+          Kriteret e vlerësimit automatik A+–E
+        </summary>
+        <div className="grid gap-2 border-t p-4 md:grid-cols-2 xl:grid-cols-4">
+          {LEVEL_GUIDE.map((item) => (
+            <div key={item.level} className="flex items-start gap-3 rounded-lg border p-3">
+              <Badge className={cn("min-w-10 justify-center border", LEVEL_STYLE[item.level])}>
+                {item.level}
+              </Badge>
+              <p className="text-xs leading-5 text-muted-foreground">{item.description}</p>
+            </div>
+          ))}
+        </div>
+        <p className="border-t px-4 py-3 text-xs text-muted-foreground">
+          Rregullat zbatohen automatikisht sipas rendit E → D → M → C → A+ → A → B; evidenca më kufizuese ka përparësi.
+        </p>
+      </details>
 
       <div className="min-h-[680px]">
         <Card className="overflow-hidden border-border/70 shadow-sm">
