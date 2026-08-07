@@ -62,8 +62,8 @@ function canonicalMeetingsSectionTitle(title: string) {
 
 function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
-    "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
     "A JEMI BRENDA MESATARES ME PROJEKTE/",
+    "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
     "(GA) M3 DET GA MBYLLJA ME HV?",
     "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?",
     "DET. PA PROGRES (PINK)?",

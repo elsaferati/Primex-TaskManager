@@ -42,8 +42,8 @@ SECTION_TITLES = [
     "N- (GA/KA) KUSH KA DET PERSONALISHT?",
 ]
 DISPLAY_SECTION_TITLES = [
-    SECTION_TITLES[2],  # STD tickets first
-    SECTION_TITLES[0],
+    SECTION_TITLES[0],  # Manual first
+    SECTION_TITLES[2],  # STD tickets first among auto-filled
     SECTION_TITLES[1],
     SECTION_TITLES[3],
     SECTION_TITLES[4],
@@ -365,6 +365,28 @@ def _wrap_fixed_width(value: str, width: int) -> list[str]:
     return textwrap.wrap(cleaned, width=width, break_long_words=False, break_on_hyphens=False) or ["-"]
 
 
+def _m3_task_type_label(task: Task) -> str:
+    """Task kind for M3 GA/HV tables: system, project, or fast (with subtype).
+
+    GA/PX note origins are sources, not types. Fast tasks show FT, or a subtype
+    when flagged (1H/BLL/R1/P).
+    """
+    if getattr(task, "system_template_origin_id", None) is not None:
+        return "SYS"
+    if getattr(task, "project_id", None) is not None:
+        return "PRJK"
+    # Fast-task subtypes take priority over generic FT
+    if getattr(task, "is_bllok", False):
+        return "BLL"
+    if getattr(task, "is_r1", False):
+        return "R1"
+    if getattr(task, "is_1h_report", False):
+        return "1H"
+    if getattr(task, "is_personal", False):
+        return "P"
+    return "FT"
+
+
 def _m3_status_table(
     status_label: str,
     tasks: list[Task],
@@ -372,10 +394,18 @@ def _m3_status_table(
     *,
     include_late_days: bool = False,
     with_status: bool = False,
+    include_type: bool = False,
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     all_participant_ids: set[Any] | None = None,
 ) -> list[str]:
-    if include_late_days:
+    type_width = 7
+    if include_type and include_late_days:
+        border = "+----+-------+---------+------------------------------------------------------------------+--------------+"
+        header = f"| {'NR':<2} | {'WHO':<5} | {'TYPE':<{type_width}} | {'TITLE':<64} | {'LATE':<12} |"
+    elif include_type:
+        border = "+----+-------+---------+------------------------------------------------------------------+"
+        header = f"| {'NR':<2} | {'WHO':<5} | {'TYPE':<{type_width}} | {'TITLE':<64} |"
+    elif include_late_days:
         border = "+----+-------+------------------------------------------------------------------+--------------+"
         header = f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} | {'LATE':<12} |"
     else:
@@ -387,11 +417,18 @@ def _m3_status_table(
         header,
         border,
     ]
+    empty_title = "(Asnje detyre)"
     if not tasks:
-        if include_late_days:
-            rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} | {'-':<12} |")
+        if include_type and include_late_days:
+            rows.append(
+                f"| {'-':<2} | {'-':<5} | {'-':<{type_width}} | {empty_title:<64} | {'-':<12} |"
+            )
+        elif include_type:
+            rows.append(f"| {'-':<2} | {'-':<5} | {'-':<{type_width}} | {empty_title:<64} |")
+        elif include_late_days:
+            rows.append(f"| {'-':<2} | {'-':<5} | {empty_title:<64} | {'-':<12} |")
         else:
-            rows.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+            rows.append(f"| {'-':<2} | {'-':<5} | {empty_title:<64} |")
         rows.append(border)
         return rows
     ordered = sorted(
@@ -404,17 +441,29 @@ def _m3_status_table(
         owner = _task_owners(
             task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
         )
+        task_type = _m3_task_type_label(task) if include_type else ""
         display_title = _clean_task_title(task.title)
         title_lines = _wrap_fixed_width(display_title, 64)
         status = _normalize_report_status(task.status) if with_status else None
         padded_titles = _append_status_marker_to_lines(title_lines, status, 64)
-        if include_late_days:
+        if include_type and include_late_days:
+            late_label = _late_days_label(_late_days(task))
+            rows.append(
+                f"| {index:<2} | {owner:<5} | {task_type:<{type_width}} | {padded_titles[0]} | {late_label:<12} |"
+            )
+        elif include_type:
+            rows.append(f"| {index:<2} | {owner:<5} | {task_type:<{type_width}} | {padded_titles[0]} |")
+        elif include_late_days:
             late_label = _late_days_label(_late_days(task))
             rows.append(f"| {index:<2} | {owner:<5} | {padded_titles[0]} | {late_label:<12} |")
         else:
             rows.append(f"| {index:<2} | {owner:<5} | {padded_titles[0]} |")
         for line in padded_titles[1:]:
-            if include_late_days:
+            if include_type and include_late_days:
+                rows.append(f"| {'':<2} | {'':<5} | {'':<{type_width}} | {line} | {'':<12} |")
+            elif include_type:
+                rows.append(f"| {'':<2} | {'':<5} | {'':<{type_width}} | {line} |")
+            elif include_late_days:
                 rows.append(f"| {'':<2} | {'':<5} | {line} | {'':<12} |")
             else:
                 rows.append(f"| {'':<2} | {'':<5} | {line} |")
@@ -648,6 +697,7 @@ def _status_group_section(
     table_kwargs = {
         "assignee_ids_by_task": assignee_ids_by_task,
         "all_participant_ids": all_participant_ids,
+        "include_type": True,
     }
     return [
         f"{title}:",
@@ -1505,7 +1555,7 @@ def _email_column_width_style(width: str) -> str:
 
 def _email_column_cell_style(header_cell: str) -> str:
     name = header_cell.strip().upper()
-    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "DATA", "DATE", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
+    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "DATA", "DATE", "TYPE", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
         return "white-space:nowrap;"
     if name == "WHO":
         return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
@@ -1520,6 +1570,7 @@ def _email_column_widths(header: list[str]) -> list[str]:
     fixed_by_name = {
         "NR": "24",
         "WHO": "34",
+        "TYPE": "42",
         "FROM": "38",
         "TIME": "46",
         "ORA": "46",
@@ -1528,12 +1579,14 @@ def _email_column_widths(header: list[str]) -> list[str]:
         "DATE": "62",
         "DISK": "42",
         "LATE": "54",
+        "KATEGORIA": "1%",
+        "LISTA": "1%",
         "MBAJTUR": "58",
         "MBAJTUR?": "62",
         "ANULUAR": "58",
         "PA STATUS": "64",
     }
-    content_names = {"TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"}
+    content_names = {"TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION", "PYETJA"}
     normalized = [cell.strip().upper() for cell in header]
     widths = ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
     if normalized and not any(name in content_names for name in normalized):
@@ -1543,7 +1596,7 @@ def _email_column_widths(header: list[str]) -> list[str]:
 
 def _primary_text_column_index(header: list[str]) -> int:
     normalized = [cell.strip().upper() for cell in header]
-    for name in ("NOTE", "TITLE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"):
+    for name in ("NOTE", "TITLE", "PYETJA", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"):
         if name in normalized:
             return normalized.index(name)
     return min(2, max(len(header) - 1, 0))

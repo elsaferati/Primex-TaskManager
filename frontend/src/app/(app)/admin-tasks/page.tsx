@@ -2050,7 +2050,9 @@ export default function AdminTasksPage() {
   const filteredAllTasksRows = React.useMemo(() => {
     if (!allTasksDateFrom && !allTasksDateTo) return allTasksTableRows
     return allTasksTableRows.filter((row) => {
-      if (row.ll === "SYS" && row.status !== "DONE" && row.dateIso && row.dateIso < todayIso) {
+      // Keep open overdue tasks visible even when the date filter starts at today
+      // (same behavior previously only applied to late system tasks).
+      if (row.status !== "DONE" && row.dateIso && row.dateIso < todayIso) {
         return true
       }
       return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
@@ -2981,6 +2983,15 @@ export default function AdminTasksPage() {
       if (row.isLateSystemTask && isIsoWithinInclusiveRange(todayIso, allTasksDateFrom, allTasksDateTo)) {
         return true
       }
+      // Open overdue FT/PRJK rows (status label is "Done" when completed).
+      if (
+        row.status !== "Done" &&
+        row.dateIso &&
+        row.dateIso < todayIso &&
+        isIsoWithinInclusiveRange(todayIso, allTasksDateFrom, allTasksDateTo)
+      ) {
+        return true
+      }
       return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
     })
   }, [allTasksDateFrom, allTasksDateTo, allTasksReportRows, todayIso])
@@ -3616,9 +3627,20 @@ export default function AdminTasksPage() {
           byDay[iso].push(task)
         }
       }
+
+      // Overdue open FT tasks fall off the week grid after due date — pin them to today
+      // (or Monday of the viewed week) so they stay findable like M3 LATE.
+      const statusValue = (task.status || "").toUpperCase()
+      const isOpen = statusValue !== "DONE" && !task.completed_at
+      if (isOpen && endIso < todayIso) {
+        const pinIso = commonWeekISOs.includes(todayIso) ? todayIso : commonWeekISOs[0]
+        if (pinIso && !byDay[pinIso].some((existing) => existing.id === task.id)) {
+          byDay[pinIso].push(task)
+        }
+      }
     }
     return byDay
-  }, [commonWeekISOs, ganeUserId, tasks])
+  }, [commonWeekISOs, ganeUserId, tasks, todayIso])
 
   const commonGaRowsByDay = React.useMemo(() => {
     const byDay: Record<string, { bz: BzItem[]; detGa: CommonGaTableEntry[] }> = {}

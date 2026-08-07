@@ -180,29 +180,35 @@ async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
     return rows
 
 
-def _format_confirmation_questions(questions: list[tuple[str, str]]) -> list[str]:
-    if not questions:
-        return ["PYETJE PER KONFIRMIM: 0"]
-    lines = ["PYETJE PER KONFIRMIM:"]
-    for index, (text, guidance) in enumerate(questions, 1):
-        lines.append(f"{index}. {text}")
-        if guidance:
-            # Keep indented so UI/email treat this as description, not a section label.
-            lines.append(f"   {guidance}")
-    return lines
+def _format_confirmation_questions(questions: list[tuple[str, str, str]]) -> list[str]:
+    """Render pending confirmation questions with their Questions category (Kategoria)."""
+    rows: list[list[str]] = []
+    for index, (category, text, guidance) in enumerate(questions, 1):
+        question = (text or "").strip() or "-"
+        tip = (guidance or "").strip()
+        if tip:
+            question = f"{question} — {tip}"
+        rows.append([str(index), (category or "").strip() or "-", question])
+    return _ascii_table(
+        "PYETJE PER KONFIRMIM",
+        [("NR", 2), ("Kategoria", 12), ("PYETJA", 64)],
+        rows,
+    )
 
 
-async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, str]]:
+async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, str, str]]:
     """Load unconfirmed View Question tasks for M2 PYETJE PER KONFIRMIM.
 
     Only questions that created an assignee task (from any Questions category)
     appear here. Template/library questions without a task are excluded.
     Once every assigned user marks the question done (or the task is DONE),
     it is omitted.
+
+    Returns (category_name, question_text, guidance) tuples.
     """
-    rows = (
+    result = (
         await db.execute(
-            select(QuestionDefinition)
+            select(QuestionDefinition, QuestionCategory.name)
             .join(QuestionCategory, QuestionCategory.id == QuestionDefinition.category_id)
             .where(QuestionDefinition.task_id.is_not(None))
             .order_by(
@@ -211,10 +217,11 @@ async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, s
                 QuestionDefinition.sort_order,
             )
         )
-    ).scalars().all()
-    if not rows:
+    ).all()
+    if not result:
         return []
 
+    rows = [row for row, _category_name in result]
     question_ids = [row.id for row in rows]
     task_ids = {row.task_id for row in rows if row.task_id is not None}
     if not task_ids:
@@ -253,9 +260,9 @@ async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, s
         ).all()
     }
 
-    pending: list[tuple[str, str]] = []
+    pending: list[tuple[str, str, str]] = []
     seen_text: set[str] = set()
-    for row in rows:
+    for row, category_name in result:
         text = (row.text or "").strip()
         if not text:
             continue
@@ -274,7 +281,7 @@ async def _load_1h_confirmation_questions(db: AsyncSession) -> list[tuple[str, s
             continue
 
         seen_text.add(text_key)
-        pending.append((text, (row.guidance or "").strip()))
+        pending.append(((category_name or "").strip() or "-", text, (row.guidance or "").strip()))
     return pending
 
 

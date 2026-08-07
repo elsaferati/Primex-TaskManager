@@ -17,6 +17,8 @@ from app.services import meetings_report_scheduler
 from app.services.meeting_point_manual_sync import is_known_report_title, is_manual_section_title
 from app.services.meetings_report import (
     SECTION_TITLES,
+    _m3_status_table,
+    _m3_task_type_label,
     normalize_meetings_report_sections,
 )
 
@@ -173,7 +175,8 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
             ]
         )
         titles = [section["title"] for section in normalized]
-        self.assertEqual(titles[0], SECTION_TITLES[2])
+        self.assertEqual(titles[0], SECTION_TITLES[0])  # manual first
+        self.assertEqual(titles[1], SECTION_TITLES[2])  # tickets first among auto-filled
         self.assertEqual(titles.count(SECTION_TITLES[1]), 1)
         self.assertEqual(titles.count(SECTION_TITLES[2]), 1)
         self.assertNotIn("(GA) M3 DET GA MBYLLJA ME HV/OH?", titles)
@@ -200,6 +203,62 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         self.assertFalse(is_manual_section_title("meetings", "(GA) M3 DET GA MBYLLJA ME HV/OH?"))
         self.assertFalse(is_manual_section_title("meetings", "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3"))
         self.assertTrue(is_manual_section_title("meetings", "Brand new Common View pike"))
+
+
+class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
+    def test_task_type_labels(self) -> None:
+        self.assertEqual(
+            _m3_task_type_label(SimpleNamespace(system_template_origin_id=uuid.uuid4(), project_id=uuid.uuid4())),
+            "SYS",
+        )
+        self.assertEqual(
+            _m3_task_type_label(
+                SimpleNamespace(
+                    project_id=uuid.uuid4(),
+                    ga_note_origin_id=uuid.uuid4(),
+                    is_1h_report=True,
+                )
+            ),
+            "PRJK",
+        )
+        self.assertEqual(
+            _m3_task_type_label(SimpleNamespace(ga_note_origin_id=uuid.uuid4(), is_bllok=True)),
+            "BLL",
+        )
+        self.assertEqual(_m3_task_type_label(SimpleNamespace(is_1h_report=True)), "1H")
+        self.assertEqual(_m3_task_type_label(SimpleNamespace(is_r1=True)), "R1")
+        self.assertEqual(_m3_task_type_label(SimpleNamespace(is_personal=True)), "P")
+        self.assertEqual(
+            _m3_task_type_label(SimpleNamespace(plan_note_origin_id=uuid.uuid4())),
+            "FT",
+        )
+        self.assertEqual(_m3_task_type_label(SimpleNamespace()), "FT")
+
+    def test_status_table_includes_type_column(self) -> None:
+        task = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="KA: MODECO KONT",
+            status="TODO",
+            is_bllok=True,
+            is_r1=False,
+            is_1h_report=False,
+            is_personal=False,
+            is_deadline_important=False,
+            ga_note_origin_id=None,
+            plan_note_origin_id=None,
+            system_template_origin_id=None,
+            project_id=None,
+            assigned_to=None,
+            fast_task_order=None,
+            due_date=None,
+            start_date=None,
+            completed_at=None,
+            created_at=None,
+        )
+        rows = _m3_status_table("TODO", [task], {}, include_type=True)
+        header = next(row for row in rows if "TYPE" in row and "TITLE" in row)
+        self.assertIn("TYPE", header)
+        self.assertTrue(any("BLL" in row and "MODECO" in row for row in rows))
 
 
 if __name__ == "__main__":
