@@ -54,6 +54,7 @@ const requiredStandards = [
   "Informacioni zyrtar i kompanisë në footer",
   "Numërimi automatik Page {PAGE} of {NUMPAGES}",
   "I njëjti header dhe footer në çdo faqe dhe seksion",
+  "Margjina Narrow prej 0.5 inç në të katër anët",
 ]
 
 function errorDetail(value: unknown, fallback: string) {

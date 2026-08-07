@@ -64,8 +64,10 @@ class TestWordStandardizer(unittest.TestCase):
 
         for section in document.sections:
             self.assertFalse(section.different_first_page_header_footer)
-            self.assertGreaterEqual(section.top_margin, Inches(0.9))
-            self.assertGreaterEqual(section.bottom_margin, Inches(0.9))
+            for margin in (section.top_margin, section.right_margin, section.bottom_margin, section.left_margin):
+                self.assertAlmostEqual(margin.inches, 0.5, places=2)
+            self.assertAlmostEqual(section.header_distance.inches, 0.08, places=2)
+            self.assertAlmostEqual(section.footer_distance.inches, 0.08, places=2)
             header_codes = " ".join(
                 node.text or "" for node in section.header._element.iter(qn("w:instrText"))
             )
@@ -76,6 +78,8 @@ class TestWordStandardizer(unittest.TestCase):
             self.assertRegex(footer_codes, r"\bPAGE\b")
             self.assertIn("NUMPAGES", footer_codes)
             self.assertTrue(any(rel.reltype == RT.IMAGE for rel in section.header.part.rels.values()))
+            logo_extent = next(section.header._element.iter(qn("wp:extent")))
+            self.assertAlmostEqual(int(logo_extent.get("cx")) / 914400, 1.0, places=2)
             self.assertIn("PrimEx SH.P.K.", section.footer.tables[0].cell(0, 0).text)
             self.assertIn("Page 1 of 1", section.footer.tables[0].cell(0, 1).text)
             expected_width = round((section.page_width - section.left_margin - section.right_margin) / 635)

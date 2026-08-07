@@ -29,6 +29,8 @@ COMPANY_LINES = (
     "Email: info@primex.com",
     "Website: www.primexeu.com",
 )
+NARROW_MARGIN = Inches(0.5)
+HEADER_FOOTER_DISTANCE = Inches(0.08)
 
 
 class WordStandardizationError(ValueError):
@@ -161,6 +163,17 @@ def _updates_fields_on_open(document) -> bool:
     return update_fields.get(qn("w:val"), "true").casefold() not in {"0", "false", "off", "no"}
 
 
+def _uses_narrow_margins(document) -> bool:
+    tolerance = Inches(0.01)
+    for section in document.sections:
+        margins = (section.top_margin, section.right_margin, section.bottom_margin, section.left_margin)
+        if any(margin is None for margin in margins):
+            return False
+        if any(abs(int(margin) - int(NARROW_MARGIN)) > int(tolerance) for margin in margins):
+            return False
+    return True
+
+
 def analyze_word_document(content: bytes, filename: str) -> WordAnalysis:
     document = _load_document(content, filename)
     sections = list(document.sections)
@@ -181,6 +194,7 @@ def analyze_word_document(content: bytes, filename: str) -> WordAnalysis:
         ComplianceCheck("automatic_pages", "Faqet përdorin fushat automatike PAGE dhe NUMPAGES", automatic_pages),
         ComplianceCheck("same_first_page", "I njëjti header/footer përdoret edhe në faqen e parë", same_first_page),
         ComplianceCheck("update_fields", "Fushat automatike përditësohen kur dokumenti hapet", _updates_fields_on_open(document)),
+        ComplianceCheck("narrow_margins", "Dokumenti përdor margjina Narrow 0.5 inç", _uses_narrow_margins(document)),
     ]
     return WordAnalysis(
         filename=filename,
@@ -315,13 +329,13 @@ def _create_header(section, now: datetime) -> None:
     logo_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
     _set_paragraph_spacing(logo_paragraph)
     logo_run = logo_paragraph.add_run()
-    logo = logo_run.add_picture(str(LOGO_PATH), width=Inches(1.45))
+    logo = logo_run.add_picture(str(LOGO_PATH), width=Inches(1.0))
     logo._inline.docPr.set("descr", "PrimEx company logo")
 
     date_paragraph = table.cell(0, 1).paragraphs[0]
     date_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _set_paragraph_spacing(date_paragraph)
-    _add_field(date_paragraph, 'DATE \\@ "dd/MM/yyyy"', now.strftime("%d/%m/%Y"), size=9, bold=True)
+    _add_field(date_paragraph, 'DATE \\@ "dd/MM/yyyy"', now.strftime("%d/%m/%Y"), size=8, bold=True)
 
 
 def _create_footer(section) -> None:
@@ -337,21 +351,25 @@ def _create_footer(section) -> None:
     company_paragraph = table.cell(0, 0).paragraphs[0]
     company_paragraph.alignment = WD_ALIGN_PARAGRAPH.LEFT
     _set_paragraph_spacing(company_paragraph, line=0.95)
-    for index, line in enumerate(COMPANY_LINES):
+    company_rows = (
+        f"{COMPANY_LINES[0]} | {COMPANY_LINES[1]}",
+        f"{COMPANY_LINES[2]} | {COMPANY_LINES[3]}",
+    )
+    for index, line in enumerate(company_rows):
         run = company_paragraph.add_run(line)
-        _set_run_font(run, size=7.5, bold=index == 0, color="334155")
-        if index < len(COMPANY_LINES) - 1:
+        _set_run_font(run, size=6.5, bold=index == 0, color="334155")
+        if index < len(company_rows) - 1:
             run.add_break()
 
     page_paragraph = table.cell(0, 1).paragraphs[0]
     page_paragraph.alignment = WD_ALIGN_PARAGRAPH.RIGHT
     _set_paragraph_spacing(page_paragraph)
     prefix = page_paragraph.add_run("Page ")
-    _set_run_font(prefix, size=8.5, bold=True)
-    _add_field(page_paragraph, "PAGE", "1", size=8.5, bold=True)
+    _set_run_font(prefix, size=7.5, bold=True)
+    _add_field(page_paragraph, "PAGE", "1", size=7.5, bold=True)
     separator = page_paragraph.add_run(" of ")
-    _set_run_font(separator, size=8.5, bold=True)
-    _add_field(page_paragraph, "NUMPAGES", "1", size=8.5, bold=True)
+    _set_run_font(separator, size=7.5, bold=True)
+    _add_field(page_paragraph, "NUMPAGES", "1", size=7.5, bold=True)
 
 
 def _configure_document_fields(document) -> None:
@@ -390,10 +408,12 @@ def standardize_word_document(
         section.different_first_page_header_footer = False
         section.header.is_linked_to_previous = False
         section.footer.is_linked_to_previous = False
-        section.header_distance = Inches(0.25)
-        section.footer_distance = Inches(0.25)
-        section.top_margin = max(section.top_margin or Inches(1), Inches(0.9))
-        section.bottom_margin = max(section.bottom_margin or Inches(1), Inches(0.9))
+        section.top_margin = NARROW_MARGIN
+        section.right_margin = NARROW_MARGIN
+        section.bottom_margin = NARROW_MARGIN
+        section.left_margin = NARROW_MARGIN
+        section.header_distance = HEADER_FOOTER_DISTANCE
+        section.footer_distance = HEADER_FOOTER_DISTANCE
         _create_header(section, now)
         _create_footer(section)
 
