@@ -71,6 +71,8 @@ type Preview = {
   excluded_full_leave: string[]
   partial_leave_users: string[]
   abbreviation_version: string
+  ai_status: string
+  ai_model: string | null
 }
 
 type Run = {
@@ -357,11 +359,12 @@ export default function WeeklyPlanningAuditPage() {
           <Card>
             <CardHeader><CardTitle className="text-sm">Preview summary: {preview.week_start} – {preview.week_end}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-2 text-sm md:grid-cols-4">
+              <div className="grid gap-2 text-sm md:grid-cols-5">
                 <div>Included: <strong>{preview.people.length}</strong></div>
                 <div>Full-week PV excluded: <strong>{preview.excluded_full_leave.length}</strong></div>
                 <div>Partial PV: <strong>{preview.partial_leave_users.length}</strong></div>
                 <div>Errors: <strong>{preview.errors.length}</strong></div>
+                <div>Analysis: <strong>{preview.ai_status === "used" ? `AI (${preview.ai_model})` : "Deterministic fallback"}</strong></div>
               </div>
               <Table>
                 <TableHeader><TableRow><TableHead>Person</TableHead><TableHead>Department</TableHead><TableHead>PV</TableHead><TableHead>Main focus</TableHead><TableHead>Tasks</TableHead><TableHead>Errors</TableHead></TableRow></TableHeader>
@@ -379,11 +382,11 @@ export default function WeeklyPlanningAuditPage() {
             <CardHeader><CardTitle className="text-sm">Detected errors</CardTitle></CardHeader>
             <CardContent>
               <Table containerClassName="max-h-[520px] overflow-auto">
-                <TableHeader><TableRow><TableHead>Person</TableHead><TableHead>Date</TableHead><TableHead>Current title</TableHead><TableHead>Problem</TableHead><TableHead>Correction</TableHead><TableHead>Rule</TableHead><TableHead>Severity</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Person</TableHead><TableHead>Date</TableHead><TableHead>Current title</TableHead><TableHead>Problem</TableHead><TableHead>Proposed title</TableHead><TableHead>Correction</TableHead><TableHead>Rule</TableHead><TableHead>Severity</TableHead></TableRow></TableHeader>
                 <TableBody>{preview.errors.map((error, index) => (
                   <TableRow key={`${error.task_id || "user"}-${error.rule_code}-${index}`}>
                     <TableCell>{error.employee}</TableCell><TableCell>{error.task_date || "—"}</TableCell><TableCell className="max-w-xs">{error.current_title || "—"}</TableCell>
-                    <TableCell className="max-w-sm">{error.problem}</TableCell><TableCell className="max-w-sm">{error.correction}</TableCell><TableCell>{error.rule_code}</TableCell>
+                    <TableCell className="max-w-sm">{error.problem}</TableCell><TableCell className="max-w-xs">{error.proposed_title || "—"}</TableCell><TableCell className="max-w-sm">{error.correction}</TableCell><TableCell>{error.rule_code}</TableCell>
                     <TableCell><span className={`rounded px-2 py-1 text-xs font-medium ${severityClass(error.severity)}`}>{error.severity}</span></TableCell>
                   </TableRow>
                 ))}</TableBody>

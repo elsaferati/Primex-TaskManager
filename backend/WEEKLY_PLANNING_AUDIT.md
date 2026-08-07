@@ -1,14 +1,21 @@
 # Weekly Planning Audit Report
 
-The Weekly Planning Audit is a read-only audit of PrimeFlow planning for the
-next Monday–Friday working week. It uses the existing Weekly Planner query for
-task occurrences and the Common View annual-leave parser. It never updates
-tasks, projects, users, planners, meetings, leave entries, or system templates.
+The Weekly Planning Audit is a read-only hybrid audit of PrimeFlow planning for
+the next Monday–Friday working week. Structured PrimeFlow fields are validated
+deterministically; when configured, OpenAI adds grounded semantic title review
+and weekly-focus selection. If AI is unavailable, deterministic validation and
+focus selection still produce the report. It uses the existing Weekly Planner
+query for task occurrences and approved Common View annual leave. It never
+updates tasks, projects, users, planners, meetings, leave entries, or system
+templates.
 
 ## Runtime configuration
 
 ```env
 WEEKLY_PLANNING_AUDIT_ENABLED=true
+WEEKLY_PLANNING_AUDIT_AI_ENABLED=true
+WEEKLY_PLANNING_AUDIT_AI_MODEL=gpt-5.2
+WEEKLY_PLANNING_AUDIT_AI_TIMEOUT_SECONDS=90
 WEEKLY_PLANNING_AUDIT_TIMEZONE=Europe/Tirane
 WEEKLY_PLANNING_AUDIT_RECIPIENTS=130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com
 REPORT_STORAGE_DIR=/var/lib/primeflow/reports

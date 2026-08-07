@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import io
+import asyncio
 import unittest
 import uuid
 from datetime import date, datetime
@@ -15,6 +16,7 @@ from app.services.weekly_planning_audit import (
     PersonAudit,
     WeeklyPlanningAuditReport,
     _is_technical_account,
+    _ai_title_introduces_unknown_abbreviation,
     clean_technical_markup,
     load_px_abbreviations,
     monday_of_next_working_week,
@@ -38,6 +40,8 @@ from app.services.weekly_planning_audit_excel import (
     build_weekly_planning_audit_workbook,
     report_subject,
 )
+from app.config import settings
+from app.services.weekly_planning_audit_ai import analyze_weekly_planning_audit
 
 
 WEEK_START = date(2026, 8, 3)
@@ -157,15 +161,36 @@ class WeeklyPlanningAuditLogicTests(unittest.TestCase):
         self.assertNotIn("RREG", proposed)
         self.assertNotIn("RREG", self.abbreviations)
 
-    def test_long_title_proposes_shorter_title_and_preserves_original(self) -> None:
+    def test_long_title_proposes_shorter_title_and_preserves_clean_current_title(self) -> None:
         title = "Projekt klienti " + "udhëzim shumë i gjatë " * 12
         task = occurrence(title=title)
         errors = validate_task_occurrence(
             task, week_start=WEEK_START, leave_dates=set(), official_abbreviations=self.abbreviations
         )
         error = next(item for item in errors if item.rule_code == "TITLE_TOO_LONG")
-        self.assertEqual(error.current_title, title)
+        self.assertEqual(error.current_title, title.strip())
         self.assertLess(len(error.proposed_title), len(title))
+
+    def test_editor_metadata_is_cleaned_and_not_reported_as_an_error(self) -> None:
+        task = occurrence(title="AT: P[[added]]X[[/added]] [[done]]WEB[[/done]]")
+        errors = validate_task_occurrence(
+            task, week_start=WEEK_START, leave_dates=set(), official_abbreviations=self.abbreviations
+        )
+        self.assertNotIn("TECHNICAL_MARKUP", {error.rule_code for error in errors})
+        self.assertTrue(all("[[" not in error.current_title for error in errors))
+
+    def test_ai_has_safe_deterministic_fallback_without_api_key(self) -> None:
+        previous_key = settings.OPENAI_API_KEY
+        previous_enabled = settings.WEEKLY_PLANNING_AUDIT_AI_ENABLED
+        try:
+            settings.OPENAI_API_KEY = None
+            settings.WEEKLY_PLANNING_AUDIT_AI_ENABLED = True
+            result, status = asyncio.run(analyze_weekly_planning_audit({"people": [{"user_id": "1"}]}))
+        finally:
+            settings.OPENAI_API_KEY = previous_key
+            settings.WEEKLY_PLANNING_AUDIT_AI_ENABLED = previous_enabled
+        self.assertIsNone(result)
+        self.assertEqual(status, "missing_api_key")
 
     def test_next_week_uses_local_tirana_time_and_next_monday(self) -> None:
         friday = datetime(2026, 7, 31, 9, 0, tzinfo=ZoneInfo("Europe/Tirane"))
@@ -293,6 +318,27 @@ class WeeklyPlanningAuditLogicTests(unittest.TestCase):
         )
         self.assertIn("R1_FORMAT_INVALID", {error.rule_code for error in r1_errors})
         self.assertNotIn("R1_FORMAT_INVALID", {error.rule_code for error in normal_errors})
+
+    def test_total_and_average_can_live_in_description(self) -> None:
+        errors = validate_task_occurrence(
+            occurrence(title="VS: Kontrolli i produkteve", description="Total: 120; Mesatare: 24"),
+            week_start=WEEK_START,
+            leave_dates=set(),
+            official_abbreviations=self.abbreviations,
+        )
+        self.assertNotIn("TOTAL_AVERAGE_INVALID", {error.rule_code for error in errors})
+
+    def test_ai_proposed_title_cannot_introduce_unknown_abbreviation(self) -> None:
+        self.assertTrue(
+            _ai_title_introduces_unknown_abbreviation(
+                "XYZ: Rregullimi i faqes", "Rregullimi i faqes", self.abbreviations
+            )
+        )
+        self.assertFalse(
+            _ai_title_introduces_unknown_abbreviation(
+                "PF: Rregullimi i faqes", "Rregullimi i faqes", self.abbreviations
+            )
+        )
 
     def test_official_dictionary_contains_seeded_values_and_not_rreg(self) -> None:
         self.assertEqual(self.abbreviations["PF"], "PRIME FLOW/PLATFORMA")

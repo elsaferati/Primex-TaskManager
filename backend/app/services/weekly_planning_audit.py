@@ -14,9 +14,10 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.config import settings
 from app.models.common_entry import CommonEntry
 from app.models.department import Department
-from app.models.enums import CommonCategory, UserRole
+from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.project import Project
 from app.models.task import Task
 from app.models.user import User
@@ -24,7 +25,7 @@ from app.services.common_leave import parse_common_view_annual_leave
 from app.services.daily_report_logic import ko_rule_applies_for_task, parse_ko_user_id
 
 
-REPORT_VERSION = "1.0"
+REPORT_VERSION = "1.1"
 DEFAULT_TIMEZONE = "Europe/Tirane"
 VALID_STATUSES = {"TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"}
 VALID_PRIORITIES = {"NORMAL", "HIGH"}
@@ -142,6 +143,8 @@ class WeeklyPlanningAuditReport:
     abbreviation_version: str = "2026.1"
     abbreviation_source: str = "Official PX abbreviation dictionary"
     abbreviation_updated_at: str = "2026-07-31"
+    ai_status: str = "not_requested"
+    ai_model: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -165,6 +168,8 @@ class WeeklyPlanningAuditReport:
             "abbreviation_version": self.abbreviation_version,
             "abbreviation_source": self.abbreviation_source,
             "abbreviation_updated_at": self.abbreviation_updated_at,
+            "ai_status": self.ai_status,
+            "ai_model": self.ai_model,
         }
 
 
@@ -234,6 +239,17 @@ def _uses_unofficial_abbreviation(occurrence: AuditTaskOccurrence) -> bool:
     # RREG has repeatedly been used as an invented abbreviation; it is explicitly
     # not in the official dictionary. Unknown project codes remain untouched.
     return bool(re.search(r"(?<![\w/])RREG(?![\w/])", title))
+
+
+def _ai_title_introduces_unknown_abbreviation(
+    proposed_title: str,
+    current_title: str,
+    official_abbreviations: dict[str, str],
+) -> bool:
+    proposed_tokens = set(re.findall(r"\b[A-ZÇË][A-ZÇË0-9]{1,7}\b", proposed_title))
+    current_tokens = set(re.findall(r"\b[A-ZÇË][A-ZÇË0-9]{1,7}\b", current_title))
+    allowed = {key.upper() for key in official_abbreviations} | {"KO1", "KO2"}
+    return bool(proposed_tokens - current_tokens - allowed)
 
 
 def is_routine_or_system_work(occurrence: AuditTaskOccurrence) -> bool:
@@ -333,7 +349,7 @@ def _error(
         department=occurrence.department,
         task_id=str(occurrence.task_id) if occurrence.task_id else None,
         task_date=occurrence.task_date,
-        current_title=occurrence.title,
+        current_title=clean_technical_markup(occurrence.title),
         problem=problem,
         proposed_title=suggested_concise_title(occurrence.title),
         correction=correction,
@@ -442,9 +458,16 @@ def validate_task_occurrence(
             rule="KO_OWNER_MISSING", severity="HIGH",
         ))
 
-    if re.search(r"\b(?:Total|Mesatare)\b", cleaned_title, re.I):
-        has_total = bool(re.search(r"\bTotal\s*[:=]\s*\d+", cleaned_title, re.I))
-        has_average = bool(re.search(r"\bMesatare\s*[:=]\s*\d+(?:[.,]\d+)?", cleaned_title, re.I))
+    task_text = "\n".join(
+        value for value in (
+            cleaned_title,
+            clean_technical_markup(occurrence.description),
+            clean_technical_markup(occurrence.internal_notes),
+        ) if value
+    )
+    if re.search(r"\b(?:Total|Mesatare)\b", task_text, re.I):
+        has_total = bool(re.search(r"\bTotal\s*[:=]\s*\d+", task_text, re.I))
+        has_average = bool(re.search(r"\bMesatare\s*[:=]\s*\d+(?:[.,]\d+)?", task_text, re.I))
         if not (has_total and has_average):
             errors.append(_error(
                 occurrence, problem="Formati kërkon vlera numerike për Total dhe Mesatare.",
@@ -484,12 +507,6 @@ def validate_task_occurrence(
             occurrence, problem="Titulli përmban disa udhëzime ose hapa.",
             correction="Mbaj një titull të shkurtër dhe zhvendos hapat e plotë në Description/Notes.",
             rule="MULTIPLE_INSTRUCTIONS_IN_TITLE", severity="LOW",
-        ))
-    if TECHNICAL_MARKUP.search(occurrence.title or ""):
-        errors.append(_error(
-            occurrence, problem="Titulli përmban markup teknik [[added]]/[[done]].",
-            correction="Përdor titullin e pastruar; teksti brenda tag-eve ruhet.",
-            rule="TECHNICAL_MARKUP", severity="LOW",
         ))
     if _uses_unofficial_abbreviation(occurrence):
         errors.append(_error(
@@ -696,16 +713,17 @@ async def build_weekly_planning_audit(
         generated = generated.replace(tzinfo=tz)
 
     users = (await db.execute(
-        select(User)
-        .where(User.is_active.is_(True), User.role.in_([UserRole.STAFF, UserRole.MANAGER]))
-        .order_by(User.full_name, User.id)
+        select(User).where(User.is_active.is_(True)).order_by(User.full_name, User.id)
     )).scalars().all()
     users = [user for user in users if not _is_technical_account(user)]
     departments = (await db.execute(select(Department))).scalars().all()
     department_map = {department.id: department.name for department in departments}
 
     leave_entries = (await db.execute(
-        select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave)
+        select(CommonEntry).where(
+            CommonEntry.category == CommonCategory.annual_leave,
+            CommonEntry.approval_status == CommonApprovalStatus.approved,
+        )
     )).scalars().all()
     leave_dates_by_user: dict[uuid.UUID, set[date]] = defaultdict(set)
     for entry in leave_entries:
@@ -729,8 +747,80 @@ async def build_weekly_planning_audit(
     by_user: dict[uuid.UUID, list[AuditTaskOccurrence]] = defaultdict(list)
     for occurrence in occurrences:
         by_user[occurrence.user_id].append(occurrence)
+    for user in included_users:
+        employee = user.full_name or user.username or user.email
+        department = department_map.get(user.department_id, "Pa departament")
+        for occurrence in by_user.get(user.id, []):
+            occurrence.employee = employee
+            occurrence.department = department
 
     abbreviations, abbreviation_meta = load_px_abbreviations(abbreviation_override)
+    deterministic_focus = {
+        str(user.id): select_weekly_focus(by_user.get(user.id, [])) for user in included_users
+    }
+    ai_payload = {
+        "week_start": normalized_start.isoformat(),
+        "week_end": (normalized_start + timedelta(days=4)).isoformat(),
+        "official_px_abbreviations": abbreviations,
+        "people": [
+            {
+                "user_id": str(user.id),
+                "tasks": [
+                    {
+                        "task_id": str(item.task_id) if item.task_id else None,
+                        "date": item.task_date.isoformat() if item.task_date else None,
+                        "title": clean_technical_markup(item.title),
+                        "description": clean_technical_markup(item.description)[:1500],
+                        "notes": clean_technical_markup(item.internal_notes)[:800],
+                        "project_id": str(item.project_id) if item.project_id else None,
+                        "project_name": clean_technical_markup(item.project_name),
+                        "is_system": item.is_system or item.system_template_origin_id is not None,
+                        "is_routine": is_routine_or_system_work(item),
+                    }
+                    for item in by_user.get(user.id, [])
+                ],
+            }
+            for user in included_users
+        ],
+    }
+    from app.services.weekly_planning_audit_ai import analyze_weekly_planning_audit
+
+    ai_result, ai_status = await analyze_weekly_planning_audit(ai_payload)
+    ai_focus_by_user = {
+        str(item.get("user_id")): item
+        for item in ((ai_result or {}).get("people") or [])
+        if isinstance(item, dict) and item.get("user_id")
+    }
+    occurrence_by_task_id = {
+        str(item.task_id): item for item in occurrences if item.task_id is not None
+    }
+    ai_errors_by_user: dict[uuid.UUID, list[AuditError]] = defaultdict(list)
+    for item in ((ai_result or {}).get("errors") or []):
+        if not isinstance(item, dict):
+            continue
+        occurrence = occurrence_by_task_id.get(str(item.get("task_id") or ""))
+        if occurrence is None:
+            continue
+        proposed_title = suggested_concise_title(str(item.get("proposed_title") or occurrence.title))
+        if _ai_title_introduces_unknown_abbreviation(
+            proposed_title,
+            clean_technical_markup(occurrence.title),
+            abbreviations,
+        ):
+            proposed_title = suggested_concise_title(occurrence.title)
+        ai_errors_by_user[occurrence.user_id].append(AuditError(
+            employee=occurrence.employee,
+            department=occurrence.department,
+            task_id=str(occurrence.task_id),
+            task_date=occurrence.task_date,
+            current_title=clean_technical_markup(occurrence.title),
+            problem=clean_technical_markup(str(item.get("problem") or "Problem semantik i titullit.")),
+            proposed_title=proposed_title,
+            correction=clean_technical_markup(str(item.get("correction") or "Përditëso titullin dhe kalo sqarimet në Description/Notes.")),
+            rule_code="AI_TITLE_SEMANTIC",
+            severity=str(item.get("severity") or "LOW"),
+            source="AI semantic audit",
+        ))
     errors: list[AuditError] = []
     people: list[PersonAudit] = []
     title_cleanup: list[dict[str, Any]] = []
@@ -739,8 +829,34 @@ async def build_weekly_planning_audit(
         department = department_map.get(user.department_id, "Pa departament")
         user_occurrences = by_user.get(user.id, [])
         leave_dates = leave_dates_by_user[user.id]
-        focus = select_weekly_focus(user_occurrences)
-        user_errors: list[AuditError] = []
+        focus = deterministic_focus[str(user.id)]
+        ai_focus = ai_focus_by_user.get(str(user.id))
+        if ai_focus:
+            selected = occurrence_by_task_id.get(str(ai_focus.get("focus_task_id") or ""))
+            selected_project_id = str(ai_focus.get("focus_project_id") or "")
+            if selected and selected.user_id == user.id and not is_routine_or_system_work(selected):
+                focus = FocusDecision(
+                    label=clean_technical_markup(selected.project_name) if selected.project_id else suggested_concise_title(selected.title),
+                    source=f"AI / Task {selected.task_id}",
+                    source_task_id=str(selected.task_id),
+                    source_project_id=str(selected.project_id) if selected.project_id else None,
+                    score=focus.score,
+                )
+            elif selected_project_id:
+                candidates = [
+                    item for item in user_occurrences
+                    if str(item.project_id or "") == selected_project_id and not is_routine_or_system_work(item)
+                ]
+                if candidates:
+                    selected = candidates[0]
+                    focus = FocusDecision(
+                        label=clean_technical_markup(selected.project_name),
+                        source=f"AI / Project {selected.project_id}",
+                        source_task_id=str(selected.task_id) if selected.task_id else None,
+                        source_project_id=str(selected.project_id),
+                        score=focus.score,
+                    )
+        user_errors: list[AuditError] = list(ai_errors_by_user.get(user.id, []))
         focus_occurrence = next(
             (
                 item for item in user_occurrences
@@ -802,7 +918,7 @@ async def build_weekly_planning_audit(
                 if item.task_id == (str(occurrence.task_id) if occurrence.task_id else None)
                 and item.rule_code in {
                     "TITLE_TOO_LONG", "MULTIPLE_INSTRUCTIONS_IN_TITLE",
-                    "TECHNICAL_MARKUP", "UNOFFICIAL_ABBREVIATION",
+                    "UNOFFICIAL_ABBREVIATION", "AI_TITLE_SEMANTIC",
                 }
             ]
             if not task_title_errors:
@@ -810,7 +926,7 @@ async def build_weekly_planning_audit(
             title_cleanup.append({
                 "employee": employee,
                 "task_id": str(occurrence.task_id) if occurrence.task_id else None,
-                "current_title": occurrence.title,
+                "current_title": clean_technical_markup(occurrence.title),
                 "title_problem": "; ".join(item.problem for item in task_title_errors),
                 "proposed_title": suggested_concise_title(occurrence.title),
                 "move_to_notes": clean_technical_markup(occurrence.title)[len(suggested_concise_title(occurrence.title)):].strip(" -:;\n"),
@@ -864,5 +980,7 @@ async def build_weekly_planning_audit(
         abbreviation_updated_at=(
             generated.date().isoformat() if abbreviation_override else abbreviation_meta["updated_at"]
         ),
+        ai_status=ai_status,
+        ai_model=settings.WEEKLY_PLANNING_AUDIT_AI_MODEL if ai_status == "used" else None,
     )
     return report

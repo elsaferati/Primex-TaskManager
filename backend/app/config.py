@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     REALIZATION_AI_ENABLED: bool = False
     REALIZATION_AI_MODEL: str = "gpt-5.2"
     REALIZATION_AI_TIMEOUT_SECONDS: int = 45
+    WEEKLY_PLANNING_AUDIT_AI_ENABLED: bool = True
+    WEEKLY_PLANNING_AUDIT_AI_MODEL: str = "gpt-5.2"
+    WEEKLY_PLANNING_AUDIT_AI_TIMEOUT_SECONDS: int = 90
 
     @property
     def cors_origin_list(self) -> list[str]:

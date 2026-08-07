@@ -6,7 +6,7 @@ from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from app.services.weekly_planning_audit import WeeklyPlanningAuditReport
+from app.services.weekly_planning_audit import REPORT_VERSION, WeeklyPlanningAuditReport
 
 
 SHEET_NAMES = [
@@ -152,7 +152,7 @@ def build_weekly_planning_audit_workbook(
     delivery.append([
         "Java e raportuar", "Data dhe ora e gjenerimit", "Kontrolli", "Timezone",
         "Marrësit", "Statusi i dërgimit", "Message ID", "Numri i tentimit",
-        "Report run ID", "Versioni i raportit",
+        "Report run ID", "Versioni i raportit", "Mënyra e analizës", "Modeli AI",
     ])
     recipient_text = "; ".join(
         f"{kind.upper()}: {', '.join(values)}" for kind, values in recipients.items() if values
@@ -167,7 +167,9 @@ def build_weekly_planning_audit_workbook(
         message_id or "",
         attempt_number,
         run_id,
-        "1.0",
+        REPORT_VERSION,
+        "AI + rregulla deterministe" if report.ai_status == "used" else "Rregulla deterministe (AI fallback)",
+        report.ai_model or "",
     ])
     delivery.cell(2, 2).number_format = "DD.MM.YYYY HH:MM"
     _style_sheet(delivery)

@@ -95,6 +95,8 @@ class WeeklyPlanningAuditPreviewOut(BaseModel):
     excluded_full_leave: list[str]
     partial_leave_users: list[str]
     abbreviation_version: str
+    ai_status: str
+    ai_model: str | None = None
 
 
 class WeeklyPlanningAuditHistoryOut(BaseModel):
