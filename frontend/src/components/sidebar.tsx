@@ -212,7 +212,9 @@ export function Sidebar({ role }: { role: UserRole }) {
     role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const { isOpen, isDesktop, setIsOpen } = useSidebar()
   const { count } = useWaitingConfirmationGa()
-  const standardsActive = pathname === "/standards/excel" || pathname.startsWith("/standards/excel/")
+  const excelStandardsActive = pathname === "/standards/excel" || pathname.startsWith("/standards/excel/")
+  const wordStandardsActive = pathname === "/standards/word" || pathname.startsWith("/standards/word/")
+  const standardsActive = excelStandardsActive || wordStandardsActive
   const [standardsOpen, setStandardsOpen] = React.useState(standardsActive)
   const [resolvedProjectRoute, setResolvedProjectRoute] = React.useState<"dev" | "pcm" | "design" | null>(null)
   const genericProjectId = React.useMemo(() => {
@@ -598,22 +600,40 @@ export function Sidebar({ role }: { role: UserRole }) {
             <ChevronDown className={cn("h-4 w-4 transition-transform", standardsOpen && "rotate-180")} />
           </button>
           {standardsOpen ? (
-            <Link
-              href="/standards/excel"
-              onMouseEnter={() => router.prefetch("/standards/excel")}
-              onFocus={() => router.prefetch("/standards/excel")}
-              onClick={() => {
-                if (!isDesktop) setIsOpen(false)
-              }}
-              className={cn(
-                "ml-6 mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
-                standardsActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground"
-              )}
-            >
-              <FileSpreadsheet className={cn("h-4 w-4", standardsActive ? "text-primary" : "text-muted-foreground")} />
-              Excel
-            </Link>
+            <div className="space-y-1">
+              <Link
+                href="/standards/excel"
+                onMouseEnter={() => router.prefetch("/standards/excel")}
+                onFocus={() => router.prefetch("/standards/excel")}
+                onClick={() => {
+                  if (!isDesktop) setIsOpen(false)
+                }}
+                className={cn(
+                  "ml-6 mt-1 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  excelStandardsActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground"
+                )}
+              >
+                <FileSpreadsheet className={cn("h-4 w-4", excelStandardsActive ? "text-primary" : "text-muted-foreground")} />
+                Excel
+              </Link>
+              <Link
+                href="/standards/word"
+                onMouseEnter={() => router.prefetch("/standards/word")}
+                onFocus={() => router.prefetch("/standards/word")}
+                onClick={() => {
+                  if (!isDesktop) setIsOpen(false)
+                }}
+                className={cn(
+                  "ml-6 flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+                  "hover:bg-sidebar-accent hover:text-sidebar-accent-foreground",
+                  wordStandardsActive ? "bg-sidebar-accent text-sidebar-accent-foreground" : "text-muted-foreground"
+                )}
+              >
+                <FileText className={cn("h-4 w-4", wordStandardsActive ? "text-primary" : "text-muted-foreground")} />
+                Word
+              </Link>
+            </div>
           ) : null}
         </div>
       </nav>

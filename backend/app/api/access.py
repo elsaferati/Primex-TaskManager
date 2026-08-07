@@ -37,6 +37,8 @@ def ensure_task_editor(user: User, task: "Task") -> None:
       - user is ADMIN or MANAGER
       - or user created the task (task.created_by)
       - or user is the primary assignee (task.assigned_to)
+      - or user is in the task's department (project/fast task collaboration)
+      - or user is any explicit TaskAssignee
     """
     from app.models.task import Task  # local import to avoid circular
 
@@ -56,6 +58,13 @@ def ensure_task_editor(user: User, task: "Task") -> None:
         assignees = getattr(task, "assignees") or []
         if any(ta.user_id == user.id for ta in assignees):
             return
+    # Same-department staff can edit project/fast tasks (matches create_task / update_task).
+    if (
+        getattr(task, "department_id", None) is not None
+        and user.department_id is not None
+        and user.department_id == task.department_id
+    ):
+        return
     raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 def ensure_admin(user: User) -> None:

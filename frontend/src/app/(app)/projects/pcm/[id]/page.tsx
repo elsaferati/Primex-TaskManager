@@ -6430,7 +6430,18 @@ export default function PcmProjectPage() {
           }),
         })
         if (!res.ok) {
-          toast.error("Failed to update task")
+          let detail = "Failed to update task"
+          try {
+            const data = (await res.json()) as { detail?: unknown }
+            if (typeof data?.detail === "string" && data.detail.trim()) {
+              detail = data.detail
+            } else if (Array.isArray(data?.detail)) {
+              detail = data.detail.map((e: any) => e.msg || String(e)).join(", ")
+            }
+          } catch {
+            // ignore parse errors
+          }
+          toast.error(detail)
           return
         }
         const updated = (await res.json()) as Task
@@ -6447,8 +6458,9 @@ export default function PcmProjectPage() {
         }))
         cancelEditTask()
         toast.success("Task updated")
-      } catch {
-        toast.error("Failed to update task")
+      } catch (error) {
+        const message = error instanceof Error && error.message ? error.message : "Failed to update task"
+        toast.error(message)
       } finally {
         setSavingTaskEdit(false)
       }

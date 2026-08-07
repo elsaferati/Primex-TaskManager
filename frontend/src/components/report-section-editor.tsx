@@ -16,7 +16,11 @@ const HEADER_LABELS = new Set([
   "PER",
   "TITLE",
   "NOTE",
+  "PYETJA",
   "TIPI",
+  "TYPE",
+  "KATEGORIA",
+  "LISTA",
   "COUNT",
   "DISK",
   "TIME",
@@ -78,14 +82,15 @@ function compactWidthForHeader(header: string) {
   const value = normalizeHeader(header)
   if (value === "NR") return "48px"
   if (value === "WHO" || value === "FROM" || value === "PER") return "64px"
-  if (value === "DISK") return "58px"
+  if (value === "DISK") return "40px"
   if (value === "TIME") return "76px"
   if (value === "DATA" || value === "DATE") return "96px"
   if (value === "LATE") return "88px"
   if (value === "COUNT") return "72px"
-  if (value === "TIPI") return "auto"
-  if (value === "MBAJTUR?" || value === "MBAJTUR" || value === "ANULUAR" || value === "PA STATUS") return "78px"
-  if (value === "TITLE" || value === "NOTE") return "minmax(280px, 1fr)"
+  if (value === "TYPE" || value === "TIPI") return "max-content"
+  if (value === "KATEGORIA" || value === "LISTA") return "max-content"
+  if (value === "MBAJTUR?" || value === "MBAJTUR" || value === "ANULUAR" || value === "PA STATUS") return "44px"
+  if (value === "TITLE" || value === "NOTE" || value === "PYETJA") return "minmax(280px, 1fr)"
   return "minmax(90px, auto)"
 }
 
@@ -96,6 +101,29 @@ function tableGridTemplate(cells: string[]) {
 function isCompactMetricTable(headers: string[]) {
   const normalized = headers.map(normalizeHeader)
   return normalized.includes("TIPI") && normalized.includes("COUNT") && !normalized.includes("TITLE")
+}
+
+function isNarrowTableHeader(header: string) {
+  return (
+    header === "NR" ||
+    header === "WHO" ||
+    header === "FROM" ||
+    header === "PER" ||
+    header === "TYPE" ||
+    header === "TIPI" ||
+    header === "DISK" ||
+    header === "MBAJTUR?" ||
+    header === "MBAJTUR" ||
+    header === "ANULUAR" ||
+    header === "PA STATUS" ||
+    header === "KATEGORIA" ||
+    header === "LISTA" ||
+    header === "COUNT" ||
+    header === "LATE" ||
+    header === "DATA" ||
+    header === "DATE" ||
+    header === "TIME"
+  )
 }
 
 function trimTableCell(value: string) {
@@ -454,42 +482,80 @@ export function ReportSectionPreview({ body }: { body: string }) {
 
   type TablePreviewItem = Extract<PreviewItem, { kind: "table" }>
 
-  const renderTableRow = (item: TablePreviewItem) => {
-    const tone = item.isHeader
-      ? "bg-slate-200 font-semibold"
-      : rowTone(item.label, item.cells, item.headers)
-    const visible = withoutStatusColumn(item.headers, item.cells)
-    const template =
-      visible.headers.length !== item.headers.length
-        ? tableGridTemplate(visible.headers)
-        : item.template
+  const renderDataTable = (rows: TablePreviewItem[], key: string) => {
+    const headers = withoutStatusColumn(rows[0].headers, rows[0].cells).headers
+    const hasWideColumn = headers.some((header) => {
+      const name = normalizeHeader(header)
+      return name === "TITLE" || name === "NOTE" || name === "PYETJA"
+    })
     return (
       <div
-        key={item.key}
-        className={`grid border-b border-slate-200 last:border-b-0 ${tone}`}
-        style={{ gridTemplateColumns: template }}
+        key={key}
+        className={`${hasWideColumn ? "w-full" : "w-max max-w-full"} border-b border-slate-200 last:border-b-0`}
       >
-        {visible.cells.map((cell, cellIndex) => {
-          const header = normalizeHeader(visible.headers[cellIndex] || "")
-          return (
-            <div
-              key={cellIndex}
-              className={`border-r border-slate-200 px-2 py-1.5 last:border-r-0 ${
-                item.isHeader ? "" : diskCellTone(visible.headers, visible.cells, cellIndex)
-              }`}
-            >
-              <span
-                className={
-                  header === "NR" || header === "WHO" || header === "COUNT"
-                    ? "whitespace-nowrap"
-                    : "whitespace-pre-wrap break-words"
-                }
-              >
-                {cell || "-"}
-              </span>
-            </div>
-          )
-        })}
+        <table
+          className={`${hasWideColumn ? "w-full" : ""} border-collapse text-xs leading-5 text-slate-950`}
+        >
+          <thead>
+            {rows
+              .filter((row) => row.isHeader)
+              .map((row) => {
+                const visible = withoutStatusColumn(row.headers, row.cells)
+                return (
+                  <tr key={row.key} className="bg-slate-200 font-semibold">
+                    {visible.cells.map((cell, cellIndex) => {
+                      const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
+                      const narrow = isNarrowTableHeader(header)
+                      return (
+                        <th
+                          key={cellIndex}
+                          className={`border-b border-r border-slate-300 py-1.5 align-top last:border-r-0 ${
+                            header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
+                              ? "px-1 text-center"
+                              : "px-2 text-left"
+                          } ${narrow ? "w-[1%] whitespace-nowrap" : ""} ${
+                            header === "NR" ? "w-8" : ""
+                          } ${header === "WHO" ? "w-10" : ""}`}
+                        >
+                          {trimTableCell(cell) || "-"}
+                        </th>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
+          </thead>
+          <tbody>
+            {rows
+              .filter((row) => !row.isHeader)
+              .map((row) => {
+                const visible = withoutStatusColumn(row.headers, row.cells)
+                const tone = rowTone(row.label, row.cells, row.headers)
+                return (
+                  <tr key={row.key} className={tone}>
+                    {visible.cells.map((cell, cellIndex) => {
+                      const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
+                      const narrow = isNarrowTableHeader(header)
+                      return (
+                        <td
+                          key={cellIndex}
+                          className={`border-b border-r border-slate-200 py-1.5 align-top last:border-r-0 ${
+                            header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
+                              ? "px-1 text-center"
+                              : "px-2"
+                          } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${
+                            narrow ? "w-[1%] whitespace-nowrap" : "whitespace-pre-wrap break-words"
+                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" ? "w-10" : ""}`}
+                        >
+                          {trimTableCell(cell) || "-"}
+                        </td>
+                      )
+                    })}
+                  </tr>
+                )
+              })}
+          </tbody>
+        </table>
       </div>
     )
   }
@@ -628,7 +694,17 @@ export function ReportSectionPreview({ body }: { body: string }) {
       continue
     }
 
-    renderedItems.push(renderTableRow(item))
+    const group: TablePreviewItem[] = [item]
+    while (
+      index + 1 < previewItems.length &&
+      previewItems[index + 1].kind === "table" &&
+      !isCompactMetricTable((previewItems[index + 1] as TablePreviewItem).headers) &&
+      !(previewItems[index + 1] as TablePreviewItem).isHeader
+    ) {
+      index += 1
+      group.push(previewItems[index] as TablePreviewItem)
+    }
+    renderedItems.push(renderDataTable(group, group[0].key))
   }
 
   return (

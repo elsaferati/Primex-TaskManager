@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth"
 
-const SLOTS = ["09:00", "09:30", "10:00", "10:30", "11:00"]
+const SLOTS = ["10:30"]
 
 type Settings = {
   id: string
@@ -71,6 +71,8 @@ type Preview = {
   excluded_full_leave: string[]
   partial_leave_users: string[]
   abbreviation_version: string
+  ai_status: string
+  ai_model: string | null
 }
 
 type Run = {
@@ -107,6 +109,17 @@ function nextMonday(): string {
   ].join("-")
 }
 
+function reportingFriday(monday: string): string {
+  const value = new Date(`${monday}T12:00:00`)
+  if (Number.isNaN(value.getTime())) return "—"
+  value.setDate(value.getDate() + 4)
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, "0"),
+    String(value.getDate()).padStart(2, "0"),
+  ].join("-")
+}
+
 function statusClass(value: string) {
   if (value === "SENT") return "bg-emerald-100 text-emerald-800"
   if (value === "FAILED") return "bg-red-100 text-red-800"
@@ -127,7 +140,7 @@ export default function WeeklyPlanningAuditPage() {
   const [history, setHistory] = React.useState<Run[]>([])
   const [preview, setPreview] = React.useState<Preview | null>(null)
   const [weekStart, setWeekStart] = React.useState(nextMonday)
-  const [slot, setSlot] = React.useState("09:00")
+  const [slot, setSlot] = React.useState("10:30")
   const [loading, setLoading] = React.useState(false)
   const [recipientsTo, setRecipientsTo] = React.useState("")
   const [recipientsCc, setRecipientsCc] = React.useState("")
@@ -160,15 +173,21 @@ export default function WeeklyPlanningAuditPage() {
       setTimezone(value.timezone)
       setRetentionDays(String(value.retention_days))
       setEnabled(value.enabled)
+    } else {
+      toast.error(`Settings: ${await readError(settingsResponse)}`)
     }
     if (historyResponse.ok) {
       const value = (await historyResponse.json()) as { items: Run[] }
       setHistory(value.items)
+    } else {
+      toast.error(`Delivery history: ${await readError(historyResponse)}`)
     }
   }, [apiFetch])
 
   React.useEffect(() => {
-    if (user && (user.role === "ADMIN" || user.role === "MANAGER")) void load()
+    if (!user || (user.role !== "ADMIN" && user.role !== "MANAGER")) return
+    const timer = window.setTimeout(() => void load(), 0)
+    return () => window.clearTimeout(timer)
   }, [load, user])
 
   const previewReport = async () => {
@@ -348,6 +367,9 @@ export default function WeeklyPlanningAuditPage() {
             <Button variant="outline" onClick={() => void runAction("generate")} disabled={loading}><FileSpreadsheet className="mr-2 h-4 w-4" /> Generate Excel</Button>
             <Button onClick={() => void runAction("generate-and-send")} disabled={loading}><Send className="mr-2 h-4 w-4" /> Generate and Send</Button>
           </div>
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            Java që do të auditohet: <strong>{weekStart} – {reportingFriday(weekStart)}</strong>
+          </div>
           <p className="text-xs text-muted-foreground">Every action reads the current PrimeFlow state; existing tasks are never changed.</p>
         </CardContent>
       </Card>
@@ -357,11 +379,16 @@ export default function WeeklyPlanningAuditPage() {
           <Card>
             <CardHeader><CardTitle className="text-sm">Preview summary: {preview.week_start} – {preview.week_end}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-2 text-sm md:grid-cols-4">
+              <div className="grid gap-2 text-sm md:grid-cols-4 lg:grid-cols-8">
+                <div>Generated: <strong>{new Date(preview.generated_at).toLocaleString()}</strong></div>
                 <div>Included: <strong>{preview.people.length}</strong></div>
                 <div>Full-week PV excluded: <strong>{preview.excluded_full_leave.length}</strong></div>
                 <div>Partial PV: <strong>{preview.partial_leave_users.length}</strong></div>
                 <div>Errors: <strong>{preview.errors.length}</strong></div>
+                <div>Critical: <strong>{preview.errors.filter((item) => item.severity === "CRITICAL").length}</strong></div>
+                <div>High: <strong>{preview.errors.filter((item) => item.severity === "HIGH").length}</strong></div>
+                <div>PX dictionary: <strong>{preview.abbreviation_version}</strong></div>
+                <div>Analysis: <strong>{preview.ai_status === "used" ? `AI (${preview.ai_model})` : "Deterministic fallback"}</strong></div>
               </div>
               <Table>
                 <TableHeader><TableRow><TableHead>Person</TableHead><TableHead>Department</TableHead><TableHead>PV</TableHead><TableHead>Main focus</TableHead><TableHead>Tasks</TableHead><TableHead>Errors</TableHead></TableRow></TableHeader>
@@ -379,11 +406,11 @@ export default function WeeklyPlanningAuditPage() {
             <CardHeader><CardTitle className="text-sm">Detected errors</CardTitle></CardHeader>
             <CardContent>
               <Table containerClassName="max-h-[520px] overflow-auto">
-                <TableHeader><TableRow><TableHead>Person</TableHead><TableHead>Date</TableHead><TableHead>Current title</TableHead><TableHead>Problem</TableHead><TableHead>Correction</TableHead><TableHead>Rule</TableHead><TableHead>Severity</TableHead></TableRow></TableHeader>
+                <TableHeader><TableRow><TableHead>Person</TableHead><TableHead>Date</TableHead><TableHead>Current title</TableHead><TableHead>Problem</TableHead><TableHead>Proposed title</TableHead><TableHead>Correction</TableHead><TableHead>Rule</TableHead><TableHead>Severity</TableHead></TableRow></TableHeader>
                 <TableBody>{preview.errors.map((error, index) => (
                   <TableRow key={`${error.task_id || "user"}-${error.rule_code}-${index}`}>
                     <TableCell>{error.employee}</TableCell><TableCell>{error.task_date || "—"}</TableCell><TableCell className="max-w-xs">{error.current_title || "—"}</TableCell>
-                    <TableCell className="max-w-sm">{error.problem}</TableCell><TableCell className="max-w-sm">{error.correction}</TableCell><TableCell>{error.rule_code}</TableCell>
+                    <TableCell className="max-w-sm">{error.problem}</TableCell><TableCell className="max-w-xs">{error.proposed_title || "—"}</TableCell><TableCell className="max-w-sm">{error.correction}</TableCell><TableCell>{error.rule_code}</TableCell>
                     <TableCell><span className={`rounded px-2 py-1 text-xs font-medium ${severityClass(error.severity)}`}>{error.severity}</span></TableCell>
                   </TableRow>
                 ))}</TableBody>

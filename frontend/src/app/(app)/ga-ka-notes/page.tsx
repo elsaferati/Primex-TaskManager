@@ -818,6 +818,24 @@ function getInitials(label: string) {
   return `${parts[0][0]}${parts[1][0]}`.toUpperCase()
 }
 
+function formatApiDetail(detail: unknown, fallback: string): string {
+  if (typeof detail === "string" && detail.trim()) return detail
+  if (Array.isArray(detail)) {
+    const parts = detail
+      .map((item) => {
+        if (typeof item === "string") return item
+        if (item && typeof item === "object" && "msg" in item) {
+          return String((item as { msg?: unknown }).msg || "")
+        }
+        return ""
+      })
+      .map((part) => part.trim())
+      .filter(Boolean)
+    if (parts.length) return parts.join("; ")
+  }
+  return fallback
+}
+
 function noteToTaskTitle(content: string) {
   const cleaned = content
     .replace(/\r\n/g, "\n")
@@ -1873,10 +1891,8 @@ export default function GaKaNotesPage() {
       } else {
         let errorMessage = "Failed to update note"
         try {
-          const errorData = (await res.json()) as { detail?: string }
-          if (errorData?.detail) {
-            errorMessage = errorData.detail
-          }
+          const errorData = (await res.json()) as { detail?: unknown }
+          errorMessage = formatApiDetail(errorData?.detail, errorMessage)
         } catch {
           // Keep the generic fallback message.
         }

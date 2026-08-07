@@ -45,8 +45,83 @@ type Draft = {
   updated_at?: string | null
 }
 
-function sectionGroupLabel(title: string, index: number) {
-  if (index === 0) return "Manual questions"
+function compactSectionTitle(value: string) {
+  return value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
+}
+
+function canonicalMeetingsSectionTitle(title: string) {
+  const key = compactSectionTitle(title)
+  if (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3")) {
+    return "(GA) TIKETAT E STD? RAPORTOHEN NE M3"
+  }
+  if (key.includes("M3DETGAMBYLLJAMEHV")) {
+    return "(GA) M3 DET GA MBYLLJA ME HV?"
+  }
+  return title
+}
+
+function collapseMeetingsSections(sections: Section[]): Section[] {
+  const displayOrder = [
+    "A JEMI BRENDA MESATARES ME PROJEKTE/",
+    "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
+    "(GA) M3 DET GA MBYLLJA ME HV?",
+    "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?",
+    "DET. PA PROGRES (PINK)?",
+    "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?",
+    "N- (GA) PV/FESTE?",
+    "N- (GA) SHIKOHET COMMON VIEW NESER, VETEM DETYRAT E REJA ME TE KALTER, 08:00 DHE ME DEADLINE?",
+    "N- (GA) TAKIMET EXTERNE/ TAKIMET INTERNE/ BZ ME GA/BLLOK?",
+    "N- A KA DETYRA 1H PA SLOT?",
+    "N- (GA/KA) KUSH KA DET PERSONALISHT?",
+  ]
+  const manuals = new Set(["A JEMI BRENDA MESATARES ME PROJEKTE/"])
+  const placeholder = "(Ploteso manualisht)"
+  const byTitle = new Map<string, string>()
+  const extras: Section[] = []
+  const seenExtra = new Set<string>()
+
+  const preferBody = (current: string, incoming: string) => {
+    const cur = current.trim()
+    const inc = incoming.trim()
+    if (!cur || cur === placeholder) return incoming || current
+    if (!inc || inc === placeholder) return current
+    return current
+  }
+
+  for (const section of sections) {
+    const title = canonicalMeetingsSectionTitle(section.title.trim())
+    if (!title) continue
+    if (displayOrder.includes(title)) {
+      const existing = byTitle.get(title)
+      byTitle.set(title, existing == null ? section.body : preferBody(existing, section.body))
+      continue
+    }
+    const key = compactSectionTitle(title)
+    if (!key || seenExtra.has(key)) continue
+    seenExtra.add(key)
+    extras.push({ title, body: section.body })
+  }
+
+  const ordered: Section[] = []
+  for (const title of displayOrder) {
+    if (byTitle.has(title)) ordered.push({ title, body: byTitle.get(title) || "" })
+    else if (manuals.has(title)) ordered.push({ title, body: placeholder })
+  }
+  let insertAt = 0
+  for (let index = 0; index < ordered.length; index += 1) {
+    if (manuals.has(ordered[index].title)) insertAt = index + 1
+  }
+  return [...ordered.slice(0, insertAt), ...extras, ...ordered.slice(insertAt)]
+}
+
+function sectionGroupLabel(title: string, _index?: number) {
+  const key = compactSectionTitle(title)
+  if (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3")) {
+    return "Auto-filled from PrimeFlow"
+  }
+  if (key.includes("M3DETGAMBYLLJAMEHV")) {
+    return "Auto-filled from PrimeFlow"
+  }
   const knownAuto = [
     "(GA) M3 DET GA MBYLLJA ME HV?",
     "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
@@ -59,9 +134,7 @@ function sectionGroupLabel(title: string, index: number) {
     "N- A KA DETYRA 1H PA SLOT?",
     "N- (GA/KA) KUSH KA DET PERSONALISHT?",
   ]
-  const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
-  const key = compact(title)
-  if (knownAuto.some((auto) => compact(auto) === key)) return "Auto-filled from PrimeFlow"
+  if (knownAuto.some((auto) => compactSectionTitle(auto) === key)) return "Auto-filled from PrimeFlow"
   return "Manual questions"
 }
 
@@ -173,7 +246,14 @@ export default function MeetingsReportPage() {
   const [loadingHistory, setLoadingHistory] = React.useState(false)
 
   const applyDraft = React.useCallback((nextDraft: Draft | null) => {
-    setDraft(nextDraft)
+    if (!nextDraft) {
+      setDraft(null)
+      return
+    }
+    setDraft({
+      ...nextDraft,
+      sections: collapseMeetingsSections(nextDraft.sections || []),
+    })
   }, [])
 
   const applySettings = React.useCallback((nextSettings: ReportSettings) => {

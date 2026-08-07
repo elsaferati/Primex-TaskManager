@@ -222,6 +222,11 @@ def _should_add_empty_project_entry_for_department(
     return False
 
 
+def _is_note_origin_task(task: Task) -> bool:
+    """GA/PX-JAV note copies keep their own start→due schedule per assignee."""
+    return getattr(task, "ga_note_origin_id", None) is not None or getattr(task, "plan_note_origin_id", None) is not None
+
+
 def _parse_production_date(internal_notes: str | None) -> date | None:
     """Parse production_date (YYYY-MM-DD) from task internal_notes."""
     if not internal_notes:
@@ -1429,13 +1434,14 @@ async def weekly_planner(
         if due is None:
             return None, None
         
-        # MST/TT project tasks: show only on due_date (ignore start_date)
+        # MST/TT project tasks: show only on due_date (ignore start_date),
+        # except GA/PX note copies which keep each assignee's start→due window.
         is_mst_tt_project = False
         if task.project_id and task.project_id in project_map:
             project = project_map[task.project_id]
             if project:
                 is_mst_tt_project = _is_mst_or_tt_project(project)
-        if is_mst_tt_project and task.project_id is not None:
+        if is_mst_tt_project and task.project_id is not None and not _is_note_origin_task(task):
             return due, due
 
         if task.start_date is not None:
@@ -1932,7 +1938,8 @@ async def weekly_table_planner(
                 f"start_date_tzinfo={task.start_date.tzinfo if task.start_date and hasattr(task.start_date, 'tzinfo') else None}"
             )
         
-        # MST project tasks: show only on due_date (ignore start_date)
+        # MST project tasks: show only on due_date (ignore start_date).
+        # GA/PX note copies keep each assignee's explicit start→due schedule.
         task_dept_id = task.department_id
         project_dept_id = None
         is_mst_project = False
@@ -1949,13 +1956,16 @@ async def weekly_table_planner(
             else:
                 # Project should already be in map, but if not, we'll check task's department
                 pass
-        if is_mst_project and task.project_id is not None:
+        note_origin = _is_note_origin_task(task)
+        if is_mst_project and task.project_id is not None and not note_origin:
             return due, due
 
-        # For Product Content department, tasks should only show on due_date, not from start_date to due_date
+        # For Product Content department, regular project tasks should only show on due_date,
+        # not from start_date to due_date. Note-origin copies are personal schedules and must
+        # keep start→due (e.g. OH Finish AM across Mon–Fri on the PCM board).
         # Check both task's department_id and project's department_id (in case task doesn't have department_id set)
         is_pc_task = (task_dept_id in pc_dept_ids) or (project_dept_id in pc_dept_ids)
-        if is_pc_task and task.project_id is not None:
+        if is_pc_task and task.project_id is not None and not note_origin:
             # Product Content project tasks: show only on due_date (ignore start_date),
             # except for TT tasks which should span start_date -> due_date.
             if not is_tt_project:
@@ -2787,24 +2797,27 @@ async def weekly_table_planner(
                                 am_fast_tasks.append(entry)
                     # Project tasks (have project_id)
                     elif task.project_id is not None:
+                        # GA/PX-JAV assignee copies are personal work items. Do not hide them
+                        # behind project-slot removals on another department's board.
+                        note_origin = task.ga_note_origin_id is not None or task.plan_note_origin_id is not None
                         if is_both:
                             # Add to both AM and PM
-                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM") and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
+                            if (note_origin or not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM")) and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
                                 if task.project_id not in am_projects_map:
                                     am_projects_map[task.project_id] = []
                                 am_projects_map[task.project_id].append(task)
-                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM") and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
+                            if (note_origin or not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM")) and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
                                 if task.project_id not in pm_projects_map:
                                     pm_projects_map[task.project_id] = []
                                 pm_projects_map[task.project_id].append(task)
                         elif is_pm:
-                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM") and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
+                            if (note_origin or not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM")) and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
                                 if task.project_id not in pm_projects_map:
                                     pm_projects_map[task.project_id] = []
                                 pm_projects_map[task.project_id].append(task)
                         else:
                             # Default to AM if not PM and not both
-                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM") and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
+                            if (note_origin or not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM")) and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
                                 if task.project_id not in am_projects_map:
                                     am_projects_map[task.project_id] = []
                                 am_projects_map[task.project_id].append(task)

@@ -45,11 +45,11 @@ from app.schemas.task import (
 )
 from pydantic import BaseModel, Field
 from app.services.audit import add_audit_log
-from app.services.notifications import add_notification, publish_notification
+from app.services.notifications import add_notification, notification_task_preview, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_task_daily_progress
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
-from app.services.daily_report_logic import business_days_between, parse_ko_user_id
+from app.services.daily_report_logic import business_days_between
 from app.services.project_classification import (
     is_mst_or_tt_project as _is_mst_or_tt_project,
     is_mst_project,
@@ -909,33 +909,12 @@ async def _sync_control_task_owner_from_ko(
     task: Task,
     project: Project | None = None,
 ) -> uuid.UUID | None:
-    if task.project_id is None:
-        return None
+    """
+    Keep KO on CONTROL MST/TT (PCM) tasks as an assignee for visibility/permissions.
 
-    phase_value = task.phase.value if isinstance(task.phase, ProjectPhaseStatus) else str(task.phase or "").strip()
-    if phase_value != ProjectPhaseStatus.CONTROL.value:
-        return None
-
-    if project is None:
-        project = (
-            await db.execute(select(Project).where(Project.id == task.project_id))
-        ).scalar_one_or_none()
-    if project is None or not _is_mst_or_tt_project(project):
-        return None
-
-    ko_user_id = parse_ko_user_id(task.internal_notes)
-    if ko_user_id is None:
-        return None
-
-    ko_user_exists = (
-        await db.execute(select(User.id).where(User.id == ko_user_id))
-    ).scalar_one_or_none()
-    if ko_user_exists is None:
-        return None
-
-    task.assigned_to = ko_user_id
-    await _replace_task_assignees(db, task, [ko_user_id])
-    return ko_user_id
+    Do not overwrite task.assigned_to — PCM UI keeps Assigned and KO as separate fields.
+    """
+    return await ensure_ko_user_is_task_assignee(db, task=task, project=project)
 
 
 async def _users_by_usernames(db: AsyncSession, usernames: set[str]) -> list[User]:
@@ -1861,7 +1840,7 @@ async def create_task(
                         user_id=assignee_id,
                         type=NotificationType.assignment,
                         title="Task assigned",
-                        body=t.title,
+                        body=notification_task_preview(t.title),
                         data={"task_id": str(t.id)},
                     )
                 )
@@ -1987,7 +1966,7 @@ async def create_task(
                                 user_id=assignee_id,
                                 type=NotificationType.assignment,
                                 title="Task assigned",
-                                body=t.title,
+                                body=notification_task_preview(t.title),
                                 data={"task_id": str(t.id)},
                             )
                         )
@@ -2092,7 +2071,7 @@ async def create_task(
                     user_id=assignee_id,
                     type=NotificationType.assignment,
                     title="Task assigned",
-                    body=t.title,
+                    body=notification_task_preview(t.title),
                     data={"task_id": str(t.id)},
                 )
             )
@@ -2192,7 +2171,7 @@ async def create_task(
                     user_id=assignee_id,
                     type=NotificationType.assignment,
                     title="Task assigned",
-                    body=t.title,
+                    body=notification_task_preview(t.title),
                     data={"task_id": str(t.id)},
                 )
             )
@@ -2343,7 +2322,7 @@ async def create_task(
                 user_id=assignee.id,
                 type=NotificationType.assignment,
                 title="Task assigned",
-                body=task.title,
+                body=notification_task_preview(task.title),
                 data={"task_id": str(task.id)},
             )
         )
@@ -2360,7 +2339,7 @@ async def create_task(
                     user_id=mu.id,
                     type=NotificationType.mention,
                     title="Mentioned in task",
-                    body=task.title,
+                    body=notification_task_preview(task.title),
                     data={"task_id": str(task.id)},
                 )
             )
@@ -2398,7 +2377,9 @@ async def update_task(
     is_confirmation_assignee = task.confirmation_assignee_id is not None and task.confirmation_assignee_id == user.id
     
     # Check if user has permission to edit this task:
-    # Allow: Admin, Manager, task creator, primary assignee, or any assignee in TaskAssignee table
+    # Allow: Admin, Manager, creator, assignee, confirmation assignee, or same-department member.
+    # Department access matches create_task so PCM/project/fast task boards remain editable
+    # by staff who collaborate on tasks they did not personally create or own.
     can_edit = False
     if user.role in (UserRole.ADMIN, UserRole.MANAGER):
         can_edit = True
@@ -2408,7 +2389,13 @@ async def update_task(
         can_edit = True
     elif is_confirmation_assignee:
         can_edit = True
-    
+    elif (
+        task.department_id is not None
+        and user.department_id is not None
+        and user.department_id == task.department_id
+    ):
+        can_edit = True
+
     if not can_edit:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
@@ -2446,7 +2433,7 @@ async def update_task(
         and user.role in (UserRole.ADMIN, UserRole.MANAGER)
     )
     # Department access check removed since can_edit above already verified
-    # that user is admin, manager, creator, or assignee
+    # that user is admin, manager, creator, assignee, or same-department member
 
     if payload.status is not None and task.system_template_origin_id is not None:
         if is_assigned_to_task:
@@ -2646,31 +2633,35 @@ async def update_task(
                         user_id=assignee.id,
                         type=NotificationType.assignment,
                         title="Task assigned",
-                        body=task.title,
+                        body=notification_task_preview(task.title),
                         data={"task_id": str(task.id)},
                     )
                 )
-    elif payload.assigned_to is not None and payload.assigned_to != task.assigned_to and not is_fast_group_task:
-        # Allow task editors (creator, assignee, manager, admin) to change assignee
-        # ensure_manager_or_admin check removed - can_edit already verified permission
-        assigned_user = (await db.execute(select(User).where(User.id == payload.assigned_to))).scalar_one_or_none()
-        if assigned_user is None:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
-        if not allow_cross_department and assigned_user.department_id != task.department_id:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
-        task.assigned_to = payload.assigned_to
-        await _replace_task_assignees(db, task, [payload.assigned_to])
-        assignee_users = [assigned_user]
-        created_notifications.append(
-            add_notification(
-                db=db,
-                user_id=assigned_user.id,
-                type=NotificationType.assignment,
-                title="Task assigned",
-                body=task.title,
-                data={"task_id": str(task.id)},
+    elif _payload_has_field(payload, "assigned_to") and not is_fast_group_task:
+        # Allow task editors to change or clear the primary assignee.
+        if payload.assigned_to is None:
+            task.assigned_to = None
+            await _replace_task_assignees(db, task, [])
+            assignee_users = []
+        elif payload.assigned_to != task.assigned_to:
+            assigned_user = (await db.execute(select(User).where(User.id == payload.assigned_to))).scalar_one_or_none()
+            if assigned_user is None:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user not found")
+            if not allow_cross_department and assigned_user.department_id != task.department_id:
+                raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Assigned user must be in department")
+            task.assigned_to = payload.assigned_to
+            await _replace_task_assignees(db, task, [payload.assigned_to])
+            assignee_users = [assigned_user]
+            created_notifications.append(
+                add_notification(
+                    db=db,
+                    user_id=assigned_user.id,
+                    type=NotificationType.assignment,
+                    title="Task assigned",
+                    body=notification_task_preview(task.title),
+                    data={"task_id": str(task.id)},
+                )
             )
-        )
 
     current_status_raw = _enum_value(task.status)
     target_status_raw = payload.status.value if payload.status is not None else current_status_raw
@@ -2808,7 +2799,7 @@ async def update_task(
             )
     if (
         payload.assignees is not None
-        or payload.assigned_to is not None
+        or _payload_has_field(payload, "assigned_to")
         or payload.project_id is not None
         or start_date_set
         or due_date_set
@@ -2951,7 +2942,7 @@ async def update_task(
                 user_id=task.assigned_to,
                 type=NotificationType.status_change,
                 title="Task status changed",
-                body=task.title,
+                body=notification_task_preview(task.title),
                 data={"task_id": str(task.id), "status": _enum_value(task.status)},
             )
         )
@@ -2968,7 +2959,7 @@ async def update_task(
                     user_id=mu.id,
                     type=NotificationType.mention,
                     title="Mentioned in task",
-                    body=task.title,
+                    body=notification_task_preview(task.title),
                     data={"task_id": str(task.id)},
                 )
             )
@@ -3117,7 +3108,7 @@ async def update_task(
                             user_id=au.id,
                             type=NotificationType.assignment,
                             title="Task assigned",
-                            body=new_task.title,
+                            body=notification_task_preview(new_task.title),
                             data={"task_id": str(new_task.id)},
                         )
                   )

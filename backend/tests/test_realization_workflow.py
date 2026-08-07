@@ -10,6 +10,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
 from app.models.enums import RealizationLevel, RealizationPeriodStatus
+from app.api.routers.realization import _can_capture_current_week_final
 from app.services.realization_calculator import build_questions
 from app.services.realization_daily import _include_nonplanned_weekly_task
 from app.services.realization_evidence import (
@@ -142,6 +143,26 @@ class TestPolicy(unittest.TestCase):
 
 
 class TestWorkflow(unittest.TestCase):
+    def test_current_week_can_be_finalized_on_friday(self) -> None:
+        period = SimpleNamespace(
+            start_date=date(2026, 8, 3),
+            end_date=date(2026, 8, 7),
+            final_snapshot_id=None,
+        )
+        self.assertTrue(
+            _can_capture_current_week_final(period, today=date(2026, 8, 7))
+        )
+
+    def test_current_week_cannot_be_finalized_before_friday(self) -> None:
+        period = SimpleNamespace(
+            start_date=date(2026, 8, 3),
+            end_date=date(2026, 8, 7),
+            final_snapshot_id=None,
+        )
+        self.assertFalse(
+            _can_capture_current_week_final(period, today=date(2026, 8, 6))
+        )
+
     def test_old_task_completed_this_week_is_included_in_live_report(self) -> None:
         self.assertTrue(
             _include_nonplanned_weekly_task(

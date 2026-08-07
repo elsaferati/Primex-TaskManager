@@ -10,12 +10,12 @@ from pydantic import BaseModel, EmailStr, Field, field_validator
 
 class WeeklyPlanningAuditGenerateIn(BaseModel):
     week_start: date | None = None
-    slot: str = "09:00"
+    slot: str = "10:30"
 
     @field_validator("slot")
     @classmethod
     def validate_slot(cls, value: str) -> str:
-        if value not in {"09:00", "09:30", "10:00", "10:30", "11:00"}:
+        if value != "10:30":
             raise ValueError("Unsupported audit slot")
         return value
 
@@ -95,6 +95,9 @@ class WeeklyPlanningAuditPreviewOut(BaseModel):
     excluded_full_leave: list[str]
     partial_leave_users: list[str]
     abbreviation_version: str
+    ai_status: str
+    ai_model: str | None = None
+    executed_checks: list[str]
 
 
 class WeeklyPlanningAuditHistoryOut(BaseModel):

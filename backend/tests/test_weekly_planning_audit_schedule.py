@@ -6,20 +6,16 @@ from app.celery_app import celery_app
 
 
 class WeeklyPlanningAuditScheduleTests(unittest.TestCase):
-    def test_all_five_friday_schedule_entries_exist(self) -> None:
-        expected = {
-            "weekly-planning-audit-0900": ("09:00",),
-            "weekly-planning-audit-0930": ("09:30",),
-            "weekly-planning-audit-1000": ("10:00",),
-            "weekly-planning-audit-1030": ("10:30",),
-            "weekly-planning-audit-1100": ("11:00",),
-        }
-        for name, args in expected.items():
-            with self.subTest(name=name):
-                entry = celery_app.conf.beat_schedule[name]
-                self.assertEqual(entry["task"], "app.celery_tasks.send_weekly_planning_audit_report")
-                self.assertEqual(entry["args"], args)
-                self.assertIn("fri", str(entry["schedule"]))
+    def test_only_approved_1030_friday_schedule_exists(self) -> None:
+        names = [
+            name for name in celery_app.conf.beat_schedule
+            if name.startswith("weekly-planning-audit-") and name != "weekly-planning-audit-cleanup"
+        ]
+        self.assertEqual(names, ["weekly-planning-audit-1030"])
+        entry = celery_app.conf.beat_schedule[names[0]]
+        self.assertEqual(entry["task"], "app.celery_tasks.send_weekly_planning_audit_report")
+        self.assertEqual(entry["args"], ("10:30",))
+        self.assertIn("fri", str(entry["schedule"]))
         self.assertEqual(celery_app.conf.timezone, "Europe/Tirane")
 
 

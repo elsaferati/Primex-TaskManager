@@ -1,12 +1,19 @@
 from __future__ import annotations
 
 import io
+import hashlib
+import json
+import re
 
 from openpyxl import Workbook, load_workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from app.services.weekly_planning_audit import WeeklyPlanningAuditReport
+from app.services.weekly_planning_audit import (
+    REPORT_VERSION,
+    WeeklyPlanningAuditReport,
+    validate_report_integrity,
+)
 
 
 SHEET_NAMES = [
@@ -24,6 +31,29 @@ SEVERITY_FILLS = {
     "MEDIUM": PatternFill("solid", fgColor="FFE699"),
     "LOW": PatternFill("solid", fgColor="DDEBF7"),
 }
+TECHNICAL_MARKUP_TEXT = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
+FINAL_HEADERS = [
+    "Nr.", "Personi", "Departamenti", "Statusi PV", "Fokusi kryesor i javës",
+    "Numri i detyrave", "Numri i gabimeve", "Gabime kritike", "Gabime të larta",
+    "Vlerësimi", "Veprimi i kërkuar",
+]
+DETAIL_HEADERS = [
+    "Nr.", "Personi", "Departamenti", "Data", "Task ID", "Titulli aktual",
+    "Problemi konkret", "Titulli i propozuar", "Korrigjimi", "Kodi i rregullit",
+    "Çfarë kalon në Description/Notes", "Ashpërsia", "Fokusi i javës", "Burimi",
+]
+TITLE_HEADERS = [
+    "Personi", "Task ID", "Titulli aktual", "Problemi i titullit",
+    "Titulli i propozuar", "Çfarë kalon në Description/Notes",
+    "Shkurtesat e përdorura", "Burimi i rregullit",
+]
+ABBREVIATION_HEADERS = ["Shkurtesa", "Definicioni", "Versioni", "Burimi", "Data e përditësimit"]
+DELIVERY_HEADERS = [
+    "Java e raportuar", "Data dhe ora e gjenerimit", "Kontrolli", "Timezone",
+    "Marrësit", "Statusi i dërgimit", "Message/provider ID", "Numri i tentimit",
+    "Report run ID", "Versioni i raportit", "AI status", "Modeli AI",
+    "Versioni i fjalorit PX", "Checksum i payload-it",
+]
 
 
 def report_filename(report: WeeklyPlanningAuditReport) -> str:
@@ -34,11 +64,8 @@ def report_filename(report: WeeklyPlanningAuditReport) -> str:
 
 
 def report_subject(report: WeeklyPlanningAuditReport) -> str:
-    if report.week_start.month == report.week_end.month:
-        week_range = f"{report.week_start:%d}–{report.week_end:%d.%m.%Y}"
-    else:
-        week_range = f"{report.week_start:%d.%m.%Y}–{report.week_end:%d.%m.%Y}"
-    return f"Kontrolli {report.slot} – Raporti PF PLNF JAV {week_range} – {report.generated_at:%d.%m.%Y}"
+    week_range = f"{report.week_start:%d.%m.%Y}–{report.week_end:%d.%m.%Y}"
+    return f"Kontrolli {report.slot} | PLNF JAV {week_range} | Raporti {report.generated_at:%d.%m.%Y}"
 
 
 def report_email_body(report: WeeklyPlanningAuditReport) -> str:
@@ -90,17 +117,19 @@ def build_weekly_planning_audit_workbook(
     message_id: str | None = None,
     attempt_number: int = 0,
 ) -> bytes:
+    validate_report_integrity(report)
+    if any(error.rule_code == "FINISH_PERIOD_MISSING" for error in report.errors):
+        raise ValueError("AM/PM must not be audited by the Friday weekly planning report")
+    payload_checksum = hashlib.sha256(
+        json.dumps(report.to_dict(), ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
     workbook = Workbook()
     workbook.remove(workbook.active)
     for name in SHEET_NAMES:
         workbook.create_sheet(name)
 
     final = workbook["RAPORTI FINAL"]
-    final.append([
-        "Nr.", "Personi", "Departamenti", "Statusi PV", "Fokusi kryesor i javës",
-        "Numri i detyrave", "Numri i gabimeve", "Gabime kritike", "Gabime të larta",
-        "Vlerësimi", "Veprimi i kërkuar",
-    ])
+    final.append(FINAL_HEADERS)
     for index, person in enumerate(report.people, 1):
         final.append([
             index, person.employee, person.department, person.leave_status, person.focus,
@@ -110,27 +139,19 @@ def build_weekly_planning_audit_workbook(
     _style_sheet(final)
 
     details = workbook["DETAJET E GABIMEVE"]
-    details.append([
-        "Nr.", "Personi", "Departamenti", "Data", "Task ID", "Titulli aktual",
-        "Problemi konkret", "Titulli i propozuar", "Korrigjimi", "Kodi i rregullit",
-        "Ashpërsia", "Fokusi i javës", "Burimi",
-    ])
+    details.append(DETAIL_HEADERS)
     for index, error in enumerate(report.errors, 1):
         details.append([
             index, error.employee, error.department, error.task_date, error.task_id,
             error.current_title, error.problem, error.proposed_title, error.correction,
-            error.rule_code, error.severity, error.weekly_focus, error.source,
+            error.rule_code, error.move_to_notes, error.severity, error.weekly_focus, error.source,
         ])
         if error.task_date:
-            details.cell(details.max_row, 4).number_format = "DD.MM.YYYY"
-    _style_sheet(details, severity_column=11)
+            details.cell(details.max_row, 4).number_format = "dd.mm.yyyy"
+    _style_sheet(details, severity_column=12)
 
     cleanup = workbook["TITUJT - SHKURTESAT PX"]
-    cleanup.append([
-        "Personi", "Task ID", "Titulli aktual", "Problemi i titullit",
-        "Titulli i propozuar", "Çfarë kalon në Description/Notes",
-        "Shkurtesat e përdorura", "Burimi i rregullit",
-    ])
+    cleanup.append(TITLE_HEADERS)
     for item in report.title_cleanup:
         cleanup.append([
             item["employee"], item["task_id"], item["current_title"], item["title_problem"],
@@ -140,7 +161,7 @@ def build_weekly_planning_audit_workbook(
     _style_sheet(cleanup)
 
     abbreviations = workbook["SHKURTESAT PX"]
-    abbreviations.append(["Shkurtesa", "Definicioni", "Versioni", "Burimi", "Data e përditësimit"])
+    abbreviations.append(ABBREVIATION_HEADERS)
     for abbreviation, definition in report.abbreviations.items():
         abbreviations.append([
             abbreviation, definition, report.abbreviation_version,
@@ -149,11 +170,7 @@ def build_weekly_planning_audit_workbook(
     _style_sheet(abbreviations)
 
     delivery = workbook["DËRGIMI AUTOMATIK"]
-    delivery.append([
-        "Java e raportuar", "Data dhe ora e gjenerimit", "Kontrolli", "Timezone",
-        "Marrësit", "Statusi i dërgimit", "Message ID", "Numri i tentimit",
-        "Report run ID", "Versioni i raportit",
-    ])
+    delivery.append(DELIVERY_HEADERS)
     recipient_text = "; ".join(
         f"{kind.upper()}: {', '.join(values)}" for kind, values in recipients.items() if values
     )
@@ -167,9 +184,13 @@ def build_weekly_planning_audit_workbook(
         message_id or "",
         attempt_number,
         run_id,
-        "1.0",
+        REPORT_VERSION,
+        report.ai_status,
+        report.ai_model or "",
+        report.abbreviation_version,
+        payload_checksum,
     ])
-    delivery.cell(2, 2).number_format = "DD.MM.YYYY HH:MM"
+    delivery.cell(2, 2).number_format = "dd.mm.yyyy hh:mm"
     _style_sheet(delivery)
 
     output = io.BytesIO()
@@ -179,5 +200,43 @@ def build_weekly_planning_audit_workbook(
     verified = load_workbook(output, read_only=True, data_only=False)
     if verified.sheetnames != SHEET_NAMES:
         raise ValueError("Weekly planning audit workbook has an invalid sheet layout")
+    expected_headers = {
+        "RAPORTI FINAL": FINAL_HEADERS,
+        "DETAJET E GABIMEVE": DETAIL_HEADERS,
+        "TITUJT - SHKURTESAT PX": TITLE_HEADERS,
+        "SHKURTESAT PX": ABBREVIATION_HEADERS,
+        "DËRGIMI AUTOMATIK": DELIVERY_HEADERS,
+    }
+    for sheet_name, headers in expected_headers.items():
+        actual = [cell.value for cell in next(verified[sheet_name].iter_rows(min_row=1, max_row=1))]
+        if actual != headers:
+            raise ValueError(f"Weekly planning audit workbook has invalid headers: {sheet_name}")
+    if verified["RAPORTI FINAL"].max_row != len(report.people) + 1:
+        raise ValueError("Weekly planning audit summary row count is invalid")
+    if verified["DETAJET E GABIMEVE"].max_row != len(report.errors) + 1:
+        raise ValueError("Weekly planning audit detail row count is invalid")
+    for sheet in verified.worksheets:
+        for row in sheet.iter_rows():
+            for cell in row:
+                if isinstance(cell.value, str) and TECHNICAL_MARKUP_TEXT.search(cell.value):
+                    raise ValueError("Technical diff markup leaked into the workbook")
     verified.close()
+    return output.getvalue()
+
+
+def update_weekly_planning_audit_delivery_metadata(
+    workbook_bytes: bytes,
+    *,
+    delivery_status: str,
+    message_id: str | None,
+    attempt_number: int,
+) -> bytes:
+    workbook = load_workbook(io.BytesIO(workbook_bytes))
+    delivery = workbook["DËRGIMI AUTOMATIK"]
+    delivery.cell(2, 6, delivery_status)
+    delivery.cell(2, 7, message_id or "")
+    delivery.cell(2, 8, attempt_number)
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
     return output.getvalue()

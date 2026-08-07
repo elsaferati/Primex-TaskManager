@@ -35,6 +35,12 @@ logger = logging.getLogger(__name__)
 REPORT_TYPE = "weekly_planning_audit"
 SCHEDULED = "SCHEDULED"
 MANUAL = "MANUAL"
+APPROVED_SLOT = "10:30"
+REQUIRED_RECIPIENTS = (
+    "130primex.eu@gmail.com",
+    "info@primexeu.com",
+    "ga@primexeu.com",
+)
 
 
 class WeeklyPlanningAuditEmailError(RuntimeError):
@@ -42,11 +48,12 @@ class WeeklyPlanningAuditEmailError(RuntimeError):
 
 
 def _environment_recipients() -> list[str]:
-    return [
+    configured = [
         value.strip()
         for value in settings.WEEKLY_PLANNING_AUDIT_RECIPIENTS.split(",")
         if value.strip()
     ]
+    return list(dict.fromkeys([*configured, *REQUIRED_RECIPIENTS]))
 
 
 async def get_or_create_settings(db: AsyncSession) -> WeeklyPlanningAuditSettings:
@@ -54,6 +61,18 @@ async def get_or_create_settings(db: AsyncSession) -> WeeklyPlanningAuditSetting
         select(WeeklyPlanningAuditSettings).order_by(WeeklyPlanningAuditSettings.created_at).limit(1)
     )).scalar_one_or_none()
     if row is not None:
+        approved_schedule = {"weekday": "friday", "slots": ["10:30"]}
+        approved_recipients = list(dict.fromkeys([*(row.recipients_to or []), *REQUIRED_RECIPIENTS]))
+        changed = False
+        if row.schedule_config != approved_schedule:
+            row.schedule_config = approved_schedule
+            changed = True
+        if row.recipients_to != approved_recipients:
+            row.recipients_to = approved_recipients
+            changed = True
+        if changed:
+            row.recipient_config_version += 1
+            await db.flush()
         return row
     row = WeeklyPlanningAuditSettings(
         enabled=settings.WEEKLY_PLANNING_AUDIT_ENABLED,
@@ -63,7 +82,7 @@ async def get_or_create_settings(db: AsyncSession) -> WeeklyPlanningAuditSetting
         recipients_bcc=[],
         schedule_config={
             "weekday": "friday",
-            "slots": ["09:00", "09:30", "10:00", "10:30", "11:00"],
+            "slots": ["10:30"],
         },
         recipient_config_version=1,
         abbreviation_version="2026.1",
@@ -158,6 +177,8 @@ async def generate_report_run(
     trigger_type: str,
     generated_by: uuid.UUID | None,
 ) -> WeeklyPlanningAuditRun:
+    if slot != APPROVED_SLOT:
+        raise ValueError(f"Unsupported audit slot: {slot}; approved slot is {APPROVED_SLOT}")
     config = await get_or_create_settings(db)
     normalized_start = normalize_week_start(week_start, config.timezone)
     if trigger_type == SCHEDULED and not config.enabled:
@@ -212,15 +233,11 @@ async def generate_report_run(
             abbreviation_version=config.abbreviation_version,
         )
         filename = report_filename(report)
-        sender_domain = os.environ.get("EMAIL_USER", "").rsplit("@", 1)[-1]
-        planned_message_id = (
-            f"weekly-planning-audit-{run.id}@{sender_domain}" if sender_domain else None
-        )
         workbook = build_weekly_planning_audit_workbook(
             report,
             recipients=recipients,
             run_id=str(run.id),
-            message_id=planned_message_id,
+            message_id=None,
         )
         checksum = hashlib.sha256(workbook).hexdigest()
         path = _safe_run_path(run.id, filename)
@@ -353,7 +370,9 @@ async def send_report_run(
             message_id=stable_message_id,
         )
         delivery.status = "SENT"
-        delivery.message_id = response.get("id")
+        # SMTP confirms acceptance but does not return a Gmail provider ID.
+        # Never present our RFC Message-ID as if Gmail assigned it.
+        delivery.message_id = response.get("provider_message_id")
         delivery.smtp_response = str(response)[:2000]
         delivery.sent_at = datetime.now(ZoneInfo(settings.WEEKLY_PLANNING_AUDIT_TIMEZONE))
         run.status = "SENT"

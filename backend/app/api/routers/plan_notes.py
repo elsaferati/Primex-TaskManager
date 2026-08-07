@@ -36,7 +36,11 @@ from app.services.ga_note_task_instances import (
     apply_ga_note_shared_task_fields,
     reconcile_plan_note_task_assignees,
 )
-from app.services.notifications import add_notification, publish_notification
+from app.services.notifications import (
+    add_notification,
+    notification_task_preview,
+    publish_notification,
+)
 
 router = APIRouter()
 
@@ -57,10 +61,13 @@ def _plan_note_task_title(content: str | None) -> str:
         re.sub(r"[ \t\f\v]+", " ", line).strip()
         for line in (content or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     ]
-    cleaned = "\n".join(line for line in lines if line)
+    cleaned = [line for line in lines if line]
     if not cleaned:
         return "Plan note task"
-    return cleaned
+    first_line = cleaned[0]
+    if len(first_line) <= 100:
+        return first_line
+    return first_line[:100].rsplit(" ", 1)[0].rstrip(" ,;:-") or first_line[:100]
 
 
 def _plan_note_default_task_description(content: str | None) -> str | None:
@@ -451,6 +458,18 @@ async def update_plan_note_task_bundle(
                 task.description = new_default
                 updated_count += 1
 
+    if payload.assignee_ids is not None or payload.assignee_states is not None:
+        from app.api.routers.tasks import _clear_task_planner_exclusions_for_current_plan
+
+        for task in active_tasks:
+            if task.assigned_to is None:
+                continue
+            await _clear_task_planner_exclusions_for_current_plan(
+                db,
+                task=task,
+                user_ids=[task.assigned_to],
+            )
+
     add_audit_log(
         db=db,
         actor_user_id=user.id,
@@ -474,7 +493,7 @@ async def update_plan_note_task_bundle(
                         user_id=created_task.assigned_to,
                         type=NotificationType.assignment,
                         title="Task assigned",
-                        body=created_task.title,
+                        body=notification_task_preview(created_task.title),
                         data={"task_id": str(created_task.id)},
                     )
                 )

@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.department import Department
 from app.models.enums import (
@@ -44,6 +46,7 @@ from app.schemas.realization import (
     RealizationReviewRequest,
     RealizationWeeklyOut,
 )
+from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
 from app.services.audit import add_audit_log
 from app.services.realization_access import (
     can_approve_realization,
@@ -78,6 +81,15 @@ from app.services.system_task_schedule import _is_working_day
 
 
 router = APIRouter()
+
+
+def _can_capture_current_week_final(period: RealizationPeriod, *, today: date | None = None) -> bool:
+    local_today = today or datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
+    return (
+        period.final_snapshot_id is None
+        and normalize_week_start(local_today) == period.start_date
+        and local_today >= period.end_date
+    )
 
 
 def _error(exc: ValueError, code: int = status.HTTP_409_CONFLICT) -> HTTPException:
@@ -568,6 +580,47 @@ async def _weekly_response(
                     visible_task_ids.add(uuid.UUID(str(task.get("task_id"))))
                 except (TypeError, ValueError):
                     continue
+    current_task_owners: dict[uuid.UUID, set[uuid.UUID]] = {}
+    if visible_task_ids:
+        from app.models.task_assignee import TaskAssignee
+
+        for task_id, owner_id in (
+            await db.execute(
+                select(TaskAssignee.task_id, TaskAssignee.user_id).where(
+                    TaskAssignee.task_id.in_(visible_task_ids)
+                )
+            )
+        ).all():
+            current_task_owners.setdefault(task_id, set()).add(owner_id)
+        for task_id, assigned_to in (
+            await db.execute(
+                select(Task.id, Task.assigned_to).where(Task.id.in_(visible_task_ids))
+            )
+        ).all():
+            if assigned_to is not None and not current_task_owners.get(task_id):
+                current_task_owners.setdefault(task_id, set()).add(assigned_to)
+
+    def belongs_to_person(task: dict, user_id: uuid.UUID) -> bool:
+        try:
+            task_id = uuid.UUID(str(task.get("task_id")))
+        except (TypeError, ValueError):
+            return True
+        owners = current_task_owners.get(task_id)
+        return not owners or user_id in owners
+
+    for row in visible:
+        for timeline_item in daily_by_user.get(row.user_id, []):
+            timeline_item["tasks"] = [
+                task
+                for task in timeline_item.get("tasks") or []
+                if belongs_to_person(task, row.user_id)
+            ]
+        if row.user_id in daily_tasks_by_user:
+            daily_tasks_by_user[row.user_id] = {
+                key: task
+                for key, task in daily_tasks_by_user[row.user_id].items()
+                if belongs_to_person(task, row.user_id)
+            }
     task_comment_map = {
         comment.task_id: comment.comment
         for comment in (
@@ -591,6 +644,11 @@ async def _weekly_response(
     for row in visible:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
         facts = _visible_facts(user, row)
+        facts["tasks"] = [
+            task
+            for task in facts.get("tasks") or []
+            if belongs_to_person(task, row.user_id)
+        ]
         facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
         facts["observations"] = live_by_user.get(row.user_id, [])
         if period.final_snapshot_id is None:
@@ -629,7 +687,7 @@ async def _weekly_response(
         has_final_snapshot=has_final,
         can_calculate=(
             has_planned
-            and has_final
+            and (has_final or _can_capture_current_week_final(period))
             and period.status in {
                 RealizationPeriodStatus.OPEN.value,
                 RealizationPeriodStatus.CALCULATED.value,
@@ -990,14 +1048,36 @@ async def calculate_realization(
     if department is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
     try:
-        period, _, _ = await ensure_weekly_period(
+        period, planned, final = await ensure_weekly_period(
             db,
             department_id=department_id,
             week_start=week_start,
             created_by=user.id,
         )
+        if final is None:
+            if not _can_capture_current_week_final(period):
+                raise RealizationWorkflowError(
+                    "FINAL mund të krijohet vetëm në ditën e fundit të javës aktuale."
+                )
+            from app.api.routers.planners import _create_and_store_weekly_snapshot
+
+            await _create_and_store_weekly_snapshot(
+                db=db,
+                user=user,
+                department_id=department_id,
+                week_start_date=period.start_date,
+                snapshot_type=WeeklySnapshotType.FINAL,
+                is_this_week=True,
+            )
+            period, planned, final = await ensure_weekly_period(
+                db,
+                department_id=department_id,
+                week_start=week_start,
+                created_by=user.id,
+            )
         period = await _period(db, period.id, for_update=True)
-        planned, final = await _pinned_snapshots(db, period)
+        if planned is None or final is None:
+            raise RealizationWorkflowError("PLANNED dhe FINAL kërkohen për kalkulimin javor")
         before = {"status": period.status}
         await calculate_weekly_period(
             db,

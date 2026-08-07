@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     WEEKLY_PLANNING_AUDIT_RECIPIENTS: str = (
         "130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com"
     )
+    # Exact user IDs, usernames, or email addresses that are intentionally
+    # excluded from the report. Active accounts are reportable by default.
+    WEEKLY_PLANNING_AUDIT_EXCLUDED_ACCOUNTS: str = ""
     STD_FEEDBACK_API_BASE_URL: str = "https://std.primexeu.com/api/integrations/primeflow/v1"
     STD_FEEDBACK_API_TOKEN: str | None = None
     STD_FEEDBACK_SYNC_ENABLED: bool = True
@@ -91,6 +94,9 @@ class Settings(BaseSettings):
     REALIZATION_AI_ENABLED: bool = False
     REALIZATION_AI_MODEL: str = "gpt-5.2"
     REALIZATION_AI_TIMEOUT_SECONDS: int = 45
+    WEEKLY_PLANNING_AUDIT_AI_ENABLED: bool = True
+    WEEKLY_PLANNING_AUDIT_AI_MODEL: str = "gpt-5.2"
+    WEEKLY_PLANNING_AUDIT_AI_TIMEOUT_SECONDS: int = 90
 
     @property
     def cors_origin_list(self) -> list[str]:
