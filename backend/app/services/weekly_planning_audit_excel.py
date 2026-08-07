@@ -34,11 +34,8 @@ def report_filename(report: WeeklyPlanningAuditReport) -> str:
 
 
 def report_subject(report: WeeklyPlanningAuditReport) -> str:
-    if report.week_start.month == report.week_end.month:
-        week_range = f"{report.week_start:%d}–{report.week_end:%d.%m.%Y}"
-    else:
-        week_range = f"{report.week_start:%d.%m.%Y}–{report.week_end:%d.%m.%Y}"
-    return f"Kontrolli {report.slot} – Raporti PF PLNF JAV {week_range} – {report.generated_at:%d.%m.%Y}"
+    week_range = f"{report.week_start:%d.%m.%Y}–{report.week_end:%d.%m.%Y}"
+    return f"Kontrolli {report.slot} | PLNF JAV {week_range} | Raporti {report.generated_at:%d.%m.%Y}"
 
 
 def report_email_body(report: WeeklyPlanningAuditReport) -> str:
@@ -113,17 +110,17 @@ def build_weekly_planning_audit_workbook(
     details.append([
         "Nr.", "Personi", "Departamenti", "Data", "Task ID", "Titulli aktual",
         "Problemi konkret", "Titulli i propozuar", "Korrigjimi", "Kodi i rregullit",
-        "Ashpërsia", "Fokusi i javës", "Burimi",
+        "Çfarë kalon në Description/Notes", "Ashpërsia", "Fokusi i javës", "Burimi",
     ])
     for index, error in enumerate(report.errors, 1):
         details.append([
             index, error.employee, error.department, error.task_date, error.task_id,
             error.current_title, error.problem, error.proposed_title, error.correction,
-            error.rule_code, error.severity, error.weekly_focus, error.source,
+            error.rule_code, error.move_to_notes, error.severity, error.weekly_focus, error.source,
         ])
         if error.task_date:
             details.cell(details.max_row, 4).number_format = "DD.MM.YYYY"
-    _style_sheet(details, severity_column=11)
+    _style_sheet(details, severity_column=12)
 
     cleanup = workbook["TITUJT - SHKURTESAT PX"]
     cleanup.append([
@@ -182,4 +179,22 @@ def build_weekly_planning_audit_workbook(
     if verified.sheetnames != SHEET_NAMES:
         raise ValueError("Weekly planning audit workbook has an invalid sheet layout")
     verified.close()
+    return output.getvalue()
+
+
+def update_weekly_planning_audit_delivery_metadata(
+    workbook_bytes: bytes,
+    *,
+    delivery_status: str,
+    message_id: str | None,
+    attempt_number: int,
+) -> bytes:
+    workbook = load_workbook(io.BytesIO(workbook_bytes))
+    delivery = workbook["DËRGIMI AUTOMATIK"]
+    delivery.cell(2, 6, delivery_status)
+    delivery.cell(2, 7, message_id or "")
+    delivery.cell(2, 8, attempt_number)
+    output = io.BytesIO()
+    workbook.save(output)
+    workbook.close()
     return output.getvalue()

@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { useAuth } from "@/lib/auth"
 
-const SLOTS = ["09:00", "09:30", "10:00", "10:30", "11:00"]
+const SLOTS = ["10:30"]
 
 type Settings = {
   id: string
@@ -129,7 +129,7 @@ export default function WeeklyPlanningAuditPage() {
   const [history, setHistory] = React.useState<Run[]>([])
   const [preview, setPreview] = React.useState<Preview | null>(null)
   const [weekStart, setWeekStart] = React.useState(nextMonday)
-  const [slot, setSlot] = React.useState("09:00")
+  const [slot, setSlot] = React.useState("10:30")
   const [loading, setLoading] = React.useState(false)
   const [recipientsTo, setRecipientsTo] = React.useState("")
   const [recipientsCc, setRecipientsCc] = React.useState("")

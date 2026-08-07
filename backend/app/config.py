@@ -36,6 +36,9 @@ class Settings(BaseSettings):
     WEEKLY_PLANNING_AUDIT_RECIPIENTS: str = (
         "130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com"
     )
+    # Exact user IDs, usernames, or email addresses that are intentionally
+    # excluded from the report. Active accounts are reportable by default.
+    WEEKLY_PLANNING_AUDIT_EXCLUDED_ACCOUNTS: str = ""
     STD_FEEDBACK_API_BASE_URL: str = "https://std.primexeu.com/api/integrations/primeflow/v1"
     STD_FEEDBACK_API_TOKEN: str | None = None
     STD_FEEDBACK_SYNC_ENABLED: bool = True

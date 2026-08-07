@@ -11,19 +11,6 @@ from app.config import settings
 AI_AUDIT_SCHEMA = {
     "type": "object",
     "properties": {
-        "people": {
-            "type": "array",
-            "items": {
-                "type": "object",
-                "properties": {
-                    "user_id": {"type": "string"},
-                    "focus_task_id": {"type": ["string", "null"]},
-                    "focus_project_id": {"type": ["string", "null"]},
-                },
-                "required": ["user_id", "focus_task_id", "focus_project_id"],
-                "additionalProperties": False,
-            },
-        },
         "errors": {
             "type": "array",
             "items": {
@@ -40,7 +27,7 @@ AI_AUDIT_SCHEMA = {
             },
         },
     },
-    "required": ["people", "errors"],
+    "required": ["errors"],
     "additionalProperties": False,
 }
 
@@ -48,14 +35,11 @@ AI_AUDIT_SCHEMA = {
 SYSTEM_PROMPT = """Role: Audito semantikisht planifikimin javor të PrimeFlow.
 
 Goal:
-- Për çdo person zgjidh si fokus vetëm një detyrë ose projekt real jo-sistem që përfaqëson punën kryesore.
 - Raporto vetëm probleme semantike të titullit që nuk mund të kontrollohen nga fusha të strukturuara.
 
 Constraints:
 - Përdor vetëm evidencën e dhënë; mos shpik detyra, projekte, shkurtesa, persona ose fakte.
-- Detyrat e sistemit dhe system templates nuk janë kurrë fokus.
-- Mos përdor si fokus GDPR rutinë, PLNF JAV, 1H, BLL, R1, P:, WFC, BKP, raportime rutinë, takime standarde, kontrolle të zakonshme ose email rutinë.
-- Për fokus kthe vetëm ID ekzistuese. Kur s'ka fokus jo-sistem, kthe null për të dy ID-të.
+- Fokusi llogaritet vetëm nga rregullat deterministe të serverit; mos propozo ose ndrysho fokus.
 - Shkurtesat lejohen vetëm kur ekzistojnë në fjalorin zyrtar PX të dhënë.
 - Titulli i propozuar duhet të jetë i shkurtër. Hapat dhe sqarimet kalojnë në Description/Notes.
 - Mos raporto metadata të editorit ose ndryshimeve të gjurmuara.
@@ -82,7 +66,7 @@ def _output_text(payload: dict[str, Any]) -> str:
 async def analyze_weekly_planning_audit(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     model = settings.WEEKLY_PLANNING_AUDIT_AI_MODEL
     if not payload.get("people"):
-        return {"people": [], "errors": []}, "not_needed"
+        return {"errors": []}, "not_needed"
     if not settings.WEEKLY_PLANNING_AUDIT_AI_ENABLED:
         return None, "disabled"
     if not settings.OPENAI_API_KEY:

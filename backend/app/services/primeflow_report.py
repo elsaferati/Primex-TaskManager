@@ -798,7 +798,12 @@ class GmailService:
                 smtp.send_message(message, from_addr=self.sender, to_addrs=all_recipients)
 
         await asyncio.to_thread(send_smtp)
-        return {"id": message_id.strip("<>"), "threadId": None}
+        return {
+            "id": message_id.strip("<>"),
+            "threadId": None,
+            "provider_message_id": None,
+            "transport": "smtp",
+        }
 
 
 def predecessor(day: date, slot: str) -> tuple[date, str]:
