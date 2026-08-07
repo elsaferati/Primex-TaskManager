@@ -7,7 +7,7 @@ import { API_HTTP_URL } from "@/lib/config"
 export default function PrimeflowClassificationsPage() {
   const { user } = useAuth()
   const params = new URLSearchParams({
-    v: "202608067",
+    v: "2026080634",
     api: API_HTTP_URL,
     role: user?.role || "STAFF",
     user: user?.full_name || user?.username || "User",
