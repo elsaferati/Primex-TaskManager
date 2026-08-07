@@ -42,9 +42,9 @@ SECTION_TITLES = [
     "N- (GA/KA) KUSH KA DET PERSONALISHT?",
 ]
 DISPLAY_SECTION_TITLES = [
+    SECTION_TITLES[2],  # STD tickets first
     SECTION_TITLES[0],
     SECTION_TITLES[1],
-    SECTION_TITLES[2],
     SECTION_TITLES[3],
     SECTION_TITLES[4],
     SECTION_TITLES[8],
@@ -58,15 +58,45 @@ MANUAL_SECTION_TITLES = {
     SECTION_TITLES[0],
 }
 SECTION_TITLE_ALIASES = {
+    "(GA) M3 DET GA MBYLLJA ME HV/OH?": SECTION_TITLES[1],
     "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[2],
     "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[10],
 }
+DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 # Same rule for M1/M2/M3: personal rows only when the title marks GA (not KA).
 PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
 TECHNICAL_TAG = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 DUE_SUFFIX = re.compile(r"\s+due\s+\d{1,2}:\d{2}\s*$", re.I)
 TITLE_PREFIX = re.compile(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})?\s*:\s*", re.I)
 TASK_LINE_STATUS = re.compile(r"^\[([A-Z_]+)\]\s*")
+
+
+def _compact_section_title(value: str | None) -> str:
+    return re.sub(r"[^A-Z0-9]+", "", (value or "").upper())
+
+
+def canonical_meetings_section_title(raw_title: str | None) -> str:
+    """Map Common View near-duplicates onto the built-in M3 section titles."""
+    raw = (raw_title or "").strip()
+    if not raw:
+        return raw
+    if raw in SECTION_TITLE_ALIASES:
+        return SECTION_TITLE_ALIASES[raw]
+
+    compact = _compact_section_title(raw)
+    for alias, canonical in SECTION_TITLE_ALIASES.items():
+        if _compact_section_title(alias) == compact:
+            return canonical
+    for known in DISPLAY_SECTION_TITLES:
+        if _compact_section_title(known) == compact:
+            return known
+
+    # Wording variants that still mean the same auto-filled questions.
+    if "TIKETATESTD" in compact and "RAPORTOHENNEM3" in compact:
+        return SECTION_TITLES[2]
+    if "M3DETGAMBYLLJAMEHV" in compact:
+        return SECTION_TITLES[1]
+    return raw
 
 
 def next_working_day(day: date) -> date:
@@ -80,33 +110,57 @@ def subject_for(day: date) -> str:
     return f"PrimeFlow Mbyllja e dites M3 - {day:%d.%m.%Y}"
 
 
+def _prefer_section_body(current: str, incoming: str) -> str:
+    """Prefer real content over the manual placeholder when collapsing aliases."""
+    cur = (current or "").strip()
+    inc = (incoming or "").strip()
+    if not cur or cur == DEFAULT_MANUAL_BODY:
+        return incoming if incoming else current
+    if not inc or inc == DEFAULT_MANUAL_BODY:
+        return current
+    return current
+
+
 def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
     """Keep saved drafts aligned with the current M3 question list without losing edits."""
     existing_sections = sections or []
     by_title: dict[str, dict[str, str]] = {}
     unknown_sections: list[dict[str, str]] = []
+    seen_unknown: set[str] = set()
     for section in existing_sections:
-        title = SECTION_TITLE_ALIASES.get(str(section.get("title") or "").strip(), str(section.get("title") or "").strip())
+        raw_title = str(section.get("title") or "").strip()
+        title = canonical_meetings_section_title(raw_title)
         if not title:
             continue
-        normalized = {"title": title, "body": str(section.get("body") or "")}
-        if title in DISPLAY_SECTION_TITLES and title not in by_title:
-            by_title[title] = normalized
-        else:
-            unknown_sections.append(normalized)
+        body = str(section.get("body") or "")
+        if title in DISPLAY_SECTION_TITLES:
+            if title not in by_title:
+                by_title[title] = {"title": title, "body": body}
+            else:
+                by_title[title]["body"] = _prefer_section_body(by_title[title]["body"], body)
+            continue
+
+        compact = _compact_section_title(title)
+        if not compact or compact in seen_unknown:
+            continue
+        seen_unknown.add(compact)
+        unknown_sections.append({"title": title, "body": body})
 
     ordered: list[dict[str, str]] = []
     for title in DISPLAY_SECTION_TITLES:
         if title in by_title:
             ordered.append(by_title[title])
         elif title in MANUAL_SECTION_TITLES:
-            ordered.append({"title": title, "body": "(Ploteso manualisht)"})
+            ordered.append({"title": title, "body": DEFAULT_MANUAL_BODY})
 
-    # Keep Common View–synced manuals with the other manuals (before auto sections).
-    manual_count = len(MANUAL_SECTION_TITLES)
+    # Keep Common View–synced manuals with the other manuals (after built-in manuals).
     if not unknown_sections:
         return ordered
-    return ordered[:manual_count] + unknown_sections + ordered[manual_count:]
+    insert_at = 0
+    for index, section in enumerate(ordered):
+        if section["title"] in MANUAL_SECTION_TITLES:
+            insert_at = index + 1
+    return ordered[:insert_at] + unknown_sections + ordered[insert_at:]
 
 
 def _local_date(value: datetime | date | None) -> date | None:
@@ -504,32 +558,24 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     ]
     section_6 = await _today_meeting_status_section(db, today_meetings, report_day)
 
-    sections = [
-        {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
-        {"title": SECTION_TITLES[1], "body": finance_section},
-        {"title": SECTION_TITLES[2], "body": std_tickets_section},
-        {"title": SECTION_TITLES[3], "body": _normalize_section(section_1)},
-        {
-            "title": SECTION_TITLES[4],
-            "body": _normalize_section(_m3_status_table("TODO", today_todo, names, **table_kwargs)),
-        },
-        {"title": SECTION_TITLES[8], "body": section_6},
-        {"title": SECTION_TITLES[5], "body": _empty_aware(_leave_lines(leave_tomorrow, names))},
-        {"title": SECTION_TITLES[7], "body": _normalize_section(section_5)},
-        {"title": SECTION_TITLES[6], "body": _normalize_section(section_4)},
-        {
-            "title": SECTION_TITLES[9],
-            "body": _normalize_section(
-                _m3_status_table("1H PA SLOT", one_h_no_slot, names, with_status=True, **table_kwargs)
-            ),
-        },
-        {
-            "title": SECTION_TITLES[10],
-            "body": _normalize_section(
-                _m3_status_table("PERSONAL GA", personal_ga, names, with_status=True, **table_kwargs)
-            ),
-        },
-    ]
+    by_title = {
+        SECTION_TITLES[0]: "(Ploteso manualisht)",
+        SECTION_TITLES[1]: finance_section,
+        SECTION_TITLES[2]: std_tickets_section,
+        SECTION_TITLES[3]: _normalize_section(section_1),
+        SECTION_TITLES[4]: _normalize_section(_m3_status_table("TODO", today_todo, names, **table_kwargs)),
+        SECTION_TITLES[8]: section_6,
+        SECTION_TITLES[5]: _empty_aware(_leave_lines(leave_tomorrow, names)),
+        SECTION_TITLES[7]: _normalize_section(section_5),
+        SECTION_TITLES[6]: _normalize_section(section_4),
+        SECTION_TITLES[9]: _normalize_section(
+            _m3_status_table("1H PA SLOT", one_h_no_slot, names, with_status=True, **table_kwargs)
+        ),
+        SECTION_TITLES[10]: _normalize_section(
+            _m3_status_table("PERSONAL GA", personal_ga, names, with_status=True, **table_kwargs)
+        ),
+    }
+    sections = [{"title": title, "body": by_title[title]} for title in DISPLAY_SECTION_TITLES]
     snapshot = {
         "report_day": report_day.isoformat(),
         "tomorrow": tomorrow.isoformat(),

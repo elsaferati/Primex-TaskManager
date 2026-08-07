@@ -47,19 +47,22 @@ def report_kind_for_checklist(checklist: Checklist | None) -> ReportKind | None:
     return CHECKLIST_TITLE_TO_REPORT.get(normalize_checklist_title(checklist.title))
 
 
-def _report_title_sets(kind: ReportKind) -> tuple[list[str], set[str], int]:
-    """Return (known section titles in display order, manual titles, manual insert index)."""
+def _report_title_sets(kind: ReportKind) -> tuple[list[str], set[str], set[str]]:
+    """Return (known section titles in display order, manual titles, manual titles)."""
     if kind == "morning":
         from app.services.morning_report import MANUAL_SECTION_TITLES, SECTION_TITLES
 
-        return list(SECTION_TITLES), set(MANUAL_SECTION_TITLES), len(MANUAL_SECTION_TITLES)
+        manuals = set(MANUAL_SECTION_TITLES)
+        return list(SECTION_TITLES), manuals, manuals
     if kind == "after_break":
         from app.services.after_break_report import MANUAL_SECTION_TITLES, SECTION_TITLES
 
-        return list(SECTION_TITLES), set(MANUAL_SECTION_TITLES), len(MANUAL_SECTION_TITLES)
+        manuals = set(MANUAL_SECTION_TITLES)
+        return list(SECTION_TITLES), manuals, manuals
     from app.services.meetings_report import DISPLAY_SECTION_TITLES, MANUAL_SECTION_TITLES
 
-    return list(DISPLAY_SECTION_TITLES), set(MANUAL_SECTION_TITLES), len(MANUAL_SECTION_TITLES)
+    manuals = set(MANUAL_SECTION_TITLES)
+    return list(DISPLAY_SECTION_TITLES), manuals, manuals
 
 
 def is_known_report_title(kind: ReportKind, title: str | None) -> bool:
@@ -78,10 +81,11 @@ def is_known_report_title(kind: ReportKind, title: str | None) -> bool:
         from app.services.after_break_report import SECTION_TITLE_ALIASES
 
         raw = SECTION_TITLE_ALIASES.get(raw, raw)
+        compact = _compact(raw)
     else:
-        from app.services.meetings_report import SECTION_TITLE_ALIASES
+        from app.services.meetings_report import canonical_meetings_section_title
 
-        raw = SECTION_TITLE_ALIASES.get(raw, raw)
+        raw = canonical_meetings_section_title(raw)
         compact = _compact(raw)
     return any(_compact(known_title) == compact for known_title in known)
 
@@ -91,6 +95,21 @@ def is_manual_section_title(kind: ReportKind, title: str | None) -> bool:
     raw = (title or "").strip()
     if not raw:
         return False
+    if kind == "morning":
+        from app.services.morning_report import SECTION_TITLE_ALIASES, _canonical_section_title
+
+        aliased = SECTION_TITLE_ALIASES.get(raw, raw)
+        canonical = _canonical_section_title(aliased)
+        raw = canonical or aliased
+    elif kind == "after_break":
+        from app.services.after_break_report import SECTION_TITLE_ALIASES
+
+        raw = SECTION_TITLE_ALIASES.get(raw, raw)
+    else:
+        from app.services.meetings_report import canonical_meetings_section_title
+
+        raw = canonical_meetings_section_title(raw)
+
     known, manuals, _ = _report_title_sets(kind)
     if raw in manuals:
         return True
@@ -117,15 +136,20 @@ def _bodies_by_title(sections: list[dict[str, Any]] | None) -> dict[str, str]:
 def _insert_manual_extras(
     sections: list[dict[str, str]],
     extras: list[dict[str, str]],
-    manual_count: int,
+    manual_titles: set[str],
 ) -> list[dict[str, str]]:
     if not extras:
         return sections
-    head = sections[:manual_count]
-    tail = sections[manual_count:]
     existing = {_compact(section["title"]) for section in sections}
     unique_extras = [extra for extra in extras if _compact(extra["title"]) not in existing]
-    return head + unique_extras + tail
+    if not unique_extras:
+        return sections
+    manuals = {_compact(title) for title in manual_titles}
+    insert_at = 0
+    for index, section in enumerate(sections):
+        if _compact(section["title"]) in manuals:
+            insert_at = index + 1
+    return sections[:insert_at] + unique_extras + sections[insert_at:]
 
 
 async def load_common_view_extra_titles(db: AsyncSession, kind: ReportKind) -> list[str]:
@@ -177,7 +201,7 @@ async def merge_common_view_manual_sections(
     existing_sections: list[dict[str, Any]] | None = None,
 ) -> list[dict[str, str]]:
     """Insert Common View pikes that are not already known report questions as manuals."""
-    _, _, manual_count = _report_title_sets(kind)
+    _, manuals, _ = _report_title_sets(kind)
     bodies = _bodies_by_title(existing_sections)
     for section in sections:
         title = section.get("title") or ""
@@ -192,7 +216,7 @@ async def merge_common_view_manual_sections(
                 "body": bodies.get(title) or DEFAULT_MANUAL_BODY,
             }
         )
-    return _insert_manual_extras(sections, extras, manual_count)
+    return _insert_manual_extras(sections, extras, manuals)
 
 
 def _today():
@@ -309,7 +333,7 @@ async def sync_checklist_item_manual_question(
 
     row = await _get_or_create_today_draft(db, kind)
     sections = _normalize_draft_sections(kind, row.sections)
-    _, _, manual_count = _report_title_sets(kind)
+    _, manuals, _ = _report_title_sets(kind)
 
     if action == "delete":
         target = clean_title or clean_previous
@@ -350,6 +374,6 @@ async def sync_checklist_item_manual_question(
             return
 
     extras = [{"title": clean_title, "body": preserved_body}]
-    row.sections = _insert_manual_extras(sections, extras, manual_count)
+    row.sections = _insert_manual_extras(sections, extras, manuals)
     if getattr(row, "status", None) != "SENT":
         row.status = "DRAFT"

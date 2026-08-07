@@ -161,6 +161,8 @@ def _draft(row: MeetingsReportDraft) -> dict:
 
 
 async def _normalize_saved_draft_sections(db: AsyncSession, row: MeetingsReportDraft) -> None:
+    from sqlalchemy.orm.attributes import flag_modified
+
     sections = [
         {
             "title": str(section.get("title") or "").strip(),
@@ -170,10 +172,14 @@ async def _normalize_saved_draft_sections(db: AsyncSession, row: MeetingsReportD
         if str(section.get("title") or "").strip()
     ]
     sections = await merge_common_view_manual_sections(db, sections, "meetings", row.sections)
-    if sections != row.sections:
+    sections = normalize_meetings_report_sections(sections)
+    if sections != (row.sections or []):
         row.sections = sections
+        flag_modified(row, "sections")
         await db.commit()
         await db.refresh(row)
+    else:
+        row.sections = sections
 
 
 @router.get("/settings")

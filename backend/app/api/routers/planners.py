@@ -2787,24 +2787,27 @@ async def weekly_table_planner(
                                 am_fast_tasks.append(entry)
                     # Project tasks (have project_id)
                     elif task.project_id is not None:
+                        # GA/PX-JAV assignee copies are personal work items. Do not hide them
+                        # behind project-slot removals on another department's board.
+                        note_origin = task.ga_note_origin_id is not None or task.plan_note_origin_id is not None
                         if is_both:
                             # Add to both AM and PM
-                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM") and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
+                            if (note_origin or not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM")) and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
                                 if task.project_id not in am_projects_map:
                                     am_projects_map[task.project_id] = []
                                 am_projects_map[task.project_id].append(task)
-                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM") and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
+                            if (note_origin or not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM")) and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
                                 if task.project_id not in pm_projects_map:
                                     pm_projects_map[task.project_id] = []
                                 pm_projects_map[task.project_id].append(task)
                         elif is_pm:
-                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM") and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
+                            if (note_origin or not _is_project_excluded(task.project_id, dept_user.id, day_date, "PM")) and not _is_excluded(task.id, dept_user.id, day_date, "PM"):
                                 if task.project_id not in pm_projects_map:
                                     pm_projects_map[task.project_id] = []
                                 pm_projects_map[task.project_id].append(task)
                         else:
                             # Default to AM if not PM and not both
-                            if not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM") and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
+                            if (note_origin or not _is_project_excluded(task.project_id, dept_user.id, day_date, "AM")) and not _is_excluded(task.id, dept_user.id, day_date, "AM"):
                                 if task.project_id not in am_projects_map:
                                     am_projects_map[task.project_id] = []
                                 am_projects_map[task.project_id].append(task)

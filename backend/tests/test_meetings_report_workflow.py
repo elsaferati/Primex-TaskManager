@@ -14,6 +14,11 @@ from app.api.routers.meetings_report import DraftUpdate, RecipientsPayload, Sect
 from app.models.enums import UserRole
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.services import meetings_report_scheduler
+from app.services.meeting_point_manual_sync import is_known_report_title, is_manual_section_title
+from app.services.meetings_report import (
+    SECTION_TITLES,
+    normalize_meetings_report_sections,
+)
 
 
 class FakeDraftDb:
@@ -151,6 +156,50 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(render_plain.call_args.args[3], regenerated)
         self.assertEqual(draft.recipients["to"], ["report@example.com"])
         self.assertEqual(draft.gmail_message_id, "gmail-id")
+
+
+class MeetingsReportAliasDedupTests(unittest.TestCase):
+    def test_normalize_collapses_common_view_aliases_into_auto_sections(self) -> None:
+        auto_hv = "GA TASKS:\n- done item"
+        auto_tickets = "STD TICKETS: 2"
+        normalized = normalize_meetings_report_sections(
+            [
+                {"title": "A JEMI BRENDA MESATARES ME PROJEKTE/", "body": "(Ploteso manualisht)"},
+                {"title": "(GA) M3 DET GA MBYLLJA ME HV/OH?", "body": "(Ploteso manualisht)"},
+                {"title": "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", "body": "(Ploteso manualisht)"},
+                {"title": SECTION_TITLES[1], "body": auto_hv},
+                {"title": SECTION_TITLES[2], "body": auto_tickets},
+                {"title": "Brand new Common View pike", "body": "(Ploteso manualisht)"},
+            ]
+        )
+        titles = [section["title"] for section in normalized]
+        self.assertEqual(titles[0], SECTION_TITLES[2])
+        self.assertEqual(titles.count(SECTION_TITLES[1]), 1)
+        self.assertEqual(titles.count(SECTION_TITLES[2]), 1)
+        self.assertNotIn("(GA) M3 DET GA MBYLLJA ME HV/OH?", titles)
+        self.assertNotIn("(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", titles)
+        self.assertIn("Brand new Common View pike", titles)
+        by_title = {section["title"]: section["body"] for section in normalized}
+        self.assertEqual(by_title[SECTION_TITLES[1]], auto_hv)
+        self.assertEqual(by_title[SECTION_TITLES[2]], auto_tickets)
+
+    def test_ticket_wording_variant_alone_maps_to_auto_title(self) -> None:
+        normalized = normalize_meetings_report_sections(
+            [
+                {"title": "A JEMI BRENDA MESATARES ME PROJEKTE/", "body": "(Ploteso manualisht)"},
+                {"title": "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", "body": "(Ploteso manualisht)"},
+            ]
+        )
+        titles = [section["title"] for section in normalized]
+        self.assertNotIn("(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", titles)
+        self.assertIn(SECTION_TITLES[2], titles)
+
+    def test_common_view_aliases_are_known_auto_not_manual(self) -> None:
+        self.assertTrue(is_known_report_title("meetings", "(GA) M3 DET GA MBYLLJA ME HV/OH?"))
+        self.assertTrue(is_known_report_title("meetings", "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3"))
+        self.assertFalse(is_manual_section_title("meetings", "(GA) M3 DET GA MBYLLJA ME HV/OH?"))
+        self.assertFalse(is_manual_section_title("meetings", "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3"))
+        self.assertTrue(is_manual_section_title("meetings", "Brand new Common View pike"))
 
 
 if __name__ == "__main__":
