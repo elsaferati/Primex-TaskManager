@@ -1,26 +1,34 @@
 from __future__ import annotations
 
 import io
+import asyncio
 import unittest
 import uuid
-from datetime import date, datetime
+from collections import defaultdict
+from datetime import date, datetime, timedelta
 from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from openpyxl import load_workbook
 
 from app.services.weekly_planning_audit import (
+    APPROVED_CHECK_DIMENSIONS,
+    AUDIT_CHECK_REGISTRY,
     AuditError,
     AuditTaskOccurrence,
     PersonAudit,
     WeeklyPlanningAuditReport,
-    _is_technical_account,
+    audit_person_occurrences,
+    _ai_title_introduces_unknown_abbreviation,
     clean_technical_markup,
+    extract_px_abbreviations,
+    is_reportable_person,
     load_px_abbreviations,
     monday_of_next_working_week,
     partition_users_by_full_week_leave,
     select_weekly_focus,
     suggested_concise_title,
+    validate_report_integrity,
     validate_task_occurrence,
 )
 from app.models.weekly_planning_audit import WeeklyPlanningAuditRun
@@ -37,7 +45,10 @@ from app.services.weekly_planning_audit_excel import (
     SHEET_NAMES,
     build_weekly_planning_audit_workbook,
     report_subject,
+    update_weekly_planning_audit_delivery_metadata,
 )
+from app.config import settings
+from app.services.weekly_planning_audit_ai import analyze_weekly_planning_audit
 
 
 WEEK_START = date(2026, 8, 3)
@@ -123,6 +134,17 @@ class WeeklyPlanningAuditLogicTests(unittest.TestCase):
         real = occurrence(title="Ndërtimi i portalit të klientit", task_id=uuid.UUID(int=3), project_id=None)
         self.assertEqual(select_weekly_focus([routine, real]).label, "Ndërtimi i portalit të klientit")
 
+    def test_standard_meeting_project_is_not_focus(self) -> None:
+        meeting = occurrence(
+            title="Koordinim me ekipin",
+            project_id=uuid.UUID(int=88),
+            project_name="Takim standard me agjentët",
+        )
+        self.assertEqual(
+            select_weekly_focus([meeting]).label,
+            "Nuk është përcaktuar fokus jo-sistem",
+        )
+
     def test_real_project_with_report_word_is_allowed_and_dominant_project_wins(self) -> None:
         project_id = uuid.UUID(int=10)
         tasks = [
@@ -157,27 +179,53 @@ class WeeklyPlanningAuditLogicTests(unittest.TestCase):
         self.assertNotIn("RREG", proposed)
         self.assertNotIn("RREG", self.abbreviations)
 
-    def test_long_title_proposes_shorter_title_and_preserves_original(self) -> None:
+    def test_long_title_proposes_shorter_title_and_preserves_clean_current_title(self) -> None:
         title = "Projekt klienti " + "udhëzim shumë i gjatë " * 12
         task = occurrence(title=title)
         errors = validate_task_occurrence(
             task, week_start=WEEK_START, leave_dates=set(), official_abbreviations=self.abbreviations
         )
         error = next(item for item in errors if item.rule_code == "TITLE_TOO_LONG")
-        self.assertEqual(error.current_title, title)
+        self.assertEqual(error.current_title, title.strip())
+        self.assertTrue(error.move_to_notes)
         self.assertLess(len(error.proposed_title), len(title))
+
+    def test_editor_metadata_is_cleaned_and_not_reported_as_an_error(self) -> None:
+        task = occurrence(title="AT: P[[added]]X[[/added]] [[done]]WEB[[/done]]")
+        errors = validate_task_occurrence(
+            task, week_start=WEEK_START, leave_dates=set(), official_abbreviations=self.abbreviations
+        )
+        self.assertNotIn("TECHNICAL_MARKUP", {error.rule_code for error in errors})
+        self.assertTrue(all("[[" not in error.current_title for error in errors))
+
+    def test_ai_has_safe_deterministic_fallback_without_api_key(self) -> None:
+        previous_key = settings.OPENAI_API_KEY
+        previous_enabled = settings.WEEKLY_PLANNING_AUDIT_AI_ENABLED
+        try:
+            settings.OPENAI_API_KEY = None
+            settings.WEEKLY_PLANNING_AUDIT_AI_ENABLED = True
+            result, status = asyncio.run(analyze_weekly_planning_audit({"people": [{"user_id": "1"}]}))
+        finally:
+            settings.OPENAI_API_KEY = previous_key
+            settings.WEEKLY_PLANNING_AUDIT_AI_ENABLED = previous_enabled
+        self.assertIsNone(result)
+        self.assertEqual(status, "missing_api_key")
 
     def test_next_week_uses_local_tirana_time_and_next_monday(self) -> None:
         friday = datetime(2026, 7, 31, 9, 0, tzinfo=ZoneInfo("Europe/Tirane"))
         self.assertEqual(monday_of_next_working_week(friday, "Europe/Tirane"), WEEK_START)
 
-    def test_technical_admin_and_service_accounts_are_excluded(self) -> None:
-        admin = SimpleNamespace(username="admin", email="admin@example.com", full_name="Admin")
-        service = SimpleNamespace(username="report-bot", email="bot@example.com", full_name="Report Bot")
-        employee = SimpleNamespace(username="elsa", email="elsa@example.com", full_name="Elsa Ferati")
-        self.assertTrue(_is_technical_account(admin))
-        self.assertTrue(_is_technical_account(service))
-        self.assertFalse(_is_technical_account(employee))
+    def test_active_admin_is_reportable_unless_explicitly_configured(self) -> None:
+        admin = SimpleNamespace(id=uuid.UUID(int=70), username="admin", email="admin@example.com", is_active=True)
+        self.assertTrue(is_reportable_person(admin))
+        self.assertFalse(is_reportable_person(admin, ["admin@example.com"]))
+
+    def test_px_matcher_uses_boundaries_longest_match_and_title_only(self) -> None:
+        self.assertNotIn("T", extract_px_abbreviations("LH: WKF VS API", self.abbreviations))
+        self.assertEqual(extract_px_abbreviations("LH:EF: PF", self.abbreviations), ["PF"])
+        self.assertEqual(extract_px_abbreviations("TAK EXT: klienti", self.abbreviations), ["TAK EXT"])
+        proposed = suggested_concise_title("LH:EF: PF\nJAV ekziston vetëm në notes")
+        self.assertNotIn("JAV", extract_px_abbreviations(proposed, self.abbreviations))
 
     def test_scheduled_retry_uses_same_idempotency_key(self) -> None:
         first = scheduled_idempotency_key(week_start=WEEK_START, slot="09:00", recipient_config_version=4)
@@ -207,7 +255,7 @@ class WeeklyPlanningAuditLogicTests(unittest.TestCase):
             id=uuid.UUID(int=110),
             week_start=WEEK_START,
             week_end=date(2026, 8, 7),
-            slot="09:00",
+            slot="10:30",
             recipients_snapshot={"to": ["ga@primexeu.com"], "cc": [], "bcc": []},
             filename="report.xlsx",
             file_checksum="a" * 64,
@@ -294,11 +342,183 @@ class WeeklyPlanningAuditLogicTests(unittest.TestCase):
         self.assertIn("R1_FORMAT_INVALID", {error.rule_code for error in r1_errors})
         self.assertNotIn("R1_FORMAT_INVALID", {error.rule_code for error in normal_errors})
 
+    def test_total_and_average_can_live_in_description(self) -> None:
+        errors = validate_task_occurrence(
+            occurrence(title="VS: Kontrolli i produkteve", description="Total: 120; Mesatare: 24"),
+            week_start=WEEK_START,
+            leave_dates=set(),
+            official_abbreviations=self.abbreviations,
+        )
+        self.assertNotIn("TOTAL_AVERAGE_INVALID", {error.rule_code for error in errors})
+
+    def test_ai_proposed_title_cannot_introduce_unknown_abbreviation(self) -> None:
+        self.assertTrue(
+            _ai_title_introduces_unknown_abbreviation(
+                "XYZ: Rregullimi i faqes", "Rregullimi i faqes", self.abbreviations
+            )
+        )
+        self.assertFalse(
+            _ai_title_introduces_unknown_abbreviation(
+                "PF: Rregullimi i faqes", "Rregullimi i faqes", self.abbreviations
+            )
+        )
+
     def test_official_dictionary_contains_seeded_values_and_not_rreg(self) -> None:
         self.assertEqual(self.abbreviations["PF"], "PRIME FLOW/PLATFORMA")
         self.assertEqual(self.abbreviations["RIORG"], "RIORGANIZIM")
         self.assertGreaterEqual(len(self.abbreviations), 60)
         self.assertNotIn("RREG", self.abbreviations)
+
+
+class WeeklyPlanningAuditAcceptanceSnapshotTests(unittest.TestCase):
+    WEEK = date(2026, 8, 10)
+    LAURENT_TASK_ID = uuid.UUID("ac583682-61c7-497c-93e6-fa3eacbe387c")
+
+    def setUp(self) -> None:
+        self.abbreviations, metadata = load_px_abbreviations()
+        names = [
+            "Anisa Ternava", "Endi Hyseni", "Florent Gara", "Rinesa Ahmedi",
+            "Elsa Ferati", "Laurent Hoxha", "Enesa Sharku", "Haxhere Spahiu", "Gane Arifaj",
+        ]
+        self.users = [
+            SimpleNamespace(
+                id=uuid.UUID(int=100 + index), full_name=name,
+                username=name.lower().replace(" ", "."), email=f"u{index}@example.com",
+                department_id=None, is_active=True,
+            )
+            for index, name in enumerate(names)
+        ]
+        by_name = {user.full_name: user for user in self.users}
+        week_dates = {self.WEEK + timedelta(days=offset) for offset in range(5)}
+        self.leave = {
+            by_name["Anisa Ternava"].id: set(week_dates),
+            by_name["Endi Hyseni"].id: set(week_dates),
+            by_name["Florent Gara"].id: set(week_dates),
+            by_name["Rinesa Ahmedi"].id: {self.WEEK + timedelta(days=offset) for offset in range(4)},
+        }
+        included, excluded = partition_users_by_full_week_leave(
+            self.users, leave_dates_by_user=self.leave, week_start=self.WEEK
+        )
+        self.excluded_names = {user.full_name for user in excluded}
+
+        occurrences_by_user: dict[uuid.UUID, list[AuditTaskOccurrence]] = defaultdict(list)
+        for offset in range(2):
+            occurrences_by_user[by_name["Rinesa Ahmedi"].id].append(occurrence(
+                user_id=by_name["Rinesa Ahmedi"].id,
+                task_id=uuid.UUID(int=200 + offset),
+                task_date=self.WEEK,
+                start_date=self.WEEK,
+                due_date=self.WEEK,
+                title=f"RA: FRG: Detyra reale {offset + 1}",
+            ))
+        for offset, title in enumerate(("PLNF JAV", "BLL: Kontroll", "P: Email rutinë", "Raport javor")):
+            occurrences_by_user[by_name["Elsa Ferati"].id].append(occurrence(
+                user_id=by_name["Elsa Ferati"].id,
+                task_id=uuid.UUID(int=300 + offset),
+                task_date=self.WEEK + timedelta(days=offset),
+                start_date=self.WEEK,
+                due_date=self.WEEK + timedelta(days=offset),
+                title=title,
+                is_bllok=title.startswith("BLL"),
+                is_personal=title.startswith("P:"),
+            ))
+        laurent_title = "LH: WKF VS API\n" + "1. Hapi i detajuar për implementim dhe verifikim.\n" * 8
+        for offset in range(5):
+            occurrences_by_user[by_name["Laurent Hoxha"].id].append(occurrence(
+                user_id=by_name["Laurent Hoxha"].id,
+                task_id=self.LAURENT_TASK_ID,
+                task_date=self.WEEK + timedelta(days=offset),
+                start_date=self.WEEK,
+                due_date=self.WEEK + timedelta(days=4),
+                title=laurent_title,
+            ))
+        for index, name in enumerate(("Enesa Sharku", "Haxhere Spahiu"), start=400):
+            occurrences_by_user[by_name[name].id].append(occurrence(
+                user_id=by_name[name].id, task_id=uuid.UUID(int=index),
+                task_date=self.WEEK, start_date=self.WEEK, due_date=self.WEEK,
+                title=f"{name}: Punë reale për klientin",
+            ))
+        occurrences_by_user[by_name["Gane Arifaj"].id].append(occurrence(
+            user_id=by_name["Gane Arifaj"].id, task_id=uuid.UUID(int=500),
+            task_date=self.WEEK, start_date=self.WEEK, due_date=self.WEEK,
+            title="TAK EXT: Takim standard me agjentët",
+            project_id=uuid.UUID(int=501), project_name="Takim standard me agjentët",
+        ))
+
+        people: list[PersonAudit] = []
+        errors: list[AuditError] = []
+        cleanup: list[dict[str, object]] = []
+        executed = set(APPROVED_CHECK_DIMENSIONS)
+        for user in included:
+            person, person_errors, person_cleanup = audit_person_occurrences(
+                user,
+                department="Development",
+                occurrences=occurrences_by_user.get(user.id, []),
+                leave_dates=self.leave.get(user.id, set()),
+                week_start=self.WEEK,
+                abbreviations=self.abbreviations,
+                executed_checks=executed,
+            )
+            people.append(person)
+            errors.extend(person_errors)
+            cleanup.extend(person_cleanup)
+        self.report = WeeklyPlanningAuditReport(
+            week_start=self.WEEK,
+            week_end=self.WEEK + timedelta(days=4),
+            generated_at=datetime(2026, 8, 7, 10, 30, tzinfo=ZoneInfo("Europe/Tirane")),
+            timezone="Europe/Tirane",
+            slot="10:30",
+            people=people,
+            errors=errors,
+            title_cleanup=cleanup,
+            excluded_full_leave=sorted(self.excluded_names),
+            partial_leave_users=["Rinesa Ahmedi"],
+            abbreviations=self.abbreviations,
+            abbreviation_version=metadata["version"],
+            abbreviation_source=metadata["source"],
+            abbreviation_updated_at=metadata["updated_at"],
+            executed_checks=list(APPROVED_CHECK_DIMENSIONS),
+        )
+
+    def test_snapshot_leave_plan_focus_and_dedup_acceptance(self) -> None:
+        names = {person.employee for person in self.report.people}
+        self.assertTrue({"Anisa Ternava", "Endi Hyseni", "Florent Gara"}.isdisjoint(names))
+        rinesa = next(person for person in self.report.people if person.employee == "Rinesa Ahmedi")
+        self.assertEqual(rinesa.leave_status, "Po, parcial: 10.08.2026–13.08.2026")
+        leave_errors = [
+            error for error in self.report.errors
+            if error.employee == "Rinesa Ahmedi" and error.rule_code == "TASK_ON_ANNUAL_LEAVE"
+        ]
+        self.assertEqual(len(leave_errors), 2)
+        for name in ("Elsa Ferati", "Laurent Hoxha", "Rinesa Ahmedi", "Enesa Sharku", "Haxhere Spahiu"):
+            self.assertFalse(any(
+                error.employee == name and error.rule_code == "NO_MEANINGFUL_WEEKLY_PLAN"
+                for error in self.report.errors
+            ))
+        laurent_errors = [error for error in self.report.errors if error.task_id == str(self.LAURENT_TASK_ID)]
+        self.assertLessEqual(sum(error.rule_code == "MULTIPLE_INSTRUCTIONS_IN_TITLE" for error in laurent_errors), 1)
+        self.assertLessEqual(sum(error.rule_code == "TITLE_TOO_LONG" for error in laurent_errors), 1)
+        self.assertEqual(sum(row["task_id"] == str(self.LAURENT_TASK_ID) for row in self.report.title_cleanup), 1)
+        gane = next(person for person in self.report.people if person.employee == "Gane Arifaj")
+        self.assertEqual(gane.focus, "Nuk është përcaktuar fokus jo-sistem")
+        self.assertEqual(set(self.report.executed_checks), set(APPROVED_CHECK_DIMENSIONS))
+        self.assertTrue(all(AUDIT_CHECK_REGISTRY[dimension] for dimension in self.report.executed_checks))
+        validate_report_integrity(self.report)
+
+    def test_snapshot_workbook_contract(self) -> None:
+        recipients = ["130primex.eu@gmail.com", "info@primexeu.com", "ga@primexeu.com"]
+        raw = build_weekly_planning_audit_workbook(
+            self.report,
+            recipients={"to": recipients, "cc": [], "bcc": []},
+            run_id=str(uuid.UUID(int=999)),
+        )
+        workbook = load_workbook(io.BytesIO(raw), data_only=True)
+        self.assertEqual(workbook.sheetnames, SHEET_NAMES)
+        delivery = workbook["DËRGIMI AUTOMATIK"]
+        self.assertEqual(delivery["C2"].value, "10:30")
+        self.assertTrue(all(address in delivery["E2"].value for address in recipients))
+        self.assertIsNone(delivery["G2"].value)
+        workbook.close()
 
 
 class WeeklyPlanningAuditWorkbookTests(unittest.TestCase):
@@ -309,7 +529,7 @@ class WeeklyPlanningAuditWorkbookTests(unittest.TestCase):
             week_end=date(2026, 8, 7),
             generated_at=datetime(2026, 7, 31, 9, 0, tzinfo=ZoneInfo("Europe/Tirane")),
             timezone="Europe/Tirane",
-            slot="09:00",
+            slot="10:30",
             people=[
                 PersonAudit(
                     user_id=str(uuid.UUID(int=1)),
@@ -380,11 +600,35 @@ class WeeklyPlanningAuditWorkbookTests(unittest.TestCase):
         self.assertEqual(workbook["RAPORTI FINAL"].max_row, 3)
         workbook.close()
 
-    def test_0900_subject_is_exact(self) -> None:
+    def test_1030_subject_is_exact(self) -> None:
         self.assertEqual(
             report_subject(self._report()),
-            "Kontrolli 09:00 – Raporti PF PLNF JAV 03–07.08.2026 – 31.07.2026",
+            "Kontrolli 10:30 | PLNF JAV 03.08.2026–07.08.2026 | Raporti 31.07.2026",
         )
+
+    def test_delivery_metadata_never_invents_message_id(self) -> None:
+        raw = build_weekly_planning_audit_workbook(
+            self._report(),
+            recipients={
+                "to": ["130primex.eu@gmail.com", "info@primexeu.com", "ga@primexeu.com"],
+                "cc": [],
+                "bcc": [],
+            },
+            run_id=str(uuid.UUID(int=99)),
+        )
+        generated = load_workbook(io.BytesIO(raw), data_only=True)
+        self.assertEqual(generated["DËRGIMI AUTOMATIK"]["F2"].value, "Generated, not sent")
+        self.assertIsNone(generated["DËRGIMI AUTOMATIK"]["G2"].value)
+        generated.close()
+
+        sent_raw = update_weekly_planning_audit_delivery_metadata(
+            raw, delivery_status="Sent", message_id="provider-123", attempt_number=1
+        )
+        sent = load_workbook(io.BytesIO(sent_raw), data_only=True)
+        self.assertEqual(sent["DËRGIMI AUTOMATIK"]["F2"].value, "Sent")
+        self.assertEqual(sent["DËRGIMI AUTOMATIK"]["G2"].value, "provider-123")
+        self.assertEqual(sent["DËRGIMI AUTOMATIK"]["H2"].value, 1)
+        sent.close()
 
 
 if __name__ == "__main__":

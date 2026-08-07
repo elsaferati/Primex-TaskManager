@@ -64,30 +64,10 @@ celery_app.conf.beat_schedule = {
         "task": "app.celery_tasks.generate_weekly_realization_results",
         "schedule": crontab(day_of_week="fri", hour=17, minute=25),
     },
-    "weekly-planning-audit-0900": {
-        "task": "app.celery_tasks.send_weekly_planning_audit_report",
-        "schedule": crontab(day_of_week="fri", hour=9, minute=0),
-        "args": ("09:00",),
-    },
-    "weekly-planning-audit-0930": {
-        "task": "app.celery_tasks.send_weekly_planning_audit_report",
-        "schedule": crontab(day_of_week="fri", hour=9, minute=30),
-        "args": ("09:30",),
-    },
-    "weekly-planning-audit-1000": {
-        "task": "app.celery_tasks.send_weekly_planning_audit_report",
-        "schedule": crontab(day_of_week="fri", hour=10, minute=0),
-        "args": ("10:00",),
-    },
     "weekly-planning-audit-1030": {
         "task": "app.celery_tasks.send_weekly_planning_audit_report",
         "schedule": crontab(day_of_week="fri", hour=10, minute=30),
         "args": ("10:30",),
-    },
-    "weekly-planning-audit-1100": {
-        "task": "app.celery_tasks.send_weekly_planning_audit_report",
-        "schedule": crontab(day_of_week="fri", hour=11, minute=0),
-        "args": ("11:00",),
     },
     "weekly-planning-audit-cleanup": {
         "task": "app.celery_tasks.cleanup_weekly_planning_audit_files",

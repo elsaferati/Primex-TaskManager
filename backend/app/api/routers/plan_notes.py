@@ -61,10 +61,13 @@ def _plan_note_task_title(content: str | None) -> str:
         re.sub(r"[ \t\f\v]+", " ", line).strip()
         for line in (content or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
     ]
-    cleaned = "\n".join(line for line in lines if line)
+    cleaned = [line for line in lines if line]
     if not cleaned:
         return "Plan note task"
-    return cleaned
+    first_line = cleaned[0]
+    if len(first_line) <= 100:
+        return first_line
+    return first_line[:100].rsplit(" ", 1)[0].rstrip(" ,;:-") or first_line[:100]
 
 
 def _plan_note_default_task_description(content: str | None) -> str | None:

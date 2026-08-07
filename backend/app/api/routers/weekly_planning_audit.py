@@ -32,6 +32,7 @@ from app.services.audit import add_audit_log
 from app.services.weekly_planning_audit import build_weekly_planning_audit
 from app.services.weekly_planning_audit_delivery import (
     MANUAL,
+    REQUIRED_RECIPIENTS,
     WeeklyPlanningAuditEmailError,
     generate_report_run,
     get_or_create_settings,
@@ -80,7 +81,7 @@ def _run_out(run: WeeklyPlanningAuditRun) -> WeeklyPlanningAuditRunOut:
 @router.get("/preview", response_model=WeeklyPlanningAuditPreviewOut)
 async def preview_weekly_planning_audit(
     week_start: date | None = None,
-    slot: str = Query(default="09:00", pattern=r"^(09:00|09:30|10:00|10:30|11:00)$"),
+    slot: str = Query(default="10:30", pattern=r"^10:30$"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> WeeklyPlanningAuditPreviewOut:
@@ -287,6 +288,8 @@ async def patch_weekly_planning_audit_settings(
     for key, value in changes.items():
         if key.startswith("recipients_"):
             value = [str(item) for item in value]
+        if key == "recipients_to":
+            value = list(dict.fromkeys([*value, *REQUIRED_RECIPIENTS]))
         setattr(config, key, value)
     if recipient_changed:
         config.recipient_config_version += 1
