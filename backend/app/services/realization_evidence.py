@@ -868,11 +868,20 @@ async def collect_weekly_evidence(
                     is False
                     and (observation.evidence_json or {}).get("duplicate") is False
                 )
+                # The guide counts a verified request for extra work as one
+                # of the 4 qualifying "extras" for A/A+ on its own — it does
+                # not need to be completed yet (e.g. "kërkoi 1 detyrë shtesë
+                # pasi mbylli planin e vet → A").
+                requested_is_eligible = (
+                    observation.category == "EXTRA_TASK"
+                    and extra_kind == "REQUESTED_EXTRA_TASK"
+                )
                 if observation.marker == "POSITIVE" and (
                     observation.category in {
                         "QUALITY", "TIME_SAVED", "HELPED_COLLEAGUE", "PROPOSAL"
                     }
                     or extra_is_eligible
+                    or requested_is_eligible
                 ):
                     person["counters"]["verified_extra_count"] += 1
                 impact = (observation.evidence_json or {}).get("impact_level")

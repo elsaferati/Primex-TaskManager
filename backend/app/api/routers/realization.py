@@ -146,22 +146,18 @@ async def _recalculate_after_evidence(
     planned, final = await _pinned_snapshots(db, period)
     if planned is None or final is None:
         return
-    reviewed = (
-        await db.execute(
-            select(RealizationPersonResult.id).where(
-                RealizationPersonResult.period_id == period.id,
-                RealizationPersonResult.reviewed_at.is_not(None),
-            ).limit(1)
-        )
-    ).scalar_one_or_none()
-    if reviewed is None:
-        await calculate_weekly_period(
-            db,
-            period=period,
-            planned_snapshot=planned,
-            final_snapshot=final,
-            actor_id=actor_id,
-        )
+    # calculate_weekly_period leaves already-reviewed people's results
+    # untouched and recalculates everyone else — so this can always run
+    # while the period is OPEN/CALCULATED (the outer guard above already
+    # stops once every person has been reviewed and the period moves to
+    # REVIEWED).
+    await calculate_weekly_period(
+        db,
+        period=period,
+        planned_snapshot=planned,
+        final_snapshot=final,
+        actor_id=actor_id,
+    )
 
 
 def _visible_facts(user: User, result: RealizationPersonResult) -> dict:

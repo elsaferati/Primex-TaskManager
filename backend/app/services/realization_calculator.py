@@ -227,55 +227,55 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             {
                 "approved": len(approved),
                 "unapproved": len(unapproved),
-                "needs_confirmation": not postponements,
             },
-            source_status="AUTO" if postponements else "AUTO_NEEDS_CONFIRMATION",
+            # Only ambiguous postponements (present but not yet marked
+            # approved/unapproved) need a manager's call — no postponements
+            # at all, or ones already resolved, are a confident AUTO answer.
+            source_status=(
+                "AUTO_NEEDS_CONFIRMATION"
+                if len(postponements) > len(approved) + len(unapproved)
+                else "AUTO"
+            ),
             evidence_ids=postponement_ids,
-            explanation="Pa evidencë aprovimi, shtyrja duhet konfirmuar nga menaxheri.",
+            explanation=(
+                "Ka shtyrje pa aprovim/refuzim të shënuar; kërkon konfirmim nga menaxheri."
+                if len(postponements) > len(approved) + len(unapproved)
+                else ""
+            ),
             answer_type="object",
         ),
         _question(
             "requested_extra_tasks",
-            True if requested else None,
-            source_status="AUTO" if requested else "AUTO_NEEDS_CONFIRMATION",
+            bool(requested),
             evidence_ids=ids(requested),
-            explanation="Kërkon evidencë se personi i ka kërkuar vetë detyrat shtesë.",
             answer_type="boolean",
         ),
         _question(
             "helped_colleague",
-            True if helped else None,
-            source_status="AUTO" if helped else "AUTO_NEEDS_CONFIRMATION",
+            bool(helped),
             evidence_ids=ids(helped),
-            explanation="Kërkon kolegun e ndihmuar dhe argument të verifikueshëm.",
             answer_type="boolean",
         ),
         _question(
             "extra_engagement",
             {"verified_categories": engagement, "additional_tasks_candidate": weekly_added},
-            source_status="AUTO" if engagement else "AUTO_NEEDS_CONFIRMATION",
             evidence_ids=ids(positive),
-            explanation="Taskat shtesë janë kandidat; angazhimi ekstra llogaritet pas verifikimit.",
             answer_type="object",
         ),
         _question(
             "gave_proposal",
-            True if proposals else None,
-            source_status="AUTO" if proposals else "AUTO_NEEDS_CONFIRMATION",
+            bool(proposals),
             evidence_ids=ids(proposals),
-            explanation="Propozimi duhet të ketë përshkrim ose evidencë.",
             answer_type="boolean",
         ),
         _question(
             "respected_meetings",
-            False if missed_meetings else None,
-            source_status="AUTO" if missed_meetings else "AUTO_NEEDS_CONFIRMATION",
+            # No missed-meeting evidence means meetings were respected by
+            # default — matching the manual process, which only flags this
+            # when there IS a problem.
+            not missed_meetings,
             evidence_ids=ids(missed_meetings),
-            explanation=(
-                "Ka evidencë për takim të humbur."
-                if missed_meetings
-                else "Pa evidencë negative; menaxheri konfirmon respektimin e takimeve."
-            ),
+            explanation="Ka evidencë për takim të humbur." if missed_meetings else "",
             answer_type="boolean",
         ),
         _question(
@@ -312,32 +312,25 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
         ),
         _question(
             "week_positive",
-            positive_comments or None,
-            source_status="AUTO" if positive_comments else "AUTO_NEEDS_CONFIRMATION",
+            positive_comments,
             evidence_ids=ids(positive),
-            explanation="Plotësohet nga evidenca pozitive ose nga menaxheri.",
             answer_type="list",
         ),
         _question(
             "week_problems",
-            problem_comments or None,
-            source_status="AUTO" if problem_comments else "AUTO_NEEDS_CONFIRMATION",
+            problem_comments,
             evidence_ids=ids(negative),
-            explanation="Pa evidencë sistemi nuk pretendon se ka ose nuk ka problem.",
             answer_type="list",
         ),
         _question(
             "affected_other_plan",
-            True if blockers else None,
-            source_status="AUTO" if blockers else "AUTO_NEEDS_CONFIRMATION",
+            bool(blockers),
             evidence_ids=ids(blockers),
-            explanation="Kërkon personin e prekur dhe nivelin e ndikimit.",
             answer_type="boolean",
         ),
         _question(
             "repeated_after_clarification",
-            True if repeated else None,
-            source_status="AUTO" if repeated else "AUTO_NEEDS_CONFIRMATION",
+            bool(repeated),
             evidence_ids=ids(repeated),
             explanation="Kërkon problemin, sqarimin paraprak dhe koment.",
             answer_type="boolean",
@@ -480,12 +473,12 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
         ),
         _question(
             "respected_meetings",
-            False if c.get("meeting_missed_count", 0) else None,
-            source_status=(
-                "AUTO"
-                if c.get("meeting_missed_count", 0)
-                else "AUTO_NEEDS_CONFIRMATION"
-            ),
+            # No missed-meeting evidence means meetings were respected by
+            # default — matching the manual process, which only flags this
+            # when there IS a problem. A manager can still add a
+            # "Takim i humbur" evidence entry at any point to flip this.
+            not c.get("meeting_missed_count", 0),
+            source_status="AUTO",
             evidence_ids=sorted(
                 set(meeting_task_ids)
                 | {str(item["id"]) for item in missed_meetings}
@@ -493,7 +486,7 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             explanation=(
                 "Ka evidencë të konfirmuar për takim të humbur."
                 if c.get("meeting_missed_count", 0)
-                else "Pa evidencë negative; prezenca duhet konfirmuar nga menaxheri."
+                else "Pa evidencë për takim të humbur."
             ),
             answer_type="boolean",
         ),
@@ -672,17 +665,30 @@ async def calculate_weekly_period(
             )
         ).scalars().all()
     }
-    if any(row.reviewed_at is not None for row in existing.values()):
-        raise ValueError("Recalculation is not allowed after any person result has been reviewed")
     eligible_user_ids = {uuid.UUID(user_id) for user_id in evidence["people"]}
     for user_id, stale_result in existing.items():
-        if user_id not in eligible_user_ids:
+        if user_id not in eligible_user_ids and stale_result.reviewed_at is None:
             await db.delete(stale_result)
     results: list[RealizationPersonResult] = []
     level_counts: Counter[str] = Counter()
     all_task_keys: set[str] = set()
     for user_id_raw, person in sorted(evidence["people"].items()):
         user_id = uuid.UUID(user_id_raw)
+        result = existing.get(user_id)
+        if result is not None and result.reviewed_at is not None:
+            # A manager's review is a final decision for this person this
+            # week — recalculating (e.g. because a colleague's evidence
+            # changed) must not silently overwrite it. Keep their stored
+            # facts/level/bonus as-is; only reviewed rows are frozen, the
+            # rest of the department still recalculates normally.
+            results.append(result)
+            reviewed_level = result.final_level or result.suggested_level
+            if reviewed_level:
+                level_counts[reviewed_level] += 1
+            all_task_keys.update(
+                item["match_key"] for item in (result.facts_json or {}).get("tasks") or []
+            )
+            continue
         counters = dict(person["counters"])
         decision = evaluate_policy({"counters": counters}, policy.criteria_json, policy.bonus_json)
         narrative = build_albanian_narrative({"counters": counters})
@@ -699,7 +705,6 @@ async def calculate_weekly_period(
             else 100.0
         )
         person["project_progress"] = build_project_progress(person["tasks"])
-        result = existing.get(user_id)
         if result is None:
             result = RealizationPersonResult(
                 period_id=period.id,
