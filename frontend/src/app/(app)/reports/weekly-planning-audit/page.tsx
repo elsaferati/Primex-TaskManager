@@ -109,6 +109,17 @@ function nextMonday(): string {
   ].join("-")
 }
 
+function reportingFriday(monday: string): string {
+  const value = new Date(`${monday}T12:00:00`)
+  if (Number.isNaN(value.getTime())) return "—"
+  value.setDate(value.getDate() + 4)
+  return [
+    value.getFullYear(),
+    String(value.getMonth() + 1).padStart(2, "0"),
+    String(value.getDate()).padStart(2, "0"),
+  ].join("-")
+}
+
 function statusClass(value: string) {
   if (value === "SENT") return "bg-emerald-100 text-emerald-800"
   if (value === "FAILED") return "bg-red-100 text-red-800"
@@ -162,15 +173,21 @@ export default function WeeklyPlanningAuditPage() {
       setTimezone(value.timezone)
       setRetentionDays(String(value.retention_days))
       setEnabled(value.enabled)
+    } else {
+      toast.error(`Settings: ${await readError(settingsResponse)}`)
     }
     if (historyResponse.ok) {
       const value = (await historyResponse.json()) as { items: Run[] }
       setHistory(value.items)
+    } else {
+      toast.error(`Delivery history: ${await readError(historyResponse)}`)
     }
   }, [apiFetch])
 
   React.useEffect(() => {
-    if (user && (user.role === "ADMIN" || user.role === "MANAGER")) void load()
+    if (!user || (user.role !== "ADMIN" && user.role !== "MANAGER")) return
+    const timer = window.setTimeout(() => void load(), 0)
+    return () => window.clearTimeout(timer)
   }, [load, user])
 
   const previewReport = async () => {
@@ -350,6 +367,9 @@ export default function WeeklyPlanningAuditPage() {
             <Button variant="outline" onClick={() => void runAction("generate")} disabled={loading}><FileSpreadsheet className="mr-2 h-4 w-4" /> Generate Excel</Button>
             <Button onClick={() => void runAction("generate-and-send")} disabled={loading}><Send className="mr-2 h-4 w-4" /> Generate and Send</Button>
           </div>
+          <div className="rounded-md border bg-muted/30 px-3 py-2 text-sm">
+            Java që do të auditohet: <strong>{weekStart} – {reportingFriday(weekStart)}</strong>
+          </div>
           <p className="text-xs text-muted-foreground">Every action reads the current PrimeFlow state; existing tasks are never changed.</p>
         </CardContent>
       </Card>
@@ -359,11 +379,15 @@ export default function WeeklyPlanningAuditPage() {
           <Card>
             <CardHeader><CardTitle className="text-sm">Preview summary: {preview.week_start} – {preview.week_end}</CardTitle></CardHeader>
             <CardContent className="space-y-3">
-              <div className="grid gap-2 text-sm md:grid-cols-5">
+              <div className="grid gap-2 text-sm md:grid-cols-4 lg:grid-cols-8">
+                <div>Generated: <strong>{new Date(preview.generated_at).toLocaleString()}</strong></div>
                 <div>Included: <strong>{preview.people.length}</strong></div>
                 <div>Full-week PV excluded: <strong>{preview.excluded_full_leave.length}</strong></div>
                 <div>Partial PV: <strong>{preview.partial_leave_users.length}</strong></div>
                 <div>Errors: <strong>{preview.errors.length}</strong></div>
+                <div>Critical: <strong>{preview.errors.filter((item) => item.severity === "CRITICAL").length}</strong></div>
+                <div>High: <strong>{preview.errors.filter((item) => item.severity === "HIGH").length}</strong></div>
+                <div>PX dictionary: <strong>{preview.abbreviation_version}</strong></div>
                 <div>Analysis: <strong>{preview.ai_status === "used" ? `AI (${preview.ai_model})` : "Deterministic fallback"}</strong></div>
               </div>
               <Table>

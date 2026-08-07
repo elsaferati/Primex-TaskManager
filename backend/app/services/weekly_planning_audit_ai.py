@@ -65,7 +65,8 @@ def _output_text(payload: dict[str, Any]) -> str:
 
 async def analyze_weekly_planning_audit(payload: dict[str, Any]) -> tuple[dict[str, Any] | None, str]:
     model = settings.WEEKLY_PLANNING_AUDIT_AI_MODEL
-    if not payload.get("people"):
+    people = payload.get("people") or []
+    if not people or not any(person.get("tasks") for person in people if isinstance(person, dict)):
         return {"errors": []}, "not_needed"
     if not settings.WEEKLY_PLANNING_AUDIT_AI_ENABLED:
         return None, "disabled"
