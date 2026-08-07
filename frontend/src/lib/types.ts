@@ -769,6 +769,7 @@ export interface RealizationPersonResult {
       task_ids: string[]
     }>
     ai_analysis?: RealizationAIAnalysis
+    ai_analysis_history?: RealizationAIAnalysis[]
   }
   planned_count: number
   completed_on_time_count: number
@@ -828,6 +829,8 @@ export interface RealizationAIAnalysis {
   evidence_ids: string[]
   model: string
   advisory_only: true
+  generated_at?: string
+  generated_by?: string
 }
 
 export interface RealizationWeeklyResponse {

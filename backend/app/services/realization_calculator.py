@@ -707,6 +707,15 @@ async def calculate_weekly_period(
                 department_id=period.department_id,
             )
             db.add(result)
+        else:
+            # Recalculating (e.g. after new evidence is added) rebuilds facts
+            # from scratch — carry forward any AI analyses generated earlier
+            # this week instead of silently losing them.
+            previous_facts = result.facts_json or {}
+            if previous_facts.get("ai_analysis"):
+                person["ai_analysis"] = previous_facts["ai_analysis"]
+            if previous_facts.get("ai_analysis_history"):
+                person["ai_analysis_history"] = previous_facts["ai_analysis_history"]
         result.facts_json = person
         for source_key, model_key in COUNTER_FIELDS.items():
             setattr(result, model_key, int(counters.get(source_key, 0)))
@@ -720,7 +729,7 @@ async def calculate_weekly_period(
         result.meeting_missed_count = int(counters.get("meeting_missed_count", 0))
         result.suggested_level = decision.level.value
         result.suggested_symbol = decision.symbol.value
-        result.suggested_bonus = None
+        result.suggested_bonus = decision.bonus
         result.auto_narrative = narrative
         results.append(result)
         level_counts[decision.level.value] += 1

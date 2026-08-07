@@ -141,6 +141,58 @@ class TestPolicy(unittest.TestCase):
         )
         self.assertEqual(result.level, RealizationLevel.C)
 
+    def test_bonus_is_sourced_from_policy_bonus_table(self) -> None:
+        result = evaluate_policy(
+            {"planned_count": 3, "completed_on_time_count": 3},
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.B)
+        self.assertEqual(result.bonus, 30)
+
+    def test_single_unexcused_absence_with_tasks_done_uses_c(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 2,
+                "completed_on_time_count": 2,
+                "accounted_planned_count": 2,
+                "unexcused_absence_days": 1,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.C)
+        self.assertEqual(result.bonus, 20)
+
+    def test_blocked_colleague_minor_impact_caps_a_plus_at_c(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 3,
+                "completed_on_time_count": 3,
+                "accounted_planned_count": 3,
+                "verified_extra_count": 2,
+                "negative_count": 1,
+                "minor_negative_impact_count": 1,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.C)
+
+    def test_blocked_colleague_major_impact_caps_a_at_d(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 3,
+                "completed_on_time_count": 3,
+                "accounted_planned_count": 3,
+                "verified_extra_count": 1,
+                "major_negative_impact": True,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.D)
+
 
 class TestWorkflow(unittest.TestCase):
     def test_current_week_can_be_finalized_on_friday(self) -> None:

@@ -326,7 +326,10 @@ class TestRealizationPermissions(unittest.TestCase):
             )
         )
 
-    def test_manager_scope_is_department_bound(self) -> None:
+    def test_manager_can_review_every_department(self) -> None:
+        # Each department manager (Development/Product Content/Graphic
+        # Design) manages Realization for all departments, not just their
+        # own — a deliberate product decision, not department scoping.
         self.assertTrue(
             can_view_person_result(
                 self.manager,
@@ -334,7 +337,14 @@ class TestRealizationPermissions(unittest.TestCase):
                 subject_department_id=self.department,
             )
         )
-        self.assertFalse(
+        self.assertTrue(
+            can_view_person_result(
+                self.manager,
+                subject_user_id=uuid.uuid4(),
+                subject_department_id=self.other_department,
+            )
+        )
+        self.assertTrue(
             can_review_realization(self.manager, department_id=self.other_department)
         )
         self.assertTrue(can_review_realization(self.manager, department_id=self.department))

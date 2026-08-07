@@ -391,9 +391,11 @@ export default function RealizationPage() {
     if (!response.ok) return
     const rows = (await response.json()) as Department[]
     setDepartments(rows)
-    const preferred = user?.role === "MANAGER" ? user.department_id : departmentId
+    // A manager's own department is only the initial default — every
+    // manager can switch to and manage any department in Realization.
+    const preferred = departmentId || (user?.role === "MANAGER" ? user.department_id : "")
     const next = rows.find((row) => row.id === preferred)?.id || rows[0]?.id || ""
-    if (!departmentId || user?.role === "MANAGER") setDepartmentId(next)
+    if (!departmentId) setDepartmentId(next)
   }, [apiFetch, departmentId, user])
 
   const loadReport = React.useCallback(async () => {
@@ -578,7 +580,6 @@ export default function RealizationPage() {
     } else if (evidenceCategory === "REPEATED_PROBLEM") {
       evidenceJson.clarified_before = true
     } else if (evidenceCategory === "MISSED_MEETING") {
-      evidenceJson.meeting_id = relatedId
       evidenceJson.occurrence_date = evidenceDate
     } else if (evidenceCategory === "BLOCKER") {
       evidenceJson.affected_user_id = relatedId
@@ -598,12 +599,12 @@ export default function RealizationPage() {
       toast.error("Vendos çelësin e problemit të përsëritur")
       return
     }
-    if (["MISSED_MEETING", "BLOCKER", "HELPED_COLLEAGUE"].includes(evidenceCategory) && !relatedId.trim()) {
-      toast.error("Vendos ID-në e evidencës së lidhur")
+    if (["BLOCKER", "HELPED_COLLEAGUE"].includes(evidenceCategory) && !relatedId.trim()) {
+      toast.error("Zgjidh personin")
       return
     }
     if (evidenceCategory === "EXTRA_TASK" && !taskId.trim()) {
-      toast.error("Vendos ID-në e detyrës shtesë")
+      toast.error("Zgjidh detyrën shtesë")
       return
     }
     setAction("evidence")
@@ -664,6 +665,7 @@ export default function RealizationPage() {
           facts_json: {
             ...person.facts_json,
             ai_analysis: analysis,
+            ai_analysis_history: [...(person.facts_json.ai_analysis_history || []), analysis],
           },
         } : person),
       } : current)
@@ -746,9 +748,18 @@ export default function RealizationPage() {
   }
 
   const people = data?.people || []
+  const colleagueOptions = people.filter((person) => person.id !== selected?.id)
+  const extraTaskOptions = Array.from(
+    new Map(
+      (selected?.facts_json.tasks || [])
+        .filter((task) => task.task_id)
+        .map((task) => [task.task_id, task])
+    ).values()
+  )
   const grade = selected?.final_level || selected?.suggested_level || null
   const selectedQuestions = selected?.facts_json.questions || []
   const aiAnalysis = selected?.facts_json.ai_analysis
+  const aiHistory = [...(selected?.facts_json.ai_analysis_history || [])].reverse()
   const selectedWeeklyPlanned = selected ? weeklyPlanned(selected) : 0
   const selectedWeeklyCompleted = selected ? weeklyCompleted(selected) : 0
   const selectedWeeklyAllCompleted = selected ? weeklyAllCompleted(selected) : 0
@@ -812,7 +823,7 @@ export default function RealizationPage() {
           <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <div className="space-y-1.5">
               <Label>Departamenti</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId} disabled={user.role === "MANAGER"}>
+              <Select value={departmentId} onValueChange={setDepartmentId}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh departamentin" /></SelectTrigger>
                 <SelectContent>
                   {departments.map((department) => <SelectItem key={department.id} value={department.id}>{department.name}</SelectItem>)}
@@ -850,7 +861,7 @@ export default function RealizationPage() {
             <Button variant="outline" onClick={() => void downloadExcel()} disabled={!people.length || !!action}>
               {action === "export" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Excel
             </Button>
-            {user.role === "ADMIN" ? (
+            {["ADMIN", "MANAGER"].includes(user.role) ? (
               <Button variant="outline" onClick={() => void downloadExcel(true)} disabled={!!action}>
                 {action === "export-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Excel gjithë
               </Button>
@@ -1028,6 +1039,28 @@ export default function RealizationPage() {
                   </section>
                 ) : null}
 
+                {aiHistory.length > 1 ? (
+                  <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                    <summary className="cursor-pointer list-none bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+                      Historiku i analizave AI ({aiHistory.length})
+                    </summary>
+                    <div className="divide-y divide-slate-100 px-4">
+                      {aiHistory.map((entry, index) => (
+                        <div key={`${entry.generated_at}-${index}`} className="py-3">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                            <span className="font-medium text-slate-700">
+                              {entry.generated_at ? new Date(entry.generated_at).toLocaleString() : "—"}
+                            </span>
+                            <Badge variant="outline" className="text-[10px]">Sugjerimi {entry.suggested_level}</Badge>
+                            <Badge variant="secondary" className="text-[10px]">Siguria {Math.round(entry.confidence * 100)}%</Badge>
+                          </div>
+                          <p className="mt-1.5 text-sm leading-6 text-slate-700">{entry.summary}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+
                 <details className="group overflow-hidden rounded-2xl border border-slate-200 bg-white">
                   <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
                     <span>Detajet e vlerësimit dhe argumentimit</span>
@@ -1116,11 +1149,11 @@ export default function RealizationPage() {
           <div className="space-y-4">
             <div className="space-y-1.5"><Label>Kategoria</Label><Select value={evidenceCategory} onValueChange={setEvidenceCategory}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{[["QUALITY", "Cilësi / angazhim ekstra"], ["PROPOSAL", "Propozim"], ["REQUESTED_EXTRA_TASK", "Kërkoi detyra shtesë"], ["HELPED_COLLEAGUE", "Ndihmoi koleg"], ["EXTRA_TASK", "Detyrë shtesë e përfunduar"], ["REPEATED_PROBLEM", "Problem i përsëritur"], ["BLOCKER", "I prishi planin kolegut"], ["MISSED_MEETING", "Takim i humbur"], ["ABSENCE", "Mungesë / pushim"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
             {evidenceCategory === "ABSENCE" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Klasifikimi</Label><Select value={absenceClass} onValueChange={setAbsenceClass}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="UNEXCUSED">E papritur / pa aprovim</SelectItem><SelectItem value="APPROVED_PERSONAL">Personale e aprovuar</SelectItem><SelectItem value="ANNUAL_LEAVE">Pushim vjetor</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label>Data</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></div> : null}
-            {evidenceCategory === "MISSED_MEETING" ? <><div className="space-y-1.5"><Label>ID e takimit</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div><div className="space-y-1.5"><Label>Data e takimit</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></> : null}
-            {evidenceCategory === "BLOCKER" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>ID e personit të prekur</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div><div className="space-y-1.5"><Label>Ndikimi</Label><Select value={impactLevel} onValueChange={setImpactLevel}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MINOR">I vogël</SelectItem><SelectItem value="MAJOR">I madh</SelectItem><SelectItem value="MULTIPLE_PEOPLE">Disa persona</SelectItem></SelectContent></Select></div></div> : null}
-            {evidenceCategory === "HELPED_COLLEAGUE" ? <div className="space-y-1.5"><Label>ID e kolegut të ndihmuar</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div> : null}
-            {evidenceCategory === "REPEATED_PROBLEM" ? <div className="space-y-1.5"><Label>Çelësi i problemit të përsëritur</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} placeholder="p.sh. kontrolli-final-produktit" /></div> : null}
-            {evidenceCategory === "EXTRA_TASK" ? <div className="space-y-1.5"><Label>ID e detyrës</Label><Input value={taskId} onChange={(event) => setTaskId(event.target.value)} /></div> : null}
+            {evidenceCategory === "MISSED_MEETING" ? <div className="space-y-1.5"><Label>Data e takimit</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /><p className="text-xs text-muted-foreground">Përshkruaj takimin te komenti më poshtë — nuk kërkohet ID.</p></div> : null}
+            {evidenceCategory === "BLOCKER" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Kolegu i prekur</Label><Select value={relatedId} onValueChange={setRelatedId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh personin" /></SelectTrigger><SelectContent>{colleagueOptions.map((person) => <SelectItem key={person.id} value={person.user_id}>{person.user_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label>Ndikimi</Label><Select value={impactLevel} onValueChange={setImpactLevel}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MINOR">I vogël</SelectItem><SelectItem value="MAJOR">I madh</SelectItem><SelectItem value="MULTIPLE_PEOPLE">Disa persona</SelectItem></SelectContent></Select></div></div> : null}
+            {evidenceCategory === "HELPED_COLLEAGUE" ? <div className="space-y-1.5"><Label>Kolegu i ndihmuar</Label><Select value={relatedId} onValueChange={setRelatedId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh personin" /></SelectTrigger><SelectContent>{colleagueOptions.map((person) => <SelectItem key={person.id} value={person.user_id}>{person.user_name}</SelectItem>)}</SelectContent></Select></div> : null}
+            {evidenceCategory === "REPEATED_PROBLEM" ? <div className="space-y-1.5"><Label>Çelësi i problemit të përsëritur</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} placeholder="p.sh. kontrolli-final-produktit" /><p className="text-xs text-muted-foreground">Përdor të njëjtin çelës çdo herë që ky problem përsëritet, që të lidhen automatikisht rastet e njëpasnjëshme.</p></div> : null}
+            {evidenceCategory === "EXTRA_TASK" ? <div className="space-y-1.5"><Label>Detyra shtesë</Label><Select value={taskId} onValueChange={setTaskId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh detyrën" /></SelectTrigger><SelectContent>{extraTaskOptions.map((task) => <SelectItem key={task.task_id} value={task.task_id as string}>{cleanTaskTitle(task.title)}</SelectItem>)}</SelectContent></Select></div> : null}
             <div className="space-y-1.5"><Label>Argumenti / komenti</Label><Textarea value={evidenceComment} onChange={(event) => setEvidenceComment(event.target.value)} rows={4} placeholder="Përshkruaj çfarë ndodhi dhe si mund të verifikohet..." /></div>
             <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">Marker automatik: <strong>{evidenceMarker}</strong>. Nota ndryshon vetëm sipas rregullave dhe evidencës së verifikuar.</div>
           </div>

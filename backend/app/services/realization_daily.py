@@ -505,9 +505,13 @@ async def calculate_daily_period(
                 department_id=period.department_id,
             )
             db.add(result)
-        previous_ai_analysis = (result.facts_json or {}).get("ai_analysis")
+        previous_facts = result.facts_json or {}
+        previous_ai_analysis = previous_facts.get("ai_analysis")
         if previous_ai_analysis:
             person["ai_analysis"] = previous_ai_analysis
+        previous_ai_history = previous_facts.get("ai_analysis_history")
+        if previous_ai_history:
+            person["ai_analysis_history"] = previous_ai_history
         result.facts_json = person
         result.planned_count = planned_today
         result.completed_on_time_count = completed_today

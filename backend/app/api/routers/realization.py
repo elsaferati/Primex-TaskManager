@@ -97,9 +97,9 @@ def _error(exc: ValueError, code: int = status.HTTP_409_CONFLICT) -> HTTPExcepti
 
 
 def _ensure_department_scope(user: User, department_id: uuid.UUID) -> None:
-    if user.role == UserRole.ADMIN:
-        return
-    if user.role != UserRole.MANAGER or user.department_id != department_id:
+    # Every department manager can see and manage Realization for all
+    # departments, not just their own — see realization_access.py.
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
@@ -546,6 +546,24 @@ async def _weekly_response(
             )
             if not task_key:
                 continue
+            # A task's scheduled day (from due_date/origin_run_at/start_date)
+            # can differ from the day it was actually completed. Without this,
+            # the same task shows up twice — once as a "scheduled" ghost entry
+            # on its due day and again here on its completion day.
+            for other_day in timeline:
+                if other_day["date"] == completion_day:
+                    continue
+                other_tasks = other_day.get("tasks")
+                if not other_tasks:
+                    continue
+                filtered = [
+                    task
+                    for task in other_tasks
+                    if str(task.get("task_id") or task.get("match_key") or "")
+                    != task_key
+                ]
+                if len(filtered) != len(other_tasks):
+                    other_day["tasks"] = filtered
             target_tasks = target.setdefault("tasks", [])
             existing_index = next(
                 (
@@ -726,13 +744,9 @@ async def export_realization_excel(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    if user.role == UserRole.MANAGER:
-        if user.department_id is None:
-            raise HTTPException(status_code=403, detail="Manager has no department")
-        if department_id is not None and department_id != user.department_id:
-            raise HTTPException(status_code=403, detail="Forbidden")
-        department_id = user.department_id
-    elif user.role != UserRole.ADMIN:
+    # Every department manager can export Realization for any department,
+    # or all of them at once (department_id=None), same as ADMIN.
+    if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     start = normalize_week_start(week_start)
@@ -757,6 +771,18 @@ async def export_realization_excel(
             await db.execute(select(Department).where(Department.id.in_(department_ids)))
         ).scalars().all()
     }
+    managers_by_department_id: dict[uuid.UUID, str] = {}
+    if department_ids:
+        for manager_row in (
+            await db.execute(
+                select(User).where(
+                    User.role == UserRole.MANAGER,
+                    User.department_id.in_(department_ids),
+                )
+            )
+        ).scalars().all():
+            if manager_row.department_id is not None:
+                managers_by_department_id[manager_row.department_id] = manager_row.full_name
     weekly_results = (
         await db.execute(
             select(RealizationPersonResult).where(
@@ -976,6 +1002,7 @@ async def export_realization_excel(
     export_departments = [
         {
             "name": departments_by_id.get(period.department_id, "Departamenti"),
+            "manager_name": managers_by_department_id.get(period.department_id),
             "status": (
                 "AKTUAL (SNAPSHOT DITOR)"
                 if period.id in live_period_ids
@@ -1411,11 +1438,17 @@ async def analyze_person_result(
     except RealizationAIError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     facts = dict(result.facts_json or {})
-    facts["ai_analysis"] = {
+    new_entry = {
         **analysis,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_by": str(user.id),
     }
+    # Every "Gjenero analizën" click is kept, not overwritten, so a manager
+    # can see how the AI's read of a person changed across the week.
+    history = list(facts.get("ai_analysis_history") or [])
+    history.append(new_entry)
+    facts["ai_analysis_history"] = history
+    facts["ai_analysis"] = new_entry
     result.facts_json = facts
     add_audit_log(
         db=db,

@@ -43,7 +43,7 @@ class TestRealizationExcel(unittest.TestCase):
         )
         self.assertIsNone(by_key["helped_colleague"]["auto_value"])
 
-    def test_export_has_department_evidence_guide_and_no_money(self) -> None:
+    def test_export_has_department_evidence_guide_and_weekly_bonus(self) -> None:
         payload = build_realization_workbook(
             week_start="2026-08-03",
             week_end="2026-08-07",
@@ -102,8 +102,19 @@ class TestRealizationExcel(unittest.TestCase):
             for row in sheet.iter_rows()
             for cell in row
         ).lower()
-        self.assertNotIn("bonus", values)
-        self.assertNotIn("€", values)
+        # The weekly € bonus (matching the manual grading guide's per-level
+        # table) is a deliberate inclusion; the monthly "PAGA" section is not.
+        self.assertIn("bonusi javor", values)
+        self.assertNotIn("pagë bazë", values)
+        self.assertNotIn("bonus mujor", values)
+
+        development = workbook["Development"]
+        development_values = " ".join(
+            str(cell.value or "") for row in development.iter_rows() for cell in row
+        ).lower()
+        self.assertIn("40", development_values)
+        self.assertIn("totali i javës", development_values)
+        self.assertIn("nënshkrimet", development_values)
 
     def test_live_export_is_populated_and_clearly_not_final(self) -> None:
         payload = build_realization_workbook(
