@@ -31,6 +31,7 @@ from app.models.realization import (
     RealizationObservation,
     RealizationPeriod,
     RealizationPersonResult,
+    RealizationQuestionAnswer,
 )
 from app.models.task import Task
 from app.models.task_user_comment import TaskUserComment
@@ -51,6 +52,8 @@ from app.schemas.realization import (
     RealizationPersonResultOut,
     RealizationPersonWorkflowOut,
     RealizationReviewRequest,
+    RealizationQuestionAnswerCreate,
+    RealizationQuestionAnswerOut,
     RealizationMonthlyOut,
     RealizationMonthlyPersonOut,
     RealizationWeeklyOut,
@@ -64,8 +67,20 @@ from app.services.realization_access import (
     can_view_observation,
     can_view_person_result,
 )
-from app.services.realization_calculator import build_live_questions, calculate_weekly_period
-from app.services.realization_ai import RealizationAIError, analyze_realization
+from app.services.realization_calculator import (
+    MANDATORY_MANUAL_QUESTION_KEYS,
+    MANUAL_BOOLEAN_QUESTION_KEYS,
+    MANUAL_TEXT_QUESTION_KEYS,
+    missing_manual_question_keys,
+    build_live_questions,
+    calculate_weekly_period,
+)
+from app.services.realization_ai import (
+    RealizationAIError,
+    analyze_realization,
+    mark_analysis_stale,
+    record_analysis_state,
+)
 from app.services.realization_daily import (
     _daily_classification,
     _local_date,
@@ -76,7 +91,6 @@ from app.services.realization_excel import build_realization_workbook
 from app.services.realization_periods import (
     RealizationWorkflowError,
     ensure_daily_period,
-    ensure_monthly_period,
     ensure_weekly_period,
     normalize_week_start,
     require_unlocked,
@@ -88,11 +102,46 @@ from app.services.realization_people import (
     load_active_users_and_common_leave,
 )
 from app.services.realization_pulse import aggregate_monthly_pulses
-from app.services.realization_monthly import calculate_monthly_period
 from app.services.system_task_schedule import _is_working_day
 
 
 router = APIRouter()
+
+
+async def _latest_question_answers(
+    db: AsyncSession, result_ids: list[uuid.UUID]
+) -> dict[uuid.UUID, dict[str, RealizationQuestionAnswer]]:
+    if not result_ids:
+        return {}
+    rows = (
+        await db.execute(
+            select(RealizationQuestionAnswer)
+            .where(RealizationQuestionAnswer.result_id.in_(result_ids))
+            .order_by(
+                RealizationQuestionAnswer.answered_at.asc(),
+                RealizationQuestionAnswer.id.asc(),
+            )
+        )
+    ).scalars().all()
+    latest: dict[uuid.UUID, dict[str, RealizationQuestionAnswer]] = {}
+    for row in rows:
+        latest.setdefault(row.result_id, {})[row.question_key] = row
+    return latest
+
+
+def _answer_payload(row: RealizationQuestionAnswer, name: str | None = None) -> dict:
+    stored = row.value_json or {}
+    return {
+        "id": str(row.id),
+        "value": stored.get("value"),
+        "comment": row.comment,
+        "evidence_ids": [str(item) for item in (row.evidence_ids_json or [])],
+        "answered_by": str(row.answered_by),
+        "answered_by_name": name,
+        "answered_at": row.answered_at.isoformat(),
+        "updated_at": row.updated_at.isoformat(),
+        "supersedes_answer_id": str(row.supersedes_answer_id) if row.supersedes_answer_id else None,
+    }
 
 
 def _can_capture_current_week_final(period: RealizationPeriod, *, today: date | None = None) -> bool:
@@ -109,7 +158,7 @@ def _error(exc: ValueError, code: int = status.HTTP_409_CONFLICT) -> HTTPExcepti
 
 
 def _ensure_department_scope(user: User, department_id: uuid.UUID) -> None:
-    if user.role == UserRole.ADMIN:
+    if user.role in {UserRole.ADMIN, UserRole.MANAGER}:
         return
     if user.role not in (UserRole.MANAGER, UserRole.STAFF) or user.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
@@ -290,7 +339,15 @@ async def _weekly_response(
                 "category": observation.category,
                 "comment": observation.comment,
                 "task_id": str(observation.task_id) if observation.task_id else None,
+                "user_id": str(observation.user_id) if observation.user_id else None,
+                "project_id": str(observation.project_id) if observation.project_id else None,
+                "impact_minutes": observation.impact_minutes,
+                "repeat_count": observation.repeat_count_at_creation,
                 "evidence_json": observation.evidence_json or {},
+                "source_type": observation.source_type,
+                "created_at": observation.created_at.isoformat(),
+                "relevant_date": (observation.evidence_json or {}).get("date")
+                or (observation.evidence_json or {}).get("occurrence_date"),
                 "verified": observation.id in verified_ids
                 or (
                     observation.is_system_generated
@@ -392,6 +449,23 @@ async def _weekly_response(
         if visible
         else []
     )
+
+
+async def _mark_ai_stale_for_subject(
+    db: AsyncSession, *, period_id: uuid.UUID, user_id: uuid.UUID | None
+) -> None:
+    if user_id is None:
+        return
+    result = (
+        await db.execute(
+            select(RealizationPersonResult).where(
+                RealizationPersonResult.period_id == period_id,
+                RealizationPersonResult.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if result is not None and result.ai_generated_at is not None:
+        mark_analysis_stale(result)
     close_history: dict[tuple[uuid.UUID, str], list[dict]] = {}
     for close_event, close_period in close_events:
         key = (close_event.user_id, close_period.start_date.isoformat())
@@ -411,6 +485,18 @@ async def _weekly_response(
                 else "OPEN"
             )
             item["close_event"] = latest
+            if (
+                latest
+                and item["close_state"] == "CLOSED"
+                and latest.get("confirmed_pulse")
+            ):
+                suggested_pulse = (item.get("pulse") or {}).get("pulse")
+                item["pulse"] = {
+                    **(item.get("pulse") or {}),
+                    "suggested_pulse": suggested_pulse,
+                    "pulse": latest["confirmed_pulse"],
+                    "confirmed": True,
+                }
 
     planned_tasks_by_user_day: dict[uuid.UUID, dict[str, list[dict]]] = {}
     if period.planned_snapshot_id is not None:
@@ -712,6 +798,18 @@ async def _weekly_response(
                 task["user_comment"] = (
                     task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
                 )
+    answers_by_result = await _latest_question_answers(db, [row.id for row in visible])
+    answerer_ids = {
+        answer.answered_by
+        for result_answers in answers_by_result.values()
+        for answer in result_answers.values()
+    }
+    answerer_names = {
+        actor.id: actor.full_name
+        for actor in (
+            await db.execute(select(User).where(User.id.in_(answerer_ids)))
+        ).scalars().all()
+    } if answerer_ids else {}
     people: list[RealizationPersonWorkflowOut] = []
     for row in visible:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
@@ -721,6 +819,14 @@ async def _weekly_response(
             for task in facts.get("tasks") or []
             if belongs_to_person(task, row.user_id)
         ]
+        for task in facts["tasks"]:
+            try:
+                task_uuid = uuid.UUID(str(task.get("task_id")))
+            except (TypeError, ValueError):
+                task_uuid = None
+            task["user_comment"] = (
+                task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
+            )
         facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
         facts["observations"] = live_by_user.get(row.user_id, [])
         pulse_history = [
@@ -748,6 +854,32 @@ async def _weekly_response(
                 facts.get("tasks") or []
             )
             facts["questions"] = build_live_questions(facts)
+        latest_answers = answers_by_result.get(row.id, {})
+        facts["manual_answers"] = {
+            key: _answer_payload(answer, answerer_names.get(answer.answered_by))
+            for key, answer in latest_answers.items()
+        }
+        enriched_questions = []
+        for question in facts.get("questions") or []:
+            item = dict(question)
+            answer = latest_answers.get(str(item.get("key")))
+            if answer is not None:
+                item["final_value"] = (answer.value_json or {}).get("value")
+                item["manager_comment"] = answer.comment
+                item["linked_evidence_ids"] = [
+                    str(value) for value in (answer.evidence_ids_json or [])
+                ]
+                item["source_status"] = "MANUAL_ANSWERED"
+            enriched_questions.append(item)
+        facts["questions"] = enriched_questions
+        answered_mandatory = set(latest_answers) & MANDATORY_MANUAL_QUESTION_KEYS
+        facts["manual_question_completeness"] = {
+            "answered": len(answered_mandatory),
+            "required": len(MANDATORY_MANUAL_QUESTION_KEYS),
+            "missing_keys": sorted(MANDATORY_MANUAL_QUESTION_KEYS - answered_mandatory),
+            "complete": answered_mandatory == MANDATORY_MANUAL_QUESTION_KEYS,
+        }
+        facts["manager_review_comment"] = row.manager_comment
         payload["facts_json"] = facts
         if user.role == UserRole.STAFF:
             payload["manager_comment"] = None
@@ -809,9 +941,6 @@ async def export_realization_excel(
 ) -> Response:
     if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(status_code=403, detail="Forbidden")
-    if user.role == UserRole.MANAGER:
-        if department_id is None or department_id != user.department_id:
-            raise HTTPException(status_code=403, detail="Managers can export only their department")
 
     start = normalize_week_start(week_start)
     end = weekly_end(start)
@@ -1312,6 +1441,8 @@ async def calculate_daily_realization(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> RealizationDailyOut:
+    if user.role == UserRole.STAFF:
+        raise HTTPException(status_code=403, detail="STAFF cannot recalculate a department snapshot")
     _ensure_department_scope(user, department_id)
     department = (
         await db.execute(select(Department).where(Department.id == department_id))
@@ -1399,6 +1530,7 @@ async def close_realization_day(
         period=period,
         planned_snapshot=planned,
         actor_id=user.id,
+        only_user_id=result.user_id if user.role == UserRole.STAFF else None,
     )
     await db.flush()
     await db.refresh(result)
@@ -1409,6 +1541,14 @@ async def close_realization_day(
             detail={
                 "code": "RLZ_TASK_COMMENT_REQUIRED",
                 "message": "Para mbylljes, plotëso komentet e rezultateve që mungojnë.",
+            },
+        )
+    if int(facts.get("missing_pink_explanation_count") or 0) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "RLZ_PINK_EXPLANATION_REQUIRED",
+                "message": "Para mbylljes, shpjego detyrat Pink pa progres.",
             },
         )
     if not (payload.daily_comment and payload.daily_comment.strip()):
@@ -1561,22 +1701,7 @@ async def get_monthly_realization(
     department = await db.get(Department, department_id)
     if department is None:
         raise HTTPException(status_code=404, detail="Department not found")
-    monthly_period = await ensure_monthly_period(
-        db,
-        department_id=department_id,
-        month_start=start,
-        created_by=user.id,
-    )
-    await calculate_monthly_period(db, period=monthly_period, actor_id=user.id)
-    add_audit_log(
-        db=db,
-        actor_user_id=user.id,
-        entity_type="realization_period",
-        entity_id=monthly_period.id,
-        action="monthly_operational_calculated",
-        after={"month_start": start.isoformat(), "month_end": end.isoformat()},
-    )
-    await db.commit()
+    # Read-only aggregation: monthly GET never creates a period or rewrites results.
     rows = (
         await db.execute(
             select(RealizationPersonResult, RealizationPeriod)
@@ -1648,6 +1773,113 @@ async def get_monthly_realization(
 
 
 @router.post(
+    "/periods/{period_id}/results/{result_id}/questions/{question_key}",
+    response_model=RealizationQuestionAnswerOut,
+)
+async def save_question_answer(
+    period_id: uuid.UUID,
+    result_id: uuid.UUID,
+    question_key: str,
+    payload: RealizationQuestionAnswerCreate,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationQuestionAnswerOut:
+    period = await _period(db, period_id, for_update=True)
+    try:
+        require_unlocked(period)
+    except RealizationWorkflowError as exc:
+        raise _error(exc)
+    if period.period_type != "WEEKLY" or not can_review_realization(
+        user, department_id=period.department_id
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if question_key not in MANDATORY_MANUAL_QUESTION_KEYS:
+        raise HTTPException(status_code=422, detail="Question is not a manual manager question")
+    if question_key in MANUAL_BOOLEAN_QUESTION_KEYS:
+        if payload.value is not None and not isinstance(payload.value, bool):
+            raise HTTPException(status_code=422, detail="Boolean questions accept Po, Jo, or N/A")
+    elif question_key in MANUAL_TEXT_QUESTION_KEYS:
+        if not isinstance(payload.value, str) or not payload.value.strip():
+            raise HTTPException(status_code=422, detail="This question requires manager text")
+
+    result = (
+        await db.execute(
+            select(RealizationPersonResult).where(
+                RealizationPersonResult.id == result_id,
+                RealizationPersonResult.period_id == period.id,
+            )
+        )
+    ).scalar_one_or_none()
+    if result is None:
+        raise HTTPException(status_code=404, detail="Person result not found")
+    if payload.evidence_ids:
+        question_support_ids = {
+            str(value)
+            for question in (result.facts_json or {}).get("questions") or []
+            if question.get("key") == question_key
+            for value in question.get("evidence_ids") or []
+        }
+        supplied_ids = {str(value) for value in payload.evidence_ids}
+        observation_ids = {
+            str(value)
+            for value in (
+            await db.execute(
+                select(RealizationObservation.id).where(
+                    RealizationObservation.id.in_(payload.evidence_ids),
+                    RealizationObservation.period_id == period.id,
+                    RealizationObservation.voided_at.is_(None),
+                )
+            )
+            ).scalars().all()
+        }
+        if not supplied_ids.issubset(question_support_ids | observation_ids):
+            raise HTTPException(status_code=422, detail="Linked evidence must belong to this period")
+    previous = (
+        await db.execute(
+            select(RealizationQuestionAnswer)
+            .where(
+                RealizationQuestionAnswer.result_id == result.id,
+                RealizationQuestionAnswer.question_key == question_key,
+            )
+            .order_by(
+                RealizationQuestionAnswer.answered_at.desc(),
+                RealizationQuestionAnswer.id.desc(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    now = datetime.now(timezone.utc)
+    answer = RealizationQuestionAnswer(
+        period_id=period.id,
+        result_id=result.id,
+        question_key=question_key,
+        value_json={"value": payload.value.strip() if isinstance(payload.value, str) else payload.value},
+        comment=payload.comment.strip() if payload.comment and payload.comment.strip() else None,
+        evidence_ids_json=[str(item) for item in payload.evidence_ids],
+        answered_by=user.id,
+        answered_at=now,
+        supersedes_answer_id=previous.id if previous else None,
+        updated_at=now,
+    )
+    db.add(answer)
+    mark_analysis_stale(result)
+    await db.flush()
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="realization_question_answer",
+        entity_id=answer.id,
+        action="created" if previous is None else "corrected",
+        before=_answer_payload(previous) if previous else None,
+        after=_answer_payload(answer),
+    )
+    await db.commit()
+    return RealizationQuestionAnswerOut.model_validate(
+        {**_answer_payload(answer, user.full_name), "period_id": period.id, "result_id": result.id, "question_key": question_key}
+    )
+
+
+@router.post(
     "/periods/{period_id}/results/{result_id}/review",
     response_model=RealizationPersonWorkflowOut,
 )
@@ -1673,6 +1905,17 @@ async def review_person_result(
     ).scalar_one_or_none()
     if result is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Person result not found")
+    latest_answers = (await _latest_question_answers(db, [result.id])).get(result.id, {})
+    missing_manual = missing_manual_question_keys(set(latest_answers))
+    if missing_manual:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "RLZ_MANUAL_QUESTIONS_INCOMPLETE",
+                "message": f"{len(latest_answers)} / {len(MANDATORY_MANUAL_QUESTION_KEYS)} pyetje manuale të plotësuara.",
+                "missing_keys": missing_manual,
+            },
+        )
     final_symbol = payload.final_symbol or RealizationSymbol(result.suggested_symbol)
     final_level = payload.final_level or RealizationLevel(result.suggested_level)
     decision = payload.model_copy(
@@ -1735,6 +1978,9 @@ async def review_person_result(
             item["source_status"] = "MANAGER_CONFIRMED"
         questions.append(item)
     facts["questions"] = questions
+    facts["manual_answers"] = {
+        key: _answer_payload(answer) for key, answer in latest_answers.items()
+    }
     result.facts_json = facts
     add_audit_log(
         db=db,
@@ -1835,6 +2081,7 @@ async def analyze_person_result(
     facts["ai_analysis_history"] = history
     facts["ai_analysis"] = new_entry
     result.facts_json = facts
+    record_analysis_state(result, analysis, datetime.now(timezone.utc))
     add_audit_log(
         db=db,
         actor_user_id=user.id,
@@ -1957,6 +2204,9 @@ async def create_observation(
         db=db, actor_user_id=user.id, entity_type="realization_observation",
         entity_id=observation.id, action="created", after={"period_id": str(period.id)},
     )
+    await _mark_ai_stale_for_subject(
+        db, period_id=period.id, user_id=observation.user_id
+    )
     await _recalculate_after_evidence(db, period=period, actor_id=user.id)
     await db.commit()
     await db.refresh(observation)
@@ -2024,6 +2274,9 @@ async def verify_observation(
         db=db, actor_user_id=user.id, entity_type="realization_observation",
         entity_id=original.id, action="verified", after={"verification_id": str(verification.id)},
     )
+    await _mark_ai_stale_for_subject(
+        db, period_id=period.id, user_id=original.user_id
+    )
     await _recalculate_after_evidence(db, period=period, actor_id=user.id)
     await db.commit()
     await db.refresh(verification)
@@ -2061,6 +2314,9 @@ async def void_observation(
         db=db, actor_user_id=user.id, entity_type="realization_observation",
         entity_id=observation.id, action="voided",
         before={"voided_at": None}, after={"reason": payload.reason},
+    )
+    await _mark_ai_stale_for_subject(
+        db, period_id=period.id, user_id=observation.user_id
     )
     await _recalculate_after_evidence(db, period=period, actor_id=user.id)
     await db.commit()

@@ -95,9 +95,9 @@ No mode can create DIAMOND without verified DIAMOND evidence, turn `?` into
 
 `OPEN -> CALCULATED -> REVIEWED -> APPROVED -> LOCKED`
 
-- Managers can view and review only their department.
+- Realization managers (including the LH/DV superuser workflow) can view and review across departments; approval and lock remain Admin-only.
 - Admins can view every department, approve, lock, and export the all-department workbook.
-- Staff cannot open the Realization module or its API data.
+- Staff can open only their own My RLZ data and cannot recalculate a department snapshot.
 - Locked periods are immutable.
 
 ## Evidence rules
@@ -114,9 +114,27 @@ No mode can create DIAMOND without verified DIAMOND evidence, turn `?` into
 - Live rows show weekly-plan tasks, tasks closed through the latest snapshot, tasks scheduled today, and cumulative additional tasks. They do not claim that a task is on time or late.
 - After the Friday `FINAL` snapshot and weekly calculation, the report switches to the final classification, deterministic letter suggestion, manager review, approval, and lock workflow.
 
+## Formal weekly review: facts, questions, evidence and AI
+
+The operational Pulse remains separate from the formal `A+/A/B/C/M/D/E` result. The formal flow is:
+
+`automatic facts + employee comments + manager answers + verified evidence -> AI proposal -> deterministic policy/constraints -> manager review -> approval -> lock`
+
+The deterministic `suggested_level` is the **policy suggestion**. `ai_suggested_level` is stored separately and is advisory. AI never reviews, approves or locks a period. If AI and policy disagree, both values and any deterministic cap are shown; a final value different from policy still requires an override reason.
+
+Section 1 remains fact-led: task state, added tasks and postponement records are AUTO facts. Sections 2 and 3 are mandatory MANUAL manager questions: requested extra work, helped a colleague, extra engagement, proposal, meeting discipline, task-closing responsibility, frequent-delay interpretation and unexpected-absence interpretation. Section 4 is also MANUAL: positive summary, problem summary, effect on another person's plan and repetition after clarification.
+
+Automatic counters and verified evidence appear beside manual questions as supporting material; they never silently answer the managerial question. Answers are append-only `RealizationQuestionAnswer` records. Corrections link through `supersedes_answer_id`, identify the manager and timestamp, and produce an audit entry. Locked periods reject changes. All mandatory answers must exist before formal review.
+
+The AI receives Realization-only context: baseline/final counters, task and project titles, planned/effective/actual dates, status and quantity progress, Pink/late/additional flags, employee `TaskUserComment`, daily-close comments, Pulse history, manager answers and comments, attendance/meeting/postponement facts, complete observation comments and structured evidence, and the deterministic decision/cap.
+
+The payload distinguishes `AUTO_FACT`, `MANAGER_ANSWER_NOT_AUTOMATICALLY_PROVEN` and `VERIFIED_EVIDENCE`. Long text is retained; token-safety truncation preserves both beginning and end and records that truncation happened. AI output includes its proposed level, grade reason, drivers, caps, question keys and evidence IDs. Evidence or answer changes mark analysis stale; regeneration keeps history and clears stale state.
+
+Only verified observations affect formal counters. `PROPOSAL`, `HELPED_COLLEAGUE`, `TIME_SAVED` and `QUALITY` increment verified extras; time saved also adds minutes. `REPEATED_PROBLEM`, `MISSED_MEETING`, `BLOCKER` and classified `ABSENCE` update their negative/absence counters. Positive evidence never compensates for unresolved planned obligations: four verified extras with only 3/8 obligations accounted still triggers D; with 8/8 accounted and qualifying extras, A/A+ becomes available under the pinned thresholds.
+
 ## Optional AI
 
-AI is advisory only. It receives an anonymous result ID, counters, task states, and evidence metadata—never the employee name. Requests use the Responses API, strict structured JSON, and `store: false`. AI output is stored with model, timestamp, and actor for audit, but never overwrites the deterministic or final grade.
+AI is advisory only. It receives an anonymous result ID plus the complete Realization-scoped context described above—never the employee name or unrelated private data. Requests use the Responses API, strict structured JSON, and `store: false`. AI output is stored with model, timestamp, actor and its own suggested level for audit, but never overwrites the deterministic or final grade.
 
 Configure in `backend/.env`:
 

@@ -137,6 +137,9 @@ class TestMonthlyAndFinalCompatibility(unittest.TestCase):
         self.assertEqual(result["unresolved_pink_days"], 2)
         self.assertEqual(result["current_pulse"], "?")
 
+    def test_monthly_no_data_has_no_artificial_ok(self):
+        self.assertIsNone(aggregate_monthly_pulses([])["current_pulse"])
+
     def test_final_letter_policy_is_unchanged(self):
         decision = evaluate_policy(
             {"planned_count": 2, "completed_on_time_count": 2},

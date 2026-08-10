@@ -54,6 +54,7 @@ from app.models.realization import (
     RealizationPeriod,
     RealizationPersonResult,
     RealizationPolicyVersion,
+    RealizationQuestionAnswer,
 )
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
@@ -137,6 +138,7 @@ __all__ = [
     "RealizationPeriod",
     "RealizationPersonResult",
     "RealizationPolicyVersion",
+    "RealizationQuestionAnswer",
     "SystemTaskTemplate",
     "SystemTaskTemplateAssigneeSlot",
     "SystemTaskOccurrence",

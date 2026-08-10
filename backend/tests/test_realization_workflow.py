@@ -327,11 +327,9 @@ class TestQuestionsAndNarrative(unittest.TestCase):
         decision = evaluate_policy(person["counters"], CRITERIA, BONUSES)
         narrative = build_albanian_narrative(person)
         questions = {row["key"]: row for row in build_questions(person, decision, narrative)}
-        # No MISSED_MEETING evidence at all is a confident "respected" —
-        # only a confirmed missed meeting should require a manager's call.
-        self.assertEqual(questions["respected_meetings"]["source_status"], "AUTO")
+        self.assertEqual(questions["respected_meetings"]["source_status"], "MANUAL_UNANSWERED")
         self.assertTrue(questions["respected_meetings"]["auto_value"])
-        self.assertEqual(questions["unexpected_absences"]["source_status"], "AUTO_NEEDS_CONFIRMATION")
+        self.assertEqual(questions["unexpected_absences"]["source_status"], "MANUAL_UNANSWERED")
         self.assertEqual(questions["current_level"]["auto_value"], "—")
         self.assertNotIn("weekly_bonus", questions)
 
@@ -348,7 +346,7 @@ class TestQuestionsAndNarrative(unittest.TestCase):
         decision = evaluate_policy(person["counters"], CRITERIA, BONUSES)
         narrative = build_albanian_narrative(person)
         questions = {row["key"]: row for row in build_questions(person, decision, narrative)}
-        self.assertEqual(questions["respected_meetings"]["source_status"], "AUTO")
+        self.assertEqual(questions["respected_meetings"]["source_status"], "MANUAL_UNANSWERED")
         self.assertFalse(questions["respected_meetings"]["auto_value"])
 
     def test_requested_and_proposed_extras_need_no_confirmation_when_absent(self) -> None:
@@ -361,7 +359,7 @@ class TestQuestionsAndNarrative(unittest.TestCase):
         narrative = build_albanian_narrative(person)
         questions = {row["key"]: row for row in build_questions(person, decision, narrative)}
         for key in ("requested_extra_tasks", "helped_colleague", "gave_proposal"):
-            self.assertEqual(questions[key]["source_status"], "AUTO")
+            self.assertEqual(questions[key]["source_status"], "MANUAL_UNANSWERED")
             self.assertFalse(questions[key]["auto_value"])
 
     def test_narrative_is_deterministic(self) -> None:

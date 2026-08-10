@@ -61,6 +61,27 @@ REPORT_QUESTION_SECTIONS = [
     ),
 ]
 
+MANUAL_BOOLEAN_QUESTION_KEYS = {
+    "requested_extra_tasks",
+    "helped_colleague",
+    "extra_engagement",
+    "gave_proposal",
+    "respected_meetings",
+    "closed_tasks",
+    "frequent_delays",
+    "unexpected_absences",
+    "affected_other_plan",
+    "repeated_after_clarification",
+}
+MANUAL_TEXT_QUESTION_KEYS = {"week_positive", "week_problems"}
+MANDATORY_MANUAL_QUESTION_KEYS = (
+    MANUAL_BOOLEAN_QUESTION_KEYS | MANUAL_TEXT_QUESTION_KEYS
+)
+
+
+def missing_manual_question_keys(answered_keys: set[str]) -> list[str]:
+    return sorted(MANDATORY_MANUAL_QUESTION_KEYS - answered_keys)
+
 
 def _question(
     key: str,
@@ -83,6 +104,26 @@ def _question(
     }
 
 
+def _manual_question(
+    key: str,
+    auto_facts: Any,
+    *,
+    evidence_ids: list[str] | None = None,
+    explanation: str = "",
+    source_status: str | None = None,
+    answer_type: str | None = None,
+) -> dict[str, Any]:
+    """Manager judgment stays manual; automatic facts are supporting context only."""
+    return _question(
+        key,
+        auto_facts,
+        source_status="MANUAL_UNANSWERED",
+        evidence_ids=evidence_ids,
+        explanation=explanation,
+        answer_type="text" if key in MANUAL_TEXT_QUESTION_KEYS else "boolean",
+    )
+
+
 def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
     """Build all reference questions from live daily facts without guessing."""
     counters = person.get("counters") or {}
@@ -90,7 +131,7 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
     observations = person.get("observations") or []
     timeline = person.get("daily_timeline") or []
     verified = [item for item in observations if item.get("verified") is True]
-    positive = [item for item in verified if item.get("marker") == "POSITIVE"]
+    positive = [item for item in verified if item.get("marker") in {"POSITIVE", "DIAMOND"}]
     negative = [item for item in verified if item.get("marker") == "NEGATIVE"]
 
     def ids(items: list[dict[str, Any]]) -> list[str]:
@@ -245,31 +286,31 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             ),
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "requested_extra_tasks",
             bool(requested),
             evidence_ids=ids(requested),
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "helped_colleague",
             bool(helped),
             evidence_ids=ids(helped),
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "extra_engagement",
             {"verified_categories": engagement, "additional_tasks_candidate": weekly_added},
             evidence_ids=ids(positive),
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "gave_proposal",
             bool(proposals),
             evidence_ids=ids(proposals),
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "respected_meetings",
             # No missed-meeting evidence means meetings were respected by
             # default — matching the manual process, which only flags this
@@ -279,7 +320,7 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             explanation="Ka evidencë për takim të humbur." if missed_meetings else "",
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "closed_tasks",
             {
                 "all_closed": weekly_planned > 0 and weekly_completed >= weekly_planned,
@@ -291,13 +332,13 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             explanation="Gjendje operative deri në snapshot-in e fundit, jo FINAL.",
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "frequent_delays",
             {"attendance_tardiness": tardiness, "frequent": tardiness >= 3, "threshold": 3},
             evidence_ids=[str(item.get("id")) for item in attendance if item.get("id")],
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "unexpected_absences",
             len(unexcused_absences) if not raw_absences or verified_absences else None,
             source_status=(
@@ -311,25 +352,25 @@ def build_live_questions(person: dict[str, Any]) -> list[dict[str, Any]]:
             ),
             answer_type="integer",
         ),
-        _question(
+        _manual_question(
             "week_positive",
             positive_comments,
             evidence_ids=ids(positive),
             answer_type="list",
         ),
-        _question(
+        _manual_question(
             "week_problems",
             problem_comments,
             evidence_ids=ids(negative),
             answer_type="list",
         ),
-        _question(
+        _manual_question(
             "affected_other_plan",
             bool(blockers),
             evidence_ids=ids(blockers),
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "repeated_after_clarification",
             bool(repeated),
             evidence_ids=ids(repeated),
@@ -376,7 +417,7 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
         if item.get("type") == "MUNGESE"
     )
     verified_ids = [str(item["id"]) for item in verified]
-    positive = [item for item in verified if item["marker"] == "POSITIVE"]
+    positive = [item for item in verified if item["marker"] in {"POSITIVE", "DIAMOND"}]
     negative = [item for item in verified if item["marker"] == "NEGATIVE"]
     requested = [
         item for item in positive
@@ -448,31 +489,31 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             evidence_ids=postponement_evidence_ids,
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "requested_extra_tasks",
             bool(requested),
             evidence_ids=[str(item["id"]) for item in requested],
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "helped_colleague",
             bool(helped),
             evidence_ids=[str(item["id"]) for item in helped],
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "extra_engagement",
             {"count": len(engagement_categories), "categories": sorted(engagement_categories)},
             evidence_ids=[str(item["id"]) for item in positive],
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "gave_proposal",
             bool(proposals),
             evidence_ids=[str(item["id"]) for item in proposals],
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "respected_meetings",
             # No missed-meeting evidence means meetings were respected by
             # default — matching the manual process, which only flags this
@@ -491,13 +532,13 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             ),
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "closed_tasks",
             closed,
             evidence_ids=planned_task_ids,
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "frequent_delays",
             {
                 "attendance_tardiness": c.get("tardiness_count", 0),
@@ -506,7 +547,7 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             },
             answer_type="object",
         ),
-        _question(
+        _manual_question(
             "unexpected_absences",
             None if absence_needs_review else c.get("unexcused_absence_days", 0),
             source_status="AUTO_NEEDS_CONFIRMATION" if absence_needs_review else "AUTO",
@@ -517,20 +558,20 @@ def build_questions(person: dict[str, Any], decision: Any, narrative: str) -> li
             ),
             answer_type="integer",
         ),
-        _question("week_positive", narrative, evidence_ids=[str(item["id"]) for item in positive], answer_type="text"),
-        _question(
+        _manual_question("week_positive", narrative, evidence_ids=[str(item["id"]) for item in positive]),
+        _manual_question(
             "week_problems",
             [item.get("comment") for item in negative if item.get("comment")],
             evidence_ids=[str(item["id"]) for item in negative],
             answer_type="list",
         ),
-        _question(
+        _manual_question(
             "affected_other_plan",
             bool(blockers),
             evidence_ids=[str(item["id"]) for item in blockers],
             answer_type="boolean",
         ),
-        _question(
+        _manual_question(
             "repeated_after_clarification",
             bool(repeated),
             evidence_ids=[str(item["id"]) for item in repeated],
@@ -697,6 +738,18 @@ async def calculate_weekly_period(
         person["decision"] = {
             "triggered_rule": decision.triggered_rule,
             "reasons": list(decision.reasons),
+            "policy_suggested_level": decision.level.value,
+            "hard_cap_level": (
+                decision.level.value
+                if decision.triggered_rule in {
+                    "unexpected_absence",
+                    "no_real_progress",
+                    "unapproved_or_major_failure",
+                    "partial_failure",
+                    "delay_or_minor_impact",
+                }
+                else None
+            ),
         }
         planned_count = int(counters.get("planned_count", 0))
         accounted_count = int(counters.get("accounted_planned_count", 0))
@@ -735,6 +788,8 @@ async def calculate_weekly_period(
                 person["ai_analysis"] = previous_facts["ai_analysis"]
             if previous_facts.get("ai_analysis_history"):
                 person["ai_analysis_history"] = previous_facts["ai_analysis_history"]
+            if previous_facts.get("ai_analysis"):
+                result.ai_analysis_stale = True
         result.facts_json = person
         for source_key, model_key in COUNTER_FIELDS.items():
             setattr(result, model_key, int(counters.get(source_key, 0)))

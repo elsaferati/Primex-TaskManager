@@ -25,6 +25,59 @@ from app.services.realization_people import (
 from app.services.system_task_schedule import _is_working_day
 
 
+def qualifies_as_verified_extra(
+    *, marker: str, category: str, evidence_json: dict, related_task: dict | None = None
+) -> bool:
+    """Pure deterministic rule for evidence that increments verified extras."""
+    if marker not in {"POSITIVE", "DIAMOND"}:
+        return False
+    if category in {"QUALITY", "TIME_SAVED", "HELPED_COLLEAGUE", "PROPOSAL"}:
+        return True
+    if category != "EXTRA_TASK":
+        return False
+    kind = str(evidence_json.get("kind") or "").upper()
+    if kind == "REQUESTED_EXTRA_TASK":
+        return True
+    return bool(
+        kind == "COMPLETED_EXTRA_TASK"
+        and related_task is not None
+        and (
+            related_task.get("classification") == "additional_completed"
+            or (
+                evidence_json.get("high_impact") is True
+                and related_task.get("positive_progress_delta", 0) > 0
+            )
+        )
+        and evidence_json.get("replaces_unfinished_planned_task") is False
+        and evidence_json.get("duplicate") is False
+    )
+
+
+def verified_positive_counter_updates(
+    *,
+    marker: str,
+    category: str,
+    impact_minutes: int | None,
+    evidence_json: dict,
+    related_task: dict | None = None,
+) -> dict[str, int]:
+    updates: dict[str, int] = {}
+    if category == "PROPOSAL":
+        updates["proposal_count"] = 1
+    if category == "HELPED_COLLEAGUE":
+        updates["helped_colleague_count"] = 1
+    if category == "TIME_SAVED":
+        updates["time_saved_minutes"] = max(0, int(impact_minutes or 0))
+    if qualifies_as_verified_extra(
+        marker=marker,
+        category=category,
+        evidence_json=evidence_json,
+        related_task=related_task,
+    ):
+        updates["verified_extra_count"] = 1
+    return updates
+
+
 def _uuid(value: Any) -> uuid.UUID | None:
     try:
         return value if isinstance(value, uuid.UUID) else uuid.UUID(str(value))
@@ -813,19 +866,21 @@ async def collect_weekly_evidence(
                 "category": observation.category,
                 "comment": observation.comment,
                 "task_id": observation.task_id,
+                "user_id": observation.user_id,
+                "project_id": observation.project_id,
+                "impact_minutes": observation.impact_minutes,
+                "repeat_count": observation.repeat_count_at_creation,
                 "evidence_json": observation.evidence_json or {},
+                "source_type": observation.source_type,
+                "created_at": observation.created_at,
+                "relevant_date": (observation.evidence_json or {}).get("date")
+                or (observation.evidence_json or {}).get("occurrence_date"),
                 "verified": verified,
                 "visibility": observation.visibility,
             }
             person["observations"].append(item)
             if verified:
                 person["counters"][f"{observation.marker.lower()}_count"] += 1
-                if observation.category == "PROPOSAL":
-                    person["counters"]["proposal_count"] += 1
-                if observation.category == "HELPED_COLLEAGUE":
-                    person["counters"]["helped_colleague_count"] += 1
-                if observation.category == "TIME_SAVED":
-                    person["counters"]["time_saved_minutes"] += observation.impact_minutes or 0
                 if observation.category == "REPEATED_PROBLEM":
                     person["counters"]["repeated_problem_count"] += 1
                 if observation.category == "MISSED_MEETING":
@@ -842,7 +897,6 @@ async def collect_weekly_evidence(
                     elif absence_kind == "ANNUAL_LEAVE":
                         person["counters"]["annual_leave_days"] += 1
                         person["counters"]["approved_absence_days"] += 1
-                extra_kind = str((observation.evidence_json or {}).get("kind") or "").upper()
                 related_task = next(
                     (
                         task
@@ -851,39 +905,14 @@ async def collect_weekly_evidence(
                     ),
                     None,
                 )
-                extra_is_eligible = (
-                    observation.category == "EXTRA_TASK"
-                    and extra_kind == "COMPLETED_EXTRA_TASK"
-                    and related_task is not None
-                    and (
-                        related_task.get("classification") == "additional_completed"
-                        or (
-                            (observation.evidence_json or {}).get("high_impact") is True
-                            and related_task.get("positive_progress_delta", 0) > 0
-                        )
-                    )
-                    and (observation.evidence_json or {}).get(
-                        "replaces_unfinished_planned_task"
-                    )
-                    is False
-                    and (observation.evidence_json or {}).get("duplicate") is False
-                )
-                # The guide counts a verified request for extra work as one
-                # of the 4 qualifying "extras" for A/A+ on its own — it does
-                # not need to be completed yet (e.g. "kërkoi 1 detyrë shtesë
-                # pasi mbylli planin e vet → A").
-                requested_is_eligible = (
-                    observation.category == "EXTRA_TASK"
-                    and extra_kind == "REQUESTED_EXTRA_TASK"
-                )
-                if observation.marker == "POSITIVE" and (
-                    observation.category in {
-                        "QUALITY", "TIME_SAVED", "HELPED_COLLEAGUE", "PROPOSAL"
-                    }
-                    or extra_is_eligible
-                    or requested_is_eligible
-                ):
-                    person["counters"]["verified_extra_count"] += 1
+                for counter_key, increment in verified_positive_counter_updates(
+                    marker=observation.marker,
+                    category=observation.category,
+                    impact_minutes=observation.impact_minutes,
+                    evidence_json=observation.evidence_json or {},
+                    related_task=related_task,
+                ).items():
+                    person["counters"][counter_key] += increment
                 impact = (observation.evidence_json or {}).get("impact_level")
                 if observation.marker == "NEGATIVE" and impact in {"MAJOR", "MULTIPLE_PEOPLE"}:
                     person["counters"]["major_negative_impact"] = 1

@@ -278,6 +278,9 @@ class RealizationPersonResultOut(RealizationSchema):
     repeated_problem_count: int
     suggested_symbol: RealizationSymbol | None
     suggested_level: RealizationLevel | None
+    ai_suggested_level: RealizationLevel | None = None
+    ai_generated_at: datetime | None = None
+    ai_analysis_stale: bool = True
     final_symbol: RealizationSymbol | None
     final_level: RealizationLevel | None
     auto_narrative: str | None
@@ -315,7 +318,30 @@ class RealizationDepartmentResultOut(RealizationSchema):
 
 
 class RealizationReviewRequest(RealizationFinalDecision):
+    # Retained for backwards-compatible AUTO confirmations. Formal MANUAL
+    # answers are persisted through the question-answer endpoint.
     question_values: dict[str, object] = Field(default_factory=dict)
+
+
+class RealizationQuestionAnswerCreate(RealizationSchema):
+    value: bool | str | None
+    comment: str | None = Field(default=None, max_length=4000)
+    evidence_ids: list[uuid.UUID] = Field(default_factory=list)
+
+
+class RealizationQuestionAnswerOut(RealizationSchema):
+    id: uuid.UUID
+    period_id: uuid.UUID
+    result_id: uuid.UUID
+    question_key: str
+    value: bool | str | None
+    comment: str | None
+    evidence_ids: list[uuid.UUID]
+    answered_by: uuid.UUID
+    answered_by_name: str | None = None
+    answered_at: datetime
+    supersedes_answer_id: uuid.UUID | None
+    updated_at: datetime
 
 
 class RealizationObservationVerify(RealizationSchema):
@@ -354,6 +380,10 @@ class RealizationAIAnalysisOut(RealizationSchema):
     problems: list[str]
     missing_evidence: list[str]
     suggested_level: RealizationLevel
+    grade_reason: str
+    grade_drivers: list[dict]
+    caps: list[dict]
+    question_keys_used: list[str]
     confidence: float = Field(ge=0, le=1)
     evidence_ids: list[str]
     model: str
