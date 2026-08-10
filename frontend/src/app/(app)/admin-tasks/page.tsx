@@ -1033,17 +1033,11 @@ export default function AdminTasksPage() {
   const [editOpen, setEditOpen] = React.useState(false)
   const [editingTaskId, setEditingTaskId] = React.useState<string | null>(null)
   const [editTitle, setEditTitle] = React.useState("")
-  const [editDescription, setEditDescription] = React.useState("")
   const [editStartDate, setEditStartDate] = React.useState("")
   const [editStartDateDisplay, setEditStartDateDisplay] = React.useState("")
   const [editDueDate, setEditDueDate] = React.useState("")
   const [editDueDateDisplay, setEditDueDateDisplay] = React.useState("")
   const [editingTaskIsFast, setEditingTaskIsFast] = React.useState(false)
-  const [editPriority, setEditPriority] = React.useState<TaskPriority>("NORMAL")
-  const [editFinishPeriod, setEditFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(
-    FINISH_PERIOD_NONE_VALUE
-  )
-  const [originalIsBllok, setOriginalIsBllok] = React.useState(false)
   const [savingEdit, setSavingEdit] = React.useState(false)
   const [deletingTaskId, setDeletingTaskId] = React.useState<string | null>(null)
 
@@ -2298,21 +2292,17 @@ export default function AdminTasksPage() {
     setEditingTaskId(task.id)
     setEditingTaskIsFast(isFastTask)
     setEditTitle(task.title || "")
-    setEditDescription(task.description || "")
     const taskStartDate = toDateInputValue(task.start_date)
     setEditStartDate(taskStartDate)
     setEditStartDateDisplay(taskStartDate ? toDDMMYYYY(taskStartDate) : "")
     const taskDueDate = toDateInputValue(task.due_date || task.start_date)
     setEditDueDate(taskDueDate)
     setEditDueDateDisplay(taskDueDate ? toDDMMYYYY(taskDueDate) : "")
-    setEditPriority((task.is_bllok ? "BLLOK" : (task.priority || "NORMAL")) as TaskPriority)
-    setOriginalIsBllok(task.is_bllok || false)
-    setEditFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setEditOpen(true)
   }
 
   const saveEditTask = async () => {
-    if (!editingTaskId || !editTitle.trim()) return
+    if (!editingTaskId) return
     setSavingEdit(true)
     try {
       let normalizedStartDate = editStartDate || ""
@@ -2322,20 +2312,11 @@ export default function AdminTasksPage() {
       }
       const startDateValue = normalizedStartDate ? new Date(normalizedStartDate).toISOString() : null
       const dueDateValue = normalizedDueDate ? new Date(normalizedDueDate).toISOString() : null
-      const isBllok = editPriority === "BLLOK"
-      const actualPriority: "NORMAL" | "HIGH" = isBllok ? "NORMAL" : (editPriority === "HIGH" ? "HIGH" : "NORMAL")
-      const payload: Record<string, unknown> = {
-        title: editTitle.trim(),
-        description: editDescription.trim() || null,
-        priority: actualPriority,
-        start_date: startDateValue,
-        due_date: dueDateValue,
-        finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
-      }
-      // Only include is_bllok if it changed from the original value
-      if (isBllok !== originalIsBllok) {
-        payload.is_bllok = isBllok
-      }
+      // This dialog edits dates only. Do not resend title or other shared fields:
+      // note-derived fast tasks must keep those fields synchronized with their source note.
+      const payload: Record<string, unknown> = editingTaskIsFast
+        ? { start_date: startDateValue, due_date: dueDateValue }
+        : { due_date: dueDateValue }
       const res = await apiFetch(`/tasks/${editingTaskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
