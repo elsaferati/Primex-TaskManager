@@ -20,6 +20,7 @@ const HEADER_LABELS = new Set([
   "NOTE",
   "PYETJA",
   "TIPI",
+  "LLOJI",
   "TYPE",
   "AM/PM",
   "ADDED",
@@ -74,8 +75,19 @@ function updateTableCell(line: string, cellIndex: number, value: string) {
 
 function normalizeHeader(value: string) {
   const upper = value.trim().toUpperCase()
-  if (upper === "ORA" || upper === "KOHA") return "TIME"
-  return upper
+  const aliases: Record<string, string> = {
+    ORA: "TIME",
+    KOHA: "TIME",
+    TITULLI: "TITLE",
+    KUSH: "WHO",
+    NGA: "FROM",
+    DERI: "TO",
+    TOTALI: "COUNT",
+    LLOJI: "TYPE",
+    KRIJUAR: "ADDED",
+    TIPI: "TYPE",
+  }
+  return aliases[upper] || upper
 }
 
 function isHeaderCells(cells: string[]) {
@@ -91,7 +103,7 @@ function compactWidthForHeader(header: string) {
   if (value === "DATA" || value === "DATE") return "96px"
   if (value === "LATE") return "88px"
   if (value === "COUNT") return "72px"
-  if (value === "TYPE" || value === "TIPI") return "max-content"
+  if (value === "TYPE" || value === "TIPI" || value === "LLOJI") return "max-content"
   if (value === "AM/PM") return "max-content"
   if (value === "ADDED") return "max-content"
   if (value === "KATEGORIA" || value === "LISTA") return "max-content"
@@ -106,7 +118,7 @@ function tableGridTemplate(cells: string[]) {
 
 function isCompactMetricTable(headers: string[]) {
   const normalized = headers.map(normalizeHeader)
-  return normalized.includes("TIPI") && normalized.includes("COUNT") && !normalized.includes("TITLE")
+  return normalized.includes("TYPE") && normalized.includes("COUNT") && !normalized.includes("TITLE")
 }
 
 function isNarrowTableHeader(header: string) {
@@ -121,6 +133,7 @@ function isNarrowTableHeader(header: string) {
     header === "AM/PM" ||
     header === "ADDED" ||
     header === "TIPI" ||
+    header === "LLOJI" ||
     header === "DISK" ||
     header === "MBAJTUR?" ||
     header === "MBAJTUR" ||
@@ -191,7 +204,7 @@ function isFixedEditorLabel(value: string) {
 
 /** Split "NDRYSHON PLANI: (Ploteso manualisht)" so the uppercase key stays bold even when the value has lowercase. */
 function splitKeyedLabel(value: string): { label: string; rest: string } | null {
-  const match = value.trim().match(/^([A-Z][A-Z0-9 /&()?.+-]*:)\s*(.*)$/)
+  const match = value.trim().match(/^([A-Z][A-Z0-9 /&()?.:+-]*:)\s*(.*)$/)
   if (!match) return null
   const labelText = match[1].slice(0, -1)
   if (!labelText || labelText !== labelText.toUpperCase()) return null
@@ -284,13 +297,26 @@ function splitStatusMarker(value: string) {
   return { text, status }
 }
 
+function splitMeetingHighlightMarker(value: string) {
+  const highlighted = /\s*\[\[\s*mt\s*:\s*non_daily_weekly\s*\]\]/i.test(value)
+  return {
+    text: value.replace(/\s*\[\[\s*mt\s*:\s*non_daily_weekly\s*\]\]/gi, "").replace(/\s+/g, " ").trim(),
+    highlighted,
+  }
+}
+
+function hasMeetingHighlight(headers: string[], cells: string[]) {
+  const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
+  return titleIndex >= 0 && splitMeetingHighlightMarker(cells[titleIndex] || "").highlighted
+}
+
 function withoutStatusColumn(headers: string[], cells: string[]) {
   const statusIndex = headers.findIndex((header) => normalizeHeader(header) === "STATUS")
   const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
   const nextHeaders = statusIndex >= 0 ? headers.filter((_, index) => index !== statusIndex) : headers
   const nextCells = cells.map((cell, index) => {
     if (statusIndex >= 0 && index === statusIndex) return null
-    if (titleIndex >= 0 && index === titleIndex) return splitStatusMarker(cell).text
+    if (titleIndex >= 0 && index === titleIndex) return splitMeetingHighlightMarker(splitStatusMarker(cell).text).text
     return cell
   }).filter((cell): cell is string => cell !== null)
   return { headers: nextHeaders, cells: nextCells }
@@ -550,11 +576,15 @@ export function ReportSectionPreview({ body }: { body: string }) {
               .map((row) => {
                 const visible = withoutStatusColumn(row.headers, row.cells)
                 const tone = rowTone(row.label, row.cells, row.headers)
+                const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)
                 return (
                   <tr key={row.key} className={tone}>
                     {visible.cells.map((cell, cellIndex) => {
                       const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
                       const narrow = isNarrowTableHeader(header)
+                      const meetingFrame = highlightedMeeting
+                        ? `border-y-[3px] border-y-blue-600 ${cellIndex === 0 ? "border-l-[3px] border-l-blue-600" : ""} ${cellIndex === visible.cells.length - 1 ? "border-r-[3px] border-r-blue-600" : ""}`
+                        : ""
                       return (
                         <td
                           key={cellIndex}
@@ -564,7 +594,9 @@ export function ReportSectionPreview({ body }: { body: string }) {
                               : "px-2"
                           } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
                             narrow ? "w-[1%] whitespace-nowrap" : "whitespace-pre-wrap break-words"
-                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""}`}
+                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${meetingFrame} ${
+                            highlightedMeeting && header === "TITLE" ? "text-blue-700 font-semibold" : ""
+                          }`}
                         >
                           {trimTableCell(cell) || "-"}
                         </td>

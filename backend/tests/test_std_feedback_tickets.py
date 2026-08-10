@@ -129,7 +129,19 @@ class TestStdFeedbackReportSection(unittest.IsolatedAsyncioTestCase):
         body = await std_tickets_report_section(db, date(2026, 8, 6))
         self.assertEqual(
             body,
-            "Totali i tiketave te hapurat: 100\nTiketa sot: 20\nmbyllura sot: 2\nrregulluar sot: 10",
+            "\n".join([
+                "+----+------------------------+--------+",
+                "| NR | LLOJI                  | TOTALI |",
+                "+----+------------------------+--------+",
+                "| 1  | Total tiketa te hapura | 100    |",
+                "+----+------------------------+--------+",
+                "| 2  | Tiketa sot             | 20     |",
+                "+----+------------------------+--------+",
+                "| 3  | Rregulluar sot         | 10     |",
+                "+----+------------------------+--------+",
+                "| 4  | Mbyllura sot           | 2      |",
+                "+----+------------------------+--------+",
+            ]),
         )
 
 

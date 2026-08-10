@@ -3,9 +3,10 @@ from __future__ import annotations
 import unittest
 import io
 import os
+import uuid
 import zipfile
 import asyncio
-from datetime import date
+from datetime import date, datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -16,6 +17,11 @@ from app.services.primeflow_report import (
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
     render_plain_text, render_png, report_subject, ReportReminderQuestion, BOARD_REMINDER_SECTION_TITLE,
     REMINDER_SECTION_TITLE,
+)
+from app.services.task_strike_events import (
+    point_key,
+    record_description_strike_events,
+    render_description_for_interval,
 )
 
 
@@ -280,6 +286,75 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn('w:fill="fef3c7"', xml)
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(document.task_count, 0)
+
+    def test_checklist_points_are_reported_once_then_hidden_until_reopened(self) -> None:
+        struck_at = datetime(2026, 8, 10, 10, 20, tzinfo=timezone.utc)
+        description = "[[done]]1. Finished during this hour[[/done]]\n2. Still open"
+        struck_event = SimpleNamespace(
+            id="strike-1", point_key=point_key("1. Finished during this hour"),
+            action="STRUCK", occurred_at=struck_at,
+        )
+        plain, marked = render_description_for_interval(
+            description,
+            [struck_event],
+            interval_start=datetime(2026, 8, 10, 10, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
+        )
+        self.assertEqual(plain, "1. Finished during this hour\n2. Still open")
+        self.assertIn("[[done]]1. Finished during this hour[[/done]]", marked)
+
+        next_plain, next_marked = render_description_for_interval(
+            description,
+            [struck_event],
+            interval_start=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 11, 50, tzinfo=timezone.utc),
+        )
+        self.assertEqual(next_plain, "2. Still open")
+        self.assertNotIn("Finished during this hour", next_marked)
+
+        reopened_at = datetime(2026, 8, 10, 11, 30, tzinfo=timezone.utc)
+        reopened_event = SimpleNamespace(
+            id="unstrike-1", point_key=struck_event.point_key, action="UNSTRUCK", occurred_at=reopened_at,
+        )
+        reopened_plain, reopened_marked = render_description_for_interval(
+            "1. Finished during this hour\n2. Still open",
+            [struck_event, reopened_event],
+            interval_start=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 11, 50, tzinfo=timezone.utc),
+        )
+        self.assertEqual(reopened_plain, "1. Finished during this hour\n2. Still open")
+        self.assertNotIn("[[done]]", reopened_marked)
+
+    def test_task_update_records_each_strike_and_unstrike(self) -> None:
+        class FakeSession:
+            def __init__(self):
+                self.rows = []
+
+            def add(self, row):
+                self.rows.append(row)
+
+        session = FakeSession()
+        task_id = uuid.uuid4()
+        actor_id = uuid.uuid4()
+        record_description_strike_events(
+            session,
+            task_id=task_id,
+            actor_user_id=actor_id,
+            before_description="1. One\n2. Two",
+            after_description="[[done]]1. One\n2. Two[[/done]]",
+        )
+        self.assertEqual({row.action for row in session.rows}, {"STRUCK"})
+        self.assertEqual({row.point_text for row in session.rows}, {"1. One", "2. Two"})
+
+        reopened = FakeSession()
+        record_description_strike_events(
+            reopened,
+            task_id=task_id,
+            actor_user_id=actor_id,
+            before_description="[[done]]1. One[[/done]]\n2. Two",
+            after_description="1. One\n2. Two",
+        )
+        self.assertEqual([(row.action, row.point_text) for row in reopened.rows], [("UNSTRUCK", "1. One")])
 
 
 if __name__ == "__main__":

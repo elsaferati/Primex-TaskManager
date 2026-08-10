@@ -17,6 +17,7 @@ from app.services import meetings_report_scheduler
 from app.services.meeting_point_manual_sync import is_known_report_title, is_manual_section_title
 from app.services.meetings_report import (
     SECTION_TITLES,
+    _common_meeting_lines,
     _m3_department_label,
     _m3_added_week_label,
     _m3_status_table,
@@ -308,17 +309,20 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
                 (entry, date(2026, 8, 13), date(2026, 8, 13), False, "08:00", "10:00", None, False),
             ],
             {user_id: "Finance Group"},
+            {user_id: "FIN"},
         )
 
-        header = next(row for row in rows if "FROM" in row and "TO" in row)
-        self.assertLess(header.index("FROM"), header.index("TO"))
+        header = next(row for row in rows if "KUSH" in row and "DEP" in row and "NGA" in row and "DERI" in row)
+        self.assertLess(header.index("KUSH"), header.index("DEP"))
+        self.assertLess(header.index("NGA"), header.index("DERI"))
+        self.assertTrue(any("FG" in row and "FIN" in row for row in rows))
         self.assertTrue(any("10.08.2026" in row and "12.08.2026" in row for row in rows))
         self.assertTrue(any("08:00" in row and "10:00" in row for row in rows))
 
     def test_meeting_status_cells_use_green_and_red_backgrounds(self) -> None:
         html = _render_ascii_table_html(
             [
-                "| NR | TIME | MBAJTUR? | TITLE |",
+                "| NR | KOHA | MBAJTUR? | TITULLI |",
                 "| 1 | 10:00 | ✓ | Held meeting |",
                 "| 2 | 11:00 | ✕ | Canceled meeting |",
             ]
@@ -326,6 +330,31 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
 
         self.assertIn("background:#dcfce7", html)
         self.assertIn("background:#fee2e2", html)
+
+    def test_non_daily_or_weekly_meetings_receive_a_blue_frame_and_title(self) -> None:
+        html = _render_ascii_table_html(
+            [
+                "| NR | KOHA | TITULLI |",
+                "| 1 | 10:00 | One-off meeting [[mt:non_daily_weekly]] |",
+            ]
+        )
+
+        self.assertIn("border-top:3px solid #2563eb", html)
+        self.assertIn("border-left:3px solid #2563eb", html)
+        self.assertIn("color:#2563eb;font-weight:700", html)
+        self.assertNotIn("[[mt:non_daily_weekly]]", html)
+
+    def test_common_view_one_time_meetings_receive_the_highlight_marker(self) -> None:
+        lines = _common_meeting_lines(
+            [
+                {"id": "one-time", "title": "One-time meeting", "date": "2026-08-11", "time": "10:00", "recurrence_type": "none"},
+                {"id": "weekly", "title": "Weekly meeting", "date": "2026-08-11", "time": "11:00", "recurrence_type": "weekly"},
+            ],
+            date(2026, 8, 11),
+        )
+
+        self.assertIn("[[mt:non_daily_weekly]]", lines[0])
+        self.assertNotIn("[[mt:non_daily_weekly]]", lines[1])
 
     def test_many_assignees_display_as_all(self) -> None:
         assignee_ids = {uuid.uuid4() for _ in range(11)}
@@ -384,9 +413,27 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             created_at=None,
         )
         rows = _m3_status_table("TODO", [task], {}, include_type=True)
-        header = next(row for row in rows if "TYPE" in row and "TITLE" in row)
-        self.assertIn("TYPE", header)
+        header = next(row for row in rows if "LLOJI" in row and "TITULLI" in row)
+        self.assertIn("LLOJI", header)
         self.assertTrue(any("BLL" in row and "MODECO" in row for row in rows))
+
+    def test_status_table_orders_system_tasks_before_fast_tasks(self) -> None:
+        system_task = SimpleNamespace(
+            id=uuid.uuid4(), title="System task", status="TODO", system_template_origin_id=uuid.uuid4(),
+            project_id=None, assigned_to=None, fast_task_order=None, is_deadline_important=False,
+            due_date=None, start_date=None, completed_at=None, created_at=None,
+        )
+        fast_task = SimpleNamespace(
+            id=uuid.uuid4(), title="Fast task", status="TODO", system_template_origin_id=None,
+            project_id=None, assigned_to=None, fast_task_order=None, is_deadline_important=False,
+            due_date=None, start_date=None, completed_at=None, created_at=None,
+        )
+
+        rows = _m3_status_table("TODO", [fast_task, system_task], {}, include_type=True)
+        task_rows = [row for row in rows if "System task" in row or "Fast task" in row]
+
+        self.assertIn("System task", task_rows[0])
+        self.assertIn("Fast task", task_rows[1])
 
     def test_late_system_task_table_includes_department_after_who(self) -> None:
         department_id = uuid.uuid4()
@@ -414,10 +461,10 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             include_am_pm=True,
             department_codes={department_id: "FIN"},
         )
-        header = next(row for row in rows if "WHO" in row and "DEP" in row and "AM/PM" in row and "TITLE" in row)
-        self.assertLess(header.index("WHO"), header.index("DEP"))
+        header = next(row for row in rows if "KUSH" in row and "DEP" in row and "AM/PM" in row and "TITULLI" in row)
+        self.assertLess(header.index("KUSH"), header.index("DEP"))
         self.assertLess(header.index("DEP"), header.index("AM/PM"))
-        self.assertLess(header.index("DEP"), header.index("TITLE"))
+        self.assertLess(header.index("DEP"), header.index("TITULLI"))
         self.assertTrue(any("FIN" in row and "PM" in row and "Late system task" in row for row in rows))
         self.assertEqual(_m3_department_label(task, {department_id: "GDS"}), "GD")
 
@@ -430,8 +477,8 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             include_am_pm_times=True,
         )
 
-        header = next(row for row in rows if "WHO" in row and "DEP" in row and "AM/PM" in row)
-        self.assertLess(header.index("WHO"), header.index("DEP"))
+        header = next(row for row in rows if "KUSH" in row and "DEP" in row and "AM/PM" in row)
+        self.assertLess(header.index("KUSH"), header.index("DEP"))
         self.assertLess(header.index("DEP"), header.index("AM/PM"))
         self.assertTrue(any("FIN" in row and "AM (08:15)" in row and "BZ task" in row for row in rows))
 
@@ -470,9 +517,9 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             department_codes={department_id: "DEV"}, week_start=date(2026, 8, 10),
         )
 
-        header = next(row for row in rows if "DEP" in row and "ADDED" in row and "AM/PM" in row)
-        self.assertLess(header.index("DEP"), header.index("ADDED"))
-        self.assertLess(header.index("ADDED"), header.index("AM/PM"))
+        header = next(row for row in rows if "DEP" in row and "KRIJUAR" in row and "AM/PM" in row)
+        self.assertLess(header.index("DEP"), header.index("KRIJUAR"))
+        self.assertLess(header.index("KRIJUAR"), header.index("AM/PM"))
         self.assertTrue(any("This W" in row for row in rows))
         self.assertTrue(any("Last W" in row for row in rows))
         self.assertEqual(_m3_added_week_label(this_week, date(2026, 8, 10)), "This W")
@@ -500,8 +547,8 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             include_department=True,
             department_codes={department_id: "PCM"},
         )
-        header = next(row for row in rows if "WHO" in row and "DEP" in row and "TITLE" in row)
-        self.assertLess(header.index("WHO"), header.index("DEP"))
+        header = next(row for row in rows if "KUSH" in row and "DEP" in row and "TITULLI" in row)
+        self.assertLess(header.index("KUSH"), header.index("DEP"))
         self.assertTrue(any("PCM" in row and "Pink task" in row for row in rows))
 
 

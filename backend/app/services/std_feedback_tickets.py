@@ -508,21 +508,21 @@ async def std_tickets_report_section(db: AsyncSession, report_day: date) -> str:
     ).scalar_one()
 
     rows = [
-        ("Totali i tiketave te hapurat", int(total_opened or 0)),
+        ("Total tiketa te hapura", int(total_opened or 0)),
         ("Tiketa sot", int(opened_today or 0)),
-        ("Mbyllura sot", int(closed_today or 0)),
         ("Rregulluar sot", int(done_today or 0)),
+        ("Mbyllura sot", int(closed_today or 0)),
     ]
-    tip_width = max(len("TIPI"), max(len(label) for label, _ in rows))
-    count_width = max(len("COUNT"), max(len(str(count)) for _, count in rows))
-    border = f"+----+{'-' * (tip_width + 2)}+{'-' * (count_width + 2)}+"
+    type_width = max(len("LLOJI"), max(len(label) for label, _ in rows))
+    count_width = max(len("TOTALI"), max(len(str(count)) for _, count in rows))
+    border = f"+----+{'-' * (type_width + 2)}+{'-' * (count_width + 2)}+"
     lines = [
         border,
-        f"| {'NR':<2} | {'TIPI':<{tip_width}} | {'COUNT':<{count_width}} |",
+        f"| {'NR':<2} | {'LLOJI':<{type_width}} | {'TOTALI':<{count_width}} |",
         border,
     ]
     for index, (label, count) in enumerate(rows, start=1):
-        lines.append(f"| {index:<2} | {label:<{tip_width}} | {str(count):<{count_width}} |")
+        lines.append(f"| {index:<2} | {label:<{type_width}} | {str(count):<{count_width}} |")
         lines.append(border)
     return "\n".join(lines)
 

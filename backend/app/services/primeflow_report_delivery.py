@@ -18,11 +18,13 @@ from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
 from app.models.question_library import QuestionCategory, QuestionDefinition
+from app.models.task_strike_event import TaskStrikeEvent
 from app.services.primeflow_report import (
     GmailService, GmailVerificationError, PrimeFlowClient, REMINDER_CATEGORY_NORMALIZED,
     ReportDocument, ReportReminderQuestion, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
+from app.services.task_strike_events import render_description_for_interval
 
 logger = logging.getLogger(__name__)
 TERMINAL = {"SENT", "ALREADY_SENT"}
@@ -83,6 +85,78 @@ async def load_1h_reminder_questions() -> list[ReportReminderQuestion]:
     ]
 
 
+def _report_task_descriptions(data: dict) -> dict[uuid.UUID, str | None]:
+    """Read every task description that can be shown in the generated report."""
+
+    result: dict[uuid.UUID, str | None] = {}
+    for bucket in (data.get("items") or {}).values():
+        if not isinstance(bucket, list):
+            continue
+        for task in bucket:
+            if not isinstance(task, dict) or task.get("id") is None:
+                continue
+            try:
+                task_id = uuid.UUID(str(task["id"]))
+            except (TypeError, ValueError):
+                continue
+            if "description" in task:
+                result[task_id] = task.get("description")
+    return result
+
+
+def _slot_cutoff(day: date, slot: str) -> datetime:
+    hour, minute = (int(part) for part in slot.split(":"))
+    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=report_timezone())
+
+
+async def _description_overrides_for_1h_interval(
+    data: dict,
+    day: date,
+    slot: str,
+    *,
+    interval_end: datetime,
+) -> dict[str, tuple[str, str]]:
+    descriptions = _report_task_descriptions(data)
+    if not descriptions:
+        return {}
+    previous_day, previous_slot = predecessor(day, slot)
+    async with SessionLocal() as db:
+        # Prefer the real generation time of the preceding email. This avoids a
+        # gap or overlap if a schedule was manually delayed or re-run.
+        previous_generated_at = await db.scalar(
+            select(PrimeFlowReportDeliveryRun.data_generated_at)
+            .where(
+                PrimeFlowReportDeliveryRun.report_type == "primeflow_1h",
+                PrimeFlowReportDeliveryRun.report_date == previous_day,
+                PrimeFlowReportDeliveryRun.report_slot == previous_slot,
+                PrimeFlowReportDeliveryRun.status.in_(TERMINAL),
+                PrimeFlowReportDeliveryRun.data_generated_at.is_not(None),
+            )
+            .order_by(PrimeFlowReportDeliveryRun.data_generated_at.desc())
+            .limit(1)
+        )
+        interval_start = previous_generated_at or _slot_cutoff(previous_day, previous_slot)
+        events = (await db.execute(
+            select(TaskStrikeEvent)
+            .where(TaskStrikeEvent.task_id.in_(descriptions))
+            .where(TaskStrikeEvent.occurred_at <= interval_end)
+            .order_by(TaskStrikeEvent.occurred_at, TaskStrikeEvent.id)
+        )).scalars().all()
+
+    by_task: dict[uuid.UUID, list[TaskStrikeEvent]] = {}
+    for event in events:
+        by_task.setdefault(event.task_id, []).append(event)
+    return {
+        str(task_id): render_description_for_interval(
+            description,
+            by_task.get(task_id, []),
+            interval_start=interval_start,
+            interval_end=interval_end,
+        )
+        for task_id, description in descriptions.items()
+    }
+
+
 async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] | None = None) -> ReportDocument:
     client = PrimeFlowClient(
         os.environ["PRIMEFLOW_API_BASE_URL"].rstrip("/"),
@@ -90,8 +164,16 @@ async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] 
     )
     data = await client.common_view(day)
     reminders = await load_1h_reminder_questions()
+    description_overrides = await _description_overrides_for_1h_interval(
+        data, day, slot, interval_end=datetime.now(report_timezone()),
+    )
     return build_report_document(
-        data, day, slot, recipients or await configured_recipients(), reminders=reminders,
+        data,
+        day,
+        slot,
+        recipients or await configured_recipients(),
+        reminders=reminders,
+        description_overrides=description_overrides,
     )
 
 

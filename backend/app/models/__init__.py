@@ -70,6 +70,7 @@ from app.models.task_review import TaskReview
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.task_status import TaskStatus
+from app.models.task_strike_event import TaskStrikeEvent
 from app.models.task_user_comment import TaskUserComment
 from app.models.task_template import TaskTemplate
 from app.models.task_template_run import TaskTemplateRun
@@ -153,6 +154,7 @@ __all__ = [
     "TaskDailyProgress",
     "TaskOneHReportSlot",
     "TaskStatus",
+    "TaskStrikeEvent",
     "TaskUserComment",
     "TaskTemplate",
     "TaskTemplateRun",
