@@ -53,12 +53,45 @@ def _numbered_points(value: str) -> list[str]:
     ]
 
 
+def _numbered_point_spans(value: str) -> list[tuple[int, int]]:
+    """Return numbered-line ranges using offsets from the original marked text.
+
+    The browser may wrap only the selected part of a numbered line in
+    ``[[done]]`` tags.  Replacing tags with spaces preserves its offsets so a
+    partial selection can still be associated with its complete checklist item.
+    """
+
+    raw = value or ""
+    masked = TECHNICAL_TAGS.sub(lambda match: " " * len(match.group(0)), raw)
+    matches = list(NUMBERED_ITEM.finditer(masked))
+    return [
+        (match.start(), matches[index + 1].start() if index + 1 < len(matches) else len(raw))
+        for index, match in enumerate(matches)
+    ]
+
+
 def struck_points(value: str | None, *, field_name: str = "DESCRIPTION") -> dict[str, StrikePoint]:
     """Return the individual checklist points currently wrapped in [[done]]."""
 
+    raw = value or ""
     result: dict[str, StrikePoint] = {}
-    for match in DONE_BLOCK.finditer(value or ""):
-        for text in _numbered_points(match.group(1)):
+    numbered_spans = _numbered_point_spans(raw)
+    for match in DONE_BLOCK.finditer(raw):
+        done_start, done_end = match.span()
+        affected_spans = [
+            (start, end)
+            for start, end in numbered_spans
+            if start < done_end and done_start < end
+        ]
+        # A partial selection still represents the complete numbered line.
+        # For non-numbered text, retain the existing selection-level behavior.
+        texts = (
+            [TECHNICAL_TAGS.sub("", raw[start:end]).strip() for start, end in affected_spans]
+            if affected_spans else _numbered_points(match.group(1))
+        )
+        for text in texts:
+            if not text:
+                continue
             key = point_key(text, field_name=field_name)
             result[key] = StrikePoint(key, text)
     return result
@@ -172,22 +205,41 @@ def render_text_for_interval(
     """
 
     latest: dict[str, TaskStrikeEvent] = {}
+    relevant_events: list[TaskStrikeEvent] = []
     for event in sorted(events, key=lambda item: (item.occurred_at, str(item.id))):
         event_field = getattr(event, "field_name", "DESCRIPTION")
         if event_field == field_name and event.occurred_at <= interval_end:
             latest[event.point_key] = event
+            relevant_events.append(event)
+
+    def event_for_point(point: StrikePoint) -> TaskStrikeEvent | None:
+        """Find an event even when an older UI save omitted ``1.`` from it."""
+
+        exact = latest.get(point.key)
+        if exact is not None:
+            return exact
+        full = _normalise(point.text).casefold()
+        without_number = re.sub(r"^\d+\.\s*", "", full)
+        compatible = []
+        for event in relevant_events:
+            event_text = _normalise(getattr(event, "point_text", "")).casefold()
+            if not event_text:
+                continue
+            if event_text in {full, without_number}:
+                compatible.append(event)
+        return compatible[-1] if compatible else None
 
     heading, points, legacy_done = _text_points(text, field_name=field_name)
     plain_parts = [heading] if heading else []
     marked_parts = [heading] if heading else []
     for point in points:
-        event = latest.get(point.key)
+        event = event_for_point(point)
         if event is None:
-            # Existing historical marks have no reliable interval timestamp.
-            # Keep their current behaviour until that point is next changed.
+            # A mark without a timestamp cannot be claimed as work from this
+            # interval. Treat it as historical and omit it, rather than showing
+            # a misleading new strike in every following 1H report.
             if point.key in legacy_done:
-                plain_parts.append(point.text)
-                marked_parts.append(f"[[done]]{point.text}[[/done]]")
+                continue
             else:
                 plain_parts.append(point.text)
                 marked_parts.append(point.text)
