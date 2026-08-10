@@ -30,37 +30,45 @@ from app.services.system_task_schedule import matches_template_date
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
     "A JEMI BRENDA MESATARES ME PROJEKTE/",
-    "(GA) M3 DET GA MBYLLJA ME HV?",
+    "GA MBYLLJA E DET",
+    "HV MBYLLJA E DET",
     "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
-    "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?",
-    "DET. PA PROGRES (PINK)?",
+    "SYSTEM TASK LATE",
+    "DET PA PROGRES PINK (FT DHE PRJK)",
     "N- (GA) PV/FESTE?",
-    "N- (GA) TAKIMET EXTERNE/ TAKIMET INTERNE/ BZ ME GA/BLLOK?",
-    "N- (GA) SHIKOHET COMMON VIEW NESER, VETEM DETYRAT E REJA ME TE KALTER, 08:00 DHE ME DEADLINE?",
+    "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
+    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK",
     "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?",
     "N- A KA DETYRA 1H PA SLOT?",
     "N- (GA/KA) KUSH KA DET PERSONALISHT?",
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
-    SECTION_TITLES[2],  # STD tickets first among auto-filled
+    SECTION_TITLES[3],  # STD tickets first among auto-filled
     SECTION_TITLES[1],
-    SECTION_TITLES[3],
+    SECTION_TITLES[2],
     SECTION_TITLES[4],
-    SECTION_TITLES[8],
     SECTION_TITLES[5],
-    SECTION_TITLES[7],
-    SECTION_TITLES[6],
     SECTION_TITLES[9],
+    SECTION_TITLES[6],
+    SECTION_TITLES[8],
+    SECTION_TITLES[7],
     SECTION_TITLES[10],
+    SECTION_TITLES[11],
 ]
 MANUAL_SECTION_TITLES = {
     SECTION_TITLES[0],
 }
 SECTION_TITLE_ALIASES = {
+    "(GA) M3 DET GA MBYLLJA ME HV?": SECTION_TITLES[1],
     "(GA) M3 DET GA MBYLLJA ME HV/OH?": SECTION_TITLES[1],
-    "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[2],
-    "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[10],
+    "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[3],
+    "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?": SECTION_TITLES[4],
+    "DET. PA PROGRES (PINK)?": SECTION_TITLES[5],
+    "N- (GA) SHIKOHET COMMON VIEW NESER, VETEM DETYRAT E REJA ME TE KALTER, 08:00 DHE ME DEADLINE?": SECTION_TITLES[8],
+    "DET TE REJA LAST WEEK DHE THIS WEEK": SECTION_TITLES[8],
+    "N- (GA) TAKIMET EXTERNE/ TAKIMET INTERNE/ BZ ME GA/BLLOK?": SECTION_TITLES[7],
+    "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[11],
 }
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 # Same rule for M1/M2/M3: personal rows only when the title marks GA (not KA).
@@ -69,6 +77,7 @@ TECHNICAL_TAG = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 DUE_SUFFIX = re.compile(r"\s+due\s+\d{1,2}:\d{2}\s*$", re.I)
 TITLE_PREFIX = re.compile(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})?\s*:\s*", re.I)
 TASK_LINE_STATUS = re.compile(r"^\[([A-Z_]+)\]\s*")
+ALL_ASSIGNEES_DISPLAY_THRESHOLD = 10
 
 
 def _compact_section_title(value: str | None) -> str:
@@ -93,7 +102,7 @@ def canonical_meetings_section_title(raw_title: str | None) -> str:
 
     # Wording variants that still mean the same auto-filled questions.
     if "TIKETATESTD" in compact and "RAPORTOHENNEM3" in compact:
-        return SECTION_TITLES[2]
+        return SECTION_TITLES[3]
     if "M3DETGAMBYLLJAMEHV" in compact:
         return SECTION_TITLES[1]
     return raw
@@ -282,7 +291,10 @@ def _task_owners(
     assignee_ids = set(assignee_ids_by_task.get(task.id, set()) if assignee_ids_by_task else set())
     if not assignee_ids and task.assigned_to:
         assignee_ids = {task.assigned_to}
-    if all_participant_ids and assignee_ids and all_participant_ids.issubset(assignee_ids):
+    if (
+        (all_participant_ids and assignee_ids and all_participant_ids.issubset(assignee_ids))
+        or len(assignee_ids) > ALL_ASSIGNEES_DISPLAY_THRESHOLD
+    ):
         return "ALL"
     owners = sorted({_initials(names.get(user_id)) for user_id in assignee_ids if _initials(names.get(user_id)) != "-"})
     return " ".join(owners) or _initials(names.get(task.assigned_to))
@@ -387,6 +399,40 @@ def _m3_task_type_label(task: Task) -> str:
     return "FT"
 
 
+def _m3_department_label(task: Task, department_codes: dict[Any, str] | None) -> str:
+    """Return the short department labels used in the M3 system-task table."""
+    code = str((department_codes or {}).get(getattr(task, "department_id", None)) or "").strip().upper()
+    aliases = {
+        "PRODUCT CONTENT": "PCM",
+        "PROJECT CONTENT MANAGER": "PCM",
+        "DEVELOPMENT": "DEV",
+        "GRAPHIC DESIGN": "GD",
+        "GDS": "GD",
+        "FINANCE": "FIN",
+    }
+    return aliases.get(code, code or "-")
+
+
+def _m3_am_pm_label(task: Task) -> str:
+    period = str(getattr(task, "finish_period", None) or "").strip().upper()
+    return period if period in {"AM", "PM", "AM/PM"} else "-"
+
+
+def _m3_added_week_label(task: Task, week_start: date | None) -> str:
+    created_day = _local_date(getattr(task, "created_at", None))
+    if week_start is not None and created_day is not None and created_day >= week_start:
+        return "This W"
+    return "Last W"
+
+
+M3_DEPARTMENT_ORDER = {"DEV": 0, "GD": 1, "PCM": 2}
+
+
+def _m3_department_sort_key(task: Task, department_codes: dict[Any, str] | None) -> int:
+    """Keep M3 department tables in the requested DEV, GD, PCM order."""
+    return M3_DEPARTMENT_ORDER.get(_m3_department_label(task, department_codes), len(M3_DEPARTMENT_ORDER))
+
+
 def _m3_status_table(
     status_label: str,
     tasks: list[Task],
@@ -395,78 +441,110 @@ def _m3_status_table(
     include_late_days: bool = False,
     with_status: bool = False,
     include_type: bool = False,
+    include_department: bool = False,
+    include_added_week: bool = False,
+    include_am_pm: bool = False,
+    department_codes: dict[Any, str] | None = None,
+    week_start: date | None = None,
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     all_participant_ids: set[Any] | None = None,
 ) -> list[str]:
-    type_width = 7
-    if include_type and include_late_days:
-        border = "+----+-------+---------+------------------------------------------------------------------+--------------+"
-        header = f"| {'NR':<2} | {'WHO':<5} | {'TYPE':<{type_width}} | {'TITLE':<64} | {'LATE':<12} |"
-    elif include_type:
-        border = "+----+-------+---------+------------------------------------------------------------------+"
-        header = f"| {'NR':<2} | {'WHO':<5} | {'TYPE':<{type_width}} | {'TITLE':<64} |"
-    elif include_late_days:
-        border = "+----+-------+------------------------------------------------------------------+--------------+"
-        header = f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} | {'LATE':<12} |"
-    else:
-        border = "+----+-------+------------------------------------------------------------------+"
-        header = f"| {'NR':<2} | {'WHO':<5} | {'TITLE':<64} |"
+    columns: list[tuple[str, int]] = [("NR", 2), ("WHO", 5)]
+    if include_department:
+        columns.append(("DEP", 5))
+    if include_added_week:
+        columns.append(("ADDED", 7))
+    if include_am_pm:
+        columns.append(("AM/PM", 5))
+    if include_type:
+        columns.append(("TYPE", 7))
+    columns.append(("TITLE", 64))
+    if include_late_days:
+        columns.append(("LATE", 12))
+
+    border = "+" + "+".join("-" * (width + 2) for _, width in columns) + "+"
+
+    def table_row(values: list[str]) -> str:
+        return "| " + " | ".join(
+            f"{value:<{width}}" for value, (_, width) in zip(values, columns)
+        ) + " |"
+
     rows = [
         f"{status_label}:",
         border,
-        header,
+        table_row([label for label, _ in columns]),
         border,
     ]
     empty_title = "(Asnje detyre)"
     if not tasks:
-        if include_type and include_late_days:
-            rows.append(
-                f"| {'-':<2} | {'-':<5} | {'-':<{type_width}} | {empty_title:<64} | {'-':<12} |"
-            )
-        elif include_type:
-            rows.append(f"| {'-':<2} | {'-':<5} | {'-':<{type_width}} | {empty_title:<64} |")
-        elif include_late_days:
-            rows.append(f"| {'-':<2} | {'-':<5} | {empty_title:<64} | {'-':<12} |")
-        else:
-            rows.append(f"| {'-':<2} | {'-':<5} | {empty_title:<64} |")
+        values = ["-", "-"]
+        if include_department:
+            values.append("-")
+        if include_added_week:
+            values.append("-")
+        if include_am_pm:
+            values.append("-")
+        if include_type:
+            values.append("-")
+        values.append(empty_title)
+        if include_late_days:
+            values.append("-")
+        rows.append(table_row(values))
         rows.append(border)
         return rows
-    ordered = sorted(
+    ordered_by_common_view = sorted(
         tasks,
         key=lambda item: common_view_task_sort_key(
             item, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
         ),
+    )
+    ordered = (
+        sorted(
+            ordered_by_common_view,
+            key=lambda item: _m3_department_sort_key(item, department_codes),
+        )
+        if include_department
+        else ordered_by_common_view
     )
     for index, task in enumerate(ordered, start=1):
         owner = _task_owners(
             task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
         )
         task_type = _m3_task_type_label(task) if include_type else ""
+        department = _m3_department_label(task, department_codes) if include_department else ""
+        added_week = _m3_added_week_label(task, week_start) if include_added_week else ""
+        am_pm = _m3_am_pm_label(task) if include_am_pm else ""
         display_title = _clean_task_title(task.title)
         title_lines = _wrap_fixed_width(display_title, 64)
         status = _normalize_report_status(task.status) if with_status else None
         padded_titles = _append_status_marker_to_lines(title_lines, status, 64)
-        if include_type and include_late_days:
-            late_label = _late_days_label(_late_days(task))
-            rows.append(
-                f"| {index:<2} | {owner:<5} | {task_type:<{type_width}} | {padded_titles[0]} | {late_label:<12} |"
-            )
-        elif include_type:
-            rows.append(f"| {index:<2} | {owner:<5} | {task_type:<{type_width}} | {padded_titles[0]} |")
-        elif include_late_days:
-            late_label = _late_days_label(_late_days(task))
-            rows.append(f"| {index:<2} | {owner:<5} | {padded_titles[0]} | {late_label:<12} |")
-        else:
-            rows.append(f"| {index:<2} | {owner:<5} | {padded_titles[0]} |")
+        values = [str(index), owner]
+        if include_department:
+            values.append(department)
+        if include_added_week:
+            values.append(added_week)
+        if include_am_pm:
+            values.append(am_pm)
+        if include_type:
+            values.append(task_type)
+        values.append(padded_titles[0])
+        if include_late_days:
+            values.append(_late_days_label(_late_days(task)))
+        rows.append(table_row(values))
         for line in padded_titles[1:]:
-            if include_type and include_late_days:
-                rows.append(f"| {'':<2} | {'':<5} | {'':<{type_width}} | {line} | {'':<12} |")
-            elif include_type:
-                rows.append(f"| {'':<2} | {'':<5} | {'':<{type_width}} | {line} |")
-            elif include_late_days:
-                rows.append(f"| {'':<2} | {'':<5} | {line} | {'':<12} |")
-            else:
-                rows.append(f"| {'':<2} | {'':<5} | {line} |")
+            continuation = ["", ""]
+            if include_department:
+                continuation.append("")
+            if include_added_week:
+                continuation.append("")
+            if include_am_pm:
+                continuation.append("")
+            if include_type:
+                continuation.append("")
+            continuation.append(line)
+            if include_late_days:
+                continuation.append("")
+            rows.append(table_row(continuation))
         rows.append(border)
     return rows
 
@@ -524,12 +602,15 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     all_participant_ids = await _all_participant_user_ids(db)
-    finance_section = await _m3_finance_ga_section(db, tasks, names, report_day)
+    ga_section, hv_section = await _m3_finance_ga_sections(db, tasks, names, report_day)
     std_tickets_section = await std_tickets_report_section(db, report_day)
 
     system_tasks = [task for task in tasks if task.system_template_origin_id and _is_open(task)]
-    system_in_progress = [task for task in system_tasks if str(task.status or "").upper() == "IN_PROGRESS"]
     system_late = _dedupe_system_task_rows([task for task in system_tasks if _late_days(task) > 0])
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
 
     today_todo = [
         task for task in tasks
@@ -540,7 +621,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     ]
 
     tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
-    new_tomorrow = [task for task in tomorrow_tasks if _local_date(task.created_at) and _local_date(task.created_at) >= week_start]
+    new_tomorrow = tomorrow_tasks
     at_0800 = [task for task in tomorrow_tasks if task.due_date and _local_time(task.due_date) == "08:00"]
     deadline = [task for task in tomorrow_tasks if task.is_deadline_important]
     one_h_no_slot = [task for task in tomorrow_tasks if task.is_1h_report and not task.one_h_report_slot]
@@ -573,17 +654,24 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     for entry in leave_entries:
         start_date, end_date, full_day, start_time, end_time, note, is_all_users = parse_common_view_annual_leave(entry)
         if start_date <= tomorrow <= end_date:
-            leave_tomorrow.append((entry, full_day, start_time, end_time, note, is_all_users))
+            leave_tomorrow.append(
+                (entry, start_date, end_date, full_day, start_time, end_time, note, is_all_users)
+            )
 
     table_kwargs = {
         "assignee_ids_by_task": assignee_ids_by_task,
         "all_participant_ids": all_participant_ids,
     }
-    section_1 = [
-        *_m3_status_table("IN PROGRESS", system_in_progress, names, **table_kwargs),
-        "",
-        *_m3_status_table("LATE", system_late, names, include_late_days=True, **table_kwargs),
-    ]
+    section_1 = _m3_status_table(
+        "LATE",
+        system_late,
+        names,
+        include_late_days=True,
+        include_department=True,
+        include_am_pm=True,
+        department_codes=department_codes,
+        **table_kwargs,
+    )
     section_4 = _tomorrow_common_section(
         common_items=common_items,
         tomorrow=tomorrow,
@@ -596,32 +684,89 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         fallback_blocked=_task_lines(
             blocked, names, assignee_ids_by_task, include_status=True, all_participant_ids=all_participant_ids
         ),
+        bz_task_metadata=_task_metadata_by_title(tomorrow_tasks, department_codes),
+        blocked_task_metadata=_task_metadata_by_title(blocked, department_codes),
         with_status=True,
     )
     section_5 = [
-        *_m3_status_table("DETYRAT E REJA", new_tomorrow, names, **table_kwargs),
+        *_m3_status_table(
+            "DETYRAT E REJA",
+            new_tomorrow,
+            names,
+            include_department=True,
+            include_added_week=True,
+            include_am_pm=True,
+            department_codes=department_codes,
+            week_start=week_start,
+            **table_kwargs,
+        ),
         "",
-        *_m3_status_table("08:00", at_0800, names, **table_kwargs),
+        *_m3_status_table(
+            "DET 08:00",
+            at_0800,
+            names,
+            include_department=True,
+            include_am_pm=True,
+            department_codes=department_codes,
+            **table_kwargs,
+        ),
         "",
-        *_m3_status_table("ME DEADLINE", deadline, names, **table_kwargs),
+        *_m3_status_table(
+            "DET ME DEADLINE",
+            deadline,
+            names,
+            include_department=True,
+            include_am_pm=True,
+            department_codes=department_codes,
+            **table_kwargs,
+        ),
     ]
     section_6 = await _today_meeting_status_section(db, today_meetings, report_day)
 
     by_title = {
         SECTION_TITLES[0]: "(Ploteso manualisht)",
-        SECTION_TITLES[1]: finance_section,
-        SECTION_TITLES[2]: std_tickets_section,
-        SECTION_TITLES[3]: _normalize_section(section_1),
-        SECTION_TITLES[4]: _normalize_section(_m3_status_table("TODO", today_todo, names, **table_kwargs)),
-        SECTION_TITLES[8]: section_6,
-        SECTION_TITLES[5]: _empty_aware(_leave_lines(leave_tomorrow, names)),
-        SECTION_TITLES[7]: _normalize_section(section_5),
-        SECTION_TITLES[6]: _normalize_section(section_4),
-        SECTION_TITLES[9]: _normalize_section(
-            _m3_status_table("1H PA SLOT", one_h_no_slot, names, with_status=True, **table_kwargs)
+        SECTION_TITLES[1]: ga_section,
+        SECTION_TITLES[2]: hv_section,
+        SECTION_TITLES[3]: std_tickets_section,
+        SECTION_TITLES[4]: _normalize_section(section_1),
+        SECTION_TITLES[5]: _normalize_section(
+            _m3_status_table(
+                "TODO",
+                today_todo,
+                names,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
+                **table_kwargs,
+            )
         ),
+        SECTION_TITLES[9]: section_6,
+        SECTION_TITLES[6]: _empty_aware(_leave_lines(leave_tomorrow, names)),
+        SECTION_TITLES[8]: _normalize_section(section_5),
+        SECTION_TITLES[7]: _normalize_section(section_4),
         SECTION_TITLES[10]: _normalize_section(
-            _m3_status_table("PERSONAL GA", personal_ga, names, with_status=True, **table_kwargs)
+            _m3_status_table(
+                "1H PA SLOT",
+                one_h_no_slot,
+                names,
+                with_status=True,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
+                **table_kwargs,
+            )
+        ),
+        SECTION_TITLES[11]: _normalize_section(
+            _m3_status_table(
+                "PERSONAL GA",
+                personal_ga,
+                names,
+                with_status=True,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
+                **table_kwargs,
+            )
         ),
     }
     sections = [{"title": title, "body": by_title[title]} for title in DISPLAY_SECTION_TITLES]
@@ -676,8 +821,18 @@ def _task_lines(
     ]
 
 
+def _task_metadata_by_title(
+    tasks: list[Task], department_codes: dict[Any, str] | None
+) -> dict[str, tuple[str, str]]:
+    """Metadata for line-based BZ/BLLOK tables, keyed by their displayed task title."""
+    return {
+        _clean_task_title(task.title): (_m3_department_label(task, department_codes), _m3_am_pm_label(task))
+        for task in tasks
+    }
+
+
 def _status_group_section(
-    title: str,
+    title: str | None,
     tasks: list[Task],
     names: dict[Any, str],
     report_day: date,
@@ -700,7 +855,7 @@ def _status_group_section(
         "include_type": True,
     }
     return [
-        f"{title}:",
+        *([f"{title}:"] if title else []),
         *_m3_status_table("TODO", todo, names, **table_kwargs),
         "",
         *_m3_status_table("IN PROGRESS", in_progress, names, **table_kwargs),
@@ -711,7 +866,9 @@ def _status_group_section(
     ]
 
 
-async def _m3_finance_ga_section(db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date) -> str:
+async def _m3_finance_ga_sections(
+    db: AsyncSession, tasks: list[Task], names: dict[Any, str], report_day: date
+) -> tuple[str, str]:
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     all_participant_ids = await _all_participant_user_ids(db)
     ga_users = await _users_by_initials(db, "GA")
@@ -740,25 +897,24 @@ async def _m3_finance_ga_section(db: AsyncSession, tasks: list[Task], names: dic
             or _late_days(task) > 0
         ]
 
-    return _normalize_section([
-        *_status_group_section(
-            "GA TASKS",
+    return (
+        _normalize_section(_status_group_section(
+            None,
             ga_tasks,
             names,
             report_day,
             assignee_ids_by_task=assignee_ids_by_task,
             all_participant_ids=all_participant_ids,
-        ),
-        "",
-        *_status_group_section(
-            "HV TASKS",
+        )),
+        _normalize_section(_status_group_section(
+            None,
             hv_tasks,
             names,
             report_day,
             assignee_ids_by_task=assignee_ids_by_task,
             all_participant_ids=all_participant_ids,
-        ),
-    ])
+        )),
+    )
 
 
 def _system_row_key(task: Task) -> tuple[str, str, str, str, str]:
@@ -1145,19 +1301,40 @@ def _append_status_marker_to_lines(title_lines: list[str], status: str | None, w
     return padded
 
 
-def _tomorrow_task_table(title: str, lines: list[str], *, with_status: bool = False) -> list[str]:
+def _tomorrow_task_table(
+    title: str,
+    lines: list[str],
+    *,
+    with_status: bool = False,
+    task_metadata: dict[str, tuple[str, str]] | None = None,
+    include_am_pm_times: bool = False,
+) -> list[str]:
     who_width = 20
+    department_width = 5
+    am_pm_width = 11 if include_am_pm_times else 5
     title_width = 64
-    border = f"+----+{'-' * (who_width + 2)}+{'-' * (title_width + 2)}+"
+    border = (
+        f"+----+{'-' * (who_width + 2)}+{'-' * (department_width + 2)}+"
+        f"{'-' * (am_pm_width + 2)}+{'-' * (title_width + 2)}+"
+    )
     rows = [
         f"{title}:",
         border,
-        f"| {'NR':<2} | {'WHO':<{who_width}} | {'TITLE':<{title_width}} |",
+        f"| {'NR':<2} | {'WHO':<{who_width}} | {'DEP':<{department_width}} | {'AM/PM':<{am_pm_width}} | {'TITLE':<{title_width}} |",
         border,
     ]
     values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
+    department_order = M3_DEPARTMENT_ORDER
+    values.sort(
+        key=lambda value: department_order.get(
+            (task_metadata or {}).get(_strip_status_markers(_parse_owned_task_line(value)[2]), ("-", "-"))[0],
+            len(department_order),
+        )
+    )
     if not values:
-        rows.append(f"| {'-':<2} | {'-':<{who_width}} | {'(Asnje detyre)':<{title_width}} |")
+        rows.append(
+            f"| {'-':<2} | {'-':<{who_width}} | {'-':<{department_width}} | {'-':<{am_pm_width}} | {'(Asnje detyre)':<{title_width}} |"
+        )
         rows.append(border)
         return rows
     for index, value in enumerate(values, start=1):
@@ -1167,13 +1344,20 @@ def _tomorrow_task_table(title: str, lines: list[str], *, with_status: bool = Fa
             status = status or "TODO"
         # Keep all assignees in one WHO cell so one task is never split by a mid-row border.
         owner_display = re.sub(r"\s+", " ", owner).strip() or "-"
+        department, am_pm = (task_metadata or {}).get(title_value, ("-", "-"))
+        if include_am_pm_times:
+            am_pm = {"AM": "AM (08:15)", "PM": "PM (13:30)"}.get(am_pm, am_pm)
         title_lines = _wrap_fixed_width(title_value, title_width)
         padded_titles = _append_status_marker_to_lines(
             title_lines, status if with_status else None, title_width
         )
-        rows.append(f"| {index:<2} | {owner_display:<{who_width}} | {padded_titles[0]} |")
+        rows.append(
+            f"| {index:<2} | {owner_display:<{who_width}} | {department:<{department_width}} | {am_pm:<{am_pm_width}} | {padded_titles[0]} |"
+        )
         for line in padded_titles[1:]:
-            rows.append(f"| {'':<2} | {'':<{who_width}} | {line} |")
+            rows.append(
+                f"| {'':<2} | {'':<{who_width}} | {'':<{department_width}} | {'':<{am_pm_width}} | {line} |"
+            )
         rows.append(border)
     return rows
 
@@ -1186,6 +1370,8 @@ def _tomorrow_common_section(
     fallback_internal: list[str],
     fallback_bz: list[str],
     fallback_blocked: list[str],
+    bz_task_metadata: dict[str, tuple[str, str]] | None = None,
+    blocked_task_metadata: dict[str, tuple[str, str]] | None = None,
     with_status: bool = False,
 ) -> list[str]:
     external = _prefer_common(_common_meeting_lines(common_items.get("external") or [], tomorrow), fallback_external)
@@ -1203,33 +1389,52 @@ def _tomorrow_common_section(
         "",
         *_tomorrow_meeting_table("TAKIMET INTERNE", internal),
         "",
-        *_tomorrow_task_table("BZ ME GA", bz, with_status=with_status),
+        *_tomorrow_task_table(
+            "BZ ME GA",
+            bz,
+            with_status=with_status,
+            task_metadata=bz_task_metadata,
+            include_am_pm_times=True,
+        ),
         "",
-        *_tomorrow_task_table("BLLOK", blocked, with_status=with_status),
+        *_tomorrow_task_table("Bllok 14:30 - 15:30", blocked, with_status=with_status, task_metadata=blocked_task_metadata),
     ]
 
 
-def _leave_lines(entries: list[tuple[CommonEntry, bool, str | None, str | None, str | None, bool]], names: dict[Any, str]) -> list[str]:
-    border = "+----+-------+------------------------------------------------------------------+"
+def _leave_lines(
+    entries: list[
+        tuple[CommonEntry, date, date, bool, str | None, str | None, str | None, bool]
+    ],
+    names: dict[Any, str],
+) -> list[str]:
+    border = "+----+-------+----------------+----------------+"
     lines = [
         border,
-        f"| {'NR':<2} | {'WHO':<5} | {'TIME':<64} |",
+        f"| {'NR':<2} | {'WHO':<5} | {'FROM':<14} | {'TO':<14} |",
         border,
     ]
     if not entries:
-        lines.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<64} |")
+        lines.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<14} | {'-':<14} |")
         lines.append(border)
         return lines
-    for index, (entry, full_day, start_time, end_time, note, is_all_users) in enumerate(entries, start=1):
+    for index, (entry, start_date, end_date, full_day, start_time, end_time, note, is_all_users) in enumerate(entries, start=1):
         person = "ALL" if is_all_users else _initials(names.get(entry.assigned_to_user_id or entry.created_by_user_id) or entry.title)
-        when = "Full day" if full_day else f"{start_time or '-'}-{end_time or '-'}"
+        if start_date == end_date and not full_day:
+            from_value, to_value = start_time or "-", end_time or "-"
+        else:
+            from_value, to_value = f"{start_date:%d.%m.%Y}", f"{end_date:%d.%m.%Y}"
         cleaned_note = TECHNICAL_TAG.sub("", note or "").strip() if note else ""
         cleaned_note = re.sub(r"\s+", " ", cleaned_note).strip()
-        detail = f" - {cleaned_note}" if cleaned_note else ""
-        time_lines = _wrap_fixed_width(f"{when}{detail}", 64)
-        lines.append(f"| {index:<2} | {person:<5} | {time_lines[0]:<64} |")
-        for line in time_lines[1:]:
-            lines.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+        if cleaned_note:
+            to_value = f"{to_value} - {cleaned_note}"
+        from_lines = _wrap_fixed_width(from_value, 14)
+        to_lines = _wrap_fixed_width(to_value, 14)
+        row_count = max(len(from_lines), len(to_lines))
+        lines.append(f"| {index:<2} | {person:<5} | {from_lines[0]:<14} | {to_lines[0]:<14} |")
+        for line_index in range(1, row_count):
+            from_line = from_lines[line_index] if line_index < len(from_lines) else ""
+            to_line = to_lines[line_index] if line_index < len(to_lines) else ""
+            lines.append(f"| {'':<2} | {'':<5} | {from_line:<14} | {to_line:<14} |")
         lines.append(border)
     return lines
 
@@ -1334,7 +1539,7 @@ def _parse_ascii_cells(line: str) -> list[str]:
 
 def _table_tone_from_label(label: str) -> str:
     normalized = label.strip().upper().rstrip(":")
-    if normalized in {"TODO", "DETYRAT E REJA"}:
+    if normalized in {"TODO", "DETYRAT E REJA", "DET TE REJA LAST WEEK DHE THIS WEEK"}:
         return "todo"
     if normalized == "IN PROGRESS":
         return "in-progress"
@@ -1469,12 +1674,12 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                 symbol = cell.strip()
                 if symbol == "\u2713":
                     current_cell_style = (
-                        "background:#f8fafc;color:#047857;border:1px solid #cbd5e1;"
+                        "background:#dcfce7;color:#166534;border:1px solid #cbd5e1;"
                         "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
                     )
                 elif symbol == "\u2715":
                     current_cell_style = (
-                        "background:#f8fafc;color:#dc2626;border:1px solid #cbd5e1;"
+                        "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
                         "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
                     )
             row_cells.append(
@@ -1555,7 +1760,7 @@ def _email_column_width_style(width: str) -> str:
 
 def _email_column_cell_style(header_cell: str) -> str:
     name = header_cell.strip().upper()
-    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "DATA", "DATE", "TYPE", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
+    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "TO", "DATA", "DATE", "DEP", "TYPE", "AM/PM", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
         return "white-space:nowrap;"
     if name == "WHO":
         return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
@@ -1570,8 +1775,12 @@ def _email_column_widths(header: list[str]) -> list[str]:
     fixed_by_name = {
         "NR": "24",
         "WHO": "34",
+        "DEP": "34",
+        "ADDED": "48",
         "TYPE": "42",
+        "AM/PM": "42",
         "FROM": "38",
+        "TO": "38",
         "TIME": "46",
         "ORA": "46",
         "KOHA": "46",

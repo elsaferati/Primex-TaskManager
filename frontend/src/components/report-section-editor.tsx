@@ -12,13 +12,17 @@ type EditorTableBlock = { headerIndex: number; rowIndexes: number[]; endIndex: n
 const HEADER_LABELS = new Set([
   "NR",
   "WHO",
+  "DEP",
   "FROM",
+  "TO",
   "PER",
   "TITLE",
   "NOTE",
   "PYETJA",
   "TIPI",
   "TYPE",
+  "AM/PM",
+  "ADDED",
   "KATEGORIA",
   "LISTA",
   "COUNT",
@@ -81,13 +85,15 @@ function isHeaderCells(cells: string[]) {
 function compactWidthForHeader(header: string) {
   const value = normalizeHeader(header)
   if (value === "NR") return "48px"
-  if (value === "WHO" || value === "FROM" || value === "PER") return "64px"
+  if (value === "WHO" || value === "DEP" || value === "FROM" || value === "TO" || value === "PER") return "64px"
   if (value === "DISK") return "40px"
   if (value === "TIME") return "76px"
   if (value === "DATA" || value === "DATE") return "96px"
   if (value === "LATE") return "88px"
   if (value === "COUNT") return "72px"
   if (value === "TYPE" || value === "TIPI") return "max-content"
+  if (value === "AM/PM") return "max-content"
+  if (value === "ADDED") return "max-content"
   if (value === "KATEGORIA" || value === "LISTA") return "max-content"
   if (value === "MBAJTUR?" || value === "MBAJTUR" || value === "ANULUAR" || value === "PA STATUS") return "44px"
   if (value === "TITLE" || value === "NOTE" || value === "PYETJA") return "minmax(280px, 1fr)"
@@ -107,9 +113,13 @@ function isNarrowTableHeader(header: string) {
   return (
     header === "NR" ||
     header === "WHO" ||
+    header === "DEP" ||
     header === "FROM" ||
+    header === "TO" ||
     header === "PER" ||
     header === "TYPE" ||
+    header === "AM/PM" ||
+    header === "ADDED" ||
     header === "TIPI" ||
     header === "DISK" ||
     header === "MBAJTUR?" ||
@@ -238,7 +248,7 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   if (resolvedStatus === "DONE") return "bg-green-100"
   if (normalizedLabel.includes("DEADLINE")) return "bg-red-600 text-white"
   if (normalizedLabel.includes("LATE")) return "bg-red-100"
-  if (normalizedLabel.includes("TODO") || normalizedLabel.includes("DETYRAT E REJA")) return "bg-pink-200"
+  if (normalizedLabel.includes("TODO") || normalizedLabel.includes("DETYRAT E REJA") || normalizedLabel.includes("DET TE REJA")) return "bg-pink-200"
   if (normalizedLabel.includes("IN PROGRESS")) return "bg-yellow-100"
   if (normalizedLabel.includes("WAITING")) return "bg-orange-100 text-orange-900"
   if (normalizedLabel.includes("DONE")) return "bg-green-100"
@@ -254,6 +264,15 @@ function diskCellTone(headers: string[], cells: string[], cellIndex: number) {
   const value = cells[cellIndex]?.trim().toUpperCase()
   if (value === "YES") return "bg-green-100 text-green-800 font-semibold text-center"
   if (value === "NO") return "bg-red-100 text-red-800 font-semibold text-center"
+  return "text-center"
+}
+
+function meetingStatusCellTone(headers: string[], cells: string[], cellIndex: number) {
+  const header = normalizeHeader(headers[cellIndex] || "")
+  if (header !== "MBAJTUR?" && header !== "MBAJTUR") return ""
+  const value = cells[cellIndex]?.trim()
+  if (value === "✓") return "bg-green-100 text-green-800 font-semibold text-center"
+  if (value === "✕") return "bg-red-100 text-red-800 font-semibold text-center"
   return "text-center"
 }
 
@@ -515,7 +534,7 @@ export function ReportSectionPreview({ body }: { body: string }) {
                               : "px-2 text-left"
                           } ${narrow ? "w-[1%] whitespace-nowrap" : ""} ${
                             header === "NR" ? "w-8" : ""
-                          } ${header === "WHO" ? "w-10" : ""}`}
+                          } ${header === "WHO" || header === "DEP" ? "w-10" : ""}`}
                         >
                           {trimTableCell(cell) || "-"}
                         </th>
@@ -543,9 +562,9 @@ export function ReportSectionPreview({ body }: { body: string }) {
                             header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
                               ? "px-1 text-center"
                               : "px-2"
-                          } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${
+                          } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
                             narrow ? "w-[1%] whitespace-nowrap" : "whitespace-pre-wrap break-words"
-                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" ? "w-10" : ""}`}
+                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""}`}
                         >
                           {trimTableCell(cell) || "-"}
                         </td>

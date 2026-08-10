@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -24,6 +24,17 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_RECIPIENTS = {"to": ["130primex.eu@gmail.com"], "cc": [], "bcc": []}
+M3_AUTO_SEND_TIMES = (time(15, 50), time(16, 30))
+
+
+def _due_m3_send_slot(now: datetime, sent_slots: set[str]) -> str | None:
+    """Return the next due M3 delivery slot that has not already been sent."""
+    current_time = now.time().replace(second=0, microsecond=0)
+    for send_time in M3_AUTO_SEND_TIMES:
+        slot = send_time.strftime("%H:%M")
+        if current_time >= send_time and slot not in sent_slots:
+            return slot
+    return None
 
 
 def normalize_recipients(value: dict | None) -> dict[str, list[str]]:
@@ -70,22 +81,13 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
         report_day = local_now.date()
         if local_now.weekday() not in (settings.weekdays or []):
             return False
-        if local_now.time().replace(second=0, microsecond=0) < settings.send_time:
-            return False
-
         row = (
             await db.execute(select(MeetingsReportDraft).where(MeetingsReportDraft.report_date == report_day))
         ).scalar_one_or_none()
-        if row and row.status == "SENT":
-            sent_at = row.sent_at
-            settings_updated_at = settings.updated_at
-            if sent_at and settings_updated_at and settings_updated_at > sent_at:
-                logger.info(
-                    "meetings_report_scheduler_resend_allowed reason=settings_changed report_date=%s",
-                    report_day,
-                )
-            else:
-                return False
+        sent_slots = {str(slot) for slot in (getattr(row, "auto_sent_slots", None) or [])}
+        delivery_slot = _due_m3_send_slot(local_now, sent_slots)
+        if delivery_slot is None:
+            return False
 
         recipients = normalize_recipients(settings.recipients)
         if not recipients["to"]:
@@ -134,10 +136,11 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
         row.sent_at = datetime.now(timezone)
         row.gmail_message_id = message.get("id")
         row.gmail_thread_id = message.get("threadId")
+        row.auto_sent_slots = [*sorted(sent_slots), delivery_slot]
         row.last_error = None
         settings.last_run_date = datetime.now(timezone)
         await db.commit()
-        logger.info("meetings_report_scheduler_sent report_date=%s", report_day)
+        logger.info("meetings_report_scheduler_sent report_date=%s slot=%s", report_day, delivery_slot)
         return True
 
 
