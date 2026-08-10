@@ -4494,23 +4494,23 @@ export default function DepartmentKanban() {
 
     try {
       if (hasRealTaskRow) {
-        const updateRes = await apiFetch(`/tasks/${taskToCloseId}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "DONE" }),
-        })
-        if (!updateRes.ok) {
-          toast.error("Failed to close system task")
-          return
-        }
-
         const commentRes = await apiFetch(`/tasks/${taskToCloseId}/comment`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({ comment: closeComment }),
         })
         if (!commentRes.ok) {
-          toast.error("Task was closed, but saving the comment failed")
+          toast.error("Failed to save the required result comment")
+          return
+        }
+        const updateRes = await apiFetch(`/tasks/${taskToCloseId}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "DONE" }),
+        })
+        if (!updateRes.ok) {
+          toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
+          return
         }
       } else {
         const occurrenceBaseDate = taskToCloseTemplate

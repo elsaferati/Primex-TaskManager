@@ -52,10 +52,32 @@ import type {
   RealizationAIAnalysis,
   RealizationLevel,
   RealizationPersonResult,
+  RealizationPulse,
   RealizationQuestion,
   RealizationTaskFact,
   RealizationWeeklyResponse,
 } from "@/lib/types"
+
+const PULSE_LABEL: Record<RealizationPulse, string> = {
+  "+": "Sipas planit",
+  "++": "Mbi plan",
+  DIAMOND: "Extra / Diamond",
+  "?": "Nën plan — kërkon veprim",
+  OK: "Nën plan por e arsyetuar",
+}
+
+const PULSE_STYLE: Record<RealizationPulse, string> = {
+  "+": "border-emerald-300 bg-emerald-50 text-emerald-900",
+  "++": "border-blue-300 bg-blue-50 text-blue-900",
+  DIAMOND: "border-violet-300 bg-violet-50 text-violet-900",
+  "?": "border-rose-300 bg-rose-50 text-rose-900",
+  OK: "border-amber-300 bg-amber-50 text-amber-950",
+}
+
+function pulseText(pulse?: RealizationPulse | null) {
+  if (!pulse) return "—"
+  return pulse === "DIAMOND" ? "♦" : pulse
+}
 
 const LEVEL_STYLE: Record<RealizationLevel, string> = {
   "A+": "border-emerald-600 bg-emerald-600 text-white",
@@ -171,6 +193,13 @@ function DayTaskCard({
           <MessageSquare className="mt-0.5 h-3 w-3 shrink-0" />
           <p className="min-w-0 whitespace-pre-wrap break-words">{task.user_comment}</p>
         </div>
+      ) : task.comment_required_before_close ? (
+        <button type="button" onClick={() => onComment(task)} className="mt-2 w-full rounded-md border border-dashed border-current/30 bg-white/50 px-2 py-1.5 text-left text-[10px] font-semibold">
+          Komenti personal kërkohet para mbylljes.
+        </button>
+      ) : null}
+      {task.rlz_impact === "PINK_ACTION_REQUIRED" ? (
+        <p className="mt-2 rounded-md bg-rose-700 px-2 py-1 text-[10px] font-bold text-white">PINK · ndikon me ? derisa të ketë progres ose arsye të aprovuar</p>
       ) : null}
     </div>
   )
@@ -274,8 +303,10 @@ function cleanTaskTitle(value: string) {
 
 async function errorMessage(response: Response) {
   try {
-    const payload = (await response.json()) as { detail?: string }
-    return payload.detail || "Veprimi dështoi"
+    const payload = (await response.json()) as { detail?: string | { message?: string } }
+    return typeof payload.detail === "string"
+      ? payload.detail
+      : payload.detail?.message || "Veprimi dështoi"
   } catch {
     return "Veprimi dështoi"
   }
@@ -368,6 +399,11 @@ export default function RealizationPage() {
   const [taskCommentOpen, setTaskCommentOpen] = React.useState(false)
   const [commentTask, setCommentTask] = React.useState<RealizationTaskFact | null>(null)
   const [taskComment, setTaskComment] = React.useState("")
+  const [dailyCloseOpen, setDailyCloseOpen] = React.useState(false)
+  const [dailyCloseComment, setDailyCloseComment] = React.useState("")
+  const [dailyCloseReason, setDailyCloseReason] = React.useState("")
+  const [dailyClosePulse, setDailyClosePulse] = React.useState<RealizationPulse | "">("")
+  const [monthlyPulseByUser, setMonthlyPulseByUser] = React.useState<Record<string, RealizationPulse>>({})
   const [reviewLevel, setReviewLevel] = React.useState<RealizationLevel>("B")
   const [managerComment, setManagerComment] = React.useState("")
   const [overrideReason, setOverrideReason] = React.useState("")
@@ -393,7 +429,7 @@ export default function RealizationPage() {
     setDepartments(rows)
     // A manager's own department is only the initial default — every
     // manager can switch to and manage any department in Realization.
-    const preferred = departmentId || (user?.role === "MANAGER" ? user.department_id : "")
+    const preferred = departmentId || (["MANAGER", "STAFF"].includes(user?.role || "") ? user?.department_id : "")
     const next = rows.find((row) => row.id === preferred)?.id || rows[0]?.id || ""
     if (!departmentId) setDepartmentId(next)
   }, [apiFetch, departmentId, user])
@@ -439,6 +475,19 @@ export default function RealizationPage() {
       setSelectedId((current) =>
         payload.people.some((person) => person.id === current) ? current : payload.people[0]?.id || null
       )
+      const monthParams = new URLSearchParams({
+        department_id: departmentId,
+        month_start: `${isoLocalDate(new Date()).slice(0, 7)}-01`,
+      })
+      const monthlyResponse = await apiFetch(`/realization/monthly?${monthParams}`)
+      if (monthlyResponse.ok) {
+        const monthly = (await monthlyResponse.json()) as {
+          people: Array<{ user_id: string; aggregation: { current_pulse: RealizationPulse } }>
+        }
+        setMonthlyPulseByUser(
+          Object.fromEntries(monthly.people.map((item) => [item.user_id, item.aggregation.current_pulse]))
+        )
+      }
     } catch (error) {
       if (requestId !== reportRequestRef.current) return
       toast.error("Raporti nuk u ngarkua", { description: error instanceof Error ? error.message : undefined })
@@ -450,7 +499,7 @@ export default function RealizationPage() {
 
   React.useEffect(() => {
     // Data loading is asynchronous; state updates happen only after the request resolves.
-    if (!authLoading && user && ["ADMIN", "MANAGER"].includes(user.role)) void loadDepartments()
+    if (!authLoading && user && ["ADMIN", "MANAGER", "STAFF"].includes(user.role)) void loadDepartments()
   }, [authLoading, loadDepartments, user])
 
   React.useEffect(() => {
@@ -561,6 +610,7 @@ export default function RealizationPage() {
   }
 
   const evidenceMarker = React.useMemo(() => {
+    if (evidenceCategory === "DIAMOND") return "DIAMOND"
     if (["QUALITY", "PROPOSAL", "HELPED_COLLEAGUE", "TIME_SAVED", "EXTRA_TASK", "REQUESTED_EXTRA_TASK"].includes(evidenceCategory)) {
       return "POSITIVE"
     }
@@ -574,6 +624,10 @@ export default function RealizationPage() {
     const evidenceJson: Record<string, unknown> = {}
     let scopeType = "PERSON"
     let apiCategory = evidenceCategory
+    if (evidenceCategory === "DIAMOND") {
+      apiCategory = "QUALITY"
+      evidenceJson.high_impact = true
+    }
     if (evidenceCategory === "ABSENCE") {
       evidenceJson.classification = absenceClass
       evidenceJson.date = evidenceDate
@@ -730,11 +784,54 @@ export default function RealizationPage() {
     }
   }
 
+  const openDailyClose = () => {
+    setDailyClosePulse(selected?.facts_json.pulse?.pulse || "")
+    setDailyCloseComment("")
+    setDailyCloseReason("")
+    setDailyCloseOpen(true)
+  }
+
+  const closeToday = async () => {
+    const today = isoLocalDate(new Date())
+    const daily = selected?.facts_json.daily_timeline?.find((item) => item.date === today)
+    if (!daily?.period_id || !daily.result_id) {
+      toast.error("Snapshot-i i sotëm nuk është gati")
+      return
+    }
+    if (!dailyCloseComment.trim()) {
+      toast.error("Shto komentin e shkurtër të mbylljes ditore")
+      return
+    }
+    setAction("close-day")
+    try {
+      const response = await apiFetch(
+        `/realization/periods/${daily.period_id}/results/${daily.result_id}/close-day`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            daily_comment: dailyCloseComment.trim(),
+            confirmed_pulse: dailyClosePulse || null,
+            reason: dailyCloseReason.trim() || null,
+          }),
+        }
+      )
+      if (!response.ok) throw new Error(await errorMessage(response))
+      toast.success("Dita u mbyll dhe u ruajt në audit")
+      setDailyCloseOpen(false)
+      await loadReport()
+    } catch (error) {
+      toast.error("Dita nuk u mbyll", { description: error instanceof Error ? error.message : undefined })
+    } finally {
+      setAction(null)
+    }
+  }
+
   if (authLoading) {
     return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>
   }
 
-  if (!user || !["ADMIN", "MANAGER"].includes(user.role)) {
+  if (!user || !["ADMIN", "MANAGER", "STAFF"].includes(user.role)) {
     return (
       <div className="mx-auto max-w-2xl py-16">
         <Card>
@@ -765,6 +862,12 @@ export default function RealizationPage() {
   const selectedWeeklyAllCompleted = selected ? weeklyAllCompleted(selected) : 0
   const selectedWeeklyAdditional = selected ? weeklyAdditional(selected) : 0
   const isLive = data ? !data.has_final_snapshot : true
+  const todayIso = isoLocalDate(new Date())
+  const todayTimeline = selected?.facts_json.daily_timeline?.find((item) => item.date === todayIso)
+  const todayPulse = selected?.facts_json.pulse?.pulse
+  const projectedWeeklyPulse = selected?.facts_json.projected_weekly_pulse?.pulse || todayPulse
+  const monthlyPulse = selected ? monthlyPulseByUser[selected.user_id] : undefined
+  const operatingMode = departments.find((item) => item.id === departmentId)?.realization_mode || "AUTO"
   const selectedTimeline = WEEK_DAYS.map((label, index) => {
     const date = addDays(weekStart, index)
     const snapshot = selected?.facts_json.daily_timeline?.find((item) => item.date === date)
@@ -823,7 +926,7 @@ export default function RealizationPage() {
           <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <div className="space-y-1.5">
               <Label>Departamenti</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId}>
+              <Select value={departmentId} onValueChange={setDepartmentId} disabled={user.role !== "ADMIN"}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh departamentin" /></SelectTrigger>
                 <SelectContent>
                   {departments.map((department) => <SelectItem key={department.id} value={department.id}>{department.name}</SelectItem>)}
@@ -855,13 +958,13 @@ export default function RealizationPage() {
             <Button variant="outline" onClick={() => void calculateToday()} disabled={!!action}>
               {action === "daily" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Përditëso tani
             </Button>
-            <Button onClick={() => void calculateWeekly()} disabled={!data?.can_calculate || !!action}>
+            <Button className={user.role === "STAFF" ? "hidden" : ""} onClick={() => void calculateWeekly()} disabled={!data?.can_calculate || !!action}>
               {action === "calculate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />} {data?.has_final_snapshot ? "Rikalkulo javën" : "Finalizo dhe vlerëso"}
             </Button>
-            <Button variant="outline" onClick={() => void downloadExcel()} disabled={!people.length || !!action}>
+            <Button className={user.role === "STAFF" ? "hidden" : ""} variant="outline" onClick={() => void downloadExcel()} disabled={!people.length || !!action}>
               {action === "export" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Excel
             </Button>
-            {["ADMIN", "MANAGER"].includes(user.role) ? (
+            {user.role === "ADMIN" ? (
               <Button variant="outline" onClick={() => void downloadExcel(true)} disabled={!!action}>
                 {action === "export-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Excel gjithë
               </Button>
@@ -890,6 +993,31 @@ export default function RealizationPage() {
           ))}
         </CardContent>
       </Card>
+
+      {selected ? (
+        <div className="grid gap-3 md:grid-cols-3">
+          {[
+            ["Sot", todayPulse],
+            ["Java aktuale", projectedWeeklyPulse],
+            ["Muaji aktual", monthlyPulse],
+          ].map(([label, rawPulse]) => {
+            const pulse = rawPulse as RealizationPulse | undefined
+            return (
+              <Card key={label} className={cn("border-2", pulse ? PULSE_STYLE[pulse] : "border-muted")}>
+                <CardContent className="flex items-center justify-between py-4">
+                  <div>
+                    <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
+                    <p className="mt-1 text-sm">{pulse ? PULSE_LABEL[pulse] : "Pa të dhëna"}</p>
+                  </div>
+                  <span className="text-3xl font-black" aria-label={pulse ? PULSE_LABEL[pulse] : "Pa të dhëna"}>
+                    {pulseText(pulse)}
+                  </span>
+                </CardContent>
+              </Card>
+            )
+          })}
+        </div>
+      ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <MetricCard icon={Target} label="Realizimi i personit" value={`${selected?.facts_json.weekly_progress_percent || 0}%`} note={selected?.user_name || "Zgjidh personin"} />
@@ -932,9 +1060,14 @@ export default function RealizationPage() {
                     <CardDescription className="mt-2 max-w-3xl text-slate-500">{selected.auto_narrative || "Rezultati do të argumentohet nga taskat, prezenca dhe evidenca e verifikuar."}</CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
-                    <Button size="sm" variant="outline" onClick={() => setEvidenceOpen(true)} disabled={data?.period.status === "LOCKED"}><Plus className="h-4 w-4" /> Evidencë</Button>
-                    <Button size="sm" variant="outline" onClick={() => void runAI()} disabled={!!action || !data || data.period.status === "LOCKED"}>{action === "ai" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />} Gjenero analizën</Button>
-                    <Button size="sm" onClick={openReview} disabled={data?.period.status !== "CALCULATED"}><FileCheck2 className="h-4 w-4" /> Rishiko</Button>
+                    {selected.user_id === user.id && todayTimeline?.period_id ? (
+                      <Button size="sm" onClick={openDailyClose} disabled={todayTimeline.close_state === "CLOSED" || !!action}>
+                        <CalendarCheck className="h-4 w-4" /> {todayTimeline.close_state === "CLOSED" ? "Dita e mbyllur" : "Mbylle ditën"}
+                      </Button>
+                    ) : null}
+                    {user.role !== "STAFF" ? <Button size="sm" variant="outline" onClick={() => setEvidenceOpen(true)} disabled={data?.period.status === "LOCKED"}><Plus className="h-4 w-4" /> Evidencë</Button> : null}
+                    {user.role !== "STAFF" ? <Button size="sm" variant="outline" onClick={() => void runAI()} disabled={!!action || !data || data.period.status === "LOCKED"}>{action === "ai" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />} Gjenero analizën</Button> : null}
+                    {user.role !== "STAFF" ? <Button size="sm" onClick={openReview} disabled={data?.period.status !== "CALCULATED"}><FileCheck2 className="h-4 w-4" /> Rishiko</Button> : null}
                   </div>
                 </div>
               </CardHeader>
@@ -961,6 +1094,29 @@ export default function RealizationPage() {
                   </div>
                 </section>
 
+                {selected.facts_json.recovery ? (
+                  <section className="rounded-2xl border-2 border-blue-200 bg-blue-50/60 p-5 dark:border-blue-900 dark:bg-blue-950/20">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h2 className="text-lg font-semibold">Çfarë duhet për ta shpëtuar javën?</h2>
+                        <p className="mt-1 text-xs text-muted-foreground">Llogaritje deterministe nga plani, progresi dhe evidenca e aprovuar.</p>
+                      </div>
+                      <Badge variant="outline">{selected.facts_json.recovery.remaining_working_days} ditë pune mbetur</Badge>
+                    </div>
+                    <ul className="mt-4 grid gap-2 text-sm md:grid-cols-2">
+                      {selected.facts_json.recovery.messages.map((message) => (
+                        <li key={message} className="rounded-lg border bg-background px-3 py-2">{message}</li>
+                      ))}
+                    </ul>
+                    <div className="mt-4 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
+                      <div className="rounded-lg bg-background p-2"><strong className="block text-lg">{selected.facts_json.recovery.delta_to_plan}</strong>Delta</div>
+                      <div className="rounded-lg bg-background p-2"><strong className="block text-lg">{selected.facts_json.recovery.unresolved_pink}</strong>Pink</div>
+                      <div className="rounded-lg bg-background p-2"><strong className="block text-lg">{selected.facts_json.recovery.justified_shortfall}</strong>Arsyetuar</div>
+                      <div className="rounded-lg bg-background p-2"><strong className="block text-lg">{selected.facts_json.recovery.unverified_extra}</strong>Extra pa verifikim</div>
+                    </div>
+                  </section>
+                ) : null}
+
                 <section>
                   <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
                     <div>
@@ -976,7 +1132,14 @@ export default function RealizationPage() {
                           <div className="flex items-start justify-between gap-2">
                             <div><p className="font-semibold text-slate-900">{day.label}</p><p className="text-[11px] text-slate-500">{day.date.split("-").reverse().join(".")}</p></div>
                             {day.snapshot?.has_snapshot ? (
-                              <Badge variant="secondary" className="text-[10px]">{day.snapshot.daily_progress_percent}%</Badge>
+                              <div className="flex flex-col items-end gap-1">
+                                <Badge className={cn("text-[10px]", day.snapshot.pulse ? PULSE_STYLE[day.snapshot.pulse.pulse] : "")}>
+                                  {pulseText(day.snapshot.pulse?.pulse)} · {day.snapshot.daily_progress_percent}%
+                                </Badge>
+                                <span className="text-[9px] font-medium text-muted-foreground">
+                                  {day.snapshot.close_state === "CLOSED" ? "Mbyllur personalisht" : day.snapshot.close_state === "REOPENED" ? "Rihapur / korrigjim" : "Ditë e hapur"}
+                                </span>
+                              </div>
                             ) : (
                               <Badge variant="outline" className="text-[10px]">Në pritje</Badge>
                             )}
@@ -1103,6 +1266,41 @@ export default function RealizationPage() {
         </Card>
       </div>
 
+      <Dialog open={dailyCloseOpen} onOpenChange={setDailyCloseOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <DialogHeader>
+            <DialogTitle>Mbylle ditën</DialogTitle>
+            <DialogDescription>
+              Faktet rifreskohen para ruajtjes. Mbyllja ruhet si ngjarje auditi dhe nuk mbishkruan historinë.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className={cn("rounded-xl border-2 p-4", dailyClosePulse ? PULSE_STYLE[dailyClosePulse] : "border-muted")}>
+              <p className="text-xs font-semibold uppercase">Pulse i sugjeruar</p>
+              <p className="mt-1 text-2xl font-black">{pulseText(selected?.facts_json.pulse?.pulse)} · {selected?.facts_json.pulse?.pulse ? PULSE_LABEL[selected.facts_json.pulse.pulse] : "Pa të dhëna"}</p>
+              <p className="mt-2 text-xs">{selected?.facts_json.pulse?.reason}</p>
+            </div>
+            {operatingMode !== "AUTO" ? (
+              <div className="space-y-1.5">
+                <Label>Pulse i konfirmuar ({operatingMode})</Label>
+                <Select value={dailyClosePulse} onValueChange={(value) => setDailyClosePulse(value as RealizationPulse)}>
+                  <SelectTrigger><SelectValue placeholder="Zgjidh Pulse" /></SelectTrigger>
+                  <SelectContent>{(["+", "++", "DIAMOND", "?", "OK"] as RealizationPulse[]).map((pulse) => <SelectItem key={pulse} value={pulse}>{pulseText(pulse)} · {PULSE_LABEL[pulse]}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+            ) : null}
+            <div className="space-y-1.5">
+              <Label>Komenti i mbylljes ditore</Label>
+              <Textarea autoFocus rows={3} value={dailyCloseComment} onChange={(event) => setDailyCloseComment(event.target.value)} placeholder="Çfarë u realizua dhe çfarë duhet vazhduar nesër?" />
+            </div>
+            {operatingMode === "MANUAL" || dailyClosePulse !== selected?.facts_json.pulse?.pulse ? (
+              <div className="space-y-1.5"><Label>Arsyeja e konfirmimit/ndryshimit</Label><Textarea rows={2} value={dailyCloseReason} onChange={(event) => setDailyCloseReason(event.target.value)} /></div>
+            ) : null}
+          </div>
+          <DialogFooter><Button variant="outline" onClick={() => setDailyCloseOpen(false)}>Anulo</Button><Button onClick={() => void closeToday()} disabled={action === "close-day"}>{action === "close-day" && <Loader2 className="h-4 w-4 animate-spin" />} Mbylle ditën</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
       <Dialog open={taskCommentOpen} onOpenChange={setTaskCommentOpen}>
         <DialogContent className="sm:max-w-lg">
           <DialogHeader>
@@ -1147,7 +1345,7 @@ export default function RealizationPage() {
         <DialogContent className="sm:max-w-xl">
           <DialogHeader><DialogTitle>Shto evidencë të verifikueshme</DialogTitle><DialogDescription>Evidenca verifikohet menjëherë nga llogaria menaxheriale dhe rikalkulon automatikisht raportin.</DialogDescription></DialogHeader>
           <div className="space-y-4">
-            <div className="space-y-1.5"><Label>Kategoria</Label><Select value={evidenceCategory} onValueChange={setEvidenceCategory}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{[["QUALITY", "Cilësi / angazhim ekstra"], ["PROPOSAL", "Propozim"], ["REQUESTED_EXTRA_TASK", "Kërkoi detyra shtesë"], ["HELPED_COLLEAGUE", "Ndihmoi koleg"], ["EXTRA_TASK", "Detyrë shtesë e përfunduar"], ["REPEATED_PROBLEM", "Problem i përsëritur"], ["BLOCKER", "I prishi planin kolegut"], ["MISSED_MEETING", "Takim i humbur"], ["ABSENCE", "Mungesë / pushim"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
+            <div className="space-y-1.5"><Label>Kategoria</Label><Select value={evidenceCategory} onValueChange={setEvidenceCategory}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{[["QUALITY", "Cilësi / angazhim ekstra"], ["DIAMOND", "♦ Kontribut ekstra i jashtëzakonshëm"], ["PROPOSAL", "Propozim"], ["REQUESTED_EXTRA_TASK", "Kërkoi detyra shtesë"], ["HELPED_COLLEAGUE", "Ndihmoi koleg"], ["EXTRA_TASK", "Detyrë shtesë e përfunduar"], ["REPEATED_PROBLEM", "Problem i përsëritur"], ["BLOCKER", "I prishi planin kolegut"], ["MISSED_MEETING", "Takim i humbur"], ["ABSENCE", "Mungesë / pushim"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
             {evidenceCategory === "ABSENCE" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Klasifikimi</Label><Select value={absenceClass} onValueChange={setAbsenceClass}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="UNEXCUSED">E papritur / pa aprovim</SelectItem><SelectItem value="APPROVED_PERSONAL">Personale e aprovuar</SelectItem><SelectItem value="ANNUAL_LEAVE">Pushim vjetor</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label>Data</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></div> : null}
             {evidenceCategory === "MISSED_MEETING" ? <div className="space-y-1.5"><Label>Data e takimit</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /><p className="text-xs text-muted-foreground">Përshkruaj takimin te komenti më poshtë — nuk kërkohet ID.</p></div> : null}
             {evidenceCategory === "BLOCKER" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Kolegu i prekur</Label><Select value={relatedId} onValueChange={setRelatedId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh personin" /></SelectTrigger><SelectContent>{colleagueOptions.map((person) => <SelectItem key={person.id} value={person.user_id}>{person.user_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label>Ndikimi</Label><Select value={impactLevel} onValueChange={setImpactLevel}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MINOR">I vogël</SelectItem><SelectItem value="MAJOR">I madh</SelectItem><SelectItem value="MULTIPLE_PEOPLE">Disa persona</SelectItem></SelectContent></Select></div></div> : null}

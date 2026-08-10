@@ -187,6 +187,7 @@ export interface UserLookup {
 export interface Department {
   id: string
   code: string
+  realization_mode?: "AUTO" | "SEMI_MANUAL" | "MANUAL"
   name: string
 }
 
@@ -640,6 +641,23 @@ export type RealizationPeriodStatus =
 
 export type RealizationLevel = "A+" | "A" | "B" | "C" | "M" | "D" | "E"
 export type RealizationSymbol = "+" | "+/-" | "-"
+export type RealizationPulse = "+" | "++" | "DIAMOND" | "?" | "OK"
+export type RealizationOperatingMode = "AUTO" | "SEMI_MANUAL" | "MANUAL"
+
+export interface RealizationPulseDecision {
+  pulse: RealizationPulse
+  reason: string
+  expected_count: number
+  completed_count: number
+  delta_to_plan: number
+  justified_shortfall: number
+  unresolved_pink_count: number
+  missing_comment_count: number
+  unresolved_negative_count: number
+  unverified_extra_count: number
+  verified_extra_count: number
+  verified_diamond_count: number
+}
 
 export interface RealizationPeriod {
   id: string
@@ -694,6 +712,8 @@ export interface RealizationTaskFact {
   meeting_origin_id?: string | null
   status_progress_inconsistent?: boolean
   user_comment?: string | null
+  comment_required_before_close?: boolean
+  rlz_impact?: string
 }
 
 export interface RealizationObservationFact {
@@ -746,8 +766,33 @@ export interface RealizationPersonResult {
     weekly_additional_count?: number
     weekly_fast_task_count?: number
     report_mode?: "LIVE_DAILY" | "FINAL_WEEKLY"
+    pulse?: RealizationPulseDecision
+    projected_weekly_pulse?: RealizationPulseDecision
+    recovery?: {
+      expected_cumulative: number
+      actual_cumulative: number
+      delta_to_plan: number
+      remaining_planned_obligations: number
+      remaining_working_days: number
+      unresolved_pink: number
+      justified_shortfall: number
+      unverified_extra: number
+      verified_extra: number
+      required_for_plus: number
+      messages: string[]
+    }
+    pulse_history?: Array<{
+      date: string
+      pulse?: RealizationPulse | null
+      reason?: string | null
+      has_snapshot: boolean
+      close_state: "OPEN" | "CLOSED" | "REOPENED"
+      close_event?: RealizationDailyCloseEvent | null
+    }>
     daily_timeline?: Array<{
       date: string
+      period_id?: string
+      result_id?: string
       has_snapshot?: boolean
       daily_progress_percent: number
       weekly_progress_percent: number
@@ -759,6 +804,11 @@ export interface RealizationPersonResult {
       weekly_additional_count?: number
       attendance: Array<{ id?: string; type: string; details?: string | null }>
       tasks?: RealizationTaskFact[]
+      pulse?: RealizationPulseDecision
+      recovery?: Record<string, unknown>
+      close_state?: "OPEN" | "CLOSED" | "REOPENED"
+      close_event?: RealizationDailyCloseEvent | null
+      close_history?: RealizationDailyCloseEvent[]
     }>
     project_progress?: Array<{
       project_id: string
@@ -792,6 +842,21 @@ export interface RealizationPersonResult {
   override_reason?: string | null
   reviewed_by?: string | null
   reviewed_at?: string | null
+}
+
+export interface RealizationDailyCloseEvent {
+  id: string
+  period_id: string
+  result_id: string
+  user_id: string
+  department_id: string
+  action: "CLOSE" | "REOPEN" | "CORRECT"
+  mode: RealizationOperatingMode
+  suggested_pulse: RealizationPulse
+  confirmed_pulse?: RealizationPulse | null
+  daily_comment?: string | null
+  reason?: string | null
+  created_at: string
 }
 
 export interface RealizationDepartmentResult {

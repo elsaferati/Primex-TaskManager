@@ -212,6 +212,71 @@ async def ensure_daily_period(
     return period, planned
 
 
+async def ensure_monthly_period(
+    db: AsyncSession,
+    *,
+    department_id: uuid.UUID,
+    month_start: date,
+    created_by: uuid.UUID | None,
+) -> RealizationPeriod:
+    start = month_start.replace(day=1)
+    next_month = date(
+        start.year + (1 if start.month == 12 else 0),
+        1 if start.month == 12 else start.month + 1,
+        1,
+    )
+    end = next_month - timedelta(days=1)
+    period = (
+        await db.execute(
+            select(RealizationPeriod).where(
+                RealizationPeriod.period_type == "MONTHLY",
+                RealizationPeriod.slot == "ALL",
+                RealizationPeriod.start_date == start,
+                RealizationPeriod.end_date == end,
+                RealizationPeriod.department_id == department_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if period is None:
+        policy = await select_policy(db, start)
+        await db.execute(
+            pg_insert(RealizationPeriod)
+            .values(
+                id=uuid.uuid4(),
+                period_type="MONTHLY",
+                slot="ALL",
+                start_date=start,
+                end_date=end,
+                department_id=department_id,
+                policy_version_id=policy.id,
+                status=RealizationPeriodStatus.OPEN.value,
+                created_by=created_by,
+            )
+            .on_conflict_do_nothing(
+                index_elements=[
+                    RealizationPeriod.period_type,
+                    RealizationPeriod.slot,
+                    RealizationPeriod.start_date,
+                    RealizationPeriod.end_date,
+                    RealizationPeriod.department_id,
+                ],
+                index_where=RealizationPeriod.department_id.is_not(None),
+            )
+        )
+        period = (
+            await db.execute(
+                select(RealizationPeriod).where(
+                    RealizationPeriod.period_type == "MONTHLY",
+                    RealizationPeriod.slot == "ALL",
+                    RealizationPeriod.start_date == start,
+                    RealizationPeriod.end_date == end,
+                    RealizationPeriod.department_id == department_id,
+                )
+            )
+        ).scalar_one()
+    return period
+
+
 def require_unlocked(period: RealizationPeriod) -> None:
     if period.status == RealizationPeriodStatus.LOCKED.value:
         raise RealizationWorkflowError("Locked Realization periods are immutable")

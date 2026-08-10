@@ -117,6 +117,7 @@ class TaskCreate(BaseModel):
     is_personal: bool | None = None
     fast_task_order: int | None = Field(default=None, ge=1)
     alignment_user_ids: list[uuid.UUID] | None = None
+    completion_override_reason: str | None = Field(default=None, max_length=2000, exclude=True)
 
 
 class TaskRemoveFromDayRequest(BaseModel):
@@ -152,3 +153,4 @@ class TaskUpdate(BaseModel):
     is_personal: bool | None = None
     fast_task_order: int | None = Field(default=None, ge=1)
     alignment_user_ids: list[uuid.UUID] | None = None
+    completion_override_reason: str | None = Field(default=None, max_length=2000, exclude=True)

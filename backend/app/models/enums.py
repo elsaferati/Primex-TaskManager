@@ -215,3 +215,25 @@ class RealizationSymbol(str, enum.Enum):
     POSITIVE = "+"
     MIXED = "+/-"
     NEGATIVE = "-"
+
+
+class RealizationPulse(str, enum.Enum):
+    """Operational steering state; intentionally separate from final symbols."""
+
+    ON_PLAN = "+"
+    ABOVE_PLAN = "++"
+    DIAMOND = "DIAMOND"
+    ACTION_REQUIRED = "?"
+    JUSTIFIED = "OK"
+
+
+class RealizationOperatingMode(str, enum.Enum):
+    AUTO = "AUTO"
+    SEMI_MANUAL = "SEMI_MANUAL"
+    MANUAL = "MANUAL"
+
+
+class RealizationDailyCloseAction(str, enum.Enum):
+    CLOSE = "CLOSE"
+    REOPEN = "REOPEN"
+    CORRECT = "CORRECT"

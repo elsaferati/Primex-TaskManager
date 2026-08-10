@@ -310,8 +310,8 @@ class TestRealizationPermissions(unittest.TestCase):
         self.manager = UserStub(uuid.uuid4(), UserRole.MANAGER, self.department)
         self.admin = UserStub(uuid.uuid4(), UserRole.ADMIN, None)
 
-    def test_staff_cannot_open_realization_person_detail(self) -> None:
-        self.assertFalse(
+    def test_staff_can_open_only_own_realization_person_detail(self) -> None:
+        self.assertTrue(
             can_view_person_result(
                 self.staff,
                 subject_user_id=self.staff.id,
@@ -326,7 +326,7 @@ class TestRealizationPermissions(unittest.TestCase):
             )
         )
 
-    def test_manager_can_review_every_department(self) -> None:
+    def test_manager_is_scoped_to_own_department(self) -> None:
         # Each department manager (Development/Product Content/Graphic
         # Design) manages Realization for all departments, not just their
         # own — a deliberate product decision, not department scoping.
@@ -337,14 +337,14 @@ class TestRealizationPermissions(unittest.TestCase):
                 subject_department_id=self.department,
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             can_view_person_result(
                 self.manager,
                 subject_user_id=uuid.uuid4(),
                 subject_department_id=self.other_department,
             )
         )
-        self.assertTrue(
+        self.assertFalse(
             can_review_realization(self.manager, department_id=self.other_department)
         )
         self.assertTrue(can_review_realization(self.manager, department_id=self.department))

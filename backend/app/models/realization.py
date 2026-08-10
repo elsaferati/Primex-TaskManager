@@ -25,6 +25,7 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.db import Base
 from app.models.enums import (
     RealizationLevel,
+    RealizationDailyCloseAction,
     RealizationMarker,
     RealizationObservationCategory,
     RealizationObservationVisibility,
@@ -33,6 +34,8 @@ from app.models.enums import (
     RealizationPeriodType,
     RealizationScopeType,
     RealizationSymbol,
+    RealizationOperatingMode,
+    RealizationPulse,
 )
 
 
@@ -484,4 +487,79 @@ class RealizationDepartmentResult(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RealizationDailyCloseEvent(Base):
+    """Append-only personal close/reopen/correction history for a daily result."""
+
+    __tablename__ = "realization_daily_close_events"
+    __table_args__ = (
+        CheckConstraint(
+            f"action IN ({_values(RealizationDailyCloseAction)})",
+            name="ck_realization_daily_close_action",
+        ),
+        CheckConstraint(
+            f"mode IN ({_values(RealizationOperatingMode)})",
+            name="ck_realization_daily_close_mode",
+        ),
+        CheckConstraint(
+            f"suggested_pulse IN ({_values(RealizationPulse)})",
+            name="ck_realization_daily_close_suggested_pulse",
+        ),
+        CheckConstraint(
+            f"confirmed_pulse IS NULL OR confirmed_pulse IN ({_values(RealizationPulse)})",
+            name="ck_realization_daily_close_confirmed_pulse",
+        ),
+        CheckConstraint(
+            "action = 'CLOSE' OR NULLIF(BTRIM(reason), '') IS NOT NULL",
+            name="ck_realization_daily_close_change_reason",
+        ),
+        CheckConstraint(
+            "mode = 'AUTO' OR confirmed_pulse IS NOT NULL",
+            name="ck_realization_daily_close_confirmation",
+        ),
+        CheckConstraint(
+            "confirmed_pulse IS NULL OR confirmed_pulse = suggested_pulse "
+            "OR NULLIF(BTRIM(reason), '') IS NOT NULL",
+            name="ck_realization_daily_close_override_reason",
+        ),
+        Index(
+            "ix_realization_daily_close_latest",
+            "period_id",
+            "user_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    period_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("realization_periods.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("realization_person_results.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    department_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(10), nullable=False)
+    mode: Mapped[str] = mapped_column(String(16), nullable=False)
+    suggested_pulse: Mapped[str] = mapped_column(String(10), nullable=False)
+    confirmed_pulse: Mapped[str | None] = mapped_column(String(10))
+    daily_comment: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    facts_json: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    supersedes_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("realization_daily_close_events.id", ondelete="RESTRICT")
+    )
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )

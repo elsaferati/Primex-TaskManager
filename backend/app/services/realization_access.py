@@ -18,16 +18,19 @@ def can_view_person_result(
     subject_user_id: uuid.UUID,
     subject_department_id: uuid.UUID | None,
 ) -> bool:
-    # MANAGER is intentionally not scoped to their own department here:
-    # every department manager (Development/Product Content/Graphic Design)
-    # needs to see and manage Realization for all three departments.
-    return user.role in (UserRole.ADMIN, UserRole.MANAGER)
+    if user.role is UserRole.ADMIN:
+        return True
+    if user.role is UserRole.MANAGER:
+        return user.department_id is not None and user.department_id == subject_department_id
+    return user.role is UserRole.STAFF and user.id == subject_user_id
 
 
 def can_view_department_aggregate(
     user: RealizationUser, *, department_id: uuid.UUID
 ) -> bool:
-    return user.role in (UserRole.ADMIN, UserRole.MANAGER)
+    if user.role is UserRole.ADMIN:
+        return True
+    return user.role is UserRole.MANAGER and user.department_id == department_id
 
 
 def can_view_observation(
@@ -37,11 +40,25 @@ def can_view_observation(
     department_id: uuid.UUID | None,
     visibility: RealizationObservationVisibility,
 ) -> bool:
-    return user.role in (UserRole.ADMIN, UserRole.MANAGER)
+    if user.role is UserRole.ADMIN:
+        return True
+    if user.role is UserRole.MANAGER:
+        return user.department_id is not None and user.department_id == department_id
+    return (
+        user.role is UserRole.STAFF
+        and user.id == subject_user_id
+        and visibility is not RealizationObservationVisibility.PRIVATE_MANAGER
+    )
 
 
 def can_review_realization(user: RealizationUser, *, department_id: uuid.UUID | None) -> bool:
-    return user.role in (UserRole.ADMIN, UserRole.MANAGER)
+    if user.role is UserRole.ADMIN:
+        return True
+    return (
+        user.role is UserRole.MANAGER
+        and user.department_id is not None
+        and user.department_id == department_id
+    )
 
 
 def can_approve_realization(user: RealizationUser) -> bool:

@@ -610,8 +610,19 @@ export default function SystemTaskInstancesPage() {
 
   const handleMarkDone = React.useCallback(
     async (taskId: string) => {
+      const resultComment = window.prompt("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")?.trim()
+      if (!resultComment) {
+        toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
+        return
+      }
       setUpdatingTaskIds((prev) => ({ ...prev, [taskId]: true }))
       try {
+        const commentRes = await apiFetch(`/tasks/${taskId}/comment`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ comment: resultComment }),
+        })
+        if (!commentRes.ok) throw new Error("Komenti i rezultatit nuk u ruajt.")
         const res = await apiFetch(`/tasks/${taskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },

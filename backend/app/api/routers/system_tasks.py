@@ -1096,6 +1096,14 @@ async def set_system_task_occurrence_status(
 
     now = datetime.now(timezone.utc)
     if payload.status == "DONE":
+        if not (payload.comment and payload.comment.strip()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "RLZ_TASK_COMMENT_REQUIRED",
+                    "message": "Para mbylljes, shto komentin për rezultatin e kësaj detyre.",
+                },
+            )
         task.status = TaskStatus.DONE
         task.completed_at = now
         task_tz, _ = _template_zoneinfo(tmpl)

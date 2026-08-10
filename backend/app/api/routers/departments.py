@@ -13,7 +13,9 @@ from sqlalchemy.orm import load_only
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.department import Department
-from app.schemas.department import DepartmentOut
+from app.models.enums import UserRole
+from app.schemas.department import DepartmentOut, DepartmentRealizationModeUpdate
+from app.services.audit import add_audit_log
 
 
 router = APIRouter()
@@ -45,11 +47,48 @@ async def list_departments(db: AsyncSession = Depends(get_db), _=Depends(get_cur
     departments = (
         await db.execute(
             select(Department)
-            .options(load_only(Department.id, Department.name, Department.code))
+            .options(load_only(Department.id, Department.name, Department.code, Department.realization_mode))
             .order_by(Department.name)
         )
     ).scalars().all()
-    return [DepartmentOut(id=d.id, name=d.name, code=d.code) for d in departments]
+    return [
+        DepartmentOut(
+            id=d.id, name=d.name, code=d.code, realization_mode=d.realization_mode
+        )
+        for d in departments
+    ]
+
+
+@router.patch("/{department_id}/realization-mode", response_model=DepartmentOut)
+async def update_department_realization_mode(
+    department_id: uuid.UUID,
+    payload: DepartmentRealizationModeUpdate,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> DepartmentOut:
+    if user.role is not UserRole.ADMIN:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    department = await db.get(Department, department_id)
+    if department is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
+    before = department.realization_mode
+    department.realization_mode = payload.realization_mode.value
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="department",
+        entity_id=department.id,
+        action="realization_mode_changed",
+        before={"realization_mode": before},
+        after={"realization_mode": department.realization_mode},
+    )
+    await db.commit()
+    return DepartmentOut(
+        id=department.id,
+        name=department.name,
+        code=department.code,
+        realization_mode=department.realization_mode,
+    )
 
 
 @router.get("/{department_id}/file-clients", response_model=list[str])
