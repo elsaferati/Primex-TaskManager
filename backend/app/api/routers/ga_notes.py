@@ -35,6 +35,7 @@ from app.schemas.ga_note import (
 )
 from app.services.audit import add_audit_log
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
+from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.ga_note_task_instances import (
     GaNoteAssigneeExecutionState,
     apply_ga_note_assignee_execution_states,
@@ -409,9 +410,25 @@ async def update_ga_note(
         for task in linked_tasks:
             # Tasks created from GA/KA notes should always track the note title.
             # Keep the stored title aligned with the full note text, only truncating at the task schema limit.
+            old_title = task.title
             task.title = new_task_title
+            if old_title != task.title:
+                record_title_strike_events(
+                    db,
+                    task_id=task.id,
+                    actor_user_id=user.id,
+                    before_title=old_title,
+                    after_title=task.title,
+                )
             if task.description == old_default_description:
                 task.description = new_default_description
+                record_description_strike_events(
+                    db,
+                    task_id=task.id,
+                    actor_user_id=user.id,
+                    before_description=old_default_description,
+                    after_description=new_default_description,
+                )
 
     await db.commit()
     await db.refresh(note)
@@ -500,6 +517,9 @@ async def update_ga_note_task_bundle(
             task.fast_task_group_id = None
         reconcile_result = None
 
+    title_before = {task.id: task.title for task in active_tasks}
+    description_before = {task.id: task.description for task in active_tasks}
+
     title = _ga_note_task_title(note.content) if "content" in fields_set else None
     description_is_set = "description" in fields_set
     updated_count = apply_ga_note_shared_task_fields(
@@ -542,6 +562,26 @@ async def update_ga_note_task_bundle(
             if task.description == old_default and task.description != new_default:
                 task.description = new_default
                 updated_count += 1
+
+    for task in active_tasks:
+        previous_title = title_before.get(task.id)
+        if previous_title != task.title:
+            record_title_strike_events(
+                db,
+                task_id=task.id,
+                actor_user_id=user.id,
+                before_title=previous_title,
+                after_title=task.title,
+            )
+        previous_description = description_before.get(task.id)
+        if previous_description != task.description:
+            record_description_strike_events(
+                db,
+                task_id=task.id,
+                actor_user_id=user.id,
+                before_description=previous_description,
+                after_description=task.description,
+            )
 
     # Re-scheduling through the note editor should restore the task on each
     # assignee's weekly planner (clear stale task/project day exclusions).

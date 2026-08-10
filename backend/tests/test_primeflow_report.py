@@ -21,7 +21,9 @@ from app.services.primeflow_report import (
 from app.services.task_strike_events import (
     point_key,
     record_description_strike_events,
+    record_title_strike_events,
     render_description_for_interval,
+    render_text_for_interval,
 )
 
 
@@ -355,6 +357,51 @@ class PrimeFlowReportTests(unittest.TestCase):
             after_description="1. One\n2. Two",
         )
         self.assertEqual([(row.action, row.point_text) for row in reopened.rows], [("UNSTRUCK", "1. One")])
+
+    def test_title_points_are_reported_once_with_the_heading_kept(self) -> None:
+        title = "OH: 14 TT CAT VERS\n[[done]]1. Completed point[[/done]]\n2. Open point"
+        event = SimpleNamespace(
+            id="title-strike", field_name="TITLE", action="STRUCK",
+            point_key=point_key("1. Completed point", field_name="TITLE"),
+            occurred_at=datetime(2026, 8, 10, 10, 20, tzinfo=timezone.utc),
+        )
+        plain, marked = render_text_for_interval(
+            title,
+            [event],
+            interval_start=datetime(2026, 8, 10, 10, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
+            field_name="TITLE",
+        )
+        self.assertEqual(plain, "OH: 14 TT CAT VERS\n1. Completed point\n2. Open point")
+        self.assertIn("[[done]]1. Completed point[[/done]]", marked)
+
+        next_plain, _ = render_text_for_interval(
+            title,
+            [event],
+            interval_start=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 11, 50, tzinfo=timezone.utc),
+            field_name="TITLE",
+        )
+        self.assertEqual(next_plain, "OH: 14 TT CAT VERS\n2. Open point")
+
+        class FakeSession:
+            def __init__(self):
+                self.rows = []
+
+            def add(self, row):
+                self.rows.append(row)
+
+        session = FakeSession()
+        record_title_strike_events(
+            session,
+            task_id=uuid.uuid4(),
+            actor_user_id=uuid.uuid4(),
+            before_title="OH: 14 TT CAT VERS\n1. Completed point\n2. Open point",
+            after_title=title,
+        )
+        self.assertEqual(len(session.rows), 1)
+        self.assertEqual(session.rows[0].field_name, "TITLE")
+        self.assertEqual(session.rows[0].point_text, "1. Completed point")
 
 
 if __name__ == "__main__":

@@ -33,8 +33,13 @@ def _normalise(value: str) -> str:
     return " ".join(value.split())
 
 
-def point_key(value: str) -> str:
-    return hashlib.sha256(_normalise(value).casefold().encode("utf-8")).hexdigest()
+def point_key(value: str, *, field_name: str = "DESCRIPTION") -> str:
+    # Keep existing description keys stable. New title keys are deliberately
+    # separate because a title and description can contain identical text.
+    source = _normalise(value).casefold()
+    if field_name != "DESCRIPTION":
+        source = f"{field_name}|{source}"
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
 def _numbered_points(value: str) -> list[str]:
@@ -48,14 +53,50 @@ def _numbered_points(value: str) -> list[str]:
     ]
 
 
-def struck_points(value: str | None) -> dict[str, StrikePoint]:
+def struck_points(value: str | None, *, field_name: str = "DESCRIPTION") -> dict[str, StrikePoint]:
     """Return the individual checklist points currently wrapped in [[done]]."""
 
     result: dict[str, StrikePoint] = {}
     for match in DONE_BLOCK.finditer(value or ""):
         for text in _numbered_points(match.group(1)):
-            result[point_key(text)] = StrikePoint(point_key(text), text)
+            key = point_key(text, field_name=field_name)
+            result[key] = StrikePoint(key, text)
     return result
+
+
+def record_text_strike_events(
+    db: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    before_text: str | None,
+    after_text: str | None,
+    field_name: str,
+) -> None:
+    """Queue events only for actual done/un-done transitions in task points."""
+
+    before = struck_points(before_text, field_name=field_name)
+    after = struck_points(after_text, field_name=field_name)
+    for key in after.keys() - before.keys():
+        point = after[key]
+        db.add(TaskStrikeEvent(
+            task_id=task_id,
+            actor_user_id=actor_user_id,
+            field_name=field_name,
+            point_key=key,
+            point_text=point.text,
+            action="STRUCK",
+        ))
+    for key in before.keys() - after.keys():
+        point = before[key]
+        db.add(TaskStrikeEvent(
+            task_id=task_id,
+            actor_user_id=actor_user_id,
+            field_name=field_name,
+            point_key=key,
+            point_text=point.text,
+            action="UNSTRUCK",
+        ))
 
 
 def record_description_strike_events(
@@ -66,32 +107,36 @@ def record_description_strike_events(
     before_description: str | None,
     after_description: str | None,
 ) -> None:
-    """Queue events only for actual done/un-done transitions in task points."""
-
-    before = struck_points(before_description)
-    after = struck_points(after_description)
-    for key in after.keys() - before.keys():
-        point = after[key]
-        db.add(TaskStrikeEvent(
-            task_id=task_id,
-            actor_user_id=actor_user_id,
-            point_key=key,
-            point_text=point.text,
-            action="STRUCK",
-        ))
-    for key in before.keys() - after.keys():
-        point = before[key]
-        db.add(TaskStrikeEvent(
-            task_id=task_id,
-            actor_user_id=actor_user_id,
-            point_key=key,
-            point_text=point.text,
-            action="UNSTRUCK",
-        ))
+    record_text_strike_events(
+        db,
+        task_id=task_id,
+        actor_user_id=actor_user_id,
+        before_text=before_description,
+        after_text=after_description,
+        field_name="DESCRIPTION",
+    )
 
 
-def _description_points(value: str | None) -> tuple[str, list[StrikePoint], set[str]]:
-    """Split a description into display points while retaining legacy done state."""
+def record_title_strike_events(
+    db: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    actor_user_id: uuid.UUID | None,
+    before_title: str | None,
+    after_title: str | None,
+) -> None:
+    record_text_strike_events(
+        db,
+        task_id=task_id,
+        actor_user_id=actor_user_id,
+        before_text=before_title,
+        after_text=after_title,
+        field_name="TITLE",
+    )
+
+
+def _text_points(value: str | None, *, field_name: str) -> tuple[str, list[StrikePoint], set[str]]:
+    """Split title/description text into points while retaining legacy marks."""
 
     raw = value or ""
     cleaned = TECHNICAL_TAGS.sub("", raw).strip()
@@ -105,16 +150,19 @@ def _description_points(value: str | None) -> tuple[str, list[StrikePoint], set[
             cleaned[match.start():matches[index + 1].start() if index + 1 < len(matches) else len(cleaned)].strip()
             for index, match in enumerate(matches)
         ]
-    legacy_done = set(struck_points(raw))
-    return heading, [StrikePoint(point_key(text), text) for text in points if text], legacy_done
+    legacy_done = set(struck_points(raw, field_name=field_name))
+    return heading, [
+        StrikePoint(point_key(text, field_name=field_name), text) for text in points if text
+    ], legacy_done
 
 
-def render_description_for_interval(
-    description: str | None,
+def render_text_for_interval(
+    text: str | None,
     events: Iterable[TaskStrikeEvent],
     *,
     interval_start: datetime,
     interval_end: datetime,
+    field_name: str = "DESCRIPTION",
 ) -> tuple[str, str]:
     """Return plain and marked text for a 1H report interval.
 
@@ -125,10 +173,11 @@ def render_description_for_interval(
 
     latest: dict[str, TaskStrikeEvent] = {}
     for event in sorted(events, key=lambda item: (item.occurred_at, str(item.id))):
-        if event.occurred_at <= interval_end:
+        event_field = getattr(event, "field_name", "DESCRIPTION")
+        if event_field == field_name and event.occurred_at <= interval_end:
             latest[event.point_key] = event
 
-    heading, points, legacy_done = _description_points(description)
+    heading, points, legacy_done = _text_points(text, field_name=field_name)
     plain_parts = [heading] if heading else []
     marked_parts = [heading] if heading else []
     for point in points:
@@ -151,3 +200,21 @@ def render_description_for_interval(
         plain_parts.append(point.text)
         marked_parts.append(point.text)
     return "\n".join(plain_parts), "\n".join(marked_parts)
+
+
+def render_description_for_interval(
+    description: str | None,
+    events: Iterable[TaskStrikeEvent],
+    *,
+    interval_start: datetime,
+    interval_end: datetime,
+) -> tuple[str, str]:
+    """Backward-compatible description-specific wrapper."""
+
+    return render_text_for_interval(
+        description,
+        events,
+        interval_start=interval_start,
+        interval_end=interval_end,
+        field_name="DESCRIPTION",
+    )
