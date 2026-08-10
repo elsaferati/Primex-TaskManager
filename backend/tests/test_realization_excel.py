@@ -37,9 +37,7 @@ class TestRealizationExcel(unittest.TestCase):
         self.assertEqual(len(questions), 15)
         by_key = {question["key"]: question for question in questions}
         self.assertEqual(by_key["task_status"]["source_status"], "AUTO")
-        # No evidence of help/proposals/meetings missed etc. is a confident
-        # "no" — it must not sit as an unresolved confirmation with nowhere
-        # in the evidence dialog to answer it.
+        # Managerial judgment remains manual even when supporting evidence is absent.
         for key in (
             "helped_colleague",
             "requested_extra_tasks",
@@ -48,10 +46,10 @@ class TestRealizationExcel(unittest.TestCase):
             "affected_other_plan",
             "repeated_after_clarification",
         ):
-            self.assertEqual(by_key[key]["source_status"], "AUTO", key)
+            self.assertEqual(by_key[key]["source_status"], "MANUAL_UNANSWERED", key)
         self.assertFalse(by_key["helped_colleague"]["auto_value"])
         self.assertTrue(by_key["respected_meetings"]["auto_value"])
-        self.assertEqual(by_key["respected_meetings"]["source_status"], "AUTO")
+        self.assertEqual(by_key["respected_meetings"]["source_status"], "MANUAL_UNANSWERED")
 
     def test_export_has_department_evidence_guide_and_weekly_bonus(self) -> None:
         payload = build_realization_workbook(

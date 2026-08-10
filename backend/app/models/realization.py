@@ -16,6 +16,7 @@ from sqlalchemy import (
     Text,
     Time,
     UniqueConstraint,
+    Boolean,
     func,
     text,
 )
@@ -325,6 +326,10 @@ class RealizationPersonResult(Base):
             name="ck_realization_person_final_level",
         ),
         CheckConstraint(
+            f"ai_suggested_level IS NULL OR ai_suggested_level IN ({_values(RealizationLevel)})",
+            name="ck_realization_person_ai_suggested_level",
+        ),
+        CheckConstraint(
             f"suggested_symbol IS NULL OR suggested_symbol IN ({_values(RealizationSymbol)})",
             name="ck_realization_person_suggested_symbol",
         ),
@@ -406,6 +411,11 @@ class RealizationPersonResult(Base):
     repeated_problem_count: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     suggested_symbol: Mapped[str | None] = mapped_column(String(3))
     suggested_level: Mapped[str | None] = mapped_column(String(2))
+    ai_suggested_level: Mapped[str | None] = mapped_column(String(2))
+    ai_generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    ai_analysis_stale: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default=text("true")
+    )
     suggested_bonus: Mapped[int | None] = mapped_column(Integer)
     final_symbol: Mapped[str | None] = mapped_column(String(3))
     final_level: Mapped[str | None] = mapped_column(String(2))
@@ -487,6 +497,60 @@ class RealizationDepartmentResult(Base):
     )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now(), onupdate=func.now()
+    )
+
+
+class RealizationQuestionAnswer(Base):
+    """Append-only manager answer history for formal weekly questions."""
+
+    __tablename__ = "realization_question_answers"
+    __table_args__ = (
+        CheckConstraint(
+            "NULLIF(BTRIM(question_key), '') IS NOT NULL",
+            name="ck_realization_question_answer_key",
+        ),
+        Index(
+            "ix_realization_question_answer_latest",
+            "result_id",
+            "question_key",
+            "answered_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    period_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("realization_periods.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("realization_person_results.id", ondelete="RESTRICT"),
+        nullable=False,
+        index=True,
+    )
+    question_key: Mapped[str] = mapped_column(String(80), nullable=False)
+    value_json: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    comment: Mapped[str | None] = mapped_column(Text)
+    evidence_ids_json: Mapped[list] = mapped_column(
+        JSONB, nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    answered_by: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False
+    )
+    answered_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    supersedes_answer_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("realization_question_answers.id", ondelete="RESTRICT"),
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
     )
 
 

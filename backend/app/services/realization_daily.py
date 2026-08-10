@@ -123,7 +123,8 @@ async def calculate_daily_period(
     period: RealizationPeriod,
     planned_snapshot: WeeklyPlannerSnapshot,
     actor_id: uuid.UUID,
-) -> tuple[list[RealizationPersonResult], RealizationDepartmentResult]:
+    only_user_id: uuid.UUID | None = None,
+) -> tuple[list[RealizationPersonResult], RealizationDepartmentResult | None]:
     """Persist an immutable-by-day operational snapshot for one department."""
     require_recalculable(period)
     if planned_snapshot is None:
@@ -208,7 +209,10 @@ async def calculate_daily_period(
         user_id for user_id, leave in common_leave.items() if day in leave.days
     }
     eligible_users = [
-        user for user in department_users if user.id not in excluded_on_leave
+        user
+        for user in department_users
+        if user.id not in excluded_on_leave
+        and (only_user_id is None or user.id == only_user_id)
     ]
     user_names = {user.id: user.full_name for user in eligible_users}
     people: dict[uuid.UUID, dict[str, Any]] = {
@@ -556,7 +560,7 @@ async def calculate_daily_period(
         ).scalars().all()
     }
     for user_id, stale_result in existing.items():
-        if user_id not in people:
+        if only_user_id is None and user_id not in people:
             await db.delete(stale_result)
     results: list[RealizationPersonResult] = []
     for user_id, person in people.items():
@@ -601,6 +605,7 @@ async def calculate_daily_period(
             round(weekly_completed * 100.0 / weekly_total, 1) if weekly_total else 0.0
         )
         missing_comments = 0
+        missing_pink_explanations = 0
         for task_fact in person["tasks"]:
             task_id_raw = task_fact.get("task_id")
             task_uuid = uuid.UUID(str(task_id_raw)) if task_id_raw else None
@@ -615,6 +620,11 @@ async def calculate_daily_period(
                 if task_fact.get("attribution") == "planned_today"
                 else "ADDITIONAL_EVIDENCE"
             )
+            task_fact["explanation_missing"] = bool(
+                task_fact["rlz_impact"] == "PINK_ACTION_REQUIRED" and not comment
+            )
+            if task_fact["explanation_missing"]:
+                missing_pink_explanations += 1
             if (
                 task_fact.get("classification") == "completed"
                 and task_fact.get("source_type") != "system"
@@ -622,7 +632,9 @@ async def calculate_daily_period(
             ):
                 missing_comments += 1
         counters["missing_comment_count"] = missing_comments
+        counters["missing_pink_explanation_count"] = missing_pink_explanations
         person["missing_comment_count"] = missing_comments
+        person["missing_pink_explanation_count"] = missing_pink_explanations
         person["unresolved_pink_count"] = int(counters.get("no_progress_count", 0))
         pulse = calculate_pulse(person)
         person["pulse"] = pulse.to_dict()
@@ -675,33 +687,34 @@ async def calculate_daily_period(
             )
         )
     ).scalar_one_or_none()
-    if department_result is None:
+    if department_result is None and only_user_id is None:
         department_result = RealizationDepartmentResult(
             period_id=period.id, department_id=period.department_id
         )
         db.add(department_result)
-    department_result.facts_json = {
-        "date": day.isoformat(),
-        "people_count": len(results),
-        "planned_count": sum(row.planned_count for row in results),
-        "completed_count": sum(row.completed_on_time_count for row in results),
-        "additional_count": sum(row.additional_count for row in results),
-        "source_planned_snapshot_id": str(planned_snapshot.id),
-        "excluded_people": [
-            {
-                "user_id": str(user.id),
-                "user_name": user.full_name,
-                "reason": "ANNUAL_LEAVE_COMMON_VIEW",
-                "common_entry_ids": [
-                    str(entry_id) for entry_id in common_leave[user.id].entry_ids
-                ],
-            }
-            for user in department_users
-            if user.id in excluded_on_leave
-        ],
-    }
-    department_result.total_bonus = None
-    department_result.average_bonus = None
+    if department_result is not None and only_user_id is None:
+        department_result.facts_json = {
+            "date": day.isoformat(),
+            "people_count": len(results),
+            "planned_count": sum(row.planned_count for row in results),
+            "completed_count": sum(row.completed_on_time_count for row in results),
+            "additional_count": sum(row.additional_count for row in results),
+            "source_planned_snapshot_id": str(planned_snapshot.id),
+            "excluded_people": [
+                {
+                    "user_id": str(user.id),
+                    "user_name": user.full_name,
+                    "reason": "ANNUAL_LEAVE_COMMON_VIEW",
+                    "common_entry_ids": [
+                        str(entry_id) for entry_id in common_leave[user.id].entry_ids
+                    ],
+                }
+                for user in department_users
+                if user.id in excluded_on_leave
+            ],
+        }
+        department_result.total_bonus = None
+        department_result.average_bonus = None
     if period.status == RealizationPeriodStatus.OPEN.value:
         transition_period(period, RealizationPeriodStatus.CALCULATED, actor_id=actor_id)
     else:

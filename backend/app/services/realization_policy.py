@@ -175,7 +175,15 @@ def evaluate_policy(
                 or negative_without_minor_impact
                 or missed_meetings
             ):
-                reasons = ["Planned obligations are incomplete or have negative evidence"]
+                reasons = []
+                if unaccounted:
+                    reasons.append(f"{unaccounted} planned obligations remain unaccounted")
+                if no_progress:
+                    reasons.append(f"{no_progress} planned obligations have no progress")
+                if late_open:
+                    reasons.append(f"{late_open} planned obligations are still open after deadline")
+                if negative_without_minor_impact:
+                    reasons.append("Verified unresolved negative evidence")
                 if missed_meetings:
                     reasons.append(f"{missed_meetings} confirmed missed meetings")
                 return _decision(

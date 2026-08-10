@@ -193,7 +193,7 @@ def aggregate_monthly_pulses(weekly_rows: Iterable[dict[str, Any]]) -> dict[str,
     unresolved_negative = sum(_count(row.get("unresolved_negative_count")) for row in rows)
     verified_negative = sum(_count(row.get("verified_negative_count")) for row in rows)
     trend = [str(row.get("pulse")) for row in rows if row.get("pulse")]
-    current = trend[-1] if trend else RealizationPulse.JUSTIFIED.value
+    current = trend[-1] if trend else None
     if counts[RealizationPulse.ACTION_REQUIRED.value]:
         current = RealizationPulse.ACTION_REQUIRED.value
     elif counts[RealizationPulse.DIAMOND.value]:

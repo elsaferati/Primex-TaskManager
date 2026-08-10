@@ -722,6 +722,13 @@ export interface RealizationObservationFact {
   category: string
   comment?: string | null
   task_id?: string | null
+  user_id?: string | null
+  project_id?: string | null
+  impact_minutes?: number | null
+  repeat_count?: number | null
+  source_type?: string | null
+  relevant_date?: string | null
+  created_at?: string | null
   evidence_json: Record<string, unknown>
   verified: boolean
   visibility: string
@@ -736,6 +743,20 @@ export interface RealizationQuestion {
   source_status: string
   evidence_ids: string[]
   explanation: string
+  manager_comment?: string | null
+  linked_evidence_ids?: string[]
+}
+
+export interface RealizationManualAnswer {
+  id: string
+  value: boolean | string | null
+  comment?: string | null
+  evidence_ids: string[]
+  answered_by: string
+  answered_by_name?: string | null
+  answered_at: string
+  updated_at: string
+  supersedes_answer_id?: string | null
 }
 
 export interface RealizationPersonResult {
@@ -753,7 +774,14 @@ export interface RealizationPersonResult {
     attendance?:
       | Record<string, { date: string; type: string; details?: string | null }>
       | Array<{ id?: string; date?: string; type: string; details?: string | null }>
-    decision?: { triggered_rule?: string; reasons?: string[] }
+    decision?: { triggered_rule?: string; reasons?: string[]; policy_suggested_level?: RealizationLevel; hard_cap_level?: RealizationLevel | null }
+    manual_answers?: Record<string, RealizationManualAnswer>
+    manual_question_completeness?: {
+      answered: number
+      required: number
+      missing_keys: string[]
+      complete: boolean
+    }
     weekly_progress_percent?: number
     daily_progress_percent?: number
     daily_planned_count?: number
@@ -835,6 +863,9 @@ export interface RealizationPersonResult {
   unexcused_absence_days: number
   suggested_symbol?: RealizationSymbol | null
   suggested_level?: RealizationLevel | null
+  ai_suggested_level?: RealizationLevel | null
+  ai_generated_at?: string | null
+  ai_analysis_stale: boolean
   final_symbol?: RealizationSymbol | null
   final_level?: RealizationLevel | null
   auto_narrative?: string | null
@@ -890,6 +921,14 @@ export interface RealizationAIAnalysis {
   problems: string[]
   missing_evidence: string[]
   suggested_level: RealizationLevel
+  grade_reason: string
+  grade_drivers: Array<{
+    type: "POSITIVE" | "NEGATIVE" | "JUSTIFICATION" | "FACT"
+    description: string
+    evidence_ids: string[]
+  }>
+  caps: Array<{ maximum_level: RealizationLevel; reason: string; evidence_ids: string[] }>
+  question_keys_used: string[]
   confidence: number
   evidence_ids: string[]
   model: string

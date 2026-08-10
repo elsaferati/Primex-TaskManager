@@ -36,7 +36,7 @@ class TestRealizationAI(unittest.IsolatedAsyncioTestCase):
                 "result-1", facts, suggested_level="C"
             )
 
-        self.assertEqual(analysis["model"], "primeflow-evidence-engine-v1")
+        self.assertEqual(analysis["model"], "primeflow-evidence-engine-v2")
         self.assertEqual(analysis["suggested_level"], "C")
         self.assertIn("4/6", analysis["summary"])
         self.assertIn("Ndihmoi koleg?", analysis["missing_evidence"])

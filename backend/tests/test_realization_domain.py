@@ -326,7 +326,7 @@ class TestRealizationPermissions(unittest.TestCase):
             )
         )
 
-    def test_manager_is_scoped_to_own_department(self) -> None:
+    def test_manager_has_cross_department_realization_access(self) -> None:
         # Each department manager (Development/Product Content/Graphic
         # Design) manages Realization for all departments, not just their
         # own — a deliberate product decision, not department scoping.
@@ -337,14 +337,14 @@ class TestRealizationPermissions(unittest.TestCase):
                 subject_department_id=self.department,
             )
         )
-        self.assertFalse(
+        self.assertTrue(
             can_view_person_result(
                 self.manager,
                 subject_user_id=uuid.uuid4(),
                 subject_department_id=self.other_department,
             )
         )
-        self.assertFalse(
+        self.assertTrue(
             can_review_realization(self.manager, department_id=self.other_department)
         )
         self.assertTrue(can_review_realization(self.manager, department_id=self.department))
