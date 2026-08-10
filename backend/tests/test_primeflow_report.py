@@ -19,7 +19,7 @@ from app.services.primeflow_report import (
     REMINDER_SECTION_TITLE,
 )
 from app.services.task_strike_events import (
-    point_key,
+    point_key, struck_points,
     record_description_strike_events,
     record_title_strike_events,
     render_description_for_interval,
@@ -442,6 +442,43 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(len(session.rows), 1)
         self.assertEqual(session.rows[0].field_name, "TITLE")
         self.assertEqual(session.rows[0].point_text, "1. Completed point")
+
+    def test_partial_note_selection_matches_the_complete_numbered_subtask(self) -> None:
+        # The UI may put the done markers around only the text after "1. ".
+        # It must still be treated as one complete subtask in the report.
+        title = "EF: 1/2 PF: 1H REPORT\n1. [[done]]Me i nda pyetje ne dy tabela[[/done]]\n2. Ende e hapur"
+        full_point = "1. Me i nda pyetje ne dy tabela"
+        self.assertIn(point_key(full_point, field_name="TITLE"), struck_points(title, field_name="TITLE"))
+
+        event = SimpleNamespace(
+            id="partial-strike", field_name="TITLE", action="STRUCK",
+            # This represents an event saved before complete-line matching.
+            point_key=point_key("Me i nda pyetje ne dy tabela", field_name="TITLE"),
+            point_text="Me i nda pyetje ne dy tabela",
+            occurred_at=datetime(2026, 8, 10, 11, 20, tzinfo=timezone.utc),
+        )
+        plain, marked = render_text_for_interval(
+            title,
+            [event],
+            interval_start=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 11, 50, tzinfo=timezone.utc),
+            field_name="TITLE",
+        )
+        self.assertIn(full_point, plain)
+        self.assertIn(f"[[done]]{full_point}[[/done]]", marked)
+
+        # A legacy marker without any recorded timestamp is historical, so it
+        # must not look like a strike from the current hour.
+        legacy_plain, legacy_marked = render_text_for_interval(
+            title,
+            [],
+            interval_start=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 11, 50, tzinfo=timezone.utc),
+            field_name="TITLE",
+        )
+        self.assertNotIn(full_point, legacy_plain)
+        self.assertNotIn(full_point, legacy_marked)
+        self.assertIn("2. Ende e hapur", legacy_plain)
 
 
 if __name__ == "__main__":
