@@ -29,18 +29,18 @@ from app.services.system_task_schedule import matches_template_date
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
-    "A JEMI BRENDA MESATARES ME PROJEKTE/",
+    "A JEMI BRENDA MESATARES ME PROJEKTE?",
     "GA MBYLLJA E DET",
     "HV MBYLLJA E DET",
-    "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
+    "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "N- (GA) PV/FESTE?",
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
-    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK",
-    "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?",
-    "N- A KA DETYRA 1H PA SLOT?",
-    "N- (GA/KA) KUSH KA DET PERSONALISHT?",
+    "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?",
+    "TAK E PA KRYERA?",
+    "N- DETYRA 1H PA SLOT?",
+    "N- (GA) DET PERSONALISHT?",
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
@@ -63,12 +63,18 @@ SECTION_TITLE_ALIASES = {
     "(GA) M3 DET GA MBYLLJA ME HV?": SECTION_TITLES[1],
     "(GA) M3 DET GA MBYLLJA ME HV/OH?": SECTION_TITLES[1],
     "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[3],
+    "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?": SECTION_TITLES[9],
+    "TAKIMET E PA KRYERA ?": SECTION_TITLES[9],
     "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?": SECTION_TITLES[4],
     "DET. PA PROGRES (PINK)?": SECTION_TITLES[5],
     "N- (GA) SHIKOHET COMMON VIEW NESER, VETEM DETYRAT E REJA ME TE KALTER, 08:00 DHE ME DEADLINE?": SECTION_TITLES[8],
+    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK, 08:00, ME DEADLINE?": SECTION_TITLES[8],
+    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK": SECTION_TITLES[8],
     "DET TE REJA LAST WEEK DHE THIS WEEK": SECTION_TITLES[8],
     "N- (GA) TAKIMET EXTERNE/ TAKIMET INTERNE/ BZ ME GA/BLLOK?": SECTION_TITLES[7],
+    "N- A KA DETYRA 1H PA SLOT?": SECTION_TITLES[10],
     "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[11],
+    "N- (GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[11],
 }
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 # Same rule for M1/M2/M3: personal rows only when the title marks GA (not KA).
@@ -77,6 +83,8 @@ TECHNICAL_TAG = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 DUE_SUFFIX = re.compile(r"\s+due\s+\d{1,2}:\d{2}\s*$", re.I)
 TITLE_PREFIX = re.compile(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})?\s*:\s*", re.I)
 TASK_LINE_STATUS = re.compile(r"^\[([A-Z_]+)\]\s*")
+MEETING_HIGHLIGHT_MARKER = "[[mt:non_daily_weekly]]"
+MEETING_HIGHLIGHT_PATTERN = re.compile(r"\s*\[\[\s*mt\s*:\s*non_daily_weekly\s*\]\]", re.I)
 ALL_ASSIGNEES_DISPLAY_THRESHOLD = 10
 
 
@@ -399,9 +407,9 @@ def _m3_task_type_label(task: Task) -> str:
     return "FT"
 
 
-def _m3_department_label(task: Task, department_codes: dict[Any, str] | None) -> str:
-    """Return the short department labels used in the M3 system-task table."""
-    code = str((department_codes or {}).get(getattr(task, "department_id", None)) or "").strip().upper()
+def _m3_department_code_label(department_id: Any, department_codes: dict[Any, str] | None) -> str:
+    """Return the short M3 label for a department id."""
+    code = str((department_codes or {}).get(department_id) or "").strip().upper()
     aliases = {
         "PRODUCT CONTENT": "PCM",
         "PROJECT CONTENT MANAGER": "PCM",
@@ -411,6 +419,11 @@ def _m3_department_label(task: Task, department_codes: dict[Any, str] | None) ->
         "FINANCE": "FIN",
     }
     return aliases.get(code, code or "-")
+
+
+def _m3_department_label(task: Task, department_codes: dict[Any, str] | None) -> str:
+    """Return the short department labels used in the M3 system-task table."""
+    return _m3_department_code_label(getattr(task, "department_id", None), department_codes)
 
 
 def _m3_am_pm_label(task: Task) -> str:
@@ -449,16 +462,16 @@ def _m3_status_table(
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     all_participant_ids: set[Any] | None = None,
 ) -> list[str]:
-    columns: list[tuple[str, int]] = [("NR", 2), ("WHO", 5)]
+    columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
         columns.append(("DEP", 5))
     if include_added_week:
-        columns.append(("ADDED", 7))
+        columns.append(("KRIJUAR", 7))
     if include_am_pm:
         columns.append(("AM/PM", 5))
     if include_type:
-        columns.append(("TYPE", 7))
-    columns.append(("TITLE", 64))
+        columns.append(("LLOJI", 7))
+    columns.append(("TITULLI", 64))
     if include_late_days:
         columns.append(("LATE", 12))
 
@@ -492,19 +505,16 @@ def _m3_status_table(
         rows.append(table_row(values))
         rows.append(border)
         return rows
-    ordered_by_common_view = sorted(
+    ordered = sorted(
         tasks,
-        key=lambda item: common_view_task_sort_key(
-            item, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+        key=lambda item: (
+            # In the GA/HV closing tables, system tasks must precede fast tasks.
+            0 if include_type and getattr(item, "system_template_origin_id", None) is not None else 1,
+            _m3_department_sort_key(item, department_codes) if include_department else 0,
+            *common_view_task_sort_key(
+                item, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+            ),
         ),
-    )
-    ordered = (
-        sorted(
-            ordered_by_common_view,
-            key=lambda item: _m3_department_sort_key(item, department_codes),
-        )
-        if include_department
-        else ordered_by_common_view
     )
     for index, task in enumerate(ordered, start=1):
         owner = _task_owners(
@@ -610,6 +620,10 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     department_codes = {
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
+    user_department_codes = {
+        user_id: _m3_department_code_label(department_id, department_codes)
+        for user_id, department_id in (await db.execute(select(User.id, User.department_id))).all()
     }
 
     today_todo = [
@@ -741,7 +755,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             )
         ),
         SECTION_TITLES[9]: section_6,
-        SECTION_TITLES[6]: _empty_aware(_leave_lines(leave_tomorrow, names)),
+        SECTION_TITLES[6]: _empty_aware(_leave_lines(leave_tomorrow, names, user_department_codes)),
         SECTION_TITLES[8]: _normalize_section(section_5),
         SECTION_TITLES[7]: _normalize_section(section_4),
         SECTION_TITLES[10]: _normalize_section(
@@ -949,9 +963,29 @@ def _meeting_lines(meetings: list[Meeting]) -> list[str]:
     if not meetings:
         return ["(Asnje takim)"]
     return [
-        f"- {_local_time(meeting.starts_at)}: {_clean_task_title(meeting.title)}"
+        f"- {_local_time(meeting.starts_at)}: {_meeting_title_with_highlight(meeting)}"
         for meeting in sorted(meetings, key=lambda m: m.starts_at or datetime.min)
     ]
+
+
+def _meeting_title_with_highlight(meeting: Meeting) -> str:
+    title = _clean_task_title(meeting.title)
+    recurrence = str(getattr(meeting, "recurrence_type", None) or "").strip().lower()
+    if recurrence not in {"daily", "weekly"}:
+        return f"{title} {MEETING_HIGHLIGHT_MARKER}"
+    return title
+
+
+def _split_meeting_highlight_marker(value: str) -> tuple[str, bool]:
+    highlighted = bool(MEETING_HIGHLIGHT_PATTERN.search(value or ""))
+    return MEETING_HIGHLIGHT_PATTERN.sub("", value or "").strip(), highlighted
+
+
+def _append_meeting_highlight_marker(lines: list[str], highlighted: bool, width: int) -> list[str]:
+    padded = [f"{line:<{width}}" for line in lines] or [f"{'-':<{width}}"]
+    if highlighted:
+        padded[-1] = f"{padded[-1].rstrip()} {MEETING_HIGHLIGHT_MARKER}"
+    return padded
 
 
 def _meeting_group_title(title: str) -> list[str]:
@@ -962,7 +996,7 @@ def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: d
     border = "+----+-------+----------+------------------------------------------------------------------+"
     rows = [
         border,
-        f"| {'NR':<2} | {'TIME':<5} | {'MBAJTUR?':<8} | {'TITLE':<64} |",
+        f"| {'NR':<2} | {'KOHA':<5} | {'MBAJTUR?':<8} | {'TITULLI':<64} |",
         border,
     ]
     if not meetings:
@@ -971,13 +1005,14 @@ def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: d
         return rows
     for index, meeting in enumerate(sorted(meetings, key=lambda item: item.starts_at or datetime.min), start=1):
         status = status_by_meeting.get(meeting.id, "")
-        title_lines = _wrap_fixed_width(_clean_task_title(meeting.title), 64)
+        title_value, highlighted = _split_meeting_highlight_marker(_meeting_title_with_highlight(meeting))
+        title_lines = _append_meeting_highlight_marker(_wrap_fixed_width(title_value, 64), highlighted, 64)
         status_icon = "\u2713" if status == "held" else "\u2715" if status == "canceled" else ""
         rows.append(
-            f"| {index:<2} | {_local_time(meeting.starts_at):<5} | {status_icon:<8} | {title_lines[0]:<64} |"
+            f"| {index:<2} | {_local_time(meeting.starts_at):<5} | {status_icon:<8} | {title_lines[0]} |"
         )
         for line in title_lines[1:]:
-            rows.append(f"| {'':<2} | {'':<5} | {'':<8} | {line:<64} |")
+            rows.append(f"| {'':<2} | {'':<5} | {'':<8} | {line} |")
         rows.append(border)
     return rows
 
@@ -993,10 +1028,10 @@ async def _today_meeting_status_section(db: AsyncSession, meetings: list[Meeting
     internal = [meeting for meeting in meetings if getattr(meeting, "meeting_type", None) != "external"]
 
     return _normalize_section([
-        *_meeting_group_title("TAKIMET EXTERNE"),
+        *_meeting_group_title("TAK EXTERNE"),
         *_meeting_status_checkbox_table(external, status_by_meeting),
         "",
-        *_meeting_group_title("TAKIMET INTERNE"),
+        *_meeting_group_title("TAK INTERNE"),
         *_meeting_status_checkbox_table(internal, status_by_meeting),
     ])
 
@@ -1198,6 +1233,9 @@ def _common_meeting_lines(items: list[dict[str, Any]], day: date) -> list[str]:
         if _item_date(item) != day:
             continue
         title = _clean_task_title(str(item.get("title") or item.get("task_title") or "Meeting"))
+        recurrence = str(item.get("recurrence_type") or item.get("recurrenceType") or "").strip().lower()
+        if recurrence not in {"daily", "weekly"}:
+            title = f"{title} {MEETING_HIGHLIGHT_MARKER}"
         time_value = str(item.get("time") or item.get("when") or "").strip()
         prefix = f"{time_value}: " if time_value else ""
         key = (item.get("id"), title, time_value)
@@ -1229,7 +1267,7 @@ def _tomorrow_meeting_table(title: str, lines: list[str]) -> list[str]:
     rows = [
         f"{title}:",
         border,
-        f"| {'NR':<2} | {'TIME':<5} | {'TITLE':<64} |",
+        f"| {'NR':<2} | {'KOHA':<5} | {'TITULLI':<64} |",
         border,
     ]
     values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
@@ -1241,10 +1279,11 @@ def _tomorrow_meeting_table(title: str, lines: list[str]) -> list[str]:
         match = re.match(r"^(\d{1,2}:\d{2})\s*:\s*(.+)$", value)
         time_value = match.group(1) if match else "-"
         title_value = match.group(2) if match else value
-        title_lines = _wrap_fixed_width(title_value, 64)
-        rows.append(f"| {index:<2} | {time_value:<5} | {title_lines[0]:<64} |")
+        title_value, highlighted = _split_meeting_highlight_marker(title_value)
+        title_lines = _append_meeting_highlight_marker(_wrap_fixed_width(title_value, 64), highlighted, 64)
+        rows.append(f"| {index:<2} | {time_value:<5} | {title_lines[0]} |")
         for line in title_lines[1:]:
-            rows.append(f"| {'':<2} | {'':<5} | {line:<64} |")
+            rows.append(f"| {'':<2} | {'':<5} | {line} |")
         rows.append(border)
     return rows
 
@@ -1320,7 +1359,7 @@ def _tomorrow_task_table(
     rows = [
         f"{title}:",
         border,
-        f"| {'NR':<2} | {'WHO':<{who_width}} | {'DEP':<{department_width}} | {'AM/PM':<{am_pm_width}} | {'TITLE':<{title_width}} |",
+        f"| {'NR':<2} | {'KUSH':<{who_width}} | {'DEP':<{department_width}} | {'AM/PM':<{am_pm_width}} | {'TITULLI':<{title_width}} |",
         border,
     ]
     values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
@@ -1385,9 +1424,9 @@ def _tomorrow_common_section(
         fallback_blocked,
     )
     return [
-        *_tomorrow_meeting_table("TAKIMET EXTERNE", external),
+        *_tomorrow_meeting_table("TAK EXTERNE", external),
         "",
-        *_tomorrow_meeting_table("TAKIMET INTERNE", internal),
+        *_tomorrow_meeting_table("TAK INTERNE", internal),
         "",
         *_tomorrow_task_table(
             "BZ ME GA",
@@ -1406,19 +1445,25 @@ def _leave_lines(
         tuple[CommonEntry, date, date, bool, str | None, str | None, str | None, bool]
     ],
     names: dict[Any, str],
+    user_department_codes: dict[Any, str] | None = None,
 ) -> list[str]:
-    border = "+----+-------+----------------+----------------+"
+    who_width = 5
+    department_width = 5
+    date_width = 14
+    border = f"+----+{'-' * (who_width + 2)}+{'-' * (department_width + 2)}+{'-' * (date_width + 2)}+{'-' * (date_width + 2)}+"
     lines = [
         border,
-        f"| {'NR':<2} | {'WHO':<5} | {'FROM':<14} | {'TO':<14} |",
+        f"| {'NR':<2} | {'KUSH':<{who_width}} | {'DEP':<{department_width}} | {'NGA':<{date_width}} | {'DERI':<{date_width}} |",
         border,
     ]
     if not entries:
-        lines.append(f"| {'-':<2} | {'-':<5} | {'(Asnje detyre)':<14} | {'-':<14} |")
+        lines.append(f"| {'-':<2} | {'-':<{who_width}} | {'-':<{department_width}} | {'(Asnje detyre)':<{date_width}} | {'-':<{date_width}} |")
         lines.append(border)
         return lines
     for index, (entry, start_date, end_date, full_day, start_time, end_time, note, is_all_users) in enumerate(entries, start=1):
         person = "ALL" if is_all_users else _initials(names.get(entry.assigned_to_user_id or entry.created_by_user_id) or entry.title)
+        user_id = entry.assigned_to_user_id or entry.created_by_user_id
+        department = "-" if is_all_users else (user_department_codes or {}).get(user_id, "-")
         if start_date == end_date and not full_day:
             from_value, to_value = start_time or "-", end_time or "-"
         else:
@@ -1427,14 +1472,14 @@ def _leave_lines(
         cleaned_note = re.sub(r"\s+", " ", cleaned_note).strip()
         if cleaned_note:
             to_value = f"{to_value} - {cleaned_note}"
-        from_lines = _wrap_fixed_width(from_value, 14)
-        to_lines = _wrap_fixed_width(to_value, 14)
+        from_lines = _wrap_fixed_width(from_value, date_width)
+        to_lines = _wrap_fixed_width(to_value, date_width)
         row_count = max(len(from_lines), len(to_lines))
-        lines.append(f"| {index:<2} | {person:<5} | {from_lines[0]:<14} | {to_lines[0]:<14} |")
+        lines.append(f"| {index:<2} | {person:<{who_width}} | {department:<{department_width}} | {from_lines[0]:<{date_width}} | {to_lines[0]:<{date_width}} |")
         for line_index in range(1, row_count):
             from_line = from_lines[line_index] if line_index < len(from_lines) else ""
             to_line = to_lines[line_index] if line_index < len(to_lines) else ""
-            lines.append(f"| {'':<2} | {'':<5} | {from_line:<14} | {to_line:<14} |")
+            lines.append(f"| {'':<2} | {'':<{who_width}} | {'':<{department_width}} | {from_line:<{date_width}} | {to_line:<{date_width}} |")
         lines.append(border)
     return lines
 
@@ -1537,6 +1582,21 @@ def _parse_ascii_cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
 
 
+def _normalized_table_header(value: str) -> str:
+    """Map Albanian report headers (and older English drafts) to semantic names."""
+    normalized = value.strip().upper()
+    return {
+        "KOHA": "TIME",
+        "TITULLI": "TITLE",
+        "KUSH": "WHO",
+        "NGA": "FROM",
+        "DERI": "TO",
+        "TOTALI": "COUNT",
+        "LLOJI": "TYPE",
+        "KRIJUAR": "ADDED",
+    }.get(normalized, normalized)
+
+
 def _table_tone_from_label(label: str) -> str:
     normalized = label.strip().upper().rstrip(":")
     if normalized in {"TODO", "DETYRAT E REJA", "DET TE REJA LAST WEEK DHE THIS WEEK"}:
@@ -1585,9 +1645,10 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     header, body_rows = table_rows[0], table_rows[1:]
     header, body_rows = _normalize_meeting_status_table(header, body_rows)
     body_rows = _merge_ascii_continuation_rows(header, body_rows)
-    status_index = next((index for index, cell in enumerate(header) if cell.upper() == "STATUS"), None)
-    title_index = next((index for index, cell in enumerate(header) if cell.upper() == "TITLE"), None)
+    status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "STATUS"), None)
+    title_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TITLE"), None)
     row_tones: list[str] = []
+    highlighted_meeting_rows: list[bool] = []
     cleaned_body_rows: list[list[str]] = []
     for row in body_rows:
         row = list(row)
@@ -1596,10 +1657,14 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             row_tone = _table_tone_from_status(row[status_index]) or row_tone
         if title_index is not None and len(row) > title_index:
             cleaned_title, marker_status = _split_status_marker(row[title_index])
+            cleaned_title, is_highlighted_meeting = _split_meeting_highlight_marker(cleaned_title)
             row[title_index] = cleaned_title
             if marker_status:
                 row_tone = _table_tone_from_status(marker_status) or row_tone
+        else:
+            is_highlighted_meeting = False
         row_tones.append(row_tone)
+        highlighted_meeting_rows.append(is_highlighted_meeting)
         cleaned_body_rows.append(row)
     body_rows = cleaned_body_rows
     if status_index is not None:
@@ -1639,13 +1704,14 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         f"<col{_email_column_width_attr(width)} style=\"{_email_column_width_style(width)}\" />"
         for width in column_widths
     )
-    canceled_index = next((index for index, cell in enumerate(header) if cell.upper() == "ANULUAR"), None)
-    meeting_status_index = next((index for index, cell in enumerate(header) if cell.upper() == "MBAJTUR?"), None)
-    disk_index = next((index for index, cell in enumerate(header) if cell.upper() == "DISK"), None)
+    canceled_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "ANULUAR"), None)
+    meeting_status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "MBAJTUR?"), None)
+    disk_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "DISK"), None)
     table_class = f"report-table report-table-{tone}" if tone else "report-table"
     body_html_parts = []
     for row_index, row in enumerate(body_rows):
         row_tone = row_tones[row_index] if row_index < len(row_tones) else tone
+        is_highlighted_meeting = highlighted_meeting_rows[row_index] if row_index < len(highlighted_meeting_rows) else False
         if row_tone:
             row_bg, row_color = _table_tone_styles(row_tone)
             row_body_style = (
@@ -1682,6 +1748,14 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                         "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
                         "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
                     )
+            if is_highlighted_meeting:
+                current_cell_style += "border-top:3px solid #2563eb;border-bottom:3px solid #2563eb;"
+                if index == 0:
+                    current_cell_style += "border-left:3px solid #2563eb;"
+                if index == len(row) - 1:
+                    current_cell_style += "border-right:3px solid #2563eb;"
+                if _normalized_table_header(header[index]) == "TITLE":
+                    current_cell_style += "color:#2563eb;font-weight:700;"
             row_cells.append(
                 f"<td data-label=\"{html.escape(header[index])}\"{_email_column_width_attr(column_widths[index])} style=\"{current_cell_style}{_email_column_width_style(column_widths[index])}{_email_column_cell_style(header[index])}\">"
                 f"{html.escape(current_cell).replace(chr(10), '<br>')}</td>"
@@ -1713,7 +1787,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
 
 def _normalize_meeting_status_table(header: list[str], body_rows: list[list[str]]) -> tuple[list[str], list[list[str]]]:
     """Render older saved meeting drafts with the current compact status column."""
-    normalized = [cell.strip().upper() for cell in header]
+    normalized = [_normalized_table_header(cell) for cell in header]
     if not {"MBAJTUR", "ANULUAR", "PA STATUS"}.issubset(set(normalized)):
         return header, body_rows
     if "TITLE" not in normalized:
@@ -1728,7 +1802,7 @@ def _normalize_meeting_status_table(header: list[str], body_rows: list[list[str]
 
     new_header: list[str] = []
     for cell in header:
-        name = cell.strip().upper()
+        name = _normalized_table_header(cell)
         if name in {"MBAJTUR", "ANULUAR", "PA STATUS"}:
             continue
         if name == "TITLE":
@@ -1740,7 +1814,7 @@ def _normalize_meeting_status_table(header: list[str], body_rows: list[list[str]
         status_icon = "\u2713" if cell_at(row, "MBAJTUR") else "\u2715" if cell_at(row, "ANULUAR") else ""
         new_row: list[str] = []
         for index, cell in enumerate(header):
-            name = cell.strip().upper()
+            name = _normalized_table_header(cell)
             if name in {"MBAJTUR", "ANULUAR", "PA STATUS"}:
                 continue
             if name == "TITLE":
@@ -1759,7 +1833,7 @@ def _email_column_width_style(width: str) -> str:
 
 
 def _email_column_cell_style(header_cell: str) -> str:
-    name = header_cell.strip().upper()
+    name = _normalized_table_header(header_cell)
     if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "TO", "DATA", "DATE", "DEP", "TYPE", "AM/PM", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
         return "white-space:nowrap;"
     if name == "WHO":
@@ -1796,7 +1870,7 @@ def _email_column_widths(header: list[str]) -> list[str]:
         "PA STATUS": "64",
     }
     content_names = {"TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION", "PYETJA"}
-    normalized = [cell.strip().upper() for cell in header]
+    normalized = [_normalized_table_header(cell) for cell in header]
     widths = ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
     if normalized and not any(name in content_names for name in normalized):
         widths[-1] = "auto"
@@ -1804,7 +1878,7 @@ def _email_column_widths(header: list[str]) -> list[str]:
 
 
 def _primary_text_column_index(header: list[str]) -> int:
-    normalized = [cell.strip().upper() for cell in header]
+    normalized = [_normalized_table_header(cell) for cell in header]
     for name in ("NOTE", "TITLE", "PYETJA", "SHENIMI", "PERSHKRIMI", "DESCRIPTION"):
         if name in normalized:
             return normalized.index(name)
@@ -1816,7 +1890,7 @@ def _merge_ascii_continuation_rows(header: list[str], rows: list[list[str]]) -> 
         return rows
     width = len(header)
     text_index = _primary_text_column_index(header)
-    nr_index = next((index for index, cell in enumerate(header) if cell.strip().upper() == "NR"), 0)
+    nr_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "NR"), 0)
     merged: list[list[str]] = []
     for row in rows:
         normalized = (row + [""] * width)[:width]
@@ -1860,13 +1934,13 @@ def _ascii_table_is_empty(lines: list[str]) -> bool:
 
 def _is_keyed_prompt_line(value: str) -> bool:
     stripped = value.strip()
-    keyed = re.match(r"^([A-Z][A-Z0-9 /&()?.+-]*:)\s*(.*)$", stripped)
+    keyed = re.match(r"^([A-Z][A-Z0-9 /&()?.:+-]*:)\s*(.*)$", stripped)
     return bool(keyed and keyed.group(1)[:-1] == keyed.group(1)[:-1].upper())
 
 
 def _render_keyed_prompt_html(line: str) -> str:
     stripped = line.strip()
-    keyed = re.match(r"^([A-Z][A-Z0-9 /&()?.+-]*:)\s*(.*)$", stripped)
+    keyed = re.match(r"^([A-Z][A-Z0-9 /&()?.:+-]*:)\s*(.*)$", stripped)
     if keyed and keyed.group(1)[:-1] == keyed.group(1)[:-1].upper():
         label, rest = keyed.group(1), keyed.group(2)
         rendered = f"<strong>{html.escape(label)}</strong>"
@@ -1901,7 +1975,7 @@ def _render_text_block_html(lines: list[str]) -> str:
     while index < len(lines):
         line = lines[index]
         stripped = line.strip()
-        keyed = re.match(r"^([A-Z][A-Z0-9 /&()?.+-]*:)\s*(.*)$", stripped)
+        keyed = re.match(r"^([A-Z][A-Z0-9 /&()?.:+-]*:)\s*(.*)$", stripped)
         if keyed and keyed.group(1)[:-1] == keyed.group(1)[:-1].upper():
             label, rest = keyed.group(1), keyed.group(2)
             rendered = f"<strong>{html.escape(label)}</strong>"

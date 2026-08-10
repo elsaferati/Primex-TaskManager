@@ -231,7 +231,11 @@ def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
-def _document_section(title: str, tasks: list[dict[str, Any]]) -> ReportSection:
+def _document_section(
+    title: str,
+    tasks: list[dict[str, Any]],
+    description_overrides: dict[str, tuple[str, str]] | None = None,
+) -> ReportSection:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for task in tasks:
         grouped.setdefault(_employee(task), []).append(task)
@@ -241,21 +245,21 @@ def _document_section(title: str, tasks: list[dict[str, Any]]) -> ReportSection:
             STATUS_ORDER[str(x.get("status")).upper()],
             str(x.get("task_title") or x.get("title") or x.get("task")),
         ))
+        report_tasks = []
+        for task in ordered:
+            raw_description = task.get("description") if "description" in task else task.get("note")
+            override = (description_overrides or {}).get(str(task.get("id")))
+            report_tasks.append(ReportTask(
+                title=clean_title(str(task.get("task_title") or task.get("title") or task.get("task"))),
+                description=override[0] if override else clean_description(raw_description),
+                marked_title=preserve_done_marks(str(task.get("task_title") or task.get("title") or task.get("task"))),
+                marked_description=override[1] if override else preserve_done_marks(raw_description),
+                status=str(task.get("status")).upper(),
+                marker=STATUS_MARKERS[str(task.get("status")).upper()],
+            ))
         employees.append(ReportEmployee(
             name=employee_initials(employee),
-            tasks=[
-                ReportTask(
-                    title=clean_title(str(task.get("task_title") or task.get("title") or task.get("task"))),
-                    description=clean_description(task.get("description") if "description" in task else task.get("note")),
-                    marked_title=preserve_done_marks(str(task.get("task_title") or task.get("title") or task.get("task"))),
-                    marked_description=preserve_done_marks(
-                        task.get("description") if "description" in task else task.get("note")
-                    ),
-                    status=str(task.get("status")).upper(),
-                    marker=STATUS_MARKERS[str(task.get("status")).upper()],
-                )
-                for task in ordered
-            ],
+            tasks=report_tasks,
         ))
     return ReportSection(title=title, employees=employees)
 
@@ -266,6 +270,7 @@ def build_report_document(
     slot: str,
     recipients: dict[str, list[str]] | None = None,
     reminders: list[ReportReminderQuestion] | None = None,
+    description_overrides: dict[str, tuple[str, str]] | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
@@ -311,7 +316,7 @@ def build_report_document(
         generated_at=datetime.now(report_timezone()),
         source_generated_at=source_generated,
         recipients=recipients or {"to": [], "cc": [], "bcc": []},
-        sections=[_document_section(title, tasks) for title, tasks in definitions],
+        sections=[_document_section(title, tasks, description_overrides) for title, tasks in definitions],
         board_reminders=_board_reminder_questions(),
         reminders=list(reminders or []),
     )

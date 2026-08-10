@@ -54,6 +54,7 @@ from app.services.project_classification import (
     is_mst_or_tt_project as _is_mst_or_tt_project,
     is_mst_project,
 )
+from app.services.task_strike_events import record_description_strike_events
 
 
 router = APIRouter()
@@ -3283,6 +3284,26 @@ async def update_task(
           before=before,
           after=after,
       )
+
+    # Keep an append-only history of checklist-point strikes. 1H reports use
+    # this rather than a task's current text alone, so a newly struck point is
+    # shown only in the interval in which it changed and reopened points return.
+    if description_set and before["description"] != task.description:
+        strike_event_task_ids = {task.id}
+        if is_fast_group_task and task.fast_task_group_id is not None:
+            strike_event_task_ids.update((await db.execute(
+                select(Task.id)
+                .where(Task.fast_task_group_id == task.fast_task_group_id)
+                .where(Task.is_active.is_(True))
+            )).scalars().all())
+        for affected_task_id in strike_event_task_ids:
+            record_description_strike_events(
+                db,
+                task_id=affected_task_id,
+                actor_user_id=user.id,
+                before_description=before["description"],
+                after_description=task.description,
+            )
 
     await db.commit()
 

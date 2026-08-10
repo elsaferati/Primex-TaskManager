@@ -51,8 +51,11 @@ function compactSectionTitle(value: string) {
 
 function canonicalMeetingsSectionTitle(title: string) {
   const key = compactSectionTitle(title)
+  if (key === compactSectionTitle("A JEMI BRENDA MESATARES ME PROJEKTE?")) {
+    return "A JEMI BRENDA MESATARES ME PROJEKTE?"
+  }
   if (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3")) {
-    return "(GA) TIKETAT E STD? RAPORTOHEN NE M3"
+    return "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3"
   }
   if (key.includes("M3DETGAMBYLLJAMEHV")) {
     return "GA MBYLLJA E DET"
@@ -64,33 +67,54 @@ function canonicalMeetingsSectionTitle(title: string) {
     return "DET PA PROGRES PINK (FT DHE PRJK)"
   }
   if (key === compactSectionTitle("N- (GA) SHIKOHET COMMON VIEW NESER, VETEM DETYRAT E REJA ME TE KALTER, 08:00 DHE ME DEADLINE?")) {
-    return "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK"
+    return "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?"
+  }
+  if (key === compactSectionTitle("N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK, 08:00, ME DEADLINE?")) {
+    return "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?"
+  }
+  if (key === compactSectionTitle("N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK")) {
+    return "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?"
   }
   if (key === compactSectionTitle("DET TE REJA LAST WEEK DHE THIS WEEK")) {
-    return "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK"
+    return "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?"
+  }
+  if (key === compactSectionTitle("TAKIMET PA KRY (KONTROLLO PLATFORMEN)?")) {
+    return "TAK E PA KRYERA?"
+  }
+  if (key === compactSectionTitle("TAKIMET E PA KRYERA ?")) {
+    return "TAK E PA KRYERA?"
+  }
+  if (key === compactSectionTitle("TAK E PA KRYERA?")) {
+    return "TAK E PA KRYERA?"
   }
   if (key === compactSectionTitle("N- (GA) TAKIMET EXTERNE/ TAKIMET INTERNE/ BZ ME GA/BLLOK?")) {
     return "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK"
+  }
+  if (key === compactSectionTitle("N- A KA DETYRA 1H PA SLOT?")) {
+    return "N- DETYRA 1H PA SLOT?"
+  }
+  if (key === compactSectionTitle("N- (GA/KA) KUSH KA DET PERSONALISHT?")) {
+    return "N- (GA) DET PERSONALISHT?"
   }
   return title
 }
 
 function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
-    "A JEMI BRENDA MESATARES ME PROJEKTE/",
-    "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
+    "A JEMI BRENDA MESATARES ME PROJEKTE?",
+    "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
     "GA MBYLLJA E DET",
     "HV MBYLLJA E DET",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
-    "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?",
+    "TAK E PA KRYERA?",
     "N- (GA) PV/FESTE?",
-    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK",
+    "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?",
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
-    "N- A KA DETYRA 1H PA SLOT?",
-    "N- (GA/KA) KUSH KA DET PERSONALISHT?",
+    "N- DETYRA 1H PA SLOT?",
+    "N- (GA) DET PERSONALISHT?",
   ]
-  const manuals = new Set(["A JEMI BRENDA MESATARES ME PROJEKTE/"])
+  const manuals = new Set(["A JEMI BRENDA MESATARES ME PROJEKTE?"])
   const placeholder = "(Ploteso manualisht)"
   const byTitle = new Map<string, string>()
   const extras: Section[] = []
@@ -141,15 +165,15 @@ function sectionGroupLabel(title: string) {
   const knownAuto = [
     "GA MBYLLJA E DET",
     "HV MBYLLJA E DET",
-    "(GA) TIKETAT E STD? RAPORTOHEN NE M3",
+    "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "N- (GA) PV/FESTE?",
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
-    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK",
-    "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?",
-    "N- A KA DETYRA 1H PA SLOT?",
-    "N- (GA/KA) KUSH KA DET PERSONALISHT?",
+    "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?",
+    "TAK E PA KRYERA?",
+    "N- DETYRA 1H PA SLOT?",
+    "N- (GA) DET PERSONALISHT?",
   ]
   if (knownAuto.some((auto) => compactSectionTitle(auto) === key)) return "Auto-filled from PrimeFlow"
   return "Manual questions"
