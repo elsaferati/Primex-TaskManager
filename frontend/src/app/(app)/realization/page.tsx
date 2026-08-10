@@ -315,6 +315,29 @@ function displayValue(value: unknown): string {
   return String(value)
 }
 
+function normalizeAIAnalysis(value: RealizationAIAnalysis | undefined): RealizationAIAnalysis | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const legacy = value as Partial<RealizationAIAnalysis>
+  const confidence = Number(legacy.confidence)
+  return {
+    summary: typeof legacy.summary === "string" ? legacy.summary : "Analizë historike pa përmbledhje.",
+    positives: Array.isArray(legacy.positives) ? legacy.positives : [],
+    problems: Array.isArray(legacy.problems) ? legacy.problems : [],
+    missing_evidence: Array.isArray(legacy.missing_evidence) ? legacy.missing_evidence : [],
+    suggested_level: legacy.suggested_level || "B",
+    grade_reason: legacy.grade_reason || legacy.summary || "Analizë e gjeneruar me skemën e mëparshme.",
+    grade_drivers: Array.isArray(legacy.grade_drivers) ? legacy.grade_drivers : [],
+    caps: Array.isArray(legacy.caps) ? legacy.caps : [],
+    question_keys_used: Array.isArray(legacy.question_keys_used) ? legacy.question_keys_used : [],
+    evidence_ids: Array.isArray(legacy.evidence_ids) ? legacy.evidence_ids : [],
+    confidence: Number.isFinite(confidence) ? confidence : 0,
+    model: typeof legacy.model === "string" ? legacy.model : "legacy",
+    advisory_only: true,
+    generated_at: legacy.generated_at,
+    generated_by: legacy.generated_by,
+  }
+}
+
 function weeklyPlanned(person: RealizationPersonResult) {
   return person.facts_json.weekly_planned_count ?? person.planned_count
 }
@@ -1012,8 +1035,11 @@ export default function RealizationPage() {
   )
   const grade = selected?.final_level || selected?.suggested_level || null
   const selectedQuestions = selected?.facts_json.questions || []
-  const aiAnalysis = selected?.facts_json.ai_analysis
-  const aiHistory = [...(selected?.facts_json.ai_analysis_history || [])].reverse()
+  const aiAnalysis = normalizeAIAnalysis(selected?.facts_json.ai_analysis)
+  const aiHistory = (selected?.facts_json.ai_analysis_history || [])
+    .map((entry) => normalizeAIAnalysis(entry))
+    .filter((entry): entry is RealizationAIAnalysis => Boolean(entry))
+    .reverse()
   const verifiedEvidence = (selected?.facts_json.observations || []).filter((item) => item.verified)
   const positiveEvidence = verifiedEvidence.filter((item) => ["POSITIVE", "DIAMOND"].includes(item.marker))
   const negativeEvidence = verifiedEvidence.filter((item) => item.marker === "NEGATIVE")
@@ -1266,7 +1292,7 @@ export default function RealizationPage() {
                       <Badge variant="outline">{selected.facts_json.recovery.remaining_working_days} ditë pune mbetur</Badge>
                     </div>
                     <ul className="mt-4 grid gap-2 text-sm md:grid-cols-2">
-                      {selected.facts_json.recovery.messages.map((message) => (
+                      {(selected.facts_json.recovery.messages || []).map((message) => (
                         <li key={message} className="rounded-lg border bg-background px-3 py-2">{message}</li>
                       ))}
                     </ul>

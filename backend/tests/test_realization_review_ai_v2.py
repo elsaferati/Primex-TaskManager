@@ -310,6 +310,11 @@ class TestFrontendEvidenceContract(unittest.TestCase):
         self.assertIn("evidenceJson.meeting_id = meetingId", self.source)
         self.assertNotIn("nuk kërkohet ID", self.source)
 
+    def test_legacy_ai_analysis_is_normalized_before_render(self) -> None:
+        self.assertIn("function normalizeAIAnalysis", self.source)
+        self.assertIn("caps: Array.isArray(legacy.caps) ? legacy.caps : []", self.source)
+        self.assertIn("normalizeAIAnalysis(selected?.facts_json.ai_analysis)", self.source)
+
 
 class TestWeeklyResponseRegression(unittest.TestCase):
     def test_weekly_response_builds_and_returns_the_response(self) -> None:
