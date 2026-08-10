@@ -14,7 +14,8 @@ from app.models.task_strike_event import TaskStrikeEvent
 
 DONE_BLOCK = re.compile(r"\[\[\s*done\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]", re.IGNORECASE | re.DOTALL)
 TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
-NUMBERED_ITEM = re.compile(r"(?m)^\s*(\d+)\.\s*")
+# Checklist points can be numbered or use the bullet controls in PX/GA notes.
+CHECKLIST_ITEM = re.compile(r"(?m)^\s*(?:\d+\.\s+|[•*-]\s+)")
 
 
 @dataclass(frozen=True)
@@ -44,7 +45,7 @@ def point_key(value: str, *, field_name: str = "DESCRIPTION") -> str:
 
 def _numbered_points(value: str) -> list[str]:
     cleaned = TECHNICAL_TAGS.sub("", value or "").strip()
-    matches = list(NUMBERED_ITEM.finditer(cleaned))
+    matches = list(CHECKLIST_ITEM.finditer(cleaned))
     if not matches:
         return [cleaned] if cleaned else []
     return [
@@ -54,7 +55,7 @@ def _numbered_points(value: str) -> list[str]:
 
 
 def _numbered_point_spans(value: str) -> list[tuple[int, int]]:
-    """Return numbered-line ranges using offsets from the original marked text.
+    """Return checklist-line ranges using offsets from the original marked text.
 
     The browser may wrap only the selected part of a numbered line in
     ``[[done]]`` tags.  Replacing tags with spaces preserves its offsets so a
@@ -63,7 +64,7 @@ def _numbered_point_spans(value: str) -> list[tuple[int, int]]:
 
     raw = value or ""
     masked = TECHNICAL_TAGS.sub(lambda match: " " * len(match.group(0)), raw)
-    matches = list(NUMBERED_ITEM.finditer(masked))
+    matches = list(CHECKLIST_ITEM.finditer(masked))
     return [
         (match.start(), matches[index + 1].start() if index + 1 < len(matches) else len(raw))
         for index, match in enumerate(matches)
@@ -173,7 +174,7 @@ def _text_points(value: str | None, *, field_name: str) -> tuple[str, list[Strik
 
     raw = value or ""
     cleaned = TECHNICAL_TAGS.sub("", raw).strip()
-    matches = list(NUMBERED_ITEM.finditer(cleaned))
+    matches = list(CHECKLIST_ITEM.finditer(cleaned))
     if not matches:
         points = [cleaned] if cleaned else []
         heading = ""
@@ -219,13 +220,13 @@ def render_text_for_interval(
         if exact is not None:
             return exact
         full = _normalise(point.text).casefold()
-        without_number = re.sub(r"^\d+\.\s*", "", full)
+        without_marker = re.sub(r"^(?:\d+\.|[•*-])\s*", "", full)
         compatible = []
         for event in relevant_events:
             event_text = _normalise(getattr(event, "point_text", "")).casefold()
             if not event_text:
                 continue
-            if event_text in {full, without_number}:
+            if event_text in {full, without_marker}:
                 compatible.append(event)
         return compatible[-1] if compatible else None
 
