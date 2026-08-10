@@ -84,6 +84,7 @@ from app.services.realization_ai import (
 from app.services.realization_daily import (
     _daily_classification,
     _local_date,
+    _system_task_operational_day,
     calculate_daily_period,
 )
 from app.services.realization_evidence import _snapshot_tasks
@@ -261,6 +262,45 @@ def _visible_facts(user: User, result: RealizationPersonResult) -> dict:
         questions.append(item)
     facts["questions"] = questions
     return facts
+
+
+def _timeline_task_identity(task: dict) -> str | None:
+    task_id = task.get("task_id")
+    if task_id:
+        return f"id:{task_id}"
+    match_key = str(task.get("match_key") or "").strip()
+    return match_key or None
+
+
+def _dedupe_timeline_tasks(tasks: list[dict]) -> list[dict]:
+    """Collapse duplicate snapshot occurrences without merging distinct tasks."""
+    unique: dict[str, dict] = {}
+    anonymous: list[dict] = []
+    for task in tasks:
+        identity = _timeline_task_identity(task)
+        if identity is None:
+            anonymous.append(task)
+            continue
+        previous = unique.get(identity)
+        if previous is None:
+            unique[identity] = task
+            continue
+        # Later live/daily facts carry current status, progress and comments.
+        # Retain any earlier non-empty metadata that is absent from that fact.
+        unique[identity] = {
+            **previous,
+            **{key: value for key, value in task.items() if value is not None},
+        }
+    return [*unique.values(), *anonymous]
+
+
+def _timeline_task_belongs_on_day(
+    task: dict, day: date, system_task_days: dict[str, date]
+) -> bool:
+    if task.get("source_type") != "system" or not task.get("task_id"):
+        return True
+    operational_day = system_task_days.get(str(task["task_id"]))
+    return operational_day is None or operational_day == day
 
 
 async def _weekly_response(
@@ -548,13 +588,22 @@ async def _weekly_response(
                             ],
                         }
                         day_key = occurrence_day.isoformat()
-                        planned_tasks_by_user_day.setdefault(user_id, {}).setdefault(day_key, []).append(fact)
+                        day_tasks = planned_tasks_by_user_day.setdefault(user_id, {}).setdefault(
+                            day_key, []
+                        )
+                        if not any(
+                            _timeline_task_identity(existing)
+                            == _timeline_task_identity(fact)
+                            for existing in day_tasks
+                        ):
+                            day_tasks.append(fact)
 
     # System-task templates may intentionally be hidden from the Weekly Planner,
     # but Realization is an execution report and must include every generated
     # occurrence assigned to the employee. Load these independently from the
     # planner snapshot and place them on their effective due/run day.
     system_tasks_by_user_day: dict[uuid.UUID, dict[str, list[dict]]] = {}
+    system_task_day_by_id: dict[str, date] = {}
     visible_user_ids = [row.user_id for row in visible]
     if visible_user_ids:
         range_start = datetime.combine(
@@ -563,7 +612,11 @@ async def _weekly_response(
         range_end = datetime.combine(
             period.end_date + timedelta(days=2), datetime.min.time(), tzinfo=timezone.utc
         )
-        effective_system_date = func.coalesce(Task.due_date, Task.origin_run_at, Task.start_date)
+        # Generated occurrences often share a Friday deadline. Their operational
+        # day is the actual origin/start run; due_date is only a fallback.
+        effective_system_date = func.coalesce(
+            Task.origin_run_at, Task.start_date, Task.due_date
+        )
         system_task_rows = (
             await db.execute(
                 select(Task).where(
@@ -578,9 +631,7 @@ async def _weekly_response(
         for system_task in system_task_rows:
             if system_task.assigned_to is None:
                 continue
-            task_day = _local_date(
-                system_task.due_date or system_task.origin_run_at or system_task.start_date
-            )
+            task_day = _system_task_operational_day(system_task)
             if (
                 task_day is None
                 or task_day < period.start_date
@@ -588,6 +639,7 @@ async def _weekly_response(
                 or not _is_working_day(task_day)
             ):
                 continue
+            system_task_day_by_id[str(system_task.id)] = task_day
             system_fact = {
                 "match_key": f"id:{system_task.id}",
                 "task_id": str(system_task.id),
@@ -638,7 +690,13 @@ async def _weekly_response(
                     timeline.append(item)
                     timeline_by_date[day_key] = item
                 else:
-                    actual_tasks = item.get("tasks") or []
+                    actual_tasks = [
+                        task
+                        for task in (item.get("tasks") or [])
+                        if _timeline_task_belongs_on_day(
+                            task, current_day, system_task_day_by_id
+                        )
+                    ]
                     actual_by_key = {
                         str(task.get("task_id") or task.get("match_key") or ""): task
                         for task in actual_tasks
@@ -665,7 +723,7 @@ async def _weekly_response(
                         for task in scheduled_system_tasks
                         if str(task.get("task_id") or task.get("match_key") or "") not in merged_keys
                     )
-                    item["tasks"] = merged_tasks
+                    item["tasks"] = _dedupe_timeline_tasks(merged_tasks)
             current_day += timedelta(days=1)
         timeline.sort(key=lambda item: item["date"])
 
@@ -729,6 +787,11 @@ async def _weekly_response(
                     "attribution": attribution,
                 }
             daily_tasks_by_user.setdefault(row.user_id, {})[task_key] = completed_task
+
+        for timeline_item in timeline:
+            timeline_item["tasks"] = _dedupe_timeline_tasks(
+                list(timeline_item.get("tasks") or [])
+            )
 
     visible_task_ids: set[uuid.UUID] = set()
     for row in visible:

@@ -39,6 +39,11 @@ def _local_date(value: datetime | None) -> date | None:
     return localized.date()
 
 
+def _system_task_operational_day(task: Task) -> date | None:
+    """Place generated work on its occurrence/run day, not its final deadline."""
+    return _local_date(task.origin_run_at or task.start_date or task.due_date)
+
+
 def _include_nonplanned_weekly_task(
     *,
     created_at: datetime,
@@ -351,7 +356,7 @@ async def calculate_daily_period(
 
         created_after_plan = task.created_at >= planned_snapshot.created_at
         completed_day = completion_day(task)
-        scheduled_system_day = _local_date(task.due_date or task.origin_run_at)
+        scheduled_system_day = _system_task_operational_day(task)
         completed_this_week = bool(
             completed_day is not None and week_start <= completed_day <= day
         )
