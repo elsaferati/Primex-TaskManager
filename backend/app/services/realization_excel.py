@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import re
+from collections import Counter
 from typing import Any
 
 from openpyxl import Workbook
@@ -27,6 +28,16 @@ LEVEL_COLORS = {
     "D": "F8696B",
     "E": "C00000",
 }
+LEVEL_BONUSES = {"A+": 50, "A": 40, "B": 30, "C": 20, "M": 15, "D": 10, "E": 0}
+DEPARTMENT_COLORS = {
+    "development": "2E7D32",
+    "product content": "1565C0",
+    "graphic design": "BF360C",
+}
+
+
+def _department_color(name: str) -> str:
+    return DEPARTMENT_COLORS.get(name.strip().lower(), NAVY)
 THIN = Side(style="thin", color="A6A6A6")
 VALUE_LABELS = {
     "planned": "Planifikuar",
@@ -87,11 +98,11 @@ def _clean_task_title(value: Any) -> str:
     return re.sub(r"\s+", " ", re.sub(r"\[\[/?[a-z_]+\]\]", "", str(value or ""), flags=re.I)).strip()
 
 
-def _title(ws, title: str, subtitle: str, width: int) -> None:
+def _title(ws, title: str, subtitle: str, width: int, color: str = NAVY) -> None:
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=width)
     ws.cell(1, 1, title)
     ws.cell(1, 1).font = Font(color=WHITE, bold=True, size=16)
-    ws.cell(1, 1).fill = PatternFill("solid", fgColor=NAVY)
+    ws.cell(1, 1).fill = PatternFill("solid", fgColor=color)
     ws.cell(1, 1).alignment = Alignment(horizontal="center", vertical="center")
     ws.row_dimensions[1].height = 28
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=width)
@@ -195,19 +206,25 @@ def build_realization_workbook(
         people = department.get("people") or []
         width = max(3, 1 + len(people) * 2)
         ws = workbook.create_sheet(_sheet_name(department["name"], used_names))
+        department_color = _department_color(department["name"])
+        manager_name = department.get("manager_name")
+        subtitle = f"Java {week_start} — {week_end} | {department.get('status', '—')}"
+        if manager_name:
+            subtitle += f" | Menaxheri: {manager_name}"
         _title(
             ws,
             f"REALIZIMI — {department['name']}",
-            f"Java {week_start} — {week_end} | {department.get('status', '—')}",
+            subtitle,
             width,
+            color=department_color,
         )
         ws.cell(4, 1, "Pyetja / Treguesi")
-        _header(ws.cell(4, 1))
+        _header(ws.cell(4, 1), department_color)
         for index, person in enumerate(people):
             col = 2 + index * 2
             ws.merge_cells(start_row=4, start_column=col, end_row=4, end_column=col + 1)
             ws.cell(4, col, person["user_name"])
-            _header(ws.cell(4, col))
+            _header(ws.cell(4, col), department_color)
             ws.cell(5, col, "Përgjigjja")
             ws.cell(5, col + 1, "Argumenti / Evidenca")
             _header(ws.cell(5, col), "5B9BD5")
@@ -443,6 +460,9 @@ def build_realization_workbook(
         _header(ws.cell(grade_row, 1), "1F4E78")
         ws.cell(grade_row, 1).alignment = Alignment(horizontal="left", vertical="center")
 
+        def _final_level(person: dict[str, Any]) -> str | None:
+            return person.get("final_level") or person.get("suggested_level")
+
         evaluation_rows = [
             (
                 "Propozimi për nivelin e vlerësimit",
@@ -456,21 +476,23 @@ def build_realization_workbook(
                     if department_is_live
                     else str(person.get("auto_narrative") or "")
                 ),
+                True,
+                False,
             ),
             (
                 "Vlerësimi final",
                 lambda person: (
                     "Në pritje"
                     if department_is_live
-                    else person.get("final_level")
-                    or person.get("suggested_level")
-                    or "—"
+                    else _final_level(person) or "—"
                 ),
                 lambda person: (
                     "Menaxheri e konfirmon pas FINAL"
                     if department_is_live
                     else str(person.get("override_reason") or "")
                 ),
+                True,
+                False,
             ),
             (
                 "Simboli",
@@ -481,15 +503,34 @@ def build_realization_workbook(
                     or person.get("suggested_symbol")
                     or "—"
                 ),
-                lambda person: "Pa vlera monetare",
+                lambda person: "",
+                False,
+                False,
+            ),
+            (
+                "Bonusi javor (€)",
+                lambda person: (
+                    "—"
+                    if department_is_live
+                    else LEVEL_BONUSES.get(str(_final_level(person)), "—")
+                ),
+                lambda person: (
+                    "Sipas nivelit; D deri 10€, sipas gjykimit të menaxherit"
+                    if not department_is_live and _final_level(person) == "D"
+                    else ""
+                ),
+                False,
+                False,
             ),
             (
                 "Komente",
                 lambda person: str(person.get("manager_comment") or "—"),
                 lambda person: str(person.get("auto_narrative") or "—"),
+                False,
+                True,
             ),
         ]
-        for row_offset, (label, value_builder, note_builder) in enumerate(
+        for row_offset, (label, value_builder, note_builder, is_level_row, is_tall) in enumerate(
             evaluation_rows, 1
         ):
             evaluation_row = grade_row + row_offset
@@ -503,24 +544,72 @@ def build_realization_workbook(
                 col = 2 + index * 2
                 value = value_builder(person)
                 note = note_builder(person)
-                fill = LEVEL_COLORS.get(str(value), GRAY if row_offset <= 3 else WHITE)
+                fill = (
+                    LEVEL_COLORS.get(str(value), GRAY)
+                    if is_level_row
+                    else WHITE
+                )
                 for target, target_value in (
                     (ws.cell(evaluation_row, col), value),
                     (ws.cell(evaluation_row, col + 1), note),
                 ):
                     target.value = target_value
                     target.fill = PatternFill("solid", fgColor=fill)
-                    target.font = Font(bold=row_offset <= 3)
+                    target.font = Font(bold=is_level_row)
                     target.alignment = Alignment(
-                        horizontal="center" if row_offset <= 3 else "left",
+                        horizontal="center" if is_level_row else "left",
                         vertical="top",
                         wrap_text=True,
                     )
                     target.border = Border(
                         left=THIN, right=THIN, top=THIN, bottom=THIN
                     )
-            ws.row_dimensions[evaluation_row].height = 46 if row_offset == 4 else 32
+            ws.row_dimensions[evaluation_row].height = 46 if is_tall else 32
         last_row = grade_row + len(evaluation_rows)
+
+        totals_row = last_row + 2
+        ws.merge_cells(
+            start_row=totals_row, start_column=1, end_row=totals_row, end_column=width
+        )
+        ws.cell(totals_row, 1, f"TOTALI I JAVËS — {department['name'].upper()}")
+        _header(ws.cell(totals_row, 1), "1A1A1A")
+        level_header_row = totals_row + 1
+        levels = ["A+", "A", "B", "C", "M", "D", "E"]
+        level_columns = [*levels, "TOTAL", "Komente / Vendim bordi"]
+        for offset, label in enumerate(level_columns):
+            cell = ws.cell(level_header_row, 1 + offset, label)
+            _header(cell, department_color)
+        level_counts = Counter(
+            str(_final_level(person)) for person in people if _final_level(person)
+        )
+        counts_row = level_header_row + 1
+        ws.cell(counts_row, 1, f"Nr. punëtorësh ({len(people)} gjithsej)")
+        ws.cell(counts_row, 1).font = Font(bold=True)
+        ws.cell(counts_row, 1).fill = PatternFill("solid", fgColor=GRAY)
+        for offset, level in enumerate(levels, 1):
+            cell = ws.cell(counts_row, 1 + offset, level_counts.get(level, 0))
+            cell.fill = PatternFill("solid", fgColor=LEVEL_COLORS.get(level, WHITE))
+            cell.font = Font(bold=True)
+            cell.alignment = Alignment(horizontal="center")
+        ws.cell(counts_row, 1 + len(levels) + 1, len(people)).font = Font(bold=True)
+        ws.cell(counts_row, 1 + len(levels) + 1).alignment = Alignment(horizontal="center")
+        for row in (level_header_row, counts_row):
+            for col_index in range(1, len(level_columns) + 2):
+                ws.cell(row, col_index).border = Border(
+                    left=THIN, right=THIN, top=THIN, bottom=THIN
+                )
+
+        signature_row = counts_row + 2
+        ws.cell(signature_row, 1, "Nënshkrimet:")
+        ws.cell(signature_row, 1).font = Font(bold=True)
+        ws.cell(signature_row, 1).fill = PatternFill("solid", fgColor=GRAY)
+        ws.cell(signature_row + 1, 1, "Barazoi: ____________________")
+        ws.cell(signature_row + 1, min(4, width), "Konfirmoi (GA): ____________________")
+        last_row = signature_row + 1
+        # The totals-by-level table (7 levels + TOTAL + Komente) can be wider
+        # than the per-person columns for small departments — make sure the
+        # print area and auto-filter cover it.
+        width = max(width, len(level_columns) + 1)
 
         ws.freeze_panes = "B6"
         ws.column_dimensions["A"].width = 44

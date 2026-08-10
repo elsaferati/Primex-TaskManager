@@ -28,7 +28,11 @@ def _clients_path_for_department(department: Department) -> Path | None:
             "DEVELOPMENT_CLIENTS_PATH",
             r"\\192.168.10.8\Files\10_ZHVILLIM\05_CLIENTS",
         )
-    if not configured_path and "PRODUCT" in identity:
+    uses_shared_client_files = any(
+        marker in identity
+        for marker in ("PRODUCT", "PROJECT CONTENT", "PCM", "GRAPHIC DESIGN")
+    )
+    if not configured_path and uses_shared_client_files:
         configured_path = os.getenv(
             "PRODUCT_CLIENTS_PATH",
             r"\\192.168.10.8\Klientat\05_CLIENTS",

@@ -10,6 +10,7 @@ from alembic.migration import MigrationContext
 from alembic.operations import Operations
 
 from app.models.enums import RealizationLevel, RealizationPeriodStatus
+from app.api.routers.realization import _can_capture_current_week_final
 from app.services.realization_calculator import build_questions
 from app.services.realization_daily import _include_nonplanned_weekly_task
 from app.services.realization_evidence import (
@@ -140,8 +141,80 @@ class TestPolicy(unittest.TestCase):
         )
         self.assertEqual(result.level, RealizationLevel.C)
 
+    def test_bonus_is_sourced_from_policy_bonus_table(self) -> None:
+        result = evaluate_policy(
+            {"planned_count": 3, "completed_on_time_count": 3},
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.B)
+        self.assertEqual(result.bonus, 30)
+
+    def test_single_unexcused_absence_with_tasks_done_uses_c(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 2,
+                "completed_on_time_count": 2,
+                "accounted_planned_count": 2,
+                "unexcused_absence_days": 1,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.C)
+        self.assertEqual(result.bonus, 20)
+
+    def test_blocked_colleague_minor_impact_caps_a_plus_at_c(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 3,
+                "completed_on_time_count": 3,
+                "accounted_planned_count": 3,
+                "verified_extra_count": 2,
+                "negative_count": 1,
+                "minor_negative_impact_count": 1,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.C)
+
+    def test_blocked_colleague_major_impact_caps_a_at_d(self) -> None:
+        result = evaluate_policy(
+            {
+                "planned_count": 3,
+                "completed_on_time_count": 3,
+                "accounted_planned_count": 3,
+                "verified_extra_count": 1,
+                "major_negative_impact": True,
+            },
+            CRITERIA,
+            BONUSES,
+        )
+        self.assertEqual(result.level, RealizationLevel.D)
+
 
 class TestWorkflow(unittest.TestCase):
+    def test_current_week_can_be_finalized_on_friday(self) -> None:
+        period = SimpleNamespace(
+            start_date=date(2026, 8, 3),
+            end_date=date(2026, 8, 7),
+            final_snapshot_id=None,
+        )
+        self.assertTrue(
+            _can_capture_current_week_final(period, today=date(2026, 8, 7))
+        )
+
+    def test_current_week_cannot_be_finalized_before_friday(self) -> None:
+        period = SimpleNamespace(
+            start_date=date(2026, 8, 3),
+            end_date=date(2026, 8, 7),
+            final_snapshot_id=None,
+        )
+        self.assertFalse(
+            _can_capture_current_week_final(period, today=date(2026, 8, 6))
+        )
+
     def test_old_task_completed_this_week_is_included_in_live_report(self) -> None:
         self.assertTrue(
             _include_nonplanned_weekly_task(
@@ -254,10 +327,42 @@ class TestQuestionsAndNarrative(unittest.TestCase):
         decision = evaluate_policy(person["counters"], CRITERIA, BONUSES)
         narrative = build_albanian_narrative(person)
         questions = {row["key"]: row for row in build_questions(person, decision, narrative)}
-        self.assertEqual(questions["respected_meetings"]["source_status"], "AUTO_NEEDS_CONFIRMATION")
+        # No MISSED_MEETING evidence at all is a confident "respected" —
+        # only a confirmed missed meeting should require a manager's call.
+        self.assertEqual(questions["respected_meetings"]["source_status"], "AUTO")
+        self.assertTrue(questions["respected_meetings"]["auto_value"])
         self.assertEqual(questions["unexpected_absences"]["source_status"], "AUTO_NEEDS_CONFIRMATION")
         self.assertEqual(questions["current_level"]["auto_value"], "—")
         self.assertNotIn("weekly_bonus", questions)
+
+    def test_confirmed_missed_meeting_does_not_need_confirmation(self) -> None:
+        person = {
+            "counters": {
+                "planned_count": 1,
+                "completed_on_time_count": 1,
+                "meeting_missed_count": 1,
+            },
+            "tasks": [],
+            "observations": [],
+        }
+        decision = evaluate_policy(person["counters"], CRITERIA, BONUSES)
+        narrative = build_albanian_narrative(person)
+        questions = {row["key"]: row for row in build_questions(person, decision, narrative)}
+        self.assertEqual(questions["respected_meetings"]["source_status"], "AUTO")
+        self.assertFalse(questions["respected_meetings"]["auto_value"])
+
+    def test_requested_and_proposed_extras_need_no_confirmation_when_absent(self) -> None:
+        person = {
+            "counters": {"planned_count": 1, "completed_on_time_count": 1},
+            "tasks": [],
+            "observations": [],
+        }
+        decision = evaluate_policy(person["counters"], CRITERIA, BONUSES)
+        narrative = build_albanian_narrative(person)
+        questions = {row["key"]: row for row in build_questions(person, decision, narrative)}
+        for key in ("requested_extra_tasks", "helped_colleague", "gave_proposal"):
+            self.assertEqual(questions[key]["source_status"], "AUTO")
+            self.assertFalse(questions[key]["auto_value"])
 
     def test_narrative_is_deterministic(self) -> None:
         facts = {"planned_count": 2, "completed_on_time_count": 2, "verified_extra_count": 1}

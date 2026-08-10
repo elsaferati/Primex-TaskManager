@@ -89,6 +89,7 @@ jobs:
           PRIMEFLOW_READONLY_DATABASE_URL: ${{ secrets.PRIMEFLOW_READONLY_DATABASE_URL }}
           EMAIL_USER: ${{ secrets.EMAIL_USER }}
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
+          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REPORT_STORAGE_DIR: ${{ vars.REPORT_STORAGE_DIR }}
         run: |
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
@@ -124,6 +125,13 @@ jobs:
           echo WEEKLY_PLANNING_AUDIT_RECIPIENTS=130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com >> backend\.env
           echo REPORT_STORAGE_DIR=%REPORT_STORAGE_DIR% >> backend\.env
           echo REPORT_RETENTION_DAYS=90 >> backend\.env
+          echo OPENAI_API_KEY=%OPENAI_API_KEY% >> backend\.env
+          echo REALIZATION_AI_ENABLED=true >> backend\.env
+          echo REALIZATION_AI_MODEL=gpt-5.2 >> backend\.env
+          echo REALIZATION_AI_TIMEOUT_SECONDS=45 >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_AI_ENABLED=true >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_AI_MODEL=gpt-5.2 >> backend\.env
+          echo WEEKLY_PLANNING_AUDIT_AI_TIMEOUT_SECONDS=90 >> backend\.env
  
       - name: Prepare Backend
         if: ${{ steps.changes.outputs.backend_changed == 'true' }}

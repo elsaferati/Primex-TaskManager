@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.department import Department
 from app.models.enums import (
@@ -44,6 +46,7 @@ from app.schemas.realization import (
     RealizationReviewRequest,
     RealizationWeeklyOut,
 )
+from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
 from app.services.audit import add_audit_log
 from app.services.realization_access import (
     can_approve_realization,
@@ -80,14 +83,23 @@ from app.services.system_task_schedule import _is_working_day
 router = APIRouter()
 
 
+def _can_capture_current_week_final(period: RealizationPeriod, *, today: date | None = None) -> bool:
+    local_today = today or datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
+    return (
+        period.final_snapshot_id is None
+        and normalize_week_start(local_today) == period.start_date
+        and local_today >= period.end_date
+    )
+
+
 def _error(exc: ValueError, code: int = status.HTTP_409_CONFLICT) -> HTTPException:
     return HTTPException(status_code=code, detail=str(exc))
 
 
 def _ensure_department_scope(user: User, department_id: uuid.UUID) -> None:
-    if user.role == UserRole.ADMIN:
-        return
-    if user.role != UserRole.MANAGER or user.department_id != department_id:
+    # Every department manager can see and manage Realization for all
+    # departments, not just their own — see realization_access.py.
+    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
@@ -134,22 +146,18 @@ async def _recalculate_after_evidence(
     planned, final = await _pinned_snapshots(db, period)
     if planned is None or final is None:
         return
-    reviewed = (
-        await db.execute(
-            select(RealizationPersonResult.id).where(
-                RealizationPersonResult.period_id == period.id,
-                RealizationPersonResult.reviewed_at.is_not(None),
-            ).limit(1)
-        )
-    ).scalar_one_or_none()
-    if reviewed is None:
-        await calculate_weekly_period(
-            db,
-            period=period,
-            planned_snapshot=planned,
-            final_snapshot=final,
-            actor_id=actor_id,
-        )
+    # calculate_weekly_period leaves already-reviewed people's results
+    # untouched and recalculates everyone else — so this can always run
+    # while the period is OPEN/CALCULATED (the outer guard above already
+    # stops once every person has been reviewed and the period moves to
+    # REVIEWED).
+    await calculate_weekly_period(
+        db,
+        period=period,
+        planned_snapshot=planned,
+        final_snapshot=final,
+        actor_id=actor_id,
+    )
 
 
 def _visible_facts(user: User, result: RealizationPersonResult) -> dict:
@@ -534,6 +542,24 @@ async def _weekly_response(
             )
             if not task_key:
                 continue
+            # A task's scheduled day (from due_date/origin_run_at/start_date)
+            # can differ from the day it was actually completed. Without this,
+            # the same task shows up twice — once as a "scheduled" ghost entry
+            # on its due day and again here on its completion day.
+            for other_day in timeline:
+                if other_day["date"] == completion_day:
+                    continue
+                other_tasks = other_day.get("tasks")
+                if not other_tasks:
+                    continue
+                filtered = [
+                    task
+                    for task in other_tasks
+                    if str(task.get("task_id") or task.get("match_key") or "")
+                    != task_key
+                ]
+                if len(filtered) != len(other_tasks):
+                    other_day["tasks"] = filtered
             target_tasks = target.setdefault("tasks", [])
             existing_index = next(
                 (
@@ -568,6 +594,47 @@ async def _weekly_response(
                     visible_task_ids.add(uuid.UUID(str(task.get("task_id"))))
                 except (TypeError, ValueError):
                     continue
+    current_task_owners: dict[uuid.UUID, set[uuid.UUID]] = {}
+    if visible_task_ids:
+        from app.models.task_assignee import TaskAssignee
+
+        for task_id, owner_id in (
+            await db.execute(
+                select(TaskAssignee.task_id, TaskAssignee.user_id).where(
+                    TaskAssignee.task_id.in_(visible_task_ids)
+                )
+            )
+        ).all():
+            current_task_owners.setdefault(task_id, set()).add(owner_id)
+        for task_id, assigned_to in (
+            await db.execute(
+                select(Task.id, Task.assigned_to).where(Task.id.in_(visible_task_ids))
+            )
+        ).all():
+            if assigned_to is not None and not current_task_owners.get(task_id):
+                current_task_owners.setdefault(task_id, set()).add(assigned_to)
+
+    def belongs_to_person(task: dict, user_id: uuid.UUID) -> bool:
+        try:
+            task_id = uuid.UUID(str(task.get("task_id")))
+        except (TypeError, ValueError):
+            return True
+        owners = current_task_owners.get(task_id)
+        return not owners or user_id in owners
+
+    for row in visible:
+        for timeline_item in daily_by_user.get(row.user_id, []):
+            timeline_item["tasks"] = [
+                task
+                for task in timeline_item.get("tasks") or []
+                if belongs_to_person(task, row.user_id)
+            ]
+        if row.user_id in daily_tasks_by_user:
+            daily_tasks_by_user[row.user_id] = {
+                key: task
+                for key, task in daily_tasks_by_user[row.user_id].items()
+                if belongs_to_person(task, row.user_id)
+            }
     task_comment_map = {
         comment.task_id: comment.comment
         for comment in (
@@ -591,6 +658,11 @@ async def _weekly_response(
     for row in visible:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
         facts = _visible_facts(user, row)
+        facts["tasks"] = [
+            task
+            for task in facts.get("tasks") or []
+            if belongs_to_person(task, row.user_id)
+        ]
         facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
         facts["observations"] = live_by_user.get(row.user_id, [])
         if period.final_snapshot_id is None:
@@ -629,7 +701,7 @@ async def _weekly_response(
         has_final_snapshot=has_final,
         can_calculate=(
             has_planned
-            and has_final
+            and (has_final or _can_capture_current_week_final(period))
             and period.status in {
                 RealizationPeriodStatus.OPEN.value,
                 RealizationPeriodStatus.CALCULATED.value,
@@ -668,13 +740,9 @@ async def export_realization_excel(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    if user.role == UserRole.MANAGER:
-        if user.department_id is None:
-            raise HTTPException(status_code=403, detail="Manager has no department")
-        if department_id is not None and department_id != user.department_id:
-            raise HTTPException(status_code=403, detail="Forbidden")
-        department_id = user.department_id
-    elif user.role != UserRole.ADMIN:
+    # Every department manager can export Realization for any department,
+    # or all of them at once (department_id=None), same as ADMIN.
+    if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(status_code=403, detail="Forbidden")
 
     start = normalize_week_start(week_start)
@@ -699,6 +767,18 @@ async def export_realization_excel(
             await db.execute(select(Department).where(Department.id.in_(department_ids)))
         ).scalars().all()
     }
+    managers_by_department_id: dict[uuid.UUID, str] = {}
+    if department_ids:
+        for manager_row in (
+            await db.execute(
+                select(User).where(
+                    User.role == UserRole.MANAGER,
+                    User.department_id.in_(department_ids),
+                )
+            )
+        ).scalars().all():
+            if manager_row.department_id is not None:
+                managers_by_department_id[manager_row.department_id] = manager_row.full_name
     weekly_results = (
         await db.execute(
             select(RealizationPersonResult).where(
@@ -918,6 +998,7 @@ async def export_realization_excel(
     export_departments = [
         {
             "name": departments_by_id.get(period.department_id, "Departamenti"),
+            "manager_name": managers_by_department_id.get(period.department_id),
             "status": (
                 "AKTUAL (SNAPSHOT DITOR)"
                 if period.id in live_period_ids
@@ -990,14 +1071,36 @@ async def calculate_realization(
     if department is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Department not found")
     try:
-        period, _, _ = await ensure_weekly_period(
+        period, planned, final = await ensure_weekly_period(
             db,
             department_id=department_id,
             week_start=week_start,
             created_by=user.id,
         )
+        if final is None:
+            if not _can_capture_current_week_final(period):
+                raise RealizationWorkflowError(
+                    "FINAL mund të krijohet vetëm në ditën e fundit të javës aktuale."
+                )
+            from app.api.routers.planners import _create_and_store_weekly_snapshot
+
+            await _create_and_store_weekly_snapshot(
+                db=db,
+                user=user,
+                department_id=department_id,
+                week_start_date=period.start_date,
+                snapshot_type=WeeklySnapshotType.FINAL,
+                is_this_week=True,
+            )
+            period, planned, final = await ensure_weekly_period(
+                db,
+                department_id=department_id,
+                week_start=week_start,
+                created_by=user.id,
+            )
         period = await _period(db, period.id, for_update=True)
-        planned, final = await _pinned_snapshots(db, period)
+        if planned is None or final is None:
+            raise RealizationWorkflowError("PLANNED dhe FINAL kërkohen për kalkulimin javor")
         before = {"status": period.status}
         await calculate_weekly_period(
             db,
@@ -1331,11 +1434,17 @@ async def analyze_person_result(
     except RealizationAIError as exc:
         raise HTTPException(status_code=503, detail=str(exc))
     facts = dict(result.facts_json or {})
-    facts["ai_analysis"] = {
+    new_entry = {
         **analysis,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "generated_by": str(user.id),
     }
+    # Every "Gjenero analizën" click is kept, not overwritten, so a manager
+    # can see how the AI's read of a person changed across the week.
+    history = list(facts.get("ai_analysis_history") or [])
+    history.append(new_entry)
+    facts["ai_analysis_history"] = history
+    facts["ai_analysis"] = new_entry
     result.facts_json = facts
     add_audit_log(
         db=db,

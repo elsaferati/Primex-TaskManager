@@ -12,6 +12,7 @@ class PolicyDecision:
     symbol: RealizationSymbol
     reasons: tuple[str, ...]
     triggered_rule: str
+    bonus: int | None = None
 
 
 DEFAULT_SYMBOLS = {
@@ -61,13 +62,21 @@ def _decision(
     rule: str,
     reasons: list[str],
     criteria: dict[str, Any],
+    bonuses: dict[str, Any] | None = None,
 ) -> PolicyDecision:
     symbols = {**DEFAULT_SYMBOLS, **(criteria.get("symbols") or {})}
+    bonus = None
+    if bonuses and level in bonuses:
+        try:
+            bonus = int(bonuses[level])
+        except (TypeError, ValueError):
+            bonus = None
     return PolicyDecision(
         level=RealizationLevel(level),
         symbol=RealizationSymbol(symbols[level]),
         reasons=tuple(reasons),
         triggered_rule=rule,
+        bonus=bonus,
     )
 
 
@@ -115,6 +124,20 @@ def evaluate_policy(
         counters.get("minor_negative_impact_count", 0)
     )
 
+    # A single unexcused day with obligations otherwise accounted for is a
+    # documented C ("1 dite PA njoftim, detyra kryer -> C"); 2+ days is E
+    # (handled above) and 1 day with tasks left undone already falls into
+    # the D "unaccounted" branch below.
+    single_unexcused_day = (
+        unexpected_absence == 1
+        and unexpected_absence < absence_e
+        and planned == obligations_accounted
+    )
+    # Blocking a colleague's plan caps the week at B regardless of extras
+    # ("PERSONI NUK MERR ME SHUME SE B") — any recorded impact, minor or
+    # major, must fall through past A+/A into the impact-driven C/D rules.
+    has_negative_impact = major_impact or minor_impact
+
     def rule(level: str) -> PolicyDecision | None:
         if level == "E":
             if unexpected_absence >= absence_e:
@@ -123,6 +146,7 @@ def evaluate_policy(
                     "unexpected_absence",
                     [f"{unexpected_absence} unexpected absences"],
                     criteria,
+                    bonuses,
                 )
             if planned > 0 and no_progress >= planned:
                 return _decision(
@@ -130,6 +154,7 @@ def evaluate_policy(
                     "no_real_progress",
                     ["No planned obligation has recorded progress"],
                     criteria,
+                    bonuses,
                 )
         elif level == "D":
             if unapproved > 0 or repeated >= repeated_d or major_impact:
@@ -141,7 +166,7 @@ def evaluate_policy(
                 if major_impact:
                     reasons.append("Verified major negative impact")
                 return _decision(
-                    "D", "unapproved_or_major_failure", reasons, criteria
+                    "D", "unapproved_or_major_failure", reasons, criteria, bonuses
                 )
             if (
                 unaccounted
@@ -158,6 +183,7 @@ def evaluate_policy(
                     "partial_failure",
                     reasons,
                     criteria,
+                    bonuses,
                 )
         elif (
             level == "M"
@@ -169,9 +195,13 @@ def evaluate_policy(
                 "approved_absence",
                 ["Approved absence with remaining obligations accounted for"],
                 criteria,
+                bonuses,
             )
         elif level == "C" and (
-            complete_late or tardiness >= frequent_delay or minor_impact
+            complete_late
+            or tardiness >= frequent_delay
+            or minor_impact
+            or single_unexcused_day
         ):
             reasons = []
             if complete_late:
@@ -180,20 +210,34 @@ def evaluate_policy(
                 reasons.append(f"{tardiness} attendance tardiness events")
             if minor_impact:
                 reasons.append("Verified minor impact caps the result at C")
-            return _decision("C", "delay_or_minor_impact", reasons, criteria)
-        elif level == "A+" and planned > 0 and verified_extra >= a_plus_extra:
+            if single_unexcused_day:
+                reasons.append("1 unexcused absence day with tasks completed")
+            return _decision("C", "delay_or_minor_impact", reasons, criteria, bonuses)
+        elif (
+            level == "A+"
+            and planned > 0
+            and verified_extra >= a_plus_extra
+            and not has_negative_impact
+        ):
             return _decision(
                 "A+",
                 "multiple_verified_extras",
                 [f"{verified_extra} verified positive extras"],
                 criteria,
+                bonuses,
             )
-        elif level == "A" and planned > 0 and verified_extra >= a_extra:
+        elif (
+            level == "A"
+            and planned > 0
+            and verified_extra >= a_extra
+            and not has_negative_impact
+        ):
             return _decision(
                 "A",
                 "verified_extra",
                 [f"{verified_extra} verified positive extras"],
                 criteria,
+                bonuses,
             )
         elif level == "B":
             return _decision(
@@ -205,6 +249,7 @@ def evaluate_policy(
                     else "All planned obligations completed on time"
                 ],
                 criteria,
+                bonuses,
             )
         return None
 

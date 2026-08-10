@@ -77,6 +77,16 @@ const LEVEL_SYMBOL: Record<RealizationLevel, "+" | "+/-" | "-"> = {
   E: "-",
 }
 
+const LEVEL_GUIDE: Array<{ level: RealizationLevel; description: string }> = [
+  { level: "A+", description: "Plani i realizuar dhe të paktën 2 angazhime pozitive shtesë të verifikuara." },
+  { level: "A", description: "Plani i realizuar dhe të paktën 1 angazhim pozitiv shtesë i verifikuar." },
+  { level: "B", description: "Të gjitha obligimet e planit janë përfunduar në kohë." },
+  { level: "C", description: "Ka përfundime me vonesë, vonesa të shpeshta ose ndikim negativ të vogël." },
+  { level: "M", description: "Mungesë personale e aprovuar dhe obligimet e mbetura janë të mbuluara." },
+  { level: "D", description: "Ka obligime të pambyllura, shtyrje pa aprovim ose evidencë negative." },
+  { level: "E", description: "Nuk ka progres real ose ka mungesa të papritura mbi pragun e politikës." },
+]
+
 const TASK_SOURCE_LABEL: Record<string, string> = {
   system: "Sistem",
   project: "Projekt",
@@ -104,20 +114,20 @@ function taskPalette(task: RealizationTaskFact) {
   const isAdditional = task.attribution === "added_after_weekly_plan"
   if (taskIsCompleted(task)) {
     return isAdditional
-      ? "border-[#059669] bg-[#6ee7b7] text-[#064e3b]"
-      : "border-[#4d7c0f] bg-[#C4FDC4] text-[#14532d]"
+      ? "border-l-4 border-l-emerald-500 border-y border-r border-emerald-200 bg-emerald-50 text-emerald-900"
+      : "border-l-4 border-l-emerald-600 border-y border-r border-emerald-200 bg-emerald-50/70 text-emerald-900"
   }
   if (task.classification === "in_progress" || task.status?.toUpperCase() === "IN_PROGRESS") {
-    return "border-[#ca8a04] bg-[#FFFF00] text-[#422006]"
+    return "border-l-4 border-l-amber-500 border-y border-r border-amber-200 bg-amber-50 text-amber-900"
   }
   if (
     task.classification === "pending_confirmation"
     || task.status?.toUpperCase() === "WAITING_CONFIRMATION"
   ) {
-    return "border-[#C2410C] bg-[#FFEDD5] text-[#9A3412]"
+    return "border-l-4 border-l-orange-500 border-y border-r border-orange-200 bg-orange-50 text-orange-900"
   }
-  if (isAdditional) return "border-[#1d4ed8] bg-[#dbeafe] text-[#0f172a]"
-  return "border-[#be185d] bg-[#FFC4ED] text-[#500724]"
+  if (isAdditional) return "border-l-4 border-l-blue-500 border-y border-r border-blue-200 bg-blue-50 text-blue-900"
+  return "border-l-4 border-l-rose-500 border-y border-r border-rose-200 bg-rose-50 text-rose-900"
 }
 
 function DayTaskCard({
@@ -298,16 +308,14 @@ function MetricCard({
   note: string
 }) {
   return (
-    <Card className="border-border/70 shadow-sm">
+    <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
       <CardContent className="flex items-start justify-between gap-3 py-5">
         <div>
-          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">{label}</p>
-          <p className="mt-2 text-3xl font-semibold tracking-tight">{value}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{note}</p>
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">{label}</p>
+          <p className="mt-2 text-3xl font-bold tracking-tight text-slate-900">{value}</p>
+          <p className="mt-1 text-xs text-slate-500">{note}</p>
         </div>
-        <div className="rounded-xl bg-primary/10 p-2.5 text-primary">
-          <Icon className="h-5 w-5" />
-        </div>
+        <Icon className="h-8 w-8 shrink-0 text-slate-400" />
       </CardContent>
     </Card>
   )
@@ -322,24 +330,24 @@ function QuestionRow({ question }: { question: RealizationQuestion }) {
     ? "Për konfirmim nga menaxheri"
     : displayValue(finalValue)
   return (
-    <div className="grid gap-2 border-b py-4 last:border-b-0 md:grid-cols-[minmax(220px,0.9fr)_minmax(260px,1.4fr)]">
+    <div className="grid gap-2 border-b border-slate-100 py-4 last:border-b-0 md:grid-cols-[minmax(220px,0.9fr)_minmax(260px,1.4fr)]">
       <div>
-        <p className="text-sm font-medium">{question.label}</p>
+        <p className="text-sm font-medium text-slate-900">{question.label}</p>
         <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
           <Badge variant={needsConfirmation ? "destructive" : "secondary"} className="text-[10px]">
             {needsConfirmation ? "Kërkon konfirmim" : question.source_status}
           </Badge>
           {question.evidence_ids?.length ? (
-            <span className="text-[11px] text-muted-foreground">
+            <span className="text-[11px] text-slate-500">
               {question.evidence_ids.length} evidencë/a
             </span>
           ) : null}
         </div>
       </div>
       <div>
-        <p className={cn("text-sm leading-6", needsConfirmation && finalValue == null ? "font-medium text-amber-700 dark:text-amber-300" : "text-foreground/90")}>{visibleValue}</p>
+        <p className={cn("text-sm leading-6", needsConfirmation && finalValue == null ? "font-medium text-amber-700" : "text-slate-700")}>{visibleValue}</p>
         {question.explanation ? (
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">{question.explanation}</p>
+          <p className="mt-1 text-xs leading-5 text-slate-500">{question.explanation}</p>
         ) : null}
       </div>
     </div>
@@ -383,9 +391,11 @@ export default function RealizationPage() {
     if (!response.ok) return
     const rows = (await response.json()) as Department[]
     setDepartments(rows)
-    const preferred = user?.role === "MANAGER" ? user.department_id : departmentId
+    // A manager's own department is only the initial default — every
+    // manager can switch to and manage any department in Realization.
+    const preferred = departmentId || (user?.role === "MANAGER" ? user.department_id : "")
     const next = rows.find((row) => row.id === preferred)?.id || rows[0]?.id || ""
-    if (!departmentId || user?.role === "MANAGER") setDepartmentId(next)
+    if (!departmentId) setDepartmentId(next)
   }, [apiFetch, departmentId, user])
 
   const loadReport = React.useCallback(async () => {
@@ -570,7 +580,6 @@ export default function RealizationPage() {
     } else if (evidenceCategory === "REPEATED_PROBLEM") {
       evidenceJson.clarified_before = true
     } else if (evidenceCategory === "MISSED_MEETING") {
-      evidenceJson.meeting_id = relatedId
       evidenceJson.occurrence_date = evidenceDate
     } else if (evidenceCategory === "BLOCKER") {
       evidenceJson.affected_user_id = relatedId
@@ -590,12 +599,12 @@ export default function RealizationPage() {
       toast.error("Vendos çelësin e problemit të përsëritur")
       return
     }
-    if (["MISSED_MEETING", "BLOCKER", "HELPED_COLLEAGUE"].includes(evidenceCategory) && !relatedId.trim()) {
-      toast.error("Vendos ID-në e evidencës së lidhur")
+    if (["BLOCKER", "HELPED_COLLEAGUE"].includes(evidenceCategory) && !relatedId.trim()) {
+      toast.error("Zgjidh personin")
       return
     }
     if (evidenceCategory === "EXTRA_TASK" && !taskId.trim()) {
-      toast.error("Vendos ID-në e detyrës shtesë")
+      toast.error("Zgjidh detyrën shtesë")
       return
     }
     setAction("evidence")
@@ -649,6 +658,17 @@ export default function RealizationPage() {
       )
       if (!response.ok) throw new Error(await errorMessage(response))
       const analysis = (await response.json()) as RealizationAIAnalysis
+      setData((current) => current ? {
+        ...current,
+        people: current.people.map((person) => person.id === selected.id ? {
+          ...person,
+          facts_json: {
+            ...person.facts_json,
+            ai_analysis: analysis,
+            ai_analysis_history: [...(person.facts_json.ai_analysis_history || []), analysis],
+          },
+        } : person),
+      } : current)
       toast.success("Analiza inteligjente u gjenerua", {
         description: `Sugjerimi ${analysis.suggested_level}, siguria ${Math.round(analysis.confidence * 100)}%`,
       })
@@ -728,9 +748,18 @@ export default function RealizationPage() {
   }
 
   const people = data?.people || []
+  const colleagueOptions = people.filter((person) => person.id !== selected?.id)
+  const extraTaskOptions = Array.from(
+    new Map(
+      (selected?.facts_json.tasks || [])
+        .filter((task) => task.task_id)
+        .map((task) => [task.task_id, task])
+    ).values()
+  )
   const grade = selected?.final_level || selected?.suggested_level || null
   const selectedQuestions = selected?.facts_json.questions || []
   const aiAnalysis = selected?.facts_json.ai_analysis
+  const aiHistory = [...(selected?.facts_json.ai_analysis_history || [])].reverse()
   const selectedWeeklyPlanned = selected ? weeklyPlanned(selected) : 0
   const selectedWeeklyCompleted = selected ? weeklyCompleted(selected) : 0
   const selectedWeeklyAllCompleted = selected ? weeklyAllCompleted(selected) : 0
@@ -764,33 +793,37 @@ export default function RealizationPage() {
 
   return (
     <div className="mx-auto w-full max-w-[1720px] space-y-6 pb-12">
-      <section className="overflow-hidden rounded-2xl border bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 text-white shadow-xl">
-        <div className="grid gap-8 px-6 py-7 lg:grid-cols-[1fr_auto] lg:px-9">
-          <div>
-            <div className="mb-3 flex flex-wrap items-center gap-2">
-              <Badge className="border-white/20 bg-white/10 text-white hover:bg-white/10">PrimeFlow Intelligence</Badge>
-              <Badge className="border-emerald-400/30 bg-emerald-400/10 text-emerald-200 hover:bg-emerald-400/10">
-                Pa vlera monetare
-              </Badge>
-            </div>
-            <h1 className="text-3xl font-semibold tracking-tight md:text-4xl">Barazimi i planit javor</h1>
-            <p className="mt-3 max-w-3xl text-sm leading-6 text-slate-300 md:text-base">
-              Për çdo ditë: çfarë ishte planifikuar, çfarë u përfundua, çfarë mbeti dhe çfarë u shtua gjatë javës.
-            </p>
-          </div>
-          <div className="grid grid-cols-2 gap-2 self-end text-xs text-slate-300">
-            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3"><span className="block text-lg font-semibold text-white">16:20</span>Snapshot ditor</div>
-            <div className="rounded-xl border border-white/10 bg-white/5 px-4 py-3"><span className="block text-lg font-semibold text-white">Audit</span>Çdo ndryshim</div>
-          </div>
+      <div className="flex flex-col gap-3 border-b border-slate-200 pb-5 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-slate-900">Realizimi javor</h1>
+          <p className="mt-1.5 max-w-2xl text-sm text-slate-500">
+            Barazimi i planit të javës me atë çka u realizua faktikisht, ditë pas dite, për çdo person.
+          </p>
         </div>
-      </section>
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          {data ? (
+            <Badge variant="outline" className="border-slate-300 text-slate-600">
+              Statusi: {data.period.status}
+            </Badge>
+          ) : null}
+          {isLive ? (
+            <Badge variant="outline" className="border-slate-300 text-slate-600">
+              <Clock3 className="mr-1 h-3 w-3" /> Snapshot ditor, ora 16:20
+            </Badge>
+          ) : (
+            <Badge variant="secondary">
+              <CheckCircle2 className="mr-1 h-3 w-3" /> Raport final
+            </Badge>
+          )}
+        </div>
+      </div>
 
-      <Card className="border-border/70 shadow-sm">
+      <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
         <CardContent className="flex flex-col gap-3 py-4 xl:flex-row xl:items-end">
           <div className="grid flex-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
             <div className="space-y-1.5">
               <Label>Departamenti</Label>
-              <Select value={departmentId} onValueChange={setDepartmentId} disabled={user.role === "MANAGER"}>
+              <Select value={departmentId} onValueChange={setDepartmentId}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh departamentin" /></SelectTrigger>
                 <SelectContent>
                   {departments.map((department) => <SelectItem key={department.id} value={department.id}>{department.name}</SelectItem>)}
@@ -823,12 +856,12 @@ export default function RealizationPage() {
               {action === "daily" ? <Loader2 className="h-4 w-4 animate-spin" /> : <CalendarCheck className="h-4 w-4" />} Përditëso tani
             </Button>
             <Button onClick={() => void calculateWeekly()} disabled={!data?.can_calculate || !!action}>
-              {action === "calculate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />} Kalkulo javën
+              {action === "calculate" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Activity className="h-4 w-4" />} {data?.has_final_snapshot ? "Rikalkulo javën" : "Finalizo dhe vlerëso"}
             </Button>
             <Button variant="outline" onClick={() => void downloadExcel()} disabled={!people.length || !!action}>
               {action === "export" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Excel
             </Button>
-            {user.role === "ADMIN" ? (
+            {["ADMIN", "MANAGER"].includes(user.role) ? (
               <Button variant="outline" onClick={() => void downloadExcel(true)} disabled={!!action}>
                 {action === "export-all" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />} Excel gjithë
               </Button>
@@ -838,22 +871,22 @@ export default function RealizationPage() {
       </Card>
 
       {data?.message ? (
-        <div className="flex items-start gap-3 rounded-xl border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-950 dark:bg-amber-950/20 dark:text-amber-100">
+        <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {data.message}
         </div>
       ) : null}
 
-      <Card className="border-border/70 shadow-sm">
+      <Card className="rounded-2xl border-slate-200 bg-white shadow-sm">
         <CardContent className="flex flex-wrap items-center gap-x-5 gap-y-2 py-3 text-xs">
-          <span className="font-semibold text-muted-foreground">Ngjyrat e Weekly Planner-it:</span>
+          <span className="font-semibold text-slate-500">Ngjyrat e Weekly Planner-it:</span>
           {[
-            ["bg-[#FFC4ED] border-[#be185d]", "Pa filluar"],
-            ["bg-[#FFFF00] border-[#ca8a04]", "Në progres"],
-            ["bg-[#FFEDD5] border-[#C2410C]", "Në konfirmim"],
-            ["bg-[#C4FDC4] border-[#4d7c0f]", "Përfunduar"],
-            ["bg-[#dbeafe] border-[#1d4ed8]", "Shtuar gjatë javës"],
+            ["bg-rose-50 border-rose-500", "Pa filluar"],
+            ["bg-amber-50 border-amber-500", "Në progres"],
+            ["bg-orange-50 border-orange-500", "Në konfirmim"],
+            ["bg-emerald-50 border-emerald-500", "Përfunduar"],
+            ["bg-blue-50 border-blue-500", "Shtuar gjatë javës"],
           ].map(([color, label]) => (
-            <span key={label} className="inline-flex items-center gap-1.5"><span className={cn("h-3 w-3 rounded-sm border", color)} />{label}</span>
+            <span key={label} className="inline-flex items-center gap-1.5 text-slate-600"><span className={cn("h-3 w-3 rounded-sm border-l-2", color)} />{label}</span>
           ))}
         </CardContent>
       </Card>
@@ -865,19 +898,38 @@ export default function RealizationPage() {
         <MetricCard icon={Sparkles} label="Shtuar gjatë javës" value={selectedWeeklyAdditional} note="Raportohen veç nga plani bazë" />
       </div>
 
+      <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+        <summary className="cursor-pointer list-none px-4 py-3 text-sm font-semibold text-slate-900">
+          Kriteret e vlerësimit automatik A+–E
+        </summary>
+        <div className="grid gap-2 border-t border-slate-200 p-4 md:grid-cols-2 xl:grid-cols-4">
+          {LEVEL_GUIDE.map((item) => (
+            <div key={item.level} className="flex items-start gap-3 rounded-lg border border-slate-200 p-3">
+              <Badge className={cn("min-w-10 justify-center border", LEVEL_STYLE[item.level])}>
+                {item.level}
+              </Badge>
+              <p className="text-xs leading-5 text-slate-500">{item.description}</p>
+            </div>
+          ))}
+        </div>
+        <p className="border-t border-slate-200 px-4 py-3 text-xs text-slate-500">
+          Rregullat zbatohen automatikisht sipas rendit E → D → M → C → A+ → A → B; evidenca më kufizuese ka përparësi.
+        </p>
+      </details>
+
       <div className="min-h-[680px]">
-        <Card className="overflow-hidden border-border/70 shadow-sm">
+        <Card className="overflow-hidden rounded-2xl border-slate-200 bg-white shadow-sm">
           {selected ? (
             <>
-              <CardHeader className="border-b bg-muted/20">
+              <CardHeader className="border-b border-slate-200 bg-slate-50">
                 <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                   <div>
                     <div className="flex flex-wrap items-center gap-2">
-                      <CardTitle className="text-2xl">{selected.user_name}</CardTitle>
+                      <CardTitle className="text-2xl text-slate-900">{selected.user_name}</CardTitle>
                       {grade ? <Badge className={cn("border px-3 py-1 text-sm", LEVEL_STYLE[grade])}>{grade} · {selected.final_symbol || selected.suggested_symbol}</Badge> : null}
                       {selected.reviewed_at ? <Badge variant="secondary"><CheckCircle2 className="mr-1 h-3 w-3" /> Rishikuar</Badge> : null}
                     </div>
-                    <CardDescription className="mt-2 max-w-3xl">{selected.auto_narrative || "Rezultati do të argumentohet nga taskat, prezenca dhe evidenca e verifikuar."}</CardDescription>
+                    <CardDescription className="mt-2 max-w-3xl text-slate-500">{selected.auto_narrative || "Rezultati do të argumentohet nga taskat, prezenca dhe evidenca e verifikuar."}</CardDescription>
                   </div>
                   <div className="flex flex-wrap gap-2">
                     <Button size="sm" variant="outline" onClick={() => setEvidenceOpen(true)} disabled={data?.period.status === "LOCKED"}><Plus className="h-4 w-4" /> Evidencë</Button>
@@ -887,23 +939,23 @@ export default function RealizationPage() {
                 </div>
               </CardHeader>
               <CardContent className="space-y-7 py-6">
-                <section className="rounded-2xl border bg-muted/15 p-4 sm:p-5">
+                <section className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:p-5">
                   <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
                     <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">Barazimi javor</p>
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Barazimi javor</p>
                       <div className="mt-2 flex flex-wrap items-center gap-2 text-sm">
-                        <span className="font-semibold">{selectedWeeklyPlanned} të planifikuara</span>
-                        <ArrowRight className="h-4 w-4 text-muted-foreground" />
+                        <span className="font-semibold text-slate-900">{selectedWeeklyPlanned} të planifikuara</span>
+                        <ArrowRight className="h-4 w-4 text-slate-400" />
                         <span className="font-semibold text-emerald-700">{selectedWeeklyCompleted} të përfunduara</span>
-                        <span className="text-muted-foreground">·</span>
+                        <span className="text-slate-400">·</span>
                         <span className="font-semibold text-rose-700">{Math.max(0, selectedWeeklyPlanned - selectedWeeklyCompleted)} të mbetura</span>
-                        <span className="text-muted-foreground">·</span>
+                        <span className="text-slate-400">·</span>
                         <span className="font-semibold text-blue-700">+{selectedWeeklyAdditional} shtesë</span>
                       </div>
-                      <p className="mt-2 text-xs text-muted-foreground">Detyrat shtesë paraqiten veçmas; nuk e rrisin artificialisht përqindjen e planit bazë.</p>
+                      <p className="mt-2 text-xs text-slate-500">Detyrat shtesë paraqiten veçmas; nuk e rrisin artificialisht përqindjen e planit bazë.</p>
                     </div>
-                    <div className="min-w-52 rounded-xl border bg-background px-4 py-3">
-                      <div className="flex items-end justify-between"><span className="text-xs text-muted-foreground">Realizimi i planit</span><span className="text-2xl font-semibold">{selected.facts_json.weekly_progress_percent || 0}%</span></div>
+                    <div className="min-w-52 rounded-xl border border-slate-200 bg-white px-4 py-3">
+                      <div className="flex items-end justify-between"><span className="text-xs text-slate-500">Realizimi i planit</span><span className="text-2xl font-semibold text-slate-900">{selected.facts_json.weekly_progress_percent || 0}%</span></div>
                       <ProgressBar value={selected.facts_json.weekly_progress_percent || 0} className="mt-2 h-2.5" />
                     </div>
                   </div>
@@ -912,17 +964,17 @@ export default function RealizationPage() {
                 <section>
                   <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
                     <div>
-                      <h2 className="text-lg font-semibold">Planifikuar kundrejt realizuar, ditë pas dite</h2>
-                      <p className="mt-1 text-xs text-muted-foreground">Secila kolonë ruan planin e asaj dite dhe gjendjen në snapshot-in e orës 16:20.</p>
+                      <h2 className="text-lg font-semibold text-slate-900">Planifikuar kundrejt realizuar, ditë pas dite</h2>
+                      <p className="mt-1 text-xs text-slate-500">Secila kolonë ruan planin e asaj dite dhe gjendjen në snapshot-in e orës 16:20.</p>
                     </div>
                     {isLive ? <Badge variant="outline"><Clock3 className="mr-1 h-3 w-3" /> Raport operativ</Badge> : <Badge variant="secondary"><CheckCircle2 className="mr-1 h-3 w-3" /> Raport final</Badge>}
                   </div>
                   <div className="grid gap-3 xl:grid-cols-5">
                     {selectedTimeline.map((day) => (
-                      <div key={day.date} className="flex min-h-64 flex-col overflow-hidden rounded-xl border bg-card">
-                        <div className="border-b bg-muted/40 px-3 py-3">
+                      <div key={day.date} className="flex min-h-64 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
+                        <div className="border-b border-slate-200 bg-slate-50 px-3 py-3">
                           <div className="flex items-start justify-between gap-2">
-                            <div><p className="font-semibold">{day.label}</p><p className="text-[11px] text-muted-foreground">{day.date.split("-").reverse().join(".")}</p></div>
+                            <div><p className="font-semibold text-slate-900">{day.label}</p><p className="text-[11px] text-slate-500">{day.date.split("-").reverse().join(".")}</p></div>
                             {day.snapshot?.has_snapshot ? (
                               <Badge variant="secondary" className="text-[10px]">{day.snapshot.daily_progress_percent}%</Badge>
                             ) : (
@@ -930,7 +982,7 @@ export default function RealizationPage() {
                             )}
                           </div>
                           <div className="mt-2 grid grid-cols-4 gap-1 text-center text-[10px]">
-                            <div className="rounded bg-background px-1 py-1"><strong className="block text-sm">{day.plannedTasks.length}</strong>Plan</div>
+                            <div className="rounded bg-white px-1 py-1 text-slate-600"><strong className="block text-sm text-slate-900">{day.plannedTasks.length}</strong>Plan</div>
                             <div className="rounded bg-emerald-50 px-1 py-1 text-emerald-800"><strong className="block text-sm">{day.completedTasks.length}</strong>Kryer</div>
                             <div className="rounded bg-blue-50 px-1 py-1 text-blue-800"><strong className="block text-sm">{day.additionalTasks.length}</strong>Shtesë</div>
                             <div className="rounded bg-violet-50 px-1 py-1 text-violet-800"><strong className="block text-sm">{day.systemTasks.length}</strong>Sistem</div>
@@ -939,8 +991,8 @@ export default function RealizationPage() {
                         <div className="flex-1 space-y-2 p-2.5">
                           {day.groups.map((group) => (
                             <div key={`${day.date}-${group.key}`} className="space-y-1.5">
-                              <div className="flex items-center gap-2 px-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
-                                <span>{group.label}</span><span className="h-px flex-1 bg-border" /><span>{group.tasks.length}</span>
+                              <div className="flex items-center gap-2 px-0.5 pt-1 text-[10px] font-semibold uppercase tracking-wide text-slate-500">
+                                <span>{group.label}</span><span className="h-px flex-1 bg-slate-200" /><span>{group.tasks.length}</span>
                               </div>
                               {group.tasks.map((task) => (
                                 <DayTaskCard
@@ -952,12 +1004,12 @@ export default function RealizationPage() {
                             </div>
                           ))}
                           {!day.plannedTasks.length && !day.additionalTasks.length && !day.systemTasks.length && !day.completionOnlyTasks.length ? (
-                            <div className="flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed text-center text-xs text-muted-foreground">
+                            <div className="flex min-h-24 flex-col items-center justify-center rounded-lg border border-dashed border-slate-200 text-center text-xs text-slate-500">
                               <CircleDashed className="mb-2 h-5 w-5" />Nuk ka detyra për këtë ditë
                             </div>
                           ) : null}
                         </div>
-                        <div className={cn("border-t px-3 py-2 text-[11px]", day.remainingTasks.length ? "bg-rose-50 text-rose-800" : "bg-emerald-50 text-emerald-800")}>
+                        <div className={cn("border-t px-3 py-2 text-[11px]", day.remainingTasks.length ? "border-rose-100 bg-rose-50 text-rose-800" : "border-emerald-100 bg-emerald-50 text-emerald-800")}>
                           {day.remainingTasks.length ? `${day.remainingTasks.length} nga plani mbetën pa u përfunduar` : day.plannedTasks.length ? "Plani i ditës është përfunduar" : "Pa obligime të planifikuara"}
                         </div>
                       </div>
@@ -966,15 +1018,15 @@ export default function RealizationPage() {
                 </section>
 
                 {selected.facts_json.project_progress?.length ? (
-                  <section><h2 className="mb-3 font-semibold">Projektet MST / TT</h2><div className="grid gap-3 md:grid-cols-2">{selected.facts_json.project_progress.map((project) => <div key={project.project_id} className="rounded-xl border p-4"><div className="flex justify-between gap-3"><div><p className="font-medium">{project.project_title}</p><p className="text-xs text-muted-foreground">{project.task_count} detyra · mesatare e progresit real</p></div><span className="font-semibold">{project.progress_percent}%</span></div><ProgressBar value={project.progress_percent} className="mt-3" /></div>)}</div></section>
+                  <section><h2 className="mb-3 font-semibold text-slate-900">Projektet MST / TT</h2><div className="grid gap-3 md:grid-cols-2">{selected.facts_json.project_progress.map((project) => <div key={project.project_id} className="rounded-xl border border-slate-200 bg-white p-4"><div className="flex justify-between gap-3"><div><p className="font-medium text-slate-900">{project.project_title}</p><p className="text-xs text-slate-500">{project.task_count} detyra · mesatare e progresit real</p></div><span className="font-semibold text-slate-900">{project.progress_percent}%</span></div><ProgressBar value={project.progress_percent} className="mt-3" /></div>)}</div></section>
                 ) : null}
 
                 {aiAnalysis ? (
-                  <section className="rounded-2xl border border-violet-200 bg-violet-50/70 p-5 dark:border-violet-900 dark:bg-violet-950/20">
+                  <section className="rounded-2xl border border-indigo-100 bg-indigo-50/60 p-5">
                     <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
                       <div className="max-w-4xl">
-                        <h2 className="flex items-center gap-2 font-semibold"><Bot className="h-4 w-4 text-violet-600" /> Analiza inteligjente — vetëm këshilluese</h2>
-                        <p className="mt-2 text-sm leading-6">{aiAnalysis.summary}</p>
+                        <h2 className="flex items-center gap-2 font-semibold text-slate-900"><Bot className="h-4 w-4 text-indigo-600" /> Analiza inteligjente — vetëm këshilluese</h2>
+                        <p className="mt-2 text-sm leading-6 text-slate-700">{aiAnalysis.summary}</p>
                       </div>
                       <div className="flex shrink-0 items-center gap-2"><Badge variant="outline">Sugjerimi {aiAnalysis.suggested_level}</Badge><Badge variant="secondary">Siguria {Math.round(aiAnalysis.confidence * 100)}%</Badge></div>
                     </div>
@@ -983,20 +1035,42 @@ export default function RealizationPage() {
                       <div className="rounded-xl border border-rose-200 bg-rose-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-rose-800">Për vëmendje</p><ul className="mt-2 space-y-1 text-xs text-rose-950">{aiAnalysis.problems.length ? aiAnalysis.problems.map((item) => <li key={item}>• {item}</li>) : <li>• Nuk ka problem të provuar.</li>}</ul></div>
                       <div className="rounded-xl border border-amber-200 bg-amber-50 p-3"><p className="text-xs font-semibold uppercase tracking-wide text-amber-800">Duhet konfirmuar</p><ul className="mt-2 space-y-1 text-xs text-amber-950">{aiAnalysis.missing_evidence.length ? aiAnalysis.missing_evidence.map((item) => <li key={item}>• {item}</li>) : <li>• Evidenca është e plotë.</li>}</ul></div>
                     </div>
-                    <p className="mt-3 text-[10px] text-muted-foreground">Burimi: {aiAnalysis.model}. Analiza përdor vetëm detyrat, snapshot-et dhe evidencat e verifikuara; vendimi final mbetet njerëzor.</p>
+                    <p className="mt-3 text-[10px] text-slate-500">Burimi: {aiAnalysis.model}. Analiza përdor vetëm detyrat, snapshot-et dhe evidencat e verifikuara; vendimi final mbetet njerëzor.</p>
                   </section>
                 ) : null}
 
-                <details className="group overflow-hidden rounded-xl border bg-card">
-                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-muted/30 px-4 py-3 text-sm font-semibold">
+                {aiHistory.length > 1 ? (
+                  <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                    <summary className="cursor-pointer list-none bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
+                      Historiku i analizave AI ({aiHistory.length})
+                    </summary>
+                    <div className="divide-y divide-slate-100 px-4">
+                      {aiHistory.map((entry, index) => (
+                        <div key={`${entry.generated_at}-${index}`} className="py-3">
+                          <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+                            <span className="font-medium text-slate-700">
+                              {entry.generated_at ? new Date(entry.generated_at).toLocaleString() : "—"}
+                            </span>
+                            <Badge variant="outline" className="text-[10px]">Sugjerimi {entry.suggested_level}</Badge>
+                            <Badge variant="secondary" className="text-[10px]">Siguria {Math.round(entry.confidence * 100)}%</Badge>
+                          </div>
+                          <p className="mt-1.5 text-sm leading-6 text-slate-700">{entry.summary}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </details>
+                ) : null}
+
+                <details className="group overflow-hidden rounded-2xl border border-slate-200 bg-white">
+                  <summary className="flex cursor-pointer list-none items-center justify-between gap-3 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">
                     <span>Detajet e vlerësimit dhe argumentimit</span>
                     <Badge variant="outline">{selectedQuestions.length} pika</Badge>
                   </summary>
                   <div className="p-4">
                   <div className="mb-4 flex flex-wrap items-end justify-between gap-2">
                     <div>
-                      <h2 className="font-semibold">Pyetjet dhe argumentimi</h2>
-                      <p className="mt-1 text-xs text-muted-foreground">Të 15 pyetjet e barazimit: automatike kur ka prova; për konfirmim kur kërkohet gjykim njerëzor.</p>
+                      <h2 className="font-semibold text-slate-900">Pyetjet dhe argumentimi</h2>
+                      <p className="mt-1 text-xs text-slate-500">Të 15 pyetjet e barazimit: automatike kur ka prova; për konfirmim kur kërkohet gjykim njerëzor.</p>
                     </div>
                     <Badge variant="outline">
                       {selectedQuestions.filter((question) => !["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(question.source_status)).length} automatike · {selectedQuestions.filter((question) => ["AUTO_NEEDS_CONFIRMATION", "MISSING_EVIDENCE"].includes(question.source_status)).length} për konfirmim
@@ -1008,8 +1082,8 @@ export default function RealizationPage() {
                         .map((key) => selectedQuestions.find((question) => question.key === key))
                         .filter((question): question is RealizationQuestion => Boolean(question))
                       return (
-                        <div key={section.title} className="overflow-hidden rounded-xl border bg-card">
-                          <div className="border-b bg-primary px-4 py-3 text-sm font-semibold text-primary-foreground">{section.title}</div>
+                        <div key={section.title} className="overflow-hidden rounded-xl border border-slate-200 bg-white">
+                          <div className="border-b border-slate-200 bg-slate-100 px-4 py-3 text-sm font-semibold text-slate-700">{section.title}</div>
                           <div className="px-4">
                             {questions.map((question) => <QuestionRow key={question.key} question={question} />)}
                           </div>
@@ -1020,12 +1094,12 @@ export default function RealizationPage() {
                   </div>
                 </details>
 
-                <details className="overflow-hidden rounded-xl border bg-card"><summary className="cursor-pointer list-none bg-muted/30 px-4 py-3 text-sm font-semibold">Evidenca teknike e detyrave ({selected.facts_json.tasks?.length || 0})</summary><div className="max-h-72 overflow-y-auto border-t"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-muted"><tr><th className="px-3 py-2 font-medium">Detyra</th><th className="px-3 py-2 font-medium">Burimi</th><th className="px-3 py-2 font-medium">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t"><td className="px-3 py-2"><p className="font-medium">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-muted-foreground">{task.task_id || task.match_key}</p></td><td className="px-3 py-2">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></details>
+                <details className="overflow-hidden rounded-2xl border border-slate-200 bg-white"><summary className="cursor-pointer list-none bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-900">Evidenca teknike e detyrave ({selected.facts_json.tasks?.length || 0})</summary><div className="max-h-72 overflow-y-auto border-t border-slate-200"><table className="w-full text-left text-sm"><thead className="sticky top-0 bg-slate-50"><tr><th className="px-3 py-2 font-medium text-slate-700">Detyra</th><th className="px-3 py-2 font-medium text-slate-700">Burimi</th><th className="px-3 py-2 font-medium text-slate-700">Statusi</th></tr></thead><tbody>{(selected.facts_json.tasks || []).map((task) => <tr key={`${task.match_key}-${task.attribution}`} className="border-t border-slate-200"><td className="px-3 py-2"><p className="font-medium text-slate-900">{cleanTaskTitle(task.title)}</p><p className="text-[11px] text-slate-500">{task.task_id || task.match_key}</p></td><td className="px-3 py-2 text-slate-700">{TASK_SOURCE_LABEL[task.source_type] || task.source_type}</td><td className="px-3 py-2"><Badge variant="outline">{TASK_STATUS_LABEL[task.classification] || task.classification}</Badge></td></tr>)}</tbody></table></div></details>
 
-                {user.role === "ADMIN" && data ? <div className="flex flex-wrap justify-end gap-2 border-t pt-5">{data.period.status === "REVIEWED" ? <Button variant="outline" onClick={() => void run("approve", `/realization/periods/${data.period.id}/approve`, { method: "POST" })} disabled={!!action}><ShieldCheck className="h-4 w-4" /> Aprovo raportin</Button> : null}{data.period.status === "APPROVED" ? <Button variant="destructive" onClick={() => void run("lock", `/realization/periods/${data.period.id}/lock`, { method: "POST" })} disabled={!!action}><LockKeyhole className="h-4 w-4" /> Blloko përfundimisht</Button> : null}</div> : null}
+                {user.role === "ADMIN" && data ? <div className="flex flex-wrap justify-end gap-2 border-t border-slate-200 pt-5">{data.period.status === "REVIEWED" ? <Button variant="outline" onClick={() => void run("approve", `/realization/periods/${data.period.id}/approve`, { method: "POST" })} disabled={!!action}><ShieldCheck className="h-4 w-4" /> Aprovo raportin</Button> : null}{data.period.status === "APPROVED" ? <Button variant="destructive" onClick={() => void run("lock", `/realization/periods/${data.period.id}/lock`, { method: "POST" })} disabled={!!action}><LockKeyhole className="h-4 w-4" /> Blloko përfundimisht</Button> : null}</div> : null}
               </CardContent>
             </>
-          ) : <div className="flex min-h-[500px] items-center justify-center text-sm text-muted-foreground">Zgjidh një person nga ekipi.</div>}
+          ) : <div className="flex min-h-[500px] items-center justify-center text-sm text-slate-500">Zgjidh një person nga ekipi.</div>}
         </Card>
       </div>
 
@@ -1075,11 +1149,11 @@ export default function RealizationPage() {
           <div className="space-y-4">
             <div className="space-y-1.5"><Label>Kategoria</Label><Select value={evidenceCategory} onValueChange={setEvidenceCategory}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent>{[["QUALITY", "Cilësi / angazhim ekstra"], ["PROPOSAL", "Propozim"], ["REQUESTED_EXTRA_TASK", "Kërkoi detyra shtesë"], ["HELPED_COLLEAGUE", "Ndihmoi koleg"], ["EXTRA_TASK", "Detyrë shtesë e përfunduar"], ["REPEATED_PROBLEM", "Problem i përsëritur"], ["BLOCKER", "I prishi planin kolegut"], ["MISSED_MEETING", "Takim i humbur"], ["ABSENCE", "Mungesë / pushim"]].map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
             {evidenceCategory === "ABSENCE" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Klasifikimi</Label><Select value={absenceClass} onValueChange={setAbsenceClass}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="UNEXCUSED">E papritur / pa aprovim</SelectItem><SelectItem value="APPROVED_PERSONAL">Personale e aprovuar</SelectItem><SelectItem value="ANNUAL_LEAVE">Pushim vjetor</SelectItem></SelectContent></Select></div><div className="space-y-1.5"><Label>Data</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></div> : null}
-            {evidenceCategory === "MISSED_MEETING" ? <><div className="space-y-1.5"><Label>ID e takimit</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div><div className="space-y-1.5"><Label>Data e takimit</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /></div></> : null}
-            {evidenceCategory === "BLOCKER" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>ID e personit të prekur</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div><div className="space-y-1.5"><Label>Ndikimi</Label><Select value={impactLevel} onValueChange={setImpactLevel}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MINOR">I vogël</SelectItem><SelectItem value="MAJOR">I madh</SelectItem><SelectItem value="MULTIPLE_PEOPLE">Disa persona</SelectItem></SelectContent></Select></div></div> : null}
-            {evidenceCategory === "HELPED_COLLEAGUE" ? <div className="space-y-1.5"><Label>ID e kolegut të ndihmuar</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} /></div> : null}
-            {evidenceCategory === "REPEATED_PROBLEM" ? <div className="space-y-1.5"><Label>Çelësi i problemit të përsëritur</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} placeholder="p.sh. kontrolli-final-produktit" /></div> : null}
-            {evidenceCategory === "EXTRA_TASK" ? <div className="space-y-1.5"><Label>ID e detyrës</Label><Input value={taskId} onChange={(event) => setTaskId(event.target.value)} /></div> : null}
+            {evidenceCategory === "MISSED_MEETING" ? <div className="space-y-1.5"><Label>Data e takimit</Label><Input type="date" value={evidenceDate} onChange={(event) => setEvidenceDate(event.target.value)} /><p className="text-xs text-muted-foreground">Përshkruaj takimin te komenti më poshtë — nuk kërkohet ID.</p></div> : null}
+            {evidenceCategory === "BLOCKER" ? <div className="grid gap-3 sm:grid-cols-2"><div className="space-y-1.5"><Label>Kolegu i prekur</Label><Select value={relatedId} onValueChange={setRelatedId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh personin" /></SelectTrigger><SelectContent>{colleagueOptions.map((person) => <SelectItem key={person.id} value={person.user_id}>{person.user_name}</SelectItem>)}</SelectContent></Select></div><div className="space-y-1.5"><Label>Ndikimi</Label><Select value={impactLevel} onValueChange={setImpactLevel}><SelectTrigger className="w-full"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="MINOR">I vogël</SelectItem><SelectItem value="MAJOR">I madh</SelectItem><SelectItem value="MULTIPLE_PEOPLE">Disa persona</SelectItem></SelectContent></Select></div></div> : null}
+            {evidenceCategory === "HELPED_COLLEAGUE" ? <div className="space-y-1.5"><Label>Kolegu i ndihmuar</Label><Select value={relatedId} onValueChange={setRelatedId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh personin" /></SelectTrigger><SelectContent>{colleagueOptions.map((person) => <SelectItem key={person.id} value={person.user_id}>{person.user_name}</SelectItem>)}</SelectContent></Select></div> : null}
+            {evidenceCategory === "REPEATED_PROBLEM" ? <div className="space-y-1.5"><Label>Çelësi i problemit të përsëritur</Label><Input value={relatedId} onChange={(event) => setRelatedId(event.target.value)} placeholder="p.sh. kontrolli-final-produktit" /><p className="text-xs text-muted-foreground">Përdor të njëjtin çelës çdo herë që ky problem përsëritet, që të lidhen automatikisht rastet e njëpasnjëshme.</p></div> : null}
+            {evidenceCategory === "EXTRA_TASK" ? <div className="space-y-1.5"><Label>Detyra shtesë</Label><Select value={taskId} onValueChange={setTaskId}><SelectTrigger className="w-full"><SelectValue placeholder="Zgjidh detyrën" /></SelectTrigger><SelectContent>{extraTaskOptions.map((task) => <SelectItem key={task.task_id} value={task.task_id as string}>{cleanTaskTitle(task.title)}</SelectItem>)}</SelectContent></Select></div> : null}
             <div className="space-y-1.5"><Label>Argumenti / komenti</Label><Textarea value={evidenceComment} onChange={(event) => setEvidenceComment(event.target.value)} rows={4} placeholder="Përshkruaj çfarë ndodhi dhe si mund të verifikohet..." /></div>
             <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs text-muted-foreground">Marker automatik: <strong>{evidenceMarker}</strong>. Nota ndryshon vetëm sipas rregullave dhe evidencës së verifikuar.</div>
           </div>

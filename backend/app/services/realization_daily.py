@@ -198,7 +198,7 @@ async def calculate_daily_period(
     for row in assignee_rows:
         assignees[row.task_id].add(row.user_id)
     for task in tasks:
-        if task.assigned_to:
+        if task.assigned_to and not assignees.get(task.id):
             assignees[task.id].add(task.assigned_to)
 
     excluded_on_leave = {
@@ -260,17 +260,23 @@ async def calculate_daily_period(
         task = task_by_id.get(raw.get("task_id"))
         progress = daily_progress.get(raw.get("task_id"))
         occurrence_users: dict[uuid.UUID, bool] = {}
-        for assignment in raw.get("assignees") or []:
-            user_id = assignment.get("assignee_id")
-            if user_id:
-                occurrences = raw.get("occurrences") or []
-                occurrence_users[user_id] = any(
-                    occurrence.get("day") == day
-                    and occurrence.get("assignee_id") in {None, user_id}
-                    for occurrence in occurrences
-                ) or (
-                    not occurrences and _local_date(raw.get("planned_due_date")) == day
-                )
+        task_id = raw.get("task_id")
+        current_owner_ids = assignees.get(task_id, set()) if task_id else set()
+        snapshot_owner_ids = {
+            assignment.get("assignee_id")
+            for assignment in raw.get("assignees") or []
+            if assignment.get("assignee_id")
+        }
+        owner_ids = current_owner_ids or snapshot_owner_ids
+        occurrences = raw.get("occurrences") or []
+        for user_id in owner_ids:
+            # Ownership comes from the live assignment table. Snapshot occurrence
+            # assignees are historical and must not leak another person's task.
+            occurrence_users[user_id] = any(
+                occurrence.get("day") == day for occurrence in occurrences
+            ) or (
+                not occurrences and _local_date(raw.get("planned_due_date")) == day
+            )
         for user_id, due_today in occurrence_users.items():
             if user_id not in people:
                 continue
@@ -499,6 +505,13 @@ async def calculate_daily_period(
                 department_id=period.department_id,
             )
             db.add(result)
+        previous_facts = result.facts_json or {}
+        previous_ai_analysis = previous_facts.get("ai_analysis")
+        if previous_ai_analysis:
+            person["ai_analysis"] = previous_ai_analysis
+        previous_ai_history = previous_facts.get("ai_analysis_history")
+        if previous_ai_history:
+            person["ai_analysis_history"] = previous_ai_history
         result.facts_json = person
         result.planned_count = planned_today
         result.completed_on_time_count = completed_today

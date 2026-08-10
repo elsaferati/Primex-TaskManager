@@ -29,7 +29,6 @@ REPORT_VERSION = "1.2"
 DEFAULT_TIMEZONE = "Europe/Tirane"
 VALID_STATUSES = {"TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"}
 VALID_PRIORITIES = {"NORMAL", "HIGH"}
-VALID_FINISH_PERIODS = {"AM", "PM"}
 TECHNICAL_MARKUP = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
 NUMBERED_INSTRUCTION = re.compile(r"(?:^|\s)(?:\d+[.)]|[-•])\s+", re.MULTILINE)
 OFFICIAL_PROJECT_IDENTIFIERS = {
@@ -53,12 +52,11 @@ ROUTINE_PATTERNS = (
 )
 
 AUDIT_CHECK_REGISTRY: dict[str, tuple[str, ...]] = {
-    "date": ("TASK_DATE_MISSING", "TASK_DATE_OUTSIDE_WEEK", "DUE_DATE_MISSING", "DATE_RANGE_INCONSISTENT"),
+    "date": ("TASK_DATE_MISSING", "TASK_DATE_OUTSIDE_WEEK", "DATE_RANGE_INCONSISTENT"),
     "status": ("STATUS_MISSING", "STATUS_INVALID"),
     "priority": ("PRIORITY_MISSING", "PRIORITY_INVALID"),
-    "AM/PM": ("FINISH_PERIOD_MISSING",),
-    "KO1": ("KO_DESIGNATION_INVALID", "KO_OWNER_MISSING"),
-    "KO2": ("KO_DESIGNATION_INVALID", "KO_OWNER_MISSING"),
+    "KO1": ("KO_OWNER_MISSING",),
+    "KO2": ("KO_OWNER_MISSING",),
     "Total/Mesatare": ("TOTAL_AVERAGE_INVALID",),
     "1H": ("ONE_H_SLOT_MISSING",),
     "R1": ("R1_FORMAT_INVALID",),
@@ -70,8 +68,7 @@ AUDIT_CHECK_REGISTRY: dict[str, tuple[str, ...]] = {
 APPROVED_CHECK_DIMENSIONS = tuple(AUDIT_CHECK_REGISTRY)
 TASK_INTRINSIC_RULES = frozenset({
     "STATUS_MISSING", "STATUS_INVALID", "PRIORITY_MISSING", "PRIORITY_INVALID",
-    "FINISH_PERIOD_MISSING", "DUE_DATE_MISSING", "DATE_RANGE_INCONSISTENT",
-    "KO_DESIGNATION_INVALID", "KO_OWNER_MISSING", "TOTAL_AVERAGE_INVALID",
+    "DATE_RANGE_INCONSISTENT", "KO_OWNER_MISSING", "TOTAL_AVERAGE_INVALID",
     "ONE_H_SLOT_MISSING", "R1_FORMAT_INVALID", "PERSONAL_FORMAT_INVALID",
     "WFC_FORMAT_INVALID", "BLL_FORMAT_INVALID", "BKP_FORMAT_INVALID",
     "TITLE_TOO_LONG", "MULTIPLE_INSTRUCTIONS_IN_TITLE",
@@ -129,6 +126,7 @@ class AuditError:
     correction: str
     rule_code: str
     severity: str
+    project_id: str | None = None
     move_to_notes: str = ""
     weekly_focus: str = ""
     source: str = "Weekly Planner"
@@ -177,7 +175,7 @@ class WeeklyPlanningAuditReport:
     abbreviation_version: str = "2026.1"
     abbreviation_source: str = "Official PX abbreviation dictionary"
     abbreviation_updated_at: str = "2026-07-31"
-    ai_status: str = "not_requested"
+    ai_status: str = "not_needed"
     ai_model: str | None = None
     executed_checks: list[str] = field(default_factory=list)
 
@@ -325,8 +323,6 @@ def extract_px_abbreviations(title: str | None, abbreviations: dict[str, str]) -
 
 
 def _uses_unofficial_abbreviation(occurrence: AuditTaskOccurrence) -> bool:
-    if occurrence.project_id is not None:
-        return False
     title = clean_technical_markup(occurrence.title).upper()
     # RREG has repeatedly been used as an invented abbreviation; it is explicitly
     # not in the official dictionary. Unknown project codes remain untouched.
@@ -340,8 +336,58 @@ def _ai_title_introduces_unknown_abbreviation(
 ) -> bool:
     proposed_tokens = set(re.findall(r"\b[A-ZÇË][A-ZÇË0-9]{1,7}\b", proposed_title))
     current_tokens = set(re.findall(r"\b[A-ZÇË][A-ZÇË0-9]{1,7}\b", current_title))
-    allowed = {key.upper() for key in official_abbreviations} | {"KO1", "KO2"}
+    allowed = {key.upper() for key in official_abbreviations}
     return bool(proposed_tokens - current_tokens - allowed)
+
+
+def validated_ai_errors_by_user(
+    ai_result: dict[str, Any] | None,
+    occurrences: Iterable[AuditTaskOccurrence],
+    official_abbreviations: dict[str, str],
+) -> dict[uuid.UUID, list[AuditError]]:
+    """Convert only grounded, complete AI title findings into auditable errors."""
+    occurrences_by_task_id: dict[str, list[AuditTaskOccurrence]] = defaultdict(list)
+    for occurrence in occurrences:
+        if occurrence.task_id is not None:
+            occurrences_by_task_id[str(occurrence.task_id)].append(occurrence)
+    accepted: dict[uuid.UUID, list[AuditError]] = defaultdict(list)
+    for item in ((ai_result or {}).get("errors") or []):
+        if not isinstance(item, dict):
+            continue
+        matching_occurrences = occurrences_by_task_id.get(str(item.get("task_id") or ""), [])
+        problem = clean_technical_markup(str(item.get("problem") or ""))
+        correction = clean_technical_markup(str(item.get("correction") or ""))
+        proposed_raw = clean_technical_markup(str(item.get("proposed_title") or ""))
+        severity = str(item.get("severity") or "").upper()
+        if not matching_occurrences or not problem or not correction or not proposed_raw:
+            continue
+        if severity not in {"HIGH", "MEDIUM", "LOW"}:
+            continue
+        for occurrence in matching_occurrences:
+            proposed_title = suggested_concise_title(proposed_raw)
+            if _ai_title_introduces_unknown_abbreviation(
+                proposed_title,
+                clean_technical_markup(occurrence.title),
+                official_abbreviations,
+            ):
+                continue
+            _, move_to_notes = split_title_and_notes(occurrence.title)
+            accepted[occurrence.user_id].append(AuditError(
+                employee=occurrence.employee,
+                department=occurrence.department,
+                task_id=str(occurrence.task_id),
+                project_id=str(occurrence.project_id) if occurrence.project_id else None,
+                task_date=occurrence.task_date,
+                current_title=clean_technical_markup(occurrence.title),
+                problem=problem,
+                proposed_title=proposed_title,
+                correction=correction,
+                rule_code="AI_TITLE_SEMANTIC",
+                severity=severity,
+                move_to_notes=move_to_notes,
+                source="AI semantic audit",
+            ))
+    return dict(accepted)
 
 
 def is_routine_or_system_work(occurrence: AuditTaskOccurrence) -> bool:
@@ -416,30 +462,44 @@ def select_weekly_focus(occurrences: Iterable[AuditTaskOccurrence]) -> FocusDeci
             score=0,
         )
 
-    ranked: list[tuple[int, int, date, str, str, dict[str, Any]]] = []
+    ranked: list[tuple[int, int, int, int, int, int, date, str, str, dict[str, Any]]] = []
     for key, group in groups.items():
         stable_task_id = min(group["task_ids"]) if group["task_ids"] else key
         ranked.append((
-            -int(group["valid_priority"]),
+            -int(group["project_id"] is not None),
+            -int(group["project_priority"] > 0),
             -len(group["days"]),
+            -group["count"],
+            -group["high"],
+            -group["deadline"],
             group["earliest"],
             stable_task_id,
             key,
             group,
         ))
     ranked.sort()
-    _, negative_days, _, _, _, winner = ranked[0]
+    _, _, negative_days, negative_count, negative_high, negative_deadline, _, _, _, winner = ranked[0]
     source_task_id = sorted(winner["task_ids"])[0] if winner["task_ids"] else None
     source_project_id = str(winner["project_id"]) if winner["project_id"] else None
+    source_label = f"Project {source_project_id}" if source_project_id else f"Task {source_task_id or winner['label']}"
     source = (
-        f"Project {source_project_id}" if source_project_id else f"Task {source_task_id or winner['label']}"
+        f"{source_label}; {len(winner['days'])} ditë, {winner['count']} paraqitje, "
+        f"HIGH={winner['high']}, deadline={winner['deadline']}"
+    )
+    score = (
+        int(winner["project_id"] is not None) * 1_000_000
+        + int(winner["project_priority"] > 0) * 100_000
+        + (-negative_days) * 10_000
+        + (-negative_count) * 100
+        + (-negative_high) * 10
+        + (-negative_deadline)
     )
     return FocusDecision(
         label=winner["label"],
         source=source,
         source_task_id=source_task_id,
         source_project_id=source_project_id,
-        score=-negative_days,
+        score=score,
     )
 
 
@@ -452,14 +512,14 @@ def _error(
     severity: str,
 ) -> AuditError:
     cleaned_title = clean_technical_markup(occurrence.title)
-    display_title = cleaned_title.splitlines()[0] if cleaned_title else ""
     _, move_to_notes = split_title_and_notes(occurrence.title)
     return AuditError(
         employee=occurrence.employee,
         department=occurrence.department,
         task_id=str(occurrence.task_id) if occurrence.task_id else None,
+        project_id=str(occurrence.project_id) if occurrence.project_id else None,
         task_date=occurrence.task_date,
-        current_title=display_title,
+        current_title=cleaned_title,
         problem=problem,
         proposed_title=suggested_concise_title(occurrence.title),
         correction=correction,
@@ -468,6 +528,25 @@ def _error(
         move_to_notes=move_to_notes,
         source=occurrence.source,
     )
+
+
+def should_require_priority(occurrence: AuditTaskOccurrence) -> bool:
+    """Task.priority is mandatory for real Task rows, but not synthetic/system rows."""
+    return bool(
+        occurrence.task_id
+        and not occurrence.is_system
+        and occurrence.system_template_origin_id is None
+    )
+
+
+def should_require_due_date(occurrence: AuditTaskOccurrence) -> bool:
+    """Planner visibility is authoritative; due_date is nullable in the Task model.
+
+    Some legitimate PCM KO occurrences are derived from production/project dates, so
+    this audit must not turn a nullable implementation detail into a planning error.
+    """
+    del occurrence
+    return False
 
 
 def validate_task_occurrence(
@@ -516,7 +595,7 @@ def validate_task_occurrence(
             rule="STATUS_INVALID", severity="HIGH",
         ))
 
-    if not occurrence.is_system:
+    if should_require_priority(occurrence):
         priority = (occurrence.priority or "").upper()
         if not priority:
             errors.append(_error(
@@ -529,16 +608,9 @@ def validate_task_occurrence(
                 correction="Përdor prioritetin NORMAL ose HIGH.", rule="PRIORITY_INVALID", severity="MEDIUM",
             ))
 
-        if occurrence.finish_period not in VALID_FINISH_PERIODS:
-            errors.append(_error(
-                occurrence, problem="Mungon periudha AM/PM e përfundimit.",
-                correction="Zgjidh AM ose PM për ditën e planifikuar.",
-                rule="FINISH_PERIOD_MISSING", severity="MEDIUM",
-            ))
-
     start_day = _as_date(occurrence.start_date)
     due_day = _as_date(occurrence.due_date)
-    if occurrence.task_id and due_day is None and not occurrence.is_system:
+    if should_require_due_date(occurrence) and due_day is None:
         errors.append(_error(
             occurrence, problem="Detyra nuk ka datë përfundimi.",
             correction="Vendos due date sipas planit javor.", rule="DUE_DATE_MISSING", severity="HIGH",
@@ -559,12 +631,6 @@ def validate_task_occurrence(
             severity="HIGH",
         ))
 
-    if re.search(r"\bKO\b", cleaned_title, re.I) and not re.search(r"\bKO[12]\b", cleaned_title, re.I):
-        errors.append(_error(
-            occurrence, problem="Përcaktimi KO1/KO2 mungon ose nuk është i vlefshëm.",
-            correction="Vendos KO1 ose KO2 vetëm kur kontrolli kërkohet nga formati i detyrës.",
-            rule="KO_DESIGNATION_INVALID", severity="MEDIUM",
-        ))
     if occurrence.ko_required and not occurrence.ko_user_id_present:
         errors.append(_error(
             occurrence, problem="Mungon personi përgjegjës i kontrollit KO për këtë detyrë.",
@@ -579,7 +645,7 @@ def validate_task_occurrence(
             clean_technical_markup(occurrence.internal_notes),
         ) if value
     )
-    if re.search(r"\b(?:Total|Mesatare)\b", task_text, re.I):
+    if occurrence.ko_required:
         has_total = bool(re.search(r"\bTotal\s*[:=]\s*\d+", task_text, re.I))
         has_average = bool(re.search(r"\bMesatare\s*[:=]\s*\d+(?:[.,]\d+)?", task_text, re.I))
         if not (has_total and has_average):
@@ -669,8 +735,21 @@ def partition_users_by_full_week_leave(
 
 
 def is_reportable_person(user: User, excluded_accounts: Iterable[str] | None = None) -> bool:
-    """Active users are included unless an exact identifier is explicitly configured."""
+    """Include active employees, never the real Admin/technical accounts."""
     if not bool(getattr(user, "is_active", True)):
+        return False
+    role = getattr(user, "role", None)
+    role_value = getattr(role, "value", role)
+    if str(role_value or "").upper() == UserRole.ADMIN.value:
+        return False
+    username = str(getattr(user, "username", "") or "").strip().casefold()
+    email_local = str(getattr(user, "email", "") or "").partition("@")[0].strip().casefold()
+    full_name = str(getattr(user, "full_name", "") or "").strip().casefold()
+    if username in {"admin", "administrator", "technical.admin", "technical_admin"}:
+        return False
+    if email_local in {"admin", "administrator", "technical.admin", "technical_admin"}:
+        return False
+    if full_name in {"admin", "administrator", "technical admin"}:
         return False
     excluded = {str(value).strip().casefold() for value in (excluded_accounts or []) if str(value).strip()}
     identifiers = {
@@ -860,21 +939,6 @@ def audit_person_occurrences(
         user_errors.extend(detected)
 
     planned_work = [item for item in occurrences if is_planner_work(item)]
-    if not planned_work:
-        user_errors.append(AuditError(
-            employee=employee,
-            department=department,
-            task_id=None,
-            task_date=None,
-            current_title="",
-            problem="Planifikimi javor nuk përmban detyra pune.",
-            proposed_title="",
-            correction="Shto detyrat reale të punës për javën e raportuar.",
-            rule_code="NO_MEANINGFUL_WEEKLY_PLAN",
-            severity="HIGH",
-            weekly_focus=focus.label,
-            source="Weekly Planner",
-        ))
 
     deduplicated: dict[tuple[str, ...], AuditError] = {}
     for item in user_errors:
@@ -902,7 +966,7 @@ def audit_person_occurrences(
             "user_id": str(user.id),
             "employee": employee,
             "task_id": task_id,
-            "current_title": clean_technical_markup(occurrence.title).splitlines()[0],
+            "current_title": clean_technical_markup(occurrence.title),
             "title_problem": "; ".join(dict.fromkeys(item.problem for item in task_title_errors)),
             "proposed_title": proposed_title,
             "move_to_notes": move_to_notes,
@@ -1012,6 +1076,7 @@ async def build_weekly_planning_audit(
                         "is_routine": is_routine_or_system_work(item),
                     }
                     for item in by_user.get(user.id, [])
+                    if not item.is_system and item.system_template_origin_id is None
                 ],
             }
             for user in included_users
@@ -1020,40 +1085,7 @@ async def build_weekly_planning_audit(
     from app.services.weekly_planning_audit_ai import analyze_weekly_planning_audit
 
     ai_result, ai_status = await analyze_weekly_planning_audit(ai_payload)
-    occurrence_by_task_id = {
-        str(item.task_id): item for item in occurrences if item.task_id is not None
-    }
-    ai_errors_by_user: dict[uuid.UUID, list[AuditError]] = defaultdict(list)
-    for item in ((ai_result or {}).get("errors") or []):
-        if not isinstance(item, dict):
-            continue
-        occurrence = occurrence_by_task_id.get(str(item.get("task_id") or ""))
-        if occurrence is None:
-            continue
-        proposed_title = suggested_concise_title(str(item.get("proposed_title") or occurrence.title))
-        if _ai_title_introduces_unknown_abbreviation(
-            proposed_title,
-            clean_technical_markup(occurrence.title),
-            abbreviations,
-        ):
-            proposed_title = suggested_concise_title(occurrence.title)
-        cleaned_current_title = clean_technical_markup(occurrence.title)
-        display_title = cleaned_current_title.splitlines()[0] if cleaned_current_title else ""
-        _, move_to_notes = split_title_and_notes(occurrence.title)
-        ai_errors_by_user[occurrence.user_id].append(AuditError(
-            employee=occurrence.employee,
-            department=occurrence.department,
-            task_id=str(occurrence.task_id),
-            task_date=occurrence.task_date,
-            current_title=display_title,
-            problem=clean_technical_markup(str(item.get("problem") or "Problem semantik i titullit.")),
-            proposed_title=proposed_title,
-            correction=clean_technical_markup(str(item.get("correction") or "Përditëso titullin dhe kalo sqarimet në Description/Notes.")),
-            rule_code="AI_TITLE_SEMANTIC",
-            severity=str(item.get("severity") or "LOW"),
-            move_to_notes=move_to_notes,
-            source="AI semantic audit",
-        ))
+    ai_errors_by_user = validated_ai_errors_by_user(ai_result, occurrences, abbreviations)
     errors: list[AuditError] = []
     people: list[PersonAudit] = []
     title_cleanup: list[dict[str, Any]] = []

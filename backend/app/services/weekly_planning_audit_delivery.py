@@ -28,7 +28,6 @@ from app.services.weekly_planning_audit_excel import (
     build_weekly_planning_audit_workbook,
     report_filename,
     report_subject,
-    update_weekly_planning_audit_delivery_metadata,
 )
 
 
@@ -379,14 +378,6 @@ async def send_report_run(
         run.status = "SENT"
         run.message_id = delivery.message_id
         run.error_message = None
-        updated = update_weekly_planning_audit_delivery_metadata(
-            path.read_bytes(),
-            delivery_status="Sent",
-            message_id=delivery.message_id,
-            attempt_number=attempt,
-        )
-        _write_atomic(path, updated)
-        run.file_checksum = hashlib.sha256(updated).hexdigest()
         await db.commit()
         logger.info(
             "weekly_planning_audit_sent run_id=%s delivery_id=%s resend=%s message_id=%s",
@@ -395,17 +386,6 @@ async def send_report_run(
         return delivery
     except Exception as exc:
         record_delivery_failure(delivery, run, exc)
-        try:
-            updated = update_weekly_planning_audit_delivery_metadata(
-                path.read_bytes(),
-                delivery_status="Failed",
-                message_id=None,
-                attempt_number=attempt,
-            )
-            _write_atomic(path, updated)
-            run.file_checksum = hashlib.sha256(updated).hexdigest()
-        except Exception:
-            logger.exception("weekly_planning_audit_failure_metadata_update_failed run_id=%s", run.id)
         await db.commit()
         logger.exception(
             "weekly_planning_audit_send_failed run_id=%s delivery_id=%s",

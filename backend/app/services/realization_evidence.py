@@ -300,19 +300,19 @@ async def collect_weekly_evidence(
         else []
     )
     task_map = {task.id: task for task in tasks}
-    outside_assignees: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
-    if completed_outside_snapshot_ids:
+    current_owner_ids: dict[uuid.UUID, set[uuid.UUID]] = defaultdict(set)
+    if task_ids:
         for assignment in (
             await db.execute(
                 select(TaskAssignee).where(
-                    TaskAssignee.task_id.in_(completed_outside_snapshot_ids)
+                    TaskAssignee.task_id.in_(task_ids)
                 )
             )
         ).scalars().all():
-            outside_assignees[assignment.task_id].add(assignment.user_id)
-    for task in completed_department_tasks:
-        if task.id in completed_outside_snapshot_ids and task.assigned_to is not None:
-            outside_assignees[task.id].add(task.assigned_to)
+            current_owner_ids[assignment.task_id].add(assignment.user_id)
+    for task in tasks:
+        if task.assigned_to is not None and not current_owner_ids.get(task.id):
+            current_owner_ids[task.id].add(task.assigned_to)
     progress_rows = (
         (
             await db.execute(
@@ -449,6 +449,20 @@ async def collect_weekly_evidence(
         if observation.user_id is not None:
             ensure_person(observation.user_id, "Employee")
 
+    def assigned_people(task_id: uuid.UUID | None, fallback: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        owners = current_owner_ids.get(task_id, set()) if task_id else set()
+        if not owners:
+            return fallback
+        return [
+            {
+                "assignee_id": owner_id,
+                "assignee_name": active_by_id[owner_id].full_name
+                if owner_id in active_by_id
+                else "Employee",
+            }
+            for owner_id in sorted(owners, key=str)
+        ]
+
     user_ids = list(people)
     attendance = (
         (
@@ -557,7 +571,7 @@ async def collect_weekly_evidence(
                 and positive_delta <= 0
             ),
         }
-        assignees = planned_task["assignees"]
+        assignees = assigned_people(planned_task["task_id"], planned_task["assignees"])
         for assignee in assignees:
             user_id = assignee["assignee_id"]
             if user_id is None:
@@ -630,7 +644,7 @@ async def collect_weekly_evidence(
         if current is not None:
             planned_owner_ids = {
                 item.get("assignee_id")
-                for item in planned_task["assignees"]
+                for item in assignees
                 if item.get("assignee_id") is not None
             }
             actual_credit_supported = bool(
@@ -638,7 +652,7 @@ async def collect_weekly_evidence(
                 and current.get("completed_at")
                 or positive_delta > 0
             )
-            for assignee in current["assignees"]:
+            for assignee in assigned_people(current["task_id"], current["assignees"]):
                 user_id = assignee.get("assignee_id")
                 if user_id is None or user_id in planned_owner_ids:
                     continue
@@ -709,7 +723,7 @@ async def collect_weekly_evidence(
             "meeting_origin_id": source.meeting_origin_id if source else None,
             "attribution": "additional_owner",
         }
-        for assignee in task["assignees"]:
+        for assignee in assigned_people(task["task_id"], task["assignees"]):
             user_id = assignee["assignee_id"]
             if user_id is None:
                 unassigned.append(_iso(fact))
@@ -758,7 +772,7 @@ async def collect_weekly_evidence(
             "meeting_origin_id": source.meeting_origin_id,
             "attribution": "completed_outside_weekly_plan",
         }
-        for user_id in outside_assignees.get(source.id, set()):
+        for user_id in current_owner_ids.get(source.id, set()):
             person = ensure_person(user_id, "Employee")
             if person is None:
                 continue
@@ -854,11 +868,20 @@ async def collect_weekly_evidence(
                     is False
                     and (observation.evidence_json or {}).get("duplicate") is False
                 )
+                # The guide counts a verified request for extra work as one
+                # of the 4 qualifying "extras" for A/A+ on its own — it does
+                # not need to be completed yet (e.g. "kërkoi 1 detyrë shtesë
+                # pasi mbylli planin e vet → A").
+                requested_is_eligible = (
+                    observation.category == "EXTRA_TASK"
+                    and extra_kind == "REQUESTED_EXTRA_TASK"
+                )
                 if observation.marker == "POSITIVE" and (
                     observation.category in {
                         "QUALITY", "TIME_SAVED", "HELPED_COLLEAGUE", "PROPOSAL"
                     }
                     or extra_is_eligible
+                    or requested_is_eligible
                 ):
                     person["counters"]["verified_extra_count"] += 1
                 impact = (observation.evidence_json or {}).get("impact_level")
