@@ -41,7 +41,15 @@ def _local_date(value: datetime | None) -> date | None:
 
 def _system_task_operational_day(task: Task) -> date | None:
     """Place generated work on its occurrence/run day, not its final deadline."""
-    return _local_date(task.origin_run_at or task.start_date or task.due_date)
+    meeting_day = getattr(task, "meeting_occurrence_date", None)
+    if meeting_day is not None:
+        return meeting_day
+    return _local_date(
+        task.origin_run_at
+        or task.start_date
+        or getattr(task, "created_at", None)
+        or task.due_date
+    )
 
 
 def _include_nonplanned_weekly_task(

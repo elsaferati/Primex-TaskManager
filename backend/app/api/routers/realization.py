@@ -615,7 +615,7 @@ async def _weekly_response(
         # Generated occurrences often share a Friday deadline. Their operational
         # day is the actual origin/start run; due_date is only a fallback.
         effective_system_date = func.coalesce(
-            Task.origin_run_at, Task.start_date, Task.due_date
+            Task.origin_run_at, Task.start_date, Task.created_at, Task.due_date
         )
         system_task_rows = (
             await db.execute(

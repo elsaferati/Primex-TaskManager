@@ -352,7 +352,9 @@ class TestWeeklyResponseRegression(unittest.TestCase):
         task = type("Task", (), {
             "origin_run_at": datetime(2026, 8, 4, 8, 0, tzinfo=timezone.utc),
             "start_date": datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
+            "created_at": datetime(2026, 8, 3, 7, 0, tzinfo=timezone.utc),
             "due_date": datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc),
+            "meeting_occurrence_date": None,
         })()
         self.assertEqual(_system_task_operational_day(task).isoformat(), "2026-08-04")
 
@@ -360,9 +362,21 @@ class TestWeeklyResponseRegression(unittest.TestCase):
         task = type("Task", (), {
             "origin_run_at": None,
             "start_date": None,
+            "created_at": None,
             "due_date": datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc),
+            "meeting_occurrence_date": None,
         })()
         self.assertEqual(_system_task_operational_day(task).isoformat(), "2026-08-07")
+
+    def test_legacy_system_task_uses_creation_day_before_shared_deadline(self) -> None:
+        task = type("Task", (), {
+            "origin_run_at": None,
+            "start_date": None,
+            "created_at": datetime(2026, 8, 5, 9, 0, tzinfo=timezone.utc),
+            "due_date": datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc),
+            "meeting_occurrence_date": None,
+        })()
+        self.assertEqual(_system_task_operational_day(task).isoformat(), "2026-08-05")
 
     def test_historical_system_task_is_removed_from_wrong_friday(self) -> None:
         task = {"task_id": "daily-report-1", "source_type": "system"}
