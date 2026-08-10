@@ -480,6 +480,27 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertNotIn(full_point, legacy_marked)
         self.assertIn("2. Ende e hapur", legacy_plain)
 
+    def test_partial_bullet_selection_is_reported_as_the_bullet_subtask(self) -> None:
+        title = "EF: TEST TASK\n• [[done]]Test[[/done]]\n• Still open"
+        full_point = "• Test"
+        self.assertIn(point_key(full_point, field_name="TITLE"), struck_points(title, field_name="TITLE"))
+        event = SimpleNamespace(
+            id="bullet-strike", field_name="TITLE", action="STRUCK",
+            # The original selection contains only the word, without the bullet.
+            point_key=point_key("Test", field_name="TITLE"), point_text="Test",
+            occurred_at=datetime(2026, 8, 10, 15, 20, tzinfo=timezone.utc),
+        )
+        plain, marked = render_text_for_interval(
+            title,
+            [event],
+            interval_start=datetime(2026, 8, 10, 14, 20, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 16, 0, tzinfo=timezone.utc),
+            field_name="TITLE",
+        )
+        self.assertIn(full_point, plain)
+        self.assertIn(f"[[done]]{full_point}[[/done]]", marked)
+        self.assertIn("• Still open", plain)
+
 
 if __name__ == "__main__":
     unittest.main()
