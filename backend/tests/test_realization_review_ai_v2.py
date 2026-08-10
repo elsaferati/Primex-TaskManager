@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 import inspect
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -11,6 +11,7 @@ from app.models.realization import RealizationPersonResult, RealizationQuestionA
 from app.api.routers.realization import (
     _dedupe_timeline_tasks,
     _mark_ai_stale_for_subject,
+    _timeline_task_belongs_on_day,
     _weekly_response,
 )
 from app.schemas.realization import RealizationFinalDecision, RealizationObservationCreate
@@ -30,6 +31,7 @@ from app.services.realization_evidence import (
     qualifies_as_verified_extra,
     verified_positive_counter_updates,
 )
+from app.services.realization_daily import _system_task_operational_day
 from app.services.realization_policy import evaluate_policy
 
 
@@ -345,6 +347,32 @@ class TestWeeklyResponseRegression(unittest.TestCase):
             {"task_id": "task-2", "title": "Daily feed"},
         ])
         self.assertEqual(len(rows), 2)
+
+    def test_system_task_uses_run_day_before_shared_friday_deadline(self) -> None:
+        task = type("Task", (), {
+            "origin_run_at": datetime(2026, 8, 4, 8, 0, tzinfo=timezone.utc),
+            "start_date": datetime(2026, 8, 3, 8, 0, tzinfo=timezone.utc),
+            "due_date": datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc),
+        })()
+        self.assertEqual(_system_task_operational_day(task).isoformat(), "2026-08-04")
+
+    def test_system_task_uses_due_date_only_as_fallback(self) -> None:
+        task = type("Task", (), {
+            "origin_run_at": None,
+            "start_date": None,
+            "due_date": datetime(2026, 8, 7, 16, 0, tzinfo=timezone.utc),
+        })()
+        self.assertEqual(_system_task_operational_day(task).isoformat(), "2026-08-07")
+
+    def test_historical_system_task_is_removed_from_wrong_friday(self) -> None:
+        task = {"task_id": "daily-report-1", "source_type": "system"}
+        operational_days = {"daily-report-1": date(2026, 8, 4)}
+        self.assertFalse(
+            _timeline_task_belongs_on_day(task, date(2026, 8, 7), operational_days)
+        )
+        self.assertTrue(
+            _timeline_task_belongs_on_day(task, date(2026, 8, 4), operational_days)
+        )
 
 
 if __name__ == "__main__":
