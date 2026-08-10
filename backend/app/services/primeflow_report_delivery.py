@@ -94,13 +94,15 @@ def _report_task_text(data: dict) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID,
         if not isinstance(bucket, list):
             continue
         for task in bucket:
-            if not isinstance(task, dict) or task.get("id") is None:
+            if not isinstance(task, dict) or (task.get("task_id") is None and task.get("id") is None):
                 continue
             try:
-                task_id = uuid.UUID(str(task["id"]))
+                # Common View uses a date-specific display id (`task:<id>:<day>`)
+                # but strike history belongs to the underlying task UUID.
+                task_id = uuid.UUID(str(task.get("task_id") or task["id"]))
             except (TypeError, ValueError):
                 continue
-            title = task.get("task_title") or task.get("title") or task.get("task")
+            title = task.get("title") or task.get("task_title") or task.get("task")
             if title is not None:
                 titles[task_id] = str(title)
             if "description" in task:

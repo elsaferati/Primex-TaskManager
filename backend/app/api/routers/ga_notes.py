@@ -410,16 +410,14 @@ async def update_ga_note(
         for task in linked_tasks:
             # Tasks created from GA/KA notes should always track the note title.
             # Keep the stored title aligned with the full note text, only truncating at the task schema limit.
-            old_title = task.title
             task.title = new_task_title
-            if old_title != task.title:
-                record_title_strike_events(
-                    db,
-                    task_id=task.id,
-                    actor_user_id=user.id,
-                    before_title=old_title,
-                    after_title=task.title,
-                )
+            record_title_strike_events(
+                db,
+                task_id=task.id,
+                actor_user_id=user.id,
+                before_title=old_content,
+                after_title=note.content,
+            )
             if task.description == old_default_description:
                 task.description = new_default_description
                 record_description_strike_events(
@@ -517,7 +515,10 @@ async def update_ga_note_task_bundle(
             task.fast_task_group_id = None
         reconcile_result = None
 
-    title_before = {task.id: task.title for task in active_tasks}
+    title_before = {
+        task.id: old_content if "content" in fields_set else task.title
+        for task in active_tasks
+    }
     description_before = {task.id: task.description for task in active_tasks}
 
     title = _ga_note_task_title(note.content) if "content" in fields_set else None
@@ -565,13 +566,14 @@ async def update_ga_note_task_bundle(
 
     for task in active_tasks:
         previous_title = title_before.get(task.id)
-        if previous_title != task.title:
+        current_title = note.content if "content" in fields_set else task.title
+        if previous_title != current_title:
             record_title_strike_events(
                 db,
                 task_id=task.id,
                 actor_user_id=user.id,
                 before_title=previous_title,
-                after_title=task.title,
+                after_title=current_title,
             )
         previous_description = description_before.get(task.id)
         if previous_description != task.description:

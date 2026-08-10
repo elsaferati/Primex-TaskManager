@@ -156,6 +156,46 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("bgcolor=\"#fef3c7\"", html)
         self.assertNotIn("color:#111827", html)
 
+    def test_common_view_source_note_title_keeps_numbered_subtasks(self) -> None:
+        """The source note is the report content, not the short internal task label."""
+        task_id = str(uuid.uuid4())
+        full_note = (
+            "OH/EF: 5 WFC RREG I WEBIT PX\n"
+            "1. Operation Services\n"
+            "2. Customer Support\n"
+            "3. E-commerce & Product Data\n"
+            "4. Design & 3D Visualization\n"
+            "5. IT Solutions"
+        )
+        data = {
+            "generated_at": "2026-08-10T09:59:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [{
+                # `id` is deliberately the Common View composite display id;
+                # title overrides must use the actual task_id.
+                "id": f"task:{task_id}:2026-08-10",
+                "task_id": task_id,
+                "date": "2026-08-10",
+                "slot": "10:00",
+                "person": "Elsa Ferati",
+                "status": "TODO",
+                "title": full_note,
+                "task_title": "OH/EF: 5 WFC RREG I WEBIT PX",
+                "description": None,
+            }]},
+        }
+        document = build_report_document(
+            data,
+            date(2026, 8, 10),
+            "10:00",
+            title_overrides={task_id: (full_note, full_note)},
+        )
+        html = render_html(document)
+        self.assertIn("OH/EF: 5 WFC RREG I WEBIT PX", html)
+        self.assertIn("1. Operation Services", html)
+        self.assertIn("5. IT Solutions", html)
+        self.assertNotIn("PÃ«rshkrimi:", html)
+
     def test_reminder_questions_render_at_start(self) -> None:
         data = {
             "generated_at": "2026-08-06T11:00:00+02:00",

@@ -25,6 +25,7 @@ from app.models.common_entry import CommonEntry
 from app.models.department import Department
 from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.ga_note import GaNote
+from app.models.plan_note import PlanNote
 from app.models.meeting import Meeting
 from app.models.project import Project
 from app.services.project_classification import has_mst_identity, is_vs_or_vl_project
@@ -780,6 +781,18 @@ async def get_common_view(
                 if (normalized := _normalize_multiline_title(content))
             }
 
+        plan_note_origin_ids = list({t.plan_note_origin_id for t in tasks if t.plan_note_origin_id})
+        plan_note_titles: dict[uuid.UUID, str] = {}
+        if plan_note_origin_ids:
+            rows = (
+                await db.execute(select(PlanNote.id, PlanNote.content).where(PlanNote.id.in_(plan_note_origin_ids)))
+            ).all()
+            plan_note_titles = {
+                note_id: normalized
+                for note_id, content in rows
+                if (normalized := _normalize_multiline_title(content))
+            }
+
         product_content_dept_id: uuid.UUID | None = None
         for d in departments_map.values():
             name_lower = (d.name or "").lower()
@@ -796,6 +809,9 @@ async def get_common_view(
         priority_map: dict[uuid.UUID, dict[str, Any]] = {}
         for t in tasks:
             display_title = ga_note_titles.get(t.ga_note_origin_id) if t.ga_note_origin_id else None
+            display_title = display_title or (
+                plan_note_titles.get(t.plan_note_origin_id) if t.plan_note_origin_id else None
+            )
             display_title = display_title or t.title
             assignees = assignees_by_task.get(t.id) or []
             if not assignees and t.assigned_to:

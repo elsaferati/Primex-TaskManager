@@ -248,16 +248,26 @@ def _document_section(
         ))
         report_tasks = []
         for task in ordered:
-            raw_title = str(task.get("task_title") or task.get("title") or task.get("task"))
+            # Common View's `title` is the full source-note content when a
+            # task comes from GA/KA or PX notes. `task_title` is only its
+            # one-line task label, so it must not hide the numbered points.
+            raw_title = str(task.get("title") or task.get("task_title") or task.get("task"))
             raw_description = task.get("description") if "description" in task else task.get("note")
-            task_id = str(task.get("id"))
+            task_id = str(task.get("task_id") or task.get("id"))
             title_override = (title_overrides or {}).get(task_id)
             description_override = (description_overrides or {}).get(task_id)
+            description_duplicates_title = bool(raw_description) and (
+                clean_description(raw_description) == clean_title(raw_title)
+            )
             report_tasks.append(ReportTask(
                 title=title_override[0] if title_override else clean_title(raw_title),
-                description=description_override[0] if description_override else clean_description(raw_description),
+                description="" if description_duplicates_title else (
+                    description_override[0] if description_override else clean_description(raw_description)
+                ),
                 marked_title=title_override[1] if title_override else preserve_done_marks(raw_title),
-                marked_description=description_override[1] if description_override else preserve_done_marks(raw_description),
+                marked_description="" if description_duplicates_title else (
+                    description_override[1] if description_override else preserve_done_marks(raw_description)
+                ),
                 status=str(task.get("status")).upper(),
                 marker=STATUS_MARKERS[str(task.get("status")).upper()],
             ))
