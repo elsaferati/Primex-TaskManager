@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import unittest
+import inspect
 from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
 from app.models.enums import RealizationLevel, RealizationMarker, RealizationObservationCategory, RealizationScopeType
 from app.models.realization import RealizationPersonResult, RealizationQuestionAnswer
+from app.api.routers.realization import _mark_ai_stale_for_subject, _weekly_response
 from app.schemas.realization import RealizationFinalDecision, RealizationObservationCreate
 from app.services.realization_ai import (
     _safe_input,
@@ -307,6 +309,18 @@ class TestFrontendEvidenceContract(unittest.TestCase):
         self.assertIn('impact_minutes: evidenceCategory === "TIME_SAVED"', self.source)
         self.assertIn("evidenceJson.meeting_id = meetingId", self.source)
         self.assertNotIn("nuk kërkohet ID", self.source)
+
+
+class TestWeeklyResponseRegression(unittest.TestCase):
+    def test_weekly_response_builds_and_returns_the_response(self) -> None:
+        source = inspect.getsource(_weekly_response)
+        self.assertIn("return RealizationWeeklyOut(", source)
+        self.assertNotIn("async def _mark_ai_stale_for_subject", source)
+
+    def test_ai_stale_helper_does_not_capture_weekly_response_body(self) -> None:
+        source = inspect.getsource(_mark_ai_stale_for_subject)
+        self.assertNotIn("close_history", source)
+        self.assertNotIn("return RealizationWeeklyOut(", source)
 
 
 if __name__ == "__main__":
