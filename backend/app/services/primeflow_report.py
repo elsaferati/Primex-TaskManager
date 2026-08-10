@@ -26,7 +26,8 @@ SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
-REMINDER_SECTION_TITLE = "PYETJET PER 1H"
+BOARD_REMINDER_SECTION_TITLE = "PYETJET PER 1H - BORD"
+REMINDER_SECTION_TITLE = "PYETJET PER 1H - STAFF"
 TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
 ADDED_TAGS = re.compile(r"\[\[\s*/?\s*added\s*\]\]", re.IGNORECASE)
 DONE_BLOCK = re.compile(r"\[\[\s*done\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]", re.IGNORECASE | re.DOTALL)
@@ -69,6 +70,14 @@ class ReportReminderQuestion(BaseModel):
     guidance: str = ""
 
 
+def _board_reminder_questions() -> list[ReportReminderQuestion]:
+    return [
+        ReportReminderQuestion(text="Done?"),
+        ReportReminderQuestion(text="Strike?"),
+        ReportReminderQuestion(text="Notes te reja?"),
+    ]
+
+
 class ReportDocument(BaseModel):
     subject: str
     report_date: date
@@ -77,6 +86,7 @@ class ReportDocument(BaseModel):
     source_generated_at: datetime
     recipients: dict[str, list[str]]
     sections: list[ReportSection]
+    board_reminders: list[ReportReminderQuestion] = Field(default_factory=_board_reminder_questions)
     reminders: list[ReportReminderQuestion] = Field(default_factory=list)
     truncated: bool = False
 
@@ -302,15 +312,21 @@ def build_report_document(
         source_generated_at=source_generated,
         recipients=recipients or {"to": [], "cc": [], "bcc": []},
         sections=[_document_section(title, tasks) for title, tasks in definitions],
+        board_reminders=_board_reminder_questions(),
         reminders=list(reminders or []),
     )
 
 
 def render_plain_text(document: ReportDocument) -> str:
     blocks = [document.subject, f"Generated: {document.generated_at.isoformat()}", ""]
-    if document.reminders:
-        reminder_lines = [REMINDER_SECTION_TITLE]
-        for index, question in enumerate(document.reminders, 1):
+    for reminder_title, questions in (
+        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
+        (REMINDER_SECTION_TITLE, document.reminders),
+    ):
+        if not questions:
+            continue
+        reminder_lines = [reminder_title]
+        for index, question in enumerate(questions, 1):
             reminder_lines.append(f"{index}. {question.text}")
             if question.guidance:
                 reminder_lines.append(f"   {question.guidance}")
@@ -385,9 +401,14 @@ def render_html(document: ReportDocument) -> str:
         )
 
     body_chunks: list[str] = []
-    if document.reminders:
-        body_chunks.append(section_title_block(REMINDER_SECTION_TITLE))
-        for index, question in enumerate(document.reminders, 1):
+    for reminder_title, questions in (
+        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
+        (REMINDER_SECTION_TITLE, document.reminders),
+    ):
+        if not questions:
+            continue
+        body_chunks.append(section_title_block(reminder_title))
+        for index, question in enumerate(questions, 1):
             guidance = (
                 detail_row(html.escape(question.guidance).replace(chr(10), "<br>"))
                 if question.guidance else ""
@@ -498,14 +519,19 @@ def render_docx(document: ReportDocument) -> bytes:
     meta = title_cell.add_paragraph(f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks")
     meta.runs[0].font.size = Pt(9)
     meta.runs[0].font.color.rgb = RGBColor(255, 255, 255)
-    if document.reminders:
+    for reminder_title, questions in (
+        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
+        (REMINDER_SECTION_TITLE, document.reminders),
+    ):
+        if not questions:
+            continue
         doc.add_paragraph()
         reminder_header = doc.add_table(rows=1, cols=1).cell(0, 0)
         shade(reminder_header, "#eef2ff")
-        reminder_run = reminder_header.paragraphs[0].add_run(REMINDER_SECTION_TITLE)
+        reminder_run = reminder_header.paragraphs[0].add_run(reminder_title)
         reminder_run.bold = True
         reminder_run.font.size = Pt(13)
-        for index, question in enumerate(document.reminders, 1):
+        for index, question in enumerate(questions, 1):
             card_cell = doc.add_table(rows=1, cols=1).cell(0, 0)
             shade(card_cell, "#f8fafc")
             add_marked_runs(
@@ -583,7 +609,8 @@ def render_png(document: ReportDocument) -> bytes:
         + len(document.sections) * 3
         + sum(
             2 + len(textwrap.wrap(question.text, 90)) + len(textwrap.wrap(question.guidance or "", 95))
-            for question in document.reminders
+            for questions in (document.board_reminders, document.reminders)
+            for question in questions
         )
         + sum(
             3 + sum(
@@ -601,12 +628,17 @@ def render_png(document: ReportDocument) -> bytes:
     draw.text((margin + 24, 55), document.subject, fill="white", font=heading)
     draw.text((margin + 24, 99), f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks", fill="white", font=font)
     y = 160
-    if document.reminders:
+    for reminder_title, questions in (
+        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
+        (REMINDER_SECTION_TITLE, document.reminders),
+    ):
+        if not questions:
+            continue
         draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
         draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
-        draw.text((margin + 18, y + 11), REMINDER_SECTION_TITLE, fill="#0f172a", font=bold)
+        draw.text((margin + 18, y + 11), reminder_title, fill="#0f172a", font=bold)
         y += 62
-        for index, question in enumerate(document.reminders, 1):
+        for index, question in enumerate(questions, 1):
             title_lines = textwrap.wrap(f"{index}. {question.text}", 95) or [""]
             guidance_lines = textwrap.wrap(question.guidance, 105) if question.guidance else []
             card_height = 25 + 28 * (len(title_lines) + len(guidance_lines))

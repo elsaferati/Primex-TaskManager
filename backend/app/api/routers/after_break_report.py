@@ -372,7 +372,10 @@ async def send_draft(
     html_body = render_html(row.subject, row.report_date, sections)
     try:
         _validate_gmail_config()
-        message = await send_after_break_report(row.subject, recipients, plain_text, html_body)
+        message = await send_after_break_report(
+            row.subject, recipients, plain_text, html_body,
+            report_day=row.report_date, sections=row.sections,
+        )
     except Exception as exc:
         row.last_error = str(exc)[:2000]
         await db.commit()

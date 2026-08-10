@@ -124,7 +124,10 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
         plain_text = render_plain_text(row.subject, row.report_date, row.tomorrow_date, row.sections)
         html_body = render_html(row.subject, row.report_date, row.tomorrow_date, row.sections)
         try:
-            message = await send_meetings_report(row.subject, recipients, plain_text, html_body)
+            message = await send_meetings_report(
+                row.subject, recipients, plain_text, html_body,
+                report_day=row.report_date, tomorrow=row.tomorrow_date, sections=row.sections,
+            )
         except Exception as exc:
             row.status = "DRAFT"
             row.last_error = str(exc)[:2000]

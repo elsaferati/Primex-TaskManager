@@ -50,6 +50,8 @@ async def main() -> None:
                 await configured_recipients(),
                 plain_text,
                 render_html(row.subject, row.report_date, row.sections),
+                report_day=row.report_date,
+                sections=row.sections,
             )
             row.status = "SENT"
             row.sent_at = datetime.now(report_timezone())

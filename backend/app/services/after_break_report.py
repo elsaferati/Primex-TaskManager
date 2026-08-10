@@ -32,7 +32,7 @@ from app.services.meetings_report import (
     _wrap_fixed_width,
     _wrap_report_email_html,
     common_view_task_sort_key,
-    send_meetings_report,
+    send_section_report,
 )
 
 REPORT_TYPE = "after_break_report"
@@ -550,5 +550,16 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
     )
 
 
-async def send_after_break_report(subject: str, recipients: dict[str, list[str]], plain_text: str, html_body: str) -> dict[str, Any]:
-    return await send_meetings_report(subject, recipients, plain_text, html_body)
+async def send_after_break_report(
+    subject: str,
+    recipients: dict[str, list[str]],
+    plain_text: str,
+    html_body: str,
+    *,
+    report_day: date,
+    sections: list[dict[str, str]],
+) -> dict[str, Any]:
+    return await send_section_report(
+        subject, recipients, plain_text, html_body,
+        report_code="M2", report_day=report_day, sections=sections,
+    )

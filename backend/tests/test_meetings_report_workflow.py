@@ -26,6 +26,7 @@ from app.services.meetings_report import (
     _task_owners,
     _tomorrow_task_table,
     normalize_meetings_report_sections,
+    section_report_attachments,
 )
 
 
@@ -217,6 +218,25 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MeetingsReportAliasDedupTests(unittest.TestCase):
+    def test_section_report_attachments_include_word_and_png(self) -> None:
+        attachments = section_report_attachments(
+            "PrimeFlow M3",
+            "M3",
+            date(2026, 8, 10),
+            [{
+                "title": "Section",
+                "body": "TODO:\n+----+-----+\n| NR | TITLE |\n+----+-----+\n| 1  | Task  |\n+----+-----+",
+            }],
+            tomorrow=date(2026, 8, 11),
+        )
+
+        self.assertEqual([attachment[0] for attachment in attachments], [
+            "PrimeFlow-M3-2026-08-10.docx",
+            "PrimeFlow-M3-2026-08-10.png",
+        ])
+        self.assertTrue(attachments[0][1].startswith(b"PK"))
+        self.assertTrue(attachments[1][1].startswith(b"\x89PNG"))
+
     def test_normalize_collapses_common_view_aliases_into_auto_sections(self) -> None:
         auto_ga = "GA TASKS:\n- done item"
         auto_tickets = "STD TICKETS: 2"

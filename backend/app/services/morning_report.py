@@ -38,7 +38,7 @@ from app.services.meetings_report import (
     _task_lines,
     _tomorrow_meeting_table,
     _tomorrow_task_table,
-    send_meetings_report,
+    send_section_report,
 )
 
 REPORT_TYPE = "morning_report"
@@ -449,6 +449,15 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
 
 
 async def send_morning_report(
-    subject: str, recipients: dict[str, list[str]], plain_text: str, html_body: str
+    subject: str,
+    recipients: dict[str, list[str]],
+    plain_text: str,
+    html_body: str,
+    *,
+    report_day: date,
+    sections: list[dict[str, str]],
 ) -> dict[str, Any]:
-    return await send_meetings_report(subject, recipients, plain_text, html_body)
+    return await send_section_report(
+        subject, recipients, plain_text, html_body,
+        report_code="M1", report_day=report_day, sections=sections,
+    )

@@ -2017,6 +2017,235 @@ def render_html(subject: str, report_day: date, tomorrow: date, sections: list[d
     )
 
 
-async def send_meetings_report(subject: str, recipients: dict[str, list[str]], plain_text: str, html_body: str) -> dict[str, Any]:
+def _section_report_table_rows(lines: list[str]) -> tuple[list[str], list[list[str]]]:
+    rows = [_parse_ascii_cells(line) for line in lines if line.startswith("|")]
+    if not rows:
+        return [], []
+    header, body_rows = _normalize_meeting_status_table(rows[0], rows[1:])
+    return header, _merge_ascii_continuation_rows(header, body_rows)
+
+
+def render_section_report_docx(
+    subject: str,
+    report_code: str,
+    report_day: date,
+    sections: list[dict[str, str]],
+    *,
+    tomorrow: date | None = None,
+) -> bytes:
+    """Render the M1/M2/M3 section and table format as a Word attachment."""
+    from docx import Document
+    from docx.enum.table import WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Inches, Pt, RGBColor
+
+    def shade(cell: Any, color: str) -> None:
+        fill = OxmlElement("w:shd")
+        fill.set(qn("w:fill"), color.lstrip("#"))
+        cell._tc.get_or_add_tcPr().append(fill)
+
+    document = Document()
+    section = document.sections[0]
+    section.top_margin = section.bottom_margin = Inches(0.55)
+    section.left_margin = section.right_margin = Inches(0.5)
+    header = document.add_table(rows=1, cols=1)
+    header.alignment = WD_TABLE_ALIGNMENT.CENTER
+    header_cell = header.cell(0, 0)
+    shade(header_cell, "#2563EB")
+    title = header_cell.paragraphs[0]
+    title_run = title.add_run(subject)
+    title_run.bold = True
+    title_run.font.size = Pt(17)
+    title_run.font.color.rgb = RGBColor(255, 255, 255)
+    date_label = f"{report_code} · {report_day:%d.%m.%Y}"
+    if tomorrow is not None:
+        date_label += f" · Neser: {tomorrow:%d.%m.%Y}"
+    metadata = header_cell.add_paragraph(date_label)
+    metadata.runs[0].font.size = Pt(9)
+    metadata.runs[0].font.color.rgb = RGBColor(255, 255, 255)
+
+    for index, report_section in enumerate(sections, 1):
+        document.add_paragraph()
+        section_title = document.add_table(rows=1, cols=1).cell(0, 0)
+        shade(section_title, "#E2E8F0")
+        title_paragraph = section_title.paragraphs[0]
+        title_run = title_paragraph.add_run(f"{index}. {report_section.get('title') or 'Untitled'}")
+        title_run.bold = True
+        title_run.font.size = Pt(11)
+
+        body_lines = str(report_section.get("body") or "").splitlines()
+        position = 0
+        while position < len(body_lines):
+            line = body_lines[position]
+            if line.startswith("+-"):
+                table_lines: list[str] = []
+                while position < len(body_lines) and (
+                    body_lines[position].startswith("+-") or body_lines[position].startswith("|")
+                ):
+                    table_lines.append(body_lines[position])
+                    position += 1
+                table_header, table_body = _section_report_table_rows(table_lines)
+                if table_header:
+                    table = document.add_table(rows=1, cols=len(table_header))
+                    table.style = "Table Grid"
+                    table.alignment = WD_TABLE_ALIGNMENT.CENTER
+                    for column, value in enumerate(table_header):
+                        cell = table.rows[0].cells[column]
+                        cell.text = value
+                        shade(cell, "#CBD5E1")
+                        for run in cell.paragraphs[0].runs:
+                            run.bold = True
+                            run.font.size = Pt(8)
+                    for row_values in table_body:
+                        row = table.add_row()
+                        for column, value in enumerate(row_values[: len(table_header)]):
+                            cell = row.cells[column]
+                            cell.text = value
+                            for paragraph in cell.paragraphs:
+                                for run in paragraph.runs:
+                                    run.font.size = Pt(8)
+                continue
+            if line.strip():
+                paragraph = document.add_paragraph(line.strip())
+                paragraph.paragraph_format.space_after = Pt(2)
+                for run in paragraph.runs:
+                    run.font.size = Pt(9)
+            position += 1
+
+    output = __import__("io").BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def render_section_report_png(
+    subject: str,
+    report_code: str,
+    report_day: date,
+    sections: list[dict[str, str]],
+    *,
+    tomorrow: date | None = None,
+) -> bytes:
+    """Render a readable, single-image PNG version of an M1/M2/M3 report."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    font_path = os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\segoeui.ttf")
+    bold_path = r"C:\Windows\Fonts\arialbd.ttf"
+    try:
+        font = ImageFont.truetype(font_path, 20)
+        bold = ImageFont.truetype(bold_path, 21)
+        heading = ImageFont.truetype(bold_path, 30)
+    except OSError:
+        font = bold = heading = ImageFont.load_default()
+
+    rows: list[tuple[str, str]] = []
+    for index, report_section in enumerate(sections, 1):
+        rows.append(("section", f"{index}. {report_section.get('title') or 'Untitled'}"))
+        body_lines = str(report_section.get("body") or "").splitlines()
+        position = 0
+        while position < len(body_lines):
+            if body_lines[position].startswith("+-"):
+                table_lines: list[str] = []
+                while position < len(body_lines) and (
+                    body_lines[position].startswith("+-") or body_lines[position].startswith("|")
+                ):
+                    table_lines.append(body_lines[position])
+                    position += 1
+                table_header, table_body = _section_report_table_rows(table_lines)
+                if table_header:
+                    rows.append(("table-header", " | ".join(table_header)))
+                    rows.extend(("table", " | ".join(value for value in row if value)) for row in table_body)
+                continue
+            text = body_lines[position].strip()
+            if text:
+                rows.append(("text", text))
+            position += 1
+
+    wrapped_rows: list[tuple[str, str]] = []
+    for kind, value in rows:
+        width = 92 if kind == "section" else 112
+        wrapped_rows.extend((kind, line) for line in (textwrap.wrap(value, width=width) or [""]))
+    width, margin, line_height = 1600, 48, 31
+    height = max(420, 175 + len(wrapped_rows) * line_height + margin)
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    draw.rounded_rectangle((margin, 30, width - margin, 130), radius=12, fill="#2563EB")
+    draw.text((margin + 20, 50), subject, fill="white", font=heading)
+    date_label = f"{report_code} · {report_day:%d.%m.%Y}"
+    if tomorrow is not None:
+        date_label += f" · Neser: {tomorrow:%d.%m.%Y}"
+    draw.text((margin + 22, 96), date_label, fill="white", font=font)
+    y = 152
+    for kind, value in wrapped_rows:
+        if kind == "section":
+            draw.rectangle((margin, y, width - margin, y + 27), fill="#E2E8F0")
+            draw.text((margin + 12, y + 3), value, fill="#0F172A", font=bold)
+        elif kind == "table-header":
+            draw.rectangle((margin + 8, y, width - margin - 8, y + 25), fill="#CBD5E1")
+            draw.text((margin + 16, y + 2), value, fill="#0F172A", font=bold)
+        elif kind == "table":
+            draw.text((margin + 16, y + 2), value, fill="#1F2937", font=font)
+        else:
+            draw.text((margin + 12, y + 2), value, fill="#1F2937", font=font)
+        y += line_height
+    output = __import__("io").BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def section_report_attachments(
+    subject: str,
+    report_code: str,
+    report_day: date,
+    sections: list[dict[str, str]],
+    *,
+    tomorrow: date | None = None,
+) -> list[tuple[str, bytes, str]]:
+    filename = f"PrimeFlow-{report_code}-{report_day:%Y-%m-%d}"
+    return [
+        (
+            f"{filename}.docx",
+            render_section_report_docx(subject, report_code, report_day, sections, tomorrow=tomorrow),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        ),
+        (f"{filename}.png", render_section_report_png(subject, report_code, report_day, sections, tomorrow=tomorrow), "image/png"),
+    ]
+
+
+async def send_section_report(
+    subject: str,
+    recipients: dict[str, list[str]],
+    plain_text: str,
+    html_body: str,
+    *,
+    report_code: str,
+    report_day: date,
+    sections: list[dict[str, str]],
+    tomorrow: date | None = None,
+) -> dict[str, Any]:
     gmail = GmailService()
-    return await gmail.send_verified(subject, recipients, plain_text, html_body, attachments=[])
+    attachments = section_report_attachments(subject, report_code, report_day, sections, tomorrow=tomorrow)
+    return await gmail.send_verified(subject, recipients, plain_text, html_body, attachments=attachments)
+
+
+async def send_meetings_report(
+    subject: str,
+    recipients: dict[str, list[str]],
+    plain_text: str,
+    html_body: str,
+    *,
+    report_day: date,
+    tomorrow: date,
+    sections: list[dict[str, str]],
+) -> dict[str, Any]:
+    return await send_section_report(
+        subject,
+        recipients,
+        plain_text,
+        html_body,
+        report_code="M3",
+        report_day=report_day,
+        tomorrow=tomorrow,
+        sections=sections,
+    )

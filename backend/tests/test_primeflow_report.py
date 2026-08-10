@@ -14,7 +14,8 @@ from app.services.primeflow_report import (
     GmailService, STATUS_MARKERS, build_report, clean_description, clean_title, employee_initials,
     exact_subject, filter_tasks,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
-    render_plain_text, render_png, report_subject, ReportReminderQuestion, REMINDER_SECTION_TITLE,
+    render_plain_text, render_png, report_subject, ReportReminderQuestion, BOARD_REMINDER_SECTION_TITLE,
+    REMINDER_SECTION_TITLE,
 )
 
 
@@ -166,10 +167,15 @@ class PrimeFlowReportTests(unittest.TestCase):
         document = build_report_document(data, date(2026, 8, 6), "11:00", reminders=reminders)
         plain = render_plain_text(document)
         html = render_html(document)
+        self.assertLess(plain.index(BOARD_REMINDER_SECTION_TITLE), plain.index(REMINDER_SECTION_TITLE))
         self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("SLOTI 06.08.2026 11:00"))
+        self.assertIn("1. Done?", plain)
+        self.assertIn("2. Strike?", plain)
+        self.assertIn("3. Notes te reja?", plain)
         self.assertIn("1. A eshte perfunduar detyra", plain)
         self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", plain)
         self.assertIn(REMINDER_SECTION_TITLE, html)
+        self.assertIn(BOARD_REMINDER_SECTION_TITLE, html)
         self.assertIn("1. A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?", html)
         self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", html)
         self.assertIn("color:#64748b", html)
