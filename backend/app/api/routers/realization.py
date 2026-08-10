@@ -221,6 +221,23 @@ async def _recalculate_after_evidence(
     )
 
 
+async def _mark_ai_stale_for_subject(
+    db: AsyncSession, *, period_id: uuid.UUID, user_id: uuid.UUID | None
+) -> None:
+    if user_id is None:
+        return
+    result = (
+        await db.execute(
+            select(RealizationPersonResult).where(
+                RealizationPersonResult.period_id == period_id,
+                RealizationPersonResult.user_id == user_id,
+            )
+        )
+    ).scalar_one_or_none()
+    if result is not None and result.ai_generated_at is not None:
+        mark_analysis_stale(result)
+
+
 def _visible_facts(user: User, result: RealizationPersonResult) -> dict:
     facts = dict(result.facts_json or {})
     if user.role != UserRole.STAFF:
@@ -451,21 +468,6 @@ async def _weekly_response(
     )
 
 
-async def _mark_ai_stale_for_subject(
-    db: AsyncSession, *, period_id: uuid.UUID, user_id: uuid.UUID | None
-) -> None:
-    if user_id is None:
-        return
-    result = (
-        await db.execute(
-            select(RealizationPersonResult).where(
-                RealizationPersonResult.period_id == period_id,
-                RealizationPersonResult.user_id == user_id,
-            )
-        )
-    ).scalar_one_or_none()
-    if result is not None and result.ai_generated_at is not None:
-        mark_analysis_stale(result)
     close_history: dict[tuple[uuid.UUID, str], list[dict]] = {}
     for close_event, close_period in close_events:
         key = (close_event.user_id, close_period.start_date.isoformat())
