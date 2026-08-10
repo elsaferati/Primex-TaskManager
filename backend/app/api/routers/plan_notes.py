@@ -37,6 +37,7 @@ from app.services.ga_note_task_instances import (
     apply_ga_note_shared_task_fields,
     reconcile_plan_note_task_assignees,
 )
+from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
 from app.services.notifications import (
     add_notification,
     notification_task_preview,
@@ -333,9 +334,25 @@ async def update_plan_note(
         ).scalars().all()
 
         for task in linked_tasks:
+            old_title = task.title
             task.title = new_task_title
+            if old_title != task.title:
+                record_title_strike_events(
+                    db,
+                    task_id=task.id,
+                    actor_user_id=user.id,
+                    before_title=old_title,
+                    after_title=task.title,
+                )
             if task.description == old_default_description:
                 task.description = new_default_description
+                record_description_strike_events(
+                    db,
+                    task_id=task.id,
+                    actor_user_id=user.id,
+                    before_description=old_default_description,
+                    after_description=new_default_description,
+                )
 
     await db.commit()
     await db.refresh(note)
@@ -419,6 +436,9 @@ async def update_plan_note_task_bundle(
             task.fast_task_group_id = None
         reconcile_result = None
 
+    title_before = {task.id: task.title for task in active_tasks}
+    description_before = {task.id: task.description for task in active_tasks}
+
     description_is_set = "description" in fields_set
     updated_count = apply_ga_note_shared_task_fields(
         active_tasks,
@@ -458,6 +478,26 @@ async def update_plan_note_task_bundle(
             if task.description == old_default and task.description != new_default:
                 task.description = new_default
                 updated_count += 1
+
+    for task in active_tasks:
+        previous_title = title_before.get(task.id)
+        if previous_title != task.title:
+            record_title_strike_events(
+                db,
+                task_id=task.id,
+                actor_user_id=user.id,
+                before_title=previous_title,
+                after_title=task.title,
+            )
+        previous_description = description_before.get(task.id)
+        if previous_description != task.description:
+            record_description_strike_events(
+                db,
+                task_id=task.id,
+                actor_user_id=user.id,
+                before_description=previous_description,
+                after_description=task.description,
+            )
 
     if payload.assignee_ids is not None or payload.assignee_states is not None:
         from app.api.routers.tasks import _clear_task_planner_exclusions_for_current_plan

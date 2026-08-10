@@ -24,7 +24,7 @@ from app.services.primeflow_report import (
     ReportDocument, ReportReminderQuestion, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
-from app.services.task_strike_events import render_description_for_interval
+from app.services.task_strike_events import render_text_for_interval
 
 logger = logging.getLogger(__name__)
 TERMINAL = {"SENT", "ALREADY_SENT"}
@@ -85,10 +85,11 @@ async def load_1h_reminder_questions() -> list[ReportReminderQuestion]:
     ]
 
 
-def _report_task_descriptions(data: dict) -> dict[uuid.UUID, str | None]:
-    """Read every task description that can be shown in the generated report."""
+def _report_task_text(data: dict) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, str | None]]:
+    """Read task titles and descriptions that can be shown in the report."""
 
-    result: dict[uuid.UUID, str | None] = {}
+    titles: dict[uuid.UUID, str] = {}
+    descriptions: dict[uuid.UUID, str | None] = {}
     for bucket in (data.get("items") or {}).values():
         if not isinstance(bucket, list):
             continue
@@ -99,9 +100,12 @@ def _report_task_descriptions(data: dict) -> dict[uuid.UUID, str | None]:
                 task_id = uuid.UUID(str(task["id"]))
             except (TypeError, ValueError):
                 continue
+            title = task.get("task_title") or task.get("title") or task.get("task")
+            if title is not None:
+                titles[task_id] = str(title)
             if "description" in task:
-                result[task_id] = task.get("description")
-    return result
+                descriptions[task_id] = task.get("description")
+    return titles, descriptions
 
 
 def _slot_cutoff(day: date, slot: str) -> datetime:
@@ -109,16 +113,17 @@ def _slot_cutoff(day: date, slot: str) -> datetime:
     return datetime(day.year, day.month, day.day, hour, minute, tzinfo=report_timezone())
 
 
-async def _description_overrides_for_1h_interval(
+async def _text_overrides_for_1h_interval(
     data: dict,
     day: date,
     slot: str,
     *,
     interval_end: datetime,
-) -> dict[str, tuple[str, str]]:
-    descriptions = _report_task_descriptions(data)
-    if not descriptions:
-        return {}
+) -> tuple[dict[str, tuple[str, str]], dict[str, tuple[str, str]]]:
+    titles, descriptions = _report_task_text(data)
+    task_ids = set(titles) | set(descriptions)
+    if not task_ids:
+        return {}, {}
     previous_day, previous_slot = predecessor(day, slot)
     async with SessionLocal() as db:
         # Prefer the real generation time of the preceding email. This avoids a
@@ -138,7 +143,7 @@ async def _description_overrides_for_1h_interval(
         interval_start = previous_generated_at or _slot_cutoff(previous_day, previous_slot)
         events = (await db.execute(
             select(TaskStrikeEvent)
-            .where(TaskStrikeEvent.task_id.in_(descriptions))
+            .where(TaskStrikeEvent.task_id.in_(task_ids))
             .where(TaskStrikeEvent.occurred_at <= interval_end)
             .order_by(TaskStrikeEvent.occurred_at, TaskStrikeEvent.id)
         )).scalars().all()
@@ -146,15 +151,27 @@ async def _description_overrides_for_1h_interval(
     by_task: dict[uuid.UUID, list[TaskStrikeEvent]] = {}
     for event in events:
         by_task.setdefault(event.task_id, []).append(event)
-    return {
-        str(task_id): render_description_for_interval(
+    title_overrides = {
+        str(task_id): render_text_for_interval(
+            title,
+            by_task.get(task_id, []),
+            interval_start=interval_start,
+            interval_end=interval_end,
+            field_name="TITLE",
+        )
+        for task_id, title in titles.items()
+    }
+    description_overrides = {
+        str(task_id): render_text_for_interval(
             description,
             by_task.get(task_id, []),
             interval_start=interval_start,
             interval_end=interval_end,
+            field_name="DESCRIPTION",
         )
         for task_id, description in descriptions.items()
     }
+    return title_overrides, description_overrides
 
 
 async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] | None = None) -> ReportDocument:
@@ -164,7 +181,7 @@ async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] 
     )
     data = await client.common_view(day)
     reminders = await load_1h_reminder_questions()
-    description_overrides = await _description_overrides_for_1h_interval(
+    title_overrides, description_overrides = await _text_overrides_for_1h_interval(
         data, day, slot, interval_end=datetime.now(report_timezone()),
     )
     return build_report_document(
@@ -173,6 +190,7 @@ async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] 
         slot,
         recipients or await configured_recipients(),
         reminders=reminders,
+        title_overrides=title_overrides,
         description_overrides=description_overrides,
     )
 

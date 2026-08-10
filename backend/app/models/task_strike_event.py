@@ -22,6 +22,7 @@ class TaskStrikeEvent(Base):
     actor_user_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("users.id", ondelete="SET NULL"), index=True
     )
+    field_name: Mapped[str] = mapped_column(String(20), nullable=False, server_default="DESCRIPTION")
     point_key: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     point_text: Mapped[str] = mapped_column(Text, nullable=False)
     action: Mapped[str] = mapped_column(String(12), nullable=False)

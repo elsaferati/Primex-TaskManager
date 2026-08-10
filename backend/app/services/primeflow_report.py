@@ -234,6 +234,7 @@ def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
 def _document_section(
     title: str,
     tasks: list[dict[str, Any]],
+    title_overrides: dict[str, tuple[str, str]] | None = None,
     description_overrides: dict[str, tuple[str, str]] | None = None,
 ) -> ReportSection:
     grouped: dict[str, list[dict[str, Any]]] = {}
@@ -247,13 +248,16 @@ def _document_section(
         ))
         report_tasks = []
         for task in ordered:
+            raw_title = str(task.get("task_title") or task.get("title") or task.get("task"))
             raw_description = task.get("description") if "description" in task else task.get("note")
-            override = (description_overrides or {}).get(str(task.get("id")))
+            task_id = str(task.get("id"))
+            title_override = (title_overrides or {}).get(task_id)
+            description_override = (description_overrides or {}).get(task_id)
             report_tasks.append(ReportTask(
-                title=clean_title(str(task.get("task_title") or task.get("title") or task.get("task"))),
-                description=override[0] if override else clean_description(raw_description),
-                marked_title=preserve_done_marks(str(task.get("task_title") or task.get("title") or task.get("task"))),
-                marked_description=override[1] if override else preserve_done_marks(raw_description),
+                title=title_override[0] if title_override else clean_title(raw_title),
+                description=description_override[0] if description_override else clean_description(raw_description),
+                marked_title=title_override[1] if title_override else preserve_done_marks(raw_title),
+                marked_description=description_override[1] if description_override else preserve_done_marks(raw_description),
                 status=str(task.get("status")).upper(),
                 marker=STATUS_MARKERS[str(task.get("status")).upper()],
             ))
@@ -270,6 +274,7 @@ def build_report_document(
     slot: str,
     recipients: dict[str, list[str]] | None = None,
     reminders: list[ReportReminderQuestion] | None = None,
+    title_overrides: dict[str, tuple[str, str]] | None = None,
     description_overrides: dict[str, tuple[str, str]] | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
@@ -316,7 +321,10 @@ def build_report_document(
         generated_at=datetime.now(report_timezone()),
         source_generated_at=source_generated,
         recipients=recipients or {"to": [], "cc": [], "bcc": []},
-        sections=[_document_section(title, tasks, description_overrides) for title, tasks in definitions],
+        sections=[
+            _document_section(title, tasks, title_overrides, description_overrides)
+            for title, tasks in definitions
+        ],
         board_reminders=_board_reminder_questions(),
         reminders=list(reminders or []),
     )
