@@ -19,6 +19,7 @@ from app.models.realization import (
 from app.services.realization_evidence import collect_weekly_evidence
 from app.services.realization_narrative import build_albanian_narrative
 from app.services.realization_periods import require_recalculable, transition_period
+from app.services.realization_pulse import build_recovery, calculate_pulse
 from app.services.realization_policy import evaluate_policy
 
 
@@ -702,7 +703,20 @@ async def calculate_weekly_period(
         person["weekly_progress_percent"] = (
             round(accounted_count * 100.0 / planned_count, 1)
             if planned_count
-            else 100.0
+            else 0.0
+        )
+        person["expected_cumulative_count"] = planned_count
+        person["actual_cumulative_count"] = int(counters.get("completed_on_time_count", 0)) + int(
+            counters.get("completed_late_count", 0)
+        )
+        person["unresolved_pink_count"] = int(counters.get("no_progress_count", 0))
+        pulse = calculate_pulse(person)
+        person["pulse"] = pulse.to_dict()
+        person["recovery"] = build_recovery(
+            decision=pulse,
+            weekly_planned_count=planned_count,
+            as_of_day=period.end_date,
+            week_end=period.end_date,
         )
         person["project_progress"] = build_project_progress(person["tasks"])
         if result is None:

@@ -48,6 +48,7 @@ from app.models.question_library import (
 from app.models.vs_workflow_item import VsWorkflowItem
 from app.models.refresh_token import RefreshToken
 from app.models.realization import (
+    RealizationDailyCloseEvent,
     RealizationDepartmentResult,
     RealizationObservation,
     RealizationPeriod,

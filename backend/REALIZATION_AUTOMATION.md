@@ -1,5 +1,83 @@
 # PrimeFlow Realization Automation
 
+## Operational RLZ Pulse
+
+RLZ Pulse is the Monday-to-Friday steering signal. It is deliberately separate
+from `RealizationSymbol` and from the official A+/A/B/C/M/D/E evaluation:
+
+- `+` — cumulative expected plan is achieved and there is no unresolved negative evidence.
+- `++` — measurable cumulative output is above the expected target. Merely adding tasks is not enough.
+- `DIAMOND` (`♦`) — planned obligations are completed/accounted for and a genuine extra contribution has verified DIAMOND evidence.
+- `?` — the person is below plan, has Pink/no-progress work, a missing required result comment, or unresolved negative evidence.
+- `OK` — raw output is below plan but the exact shortfall is covered by approved postponement, absence, priority change, external blocker, or manager-confirmed evidence. Counters are never inflated.
+
+Zero planned obligations produce `OK` with `Pa obligime të planifikuara` and
+`0%`; the system never creates an artificial 100% denominator.
+
+## M3 relationship
+
+M3 remains the operational report and RLZ remains the evidence/evaluation
+domain. RLZ never parses generated M3 email or document text. Both features use
+the same normalized source records: tasks, daily progress, official planner
+snapshots, personal task comments, attendance/Common View leave, meetings,
+system tasks, and Realization observations. Pink work, late/open obligations,
+missed meetings and approved blockers therefore flow into Pulse without making
+the M3 document itself a source of truth. Operational M3 questions that are not
+performance evidence do not affect Pulse.
+
+## Personal daily close (`RLZ im`)
+
+STAFF can read only their own Realization result and non-private evidence.
+Before `Mbylle ditën`, the API recalculates the current daily facts so closure
+does not rely on a stale 16:20 snapshot. A short daily comment is mandatory.
+The close stores the suggested Pulse, confirmed Pulse, operating mode, counters,
+recovery facts and task IDs in an append-only `realization_daily_close_events`
+row plus `AuditLog`.
+
+Reopen and correction create later events linked with `supersedes_event_id`;
+they do not edit or delete the original close. Reopen requires a manager/admin
+reason. Managers can see close state for each employee in their department.
+
+## Task result comments
+
+An assigned employee explicitly changing an RLZ-relevant task to `DONE` must
+first store their own non-empty `TaskUserComment`. A comment from another
+assignee does not satisfy this rule. The API enforces it for explicit task
+completion; the UI opens a result-comment flow and shows the Albanian guidance.
+Manager/admin exceptional completion requires a reason and writes an audit
+event. Quantity/scheduler-driven automatic completion is not blocked; missing
+personal confirmation remains visible to RLZ instead of being invented.
+
+## SAVE THE DAY recovery
+
+Each daily result stores deterministic recovery metrics: expected and actual
+cumulative output, delta, weekly obligations remaining, working days remaining,
+Pink count, justified shortfall, unverified/verified extras, and the exact count
+needed to return to `+`. These values power `Çfarë duhet për ta shpëtuar javën?`.
+
+## Live weekly and monthly Pulse
+
+Every daily result keeps that day's Pulse. The weekly API returns the
+Monday-Friday history, snapshot state, personal-close state, and current
+projected weekly Pulse. It is explicitly operational and may change each day.
+Friday FINAL continues to use the existing immutable workflow and letter policy.
+
+Monthly RLZ aggregates official weekly results rather than re-reading M3. It
+returns weekly drill-down IDs/dates, Pulse counts, Pink days, positive extras,
+negative evidence, trend and current monthly status.
+
+## Operating modes
+
+`departments.realization_mode` configures the pilot without hardcoded people or
+department names:
+
+- `AUTO`: system Pulse is confirmed automatically; manager/admin override needs a reason.
+- `SEMI_MANUAL`: system suggestion remains stored separately; employee or manager confirms it and any change needs a reason.
+- `MANUAL`: counters/evidence remain automatic, but an authorized user selects Pulse and must always give a reason.
+
+No mode can create DIAMOND without verified DIAMOND evidence, turn `?` into
+`OK` without justification, modify PLANNED snapshots, or mutate a locked period.
+
 ## What is automatic
 
 - A department snapshot is stored every working day at `16:20` in `Europe/Tirane`.

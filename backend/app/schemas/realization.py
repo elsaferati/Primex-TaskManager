@@ -7,6 +7,7 @@ from decimal import Decimal
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.models.enums import (
+    RealizationDailyCloseAction,
     RealizationLevel,
     RealizationMarker,
     RealizationObservationCategory,
@@ -14,6 +15,8 @@ from app.models.enums import (
     RealizationPeriodSlot,
     RealizationPeriodStatus,
     RealizationPeriodType,
+    RealizationOperatingMode,
+    RealizationPulse,
     RealizationScopeType,
     RealizationSymbol,
 )
@@ -355,3 +358,46 @@ class RealizationAIAnalysisOut(RealizationSchema):
     evidence_ids: list[str]
     model: str
     advisory_only: bool = True
+
+
+class RealizationDailyCloseRequest(RealizationSchema):
+    daily_comment: str | None = Field(default=None, max_length=2000)
+    confirmed_pulse: RealizationPulse | None = None
+    reason: str | None = Field(default=None, max_length=4000)
+
+
+class RealizationDailyReopenRequest(RealizationSchema):
+    reason: str = Field(min_length=1, max_length=4000)
+
+
+class RealizationDailyCloseEventOut(RealizationSchema):
+    id: uuid.UUID
+    period_id: uuid.UUID
+    result_id: uuid.UUID
+    user_id: uuid.UUID
+    department_id: uuid.UUID
+    action: RealizationDailyCloseAction
+    mode: RealizationOperatingMode
+    suggested_pulse: RealizationPulse
+    confirmed_pulse: RealizationPulse | None
+    daily_comment: str | None
+    reason: str | None
+    facts_json: dict
+    supersedes_event_id: uuid.UUID | None
+    actor_user_id: uuid.UUID
+    created_at: datetime
+
+
+class RealizationMonthlyPersonOut(RealizationSchema):
+    user_id: uuid.UUID
+    user_name: str
+    department_id: uuid.UUID | None
+    aggregation: dict
+
+
+class RealizationMonthlyOut(RealizationSchema):
+    month_start: date
+    month_end: date
+    department_id: uuid.UUID
+    department_name: str | None = None
+    people: list[RealizationMonthlyPersonOut] = Field(default_factory=list)

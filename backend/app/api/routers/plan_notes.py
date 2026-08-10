@@ -20,6 +20,7 @@ from app.models.plan_note import PlanNote
 from app.models.plan_note_attachment import PlanNoteAttachment
 from app.models.project import Project
 from app.models.task import Task
+from app.models.task_user_comment import TaskUserComment
 from app.schemas.plan_note import (
     PlanNoteAttachmentOut,
     PlanNoteCreate,
@@ -622,6 +623,27 @@ async def mark_plan_note_waiting_tasks_done(
     await _ensure_note_access(note, user, db)
 
     tasks = (await db.execute(select(Task).where(Task.plan_note_origin_id == note_id))).scalars().all()
+
+    waiting = [task for task in tasks if task.status == TaskStatus.WAITING_CONFIRMATION]
+    comments = {
+        row.task_id: (row.comment or "").strip()
+        for row in (
+            await db.execute(
+                select(TaskUserComment).where(
+                    TaskUserComment.task_id.in_([task.id for task in waiting]),
+                    TaskUserComment.user_id == user.id,
+                )
+            )
+        ).scalars().all()
+    } if waiting else {}
+    if any(task.assigned_to != user.id or not comments.get(task.id) for task in waiting):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "RLZ_TASK_COMMENT_REQUIRED",
+                "message": "Para mbylljes, shto komentin personal për secilën detyrë; përjashtimet mbyllen individualisht me arsye.",
+            },
+        )
 
     updated_count = 0
     for task in tasks:

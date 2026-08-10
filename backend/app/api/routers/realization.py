@@ -13,6 +13,7 @@ from app.config import settings
 from app.db import get_db
 from app.models.department import Department
 from app.models.enums import (
+    RealizationDailyCloseAction,
     RealizationLevel,
     RealizationMarker,
     RealizationObservationCategory,
@@ -20,9 +21,12 @@ from app.models.enums import (
     RealizationPeriodStatus,
     RealizationScopeType,
     RealizationSymbol,
+    RealizationOperatingMode,
+    RealizationPulse,
     UserRole,
 )
 from app.models.realization import (
+    RealizationDailyCloseEvent,
     RealizationDepartmentResult,
     RealizationObservation,
     RealizationPeriod,
@@ -36,6 +40,9 @@ from app.schemas.realization import (
     RealizationDepartmentResultOut,
     RealizationAIAnalysisOut,
     RealizationDailyOut,
+    RealizationDailyCloseEventOut,
+    RealizationDailyCloseRequest,
+    RealizationDailyReopenRequest,
     RealizationObservationCreate,
     RealizationObservationOut,
     RealizationObservationVerify,
@@ -44,6 +51,8 @@ from app.schemas.realization import (
     RealizationPersonResultOut,
     RealizationPersonWorkflowOut,
     RealizationReviewRequest,
+    RealizationMonthlyOut,
+    RealizationMonthlyPersonOut,
     RealizationWeeklyOut,
 )
 from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
@@ -67,6 +76,7 @@ from app.services.realization_excel import build_realization_workbook
 from app.services.realization_periods import (
     RealizationWorkflowError,
     ensure_daily_period,
+    ensure_monthly_period,
     ensure_weekly_period,
     normalize_week_start,
     require_unlocked,
@@ -77,6 +87,8 @@ from app.services.realization_people import (
     full_period_leave_user_ids,
     load_active_users_and_common_leave,
 )
+from app.services.realization_pulse import aggregate_monthly_pulses
+from app.services.realization_monthly import calculate_monthly_period
 from app.services.system_task_schedule import _is_working_day
 
 
@@ -97,9 +109,9 @@ def _error(exc: ValueError, code: int = status.HTTP_409_CONFLICT) -> HTTPExcepti
 
 
 def _ensure_department_scope(user: User, department_id: uuid.UUID) -> None:
-    # Every department manager can see and manage Realization for all
-    # departments, not just their own — see realization_access.py.
-    if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+    if user.role == UserRole.ADMIN:
+        return
+    if user.role not in (UserRole.MANAGER, UserRole.STAFF) or user.department_id != department_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
@@ -335,6 +347,8 @@ async def _weekly_response(
         daily_by_user.setdefault(daily_result.user_id, []).append(
             {
                 "date": daily_period.start_date.isoformat(),
+                "period_id": str(daily_period.id),
+                "result_id": str(daily_result.id),
                 "has_snapshot": True,
                 "daily_progress_percent": daily_facts.get("daily_progress_percent", 0),
                 "weekly_progress_percent": daily_facts.get("weekly_progress_percent", 0),
@@ -349,12 +363,54 @@ async def _weekly_response(
                 "additional_count": daily_result.additional_count,
                 "attendance": daily_facts.get("attendance") or [],
                 "tasks": day_tasks,
+                "pulse": daily_facts.get("pulse"),
+                "recovery": daily_facts.get("recovery"),
             }
         )
         for task in day_tasks:
             task_key = str(task.get("task_id") or task.get("match_key") or "")
             if task_key:
                 daily_tasks_by_user.setdefault(daily_result.user_id, {})[task_key] = task
+
+    close_events = (
+        (
+            await db.execute(
+                select(RealizationDailyCloseEvent, RealizationPeriod)
+                .join(RealizationPeriod, RealizationPeriod.id == RealizationDailyCloseEvent.period_id)
+                .where(
+                    RealizationDailyCloseEvent.user_id.in_([row.user_id for row in visible]),
+                    RealizationPeriod.period_type == "DAILY",
+                    RealizationPeriod.start_date >= period.start_date,
+                    RealizationPeriod.end_date <= period.end_date,
+                )
+                .order_by(
+                    RealizationDailyCloseEvent.created_at.asc(),
+                    RealizationDailyCloseEvent.id.asc(),
+                )
+            )
+        ).all()
+        if visible
+        else []
+    )
+    close_history: dict[tuple[uuid.UUID, str], list[dict]] = {}
+    for close_event, close_period in close_events:
+        key = (close_event.user_id, close_period.start_date.isoformat())
+        close_history.setdefault(key, []).append(
+            RealizationDailyCloseEventOut.model_validate(close_event).model_dump(mode="json")
+        )
+    for user_id, timeline in daily_by_user.items():
+        for item in timeline:
+            history = close_history.get((user_id, item["date"]), [])
+            latest = history[-1] if history else None
+            item["close_history"] = history
+            item["close_state"] = (
+                "CLOSED"
+                if latest and latest["action"] in {"CLOSE", "CORRECT"}
+                else "REOPENED"
+                if latest and latest["action"] == "REOPEN"
+                else "OPEN"
+            )
+            item["close_event"] = latest
 
     planned_tasks_by_user_day: dict[uuid.UUID, dict[str, list[dict]]] = {}
     if period.planned_snapshot_id is not None:
@@ -636,12 +692,12 @@ async def _weekly_response(
                 if belongs_to_person(task, row.user_id)
             }
     task_comment_map = {
-        comment.task_id: comment.comment
+        (comment.task_id, comment.user_id): comment.comment
         for comment in (
             await db.execute(
                 select(TaskUserComment).where(
                     TaskUserComment.task_id.in_(visible_task_ids),
-                    TaskUserComment.user_id == user.id,
+                    TaskUserComment.user_id.in_([row.user_id for row in visible]),
                 )
             )
         ).scalars().all()
@@ -653,7 +709,9 @@ async def _weekly_response(
                     task_uuid = uuid.UUID(str(task.get("task_id")))
                 except (TypeError, ValueError):
                     task_uuid = None
-                task["user_comment"] = task_comment_map.get(task_uuid) if task_uuid else None
+                task["user_comment"] = (
+                    task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
+                )
     people: list[RealizationPersonWorkflowOut] = []
     for row in visible:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
@@ -665,6 +723,26 @@ async def _weekly_response(
         ]
         facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
         facts["observations"] = live_by_user.get(row.user_id, [])
+        pulse_history = [
+            {
+                "date": item["date"],
+                "pulse": (item.get("pulse") or {}).get("pulse"),
+                "reason": (item.get("pulse") or {}).get("reason"),
+                "has_snapshot": item.get("has_snapshot", False),
+                "close_state": item.get("close_state", "OPEN"),
+                "close_event": item.get("close_event"),
+            }
+            for item in facts["daily_timeline"]
+        ]
+        facts["pulse_history"] = pulse_history
+        latest_pulse_item = next(
+            (item for item in reversed(facts["daily_timeline"]) if item.get("pulse")),
+            None,
+        )
+        if period.final_snapshot_id is None and latest_pulse_item is not None:
+            facts["pulse"] = latest_pulse_item.get("pulse")
+            facts["projected_weekly_pulse"] = latest_pulse_item.get("pulse")
+            facts["recovery"] = latest_pulse_item.get("recovery")
         if period.final_snapshot_id is None:
             facts["tasks"] = list(daily_tasks_by_user.get(row.user_id, {}).values()) or (
                 facts.get("tasks") or []
@@ -712,23 +790,12 @@ async def _weekly_response(
         message=message,
         people=people,
         department_result=(
-            RealizationDepartmentResultOut.model_validate(
-                {
-                    **RealizationDepartmentResultOut.model_validate(
-                        department_result
-                    ).model_dump(),
-                    "final_comment": None,
-                }
-            )
-            if department_result and user.role == UserRole.STAFF
-            else (
-                RealizationDepartmentResultOut.model_validate(department_result)
-                if department_result
-                else None
-            )
+            RealizationDepartmentResultOut.model_validate(department_result)
+            if department_result and user.role != UserRole.STAFF
+            else None
         ),
         unassigned=(department_result.facts_json or {}).get("unassigned", [])
-        if department_result
+        if department_result and user.role != UserRole.STAFF
         else [],
     )
 
@@ -740,10 +807,11 @@ async def export_realization_excel(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> Response:
-    # Every department manager can export Realization for any department,
-    # or all of them at once (department_id=None), same as ADMIN.
     if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(status_code=403, detail="Forbidden")
+    if user.role == UserRole.MANAGER:
+        if department_id is None or department_id != user.department_id:
+            raise HTTPException(status_code=403, detail="Managers can export only their department")
 
     start = normalize_week_start(week_start)
     end = weekly_end(start)
@@ -1137,6 +1205,7 @@ async def _daily_response(
     *,
     period: RealizationPeriod,
     department_name: str,
+    user: User,
 ) -> RealizationDailyOut:
     raw_rows = (
         await db.execute(
@@ -1157,7 +1226,16 @@ async def _daily_response(
         if active_user.id not in common_leave
         or period.start_date not in common_leave[active_user.id].days
     }
-    rows = [row for row in raw_rows if row.user_id in eligible_user_ids]
+    rows = [
+        row
+        for row in raw_rows
+        if row.user_id in eligible_user_ids
+        and can_view_person_result(
+            user,
+            subject_user_id=row.user_id,
+            subject_department_id=row.department_id,
+        )
+    ]
     names = {
         row.id: row.full_name
         for row in (
@@ -1167,6 +1245,10 @@ async def _daily_response(
     people = []
     for row in rows:
         payload = RealizationPersonResultOut.model_validate(row).model_dump()
+        payload["facts_json"] = _visible_facts(user, row)
+        if user.role == UserRole.STAFF:
+            payload["manager_comment"] = None
+            payload["override_reason"] = None
         payload["user_name"] = names.get(row.user_id, "Employee")
         people.append(RealizationPersonWorkflowOut.model_validate(payload))
     department_result = (
@@ -1192,7 +1274,7 @@ async def _daily_response(
         people=people,
         department_result=(
             RealizationDepartmentResultOut.model_validate(department_result)
-            if department_result else None
+            if department_result and user.role != UserRole.STAFF else None
         ),
     )
 
@@ -1218,7 +1300,9 @@ async def get_daily_realization(
         await db.refresh(period)
     except RealizationWorkflowError as exc:
         raise _error(exc)
-    return await _daily_response(db, period=period, department_name=department.name)
+    return await _daily_response(
+        db, period=period, department_name=department.name, user=user
+    )
 
 
 @router.post("/daily/calculate", response_model=RealizationDailyOut)
@@ -1255,7 +1339,312 @@ async def calculate_daily_realization(
     except (ValueError, RealizationWorkflowError) as exc:
         await db.rollback()
         raise _error(exc)
-    return await _daily_response(db, period=period, department_name=department.name)
+    return await _daily_response(
+        db, period=period, department_name=department.name, user=user
+    )
+
+
+async def _latest_close_event(
+    db: AsyncSession, *, period_id: uuid.UUID, user_id: uuid.UUID
+) -> RealizationDailyCloseEvent | None:
+    return (
+        await db.execute(
+            select(RealizationDailyCloseEvent)
+            .where(
+                RealizationDailyCloseEvent.period_id == period_id,
+                RealizationDailyCloseEvent.user_id == user_id,
+            )
+            .order_by(
+                RealizationDailyCloseEvent.created_at.desc(),
+                RealizationDailyCloseEvent.id.desc(),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+@router.post(
+    "/periods/{period_id}/results/{result_id}/close-day",
+    response_model=RealizationDailyCloseEventOut,
+)
+async def close_realization_day(
+    period_id: uuid.UUID,
+    result_id: uuid.UUID,
+    payload: RealizationDailyCloseRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationDailyCloseEventOut:
+    period = await _period(db, period_id, for_update=True)
+    if period.period_type != "DAILY" or period.department_id is None:
+        raise HTTPException(status_code=409, detail="Only a daily Realization period can be closed")
+    result = await db.get(RealizationPersonResult, result_id)
+    if result is None or result.period_id != period.id:
+        raise HTTPException(status_code=404, detail="Realization result not found")
+    if not can_view_person_result(
+        user,
+        subject_user_id=result.user_id,
+        subject_department_id=result.department_id,
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if user.role == UserRole.STAFF and result.user_id != user.id:
+        raise HTTPException(status_code=403, detail="STAFF can close only their own day")
+    require_unlocked(period)
+    planned, _ = await _pinned_snapshots(db, period)
+    if planned is None:
+        raise HTTPException(status_code=409, detail="PLANNED snapshot is required")
+
+    # Closing always refreshes the source facts first; it never trusts the 16:20 snapshot blindly.
+    await calculate_daily_period(
+        db,
+        period=period,
+        planned_snapshot=planned,
+        actor_id=user.id,
+    )
+    await db.flush()
+    await db.refresh(result)
+    facts = dict(result.facts_json or {})
+    if int(facts.get("missing_comment_count") or 0) > 0:
+        raise HTTPException(
+            status_code=409,
+            detail={
+                "code": "RLZ_TASK_COMMENT_REQUIRED",
+                "message": "Para mbylljes, plotëso komentet e rezultateve që mungojnë.",
+            },
+        )
+    if not (payload.daily_comment and payload.daily_comment.strip()):
+        raise HTTPException(status_code=422, detail="Komenti i mbylljes ditore është i detyrueshëm")
+    pulse_raw = (facts.get("pulse") or {}).get("pulse")
+    try:
+        suggested = RealizationPulse(str(pulse_raw))
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail="Daily Pulse is not available") from exc
+    department = await db.get(Department, period.department_id)
+    mode = RealizationOperatingMode(
+        department.realization_mode if department else RealizationOperatingMode.AUTO.value
+    )
+    confirmed = payload.confirmed_pulse
+    reason = (payload.reason or "").strip() or None
+    if mode is RealizationOperatingMode.AUTO:
+        if confirmed is None:
+            confirmed = suggested
+        elif confirmed != suggested:
+            if user.role not in {UserRole.MANAGER, UserRole.ADMIN} or not reason:
+                raise HTTPException(status_code=409, detail="AUTO override requires manager/admin and a reason")
+    elif confirmed is None:
+        raise HTTPException(status_code=422, detail="This operating mode requires a confirmed Pulse")
+    if mode is RealizationOperatingMode.MANUAL and not reason:
+        raise HTTPException(status_code=422, detail="MANUAL Pulse requires a reason")
+    if confirmed != suggested and not reason:
+        raise HTTPException(status_code=422, detail="Changing the suggested Pulse requires a reason")
+    if confirmed is RealizationPulse.DIAMOND and int((facts.get("pulse") or {}).get("verified_diamond_count") or 0) < 1:
+        raise HTTPException(status_code=409, detail="DIAMOND requires verified DIAMOND evidence")
+
+    latest = await _latest_close_event(db, period_id=period.id, user_id=result.user_id)
+    if latest is not None and latest.action in {
+        RealizationDailyCloseAction.CLOSE.value,
+        RealizationDailyCloseAction.CORRECT.value,
+    }:
+        raise HTTPException(status_code=409, detail="The day is already closed; reopen it before correction")
+    action = (
+        RealizationDailyCloseAction.CORRECT
+        if latest is not None
+        else RealizationDailyCloseAction.CLOSE
+    )
+    if action is RealizationDailyCloseAction.CORRECT and not reason:
+        raise HTTPException(status_code=422, detail="A corrected daily close requires a reason")
+    event = RealizationDailyCloseEvent(
+        period_id=period.id,
+        result_id=result.id,
+        user_id=result.user_id,
+        department_id=period.department_id,
+        action=action.value,
+        mode=mode.value,
+        suggested_pulse=suggested.value,
+        confirmed_pulse=confirmed.value if confirmed else None,
+        daily_comment=payload.daily_comment.strip(),
+        reason=reason,
+        facts_json={
+            "pulse": facts.get("pulse"),
+            "recovery": facts.get("recovery"),
+            "counters": facts.get("counters"),
+            "task_ids": [item.get("task_id") for item in facts.get("tasks") or [] if item.get("task_id")],
+        },
+        supersedes_event_id=latest.id if latest else None,
+        actor_user_id=user.id,
+    )
+    db.add(event)
+    await db.flush()
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="realization_daily_close",
+        entity_id=event.id,
+        action=action.value.lower(),
+        before={"event_id": str(latest.id)} if latest else None,
+        after={
+            "suggested_pulse": suggested.value,
+            "confirmed_pulse": confirmed.value if confirmed else None,
+            "mode": mode.value,
+            "reason": reason,
+        },
+    )
+    await db.commit()
+    await db.refresh(event)
+    return RealizationDailyCloseEventOut.model_validate(event)
+
+
+@router.post(
+    "/periods/{period_id}/results/{result_id}/reopen-day",
+    response_model=RealizationDailyCloseEventOut,
+)
+async def reopen_realization_day(
+    period_id: uuid.UUID,
+    result_id: uuid.UUID,
+    payload: RealizationDailyReopenRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationDailyCloseEventOut:
+    if user.role not in {UserRole.MANAGER, UserRole.ADMIN}:
+        raise HTTPException(status_code=403, detail="Only manager/admin can reopen a closed day")
+    period = await _period(db, period_id, for_update=True)
+    result = await db.get(RealizationPersonResult, result_id)
+    if result is None or result.period_id != period.id or period.period_type != "DAILY":
+        raise HTTPException(status_code=404, detail="Daily Realization result not found")
+    if not can_review_realization(user, department_id=result.department_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    require_unlocked(period)
+    latest = await _latest_close_event(db, period_id=period.id, user_id=result.user_id)
+    if latest is None or latest.action == RealizationDailyCloseAction.REOPEN.value:
+        raise HTTPException(status_code=409, detail="The day is not currently closed")
+    event = RealizationDailyCloseEvent(
+        period_id=period.id,
+        result_id=result.id,
+        user_id=result.user_id,
+        department_id=result.department_id,
+        action=RealizationDailyCloseAction.REOPEN.value,
+        mode=latest.mode,
+        suggested_pulse=latest.suggested_pulse,
+        confirmed_pulse=latest.confirmed_pulse,
+        daily_comment=latest.daily_comment,
+        reason=payload.reason.strip(),
+        facts_json=latest.facts_json or {},
+        supersedes_event_id=latest.id,
+        actor_user_id=user.id,
+    )
+    db.add(event)
+    await db.flush()
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="realization_daily_close",
+        entity_id=event.id,
+        action="reopen",
+        before={"event_id": str(latest.id)},
+        after={"reason": event.reason},
+    )
+    await db.commit()
+    await db.refresh(event)
+    return RealizationDailyCloseEventOut.model_validate(event)
+
+
+@router.get("/monthly", response_model=RealizationMonthlyOut)
+async def get_monthly_realization(
+    department_id: uuid.UUID,
+    month_start: date,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationMonthlyOut:
+    _ensure_department_scope(user, department_id)
+    start = month_start.replace(day=1)
+    next_month = date(start.year + (1 if start.month == 12 else 0), 1 if start.month == 12 else start.month + 1, 1)
+    end = next_month - timedelta(days=1)
+    department = await db.get(Department, department_id)
+    if department is None:
+        raise HTTPException(status_code=404, detail="Department not found")
+    monthly_period = await ensure_monthly_period(
+        db,
+        department_id=department_id,
+        month_start=start,
+        created_by=user.id,
+    )
+    await calculate_monthly_period(db, period=monthly_period, actor_id=user.id)
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="realization_period",
+        entity_id=monthly_period.id,
+        action="monthly_operational_calculated",
+        after={"month_start": start.isoformat(), "month_end": end.isoformat()},
+    )
+    await db.commit()
+    rows = (
+        await db.execute(
+            select(RealizationPersonResult, RealizationPeriod)
+            .join(RealizationPeriod, RealizationPeriod.id == RealizationPersonResult.period_id)
+            .where(
+                RealizationPeriod.department_id == department_id,
+                RealizationPeriod.period_type == "WEEKLY",
+                RealizationPeriod.final_snapshot_id.is_not(None),
+                RealizationPeriod.start_date <= end,
+                RealizationPeriod.end_date >= start,
+                RealizationPeriod.status != RealizationPeriodStatus.OPEN.value,
+            )
+            .order_by(RealizationPeriod.start_date.asc())
+        )
+    ).all()
+    visible_rows = [
+        (result, period)
+        for result, period in rows
+        if can_view_person_result(
+            user,
+            subject_user_id=result.user_id,
+            subject_department_id=result.department_id,
+        )
+    ]
+    user_ids = {result.user_id for result, _ in visible_rows}
+    names = {
+        row.id: row.full_name
+        for row in (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    } if user_ids else {}
+    weekly_by_user: dict[uuid.UUID, list[dict]] = {}
+    departments: dict[uuid.UUID, uuid.UUID | None] = {}
+    for result, period in visible_rows:
+        facts = result.facts_json or {}
+        pulse = (facts.get("pulse") or {}).get("pulse") or RealizationPulse.JUSTIFIED.value
+        weekly_by_user.setdefault(result.user_id, []).append(
+            {
+                "period_id": str(period.id),
+                "week_start": period.start_date.isoformat(),
+                "week_end": period.end_date.isoformat(),
+                "pulse": pulse,
+                "unresolved_pink_days": sum(
+                    1
+                    for item in facts.get("daily_timeline") or []
+                    if int(item.get("unresolved_pink_count") or 0) > 0
+                ) or (1 if int(facts.get("unresolved_pink_count") or 0) > 0 else 0),
+                "verified_positive_extras": int((facts.get("pulse") or {}).get("verified_extra_count") or 0),
+                "unresolved_negative_count": int((facts.get("pulse") or {}).get("unresolved_negative_count") or 0),
+                "verified_negative_count": int((facts.get("counters") or {}).get("negative_count") or 0),
+                "drilldown": {"week_start": period.start_date.isoformat()},
+            }
+        )
+        departments[result.user_id] = result.department_id
+    people = [
+        RealizationMonthlyPersonOut(
+            user_id=user_id,
+            user_name=names.get(user_id, "Employee"),
+            department_id=departments.get(user_id),
+            aggregation=aggregate_monthly_pulses(weekly_rows),
+        )
+        for user_id, weekly_rows in sorted(weekly_by_user.items(), key=lambda item: names.get(item[0], ""))
+    ]
+    return RealizationMonthlyOut(
+        month_start=start,
+        month_end=end,
+        department_id=department_id,
+        department_name=department.name,
+        people=people,
+    )
 
 
 @router.post(

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from collections import defaultdict
-from datetime import date, datetime, time, timezone
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
@@ -15,17 +15,20 @@ from app.models.enums import AttendanceType, RealizationPeriodStatus
 from app.models.project import Project
 from app.models.realization import (
     RealizationDepartmentResult,
+    RealizationObservation,
     RealizationPeriod,
     RealizationPersonResult,
 )
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
+from app.models.task_user_comment import TaskUserComment
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.services.realization_calculator import build_live_questions, build_project_progress
 from app.services.realization_evidence import _snapshot_tasks
 from app.services.realization_people import load_active_users_and_common_leave
 from app.services.realization_periods import require_recalculable, transition_period
+from app.services.realization_pulse import build_recovery, calculate_pulse
 
 
 def _local_date(value: datetime | None) -> date | None:
@@ -222,6 +225,7 @@ async def calculate_daily_period(
     }
 
     weekly_task_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
+    weekly_expected_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
     weekly_completed_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
     weekly_all_completed_by_user: dict[uuid.UUID, dict[str, dict[str, Any]]] = defaultdict(dict)
     weekly_additional_keys_by_user: dict[uuid.UUID, set[str]] = defaultdict(set)
@@ -277,6 +281,16 @@ async def calculate_daily_period(
             ) or (
                 not occurrences and _local_date(raw.get("planned_due_date")) == day
             )
+            expected_by_today = any(
+                occurrence.get("day") is not None and occurrence.get("day") <= day
+                for occurrence in occurrences
+            ) or (
+                not occurrences
+                and _local_date(raw.get("planned_due_date")) is not None
+                and _local_date(raw.get("planned_due_date")) <= day  # type: ignore[operator]
+            )
+            if expected_by_today:
+                weekly_expected_keys_by_user[user_id].add(key)
         for user_id, due_today in occurrence_users.items():
             if user_id not in people:
                 continue
@@ -333,6 +347,7 @@ async def calculate_daily_period(
 
         created_after_plan = task.created_at >= planned_snapshot.created_at
         completed_day = completion_day(task)
+        scheduled_system_day = _local_date(task.due_date or task.origin_run_at)
         completed_this_week = bool(
             completed_day is not None and week_start <= completed_day <= day
         )
@@ -351,6 +366,16 @@ async def calculate_daily_period(
         for user_id in assignees.get(task.id, set()):
             if user_id not in people:
                 continue
+            if (
+                is_system_task
+                and scheduled_system_day is not None
+                and week_start <= scheduled_system_day <= day
+            ):
+                system_key = f"id:{task.id}"
+                weekly_task_keys_by_user[user_id].add(system_key)
+                weekly_expected_keys_by_user[user_id].add(system_key)
+                if completed_this_week:
+                    weekly_completed_by_user[user_id].add(system_key)
             if not is_system_task and created_after_plan:
                 weekly_additional_keys_by_user[user_id].add(str(task.id))
                 if source_type == "fast":
@@ -383,7 +408,6 @@ async def calculate_daily_period(
                     completed_day=completed_day,
                 )
 
-        scheduled_system_day = _local_date(task.due_date or task.origin_run_at)
         has_activity_today = (
             _local_date(task.created_at) == day
             or _local_date(task.completed_at) == day
@@ -417,6 +441,8 @@ async def calculate_daily_period(
                 people[user_id]["counters"]["system_task_count"] += 1
                 if fact["classification"] == "completed":
                     people[user_id]["counters"]["system_task_completed_count"] += 1
+                else:
+                    people[user_id]["counters"][f"{fact['classification']}_count"] += 1
             else:
                 people[user_id]["counters"]["additional_count"] += 1
             if fact["source_type"] == "fast":
@@ -444,6 +470,81 @@ async def calculate_daily_period(
         elif row.type == AttendanceType.MUNGESE:
             person["counters"]["absence_needs_review_count"] += 1
 
+    # M3 and RLZ share these normalized source records. We never parse report text.
+    relevant_task_ids = {
+        uuid.UUID(str(task_fact["task_id"]))
+        for person in people.values()
+        for task_fact in person["tasks"]
+        if task_fact.get("task_id")
+    }
+    comment_rows = (
+        (
+            await db.execute(
+                select(TaskUserComment).where(
+                    TaskUserComment.task_id.in_(relevant_task_ids),
+                    TaskUserComment.user_id.in_(list(people)),
+                )
+            )
+        ).scalars().all()
+        if relevant_task_ids and people
+        else []
+    )
+    comments = {(row.task_id, row.user_id): (row.comment or "").strip() for row in comment_rows}
+
+    observation_rows = (
+        await db.execute(
+            select(RealizationObservation).where(
+                RealizationObservation.department_id == period.department_id,
+                RealizationObservation.voided_at.is_(None),
+                RealizationObservation.created_at <= day_end_utc,
+            )
+        )
+    ).scalars().all()
+    verified_ids: set[uuid.UUID] = set()
+    for observation in observation_rows:
+        if observation.source_type != "realization_observation_verification":
+            continue
+        raw_id = (observation.evidence_json or {}).get("verification_of") or observation.source_id
+        try:
+            verified_ids.add(uuid.UUID(str(raw_id)))
+        except (TypeError, ValueError):
+            continue
+    for observation in observation_rows:
+        if observation.source_type == "realization_observation_verification" or observation.user_id not in people:
+            continue
+        verified = observation.id in verified_ids or (
+            observation.is_system_generated and (observation.evidence_json or {}).get("verified") is True
+        )
+        person = people[observation.user_id]
+        person.setdefault("observations", []).append(
+            {
+                "id": str(observation.id),
+                "marker": observation.marker,
+                "category": observation.category,
+                "comment": observation.comment,
+                "task_id": str(observation.task_id) if observation.task_id else None,
+                "evidence_json": observation.evidence_json or {},
+                "verified": verified,
+                "visibility": observation.visibility,
+            }
+        )
+        if not verified:
+            if observation.marker in {"POSITIVE", "DIAMOND"}:
+                person["counters"]["unverified_extra_count"] += 1
+            continue
+        if observation.marker == "DIAMOND":
+            person["counters"]["verified_diamond_count"] += 1
+        elif observation.marker == "POSITIVE":
+            person["counters"]["verified_extra_count"] += 1
+        elif observation.marker == "NEGATIVE":
+            evidence = observation.evidence_json or {}
+            if observation.category == "BLOCKER" and evidence.get("outside_person_control") is True:
+                person["counters"]["verified_external_blocker_count"] += 1
+            else:
+                person["counters"]["unresolved_negative_count"] += 1
+        if observation.category == "PRIORITY_CHANGE":
+            person["counters"]["approved_priority_change_count"] += 1
+
     existing = {
         row.user_id: row
         for row in (
@@ -463,11 +564,13 @@ async def calculate_daily_period(
         planned_today = int(counters.get("planned_count", 0))
         completed_today = int(counters.get("completed_count", 0))
         weekly_total = len(weekly_task_keys_by_user[user_id])
+        weekly_expected = len(weekly_expected_keys_by_user[user_id])
         weekly_completed = len(weekly_completed_by_user[user_id])
         weekly_all_completed = len(weekly_all_completed_by_user[user_id])
         counters["daily_planned_count"] = planned_today
         counters["daily_completed_count"] = completed_today
         counters["weekly_planned_count"] = weekly_total
+        counters["weekly_expected_count"] = weekly_expected
         counters["weekly_completed_count"] = weekly_completed
         counters["weekly_all_completed_count"] = weekly_all_completed
         counters["weekly_completed_outside_plan_count"] = max(
@@ -479,6 +582,8 @@ async def calculate_daily_period(
         person["daily_planned_count"] = planned_today
         person["daily_completed_count"] = completed_today
         person["weekly_planned_count"] = weekly_total
+        person["expected_cumulative_count"] = weekly_expected
+        person["actual_cumulative_count"] = weekly_completed
         person["weekly_completed_count"] = weekly_completed
         person["weekly_all_completed_count"] = weekly_all_completed
         person["weekly_completed_outside_plan_count"] = max(
@@ -494,6 +599,38 @@ async def calculate_daily_period(
         )
         person["weekly_progress_percent"] = (
             round(weekly_completed * 100.0 / weekly_total, 1) if weekly_total else 0.0
+        )
+        missing_comments = 0
+        for task_fact in person["tasks"]:
+            task_id_raw = task_fact.get("task_id")
+            task_uuid = uuid.UUID(str(task_id_raw)) if task_id_raw else None
+            comment = comments.get((task_uuid, user_id), "") if task_uuid else ""
+            task_fact["user_comment"] = comment or None
+            task_fact["comment_required_before_close"] = task_fact.get("source_type") != "system"
+            task_fact["rlz_impact"] = (
+                "PINK_ACTION_REQUIRED"
+                if task_fact.get("attribution") in {"planned_today", "system_schedule"}
+                and task_fact.get("classification") == "no_progress"
+                else "EXPECTED_PLAN"
+                if task_fact.get("attribution") == "planned_today"
+                else "ADDITIONAL_EVIDENCE"
+            )
+            if (
+                task_fact.get("classification") == "completed"
+                and task_fact.get("source_type") != "system"
+                and not comment
+            ):
+                missing_comments += 1
+        counters["missing_comment_count"] = missing_comments
+        person["missing_comment_count"] = missing_comments
+        person["unresolved_pink_count"] = int(counters.get("no_progress_count", 0))
+        pulse = calculate_pulse(person)
+        person["pulse"] = pulse.to_dict()
+        person["recovery"] = build_recovery(
+            decision=pulse,
+            weekly_planned_count=weekly_total,
+            as_of_day=day,
+            week_end=period.start_date + timedelta(days=4),
         )
         person["project_progress"] = build_project_progress(person["tasks"])
         person["questions"] = build_live_questions(person)

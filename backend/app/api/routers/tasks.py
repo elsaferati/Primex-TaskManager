@@ -1024,6 +1024,69 @@ def _can_complete_waiting_confirmation(
     return actor_is_assignee
 
 
+async def _require_rlz_completion_comment(
+    db: AsyncSession,
+    *,
+    task: Task,
+    user: User,
+    actor_is_assignee: bool,
+    override_reason: str | None,
+) -> bool:
+    """Return True when a manager/admin used an audited exceptional override."""
+    if not task.is_active or task.department_id is None:
+        return False
+    comment = (
+        await db.execute(
+            select(TaskUserComment.comment).where(
+                TaskUserComment.task_id == task.id,
+                TaskUserComment.user_id == user.id,
+            )
+        )
+    ).scalar_one_or_none()
+    try:
+        return _validate_rlz_completion_comment(
+            user_role=user.role,
+            actor_is_assignee=actor_is_assignee,
+            personal_comment=comment,
+            override_reason=override_reason,
+        )
+    except ValueError as exc:
+        code = str(exc)
+    if code == "RLZ_COMPLETION_OVERRIDE_REASON_REQUIRED":
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "RLZ_COMPLETION_OVERRIDE_REASON_REQUIRED",
+                "message": "Mbyllja pa komentin personal kërkon arsye për përjashtim.",
+            },
+        )
+    raise HTTPException(
+        status_code=status.HTTP_409_CONFLICT,
+        detail={
+            "code": "RLZ_TASK_COMMENT_REQUIRED",
+            "message": "Para mbylljes, shto komentin për rezultatin e kësaj detyre.",
+            "task_id": str(task.id),
+        },
+    )
+
+
+def _validate_rlz_completion_comment(
+    *,
+    user_role: UserRole,
+    actor_is_assignee: bool,
+    personal_comment: str | None,
+    override_reason: str | None,
+) -> bool:
+    """Pure completion rule used by every explicit task-status path and tests."""
+    if actor_is_assignee and personal_comment and personal_comment.strip():
+        return False
+    if user_role in (UserRole.ADMIN, UserRole.MANAGER):
+        if override_reason and override_reason.strip():
+            return True
+        raise ValueError("RLZ_COMPLETION_OVERRIDE_REASON_REQUIRED")
+    raise ValueError("RLZ_TASK_COMMENT_REQUIRED")
+
+
 async def _clear_ga_note_conversion_if_no_active_tasks(
     db: AsyncSession,
     *,
@@ -1714,6 +1777,23 @@ async def create_task(
     status_value = payload.status or TaskStatus.TODO
     if payload.ga_note_origin_id is not None or payload.plan_note_origin_id is not None:
         status_value = _normalize_ga_note_task_status(status_value)
+    if status_value == TaskStatus.DONE and department_id is not None:
+        if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "RLZ_TASK_COMMENT_REQUIRED",
+                    "message": "Krijo detyrën, shto komentin e rezultatit dhe pastaj mbylle.",
+                },
+            )
+        if not (payload.completion_override_reason and payload.completion_override_reason.strip()):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={
+                    "code": "RLZ_COMPLETION_OVERRIDE_REASON_REQUIRED",
+                    "message": "Krijimi direkt si DONE kërkon arsye për përjashtim.",
+                },
+            )
     confirmation_assignee_id = payload.confirmation_assignee_id
     if confirmation_assignee_id is not None:
         confirmation_user = (
@@ -2305,6 +2385,19 @@ async def create_task(
             "assigned_to": str(task.assigned_to) if task.assigned_to else None,
         },
     )
+    if status_value == TaskStatus.DONE and payload.completion_override_reason:
+        add_audit_log(
+            db=db,
+            actor_user_id=user.id,
+            entity_type="task",
+            entity_id=task.id,
+            action="rlz_completion_comment_overridden",
+            before=None,
+            after={
+                "status": TaskStatus.DONE.value,
+                "reason": payload.completion_override_reason.strip(),
+            },
+        )
 
     created_notifications: list[Notification] = []
     existing_assignee_ids: set[uuid.UUID] = set()
@@ -2475,6 +2568,14 @@ async def update_task(
     old_due_day = _as_local_date(task.due_date)
 
     if question_status_requested is not None:
+        if question_status_requested == TaskStatus.DONE:
+            await _require_rlz_completion_comment(
+                db,
+                task=task,
+                user=user,
+                actor_is_assignee=True,
+                override_reason=payload.completion_override_reason,
+            )
         question_status_override = await _set_question_task_user_completion(
             db,
             task=task,
@@ -2666,6 +2767,31 @@ async def update_task(
     current_status_raw = _enum_value(task.status)
     target_status_raw = payload.status.value if payload.status is not None else current_status_raw
     actor_is_assignee_for_completion = await _is_user_assigned_to_task(db, task, user.id)
+    completion_override_used = False
+    if (
+        payload.status == TaskStatus.DONE
+        and current_status_raw != TaskStatus.DONE.value
+    ):
+        completion_override_used = await _require_rlz_completion_comment(
+            db,
+            task=task,
+            user=user,
+            actor_is_assignee=actor_is_assignee_for_completion,
+            override_reason=payload.completion_override_reason,
+        )
+        if completion_override_used:
+            add_audit_log(
+                db=db,
+                actor_user_id=user.id,
+                entity_type="task",
+                entity_id=task.id,
+                action="rlz_completion_comment_overridden",
+                before={"status": current_status_raw},
+                after={
+                    "status": TaskStatus.DONE.value,
+                    "reason": payload.completion_override_reason.strip(),
+                },
+            )
     if target_status_raw == TaskStatus.WAITING_CONFIRMATION.value and task.confirmation_assignee_id is None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
