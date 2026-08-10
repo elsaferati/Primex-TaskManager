@@ -76,6 +76,15 @@ jobs:
               $migrationChanged = $true
             }
           }
+
+          # A backend or migration failure stops this workflow before the frontend
+          # deployment step. The next corrective commit may touch only backend
+          # files, while the server is still running an older frontend build.
+          # Deploying the frontend with backend changes keeps both production
+          # surfaces on the same checked-out commit after recovery.
+          if ($backendChanged) {
+            $frontendChanged = $true
+          }
  
           "backend_changed=$($backendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "frontend_changed=$($frontendChanged.ToString().ToLowerInvariant())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
