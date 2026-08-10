@@ -8,7 +8,11 @@ from unittest.mock import patch
 
 from app.models.enums import RealizationLevel, RealizationMarker, RealizationObservationCategory, RealizationScopeType
 from app.models.realization import RealizationPersonResult, RealizationQuestionAnswer
-from app.api.routers.realization import _mark_ai_stale_for_subject, _weekly_response
+from app.api.routers.realization import (
+    _dedupe_timeline_tasks,
+    _mark_ai_stale_for_subject,
+    _weekly_response,
+)
 from app.schemas.realization import RealizationFinalDecision, RealizationObservationCreate
 from app.services.realization_ai import (
     _safe_input,
@@ -326,6 +330,21 @@ class TestWeeklyResponseRegression(unittest.TestCase):
         source = inspect.getsource(_mark_ai_stale_for_subject)
         self.assertNotIn("close_history", source)
         self.assertNotIn("return RealizationWeeklyOut(", source)
+
+    def test_duplicate_occurrences_of_same_task_are_collapsed_per_day(self) -> None:
+        rows = _dedupe_timeline_tasks([
+            {"task_id": "task-1", "match_key": "id:task-1", "title": "Amazon MWS", "status": "TODO"},
+            {"task_id": "task-1", "match_key": "id:task-1", "title": "Amazon MWS", "status": "DONE"},
+        ])
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0]["status"], "DONE")
+
+    def test_same_title_with_different_task_ids_remains_distinct(self) -> None:
+        rows = _dedupe_timeline_tasks([
+            {"task_id": "task-1", "title": "Daily feed"},
+            {"task_id": "task-2", "title": "Daily feed"},
+        ])
+        self.assertEqual(len(rows), 2)
 
 
 if __name__ == "__main__":
