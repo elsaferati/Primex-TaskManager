@@ -20,6 +20,7 @@ async def check(url: str, call_common_view: bool) -> None:
             missing = required - names
             if missing:
                 raise RuntimeError("Missing MCP tools: " + ", ".join(sorted(missing)))
+            print("MCP functional check: initialized; required tools are registered")
             health = await session.call_tool("health_check", {})
             health_text = "".join(str(getattr(item, "text", "")) for item in getattr(health, "content", []))
             try:
@@ -27,11 +28,13 @@ async def check(url: str, call_common_view: bool) -> None:
             except json.JSONDecodeError:
                 health_payload = {}
             if getattr(health, "isError", False) or health_payload.get("status") != "ok":
-                raise RuntimeError(f"MCP health_check failed: {health}")
+                raise RuntimeError(f"MCP health_check failed: {health_text[:1000] or health}")
+            print("MCP functional check: health_check is OK")
             if call_common_view:
                 result = await session.call_tool("get_common_view", {"include": "tasks", "max_items_per_bucket": 1})
                 if getattr(result, "isError", False):
                     raise RuntimeError(f"get_common_view failed: {result}")
+                print("MCP functional check: get_common_view is OK")
 
 
 def main() -> None:

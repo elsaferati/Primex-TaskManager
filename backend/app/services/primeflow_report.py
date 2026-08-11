@@ -332,7 +332,7 @@ def build_report_document(
                 filter_tasks(one_h, report_day, slot),
             ),
             (
-                f"SLOTI PARAPRAK {report_day:%d.%m.%Y} {previous_slot}",
+                f"{previous_slot} SLOTI PARAPRAK {report_day:%d.%m.%Y}",
                 filter_tasks(one_h, report_day, previous_slot),
             ),
         ])

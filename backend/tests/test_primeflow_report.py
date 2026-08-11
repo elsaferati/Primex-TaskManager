@@ -265,7 +265,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             [section.title for section in document.sections],
             [
                 "SLOTI 28.07.2026 14:20",
-                "SLOTI PARAPRAK 28.07.2026 11:50",
+                "11:50 SLOTI PARAPRAK 28.07.2026",
                 "BLL - DETYRAT E BLLOKUT 28.07.2026",
             ],
         )
@@ -298,7 +298,7 @@ class PrimeFlowReportTests(unittest.TestCase):
                 document = build_report_document(data, date(2026, 7, 28), current)
                 expected_titles = [
                     f"SLOTI 28.07.2026 {current}",
-                    f"SLOTI PARAPRAK 28.07.2026 {previous}",
+                    f"{previous} SLOTI PARAPRAK 28.07.2026",
                 ]
                 if current == "14:20":
                     expected_titles.append("BLL - DETYRAT E BLLOKUT 28.07.2026")
