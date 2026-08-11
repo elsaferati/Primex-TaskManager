@@ -211,6 +211,11 @@ function splitKeyedLabel(value: string): { label: string; rest: string } | null 
   return { label: match[1], rest: match[2] }
 }
 
+function emailTaskCountLabel(value: string): { source: string; count: string } | null {
+  const match = value.trim().match(/^(EM:\s*(?:INFO PX|IT|HF|PX EU)):\s*(\d+):?$/i)
+  return match ? { source: match[1], count: match[2] } : null
+}
+
 function isGuidanceLine(value: string) {
   const trimmed = value.trim()
   if (!trimmed) return false
@@ -712,6 +717,21 @@ export function ReportSectionPreview({
       continue
     }
     if (item.kind === "label") {
+      const emailCount = emailTaskCountLabel(item.text)
+      if (emailCount) {
+        renderedItems.push(
+          <div key={item.key} className="flex items-center gap-2 border-b border-slate-200 bg-slate-50 px-3 py-2 uppercase tracking-normal">
+            <span className="font-semibold">{emailCount.source}:</span>
+            <span
+              aria-label={`${emailCount.count} email tasks`}
+              className="inline-flex size-6 items-center justify-center rounded-full bg-blue-600 text-xs font-bold tabular-nums text-white"
+            >
+              {emailCount.count}
+            </span>
+          </div>,
+        )
+        continue
+      }
       const keyed = splitKeyedLabel(item.text)
       if (keyed) {
         renderedItems.push(

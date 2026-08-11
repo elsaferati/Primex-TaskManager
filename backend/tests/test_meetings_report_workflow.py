@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from io import BytesIO
+from zipfile import ZipFile
 from datetime import date, datetime, time
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
@@ -18,6 +20,8 @@ from app.services.meeting_point_manual_sync import is_known_report_title, is_man
 from app.services.meetings_report import (
     SECTION_TITLES,
     _common_meeting_lines,
+    _common_task_metadata_by_title,
+    _meeting_lines,
     _m3_department_label,
     _m3_added_week_label,
     _m3_status_table,
@@ -27,6 +31,8 @@ from app.services.meetings_report import (
     _task_owners,
     _tomorrow_task_table,
     normalize_meetings_report_sections,
+    render_section_report_docx,
+    render_section_report_png,
     section_report_attachments,
 )
 
@@ -219,6 +225,48 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
 
 class MeetingsReportAliasDedupTests(unittest.TestCase):
+    def test_section_exports_keep_email_groups_tables_and_status_colors(self) -> None:
+        sections = [
+            {"title": "A JEMI BRENDA MESATARES ME PROJEKTE?", "body": "(Ploteso manualisht)"},
+            {
+                "title": "GA MBYLLJA E DET",
+                "body": (
+                    "TODO:\n+----+------+--------------------------------+\n"
+                    "| NR | KUSH | TITULLI                        |\n"
+                    "+----+------+--------------------------------+\n"
+                    "| 1  | GA   | DetyrÃ« e re                    |\n"
+                    "+----+------+--------------------------------+\n"
+                    "DONE:\n+----+------+--------------------------------+\n"
+                    "| NR | KUSH | TITULLI                        |\n"
+                    "+----+------+--------------------------------+\n"
+                    "| 1  | GA   | DetyrÃ« e kryer                 |\n"
+                    "+----+------+--------------------------------+"
+                ),
+            },
+        ]
+        docx_bytes = render_section_report_docx("PrimeFlow M3", "M3", date(2026, 8, 10), sections)
+        png_bytes = render_section_report_png("PrimeFlow M3", "M3", date(2026, 8, 10), sections)
+
+        from docx import Document
+        from PIL import Image
+
+        document = Document(BytesIO(docx_bytes))
+        document_text = "\n".join(paragraph.text for paragraph in document.paragraphs)
+        table_text = "\n".join(cell.text for table in document.tables for row in table.rows for cell in row.cells)
+        self.assertIn("PrimeFlow M3", document_text)
+        self.assertIn("MANUAL QUESTIONS", table_text)
+        self.assertIn("AUTO-FILLED FROM PRIMEFLOW", table_text)
+        self.assertIn("TODO:", table_text)
+        self.assertIn("DONE:", table_text)
+        with ZipFile(BytesIO(docx_bytes)) as archive:
+            document_xml = archive.read("word/document.xml").decode("utf-8")
+        self.assertIn("fbcfe8", document_xml.lower())
+        self.assertIn("d4ffe1", document_xml.lower())
+        self.assertIn('w:w="432"', document_xml)  # Compact NR column, matching the email grid.
+        image = Image.open(BytesIO(png_bytes))
+        self.assertGreater(image.width, 1000)
+        self.assertGreater(image.height, 400)
+
     def test_section_report_attachments_include_word_and_png(self) -> None:
         attachments = section_report_attachments(
             "PrimeFlow M3",
@@ -319,6 +367,28 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertTrue(any("10.08.2026" in row and "12.08.2026" in row for row in rows))
         self.assertTrue(any("08:00" in row and "10:00" in row for row in rows))
 
+    def test_pv_uses_the_weekly_planner_user_order(self) -> None:
+        first_user_id = uuid.uuid4()
+        second_user_id = uuid.uuid4()
+        first = SimpleNamespace(id=uuid.uuid4(), assigned_to_user_id=first_user_id, created_by_user_id=None)
+        second = SimpleNamespace(id=uuid.uuid4(), assigned_to_user_id=second_user_id, created_by_user_id=None)
+
+        rows = _leave_lines(
+            [
+                (second, date(2026, 8, 12), date(2026, 8, 12), True, None, None, None, False),
+                (first, date(2026, 8, 12), date(2026, 8, 12), True, None, None, None, False),
+            ],
+            {first_user_id: "Zeta User", second_user_id: "Alpha User"},
+            user_sort_keys={
+                first_user_id: (0, "dev", 0, 1, "zeta user"),
+                second_user_id: (0, "dev", 0, 2, "alpha user"),
+            },
+        )
+
+        data_rows = [row for row in rows if "ZU" in row or "AU" in row]
+        self.assertIn("ZU", data_rows[0])
+        self.assertIn("AU", data_rows[1])
+
     def test_meeting_status_cells_use_green_and_red_backgrounds(self) -> None:
         html = _render_ascii_table_html(
             [
@@ -355,6 +425,37 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
 
         self.assertIn("[[mt:non_daily_weekly]]", lines[0])
         self.assertNotIn("[[mt:non_daily_weekly]]", lines[1])
+
+    def test_common_view_meetings_are_sorted_by_time(self) -> None:
+        lines = _common_meeting_lines(
+            [
+                {"id": "late", "title": "Later meeting", "date": "2026-08-11", "time": "13:15"},
+                {"id": "early", "title": "Earlier meeting", "date": "2026-08-11", "time": "10:15"},
+                {"id": "first", "title": "First meeting", "date": "2026-08-11", "time": "08:30"},
+            ],
+            date(2026, 8, 11),
+        )
+
+        self.assertEqual(
+            lines,
+            [
+                "- 08:30: First meeting [[mt:non_daily_weekly]]",
+                "- 10:15: Earlier meeting [[mt:non_daily_weekly]]",
+                "- 13:15: Later meeting [[mt:non_daily_weekly]]",
+            ],
+        )
+
+    def test_database_meetings_are_sorted_by_clock_time_not_original_date(self) -> None:
+        utc = ZoneInfo("UTC")
+        lines = _meeting_lines(
+            [
+                SimpleNamespace(title="Recurring later", starts_at=datetime(2026, 8, 10, 11, 15, tzinfo=utc), recurrence_type="weekly"),
+                SimpleNamespace(title="One-off earlier", starts_at=datetime(2026, 8, 11, 8, 15, tzinfo=utc), recurrence_type="none"),
+            ]
+        )
+
+        self.assertTrue(lines[0].startswith("- 10:15: One-off earlier"))
+        self.assertTrue(lines[1].startswith("- 13:15: Recurring later"))
 
     def test_many_assignees_display_as_all(self) -> None:
         assignee_ids = {uuid.uuid4() for _ in range(11)}
@@ -481,6 +582,23 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertLess(header.index("KUSH"), header.index("DEP"))
         self.assertLess(header.index("DEP"), header.index("AM/PM"))
         self.assertTrue(any("FIN" in row and "AM (08:15)" in row and "BZ task" in row for row in rows))
+
+    def test_common_view_task_metadata_uses_string_department_id(self) -> None:
+        department_id = uuid.uuid4()
+        metadata = _common_task_metadata_by_title(
+            [
+                {
+                    "title": "Blocked task",
+                    "date": "2026-08-12",
+                    "department_id": str(department_id),
+                    "finish_period": "PM",
+                }
+            ],
+            date(2026, 8, 12),
+            {department_id: "PRODUCT CONTENT"},
+        )
+
+        self.assertEqual(metadata, {"Blocked task": ("PCM", "PM")})
 
     def test_bz_table_orders_tasks_by_department(self) -> None:
         rows = _tomorrow_task_table(

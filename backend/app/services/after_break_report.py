@@ -64,10 +64,16 @@ PERSONAL_GROUPS = [
     ("WAITING CONFIRMATION", "WAITING_CONFIRMATION"),
     ("DONE", "DONE"),
 ]
-
-
 def subject_for(day: date) -> str:
-    return f"PrimeFlow Permbledhja pas pauzes - {day:%d.%m.%Y}"
+    return f"M2 - PrimeFlow Permbledhja pas pauzes - {day:%d.%m.%Y}"
+
+
+def is_generated_subject(subject: str | None, day: date) -> bool:
+    """Recognize the old and current automatically generated M2 subjects."""
+    return (subject or "").strip() in {
+        subject_for(day),
+        f"PrimeFlow Permbledhja pas pauzes - {day:%d.%m.%Y}",
+    }
 
 
 def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[list[str]]) -> list[str]:
@@ -425,12 +431,13 @@ async def _personal_section(
 
 
 async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
-    """All open blue notes: not converted, not closed, no active linked task (any day)."""
+    """All eligible PX Notes that have not yet been discussed."""
     notes = (
         await db.execute(
             select(GaNote)
             .where(GaNote.is_converted_to_task.is_(False))
             .where(GaNote.status != GaNoteStatus.CLOSED)
+            .where(GaNote.is_discussed.is_(False))
         )
     ).scalars().all()
     if not notes:
@@ -446,7 +453,11 @@ async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
             )
         ).scalars().all()
     )
-    open_notes = [note for note in notes if note.id not in linked_note_ids]
+    open_notes = [
+        note for note in notes
+        if note.id not in linked_note_ids
+        and not note.is_discussed
+    ]
     if not open_notes:
         return []
 
@@ -456,11 +467,7 @@ async def _blue_note_rows(db: AsyncSession) -> list[list[str]]:
         users = (await db.execute(select(User).where(User.id.in_(author_ids)))).scalars().all()
         names = {user.id: user.full_name or user.username or user.email for user in users}
 
-    # Discussed notes first, then the rest, each chronological.
-    ordered = sorted(
-        open_notes,
-        key=lambda note: (not note.is_discussed, note.created_at or note.updated_at),
-    )
+    ordered = sorted(open_notes, key=lambda note: note.created_at or note.updated_at)
     return [
         [
             str(index),

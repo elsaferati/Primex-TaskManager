@@ -41,55 +41,61 @@ from app.services.meetings_report import (
     _task_metadata_by_title,
     _tomorrow_meeting_table,
     _tomorrow_task_table,
+    weekly_planner_user_sort_keys,
     send_section_report,
 )
 
 REPORT_TYPE = "morning_report"
 REPORT_LABEL = "Hapja e dites M1"
 SECTION_TITLES = [
-    # Manual answers first
-    (
-        "(GA) EM: INFO PX (KO SPAM), EM: INFO HF (KO SPAM), EM: PRIMEX EU (GMAIL-KO SPAM). "
-        "VENDOS DET: STATUS (1H: EM(08:00),08:00,DL,AM,AM&PM,PM/P/R1)"
-    ),
+    # Manual answer first
     "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
     # Auto-filled from PrimeFlow
+    "(GA) DET NGA EMAILS TE REJA",
     "(GA) VONESA/MUNGESA. A NDRYSHON PLANI PER SOT?",
-    "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET DETYRE?",
+    "(GA) NOTES TE REJA?",
     "PV/FESTA EXTERNE/TAKIMET EXTERNE/ TAKIME INTERNE/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
 ]
-MANUAL_SECTION_TITLES = set(SECTION_TITLES[:2])
+MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
+EMAIL_TASK_SOURCES: tuple[tuple[str, re.Pattern[str]], ...] = (
+    ("EM: INFO PX", re.compile(r"^\s*EM\s*:\s*INFO\s+PX\b", re.I)),
+    ("EM: IT", re.compile(r"^\s*EM\s*:\s*IT\b", re.I)),
+    ("EM: HF", re.compile(r"^\s*EM\s*:\s*HF\b", re.I)),
+    ("EM: PX EU", re.compile(r"^\s*EM\s*:\s*PX\s+EU\b", re.I)),
+)
 LEGACY_NOTES_TITLE = (
     "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET "
     "DETYRE? EM: INFO PX (KO SPAM), EM:INFO HF, (KO SPAM) EM: PRIMEX EU (GMAIL-KO SPAM), "
     "VENDOS DET: STATUS (1H: EM(08:00),08:00,DL,AM,AM&PM,PM/P/R1)"
 )
 SECTION_TITLE_ALIASES = {
+    "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET DETYRE?": SECTION_TITLES[3],
     LEGACY_NOTES_TITLE: SECTION_TITLES[3],
 }
 
 
 def subject_for(day: date) -> str:
-    return f"PrimeFlow Hapja e dites M1 - {day:%d.%m.%Y}"
+    return f"M1 - PrimeFlow Hapja e dites - {day:%d.%m.%Y}"
+
+
+def is_generated_subject(subject: str | None, day: date) -> bool:
+    """Recognize the old and current automatically generated M1 subjects."""
+    return (subject or "").strip() in {
+        subject_for(day),
+        f"PrimeFlow Hapja e dites M1 - {day:%d.%m.%Y}",
+    }
 
 
 def _emails_default_body() -> str:
-    return "\n\n".join(
-        [
-            "EMAIL INFO PX (KO SPAM): (Ploteso manualisht)",
-            "EMAIL INFO HF (KO SPAM): (Ploteso manualisht)",
-            "EMAIL PRIMEX EU / GMAIL (KO SPAM): (Ploteso manualisht)",
-            "STATUSI I DETYRAVE 1H/08:00/DL/AM/AM&PM/PM/P/R1: (Ploteso manualisht)",
-        ]
-    )
+    return "Email-source tasks load automatically when M1 is generated."
 
 
 def _default_body(title: str) -> str:
     if title == SECTION_TITLES[0]:
-        return _emails_default_body()
-    if title == SECTION_TITLES[1]:
         return "(Ploteso manualisht)"
+    if title == SECTION_TITLES[1]:
+        return _emails_default_body()
     if title == SECTION_TITLES[2]:
         return "\n".join(["VONESA: 0", "", "MUNGESA: 0", "", "NDRYSHON PLANI: (Ploteso manualisht)"])
     if title == SECTION_TITLES[3]:
@@ -113,6 +119,14 @@ def _is_manual_email_line(line: str) -> bool:
     return upper.startswith("EMAIL ") or upper.startswith("STATUSI I DETYRAVE")
 
 
+def _without_retired_task_status_prompt(body: str) -> str:
+    """Remove the retired task-status prompt from saved M1 email sections."""
+    return "\n".join(
+        line for line in (body or "").splitlines()
+        if not line.strip().upper().startswith("STATUSI I DETYRAVE")
+    ).strip()
+
+
 def _split_notes_and_emails(body: str) -> tuple[str, str]:
     note_lines: list[str] = []
     email_lines: list[str] = []
@@ -122,7 +136,8 @@ def _split_notes_and_emails(body: str) -> tuple[str, str]:
         else:
             note_lines.append(line)
     notes_body = "\n".join(note_lines).strip() or "NOTES: 0"
-    emails_body = "\n\n".join(line for line in email_lines if line).strip() or _emails_default_body()
+    emails_body = _without_retired_task_status_prompt("\n\n".join(line for line in email_lines if line))
+    emails_body = emails_body or _emails_default_body()
     return notes_body, emails_body
 
 
@@ -148,11 +163,11 @@ def _canonical_section_title(raw_title: str) -> str | None:
 
     # Older drafts used near-identical wording for the emails / notes prompts.
     if "VENDOSDETSTATUS" in compact or compact.startswith("GAEMINFO"):
-        return SECTION_TITLES[0]
+        return SECTION_TITLES[1]
     if "NOTESTEREJA" in compact and "VENDOSDETSTATUS" not in compact:
         return SECTION_TITLES[3]
     if "AKAREPLYNGAGA" in compact:
-        return SECTION_TITLES[1]
+        return SECTION_TITLES[0]
     if "VONESA" in compact and "MUNGESA" in compact:
         return SECTION_TITLES[2]
     if "BZMEGA" in compact and "BLLOK" in compact:
@@ -175,15 +190,15 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
             notes_body, emails_body = _split_notes_and_emails(body)
             if SECTION_TITLES[3] not in by_title:
                 by_title[SECTION_TITLES[3]] = notes_body
-            if SECTION_TITLES[0] not in by_title:
-                by_title[SECTION_TITLES[0]] = emails_body
+            if SECTION_TITLES[1] not in by_title:
+                by_title[SECTION_TITLES[1]] = emails_body
             continue
         if title is None:
             if raw_title:
                 extras.append({"title": raw_title, "body": body})
             continue
-        if title == SECTION_TITLES[0]:
-            body = _separate_keyed_prompt_lines(body) or _emails_default_body()
+        if title == SECTION_TITLES[1]:
+            body = _separate_keyed_prompt_lines(_without_retired_task_status_prompt(body)) or _emails_default_body()
         if title not in by_title:
             by_title[title] = body
 
@@ -192,10 +207,13 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         {"title": title, "body": by_title.get(title, _default_body(title))}
         for title in SECTION_TITLES
     ]
-    manual_count = len(MANUAL_SECTION_TITLES)
     if not extras:
         return known
-    return known[:manual_count] + extras + known[manual_count:]
+    insert_at = max(
+        (index + 1 for index, section in enumerate(known) if section["title"] in MANUAL_SECTION_TITLES),
+        default=0,
+    )
+    return known[:insert_at] + extras + known[insert_at:]
 
 
 def _entry_day(entry: CommonEntry) -> date | None:
@@ -270,8 +288,46 @@ def _notes_section(note_rows: list[list[str]]) -> str:
     )
 
 
-def _emails_section() -> str:
-    return _emails_default_body()
+def _email_task_source_label(task: Task) -> str | None:
+    """Return the standard email-source tag at the beginning of a task title."""
+    title = task.title or ""
+    return next((label for label, pattern in EMAIL_TASK_SOURCES if pattern.search(title)), None)
+
+
+def _emails_section(
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    department_codes: dict[Any, str],
+    all_participant_ids: set[Any],
+) -> tuple[str, int]:
+    """Render open email-source tasks in one table per standard source tag."""
+    lines: list[str] = []
+    count = 0
+    for label, _ in EMAIL_TASK_SOURCES:
+        source_tasks = [
+            task
+            for task in tasks
+            if _is_open(task) and _email_task_source_label(task) == label
+        ]
+        count += len(source_tasks)
+        lines.extend(
+            _tomorrow_task_table(
+                f"{label}: {len(source_tasks)}",
+                _task_lines(
+                    source_tasks,
+                    names,
+                    assignee_ids_by_task,
+                    include_status=True,
+                    all_participant_ids=all_participant_ids,
+                ),
+                with_status=True,
+                task_metadata=_task_metadata_by_title(source_tasks, department_codes),
+                include_am_pm_times=True,
+            )
+        )
+        lines.append("")
+    return _normalize_section(lines), count
 
 
 async def _day_context_section(
@@ -281,6 +337,8 @@ async def _day_context_section(
     tasks: list[Task],
     assignee_ids_by_task: dict[Any, set[Any]],
     report_day: date,
+    user_department_codes: dict[Any, str] | None = None,
+    user_sort_keys: dict[Any, tuple[int, str, int, int, str]] | None = None,
 ) -> tuple[str, int]:
     leave_rows = []
     holiday_rows: list[list[str]] = []
@@ -337,7 +395,7 @@ async def _day_context_section(
 
     lines = [
         "PV",
-        *_leave_lines(leave_rows, names),
+        *_leave_lines(leave_rows, names, user_department_codes, user_sort_keys),
         "",
         *_ascii_table("FESTA EXTERNE", [("NR", 2), ("FESTA", 48), ("NOTE", 32)], holiday_rows),
         "",
@@ -358,7 +416,6 @@ async def _day_context_section(
             block_lines,
             with_status=True,
             task_metadata=_task_metadata_by_title(blocked_tasks, department_codes),
-            include_am_pm_times=True,
         ),
     ]
     count = len(leave_rows) + len(holiday_rows) + len(today_meetings) + len(bz_lines) + len(block_lines)
@@ -393,9 +450,40 @@ async def build_morning_report_sections(
         users = (await db.execute(select(User).where(User.id.in_(entry_user_ids)))).scalars().all()
         names.update({user.id: user.full_name or user.username or user.email for user in users})
 
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
+    user_department_codes = {
+        user_id: department_codes.get(department_id, "-") or "-"
+        for user_id, department_id in (await db.execute(select(User.id, User.department_id))).all()
+    }
+    leave_user_ids = {
+        entry.assigned_to_user_id or entry.created_by_user_id
+        for entry in entries
+        if entry.category == CommonCategory.annual_leave
+        and (entry.assigned_to_user_id or entry.created_by_user_id)
+    }
+    leave_user_sort_keys = await weekly_planner_user_sort_keys(db, leave_user_ids, department_codes)
+
     note_rows = await _blue_note_rows(db)
+    all_participant_ids = await _all_participant_user_ids(db)
+    email_tasks, email_task_count = _emails_section(
+        tasks,
+        names,
+        assignee_ids_by_task,
+        department_codes,
+        all_participant_ids,
+    )
     day_context, day_context_count = await _day_context_section(
-        db, entries, names, tasks, assignee_ids_by_task, report_day
+        db,
+        entries,
+        names,
+        tasks,
+        assignee_ids_by_task,
+        report_day,
+        user_department_codes,
+        leave_user_sort_keys,
     )
     personal = await _personal_section(
         db,
@@ -404,16 +492,13 @@ async def build_morning_report_sections(
         assignee_ids_by_task,
         report_day,
         title_pattern=PERSONAL_GA,
-        department_codes={
-            department_id: code
-            for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
-        },
+        department_codes=department_codes,
     )
 
     attendance = _attendance_section(entries, names, report_day)
     sections = [
-        {"title": SECTION_TITLES[0], "body": _emails_section()},
-        {"title": SECTION_TITLES[1], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
+        {"title": SECTION_TITLES[1], "body": email_tasks},
         {"title": SECTION_TITLES[2], "body": attendance},
         {"title": SECTION_TITLES[3], "body": _notes_section(note_rows)},
         {"title": SECTION_TITLES[4], "body": day_context},
@@ -423,7 +508,7 @@ async def build_morning_report_sections(
         "report_day": report_day.isoformat(),
         "counts": {
             SECTION_TITLES[0]: 0,
-            SECTION_TITLES[1]: 0,
+            SECTION_TITLES[1]: email_task_count,
             SECTION_TITLES[2]: sum(
                 1
                 for entry in entries

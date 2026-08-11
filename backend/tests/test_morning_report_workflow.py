@@ -21,6 +21,7 @@ from app.services.morning_report import (
     SECTION_TITLES,
     _attendance_section,
     _day_context_section,
+    _email_task_source_label,
     normalize_morning_report_sections,
     render_html,
     subject_for,
@@ -98,13 +99,32 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
     def test_normalization_keeps_all_six_m1_questions_and_saved_edits(self) -> None:
         sections = normalize_morning_report_sections(
-            [{"title": SECTION_TITLES[1], "body": "GA replied at 07:55"}]
+            [{"title": SECTION_TITLES[0], "body": "GA replied at 07:55"}]
         )
 
         self.assertEqual([section["title"] for section in sections], SECTION_TITLES)
-        self.assertEqual(sections[1]["body"], "GA replied at 07:55")
-        self.assertIn("EMAIL INFO PX", sections[0]["body"])
+        self.assertEqual(sections[0]["body"], "GA replied at 07:55")
+        self.assertIn("Email-source tasks load automatically", sections[1]["body"])
         self.assertIn("NDRYSHON PLANI", sections[2]["body"])
+
+    def test_standard_email_task_source_tags_are_detected(self) -> None:
+        self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: INFO PX: Update catalogue")), "EM: INFO PX")
+        self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: IT: Reset account")), "EM: IT")
+        self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: HF: Invoice issue")), "EM: HF")
+        self.assertEqual(_email_task_source_label(SimpleNamespace(title="EM: PX EU: Customer request")), "EM: PX EU")
+        self.assertIsNone(_email_task_source_label(SimpleNamespace(title="EM: PX: General mail")))
+
+    def test_normalization_renames_the_previous_notes_section(self) -> None:
+        previous_title = (
+            "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) "
+            "SECILEN A KRIJOHET DETYRE?"
+        )
+
+        sections = normalize_morning_report_sections(
+            [{"title": previous_title, "body": "NOTES: 2"}]
+        )
+
+        self.assertEqual(sections[3], {"title": "(GA) NOTES TE REJA?", "body": "NOTES: 2"})
 
     def test_normalization_drops_duplicate_near_match_email_section(self) -> None:
         variant_emails_title = (
@@ -113,7 +133,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         )
         sections = normalize_morning_report_sections(
             [
-                {"title": SECTION_TITLES[0], "body": "EMAIL INFO PX (KO SPAM): first"},
+                {"title": SECTION_TITLES[1], "body": "EMAIL INFO PX (KO SPAM): first"},
                 {"title": variant_emails_title, "body": "EMAIL INFO PX (KO SPAM): duplicate"},
                 {"title": SECTION_TITLES[5], "body": "IN PROGRESS: 1"},
             ]
@@ -121,7 +141,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(len(sections), 6)
         self.assertEqual([section["title"] for section in sections], SECTION_TITLES)
-        self.assertEqual(sections[0]["body"], "EMAIL INFO PX (KO SPAM): first")
+        self.assertEqual(sections[1]["body"], "EMAIL INFO PX (KO SPAM): first")
         self.assertEqual(sections[5]["body"], "IN PROGRESS: 1")
 
     def test_normalization_splits_legacy_notes_emails_into_manual_section(self) -> None:
@@ -140,11 +160,21 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         )
 
         self.assertEqual(
-            sections[0]["body"],
-            "EMAIL INFO PX (KO SPAM): checked\n\nSTATUSI I DETYRAVE 1H: ok",
+            sections[1]["body"],
+            "EMAIL INFO PX (KO SPAM): checked",
         )
         self.assertIn("NOTES: 1", sections[3]["body"])
         self.assertNotIn("EMAIL INFO PX", sections[3]["body"])
+
+    def test_normalization_removes_retired_task_status_prompt(self) -> None:
+        sections = normalize_morning_report_sections(
+            [{
+                "title": SECTION_TITLES[1],
+                "body": "EMAIL INFO PX (KO SPAM): checked\nSTATUSI I DETYRAVE 1H: complete",
+            }]
+        )
+
+        self.assertEqual(sections[1]["body"], "EMAIL INFO PX (KO SPAM): checked")
 
     def test_attendance_section_formats_delays_absences_and_manual_plan_decision(self) -> None:
         user_id = uuid.uuid4()
@@ -200,11 +230,18 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             patch("app.services.morning_report._bz_alignment_lines", new=AsyncMock(return_value=[])),
         ):
             body, count = await _day_context_section(
-                db, [leave], {user_id: "Drita Vela"}, [], {}, date(2026, 8, 5)
+                db,
+                [leave],
+                {user_id: "Drita Vela"},
+                [],
+                {},
+                date(2026, 8, 5),
+                {user_id: "DEV"},
             )
 
         self.assertEqual(count, 1)
         self.assertIn("05.08.2026", body)
+        self.assertIn("DEV", body)
 
     def test_email_html_is_mobile_safe_and_contains_m1_heading(self) -> None:
         subject = subject_for(date(2026, 8, 5))

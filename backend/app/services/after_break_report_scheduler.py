@@ -13,6 +13,7 @@ from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.services.after_break_report import (
     MANUAL_SECTION_TITLES,
     build_after_break_report_sections,
+    is_generated_subject,
     render_html,
     render_plain_text,
     send_after_break_report,
@@ -92,7 +93,8 @@ async def run_after_break_report_scheduler_once(now: datetime | None = None) -> 
             db.add(row)
             await db.flush()
         else:
-            row.subject = row.subject or subject_for(report_day)
+            if not row.subject or is_generated_subject(row.subject, report_day):
+                row.subject = subject_for(report_day)
             row.recipients = recipients
             row.sections = sections
             row.generated_snapshot = snapshot

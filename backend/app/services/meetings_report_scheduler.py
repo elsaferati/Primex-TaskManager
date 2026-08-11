@@ -13,6 +13,7 @@ from app.models.meetings_report_settings import MeetingsReportSettings
 from app.services.meetings_report import (
     MANUAL_SECTION_TITLES,
     build_meetings_report_sections,
+    is_generated_subject,
     render_html,
     render_plain_text,
     send_meetings_report,
@@ -115,7 +116,8 @@ async def run_meetings_report_scheduler_once(now: datetime | None = None) -> boo
             db.add(row)
             await db.flush()
         else:
-            row.subject = row.subject or subject_for(report_day)
+            if not row.subject or is_generated_subject(row.subject, report_day):
+                row.subject = subject_for(report_day)
             row.recipients = recipients
             row.tomorrow_date = tomorrow
             row.sections = sections

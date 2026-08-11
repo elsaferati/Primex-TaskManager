@@ -2,7 +2,11 @@ import unittest
 from datetime import datetime
 from types import SimpleNamespace
 
-from app.services.after_break_report import _format_confirmation_questions, _new_system_task_rows
+from app.services.after_break_report import (
+    _blue_note_rows,
+    _format_confirmation_questions,
+    _new_system_task_rows,
+)
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
@@ -28,6 +32,40 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
 
 
 class NewSystemTaskRowsTests(unittest.IsolatedAsyncioTestCase):
+    async def test_px_note_rows_include_all_and_only_undiscussed_notes(self) -> None:
+        included = SimpleNamespace(
+            id="included", content="Created before the former M2 window", is_discussed=False,
+            created_by=None, created_at=datetime(2026, 8, 11, 9, 0), updated_at=None,
+        )
+        discussed = SimpleNamespace(
+            id="discussed", content="Already discussed", is_discussed=True,
+            created_by=None, created_at=datetime(2026, 8, 11, 12, 0), updated_at=None,
+        )
+        linked = SimpleNamespace(
+            id="linked", content="Already linked to a task", is_discussed=False,
+            created_by=None, created_at=datetime(2026, 8, 11, 14, 0), updated_at=None,
+        )
+
+        class FakeResult:
+            def __init__(self, values):
+                self.values = values
+
+            def scalars(self):
+                return SimpleNamespace(all=lambda: self.values)
+
+        class FakeDb:
+            def __init__(self):
+                self.results = iter([[included, discussed, linked], [linked.id]])
+
+            async def execute(self, _statement):
+                return FakeResult(next(self.results))
+
+        rows = await _blue_note_rows(FakeDb())
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows[0][1], "NO")
+        self.assertIn("Created before the former M2 window", rows[0][2])
+
     async def test_new_system_tasks_include_department_and_finish_period(self) -> None:
         template = SimpleNamespace(
             title="New system task",

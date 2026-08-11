@@ -228,14 +228,9 @@ async def get_draft(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
-    sections = [
-        {
-            "title": str(section.get("title") or "").strip(),
-            "body": str(section.get("body") or ""),
-        }
-        for section in (row.sections or [])
-        if str(section.get("title") or "").strip()
-    ]
+    # Apply section migrations to saved reports too.  Otherwise retired prompts
+    # remain visible in a previously generated or sent report indefinitely.
+    sections = normalize_morning_report_sections(row.sections)
     sections = await merge_common_view_manual_sections(db, sections, "morning", row.sections)
     if sections != row.sections:
         row.sections = sections
@@ -280,6 +275,7 @@ async def generate_draft(
             for section in sections
         ]
     sections = await merge_common_view_manual_sections(db, sections, "morning", existing_sections)
+    sections = normalize_morning_report_sections(sections)
     if row is None:
         row = MorningReportDraft(
             report_date=report_date,

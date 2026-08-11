@@ -53,18 +53,21 @@ type DeliveryHistory = {
   last_error?: string | null
 }
 
-function sectionGroupLabel(title: string, index: number) {
+function sectionGroupLabel(title: string, _index: number) {
   // Built-in manuals are first; Common View–synced extras sit after them and before autos.
-  if (index < 2) return "Manual questions"
   const knownAuto = [
+    "(GA) DET NGA EMAILS TE REJA",
     "(GA) VONESA/MUNGESA. A NDRYSHON PLANI PER SOT?",
-    "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET DETYRE?",
+    "(GA) NOTES TE REJA?",
     "PV/FESTA EXTERNE/TAKIMET EXTERNE/ TAKIME INTERNE/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
   ]
   const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
   const key = compact(title)
-  if (knownAuto.some((auto) => compact(auto) === key)) return "Auto-filled from PrimeFlow"
+  const isEmailTasksSection = key.startsWith("GAEMINFO") || key.includes("DETNGEMAILS")
+  if (isEmailTasksSection || knownAuto.some((auto) => compact(auto) === key)) {
+    return "Auto-filled from PrimeFlow"
+  }
   return "Manual questions"
 }
 

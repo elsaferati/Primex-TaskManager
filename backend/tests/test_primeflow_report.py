@@ -82,12 +82,12 @@ class PrimeFlowReportTests(unittest.TestCase):
     def test_previous_working_day_and_subject(self) -> None:
         self.assertEqual(previous_working_day(date(2026, 7, 27)), date(2026, 7, 24))
         self.assertEqual(previous_working_day(date(2026, 7, 28)), date(2026, 7, 27))
-        self.assertEqual(report_subject(date(2026, 7, 28), "10:00"), "PrimeFlow 1H – 28.07.2026 – 10:00")
+        self.assertEqual(report_subject(date(2026, 7, 28), "10:00"), "【10:00】 PrimeFlow 1H - 28.07.2026")
 
     def test_exact_subject_is_not_fuzzy(self) -> None:
-        headers = [{"name": "Subject", "value": "PrimeFlow 1H – 28.07.2026 – 10:00"}]
-        self.assertTrue(exact_subject(headers, "PrimeFlow 1H – 28.07.2026 – 10:00"))
-        self.assertFalse(exact_subject(headers, "PrimeFlow 1H – 28.07.2026 – 11:00"))
+        headers = [{"name": "Subject", "value": "【10:00】 PrimeFlow 1H - 28.07.2026"}]
+        self.assertTrue(exact_subject(headers, "【10:00】 PrimeFlow 1H - 28.07.2026"))
+        self.assertFalse(exact_subject(headers, "【11:00】 PrimeFlow 1H - 28.07.2026"))
 
     def test_description_removes_only_technical_tags(self) -> None:
         original = "[[added]]1. Çdo Überprüfung\n\nMiSSpelled TEXT[[/added]]\n[[done]]2. Përfundo[[/done]]"

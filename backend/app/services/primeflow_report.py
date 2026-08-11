@@ -112,7 +112,9 @@ def previous_working_day(day: date, holidays: set[date] | None = None) -> date:
 def report_subject(day: date, slot: str) -> str:
     if slot not in SLOTS:
         raise ValueError(f"Unsupported report slot: {slot}")
-    return f"PrimeFlow 1H – {day:%d.%m.%Y} – {slot}"
+    # Subjects are plain text in Gmail. Brackets give the leading time a
+    # strong, consistent visual treatment without relying on unsupported HTML.
+    return f"【{slot}】 PrimeFlow 1H - {day:%d.%m.%Y}"
 
 
 def exact_subject(headers: list[dict[str, str]], expected: str) -> bool:

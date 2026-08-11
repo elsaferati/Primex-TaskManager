@@ -125,7 +125,15 @@ def next_working_day(day: date) -> date:
 
 
 def subject_for(day: date) -> str:
-    return f"PrimeFlow Mbyllja e dites M3 - {day:%d.%m.%Y}"
+    return f"M3 - PrimeFlow Mbyllja e dites - {day:%d.%m.%Y}"
+
+
+def is_generated_subject(subject: str | None, day: date) -> bool:
+    """Recognize the old and current automatically generated M3 subjects."""
+    return (subject or "").strip() in {
+        subject_for(day),
+        f"PrimeFlow Mbyllja e dites M3 - {day:%d.%m.%Y}",
+    }
 
 
 def _prefer_section_body(current: str, incoming: str) -> str:
@@ -351,6 +359,32 @@ async def apply_weekly_planner_task_order(
         )
 
 
+async def weekly_planner_user_sort_keys(
+    db: AsyncSession,
+    user_ids: set[Any],
+    department_codes: dict[Any, str] | None = None,
+) -> dict[Any, tuple[int, str, int, int, str]]:
+    """Return the same department/person order used by report task tables."""
+    if not user_ids:
+        return {}
+    codes = department_codes or {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
+    users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
+    result: dict[Any, tuple[int, str, int, int, str]] = {}
+    for user in users:
+        department_code = _weekly_planner_department_code(user.department_id, codes)
+        result[user.id] = (
+            WEEKLY_PLANNER_DEPARTMENT_ORDER.get(department_code, len(WEEKLY_PLANNER_DEPARTMENT_ORDER)),
+            department_code.casefold(),
+            1 if user.weekly_planner_sort_order is None else 0,
+            user.weekly_planner_sort_order or 0,
+            (user.full_name or user.username or user.email or "").casefold(),
+        )
+    return result
+
+
 async def _users_by_initials(db: AsyncSession, initials: str) -> list[User]:
     users = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
     target = initials.upper()
@@ -486,7 +520,17 @@ def _m3_task_type_label(task: Task) -> str:
 
 def _m3_department_code_label(department_id: Any, department_codes: dict[Any, str] | None) -> str:
     """Return the short M3 label for a department id."""
-    code = str((department_codes or {}).get(department_id) or "").strip().upper()
+    codes = department_codes or {}
+    code = codes.get(department_id)
+    if not code and department_id is not None:
+        # Common View is an HTTP payload, so its UUIDs arrive as strings while
+        # the report's database map is keyed by UUID objects.
+        department_id_value = str(department_id)
+        code = next(
+            (value for key, value in codes.items() if str(key) == department_id_value),
+            None,
+        )
+    code = str(code or "").strip().upper()
     aliases = {
         "PRODUCT CONTENT": "PCM",
         "PROJECT CONTENT MANAGER": "PCM",
@@ -753,6 +797,15 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             leave_tomorrow.append(
                 (entry, start_date, end_date, full_day, start_time, end_time, note, is_all_users)
             )
+    leave_user_sort_keys = await weekly_planner_user_sort_keys(
+        db,
+        {
+            entry.assigned_to_user_id or entry.created_by_user_id
+            for entry, *_ in leave_tomorrow
+            if entry.assigned_to_user_id or entry.created_by_user_id
+        },
+        department_codes,
+    )
 
     table_kwargs = {
         "assignee_ids_by_task": assignee_ids_by_task,
@@ -780,8 +833,14 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         fallback_blocked=_task_lines(
             blocked, names, assignee_ids_by_task, include_status=True, all_participant_ids=all_participant_ids
         ),
-        bz_task_metadata=_task_metadata_by_title(tomorrow_tasks, department_codes),
-        blocked_task_metadata=_task_metadata_by_title(blocked, department_codes),
+        bz_task_metadata=_merged_task_metadata(
+            _task_metadata_by_title(tomorrow_tasks, department_codes),
+            _common_task_metadata_by_title(common_items.get("bz") or [], tomorrow, department_codes),
+        ),
+        blocked_task_metadata=_merged_task_metadata(
+            _task_metadata_by_title(blocked, department_codes),
+            _common_task_metadata_by_title(common_items.get("blocked") or [], tomorrow, department_codes),
+        ),
         with_status=True,
     )
     section_5 = [
@@ -837,7 +896,9 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             )
         ),
         SECTION_TITLES[9]: section_6,
-        SECTION_TITLES[6]: _empty_aware(_leave_lines(leave_tomorrow, names, user_department_codes)),
+        SECTION_TITLES[6]: _empty_aware(
+            _leave_lines(leave_tomorrow, names, user_department_codes, leave_user_sort_keys)
+        ),
         SECTION_TITLES[8]: _normalize_section(section_5),
         SECTION_TITLES[7]: _normalize_section(section_4),
         SECTION_TITLES[10]: _normalize_section(
@@ -925,6 +986,46 @@ def _task_metadata_by_title(
         _clean_task_title(task.title): (_m3_department_label(task, department_codes), _m3_am_pm_label(task))
         for task in tasks
     }
+
+
+def _common_task_metadata_by_title(
+    items: list[dict[str, Any]], day: date, department_codes: dict[Any, str] | None
+) -> dict[str, tuple[str, str]]:
+    """Read department and AM/PM directly from Common View task rows.
+
+    The BZ and Block tables may use Common View rows whose effective date does
+    not match the report's fallback task list.  Those rows already include the
+    resolved assignee department and finish period, so use them instead of
+    rendering empty metadata.
+    """
+    metadata: dict[str, tuple[str, str]] = {}
+    for item in items:
+        if _item_date(item) != day:
+            continue
+        title = _common_title(item)
+        if not title:
+            continue
+        department = _m3_department_code_label(
+            item.get("department_id") or item.get("departmentId"), department_codes
+        )
+        period = str(item.get("finish_period") or item.get("finishPeriod") or "").strip().upper()
+        am_pm = period if period in {"AM", "PM", "AM/PM"} else "-"
+        metadata[title] = (department, am_pm)
+    return metadata
+
+
+def _merged_task_metadata(
+    fallback: dict[str, tuple[str, str]], common: dict[str, tuple[str, str]]
+) -> dict[str, tuple[str, str]]:
+    """Prefer Common View's resolved fields while retaining fallback values."""
+    merged = dict(fallback)
+    for title, (common_department, common_am_pm) in common.items():
+        fallback_department, fallback_am_pm = merged.get(title, ("-", "-"))
+        merged[title] = (
+            common_department if common_department != "-" else fallback_department,
+            common_am_pm if common_am_pm != "-" else fallback_am_pm,
+        )
+    return merged
 
 
 def _status_group_section(
@@ -1044,9 +1145,17 @@ def _dedupe_system_task_rows(tasks: list[Task]) -> list[Task]:
 def _meeting_lines(meetings: list[Meeting]) -> list[str]:
     if not meetings:
         return ["(Asnje takim)"]
+
+    def time_sort_key(meeting: Meeting) -> tuple[int, int, str]:
+        starts_at = meeting.starts_at
+        if starts_at is None:
+            return (24, 0, _clean_task_title(meeting.title).casefold())
+        local = starts_at.astimezone(report_timezone()) if starts_at.tzinfo else starts_at
+        return (local.hour, local.minute, _clean_task_title(meeting.title).casefold())
+
     return [
         f"- {_local_time(meeting.starts_at)}: {_meeting_title_with_highlight(meeting)}"
-        for meeting in sorted(meetings, key=lambda m: m.starts_at or datetime.min)
+        for meeting in sorted(meetings, key=time_sort_key)
     ]
 
 
@@ -1309,7 +1418,7 @@ async def _bz_alignment_lines(
 
 
 def _common_meeting_lines(items: list[dict[str, Any]], day: date) -> list[str]:
-    lines = []
+    rows: list[tuple[tuple[int, int, str], str]] = []
     seen = set()
     for item in items:
         if _item_date(item) != day:
@@ -1324,8 +1433,14 @@ def _common_meeting_lines(items: list[dict[str, Any]], day: date) -> list[str]:
         if key in seen:
             continue
         seen.add(key)
-        lines.append(f"- {prefix}{title}")
-    return lines
+        time_match = re.search(r"\b([01]?\d|2[0-3]):([0-5]\d)\b", time_value)
+        time_sort_key = (
+            int(time_match.group(1)) if time_match else 24,
+            int(time_match.group(2)) if time_match else 0,
+            title.casefold(),
+        )
+        rows.append((time_sort_key, f"- {prefix}{title}"))
+    return [line for _, line in sorted(rows, key=lambda row: row[0])]
 
 
 def _prefer_common(common_lines: list[str], fallback_lines: list[str]) -> list[str]:
@@ -1528,6 +1643,7 @@ def _leave_lines(
     ],
     names: dict[Any, str],
     user_department_codes: dict[Any, str] | None = None,
+    user_sort_keys: dict[Any, tuple[int, str, int, int, str]] | None = None,
 ) -> list[str]:
     who_width = 5
     department_width = 5
@@ -1542,7 +1658,21 @@ def _leave_lines(
         lines.append(f"| {'-':<2} | {'-':<{who_width}} | {'-':<{department_width}} | {'(Asnje detyre)':<{date_width}} | {'-':<{date_width}} |")
         lines.append(border)
         return lines
-    for index, (entry, start_date, end_date, full_day, start_time, end_time, note, is_all_users) in enumerate(entries, start=1):
+    ordered_entries = sorted(
+        entries,
+        key=lambda row: (
+            (10**6, "~", 1, 10**6, "~")
+            if row[7]
+            else (user_sort_keys or {}).get(
+                row[0].assigned_to_user_id or row[0].created_by_user_id,
+                (10**6, "~", 1, 10**6, _initials(names.get(row[0].assigned_to_user_id or row[0].created_by_user_id)).casefold()),
+            ),
+            row[1],
+            row[2],
+            str(getattr(row[0], "id", "")),
+        ),
+    )
+    for index, (entry, start_date, end_date, full_day, start_time, end_time, note, is_all_users) in enumerate(ordered_entries, start=1):
         person = "ALL" if is_all_users else _initials(names.get(entry.assigned_to_user_id or entry.created_by_user_id) or entry.title)
         user_id = entry.assigned_to_user_id or entry.created_by_user_id
         department = "-" if is_all_users else (user_department_codes or {}).get(user_id, "-")
@@ -2181,7 +2311,103 @@ def _section_report_table_rows(lines: list[str]) -> tuple[list[str], list[list[s
     return header, _merge_ascii_continuation_rows(header, body_rows)
 
 
-def render_section_report_docx(
+def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[str], list[list[str]], list[str], list[bool]]:
+    """Return the same cleaned table data and row treatment used in the email."""
+    header, body_rows = _section_report_table_rows(lines)
+    if not header:
+        return [], [], [], []
+    status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "STATUS"), None)
+    title_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TITLE"), None)
+    cleaned_rows: list[list[str]] = []
+    row_tones: list[str] = []
+    highlights: list[bool] = []
+    for source_row in body_rows:
+        row = (list(source_row) + [""] * len(header))[:len(header)]
+        row_tone = tone
+        if status_index is not None and row[status_index]:
+            row_tone = _table_tone_from_status(row[status_index]) or row_tone
+        highlighted = False
+        if title_index is not None:
+            title, marker_status = _split_status_marker(row[title_index])
+            title, highlighted = _split_meeting_highlight_marker(title)
+            row[title_index] = title
+            row_tone = _table_tone_from_status(marker_status) or row_tone
+        if status_index is not None:
+            row = [cell for index, cell in enumerate(row) if index != status_index]
+        cleaned_rows.append(row)
+        row_tones.append(row_tone)
+        highlights.append(highlighted)
+    if status_index is not None:
+        header = [cell for index, cell in enumerate(header) if index != status_index]
+    return header, cleaned_rows, row_tones, highlights
+
+
+def _section_report_blocks(body: str) -> list[dict[str, Any]]:
+    """Parse a section once so native attachments keep the email's structure."""
+    blocks: list[dict[str, Any]] = []
+    text_buffer: list[str] = []
+    lines = body.splitlines()
+    position = 0
+
+    def flush_text() -> None:
+        if any(line.strip() for line in text_buffer):
+            blocks.append({"kind": "text", "lines": list(text_buffer)})
+        text_buffer.clear()
+
+    def current_table_tone() -> str:
+        for previous in reversed(text_buffer):
+            if previous.strip():
+                return _table_tone_from_label(previous)
+        return ""
+
+    def mark_current_label_empty() -> None:
+        for previous_index in range(len(text_buffer) - 1, -1, -1):
+            if text_buffer[previous_index].strip():
+                label = text_buffer[previous_index].rstrip()
+                text_buffer[previous_index] = label if label.endswith("0") else f"{label} 0"
+                return
+
+    def pop_current_table_label() -> str:
+        for previous_index in range(len(text_buffer) - 1, -1, -1):
+            stripped = text_buffer[previous_index].strip()
+            if not stripped:
+                continue
+            if len(stripped) <= 45 and (stripped.endswith(":") or stripped.isupper() or re.match(r"^\d{1,2}:\d{2}:?$", stripped)):
+                del text_buffer[previous_index:]
+                return stripped
+            return ""
+        return ""
+
+    while position < len(lines):
+        if lines[position].startswith("+-"):
+            table_lines: list[str] = []
+            while position < len(lines) and (lines[position].startswith("+-") or lines[position].startswith("|")):
+                table_lines.append(lines[position])
+                position += 1
+            if _ascii_table_is_empty(table_lines):
+                mark_current_label_empty()
+                continue
+            tone = current_table_tone()
+            caption = pop_current_table_label()
+            header, rows, row_tones, highlights = _section_report_table_model(table_lines, tone)
+            flush_text()
+            if header:
+                blocks.append({"kind": "table", "caption": caption, "header": header, "rows": rows, "tone": tone, "row_tones": row_tones, "highlights": highlights})
+            continue
+        text_buffer.append(lines[position])
+        position += 1
+    flush_text()
+    return blocks
+
+
+def _section_report_group_for_code(report_code: str, title: str | None) -> str:
+    from app.services.meeting_point_manual_sync import section_group_label
+
+    report_kind = {"M1": "morning", "M2": "after_break", "M3": "meetings"}.get(report_code.upper(), "meetings")
+    return section_group_label(report_kind, title)
+
+
+def _legacy_render_section_report_docx(
     subject: str,
     report_code: str,
     report_day: date,
@@ -2275,7 +2501,7 @@ def render_section_report_docx(
     return output.getvalue()
 
 
-def render_section_report_png(
+def _legacy_render_section_report_png(
     subject: str,
     report_code: str,
     report_day: date,
@@ -2345,6 +2571,335 @@ def render_section_report_png(
         else:
             draw.text((margin + 12, y + 2), value, fill="#1F2937", font=font)
         y += line_height
+    output = __import__("io").BytesIO()
+    image.save(output, format="PNG", optimize=True)
+    return output.getvalue()
+
+
+def render_section_report_docx(
+    subject: str,
+    report_code: str,
+    report_day: date,
+    sections: list[dict[str, str]],
+    *,
+    tomorrow: date | None = None,
+) -> bytes:
+    """Native Word equivalent of the M1/M2/M3 email report."""
+    from docx import Document
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+    from docx.oxml import OxmlElement
+    from docx.oxml.ns import qn
+    from docx.shared import Inches, Pt, RGBColor, Twips
+
+    def shade(cell: Any, color: str) -> None:
+        item = OxmlElement("w:shd")
+        item.set(qn("w:fill"), color.lstrip("#"))
+        cell._tc.get_or_add_tcPr().append(item)
+
+    def border(cell: Any, color: str = "CBD5E1", size: str = "6") -> None:
+        properties = cell._tc.get_or_add_tcPr()
+        borders = properties.first_child_found_in("w:tcBorders")
+        if borders is None:
+            borders = OxmlElement("w:tcBorders")
+            properties.append(borders)
+        for edge_name in ("top", "left", "bottom", "right"):
+            edge = borders.find(qn(f"w:{edge_name}"))
+            if edge is None:
+                edge = OxmlElement(f"w:{edge_name}")
+                borders.append(edge)
+            edge.set(qn("w:val"), "single")
+            edge.set(qn("w:sz"), size)
+            edge.set(qn("w:color"), color.lstrip("#"))
+
+    def cell_style(cell: Any, fill: str, *, color: str = "#111827", bold: bool = False, size: float = 8.5, outline: str = "#CBD5E1") -> None:
+        shade(cell, fill)
+        border(cell, outline)
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.TOP
+        for paragraph in cell.paragraphs:
+            paragraph.paragraph_format.space_after = Pt(0)
+            for run in paragraph.runs:
+                run.font.name = "Arial"
+                run._element.rPr.rFonts.set(qn("w:ascii"), "Arial")
+                run._element.rPr.rFonts.set(qn("w:hAnsi"), "Arial")
+                run.font.size = Pt(size)
+                run.bold = bold
+                run.font.color.rgb = RGBColor.from_string(color.lstrip("#"))
+
+    def table_widths(header: list[str]) -> list[int]:
+        # Email uses a 600px shell with compact utility columns.  Map the same
+        # proportions to Word's usable page width (10166 twips at these margins).
+        available = 10166
+        raw = _email_column_widths(header)
+        widths: list[int | None] = []
+        for value in raw:
+            if value == "auto":
+                widths.append(None)
+            elif value.endswith("%"):
+                widths.append(max(720, int(available * float(value[:-1]) / 100)))
+            else:
+                widths.append(int(float(value) * 18))
+        fixed = sum(value or 0 for value in widths)
+        auto_count = sum(value is None for value in widths)
+        if fixed >= available:
+            return [max(500, int((value or 500) * available / max(fixed, 1))) for value in widths]
+        auto_width = max(960, (available - fixed) // max(auto_count, 1))
+        return [value if value is not None else auto_width for value in widths]
+
+    def set_width(cell: Any, width: int) -> None:
+        properties = cell._tc.get_or_add_tcPr()
+        tc_width = properties.first_child_found_in("w:tcW")
+        if tc_width is None:
+            tc_width = OxmlElement("w:tcW")
+            properties.append(tc_width)
+        tc_width.set(qn("w:w"), str(width))
+        tc_width.set(qn("w:type"), "dxa")
+
+    def add_text(lines: list[str]) -> None:
+        non_empty = [line for line in lines if line.strip()]
+        keyed_only = bool(non_empty) and all(_is_keyed_prompt_line(line) for line in non_empty)
+        for line in non_empty:
+            value = line.strip()
+            if keyed_only:
+                cell = document.add_table(rows=1, cols=1).cell(0, 0)
+                cell.text = value
+                cell_style(cell, "#F8FAFC", bold=True, size=9, outline="#E5E7EB")
+                document.add_paragraph().paragraph_format.space_after = Pt(1)
+                continue
+            paragraph = document.add_paragraph()
+            paragraph.paragraph_format.space_after = Pt(3)
+            if _is_guidance_line(line):
+                paragraph.paragraph_format.left_indent = Inches(0.14)
+            run = paragraph.add_run(value)
+            run.font.name = "Arial"
+            run._element.rPr.rFonts.set(qn("w:ascii"), "Arial")
+            run._element.rPr.rFonts.set(qn("w:hAnsi"), "Arial")
+            run.font.size = Pt(9)
+            run.bold = _is_keyed_prompt_line(line) or (len(value) <= 45 and value.endswith((":", ": 0")))
+            if _is_guidance_line(line):
+                run.italic = True
+                run.font.color.rgb = RGBColor(100, 116, 139)
+
+    def add_table(block: dict[str, Any]) -> None:
+        caption = str(block["caption"] or "")
+        if caption:
+            cell = document.add_table(rows=1, cols=1).cell(0, 0)
+            cell.text = caption
+            cell_style(cell, "#F8FAFC", bold=True, size=9)
+        header = block["header"]
+        table = document.add_table(rows=1, cols=len(header))
+        table.autofit = False
+        column_widths = table_widths(header)
+        for index, grid_column in enumerate(table._tbl.tblGrid.gridCol_lst):
+            grid_column.w = Twips(column_widths[index])
+        for index, value in enumerate(header):
+            cell = table.rows[0].cells[index]
+            cell.text = value
+            cell_style(cell, "#E5E7EB", bold=True, size=8)
+            set_width(cell, column_widths[index])
+        for row_index, values in enumerate(block["rows"]):
+            row = table.add_row()
+            tone = block["row_tones"][row_index] if row_index < len(block["row_tones"]) else block["tone"]
+            fill, color = _table_tone_styles(tone)
+            highlighted = block["highlights"][row_index] if row_index < len(block["highlights"]) else False
+            for column, value in enumerate(values):
+                header_name = _normalized_table_header(header[column])
+                cell_fill, cell_color, cell_bold = fill, color, False
+                if header_name == "DISK" and str(value).strip().upper() == "YES":
+                    cell_fill, cell_color, cell_bold = "#DCFCE7", "#166534", True
+                elif header_name == "DISK" and str(value).strip().upper() == "NO":
+                    cell_fill, cell_color, cell_bold = "#FEE2E2", "#991B1B", True
+                elif header_name == "MBAJTUR?" and str(value).strip() == "✓":
+                    cell_fill, cell_color, cell_bold = "#DCFCE7", "#166534", True
+                elif header_name == "MBAJTUR?" and str(value).strip() == "✕":
+                    cell_fill, cell_color, cell_bold = "#FEE2E2", "#991B1B", True
+                if highlighted and header_name == "TITLE":
+                    cell_color, cell_bold = "#2563EB", True
+                cell = row.cells[column]
+                cell.text = value
+                cell_style(cell, cell_fill, color=cell_color, bold=cell_bold, size=8, outline="#2563EB" if highlighted else "#CBD5E1")
+                set_width(cell, column_widths[column])
+        document.add_paragraph().paragraph_format.space_after = Pt(1)
+
+    document = Document()
+    page = document.sections[0]
+    page.top_margin = page.bottom_margin = Inches(0.6)
+    page.left_margin = page.right_margin = Inches(0.72)
+    title = document.add_paragraph()
+    title.paragraph_format.space_after = Pt(4)
+    run = title.add_run(subject)
+    run.font.name, run.font.size, run.bold = "Arial", Pt(16), True
+    run.font.color.rgb = RGBColor(17, 24, 39)
+    label = f"{report_code} · {report_day:%d.%m.%Y}"
+    if tomorrow is not None:
+        label += f" · Neser: {tomorrow:%d.%m.%Y}"
+    subtitle = document.add_paragraph(label)
+    subtitle.paragraph_format.space_after = Pt(10)
+    subtitle.runs[0].font.name = "Arial"
+    subtitle.runs[0].font.size = Pt(9)
+    subtitle.runs[0].font.color.rgb = RGBColor(71, 85, 105)
+
+    current_group = ""
+    for index, report_section in enumerate(sections, 1):
+        group = _section_report_group_for_code(report_code, report_section.get("title"))
+        if group != current_group:
+            group_cell = document.add_table(rows=1, cols=1).cell(0, 0)
+            group_cell.text = group
+            cell_style(group_cell, "#F1F5F9", color="#334155", bold=True, outline="#D7DEE8")
+            current_group = group
+        heading = document.add_paragraph()
+        heading.paragraph_format.space_before = Pt(8)
+        heading.paragraph_format.space_after = Pt(4)
+        heading_run = heading.add_run(f"{index}. {report_section.get('title') or 'Untitled'}")
+        heading_run.font.name, heading_run.font.size, heading_run.bold = "Arial", Pt(10.5), True
+        heading_run.font.color.rgb = RGBColor(15, 23, 42)
+        for block in _section_report_blocks(str(report_section.get("body") or "")):
+            add_table(block) if block["kind"] == "table" else add_text(block["lines"])
+
+    output = __import__("io").BytesIO()
+    document.save(output)
+    return output.getvalue()
+
+
+def render_section_report_png(
+    subject: str,
+    report_code: str,
+    report_day: date,
+    sections: list[dict[str, str]],
+    *,
+    tomorrow: date | None = None,
+) -> bytes:
+    """Bitmap equivalent of the email report; tables remain real cell grids."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    width, margin = 1200, 46
+    try:
+        font = ImageFont.truetype(os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\segoeui.ttf"), 18)
+        bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 18)
+        heading = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 29)
+    except OSError:
+        font = bold = heading = ImageFont.load_default()
+    measure = ImageDraw.Draw(Image.new("RGB", (width, 1), "white"))
+
+    def wrap(value: str, text_font: Any, max_width: int) -> list[str]:
+        lines: list[str] = []
+        for source in (value or "").splitlines() or [""]:
+            words, current = source.split() or [""], ""
+            for word in words:
+                candidate = word if not current else f"{current} {word}"
+                if current and measure.textlength(candidate, font=text_font) > max_width:
+                    lines.append(current)
+                    current = word
+                else:
+                    current = candidate
+            lines.append(current)
+        return lines or [""]
+
+    def widths(header: list[str]) -> list[int]:
+        available = width - 2 * margin
+        result: list[int | None] = []
+        for item in _email_column_widths(header):
+            result.append(None if item == "auto" else max(64, int(float(item.rstrip("%")) * (available / 100 if item.endswith("%") else 2))))
+        fixed, autos = sum(item or 0 for item in result), sum(item is None for item in result)
+        if fixed >= available:
+            return [max(44, int((item or 44) * available / fixed)) for item in result]
+        return [item if item is not None else max(80, (available - fixed) // max(autos, 1)) for item in result]
+
+    layout: list[dict[str, Any]] = []
+    current_group = ""
+    for index, report_section in enumerate(sections, 1):
+        group = _section_report_group_for_code(report_code, report_section.get("title"))
+        if group != current_group:
+            layout.append({"kind": "group", "value": group})
+            current_group = group
+        layout.append({"kind": "section", "value": f"{index}. {report_section.get('title') or 'Untitled'}"})
+        layout.extend(_section_report_blocks(str(report_section.get("body") or "")))
+
+    def block_height(block: dict[str, Any]) -> int:
+        if block["kind"] == "group":
+            return 39
+        if block["kind"] == "section":
+            return 37
+        if block["kind"] == "text":
+            return 8 + sum(23 * len(wrap(line.strip(), font, width - 2 * margin)) for line in block["lines"] if line.strip())
+        column_widths = widths(block["header"])
+        rows = 34 + (32 if block["caption"] else 0)
+        for row in block["rows"]:
+            rows += max(31, 8 + max(len(wrap(str(value), font, max(20, column_widths[index] - 12))) for index, value in enumerate(row)) * 22)
+        return rows + 14
+
+    height = 105 + sum(block_height(block) for block in layout) + margin
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((margin, 28), subject, fill="#111827", font=heading)
+    label = f"{report_code} · {report_day:%d.%m.%Y}"
+    if tomorrow is not None:
+        label += f" · Neser: {tomorrow:%d.%m.%Y}"
+    draw.text((margin, 68), label, fill="#475569", font=font)
+    y = 105
+    for block in layout:
+        if block["kind"] == "group":
+            draw.rectangle((margin, y, width - margin, y + 30), fill="#F1F5F9", outline="#D7DEE8")
+            draw.text((margin + 10, y + 6), block["value"], fill="#334155", font=bold)
+            y += 39
+        elif block["kind"] == "section":
+            draw.text((margin, y + 5), block["value"], fill="#0F172A", font=bold)
+            y += 37
+        elif block["kind"] == "text":
+            non_empty = [line for line in block["lines"] if line.strip()]
+            keyed_only = bool(non_empty) and all(_is_keyed_prompt_line(line) for line in non_empty)
+            for line in non_empty:
+                value = line.strip()
+                if keyed_only:
+                    draw.rectangle((margin, y, width - margin, y + 28), fill="#F8FAFC", outline="#E5E7EB")
+                    draw.text((margin + 10, y + 5), value, fill="#0F172A", font=bold)
+                    y += 35
+                    continue
+                text_font = bold if (_is_keyed_prompt_line(line) or (len(value) <= 45 and value.endswith((":", ": 0")))) else font
+                color, x = ("#64748B", margin + 18) if _is_guidance_line(line) else ("#111827", margin)
+                for wrapped in wrap(value, text_font, width - margin - x):
+                    draw.text((x, y + 3), wrapped, fill=color, font=text_font)
+                    y += 23
+            y += 7
+        else:
+            if block["caption"]:
+                draw.rectangle((margin, y, width - margin, y + 32), fill="#F8FAFC", outline="#CBD5E1")
+                draw.text((margin + 10, y + 6), str(block["caption"]), fill="#111827", font=bold)
+                y += 32
+            header, column_widths = block["header"], widths(block["header"])
+            x = margin
+            for index, value in enumerate(header):
+                right = x + column_widths[index]
+                draw.rectangle((x, y, right, y + 34), fill="#E5E7EB", outline="#CBD5E1")
+                draw.text((x + 6, y + 7), value, fill="#111827", font=bold)
+                x = right
+            y += 34
+            for row_index, row in enumerate(block["rows"]):
+                cells = [wrap(str(value), font, max(20, column_widths[index] - 12)) for index, value in enumerate(row)]
+                row_height = max(31, 8 + max(len(cell) for cell in cells) * 22)
+                tone = block["row_tones"][row_index] if row_index < len(block["row_tones"]) else block["tone"]
+                fill, color = _table_tone_styles(tone)
+                highlighted = block["highlights"][row_index] if row_index < len(block["highlights"]) else False
+                x = margin
+                for index, value in enumerate(row):
+                    header_name = _normalized_table_header(header[index])
+                    cell_fill, cell_color, cell_font = fill, color, font
+                    if header_name == "DISK" and str(value).strip().upper() == "YES":
+                        cell_fill, cell_color, cell_font = "#DCFCE7", "#166534", bold
+                    elif header_name == "DISK" and str(value).strip().upper() == "NO":
+                        cell_fill, cell_color, cell_font = "#FEE2E2", "#991B1B", bold
+                    elif header_name == "MBAJTUR?" and str(value).strip() == "✓":
+                        cell_fill, cell_color, cell_font = "#DCFCE7", "#166534", bold
+                    elif header_name == "MBAJTUR?" and str(value).strip() == "✕":
+                        cell_fill, cell_color, cell_font = "#FEE2E2", "#991B1B", bold
+                    if highlighted and header_name == "TITLE":
+                        cell_color, cell_font = "#2563EB", bold
+                    right = x + column_widths[index]
+                    draw.rectangle((x, y, right, y + row_height), fill=cell_fill, outline="#2563EB" if highlighted else "#CBD5E1", width=3 if highlighted else 1)
+                    for line_index, text in enumerate(cells[index]):
+                        draw.text((x + 6, y + 5 + line_index * 22), text, fill=cell_color, font=cell_font)
+                    x = right
+                y += row_height
+            y += 14
     output = __import__("io").BytesIO()
     image.save(output, format="PNG", optimize=True)
     return output.getvalue()

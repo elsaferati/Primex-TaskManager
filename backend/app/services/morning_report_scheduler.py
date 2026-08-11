@@ -14,6 +14,7 @@ from app.services.morning_report import (
     MANUAL_SECTION_TITLES,
     SECTION_TITLES,
     build_morning_report_sections,
+    is_generated_subject,
     render_html,
     render_plain_text,
     send_morning_report,
@@ -114,7 +115,8 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
             db.add(row)
             await db.flush()
         else:
-            row.subject = row.subject or subject_for(report_day)
+            if not row.subject or is_generated_subject(row.subject, report_day):
+                row.subject = subject_for(report_day)
             row.recipients = recipients
             row.sections = sections
             row.generated_snapshot = snapshot
