@@ -464,6 +464,11 @@ export function ReportSectionPreview({
   lines.forEach((line, index) => {
     const trimmed = line.trim()
     if (!trimmed) {
+      // Saved report drafts may contain visual spacer lines between the ASCII
+      // table border, header and rows.  Keep the current table open so those
+      // spacers do not split it into separate plain-text fragments.
+      const nextNonEmpty = lines.slice(index + 1).find((nextLine) => nextLine.trim())?.trim() || ""
+      if (pendingHeader && (isRuleLine(nextNonEmpty) || Boolean(tableCells(nextNonEmpty)))) return
       flushTable()
       previewItems.push({ kind: "blank", key: `blank-${index}` })
       return

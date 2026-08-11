@@ -58,7 +58,7 @@ function abbreviateDepartmentName(name?: string | null) {
 
 export default function WaitingConfirmationGaPage() {
   const { apiFetch, user } = useAuth()
-  const { ganeUser, tasks, loading, error, refresh, applyTaskResult } = useWaitingConfirmationGa()
+  const { tasks, loading, error, refresh, applyTaskResult } = useWaitingConfirmationGa()
   const [projects, setProjects] = React.useState<Project[]>([])
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [metaLoading, setMetaLoading] = React.useState(true)
@@ -70,8 +70,7 @@ export default function WaitingConfirmationGaPage() {
   const [editTitle, setEditTitle] = React.useState("")
   const [editDescription, setEditDescription] = React.useState("")
   const [savingEdit, setSavingEdit] = React.useState(false)
-  const canManageWaitingConfirmation =
-    user?.role === "ADMIN" || (user?.username ? user.username.toLowerCase() === "gane.arifaj" : false)
+  const canManageWaitingConfirmation = Boolean(user?.id)
 
   const loadMetadata = React.useCallback(async () => {
     setMetaLoading(true)
@@ -112,7 +111,7 @@ export default function WaitingConfirmationGaPage() {
   const updateTask = React.useCallback(
     async (taskId: string, payload: Record<string, unknown>, successMessage: string) => {
       if (!canManageWaitingConfirmation) {
-        toast.error("Only gane.arifaj can update these tasks.")
+        toast.error("Only the selected confirmation recipient can update these tasks.")
         return false
       }
       setUpdatingTaskId(taskId)
@@ -149,7 +148,7 @@ export default function WaitingConfirmationGaPage() {
 
   const startEditTask = React.useCallback((task: Task) => {
     if (!canManageWaitingConfirmation) {
-      toast.error("Only gane.arifaj can edit these tasks.")
+      toast.error("Only the selected confirmation recipient can edit these tasks.")
       return
     }
     setEditingTaskId(task.id)
@@ -186,9 +185,9 @@ export default function WaitingConfirmationGaPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h1 className="text-xl font-semibold tracking-tight">Waiting Confirmation GA</h1>
+          <h1 className="text-xl font-semibold tracking-tight">Awaiting Confirmation</h1>
           <p className="text-sm text-muted-foreground">
-            Tasks waiting for confirmation by {ganeUser?.full_name || "Gane Arifaj"}.
+            Tasks waiting for your confirmation.
           </p>
         </div>
         <Button variant="outline" size="sm" onClick={() => void handleRefresh()} disabled={isLoading || refreshing}>
@@ -201,19 +200,13 @@ export default function WaitingConfirmationGaPage() {
         <div className="rounded-md border border-rose-200 bg-rose-50 p-4 text-sm text-rose-700">{combinedError}</div>
       ) : null}
 
-      {!combinedError && !isLoading && !ganeUser ? (
-        <div className="rounded-md border border-amber-200 bg-amber-50 p-4 text-sm text-amber-800">
-          Gane Arifaj was not found in the users list.
-        </div>
-      ) : null}
-
       {isLoading ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
           Loading waiting confirmation tasks...
         </div>
       ) : null}
 
-      {!isLoading && !combinedError && ganeUser && tasks.length === 0 ? (
+      {!isLoading && !combinedError && tasks.length === 0 ? (
         <div className="rounded-md border border-slate-200 bg-slate-50 p-4 text-sm text-slate-500">
           No waiting confirmation tasks.
         </div>

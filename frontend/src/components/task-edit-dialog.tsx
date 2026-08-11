@@ -18,12 +18,14 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
-import type { Task, TaskFinishPeriod } from "@/lib/types"
+import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
+import type { Task, TaskFinishPeriod, UserLookup } from "@/lib/types"
+import { fetchUsersLookupCached } from "@/lib/users-cache"
 
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
-  { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
+  { value: "WAITING_CONFIRMATION", label: "Waiting for Confirmation" },
   { value: "DONE", label: "Done" },
 ] as const
 
@@ -119,6 +121,8 @@ export function TaskEditDialog({
   const [dueDate, setDueDate] = React.useState("")
   const [finishPeriod, setFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
   const [oneHReportSlot, setOneHReportSlot] = React.useState<string>(ONE_H_REPORT_SLOT_NONE_VALUE)
+  const [confirmationAssigneeId, setConfirmationAssigneeId] = React.useState("")
+  const [users, setUsers] = React.useState<UserLookup[]>([])
   const [saving, setSaving] = React.useState(false)
 
   React.useEffect(() => {
@@ -132,16 +136,39 @@ export function TaskEditDialog({
     setDueDate(toDateInputValue(task.due_date))
     setFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
     setOneHReportSlot(getOneHReportSlotValue(task.one_h_report_slot))
+    setConfirmationAssigneeId(task.confirmation_assignee_id || "")
   }, [task])
+
+  const supportsWaitingConfirmation = Boolean(
+    task
+    && !task.system_template_origin_id
+    && (
+      isNoteOriginTask
+      || (isFastTask(task) && ["BLL", "R1", "1H", "P:"].includes(fastTaskType))
+      || (isProjectTask(task) && ["1H", "R1", "PERSONAL", "BLLOK"].includes(projectTaskType))
+      || task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal
+    )
+  )
+  const waitingNeedsConfirmer = isWaitingConfirmation(statusValue)
+  const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
+
+  React.useEffect(() => {
+    if (!open || !waitingNeedsConfirmer) return
+    let cancelled = false
+    void fetchUsersLookupCached(apiFetch).then((result) => {
+      if (!cancelled && result) setUsers(result as UserLookup[])
+    })
+    return () => { cancelled = true }
+  }, [apiFetch, open, waitingNeedsConfirmer])
 
   const statusOptions = React.useMemo(() => {
     if (!task) return TASK_STATUS_OPTIONS
     return TASK_STATUS_OPTIONS.filter((option) => {
-      if (isNoteOriginTask) return option.value !== "WAITING_CONFIRMATION"
+      if (isNoteOriginTask) return true
       if (option.value !== "WAITING_CONFIRMATION") return true
-      return Boolean(task.confirmation_assignee_id || task.status === "WAITING_CONFIRMATION")
+      return supportsWaitingConfirmation
     })
-  }, [isNoteOriginTask, task])
+  }, [isNoteOriginTask, supportsWaitingConfirmation, task])
 
   const closeDialog = React.useCallback(() => {
     if (saving) return
@@ -157,8 +184,9 @@ export function TaskEditDialog({
       return
     }
 
-    if (!isNoteOriginTask && statusValue === "WAITING_CONFIRMATION" && !task.confirmation_assignee_id) {
-      toast.error("This task needs a confirmation assignee before it can use Waiting Confirmation.")
+    const confirmationValidation = validateWaitingConfirmation(statusValue, confirmationAssigneeId)
+    if (confirmationValidation) {
+      toast.error(confirmationValidation)
       return
     }
 
@@ -199,6 +227,7 @@ export function TaskEditDialog({
           ? { description: nextDescription }
           : {}),
         ...(statusValue !== task.status ? { status: statusValue } : {}),
+        ...(waitingNeedsConfirmer ? { confirmation_assignee_id: confirmationAssigneeId } : {}),
         ...(nextStartDate !== currentStartDate ? { start_date: nextStartDate } : {}),
         ...(nextDueDate !== currentDueDate ? { due_date: nextDueDate } : {}),
         ...(nextFinishPeriod !== currentFinishPeriod ? { finish_period: nextFinishPeriod } : {}),
@@ -256,6 +285,7 @@ export function TaskEditDialog({
     }
   }, [
     apiFetch,
+    confirmationAssigneeId,
     description,
     dueDate,
     fastTaskType,
@@ -270,6 +300,7 @@ export function TaskEditDialog({
     statusValue,
     task,
     title,
+    waitingNeedsConfirmer,
   ])
 
   if (!task) return null
@@ -364,6 +395,28 @@ export function TaskEditDialog({
                 </SelectContent>
               </Select>
             </div>
+
+            {waitingNeedsConfirmer ? (
+              <div className="space-y-2">
+                <Label>Confirm by (Manager/Admin/GA)</Label>
+                <Select
+                  value={confirmationAssigneeId || "__none__"}
+                  onValueChange={(value) => setConfirmationAssigneeId(value === "__none__" ? "" : value)}
+                >
+                  <SelectTrigger disabled={saving}>
+                    <SelectValue placeholder="Select confirmer" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">Select confirmer</SelectItem>
+                    {confirmerCandidates.map((candidate) => (
+                      <SelectItem key={candidate.id} value={candidate.id}>
+                        {candidate.full_name || candidate.username || "-"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : null}
 
             <div className="space-y-2">
               <Label htmlFor="task-edit-start-date">Start date</Label>

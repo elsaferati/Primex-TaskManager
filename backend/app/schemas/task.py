@@ -71,6 +71,7 @@ class GaNoteTaskSummaryOut(BaseModel):
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
+    confirmation_assignee_id: uuid.UUID | None = None
     assignees: list[TaskAssigneeOut] = Field(default_factory=list)
     ga_note_origin_id: uuid.UUID | None = None
     plan_note_origin_id: uuid.UUID | None = None

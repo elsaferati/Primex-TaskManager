@@ -46,7 +46,7 @@ class TestPerformanceHotPaths(unittest.IsolatedAsyncioTestCase):
     async def test_waiting_confirmation_badge_uses_one_scalar_query(self):
         db = _Session([_Result(scalar=4)])
 
-        result = await waiting_confirmation_ga_count(db=db, _=object())
+        result = await waiting_confirmation_ga_count(db=db, user=SimpleNamespace(id=uuid.uuid4()))
 
         self.assertEqual(result, {"count": 4})
         self.assertEqual(len(db.executed), 1)

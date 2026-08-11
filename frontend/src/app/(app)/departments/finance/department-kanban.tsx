@@ -559,20 +559,30 @@ export default function DepartmentKanban() {
 
   const handleMarkDone = React.useCallback(
     async (taskId: string) => {
-      const resultComment = window.prompt("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")?.trim()
-      if (!resultComment) {
+      const task = tasks.find((item) => item.id === taskId)
+      const skipsResultComment = Boolean(
+        task && (
+          task.ga_note_origin_id || task.plan_note_origin_id || task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal
+        )
+      )
+      const resultComment = skipsResultComment
+        ? null
+        : window.prompt("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")?.trim()
+      if (!skipsResultComment && !resultComment) {
         toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
         return
       }
       setUpdatingTaskIds((prev) => ({ ...prev, [taskId]: true }))
 
       try {
-        const commentRes = await apiFetch(`/tasks/${taskId}/comment`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ comment: resultComment }),
-        })
-        if (!commentRes.ok) throw new Error("Komenti i rezultatit nuk u ruajt.")
+        if (resultComment) {
+          const commentRes = await apiFetch(`/tasks/${taskId}/comment`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ comment: resultComment }),
+          })
+          if (!commentRes.ok) throw new Error("Komenti i rezultatit nuk u ruajt.")
+        }
         const res = await apiFetch(`/tasks/${taskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
@@ -604,7 +614,7 @@ export default function DepartmentKanban() {
         })
       }
     },
-    [apiFetch]
+    [apiFetch, tasks]
   )
 
   const handleExportExcel = React.useCallback(async () => {

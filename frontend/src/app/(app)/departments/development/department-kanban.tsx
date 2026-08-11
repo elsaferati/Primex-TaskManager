@@ -1317,6 +1317,7 @@ export default function DepartmentKanban() {
   const [editTaskDescription, setEditTaskDescription] = React.useState("")
   const [editTaskType, setEditTaskType] = React.useState<(typeof NO_PROJECT_TYPES)[number]["id"]>("normal")
   const [editTaskStatus, setEditTaskStatus] = React.useState<string>("TODO")
+  const [editTaskConfirmationAssigneeId, setEditTaskConfirmationAssigneeId] = React.useState("")
   const [editTaskStartDate, setEditTaskStartDate] = React.useState("")
   const [editTaskDueDate, setEditTaskDueDate] = React.useState("")
   const [editTaskFinishPeriod, setEditTaskFinishPeriod] = React.useState<TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE>(FINISH_PERIOD_NONE_VALUE)
@@ -5557,6 +5558,7 @@ export default function DepartmentKanban() {
         ? statusValue
         : "TODO"
     )
+    setEditTaskConfirmationAssigneeId(task.confirmation_assignee_id || "")
     setEditTaskStartDate(toDateInputValue(task.start_date))
     setEditTaskDueDate(toDateInputValue(task.due_date))
     setEditTaskFinishPeriod(task.finish_period || FINISH_PERIOD_NONE_VALUE)
@@ -5583,6 +5585,7 @@ export default function DepartmentKanban() {
     setEditTaskDescription("")
     setEditTaskType("normal")
     setEditTaskStatus("TODO")
+    setEditTaskConfirmationAssigneeId("")
     setEditTaskStartDate("")
     setEditTaskDueDate("")
     setEditTaskFinishPeriod(FINISH_PERIOD_NONE_VALUE)
@@ -5606,6 +5609,11 @@ export default function DepartmentKanban() {
     setUpdatingTask(true)
     try {
       const editingTask = noProjectTasks.find((candidate) => candidate.id === editingTaskId) || null
+      const confirmationValidation = validateWaitingConfirmation(editTaskStatus, editTaskConfirmationAssigneeId)
+      if (confirmationValidation) {
+        toast.error(confirmationValidation)
+        return
+      }
       const startDateValue = editTaskStartDate ? new Date(editTaskStartDate).toISOString() : null
       const dueDateValue = editTaskDueDate ? new Date(editTaskDueDate).toISOString() : null
       const assigneesChanged = !sameIdSet(editTaskAssignees, editTaskInitialAssignees)
@@ -5623,6 +5631,9 @@ export default function DepartmentKanban() {
             is_1h_report: editTaskType === "hourly",
             is_r1: editTaskType === "r1",
             is_personal: editTaskType === "personal",
+            ...(isWaitingConfirmation(editTaskStatus)
+              ? { confirmation_assignee_id: editTaskConfirmationAssigneeId }
+              : {}),
           }
         : {
             title: buildMarkedAppendOnlyText(editingTask?.title, editTaskTitle.trim()),
@@ -5636,6 +5647,9 @@ export default function DepartmentKanban() {
             due_date: dueDateValue,
             finish_period: editTaskFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editTaskFinishPeriod,
             is_deadline_important: editTaskDeadlineImportant,
+            ...(isWaitingConfirmation(editTaskStatus)
+              ? { confirmation_assignee_id: editTaskConfirmationAssigneeId }
+              : {}),
           }
       if (assigneesChanged && editingTask?.ga_note_origin_id) {
         const membershipRes = await replaceGaNoteTaskAssignees(
@@ -5713,9 +5727,7 @@ export default function DepartmentKanban() {
     setAllTodayEditType(getAllTodayTaskType(task))
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
-      (task.ga_note_origin_id || task.plan_note_origin_id) && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)
-        ? "TODO"
-        : ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
+      ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
         ? statusValue
         : "TODO"
     )
@@ -5747,9 +5759,7 @@ export default function DepartmentKanban() {
       return
     }
     const isNoteOriginTask = Boolean(editingTask?.ga_note_origin_id || editingTask?.plan_note_origin_id)
-    const confirmationValidation = isNoteOriginTask
-      ? null
-      : validateWaitingConfirmation(allTodayEditStatus, allTodayEditConfirmationAssigneeId)
+    const confirmationValidation = validateWaitingConfirmation(allTodayEditStatus, allTodayEditConfirmationAssigneeId)
     if (confirmationValidation) {
       toast.error(confirmationValidation)
       return
@@ -5775,6 +5785,9 @@ export default function DepartmentKanban() {
                 is_1h_report: allTodayEditType === "hourly",
                 is_r1: allTodayEditType === "r1",
                 is_personal: allTodayEditType === "personal",
+                ...(isWaitingConfirmation(allTodayEditStatus)
+                  ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
+                  : {}),
               }
             : {
                 title: buildMarkedAppendOnlyText(editingTask?.title, allTodayEditTitle.trim()),
@@ -8243,9 +8256,7 @@ export default function DepartmentKanban() {
                             <SelectValue placeholder="Select status" />
                           </SelectTrigger>
                           <SelectContent>
-                            {ALL_TODAY_TASK_STATUS_OPTIONS.filter((value) =>
-                              !(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) || value === "TODO" || value === "IN_PROGRESS" || value === "DONE"
-                            ).map((value) => (
+                            {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
                               <SelectItem key={value} value={value}>
                                 {reportStatusLabel(value)}
                               </SelectItem>
@@ -8254,9 +8265,9 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                     </div>
-                    {!(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) && isWaitingConfirmation(allTodayEditStatus) ? (
+                    {isWaitingConfirmation(allTodayEditStatus) ? (
                       <div className="space-y-2">
-                        <Label className="text-slate-700">Confirm by (Manager/Admin)</Label>
+                        <Label className="text-slate-700">Confirm by (Manager/Admin/GA)</Label>
                         <Select
                           value={allTodayEditConfirmationAssigneeId || "__none__"}
                           onValueChange={(value) =>
@@ -8894,9 +8905,7 @@ export default function DepartmentKanban() {
                               <SelectValue placeholder="Select status" />
                             </SelectTrigger>
                             <SelectContent>
-                              {ALL_TODAY_TASK_STATUS_OPTIONS.filter((value) =>
-                                !editingGaTask || value === "TODO" || value === "IN_PROGRESS" || value === "DONE"
-                              ).map((value) => (
+                              {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
                                 <SelectItem key={value} value={value}>
                                   {reportStatusLabel(value)}
                                 </SelectItem>
@@ -8905,6 +8914,27 @@ export default function DepartmentKanban() {
                           </Select>
                         </div>
                       </div>
+                      {isWaitingConfirmation(editTaskStatus) ? (
+                        <div className="space-y-2">
+                          <Label className="text-slate-700">Confirm by (Manager/Admin/GA)</Label>
+                          <Select
+                            value={editTaskConfirmationAssigneeId || "__none__"}
+                            onValueChange={(value) => setEditTaskConfirmationAssigneeId(value === "__none__" ? "" : value)}
+                          >
+                            <SelectTrigger className="border-slate-200 focus:border-slate-400 rounded-xl">
+                              <SelectValue placeholder="Select confirmer" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="__none__">Select confirmer</SelectItem>
+                              {confirmerCandidates.map((candidate) => (
+                                <SelectItem key={candidate.id} value={candidate.id}>
+                                  {candidate.full_name || candidate.username || "-"}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      ) : null}
                       <div className="grid gap-4 md:grid-cols-2">
                         <div className="space-y-2">
                           <Label className="text-slate-700">Finish by (optional)</Label>

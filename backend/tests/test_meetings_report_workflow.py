@@ -21,7 +21,9 @@ from app.services.meetings_report import (
     SECTION_TITLES,
     _common_meeting_lines,
     _common_task_metadata_by_title,
+    _is_new_task_for_m3_day,
     _meeting_lines,
+    _meeting_status_checkbox_table,
     _m3_department_label,
     _m3_added_week_label,
     _m3_status_table,
@@ -347,6 +349,26 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
 
 
 class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
+    def test_meeting_status_table_sorts_by_clock_time_not_source_date(self) -> None:
+        meetings = [
+            SimpleNamespace(
+                id=uuid.uuid4(), title="13:15 meeting", starts_at=datetime(2026, 8, 1, 13, 15), recurrence_type="daily"
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(), title="10:15 meeting", starts_at=datetime(2026, 8, 20, 10, 15), recurrence_type="once"
+            ),
+            SimpleNamespace(
+                id=uuid.uuid4(), title="08:30 meeting", starts_at=datetime(2026, 8, 1, 8, 30), recurrence_type="daily"
+            ),
+        ]
+
+        rows = _meeting_status_checkbox_table(meetings, {})
+        meeting_rows = [row for row in rows if "meeting" in row]
+
+        self.assertIn("08:30", meeting_rows[0])
+        self.assertIn("10:15", meeting_rows[1])
+        self.assertIn("13:15", meeting_rows[2])
+
     def test_pv_displays_date_range_or_one_day_partial_time_range(self) -> None:
         user_id = uuid.uuid4()
         entry = SimpleNamespace(assigned_to_user_id=user_id, created_by_user_id=None)
@@ -398,8 +420,8 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             ]
         )
 
-        self.assertIn("background:#dcfce7", html)
-        self.assertIn("background:#fee2e2", html)
+        self.assertIn('class="n held"', html)
+        self.assertIn('class="n canceled"', html)
 
     def test_non_daily_or_weekly_meetings_receive_a_blue_frame_and_title(self) -> None:
         html = _render_ascii_table_html(
@@ -409,9 +431,8 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             ]
         )
 
-        self.assertIn("border-top:3px solid #2563eb", html)
-        self.assertIn("border-left:3px solid #2563eb", html)
-        self.assertIn("color:#2563eb;font-weight:700", html)
+        self.assertIn('class="highlight"', html)
+        self.assertIn('class="title"', html)
         self.assertNotIn("[[mt:non_daily_weekly]]", html)
 
     def test_common_view_one_time_meetings_receive_the_highlight_marker(self) -> None:
@@ -517,6 +538,34 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         header = next(row for row in rows if "LLOJI" in row and "TITULLI" in row)
         self.assertIn("LLOJI", header)
         self.assertTrue(any("BLL" in row and "MODECO" in row for row in rows))
+
+    def test_new_task_table_keeps_each_task_status_for_row_coloring(self) -> None:
+        task_template = {
+            "id": uuid.uuid4(),
+            "system_template_origin_id": None,
+            "project_id": None,
+            "assigned_to": None,
+            "fast_task_order": None,
+            "is_deadline_important": False,
+            "due_date": None,
+            "start_date": None,
+            "completed_at": None,
+            "created_at": None,
+        }
+        tasks = [
+            SimpleNamespace(**task_template, title="Todo task", status="TODO"),
+            SimpleNamespace(**{**task_template, "id": uuid.uuid4()}, title="Progress task", status="IN_PROGRESS"),
+            SimpleNamespace(**{**task_template, "id": uuid.uuid4()}, title="Waiting task", status="WAITING_CONFIRMATION"),
+            SimpleNamespace(**{**task_template, "id": uuid.uuid4()}, title="Done task", status="DONE"),
+        ]
+
+        rows = _m3_status_table("DETYRAT E REJA", tasks, {}, with_status=True)
+        html = _render_ascii_table_html(rows)
+
+        self.assertIn('class="todo"', html)
+        self.assertIn('class="in-progress"', html)
+        self.assertIn('class="waiting"', html)
+        self.assertIn('class="done"', html)
 
     def test_status_table_orders_system_tasks_before_fast_tasks(self) -> None:
         system_task = SimpleNamespace(
@@ -667,6 +716,28 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertTrue(any("This W" in row for row in rows))
         self.assertTrue(any("Last W" in row for row in rows))
         self.assertEqual(_m3_added_week_label(this_week, date(2026, 8, 10)), "This W")
+
+    def test_new_m3_tasks_are_included_only_on_their_start_date(self) -> None:
+        wednesday = date(2026, 8, 12)
+        task = SimpleNamespace(
+            start_date=wednesday,
+            due_date=date(2026, 8, 14),
+            created_at=date(2026, 8, 7),
+            completed_at=None,
+            status="TODO",
+        )
+
+        self.assertTrue(_is_new_task_for_m3_day(task, wednesday))
+        self.assertFalse(_is_new_task_for_m3_day(task, date(2026, 8, 13)))
+
+        no_start_date = SimpleNamespace(
+            start_date=None,
+            due_date=wednesday,
+            created_at=date(2026, 8, 10),
+            completed_at=None,
+            status="TODO",
+        )
+        self.assertFalse(_is_new_task_for_m3_day(no_start_date, wednesday))
 
     def test_todo_table_includes_department_after_who(self) -> None:
         department_id = uuid.uuid4()

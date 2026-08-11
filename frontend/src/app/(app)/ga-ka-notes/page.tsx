@@ -22,6 +22,7 @@ import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
+import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
 import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
@@ -83,13 +84,14 @@ type ParsedMarkedNoteContent = {
   doneRanges: TextMarkRange[]
   addedRanges: TextMarkRange[]
 }
-type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "DONE"
+type GaAssigneeTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE"
 type GaAssigneeTaskType = "NORMAL" | "HIGH" | "1H" | "R1" | "PERSONAL" | "BLLOK"
 type GaNotesTableNote = GaNote & { source?: "GA_KA" | "PX_JAV" }
 type GaAssigneeTaskState = {
   taskId: string | null
   type: GaAssigneeTaskType
   status: GaAssigneeTaskStatus
+  confirmationAssigneeId: string
   startDate: string
   dueDate: string
   finishPeriod: TaskFinishPeriod | null
@@ -129,6 +131,7 @@ function createEmptyGaAssigneeTaskState(): GaAssigneeTaskState {
     taskId: null,
     type: "NORMAL",
     status: "TODO",
+    confirmationAssigneeId: "",
     startDate: "",
     dueDate: "",
     finishPeriod: null,
@@ -898,6 +901,7 @@ export default function GaKaNotesPage() {
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const usersRef = React.useRef<UserLookup[]>([])
   usersRef.current = users
+  const confirmerCandidates = React.useMemo(() => getConfirmerCandidates(users), [users])
 
   // Initialize from URL parameters if present
   const urlDepartmentId = searchParams.get("department_id")
@@ -1222,7 +1226,10 @@ export default function GaKaNotesPage() {
             [t.assigned_to]: {
               taskId: t.id,
               type: gaAssigneeTaskType(t),
-              status: normalizedStatus === "IN_PROGRESS" || normalizedStatus === "DONE" ? normalizedStatus : "TODO",
+              status: normalizedStatus === "IN_PROGRESS" || normalizedStatus === "WAITING_CONFIRMATION" || normalizedStatus === "DONE"
+                ? normalizedStatus
+                : "TODO",
+              confirmationAssigneeId: t.confirmation_assignee_id || "",
               startDate: taskDateKey(t.start_date) || "",
               dueDate: taskDateKey(t.due_date) || "",
               finishPeriod: t.finish_period === "AM" || t.finish_period === "PM" ? t.finish_period : null,
@@ -1814,6 +1821,12 @@ export default function GaKaNotesPage() {
     }
     for (const assigneeId of editTaskAssigneeIds) {
       const state = editTaskAssigneeStates[assigneeId]
+      const confirmationValidation = validateWaitingConfirmation(state?.status, state?.confirmationAssigneeId)
+      if (confirmationValidation) {
+        const person = taskAssigneeOptions.find((item) => item.id === assigneeId)
+        toast.error(`${person?.full_name || person?.username || assigneeId}: ${confirmationValidation}`)
+        return
+      }
       if (state?.startDate && state?.dueDate && state.startDate > state.dueDate) {
         const person = taskAssigneeOptions.find((item) => item.id === assigneeId)
         toast.error(`Start date cannot be after due date for ${person?.full_name || person?.username || assigneeId}`)
@@ -1852,6 +1865,7 @@ export default function GaKaNotesPage() {
               return {
                 assignee_id: assigneeId,
                 status: state.status,
+                confirmation_assignee_id: isWaitingConfirmation(state.status) ? state.confirmationAssigneeId : null,
                 priority: state.type === "HIGH" ? "HIGH" : "NORMAL",
                 is_bllok: state.type === "BLLOK",
                 is_1h_report: state.type === "1H",
@@ -4228,10 +4242,35 @@ export default function GaKaNotesPage() {
                                 <SelectContent>
                                   <SelectItem value="TODO">To do</SelectItem>
                                   <SelectItem value="IN_PROGRESS">In progress</SelectItem>
+                                  <SelectItem value="WAITING_CONFIRMATION">Waiting Confirmation</SelectItem>
                                   <SelectItem value="DONE">Done</SelectItem>
                                 </SelectContent>
                               </Select>
                             </div>
+                            {isWaitingConfirmation(state.status) ? (
+                              <div className="space-y-1">
+                                <Label className="text-xs text-muted-foreground">Confirm by</Label>
+                                <Select
+                                  value={state.confirmationAssigneeId || "__none__"}
+                                  onValueChange={(value) =>
+                                    updateEditTaskAssigneeState(assigneeId, {
+                                      confirmationAssigneeId: value === "__none__" ? "" : value,
+                                    })
+                                  }
+                                  disabled={savingEdit}
+                                >
+                                  <SelectTrigger><SelectValue placeholder="Manager, Admin, or GA" /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="__none__">Select confirmer</SelectItem>
+                                    {confirmerCandidates.map((candidate) => (
+                                      <SelectItem key={candidate.id} value={candidate.id}>
+                                        {candidate.full_name || candidate.username || "-"}
+                                      </SelectItem>
+                                    ))}
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            ) : null}
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Start date</Label>
                               <Input

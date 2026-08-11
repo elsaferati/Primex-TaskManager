@@ -4,11 +4,9 @@ import * as React from "react"
 import { usePathname } from "next/navigation"
 
 import { useAuth } from "@/lib/auth"
-import type { Task, UserLookup } from "@/lib/types"
-import { fetchUsersLookupCached } from "@/lib/users-cache"
+import type { Task } from "@/lib/types"
 
 type WaitingConfirmationGaContextValue = {
-  ganeUser: UserLookup | null
   tasks: Task[]
   count: number
   loading: boolean
@@ -19,16 +17,9 @@ type WaitingConfirmationGaContextValue = {
 
 const WaitingConfirmationGaContext = React.createContext<WaitingConfirmationGaContextValue | null>(null)
 
-function matchesGane(user: UserLookup) {
-  const fullName = (user.full_name || "").trim().toLowerCase()
-  const username = (user.username || "").trim().toLowerCase()
-  return fullName === "gane arifaj" || username === "gane.arifaj" || username === "gane_arifaj" || username === "gane"
-}
-
 export function WaitingConfirmationGaProvider({ children }: { children: React.ReactNode }) {
-  const { apiFetch } = useAuth()
+  const { apiFetch, user } = useAuth()
   const pathname = usePathname()
-  const [ganeUser, setGaneUser] = React.useState<UserLookup | null>(null)
   const [tasks, setTasks] = React.useState<Task[]>([])
   const [count, setCount] = React.useState(0)
   const [loading, setLoading] = React.useState(true)
@@ -38,34 +29,26 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
     setLoading(true)
     setError(null)
     try {
-      const usersPromise = (async () => {
-        const cached = await fetchUsersLookupCached(apiFetch)
-        if (cached) return cached as UserLookup[]
-        const res = await apiFetch("/users/lookup")
-        if (!res.ok) return [] as UserLookup[]
-        return (await res.json()) as UserLookup[]
-      })()
-
-      const [users, tasksRes] = await Promise.all([
-        usersPromise,
-        apiFetch("/tasks?status=WAITING_CONFIRMATION&include_done=false"),
-      ])
+      if (!user?.id) {
+        setTasks([])
+        setCount(0)
+        return
+      }
+      const params = new URLSearchParams({
+        status: "WAITING_CONFIRMATION",
+        include_done: "false",
+        confirmation_assignee_id: user.id,
+      })
+      const tasksRes = await apiFetch(`/tasks?${params.toString()}`)
 
       if (!tasksRes.ok) {
         throw new Error("tasks_failed")
       }
 
-      const gane = users.find(matchesGane) ?? null
       const fetchedTasks = (await tasksRes.json()) as Task[]
-
-      const matchingTasks = gane
-        ? fetchedTasks.filter(
-            (task) =>
-              task.status === "WAITING_CONFIRMATION" &&
-              task.confirmation_assignee_id === gane.id
-          )
-        : []
-      setGaneUser(gane)
+      const matchingTasks = fetchedTasks.filter(
+        (task) => task.status === "WAITING_CONFIRMATION" && task.confirmation_assignee_id === user.id
+      )
       setTasks(matchingTasks)
       setCount(matchingTasks.length)
     } catch {
@@ -73,7 +56,7 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
     } finally {
       setLoading(false)
     }
-  }, [apiFetch])
+  }, [apiFetch, user?.id])
 
   const refreshCount = React.useCallback(async () => {
     try {
@@ -120,9 +103,9 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
     (task: Task) => {
       setTasks((prev) => {
         const shouldStay =
-          ganeUser &&
+          user?.id &&
           task.status === "WAITING_CONFIRMATION" &&
-          task.confirmation_assignee_id === ganeUser.id
+          task.confirmation_assignee_id === user.id
 
         let next: Task[]
         if (!shouldStay) {
@@ -136,12 +119,11 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
         return next
       })
     },
-    [ganeUser]
+    [user?.id]
   )
 
   const value = React.useMemo<WaitingConfirmationGaContextValue>(
     () => ({
-      ganeUser,
       tasks,
       count,
       loading,
@@ -149,7 +131,7 @@ export function WaitingConfirmationGaProvider({ children }: { children: React.Re
       refresh,
       applyTaskResult,
     }),
-    [applyTaskResult, count, error, ganeUser, loading, refresh, tasks]
+    [applyTaskResult, count, error, loading, refresh, tasks]
   )
 
   return (

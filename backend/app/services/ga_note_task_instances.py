@@ -29,6 +29,7 @@ class GaNoteTaskReconcileResult:
 class GaNoteAssigneeExecutionState:
     assignee_id: uuid.UUID
     status: TaskStatus
+    confirmation_assignee_id: uuid.UUID | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None
@@ -406,8 +407,13 @@ def apply_ga_note_assignee_execution_states(
         task = active_by_assignee.get(state.assignee_id)
         if task is None:
             raise ValueError("Assignee state does not match an active GA task copy")
-        if state.status not in {TaskStatus.TODO, TaskStatus.IN_PROGRESS, TaskStatus.DONE}:
-            raise ValueError("GA task status must be TODO, IN_PROGRESS, or DONE")
+        if state.status not in {
+            TaskStatus.TODO,
+            TaskStatus.IN_PROGRESS,
+            TaskStatus.WAITING_CONFIRMATION,
+            TaskStatus.DONE,
+        }:
+            raise ValueError("GA task status must be TODO, IN_PROGRESS, WAITING_CONFIRMATION, or DONE")
         if state.start_date is not None and state.due_date is not None and state.start_date > state.due_date:
             raise ValueError("Start date cannot be after due date")
 
@@ -417,6 +423,9 @@ def apply_ga_note_assignee_execution_states(
         if current_status != next_status:
             task.status = next_status
             task.completed_at = datetime.now(timezone.utc) if next_status == TaskStatus.DONE.value else None
+            changed = True
+        if task.confirmation_assignee_id != state.confirmation_assignee_id:
+            task.confirmation_assignee_id = state.confirmation_assignee_id
             changed = True
         if task.start_date != state.start_date:
             task.start_date = state.start_date

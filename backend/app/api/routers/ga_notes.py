@@ -532,12 +532,18 @@ async def update_ga_note_task_bundle(
 
     if payload.assignee_states is not None:
         try:
+            from app.api.routers.tasks import _validate_waiting_confirmation_assignee
+
+            for item in payload.assignee_states:
+                if item.status == TaskStatus.WAITING_CONFIRMATION:
+                    await _validate_waiting_confirmation_assignee(db, item.confirmation_assignee_id)
             updated_count += apply_ga_note_assignee_execution_states(
                 active_tasks,
                 [
                     GaNoteAssigneeExecutionState(
                         assignee_id=item.assignee_id,
                         status=item.status,
+                        confirmation_assignee_id=item.confirmation_assignee_id,
                         start_date=item.start_date,
                         due_date=item.due_date,
                         finish_period=item.finish_period,

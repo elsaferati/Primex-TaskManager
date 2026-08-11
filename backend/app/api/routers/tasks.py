@@ -142,6 +142,21 @@ def _as_local_date(value: datetime | date | None) -> date | None:
     return value
 
 
+def _as_utc_datetime(value: datetime | None) -> datetime | None:
+    """Make user-supplied task datetimes safe to compare with stored values.
+
+    Browser date inputs submit a bare ``YYYY-MM-DD`` value, which Pydantic
+    parses as a timezone-naive datetime.  PostgreSQL task timestamps are
+    timezone-aware.  Comparing the two while editing only start or due date
+    raises ``TypeError`` and previously caused Finance date updates to fail.
+    """
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _is_development_department(department: Department | None) -> bool:
     if department is None:
         return False
@@ -274,6 +289,7 @@ def _should_auto_status_from_product_counts(
 _GA_NOTE_VALID_STATUSES = {
     TaskStatus.TODO.value,
     TaskStatus.IN_PROGRESS.value,
+    TaskStatus.WAITING_CONFIRMATION.value,
     TaskStatus.DONE.value,
 }
 
@@ -282,11 +298,17 @@ _GA_NOTE_SHARED_TASK_FIELDS = {
     "project_id",
     "dependency_task_id",
     "department_id",
-    "confirmation_assignee_id",
     "phase",
     "fast_task_order",
     "alignment_user_ids",
 }
+
+
+def _is_ga_confirmation_user(user: User) -> bool:
+    """GA is an account identity, not one of the three system roles."""
+    full_name = (user.full_name or "").strip().lower()
+    username = (user.username or "").strip().lower()
+    return full_name == "gane arifaj" or username in {"gane.arifaj", "gane_arifaj", "gane"}
 
 
 def _normalize_ga_note_task_status(value: str | TaskStatus | None) -> TaskStatus:
@@ -296,6 +318,61 @@ def _normalize_ga_note_task_status(value: str | TaskStatus | None) -> TaskStatus
     if raw in _GA_NOTE_VALID_STATUSES:
         return TaskStatus(raw)
     return TaskStatus.TODO
+
+
+def _supports_waiting_confirmation(
+    task: Task,
+    *,
+    is_bllok: bool | None = None,
+    is_1h_report: bool | None = None,
+    is_r1: bool | None = None,
+    is_personal: bool | None = None,
+) -> bool:
+    """Waiting Confirmation is for special and note-origin tasks, never system tasks."""
+    if getattr(task, "system_template_origin_id", None) is not None:
+        return False
+    if getattr(task, "ga_note_origin_id", None) is not None or getattr(task, "plan_note_origin_id", None) is not None:
+        return True
+    return any(
+        (
+            getattr(task, "is_bllok", False) if is_bllok is None else is_bllok,
+            getattr(task, "is_1h_report", False) if is_1h_report is None else is_1h_report,
+            getattr(task, "is_r1", False) if is_r1 is None else is_r1,
+            getattr(task, "is_personal", False) if is_personal is None else is_personal,
+        )
+    )
+
+
+def _payload_supports_waiting_confirmation(payload: TaskCreate) -> bool:
+    return bool(
+        payload.ga_note_origin_id
+        or payload.plan_note_origin_id
+        or payload.is_bllok
+        or payload.is_1h_report
+        or payload.is_r1
+        or payload.is_personal
+    )
+
+
+async def _validate_waiting_confirmation_assignee(
+    db: AsyncSession,
+    confirmation_assignee_id: uuid.UUID | None,
+) -> None:
+    if confirmation_assignee_id is None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation assignee is required when status is WAITING_CONFIRMATION",
+        )
+    confirmation_user = (
+        await db.execute(select(User).where(User.id == confirmation_assignee_id))
+    ).scalar_one_or_none()
+    if confirmation_user is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
+    if confirmation_user.role not in (UserRole.ADMIN, UserRole.MANAGER) and not _is_ga_confirmation_user(confirmation_user):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Confirmation assignee must be a manager, admin, or GA",
+        )
 
 
 def _user_to_assignee(user: User) -> TaskAssigneeOut:
@@ -1075,8 +1152,8 @@ async def _require_rlz_completion_comment(
 
 
 def _requires_rlz_completion_comment(task: Task) -> bool:
-    """Note-task copies have their own status dialog, not an RLZ comment flow."""
-    return task.ga_note_origin_id is None and task.plan_note_origin_id is None
+    """Special and note-origin tasks do not use the RLZ result-comment flow."""
+    return not _supports_waiting_confirmation(task)
 
 
 def _validate_rlz_completion_comment(
@@ -1346,18 +1423,10 @@ async def dashboard_task_summary(
 @router.get("/waiting-confirmation-ga/count")
 async def waiting_confirmation_ga_count(
     db: AsyncSession = Depends(get_db),
-    _=Depends(get_current_user),
+    user=Depends(get_current_user),
 ) -> dict[str, int]:
-    """Return the global GA waiting-confirmation badge count cheaply."""
+    """Return the current recipient's pending-confirmation badge count."""
 
-    normalized_full_name = func.lower(func.trim(func.coalesce(User.full_name, "")))
-    normalized_username = func.lower(func.trim(func.coalesce(User.username, "")))
-    gane_user_ids = select(User.id).where(
-        or_(
-            normalized_full_name == "gane arifaj",
-            normalized_username.in_(("gane.arifaj", "gane_arifaj", "gane")),
-        )
-    )
     count = (
         await db.execute(
             select(func.count())
@@ -1365,7 +1434,7 @@ async def waiting_confirmation_ga_count(
             .where(
                 Task.is_active.is_(True),
                 Task.status == TaskStatus.WAITING_CONFIRMATION.value,
-                Task.confirmation_assignee_id.in_(gane_user_ids),
+                Task.confirmation_assignee_id == user.id,
             )
         )
     ).scalar_one()
@@ -1423,6 +1492,7 @@ async def list_task_summaries_by_ga_notes(
             Task.project_id,
             Task.department_id,
             Task.assigned_to,
+            Task.confirmation_assignee_id,
             Task.ga_note_origin_id,
             Task.plan_note_origin_id,
             Task.status,
@@ -1448,6 +1518,7 @@ async def list_task_summaries_by_ga_notes(
             project_id=task.project_id,
             department_id=task.department_id,
             assigned_to=task.assigned_to,
+            confirmation_assignee_id=task.confirmation_assignee_id,
             assignees=assignee_map.get(task.id, []),
             ga_note_origin_id=task.ga_note_origin_id,
             plan_note_origin_id=task.plan_note_origin_id,
@@ -1804,17 +1875,19 @@ async def create_task(
                 },
             )
     confirmation_assignee_id = payload.confirmation_assignee_id
-    if confirmation_assignee_id is not None:
+    if status_value == TaskStatus.WAITING_CONFIRMATION:
+        if not _payload_supports_waiting_confirmation(payload):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="WAITING_CONFIRMATION is only available for 1H, R1, Personal, Bllok, GA/KA note, or plan-note tasks",
+            )
+        await _validate_waiting_confirmation_assignee(db, confirmation_assignee_id)
+    elif confirmation_assignee_id is not None:
         confirmation_user = (
             await db.execute(select(User).where(User.id == confirmation_assignee_id))
         ).scalar_one_or_none()
         if confirmation_user is None:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Confirmation assignee not found")
-    if status_value == TaskStatus.WAITING_CONFIRMATION and confirmation_assignee_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Confirmation assignee is required when status is WAITING_CONFIRMATION",
-        )
     priority_value = payload.priority or TaskPriority.NORMAL
     phase_value = payload.phase or (project.current_phase if project else ProjectPhaseStatus.MEETINGS)
     phase_value = _normalize_project_task_phase(
@@ -2598,8 +2671,8 @@ async def update_task(
     start_date_set = _payload_has_field(payload, "start_date")
     due_date_set = _payload_has_field(payload, "due_date")
     finish_period_set = _payload_has_field(payload, "finish_period")
-    effective_start_date = payload.start_date if start_date_set else task.start_date
-    effective_due_date = payload.due_date if due_date_set else task.due_date
+    effective_start_date = _as_utc_datetime(payload.start_date) if start_date_set else _as_utc_datetime(task.start_date)
+    effective_due_date = _as_utc_datetime(payload.due_date) if due_date_set else _as_utc_datetime(task.due_date)
     if (
         effective_start_date is not None
         and effective_due_date is not None
@@ -2670,6 +2743,7 @@ async def update_task(
         task.department_id = payload.department_id
 
     confirmation_set = _payload_has_field(payload, "confirmation_assignee_id")
+    previous_confirmation_assignee_id = task.confirmation_assignee_id
     if confirmation_set:
         if payload.confirmation_assignee_id is not None:
             confirmation_user = (
@@ -2802,11 +2876,19 @@ async def update_task(
                     "reason": payload.completion_override_reason.strip(),
                 },
             )
-    if target_status_raw == TaskStatus.WAITING_CONFIRMATION.value and task.confirmation_assignee_id is None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Confirmation assignee is required when status is WAITING_CONFIRMATION",
-        )
+    if payload.status == TaskStatus.WAITING_CONFIRMATION:
+        if not _supports_waiting_confirmation(
+            task,
+            is_bllok=payload.is_bllok,
+            is_1h_report=payload.is_1h_report,
+            is_r1=payload.is_r1,
+            is_personal=payload.is_personal,
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="WAITING_CONFIRMATION is only available for 1H, R1, Personal, Bllok, GA/KA note, or plan-note tasks",
+            )
+        await _validate_waiting_confirmation_assignee(db, task.confirmation_assignee_id)
     if (
         payload.status == TaskStatus.DONE
         and current_status_raw == TaskStatus.WAITING_CONFIRMATION.value
@@ -2857,6 +2939,26 @@ async def update_task(
             existing_progress.daily_status = task.status.value
             if existing_progress.finish_period is None:
                 existing_progress.finish_period = progress_finish_period
+
+    if (
+        task.status == TaskStatus.WAITING_CONFIRMATION
+        and task.confirmation_assignee_id is not None
+        and task.confirmation_assignee_id != user.id
+        and (
+            current_status_raw != TaskStatus.WAITING_CONFIRMATION.value
+            or previous_confirmation_assignee_id != task.confirmation_assignee_id
+        )
+    ):
+        created_notifications.append(
+            add_notification(
+                db=db,
+                user_id=task.confirmation_assignee_id,
+                type=NotificationType.status_change,
+                title="Confirmation requested",
+                body=notification_task_preview(task.title),
+                data={"task_id": str(task.id), "status": TaskStatus.WAITING_CONFIRMATION.value},
+            )
+        )
     
     if payload.is_personal is not None:
         task.is_personal = payload.is_personal
@@ -2892,7 +2994,7 @@ async def update_task(
     if payload.daily_products is not None:
         task.daily_products = payload.daily_products
     if start_date_set:
-        task.start_date = payload.start_date
+        task.start_date = effective_start_date
     if due_date_set:
         # If due_date is being changed (postponed), preserve the original planned date once.
         if (
@@ -2902,7 +3004,7 @@ async def update_task(
             and task.original_due_date is None
         ):
             task.original_due_date = task.due_date
-        task.due_date = payload.due_date
+        task.due_date = effective_due_date
     if start_date_set or due_date_set:
         new_start_day = _as_local_date(task.start_date)
         progress_days: set[date] = set()
@@ -3406,7 +3508,7 @@ async def update_task_one_h_report_slot(
     if payload.one_h_report_slot is not None and next_slot is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
 
-    # Current-day slots roll over to the next working day at 16:00.
+    # Current-day slots roll over to the next working day at 15:30.
     slot_date = effective_slot_date(payload.report_date)
 
     task.one_h_report_slot = next_slot

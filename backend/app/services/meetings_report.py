@@ -210,6 +210,16 @@ def _task_day(task: Task) -> date | None:
     return _local_date(task.due_date or task.start_date or task.created_at)
 
 
+def _is_new_task_for_m3_day(task: Task, day: date) -> bool:
+    """Whether a task is new for the M3 report generated for ``day``.
+
+    A task is reported as new once only: on its planned start date.  Its
+    creation date is intentionally not used here; it only determines the
+    ``Last W`` / ``This W`` label shown in the table.
+    """
+    return _is_open(task) and _local_date(task.start_date) == day
+
+
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
     recurrence = (meeting.recurrence_type or "").lower()
     if recurrence == "weekly":
@@ -761,7 +771,9 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     ]
 
     tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
-    new_tomorrow = tomorrow_tasks
+    # "Detyrat e reja" is a one-day list: a task is new on its planned start
+    # date, rather than on every day up to its due date.
+    new_tomorrow = [task for task in tasks if _is_new_task_for_m3_day(task, tomorrow)]
     at_0800 = [task for task in tomorrow_tasks if task.due_date and _local_time(task.due_date) == "08:00"]
     deadline = [task for task in tomorrow_tasks if task.is_deadline_important]
     one_h_no_slot = [task for task in tomorrow_tasks if task.is_1h_report and not task.one_h_report_slot]
@@ -848,6 +860,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             "DETYRAT E REJA",
             new_tomorrow,
             names,
+            with_status=True,
             include_department=True,
             include_added_week=True,
             include_am_pm=True,
@@ -1142,20 +1155,22 @@ def _dedupe_system_task_rows(tasks: list[Task]) -> list[Task]:
     )
 
 
+def _meeting_clock_sort_key(meeting: Meeting) -> tuple[int, int, str]:
+    """Order report meetings by their displayed clock time, never their source date."""
+    starts_at = meeting.starts_at
+    if starts_at is None:
+        return (24, 0, _clean_task_title(meeting.title).casefold())
+    local = starts_at.astimezone(report_timezone()) if starts_at.tzinfo else starts_at
+    return (local.hour, local.minute, _clean_task_title(meeting.title).casefold())
+
+
 def _meeting_lines(meetings: list[Meeting]) -> list[str]:
     if not meetings:
         return ["(Asnje takim)"]
 
-    def time_sort_key(meeting: Meeting) -> tuple[int, int, str]:
-        starts_at = meeting.starts_at
-        if starts_at is None:
-            return (24, 0, _clean_task_title(meeting.title).casefold())
-        local = starts_at.astimezone(report_timezone()) if starts_at.tzinfo else starts_at
-        return (local.hour, local.minute, _clean_task_title(meeting.title).casefold())
-
     return [
         f"- {_local_time(meeting.starts_at)}: {_meeting_title_with_highlight(meeting)}"
-        for meeting in sorted(meetings, key=time_sort_key)
+        for meeting in sorted(meetings, key=_meeting_clock_sort_key)
     ]
 
 
@@ -1194,7 +1209,7 @@ def _meeting_status_checkbox_table(meetings: list[Meeting], status_by_meeting: d
         rows.append(f"| {'-':<2} | {'-':<5} | {'':<8} | {'(Asnje takim)':<64} |")
         rows.append(border)
         return rows
-    for index, meeting in enumerate(sorted(meetings, key=lambda item: item.starts_at or datetime.min), start=1):
+    for index, meeting in enumerate(sorted(meetings, key=_meeting_clock_sort_key), start=1):
         status = status_by_meeting.get(meeting.id, "")
         title_value, highlighted = _split_meeting_highlight_marker(_meeting_title_with_highlight(meeting))
         title_lines = _append_meeting_highlight_marker(_wrap_fixed_width(title_value, 64), highlighted, 64)
@@ -1763,6 +1778,10 @@ table, td {{ font-family: Arial, sans-serif !important; }}
 body{{font-family:Arial,sans-serif;color:#111827;background:#f8fafc;margin:0;padding:24px}}
 h1{{font-size:22px;margin:0 0 8px}}p{{margin:0 0 18px;color:#475569}}
 h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
+.report-table{{width:100%;border-collapse:collapse;table-layout:auto;font:12px/1.3 Arial,sans-serif}}
+.report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700;border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
+.report-table td{{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
+.report-table .n{{white-space:nowrap}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
 @media only screen and (max-width:600px){{
 body{{padding:8px!important}}
 h1{{font-size:18px!important;line-height:1.2!important}}
@@ -1792,6 +1811,45 @@ pre{{font-size:12px!important;padding:10px!important}}
 
 def _parse_ascii_cells(line: str) -> list[str]:
     return [cell.strip() for cell in line.strip().strip("|").split("|")]
+
+
+def _ascii_table_block(lines: list[str], start: int) -> tuple[list[str], int] | None:
+    """Read one ASCII table, allowing blank editor rows between its lines.
+
+    Report sections are editable one line at a time.  Older saved drafts can
+    therefore contain blank lines between a table border, header, and data
+    rows.  Those blanks are formatting only; they must not turn the table into
+    a plain-text block in the email or its native attachment.
+    """
+    if start >= len(lines) or not lines[start].lstrip().startswith("+-"):
+        return None
+
+    table_lines: list[str] = []
+    index = start
+    while index < len(lines):
+        line = lines[index]
+        stripped = line.strip()
+        if stripped.startswith("+-") or stripped.startswith("|"):
+            table_lines.append(stripped)
+            index += 1
+            continue
+        if stripped:
+            break
+
+        # Keep blanks only when they separate two lines of the same table.
+        next_index = index + 1
+        while next_index < len(lines) and not lines[next_index].strip():
+            next_index += 1
+        if next_index < len(lines) and (
+            lines[next_index].lstrip().startswith("+-")
+            or lines[next_index].lstrip().startswith("|")
+        ):
+            index = next_index
+            continue
+        break
+
+    has_header = any(line.startswith("|") for line in table_lines)
+    return (table_lines, index) if has_header else None
 
 
 def _normalized_table_header(value: str) -> str:
@@ -1886,34 +1944,12 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             for row in body_rows
         ]
     column_widths = _email_column_widths(header)
-    header_cell_style = (
-        "background:#e5e7eb;color:#111827;text-align:left;font-weight:700;"
-        "border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top;"
-    )
-    default_body_bg, default_body_color = _table_tone_styles(tone)
-    body_cell_style = (
-        f"background:{default_body_bg};color:{default_body_color};border:1px solid #cbd5e1;"
-        "padding:4px 5px;vertical-align:top;"
-    )
-    canceled_cell_style = (
-        "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
-        "padding:4px 5px;vertical-align:top;"
-    )
-    disk_yes_cell_style = (
-        "background:#dcfce7;color:#166534;border:1px solid #cbd5e1;"
-        "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
-    )
-    disk_no_cell_style = (
-        "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
-        "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
-    )
     header_html = "".join(
-        f"<th{_email_column_width_attr(column_widths[index])} style=\"{header_cell_style}{_email_column_width_style(column_widths[index])}{_email_column_cell_style(cell)}\">"
-        f"{html.escape(cell)}</th>"
+        f"<th{_email_column_width_attr(column_widths[index])}{_email_column_class(cell)}>{html.escape(cell)}</th>"
         for index, cell in enumerate(header)
     )
     colgroup_html = "".join(
-        f"<col{_email_column_width_attr(width)} style=\"{_email_column_width_style(width)}\" />"
+        f"<col{_email_column_width_attr(width)}>"
         for width in column_widths
     )
     canceled_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "ANULUAR"), None)
@@ -1924,56 +1960,39 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     for row_index, row in enumerate(body_rows):
         row_tone = row_tones[row_index] if row_index < len(row_tones) else tone
         is_highlighted_meeting = highlighted_meeting_rows[row_index] if row_index < len(highlighted_meeting_rows) else False
-        if row_tone:
-            row_bg, row_color = _table_tone_styles(row_tone)
-            row_body_style = (
-                f"background:{row_bg};color:{row_color};border:1px solid #cbd5e1;"
-                "padding:4px 5px;vertical-align:top;"
-            )
-        else:
-            row_body_style = body_cell_style
         is_canceled = (
             canceled_index is not None
             and len(row) > canceled_index
             and bool(row[canceled_index].strip())
         )
-        cell_style = canceled_cell_style if is_canceled else row_body_style
         row_cells = []
         for index, cell in enumerate(row):
-            current_cell_style = cell_style
+            cell_classes = [_email_column_class_name(header[index])]
             current_cell = cell
+            if is_canceled:
+                cell_classes.append("canceled")
             if tone == "notes" and disk_index is not None and index == disk_index:
                 disk_value = cell.strip().upper()
                 if disk_value == "YES":
-                    current_cell_style = disk_yes_cell_style
+                    cell_classes.append("disk-yes")
                 elif disk_value == "NO":
-                    current_cell_style = disk_no_cell_style
+                    cell_classes.append("disk-no")
             if meeting_status_index is not None and index == meeting_status_index:
                 symbol = cell.strip()
                 if symbol == "\u2713":
-                    current_cell_style = (
-                        "background:#dcfce7;color:#166534;border:1px solid #cbd5e1;"
-                        "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
-                    )
+                    cell_classes.append("held")
                 elif symbol == "\u2715":
-                    current_cell_style = (
-                        "background:#fee2e2;color:#991b1b;border:1px solid #cbd5e1;"
-                        "padding:4px 5px;vertical-align:top;font-weight:700;text-align:center;"
-                    )
+                    cell_classes.append("canceled")
             if is_highlighted_meeting:
-                current_cell_style += "border-top:3px solid #2563eb;border-bottom:3px solid #2563eb;"
-                if index == 0:
-                    current_cell_style += "border-left:3px solid #2563eb;"
-                if index == len(row) - 1:
-                    current_cell_style += "border-right:3px solid #2563eb;"
                 if _normalized_table_header(header[index]) == "TITLE":
-                    current_cell_style += "color:#2563eb;font-weight:700;"
+                    cell_classes.append("title")
             row_cells.append(
-                f"<td data-label=\"{html.escape(header[index])}\"{_email_column_width_attr(column_widths[index])} style=\"{current_cell_style}{_email_column_width_style(column_widths[index])}{_email_column_cell_style(header[index])}\">"
+                f"<td{_email_column_width_attr(column_widths[index])} class=\"{' '.join(filter(None, cell_classes))}\">"
                 f"{html.escape(current_cell).replace(chr(10), '<br>')}</td>"
             )
+        row_classes = " ".join(filter(None, (row_tone, "highlight" if is_highlighted_meeting else "")))
         body_html_parts.append(
-            "<tr>"
+            f"<tr class=\"{row_classes}\">"
             + "".join(row_cells)
             + "</tr>"
         )
@@ -1991,7 +2010,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         "style=\"width:100%;border-collapse:collapse;margin:8px 0 12px;\">"
         f"{caption_html}<tr><td style=\"padding:0;\">"
         f"<table class=\"{table_class}\" width=\"100%\" cellspacing=\"0\" cellpadding=\"0\" border=\"0\" "
-        "style=\"width:100%;border-collapse:collapse;table-layout:auto;font-size:12px;line-height:1.3;font-family:Arial,sans-serif;\">"
+        "style=\"width:100%;border-collapse:collapse;\">"
         f"<colgroup>{colgroup_html}</colgroup><thead><tr>{header_html}</tr></thead><tbody>{body_html}</tbody></table>"
         "</td></tr></table>"
     )
@@ -2040,17 +2059,16 @@ def _email_column_width_attr(width: str) -> str:
     return "" if width == "auto" else f" width=\"{width}\""
 
 
-def _email_column_width_style(width: str) -> str:
-    return "" if width == "auto" else f"width:{width}px;"
-
-
-def _email_column_cell_style(header_cell: str) -> str:
+def _email_column_class_name(header_cell: str) -> str:
     name = _normalized_table_header(header_cell)
     if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "TO", "DATA", "DATE", "DEP", "TYPE", "AM/PM", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
-        return "white-space:nowrap;"
-    if name == "WHO":
-        return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
-    return "white-space:normal;word-break:normal;overflow-wrap:break-word;"
+        return "n"
+    return ""
+
+
+def _email_column_class(header_cell: str) -> str:
+    class_name = _email_column_class_name(header_cell)
+    return f' class="{class_name}"' if class_name else ""
 
 
 def _email_column_widths(header: list[str]) -> list[str]:
@@ -2265,13 +2283,10 @@ def _render_section_body_html(body: str) -> str:
         return ""
 
     while index < len(lines):
-        line = lines[index]
-        if line.startswith("+-") and index + 1 < len(lines) and lines[index + 1].startswith("|"):
+        table_block = _ascii_table_block(lines, index)
+        if table_block:
+            table_lines, index = table_block
             tone = current_table_tone()
-            table_lines: list[str] = []
-            while index < len(lines) and (lines[index].startswith("+-") or lines[index].startswith("|")):
-                table_lines.append(lines[index])
-                index += 1
             if _ascii_table_is_empty(table_lines):
                 mark_current_label_empty()
                 continue
@@ -2279,7 +2294,7 @@ def _render_section_body_html(body: str) -> str:
             flush_text()
             chunks.append(_render_ascii_table_html(table_lines, tone, caption))
             continue
-        text_buffer.append(line)
+        text_buffer.append(lines[index])
         index += 1
     flush_text()
     return "".join(chunk for chunk in chunks if chunk)
@@ -2379,11 +2394,9 @@ def _section_report_blocks(body: str) -> list[dict[str, Any]]:
         return ""
 
     while position < len(lines):
-        if lines[position].startswith("+-"):
-            table_lines: list[str] = []
-            while position < len(lines) and (lines[position].startswith("+-") or lines[position].startswith("|")):
-                table_lines.append(lines[position])
-                position += 1
+        table_block = _ascii_table_block(lines, position)
+        if table_block:
+            table_lines, position = table_block
             if _ascii_table_is_empty(table_lines):
                 mark_current_label_empty()
                 continue

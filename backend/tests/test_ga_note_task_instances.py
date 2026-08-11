@@ -239,6 +239,25 @@ class TestGaNoteTaskInstances(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(task_b.priority, TaskPriority.NORMAL)
         self.assertFalse(task_b.is_1h_report)
 
+    def test_assignee_execution_accepts_waiting_confirmation(self) -> None:
+        note_id = uuid.uuid4()
+        owner_id = uuid.uuid4()
+        task = _task(note_id, owner_id, TaskStatus.IN_PROGRESS)
+
+        updated = apply_ga_note_assignee_execution_states(
+            [task],
+            [
+                GaNoteAssigneeExecutionState(
+                    assignee_id=owner_id,
+                    status=TaskStatus.WAITING_CONFIRMATION,
+                )
+            ],
+        )
+
+        self.assertEqual(updated, 1)
+        self.assertEqual(task.status, TaskStatus.WAITING_CONFIRMATION.value)
+        self.assertIsNone(task.completed_at)
+
     def test_assignee_execution_rejects_invalid_date_range(self) -> None:
         note_id = uuid.uuid4()
         owner_id = uuid.uuid4()

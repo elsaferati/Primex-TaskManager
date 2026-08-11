@@ -260,6 +260,30 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("max-width:600px", html)
         self.assertIn("@media only screen and (max-width:600px)", html)
 
+    def test_email_html_renders_spaced_ascii_email_tables(self) -> None:
+        # Editable saved drafts can contain blank spacer lines between every
+        # ASCII table row.  The M1 email must still render it as an HTML table.
+        spaced_table = "\n\n".join(
+            [
+                "EM: INFO PX: 1:",
+                "+----+----------------------+-------+-------------+------------------------------------------------------------------+",
+                "| NR | KUSH                 | DEP   | AM/PM       | TITULLI                                                          |",
+                "+----+----------------------+-------+-------------+------------------------------------------------------------------+",
+                "| 1  | EF                   | DEV   | -           | EM: INFO PX: DET TEST [[st:WAITING_CONFIRMATION]]               |",
+                "+----+----------------------+-------+-------------+------------------------------------------------------------------+",
+            ]
+        )
+
+        html = render_html(
+            subject_for(date(2026, 8, 5)),
+            date(2026, 8, 5),
+            [{"title": SECTION_TITLES[1], "body": spaced_table}],
+        )
+
+        self.assertIn('class="report-table"', html)
+        self.assertIn("EM: INFO PX: DET TEST", html)
+        self.assertNotIn("<pre", html)
+
     def test_settings_routes_require_admin(self) -> None:
         settings_routes = [route for route in router.routes if route.path == "/settings"]
         self.assertEqual(len(settings_routes), 2)

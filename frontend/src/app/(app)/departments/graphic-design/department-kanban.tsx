@@ -5145,9 +5145,7 @@ export default function DepartmentKanban() {
     setAllTodayEditType(getAllTodayTaskType(task))
     const statusValue = (task.status || "").toUpperCase()
     setAllTodayEditStatus(
-      (task.ga_note_origin_id || task.plan_note_origin_id) && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)
-        ? "TODO"
-        : ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
+      ALL_TODAY_TASK_STATUS_OPTIONS.includes(statusValue as (typeof ALL_TODAY_TASK_STATUS_OPTIONS)[number])
         ? statusValue
         : "TODO"
     )
@@ -5179,9 +5177,7 @@ export default function DepartmentKanban() {
       return
     }
     const isNoteOriginTask = Boolean(editingTask?.ga_note_origin_id || editingTask?.plan_note_origin_id)
-    const confirmationValidation = isNoteOriginTask
-      ? null
-      : validateWaitingConfirmation(allTodayEditStatus, allTodayEditConfirmationAssigneeId)
+    const confirmationValidation = validateWaitingConfirmation(allTodayEditStatus, allTodayEditConfirmationAssigneeId)
     if (confirmationValidation) {
       toast.error(confirmationValidation)
       return
@@ -5215,6 +5211,9 @@ export default function DepartmentKanban() {
                 is_1h_report: allTodayEditType === "hourly",
                 is_r1: allTodayEditType === "r1",
                 is_personal: allTodayEditType === "personal",
+                ...(isWaitingConfirmation(allTodayEditStatus)
+                  ? { confirmation_assignee_id: allTodayEditConfirmationAssigneeId }
+                  : {}),
               }
             : {
                 is_bllok: allTodayEditType === "blocked",
@@ -7145,9 +7144,7 @@ export default function DepartmentKanban() {
                             <SelectValue placeholder="Select status" />
                           </SelectTrigger>
                           <SelectContent>
-                              {ALL_TODAY_TASK_STATUS_OPTIONS.filter((value) =>
-                                !(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) || value === "TODO" || value === "IN_PROGRESS" || value === "DONE"
-                              ).map((value) => (
+                              {ALL_TODAY_TASK_STATUS_OPTIONS.map((value) => (
                               <SelectItem key={value} value={value}>
                                 {reportStatusLabel(value)}
                               </SelectItem>
@@ -7156,9 +7153,9 @@ export default function DepartmentKanban() {
                         </Select>
                       </div>
                     </div>
-                    {!(allTodayEditingTask?.ga_note_origin_id || allTodayEditingTask?.plan_note_origin_id) && isWaitingConfirmation(allTodayEditStatus) ? (
+                    {isWaitingConfirmation(allTodayEditStatus) ? (
                       <div className="space-y-2">
-                        <Label className="text-slate-700">Confirm by (Manager/Admin)</Label>
+                        <Label className="text-slate-700">Confirm by (Manager/Admin/GA)</Label>
                         <Select
                           value={allTodayEditConfirmationAssigneeId || "__none__"}
                           onValueChange={(value) =>

@@ -353,8 +353,8 @@ export default function TaskDetailsPage() {
       let gaMembershipChanged = false
       let removedCurrentCopy = false
       if (statusValue) payload.status = statusValue
-      if (isNoteOriginTask && statusValue && !["TODO", "IN_PROGRESS", "DONE"].includes(statusValue)) {
-        toast.error("Note task status must be To Do, In Progress, or Done")
+      if (isNoteOriginTask && statusValue && !["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"].includes(statusValue)) {
+        toast.error("Note task status must be To Do, In Progress, Waiting Confirmation, or Done")
         return
       }
       const confirmationValidation = isNoteOriginTask
