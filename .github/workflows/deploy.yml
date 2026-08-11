@@ -151,6 +151,10 @@ jobs:
           if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m py_compile mcp_server.py app\api\routers\search.py app\schemas\search.py
           if errorlevel 1 exit /b 1
+          REM Import the complete ASGI application before deleting any live PM2
+          REM process. This catches missing modules and startup-time config errors.
+          "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -c "from app.main import app; print('Backend application import: OK')"
+          if errorlevel 1 exit /b 1
           "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe" -m unittest tests.test_mcp_server
           if errorlevel 1 exit /b 1
 
@@ -395,13 +399,56 @@ jobs:
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}
         shell: powershell
         run: |
+          $ErrorActionPreference = "Stop"
           Set-Location frontend
  
           Write-Host "1. Installing Dependencies..."
           npm install
           if ($LASTEXITCODE -ne 0) { Write-Error "NPM Install Failed"; exit 1 }
  
-          Write-Host "2. Stopping Existing Frontend Process..."
+          # Build beside the live .next directory. The current PM2 process keeps
+          # serving traffic unless and until this candidate build succeeds.
+          Write-Host "2. Building Candidate Version..."
+          if (Test-Path .next-deploy) {
+            Remove-Item .next-deploy -Recurse -Force
+          }
+          $env:NEXT_DIST_DIR = ".next-deploy"
+          $env:NEXT_DEPLOYMENT_ID = "${{ github.sha }}"
+          npm run build
+          $buildExitCode = $LASTEXITCODE
+          Remove-Item Env:NEXT_DIST_DIR -ErrorAction SilentlyContinue
+          Remove-Item Env:NEXT_DEPLOYMENT_ID -ErrorAction SilentlyContinue
+          if ($buildExitCode -ne 0) {
+            Write-Error "Candidate build failed; the existing frontend was left running."
+            exit 1
+          }
+
+          $CurrentPath = (Get-Location).Path
+          $env:RUNNER_TRACKING_ID = ""
+
+          function Start-PrimeFlowFrontend {
+            $result = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000" -NoNewWindow -Wait -PassThru
+            if ($result.ExitCode -ne 0) {
+              throw "PM2 frontend start failed with exit code $($result.ExitCode)."
+            }
+          }
+
+          function Wait-PrimeFlowFrontend {
+            $uri = "http://127.0.0.1:3000/dashboard"
+            for ($i = 0; $i -lt 20; $i++) {
+              try {
+                $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+                Write-Host "Frontend readiness attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
+                if ($resp.StatusCode -eq 200) { return $true }
+              } catch {
+                Write-Host "Frontend readiness attempt $($i + 1)/20: no response yet"
+              }
+              Start-Sleep -Seconds 2
+            }
+            return $false
+          }
+
+          Write-Host "3. Replacing Existing Frontend Process..."
           $pm2Describe = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 describe frontend > NUL 2>&1" -NoNewWindow -Wait -PassThru
           if ($pm2Describe.ExitCode -eq 0) {
             $pm2Delete = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 delete frontend" -NoNewWindow -Wait -PassThru
@@ -410,24 +457,41 @@ jobs:
             Write-Host "PM2 frontend process did not exist yet. Continuing with clean start."
           }
  
-          Write-Host "3. Cleaning Old Build..."
+          if (Test-Path .next-previous) {
+            Remove-Item .next-previous -Recurse -Force
+          }
           if (Test-Path .next) {
-            Remove-Item .next -Recurse -Force -ErrorAction SilentlyContinue
+            Move-Item .next .next-previous
+          }
+
+          try {
+            Move-Item .next-deploy .next
+            Start-PrimeFlowFrontend
+            if (-not (Wait-PrimeFlowFrontend)) {
+              throw "The candidate frontend did not become ready on port 3000."
+            }
+            Write-Host "Candidate frontend is healthy. Previous build retained in .next-previous for rollback."
+          } catch {
+            $deploymentError = $_.Exception.Message
+            Write-Host "Candidate deployment failed: $deploymentError"
+            cmd /c "pm2 delete frontend || ver > NUL" | Out-Host
             if (Test-Path .next) {
-              Start-Sleep -Seconds 2
               Remove-Item .next -Recurse -Force
             }
+            if (Test-Path .next-previous) {
+              Move-Item .next-previous .next
+              Start-PrimeFlowFrontend
+              if (-not (Wait-PrimeFlowFrontend)) {
+                Write-Error "Candidate failed and the previous frontend could not be restored. Original error: $deploymentError"
+                exit 1
+              }
+              Write-Host "Previous frontend restored successfully."
+            } else {
+              Write-Host "No previous frontend build was available to restore."
+            }
+            Write-Error "Frontend deployment failed and was rolled back: $deploymentError"
+            exit 1
           }
- 
-          Write-Host "4. Building New Version (This takes time)..."
-          npm run build
-          if ($LASTEXITCODE -ne 0) { Write-Error "Build Failed"; exit 1 }
- 
-          Write-Host "5. Starting Frontend Process..."
-          $CurrentPath = (Get-Location).Path
-          $env:RUNNER_TRACKING_ID = ""
-          $pm2Start = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", "pm2 start node_modules/next/dist/bin/next --name frontend --cwd ""$CurrentPath"" --interpreter node -- start --port 3000" -NoNewWindow -Wait -PassThru
-          if ($pm2Start.ExitCode -ne 0) { Write-Error "PM2 frontend start failed"; exit 1 }
  
       - name: Wait for Frontend Readiness
         if: ${{ steps.changes.outputs.frontend_changed == 'true' }}

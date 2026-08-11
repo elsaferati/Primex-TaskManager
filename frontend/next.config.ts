@@ -4,8 +4,10 @@ const deploymentId =
   process.env.NEXT_DEPLOYMENT_ID ||
   process.env.GITHUB_SHA ||
   process.env.APP_BUILD_SHA;
+const distDir = process.env.NEXT_DIST_DIR || ".next";
 
 const nextConfig: NextConfig = {
+  distDir,
   ...(deploymentId ? { deploymentId } : {}),
   typescript: {
     ignoreBuildErrors: true,
