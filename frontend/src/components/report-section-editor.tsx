@@ -371,7 +371,14 @@ function mergeContinuationTableRows(header: string[], rows: string[][]) {
   return merged
 }
 
-export function ReportSectionPreview({ body }: { body: string }) {
+export function ReportSectionPreview({
+  body,
+  filterCreatedWeek = false,
+}: {
+  body: string
+  filterCreatedWeek?: boolean
+}) {
+  const [createdWeekFilter, setCreatedWeekFilter] = React.useState<"all" | "this" | "last">("all")
   const lines = reportSectionEditorLines(body)
   const templates = tableGridTemplates(lines)
   const lineContexts = lines.reduce<{ contexts: Array<{ label: string; headers: string[] }>; label: string; headers: string[] }>(
@@ -529,6 +536,15 @@ export function ReportSectionPreview({ body }: { body: string }) {
 
   const renderDataTable = (rows: TablePreviewItem[], key: string) => {
     const headers = withoutStatusColumn(rows[0].headers, rows[0].cells).headers
+    const createdColumnIndex = headers.findIndex((header) => normalizeHeader(header) === "ADDED")
+    const canFilterCreatedWeek = filterCreatedWeek && createdColumnIndex >= 0
+    const dataRows = rows.filter((row) => !row.isHeader)
+    const visibleDataRows = !canFilterCreatedWeek || createdWeekFilter === "all"
+      ? dataRows
+      : dataRows.filter((row) => {
+          const value = row.cells[createdColumnIndex]?.trim().toUpperCase()
+          return createdWeekFilter === "this" ? value === "THIS W" : value === "LAST W"
+        })
     const hasWideColumn = headers.some((header) => {
       const name = normalizeHeader(header)
       return name === "TITLE" || name === "NOTE" || name === "PYETJA"
@@ -562,7 +578,23 @@ export function ReportSectionPreview({ body }: { body: string }) {
                             header === "NR" ? "w-8" : ""
                           } ${header === "WHO" || header === "DEP" ? "w-10" : ""}`}
                         >
-                          {trimTableCell(cell) || "-"}
+                          {header === "ADDED" && canFilterCreatedWeek ? (
+                            <label className="flex flex-col gap-1 text-left">
+                              <span>{trimTableCell(cell) || "-"}</span>
+                              <select
+                                aria-label="Filter by created week"
+                                value={createdWeekFilter}
+                                onChange={(event) => setCreatedWeekFilter(event.target.value as "all" | "this" | "last")}
+                                className="h-6 rounded border border-slate-300 bg-white px-1 text-[10px] font-medium text-slate-700"
+                              >
+                                <option value="all">All</option>
+                                <option value="this">This W</option>
+                                <option value="last">Last W</option>
+                              </select>
+                            </label>
+                          ) : (
+                            trimTableCell(cell) || "-"
+                          )}
                         </th>
                       )
                     })}
@@ -571,9 +603,7 @@ export function ReportSectionPreview({ body }: { body: string }) {
               })}
           </thead>
           <tbody>
-            {rows
-              .filter((row) => !row.isHeader)
-              .map((row) => {
+            {visibleDataRows.map((row) => {
                 const visible = withoutStatusColumn(row.headers, row.cells)
                 const tone = rowTone(row.label, row.cells, row.headers)
                 const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)

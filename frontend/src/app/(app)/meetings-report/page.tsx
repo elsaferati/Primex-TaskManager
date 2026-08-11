@@ -599,7 +599,13 @@ export default function MeetingsReportPage() {
                             onSave={applySectionEditor}
                           />
                         ) : (
-                          <ReportSectionPreview body={sectionPreviewText(section.body)} />
+                          <ReportSectionPreview
+                            body={sectionPreviewText(section.body)}
+                            filterCreatedWeek={
+                              canonicalMeetingsSectionTitle(section.title) ===
+                              "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?"
+                            }
+                          />
                         )}
                       </section>
                     </React.Fragment>

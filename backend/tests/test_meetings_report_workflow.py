@@ -499,6 +499,32 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertIn("GD task", task_rows[1])
         self.assertIn("PCM task", task_rows[2])
 
+    def test_task_tables_honor_weekly_planner_department_and_user_order(self) -> None:
+        def task(title: str, weekly_order: tuple) -> SimpleNamespace:
+            return SimpleNamespace(
+                id=uuid.uuid4(), title=title, status="TODO", assigned_to=None,
+                fast_task_order=None, is_deadline_important=False, due_date=None,
+                start_date=None, completed_at=None, created_at=None,
+                _weekly_planner_report_sort=weekly_order,
+            )
+
+        rows = _m3_status_table(
+            "TODO",
+            [
+                task("PCM task", (2, "pcm", 0, 0, "DM")),
+                task("DEV EF task", (0, "dev", 0, 2, "EF")),
+                task("GD task", (1, "gd", 0, 0, "DM")),
+                task("DEV AT task", (0, "dev", 0, 1, "AT")),
+            ],
+            {},
+        )
+        task_rows = [row for row in rows if "task" in row]
+
+        self.assertIn("DEV AT task", task_rows[0])
+        self.assertIn("DEV EF task", task_rows[1])
+        self.assertIn("GD task", task_rows[2])
+        self.assertIn("PCM task", task_rows[3])
+
     def test_new_tomorrow_table_marks_this_and_last_week_after_department(self) -> None:
         department_id = uuid.uuid4()
         this_week = SimpleNamespace(

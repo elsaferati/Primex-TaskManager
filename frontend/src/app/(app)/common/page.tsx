@@ -1390,6 +1390,15 @@ export default function CommonViewPage() {
     },
     []
   )
+  const getWeeklyPlannerPersonSortKey = React.useCallback(
+    (item: { person?: string; owner?: string; assignees?: string[]; userId?: string }) => {
+      const user = item.userId ? users.find((entry) => entry.id === item.userId) : undefined
+      const name = getFastTaskAssigneeKey(item as FastTaskEntry) || getPersonSortKey(item)
+      if (!user || user.weekly_planner_sort_order == null) return [1, 0, name] as const
+      return [0, user.weekly_planner_sort_order, name] as const
+    },
+    [getPersonSortKey, users]
+  )
   const compareTaskOrder = React.useCallback(
     (
       a: {
@@ -1431,9 +1440,11 @@ export default function CommonViewPage() {
         const nameCmp = metaA.name.localeCompare(metaB.name)
         if (nameCmp) return nameCmp
       }
-      const personA = getFastTaskAssigneeKey(a as FastTaskEntry) || getPersonSortKey(a)
-      const personB = getFastTaskAssigneeKey(b as FastTaskEntry) || getPersonSortKey(b)
-      if (personA !== personB) return personA.localeCompare(personB)
+      const personA = getWeeklyPlannerPersonSortKey(a)
+      const personB = getWeeklyPlannerPersonSortKey(b)
+      if (personA[0] !== personB[0]) return personA[0] - personB[0]
+      if (personA[1] !== personB[1]) return personA[1] - personB[1]
+      if (personA[2] !== personB[2]) return personA[2].localeCompare(personB[2])
       const slotRankA = oneHReportSlotRank(a.oneHReportSlot)
       const slotRankB = oneHReportSlotRank(b.oneHReportSlot)
       if (slotRankA !== slotRankB) return slotRankA - slotRankB
@@ -1451,7 +1462,7 @@ export default function CommonViewPage() {
       if (statusRankA !== statusRankB) return statusRankA - statusRankB
       return (a.title || "").localeCompare(b.title || "")
     },
-    [getDepartmentMeta, getPersonSortKey]
+    [getDepartmentMeta, getWeeklyPlannerPersonSortKey]
   )
   const sortTasksByOrder = React.useCallback(
     <T extends {
@@ -2388,6 +2399,7 @@ export default function CommonViewPage() {
           startDate: item.startDate || item.start_date || null,
           createdAt: item.createdAt || item.created_at || null,
           completedAt: item.completedAt || item.completed_at || null,
+          departmentId: item.departmentId || item.department_id || undefined,
           status,
           isDone: isCommonTaskDone(status, item.isDone),
         }

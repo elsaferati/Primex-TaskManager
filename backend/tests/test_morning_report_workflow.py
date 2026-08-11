@@ -14,6 +14,7 @@ from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.morning_report_draft import MorningReportDraft
 from app.models.task import Task
 from app.services import morning_report_scheduler
+from app.services.morning_report_scheduler import _due_m1_send_slot
 from app.services.after_break_report import _personal_section
 from app.services.meetings_report import PERSONAL_GA
 from app.services.morning_report import (
@@ -84,6 +85,17 @@ def make_draft() -> MorningReportDraft:
 
 
 class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    def test_m1_auto_delivery_uses_only_the_0700_and_0900_slots(self) -> None:
+        timezone = ZoneInfo("Europe/Tirane")
+        self.assertIsNone(_due_m1_send_slot(datetime(2026, 8, 5, 6, 59, tzinfo=timezone), set()))
+        self.assertEqual(_due_m1_send_slot(datetime(2026, 8, 5, 7, 0, tzinfo=timezone), set()), "07:00")
+        self.assertEqual(_due_m1_send_slot(datetime(2026, 8, 5, 9, 0, tzinfo=timezone), {"07:00"}), "09:00")
+        # Deploying after 09:00 must not backfill 07:00 and 09:00 as two rapid emails.
+        self.assertEqual(_due_m1_send_slot(datetime(2026, 8, 5, 9, 15, tzinfo=timezone), set()), "09:00")
+        self.assertIsNone(
+            _due_m1_send_slot(datetime(2026, 8, 5, 9, 15, tzinfo=timezone), {"07:00", "09:00"})
+        )
+
     def test_normalization_keeps_all_six_m1_questions_and_saved_edits(self) -> None:
         sections = normalize_morning_report_sections(
             [{"title": SECTION_TITLES[1], "body": "GA replied at 07:55"}]
@@ -179,6 +191,7 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         )
         empty_result = SimpleNamespace(
             scalars=lambda: SimpleNamespace(all=lambda: []),
+            all=lambda: [],
         )
         db = SimpleNamespace(execute=AsyncMock(return_value=empty_result))
 
@@ -257,14 +270,15 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             due_date=datetime(2026, 8, 5, 10, 0, tzinfo=ZoneInfo("Europe/Tirane")),
         )
 
-        lines = await _personal_section(
-            SimpleNamespace(),
-            [ka_task, ga_task],
-            {assignee_id: "Arta Test"},
-            {ka_task.id: {assignee_id}, ga_task.id: {assignee_id}},
-            date(2026, 8, 5),
-            title_pattern=PERSONAL_GA,
-        )
+        with patch("app.services.after_break_report._all_participant_user_ids", new=AsyncMock(return_value=set())):
+            lines = await _personal_section(
+                SimpleNamespace(),
+                [ka_task, ga_task],
+                {assignee_id: "Arta Test"},
+                {ka_task.id: {assignee_id}, ga_task.id: {assignee_id}},
+                date(2026, 8, 5),
+                title_pattern=PERSONAL_GA,
+            )
         body = "\n".join(lines)
 
         self.assertIn("DM/GA: BZ GA - P/P PARA PF", body)

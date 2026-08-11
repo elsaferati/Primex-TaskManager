@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.common_entry import CommonEntry
+from app.models.department import Department
 from app.models.enums import CommonCategory
 from app.models.meeting import Meeting
 from app.models.task import Task
@@ -25,6 +26,7 @@ from app.services.meetings_report import (
     TECHNICAL_TAG,
     _all_participant_user_ids,
     _assignee_names,
+    apply_weekly_planner_task_order,
     _bz_alignment_lines,
     _effective_task_assignee_ids,
     _initials,
@@ -36,6 +38,7 @@ from app.services.meetings_report import (
     _normalize_section,
     _strip_status_markers,
     _task_lines,
+    _task_metadata_by_title,
     _tomorrow_meeting_table,
     _tomorrow_task_table,
     send_section_report,
@@ -327,6 +330,10 @@ async def _day_context_section(
     ]
     bz_lines = list(dict.fromkeys(line for line in bz_lines if line and not line.startswith("(")))
     block_lines = list(dict.fromkeys(line for line in block_lines if line and not line.startswith("(")))
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
 
     lines = [
         "PV",
@@ -338,9 +345,21 @@ async def _day_context_section(
         "",
         *_tomorrow_meeting_table("TAKIMET INTERNE", _meeting_lines(internal_meetings)),
         "",
-        *_tomorrow_task_table("BZ ME GA", bz_lines, with_status=True),
+        *_tomorrow_task_table(
+            "BZ ME GA",
+            bz_lines,
+            with_status=True,
+            task_metadata=_task_metadata_by_title(today_tasks, department_codes),
+            include_am_pm_times=True,
+        ),
         "",
-        *_tomorrow_task_table("BLLOK", block_lines, with_status=True),
+        *_tomorrow_task_table(
+            "BLLOK",
+            block_lines,
+            with_status=True,
+            task_metadata=_task_metadata_by_title(blocked_tasks, department_codes),
+            include_am_pm_times=True,
+        ),
     ]
     count = len(leave_rows) + len(holiday_rows) + len(today_meetings) + len(bz_lines) + len(block_lines)
     return _normalize_section(lines), count
@@ -362,6 +381,7 @@ async def build_morning_report_sections(
     ).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
 
     entry_user_ids = {
         user_id
@@ -378,7 +398,16 @@ async def build_morning_report_sections(
         db, entries, names, tasks, assignee_ids_by_task, report_day
     )
     personal = await _personal_section(
-        db, tasks, names, assignee_ids_by_task, report_day, title_pattern=PERSONAL_GA
+        db,
+        tasks,
+        names,
+        assignee_ids_by_task,
+        report_day,
+        title_pattern=PERSONAL_GA,
+        department_codes={
+            department_id: code
+            for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+        },
     )
 
     attendance = _attendance_section(entries, names, report_day)

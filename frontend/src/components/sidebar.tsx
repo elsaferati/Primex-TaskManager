@@ -87,6 +87,11 @@ const primaryItems: NavItem[] = [
     label: "Next Week Plan",
     icon: CalendarClock,
   },
+  {
+    href: "/admin-tasks",
+    label: "Admin Tasks",
+    icon: ClipboardCheck,
+  },
 ]
 
 const navGroups: NavGroup[] = [
@@ -98,7 +103,6 @@ const navGroups: NavGroup[] = [
       { href: "/primeflow-classifications", label: "Classifications", icon: Layers },
       { href: "/primeflow-pyetje", label: "Questions", icon: ClipboardCheck },
       { href: "/waiting-confirmation-ga", label: "GA Awaiting Confirmation", icon: Clock3 },
-      { href: "/admin-tasks", label: "Admin Tasks", icon: ClipboardCheck },
       { href: "/system-tasks", label: "System Tasks", icon: Layers },
       { href: "/open-tasks", label: "Open Tasks", icon: ListTodo },
     ],

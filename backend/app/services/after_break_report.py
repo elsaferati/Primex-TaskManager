@@ -8,6 +8,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.enums import CommonApprovalStatus, GaNoteStatus, TaskStatus
+from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.question_library import QuestionCategory, QuestionDefinition, QuestionUserStatus
 from app.models.system_task_template import SystemTaskTemplate
@@ -19,12 +20,15 @@ from app.services.meetings_report import (
     TECHNICAL_TAG,
     _all_participant_user_ids,
     _assignee_names,
+    apply_weekly_planner_task_order,
     _clean_task_title as _display_title,
     _effective_task_assignee_ids,
     _initials,
     _is_open,
     _local_date,
     _local_time,
+    _m3_am_pm_label,
+    _m3_department_label,
     _normalize_section,
     _render_group_label_html,
     _render_section_block_html,
@@ -52,7 +56,7 @@ SECTION_TITLE_ALIASES = {
 }
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
-PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("TITLE", 56)]
+PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56)]
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
     ("IN PROGRESS", "IN_PROGRESS"),
@@ -357,6 +361,7 @@ async def _personal_section(
     assignee_ids_by_task: dict[Any, set[Any]],
     report_day: date,
     title_pattern: re.Pattern[str] = PERSONAL_GA,
+    department_codes: dict[Any, str] | None = None,
 ) -> list[str]:
     personal = [task for task in tasks if task.is_personal and _belongs_to_day(task, report_day)]
     all_participant_ids = await _all_participant_user_ids(db)
@@ -402,6 +407,8 @@ async def _personal_section(
                 _task_owners(
                     task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
                 ),
+                _m3_department_label(task, department_codes),
+                _m3_am_pm_label(task),
                 _title(task),
             ]
             for index, task in enumerate(ordered, start=1)
@@ -465,6 +472,11 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
 
     confirmation_ids = {
         task.confirmation_assignee_id for task in tasks
@@ -483,7 +495,9 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         "",
         *_format_confirmation_questions(await _load_1h_confirmation_questions(db)),
     ]
-    section_2 = await _personal_section(db, tasks, names, assignee_ids_by_task, report_day)
+    section_2 = await _personal_section(
+        db, tasks, names, assignee_ids_by_task, report_day, department_codes=department_codes
+    )
     section_3 = _ascii_table(
         "NOTES",
         [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME", 5)],
