@@ -235,9 +235,10 @@ class PrimeFlowReportTests(unittest.TestCase):
 
     def test_section_order_and_backfill_chain(self) -> None:
         body = build_report({"guardrails": {"truncated": {}}, "items": {}}, date(2026, 7, 28), "10:00")
-        headings = ["SLOTI 28.07.2026 10:00", "SLOTI 28.07.2026 11:00", "SLOTI 28.07.2026 16:00", "DETYRA PA SLOT", "DETYRAT E BLLOKUT", "P: PERSONALE", "R1 = 1H"]
+        headings = ["SLOTI 28.07.2026 10:00", "SLOTI 28.07.2026 11:00", "SLOTI 28.07.2026 16:00", "DETYRA PA SLOT", "P: PERSONALE", "R1 = 1H"]
         positions = [body.index(value) for value in headings]
         self.assertEqual(positions, sorted(positions))
+        self.assertNotIn("DETYRAT E BLLOKUT", body)
         self.assertNotIn("SLOTI 27.07.2026", body)
         self.assertEqual(predecessor(date(2026, 7, 28), "10:00"), (date(2026, 7, 27), "16:00"))
         self.assertEqual(predecessor(date(2026, 7, 28), "14:20"), (date(2026, 7, 28), "11:50"))
@@ -523,6 +524,73 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn(full_point, plain)
         self.assertIn(f"[[done]]{full_point}[[/done]]", marked)
         self.assertIn("• Still open", plain)
+    def test_duplicate_bullets_keep_individual_strike_identity(self) -> None:
+        class FakeSession:
+            def __init__(self):
+                self.rows = []
+
+            def add(self, row):
+                self.rows.append(row)
+
+        before = "EF: TEST TASK\n- Repeat\n- Repeat"
+        after = "EF: TEST TASK\n- [[done]]Repeat[[/done]]\n- Repeat"
+        session = FakeSession()
+        record_title_strike_events(
+            session,
+            task_id=uuid.uuid4(),
+            actor_user_id=uuid.uuid4(),
+            before_title=before,
+            after_title=after,
+        )
+        self.assertEqual(len(session.rows), 1)
+
+        event = session.rows[0]
+        event.id = "duplicate-strike"
+        event.occurred_at = datetime(2026, 8, 10, 15, 20, tzinfo=timezone.utc)
+        plain, marked = render_text_for_interval(
+            after,
+            [event],
+            interval_start=datetime(2026, 8, 10, 14, 20, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 16, 0, tzinfo=timezone.utc),
+            field_name="TITLE",
+        )
+        self.assertEqual(plain.count("- Repeat"), 2)
+        self.assertEqual(marked.count("[[done]]- Repeat[[/done]]"), 1)
+
+    def test_plain_multiline_title_strike_is_matched_line_by_line(self) -> None:
+        class FakeSession:
+            def __init__(self):
+                self.rows = []
+
+            def add(self, row):
+                self.rows.append(row)
+
+        before = "Task heading\nFirst plain line\nSecond plain line"
+        after = "Task heading\n[[done]]First plain line[[/done]]\nSecond plain line"
+        session = FakeSession()
+        record_title_strike_events(
+            session,
+            task_id=uuid.uuid4(),
+            actor_user_id=uuid.uuid4(),
+            before_title=before,
+            after_title=after,
+        )
+        self.assertEqual(len(session.rows), 1)
+
+        event = session.rows[0]
+        event.id = "plain-line-strike"
+        event.occurred_at = datetime(2026, 8, 10, 15, 20, tzinfo=timezone.utc)
+        plain, marked = render_text_for_interval(
+            after,
+            [event],
+            interval_start=datetime(2026, 8, 10, 14, 20, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 16, 0, tzinfo=timezone.utc),
+            field_name="TITLE",
+        )
+        self.assertIn("First plain line", plain)
+        self.assertIn("Second plain line", plain)
+        self.assertIn("[[done]]First plain line[[/done]]", marked)
+        self.assertNotIn("[[done]]Second plain line[[/done]]", marked)
 
 
 if __name__ == "__main__":

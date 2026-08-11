@@ -321,7 +321,6 @@ def build_report_document(
             ("DETYRA PA SLOT – E GJITHË DITA", [
                 task for task in filter_tasks(one_h, report_day, None) if _slot(task) is None
             ]),
-            ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
             ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
             ("R1 = 1H", filter_tasks(items.get("r1") or [], report_day)),
         ])
