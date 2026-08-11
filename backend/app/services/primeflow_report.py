@@ -51,6 +51,7 @@ class ReportTask(BaseModel):
     description: str
     marked_title: str = ""
     marked_description: str = ""
+    department: str = "-"
     status: str
     marker: str
 
@@ -236,6 +237,7 @@ def _document_section(
     tasks: list[dict[str, Any]],
     title_overrides: dict[str, tuple[str, str]] | None = None,
     description_overrides: dict[str, tuple[str, str]] | None = None,
+    department_codes: dict[str, str] | None = None,
 ) -> ReportSection:
     grouped: dict[str, list[dict[str, Any]]] = {}
     for task in tasks:
@@ -259,6 +261,13 @@ def _document_section(
             description_duplicates_title = bool(raw_description) and (
                 clean_description(raw_description) == clean_title(raw_title)
             )
+            department_id = str(task.get("department_id") or task.get("departmentId") or "")
+            department = (
+                task.get("department_code")
+                or task.get("departmentCode")
+                or (department_codes or {}).get(department_id)
+                or "-"
+            )
             report_tasks.append(ReportTask(
                 title=title_override[0] if title_override else clean_title(raw_title),
                 description="" if description_duplicates_title else (
@@ -268,6 +277,7 @@ def _document_section(
                 marked_description="" if description_duplicates_title else (
                     description_override[1] if description_override else preserve_done_marks(raw_description)
                 ),
+                department=str(department).strip() or "-",
                 status=str(task.get("status")).upper(),
                 marker=STATUS_MARKERS[str(task.get("status")).upper()],
             ))
@@ -292,6 +302,11 @@ def build_report_document(
     if truncated:
         raise ValueError("Common View contains truncated buckets")
     items = data.get("items") or {}
+    department_codes = {
+        str(department.get("id")): str(department.get("code") or "").strip()
+        for department in (data.get("departments") or [])
+        if isinstance(department, dict) and department.get("id")
+    }
     one_h = items.get("oneH") or data.get("tasks") or []
     definitions: list[tuple[str, list[dict[str, Any]]]] = []
     if slot == "10:00":
@@ -322,6 +337,13 @@ def build_report_document(
                 filter_tasks(one_h, report_day, previous_slot),
             ),
         ])
+        # The 14:20 report is delivered by the 14:10 schedule. Its final
+        # section keeps the day's BLL work visible with that 1H follow-up.
+        if slot == "14:20":
+            definitions.append((
+                f"BLL - DETYRAT E BLLOKUT {report_day:%d.%m.%Y}",
+                filter_tasks(items.get("blocked") or [], report_day),
+            ))
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
     source_generated = datetime.fromisoformat(str(generated_value).replace("Z", "+00:00"))
     return ReportDocument(
@@ -332,7 +354,13 @@ def build_report_document(
         source_generated_at=source_generated,
         recipients=recipients or {"to": [], "cc": [], "bcc": []},
         sections=[
-            _document_section(title, tasks, title_overrides, description_overrides)
+            _document_section(
+                title,
+                tasks,
+                title_overrides,
+                description_overrides,
+                department_codes,
+            )
             for title, tasks in definitions
         ],
         board_reminders=_board_reminder_questions(),
@@ -423,6 +451,57 @@ def render_html(document: ReportDocument) -> str:
             "</td></tr></table>"
         )
 
+    def section_separator() -> str:
+        """A reliable visual break between report slots in Gmail and Outlook."""
+        return (
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-report-section-separator="true" '
+            'style="width:100%;border-collapse:collapse;margin:30px 0 4px;">'
+            '<tr><td height="4" bgcolor="#334155" '
+            'style="height:4px;line-height:4px;font-size:0;background-color:#334155;">&nbsp;</td></tr>'
+            '</table>'
+        )
+
+    def bll_task_table(section: ReportSection) -> str:
+        """Compact BLL table used at the end of the 14:10 delivery."""
+        rows: list[str] = []
+        number = 0
+        for employee in section.employees:
+            for task in employee.tasks:
+                number += 1
+                background, _, accent = STATUS_COLORS[task.status]
+                heading, detail_lines = split_task_display(task.title)
+                details = "".join(
+                    detail_row(marked_html(item, task.marked_title)) for item in detail_lines
+                )
+                if task.description:
+                    details += detail_row(marked_html(task.description, task.marked_description))
+                rows.append(
+                    "<tr>"
+                    f'<td style="padding:9px;border:1px solid #cbd5e1;text-align:center;font-family:Arial,sans-serif;">{number}</td>'
+                    f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-weight:700;">{html.escape(employee.name)}</td>'
+                    f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;">{html.escape(task.department)}</td>'
+                    f'<td bgcolor="{background}" style="padding:9px;border:1px solid {accent};font-family:Arial,sans-serif;">'
+                    f'<div style="font-size:14px;font-weight:700;color:#050505;">{marked_html(heading or task.title, task.marked_title)}</div>{details}'
+                    "</td></tr>"
+                )
+        if not rows:
+            rows.append(
+                '<tr><td colspan="4" style="padding:10px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;color:#64748b;">(Asnjë detyrë)</td></tr>'
+            )
+        return (
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-bll-task-table="true" style="width:100%;border-collapse:collapse;margin:8px 0 4px;">'
+            '<tr bgcolor="#e2e8f0">'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:center;font-size:12px;">NR</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">KUSH</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">DEP</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">TITULLI</th>'
+            "</tr>"
+            f"{''.join(rows)}"
+            "</table>"
+        )
+
     body_chunks: list[str] = []
     for reminder_title, questions in (
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
@@ -445,8 +524,13 @@ def render_html(document: ReportDocument) -> str:
                 )
             )
 
-    for section in document.sections:
+    for section_index, section in enumerate(document.sections):
+        if section_index:
+            body_chunks.append(section_separator())
         body_chunks.append(section_title_block(section.title))
+        if section.title.startswith("BLL - DETYRAT E BLLOKUT"):
+            body_chunks.append(bll_task_table(section))
+            continue
         if not section.employees:
             body_chunks.append(
                 "<div style=\"font-family:Arial,sans-serif;color:#64748b;padding:8px 0;\">(Asnjë detyrë)</div>"

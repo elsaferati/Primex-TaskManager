@@ -247,13 +247,14 @@ class PrimeFlowReportTests(unittest.TestCase):
         data = {
             "generated_at": "2026-07-28T13:59:00+02:00",
             "guardrails": {"truncated": {}},
+            "departments": [{"id": "pcm", "code": "PCM"}],
             "items": {
                 "oneH": [
                     {**common, "id": "early", "slot": "11:50", "title": "Earlier"},
                     {**common, "id": "current", "slot": "14:20", "title": "Current"},
                     {**common, "id": "later", "slot": "16:00", "title": "Later"},
                 ],
-                "blocked": [{**common, "id": "blocked", "title": "Blocked"}],
+                "blocked": [{**common, "id": "blocked", "title": "Blocked", "department_id": "pcm"}],
                 "personal": [{**common, "id": "personal", "title": "Personal"}],
                 "r1": [{**common, "id": "r1", "title": "R1 task"}],
             },
@@ -261,12 +262,21 @@ class PrimeFlowReportTests(unittest.TestCase):
         document = build_report_document(data, date(2026, 7, 28), "14:20")
         self.assertEqual(
             [section.title for section in document.sections],
-            ["SLOTI 28.07.2026 14:20", "SLOTI PARAPRAK 28.07.2026 11:50"],
+            [
+                "SLOTI 28.07.2026 14:20",
+                "SLOTI PARAPRAK 28.07.2026 11:50",
+                "BLL - DETYRAT E BLLOKUT 28.07.2026",
+            ],
         )
-        self.assertEqual(document.task_count, 2)
+        self.assertEqual(document.task_count, 3)
         self.assertEqual(document.sections[0].employees[0].name, "AT")
         self.assertEqual(document.sections[0].employees[0].tasks[0].title, "Current")
         self.assertEqual(document.sections[1].employees[0].tasks[0].title, "Earlier")
+        self.assertEqual(document.sections[2].employees[0].tasks[0].title, "Blocked")
+        html = render_html(document)
+        self.assertIn('data-bll-task-table="true"', html)
+        self.assertIn(">DEP</th>", html)
+        self.assertIn(">PCM</td>", html)
         self.assertNotIn("Later", render_plain_text(document))
 
     def test_each_later_report_uses_the_immediately_previous_slot(self) -> None:
@@ -285,14 +295,27 @@ class PrimeFlowReportTests(unittest.TestCase):
         for current, previous in expected.items():
             with self.subTest(current=current):
                 document = build_report_document(data, date(2026, 7, 28), current)
-                self.assertEqual(
-                    [section.title for section in document.sections],
-                    [
-                        f"SLOTI 28.07.2026 {current}",
-                        f"SLOTI PARAPRAK 28.07.2026 {previous}",
-                    ],
-                )
+                expected_titles = [
+                    f"SLOTI 28.07.2026 {current}",
+                    f"SLOTI PARAPRAK 28.07.2026 {previous}",
+                ]
+                if current == "14:20":
+                    expected_titles.append("BLL - DETYRAT E BLLOKUT 28.07.2026")
+                self.assertEqual([section.title for section in document.sections], expected_titles)
                 self.assertEqual(document.task_count, 2)
+
+    def test_html_has_a_clear_separator_between_report_sections(self) -> None:
+        data = {
+            "generated_at": "2026-07-28T13:59:00+02:00",
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [
+                {"id": "current", "date": "2026-07-28", "slot": "14:20", "person": "Anisa", "status": "TODO", "title": "Current"},
+                {"id": "previous", "date": "2026-07-28", "slot": "11:50", "person": "Anisa", "status": "TODO", "title": "Previous"},
+            ]},
+        }
+        html = render_html(build_report_document(data, date(2026, 7, 28), "14:20"))
+        # Current slot, prior slot, and BLL need two unmistakable dividers.
+        self.assertEqual(html.count('data-report-section-separator="true"'), 2)
 
     def test_employee_names_are_uppercase_initials(self) -> None:
         self.assertEqual(employee_initials("Anisa Tërnava"), "AT")
