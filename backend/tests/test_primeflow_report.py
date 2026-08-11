@@ -216,7 +216,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         plain = render_plain_text(document)
         html = render_html(document)
         self.assertLess(plain.index(BOARD_REMINDER_SECTION_TITLE), plain.index(REMINDER_SECTION_TITLE))
-        self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("SLOTI 06.08.2026 11:00"))
+        self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("11:00 SLOTI 06.08.2026"))
         self.assertIn("1. Done?", plain)
         self.assertIn("2. Strike?", plain)
         self.assertIn("3. Notes te reja?", plain)
@@ -227,7 +227,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("1. A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?", html)
         self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", html)
         self.assertIn("color:#64748b", html)
-        self.assertLess(html.index(REMINDER_SECTION_TITLE), html.index("SLOTI 06.08.2026 11:00"))
+        self.assertLess(html.index(REMINDER_SECTION_TITLE), html.index("11:00 SLOTI 06.08.2026"))
 
     def test_truncation_blocks_report(self) -> None:
         with self.assertRaisesRegex(ValueError, "truncated"):
@@ -235,7 +235,7 @@ class PrimeFlowReportTests(unittest.TestCase):
 
     def test_section_order_and_backfill_chain(self) -> None:
         body = build_report({"guardrails": {"truncated": {}}, "items": {}}, date(2026, 7, 28), "10:00")
-        headings = ["SLOTI 28.07.2026 10:00", "SLOTI 28.07.2026 11:00", "SLOTI 28.07.2026 16:00", "DETYRA PA SLOT", "P: PERSONALE", "R1 = 1H"]
+        headings = ["10:00 SLOTI 28.07.2026", "11:00 SLOTI 28.07.2026", "16:00 SLOTI 28.07.2026", "DETYRA PA SLOT", "P: PERSONALE", "R1 = 1H"]
         positions = [body.index(value) for value in headings]
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn("DETYRAT E BLLOKUT", body)
@@ -264,9 +264,9 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(
             [section.title for section in document.sections],
             [
-                "SLOTI 28.07.2026 14:20",
+                "14:20 SLOTI 28.07.2026",
                 "11:50 SLOTI PARAPRAK 28.07.2026",
-                "BLL - DETYRAT E BLLOKUT 28.07.2026",
+                "BLLOK 14:30-15:30 28.07.2026",
             ],
         )
         self.assertEqual(document.task_count, 3)
@@ -297,11 +297,11 @@ class PrimeFlowReportTests(unittest.TestCase):
             with self.subTest(current=current):
                 document = build_report_document(data, date(2026, 7, 28), current)
                 expected_titles = [
-                    f"SLOTI 28.07.2026 {current}",
+                    f"{current} SLOTI 28.07.2026",
                     f"{previous} SLOTI PARAPRAK 28.07.2026",
                 ]
                 if current == "14:20":
-                    expected_titles.append("BLL - DETYRAT E BLLOKUT 28.07.2026")
+                    expected_titles.append("BLLOK 14:30-15:30 28.07.2026")
                 self.assertEqual([section.title for section in document.sections], expected_titles)
                 self.assertEqual(document.task_count, 2)
 
@@ -321,6 +321,93 @@ class PrimeFlowReportTests(unittest.TestCase):
     def test_employee_names_are_uppercase_initials(self) -> None:
         self.assertEqual(employee_initials("Anisa Tërnava"), "AT")
         self.assertEqual(employee_initials("elsa ferati ahmedi"), "EFA")
+
+    def test_1h_uses_common_view_user_order_in_every_output(self) -> None:
+        common = {"date": "2026-07-28", "slot": "10:00", "status": "TODO"}
+        data = {
+            "guardrails": {"truncated": {}},
+            "items": {"oneH": [
+                {
+                    **common,
+                    "id": "alphabetical-first", "person": "Adam Dev First", "title": "Adam task",
+                    "weekly_planner_sort": [0, "dev", 0, 2, "Adam Dev First"],
+                },
+                {
+                    **common,
+                    "id": "planner-first", "person": "Zoe Dev First", "title": "Zoe task",
+                    "weekly_planner_sort": [0, "dev", 0, 1, "Zoe Dev First"],
+                },
+                {
+                    **common,
+                    "id": "pcm", "person": "Ben Pcm", "title": "Ben task",
+                    "weekly_planner_sort": [2, "pcm", 0, 1, "Ben Pcm"],
+                },
+            ]},
+        }
+        document = build_report_document(data, date(2026, 7, 28), "10:00")
+        employee_names = [employee.name for employee in document.sections[0].employees]
+        self.assertEqual(employee_names, ["ZDF", "ADF", "BP"])
+
+        plain_text = render_plain_text(document)
+        html = render_html(document)
+        word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode("utf-8")
+        self.assertLess(plain_text.index("ZDF"), plain_text.index("ADF"))
+        self.assertLess(html.index(">ZDF</div>"), html.index(">ADF</div>"))
+        self.assertLess(word_xml.index("ZDF"), word_xml.index("ADF"))
+
+        from PIL import ImageDraw
+
+        original_draw = ImageDraw.Draw
+        drawn_text: list[str] = []
+
+        class RecordingDraw:
+            def __init__(self, image):
+                self._draw = original_draw(image)
+
+            def text(self, xy, text, *args, **kwargs):
+                drawn_text.append(str(text))
+                return self._draw.text(xy, text, *args, **kwargs)
+
+            def __getattr__(self, name):
+                return getattr(self._draw, name)
+
+        with patch("PIL.ImageDraw.Draw", RecordingDraw):
+            png = render_png(document)
+
+        self.assertTrue(png.startswith(b"\x89PNG"))
+        self.assertLess(drawn_text.index("ZDF"), drawn_text.index("ADF"))
+
+    def test_blocked_table_uses_the_common_view_user_order(self) -> None:
+        common = {"date": "2026-07-28", "status": "TODO"}
+        data = {
+            "guardrails": {"truncated": {}},
+            "items": {"blocked": [
+                {
+                    **common,
+                    "id": "adam", "person": "Adam Dev First", "title": "Adam blocked",
+                    "weekly_planner_sort": [0, "dev", 0, 2, "Adam Dev First"],
+                },
+                {
+                    **common,
+                    "id": "zoe", "person": "Zoe Dev First", "title": "Zoe blocked",
+                    "weekly_planner_sort": [0, "dev", 0, 1, "Zoe Dev First"],
+                },
+                {
+                    **common,
+                    "id": "ben", "person": "Ben Pcm", "title": "Ben blocked",
+                    "weekly_planner_sort": [2, "pcm", 0, 1, "Ben Pcm"],
+                },
+            ]},
+        }
+
+        document = build_report_document(data, date(2026, 7, 28), "14:20")
+        blocked_section = document.sections[-1]
+        self.assertEqual(blocked_section.title, "BLLOK 14:30-15:30 28.07.2026")
+        self.assertEqual([employee.name for employee in blocked_section.employees], ["ZDF", "ADF", "BP"])
+
+        html = render_html(document)
+        self.assertIn('data-bll-task-table="true"', html)
+        self.assertLess(html.index(">ZDF</td>"), html.index(">ADF</td>"))
 
     def test_all_formats_share_one_normalized_document(self) -> None:
         exact_title = "ÄNDERUNG pa përmbledhje"

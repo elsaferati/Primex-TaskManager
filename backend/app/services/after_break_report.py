@@ -57,6 +57,7 @@ SECTION_TITLE_ALIASES = {
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
 PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56)]
+SYSTEM_TASK_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56), ("DATA", 10)]
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
     ("IN PROGRESS", "IN_PROGRESS"),
@@ -140,7 +141,9 @@ def _belongs_to_day(task: Task, day: date) -> bool:
     return _task_covers_day(task, day)
 
 
-async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
+async def _new_system_task_rows(
+    db: AsyncSession, department_codes: dict[Any, str] | None = None
+) -> list[list[str]]:
     templates = (
         await db.execute(
             select(SystemTaskTemplate).where(SystemTaskTemplate.approval_status == CommonApprovalStatus.pending)
@@ -178,6 +181,8 @@ async def _new_system_task_rows(db: AsyncSession) -> list[list[str]]:
         rows.append([
             str(len(rows) + 1),
             owner_label,
+            _m3_department_label(template, department_codes),
+            _m3_am_pm_label(template),
             _display_title(template.title),
             created.strftime("%d.%m.%Y") if created else "-",
         ])
@@ -489,8 +494,8 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
     section_1 = [
         *_ascii_table(
             "NEW SYSTEM TASKS",
-            [("NR", 2), ("WHO", 20), ("TITLE", 56), ("DATA", 10)],
-            await _new_system_task_rows(db),
+            SYSTEM_TASK_COLUMNS,
+            await _new_system_task_rows(db, department_codes),
         ),
         "",
         *_format_confirmation_questions(await _load_1h_confirmation_questions(db)),

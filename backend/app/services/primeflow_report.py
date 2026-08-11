@@ -38,6 +38,7 @@ STATUS_COLORS = {
     "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
     "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
 }
+BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-15:30"
 
 
 class GmailVerificationError(RuntimeError):
@@ -190,6 +191,40 @@ def employee_initials(name: str) -> str:
     return "".join(part[0] for part in parts).upper()
 
 
+def _weekly_planner_user_sort_key(item: dict[str, Any]) -> tuple[int, str, int, int, str] | None:
+    """Read the user order supplied by the Common View payload.
+
+    Common View assigns this key to 1H rows using the same department and
+    Weekly Planner user order used by M1, M2, and M3.  Keep it as payload
+    metadata so the report can use one normalized order for every output.
+    """
+    raw = item.get("weekly_planner_sort") or item.get("weeklyPlannerSort")
+    if not isinstance(raw, (list, tuple)) or len(raw) < 5:
+        return None
+    try:
+        return (
+            int(raw[0]),
+            str(raw[1]).casefold(),
+            int(raw[2]),
+            int(raw[3]),
+            str(raw[4]).casefold(),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _employee_sort_key(employee: str, tasks: list[dict[str, Any]]) -> tuple[int, str, int, int, str]:
+    keys = [key for task in tasks if (key := _weekly_planner_user_sort_key(task)) is not None]
+    return min(keys) if keys else (10**6, "~", 1, 10**6, employee.casefold())
+
+
+def _group_tasks_by_employee(tasks: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        grouped.setdefault(_employee(task), []).append(task)
+    return sorted(grouped.items(), key=lambda group: _employee_sort_key(*group))
+
+
 def filter_tasks(
     items: list[dict[str, Any]], day: date, slot: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -216,18 +251,16 @@ def filter_tasks(
 
 def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
     lines = [title]
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for task in tasks:
-        grouped.setdefault(_employee(task), []).append(task)
-    for employee_index, employee in enumerate(sorted(grouped, key=str.casefold), 1):
+    employee_groups = _group_tasks_by_employee(tasks)
+    for employee_index, (employee, employee_tasks) in enumerate(employee_groups, 1):
         lines.append(f"{employee_index}. {employee}")
-        ordered = sorted(grouped[employee], key=lambda x: (STATUS_ORDER[str(x.get("status")).upper()], str(x.get("task_title") or x.get("title") or x.get("task"))))
+        ordered = sorted(employee_tasks, key=lambda x: (STATUS_ORDER[str(x.get("status")).upper()], str(x.get("task_title") or x.get("title") or x.get("task"))))
         for task_index, task in enumerate(ordered, 1):
             status = str(task.get("status")).upper()
             title_value = clean_title(str(task.get("task_title") or task.get("title") or task.get("task")))
             description = clean_description(task.get("description") if "description" in task else task.get("note"))
             lines.extend([f"{employee_index}.{task_index} {STATUS_MARKERS[status]} {title_value}", "Përshkrimi:", description])
-    if not grouped:
+    if not employee_groups:
         lines.append("(Asnjë detyrë)")
     return "\n".join(lines)
 
@@ -239,12 +272,9 @@ def _document_section(
     description_overrides: dict[str, tuple[str, str]] | None = None,
     department_codes: dict[str, str] | None = None,
 ) -> ReportSection:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for task in tasks:
-        grouped.setdefault(_employee(task), []).append(task)
     employees = []
-    for employee in sorted(grouped, key=str.casefold):
-        ordered = sorted(grouped[employee], key=lambda x: (
+    for employee, employee_tasks in _group_tasks_by_employee(tasks):
+        ordered = sorted(employee_tasks, key=lambda x: (
             STATUS_ORDER[str(x.get("status")).upper()],
             str(x.get("task_title") or x.get("title") or x.get("task")),
         ))
@@ -313,7 +343,7 @@ def build_report_document(
         for candidate in SLOTS:
             definitions.append(
                 (
-                    f"SLOTI {report_day:%d.%m.%Y} {candidate}",
+                    f"{candidate} SLOTI {report_day:%d.%m.%Y}",
                     filter_tasks(one_h, report_day, candidate),
                 )
             )
@@ -328,7 +358,7 @@ def build_report_document(
         previous_slot = SLOTS[SLOTS.index(slot) - 1]
         definitions.extend([
             (
-                f"SLOTI {report_day:%d.%m.%Y} {slot}",
+                f"{slot} SLOTI {report_day:%d.%m.%Y}",
                 filter_tasks(one_h, report_day, slot),
             ),
             (
@@ -340,7 +370,7 @@ def build_report_document(
         # section keeps the day's BLL work visible with that 1H follow-up.
         if slot == "14:20":
             definitions.append((
-                f"BLL - DETYRAT E BLLOKUT {report_day:%d.%m.%Y}",
+                f"{BLOCKED_SECTION_TITLE_PREFIX} {report_day:%d.%m.%Y}",
                 filter_tasks(items.get("blocked") or [], report_day),
             ))
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
@@ -527,7 +557,7 @@ def render_html(document: ReportDocument) -> str:
         if section_index:
             body_chunks.append(section_separator())
         body_chunks.append(section_title_block(section.title))
-        if section.title.startswith("BLL - DETYRAT E BLLOKUT"):
+        if section.title.startswith(BLOCKED_SECTION_TITLE_PREFIX):
             body_chunks.append(bll_task_table(section))
             continue
         if not section.employees:
