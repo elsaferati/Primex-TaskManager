@@ -1074,6 +1074,11 @@ async def _require_rlz_completion_comment(
     )
 
 
+def _requires_rlz_completion_comment(task: Task) -> bool:
+    """Note-task copies have their own status dialog, not an RLZ comment flow."""
+    return task.ga_note_origin_id is None and task.plan_note_origin_id is None
+
+
 def _validate_rlz_completion_comment(
     *,
     user_role: UserRole,
@@ -2775,6 +2780,7 @@ async def update_task(
     if (
         payload.status == TaskStatus.DONE
         and current_status_raw != TaskStatus.DONE.value
+        and _requires_rlz_completion_comment(task)
     ):
         completion_override_used = await _require_rlz_completion_comment(
             db,

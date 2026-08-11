@@ -286,7 +286,9 @@ async def _day_context_section(
         if entry.category == CommonCategory.annual_leave:
             start, end, full_day, start_time, end_time, note, is_all_users = parse_common_view_annual_leave(entry)
             if start <= report_day <= end:
-                leave_rows.append((entry, full_day, start_time, end_time, note, is_all_users))
+                # _leave_lines is shared with M3 and expects the complete
+                # annual-leave tuple, including the start and end dates.
+                leave_rows.append((entry, start, end, full_day, start_time, end_time, note, is_all_users))
         elif entry.category == CommonCategory.external_holiday and _entry_day(entry) == report_day:
             holiday_rows.append(
                 [str(len(holiday_rows) + 1), _display_title(entry.title), _clean_entry_note(entry.description)]

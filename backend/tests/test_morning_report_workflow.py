@@ -19,6 +19,7 @@ from app.services.meetings_report import PERSONAL_GA
 from app.services.morning_report import (
     SECTION_TITLES,
     _attendance_section,
+    _day_context_section,
     normalize_morning_report_sections,
     render_html,
     subject_for,
@@ -163,6 +164,34 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("08:00-08:25", body)
         self.assertIn("08:00-12:00", body)
         self.assertIn("NDRYSHON PLANI: (Ploteso manualisht)", body)
+
+    async def test_day_context_renders_annual_leave_without_tuple_unpack_error(self) -> None:
+        user_id = uuid.uuid4()
+        leave = CommonEntry(
+            id=uuid.uuid4(),
+            category=CommonCategory.annual_leave,
+            title="Annual leave",
+            description="Date: 2026-08-05 (Full day)",
+            entry_date=date(2026, 8, 5),
+            created_by_user_id=user_id,
+            assigned_to_user_id=user_id,
+            approval_status=CommonApprovalStatus.approved,
+        )
+        empty_result = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: []),
+        )
+        db = SimpleNamespace(execute=AsyncMock(return_value=empty_result))
+
+        with (
+            patch("app.services.morning_report._all_participant_user_ids", new=AsyncMock(return_value=set())),
+            patch("app.services.morning_report._bz_alignment_lines", new=AsyncMock(return_value=[])),
+        ):
+            body, count = await _day_context_section(
+                db, [leave], {user_id: "Drita Vela"}, [], {}, date(2026, 8, 5)
+            )
+
+        self.assertEqual(count, 1)
+        self.assertIn("05.08.2026", body)
 
     def test_email_html_is_mobile_safe_and_contains_m1_heading(self) -> None:
         subject = subject_for(date(2026, 8, 5))
