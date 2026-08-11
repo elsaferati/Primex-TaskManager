@@ -144,6 +144,7 @@ def _draft(row: MorningReportDraft) -> dict:
             if str(section.get("title") or "").strip()
         ],
         "generated_snapshot": row.generated_snapshot,
+        "auto_sent_slots": list(row.auto_sent_slots or []),
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
         "gmail_message_id": row.gmail_message_id,
@@ -296,7 +297,8 @@ async def generate_draft(
             row.recipients = normalize_recipients(recipients)
         row.sections = sections
         row.generated_snapshot = snapshot
-        row.status = "DRAFT"
+        # Generating a report is draft-only. Keep SENT so the scheduler cannot
+        # mistake this refresh for an unsent automatic delivery.
         row.last_error = None
         row.updated_by_user_id = user.id
     await db.commit()

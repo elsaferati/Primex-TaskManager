@@ -22,6 +22,7 @@ class MorningReportDraft(Base):
     recipients: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
     sections: Mapped[list] = mapped_column(JSONB, nullable=False, default=list)
     generated_snapshot: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    auto_sent_slots: Mapped[list[str]] = mapped_column(JSONB, nullable=False, default=list)
     status: Mapped[str] = mapped_column(String(30), nullable=False, default="DRAFT", index=True)
     sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     gmail_message_id: Mapped[str | None] = mapped_column(String(255))

@@ -86,6 +86,7 @@ TASK_LINE_STATUS = re.compile(r"^\[([A-Z_]+)\]\s*")
 MEETING_HIGHLIGHT_MARKER = "[[mt:non_daily_weekly]]"
 MEETING_HIGHLIGHT_PATTERN = re.compile(r"\s*\[\[\s*mt\s*:\s*non_daily_weekly\s*\]\]", re.I)
 ALL_ASSIGNEES_DISPLAY_THRESHOLD = 10
+WEEKLY_PLANNER_DEPARTMENT_ORDER = {"DEV": 0, "GD": 1, "PCM": 2}
 
 
 def _compact_section_title(value: str | None) -> str:
@@ -278,6 +279,78 @@ async def _effective_task_assignee_ids(db: AsyncSession, tasks: list[Task]) -> d
     return result
 
 
+def _weekly_planner_department_code(department_id: Any, department_codes: dict[Any, str]) -> str:
+    code = str(department_codes.get(department_id) or "").strip().upper()
+    aliases = {
+        "DEVELOPMENT": "DEV",
+        "GRAPHIC DESIGN": "GD",
+        "GDS": "GD",
+        "PRODUCT CONTENT": "PCM",
+        "PROJECT CONTENT MANAGER": "PCM",
+    }
+    return aliases.get(code, code or "-")
+
+
+async def apply_weekly_planner_task_order(
+    db: AsyncSession,
+    tasks: list[Task],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    department_codes: dict[Any, str] | None = None,
+) -> None:
+    """Attach the Weekly Planner department/person order to report task rows.
+
+    The Weekly Planner is the source of truth: department order is DEV, GD,
+    PCM, and users use their saved ``weekly_planner_sort_order`` within each
+    department.  The attribute is request-local on the loaded ORM objects and
+    is consumed by the existing task table renderers.
+    """
+    if not tasks:
+        return
+    codes = department_codes or {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
+    user_ids = {
+        user_id
+        for task in tasks
+        for user_id in ({task.assigned_to} if task.assigned_to else set()) | assignee_ids_by_task.get(task.id, set())
+    }
+    users = (
+        await db.execute(select(User).where(User.id.in_(user_ids)))
+    ).scalars().all() if user_ids else []
+    users_by_id = {user.id: user for user in users}
+
+    def user_key(user_id: Any) -> tuple[int, int, str]:
+        user = users_by_id.get(user_id)
+        if user is None:
+            return (1, 0, "~")
+        return (
+            1 if user.weekly_planner_sort_order is None else 0,
+            user.weekly_planner_sort_order or 0,
+            (user.full_name or user.username or user.email or "").casefold(),
+        )
+
+    for task in tasks:
+        assignee_ids = set(assignee_ids_by_task.get(task.id, set()))
+        if task.assigned_to:
+            assignee_ids.add(task.assigned_to)
+        primary_user_id = task.assigned_to if task.assigned_to in users_by_id else None
+        if primary_user_id is None and assignee_ids:
+            primary_user_id = min(assignee_ids, key=user_key)
+        primary_user = users_by_id.get(primary_user_id)
+        department_id = primary_user.department_id if primary_user and primary_user.department_id else task.department_id
+        department_code = _weekly_planner_department_code(department_id, codes)
+        setattr(
+            task,
+            "_weekly_planner_report_sort",
+            (
+                WEEKLY_PLANNER_DEPARTMENT_ORDER.get(department_code, len(WEEKLY_PLANNER_DEPARTMENT_ORDER)),
+                department_code.casefold(),
+                *user_key(primary_user_id),
+            ),
+        )
+
+
 async def _users_by_initials(db: AsyncSession, initials: str) -> list[User]:
     users = (await db.execute(select(User).where(User.is_active.is_(True)))).scalars().all()
     target = initials.upper()
@@ -317,7 +390,7 @@ def common_view_task_sort_key(
 ) -> tuple:
     """Mirror Common View compareTaskOrder for report task tables (M1/M2/M3)."""
     owner = _task_owners(task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids)
-    return (
+    existing_order = (
         0 if bool(task.is_deadline_important) else 1,
         0 if re.search(r"\b0?8:00\b", task.title or "") else 1,
         owner.casefold(),
@@ -325,6 +398,8 @@ def common_view_task_sort_key(
         _clean_task_title(task.title).casefold(),
         str(task.created_at or ""),
     )
+    weekly_planner_order = getattr(task, "_weekly_planner_report_sort", None)
+    return (*weekly_planner_order, *existing_order) if weekly_planner_order else existing_order
 
 
 # Backwards-compatible alias used by older call sites / tests.
@@ -342,7 +417,7 @@ def common_view_item_sort_key(item: dict[str, Any]) -> tuple:
         order = item.get("fastTaskOrder")
     if not isinstance(order, int):
         order = 10**9
-    return (
+    existing_order = (
         0 if important else 1,
         0 if eight_am else 1,
         owner.casefold(),
@@ -350,6 +425,8 @@ def common_view_item_sort_key(item: dict[str, Any]) -> tuple:
         title.casefold(),
         str(item.get("created_at") or item.get("createdAt") or ""),
     )
+    weekly_planner_order = item.get("weekly_planner_sort") or item.get("weeklyPlannerSort")
+    return (*tuple(weekly_planner_order), *existing_order) if weekly_planner_order else existing_order
 
 
 def _task_line(
@@ -438,7 +515,7 @@ def _m3_added_week_label(task: Task, week_start: date | None) -> str:
     return "Last W"
 
 
-M3_DEPARTMENT_ORDER = {"DEV": 0, "GD": 1, "PCM": 2}
+M3_DEPARTMENT_ORDER = WEEKLY_PLANNER_DEPARTMENT_ORDER
 
 
 def _m3_department_sort_key(task: Task, department_codes: dict[Any, str] | None) -> int:
@@ -505,17 +582,21 @@ def _m3_status_table(
         rows.append(table_row(values))
         rows.append(border)
         return rows
-    ordered = sorted(
-        tasks,
-        key=lambda item: (
-            # In the GA/HV closing tables, system tasks must precede fast tasks.
+    def sort_key(item: Task) -> tuple:
+        ordered_key = common_view_task_sort_key(
+            item, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+        )
+        if getattr(item, "_weekly_planner_report_sort", None):
+            return ordered_key
+        # Preserve the legacy order for direct callers that do not have the
+        # Weekly Planner metadata available.
+        return (
             0 if include_type and getattr(item, "system_template_origin_id", None) is not None else 1,
             _m3_department_sort_key(item, department_codes) if include_department else 0,
-            *common_view_task_sort_key(
-                item, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
-            ),
-        ),
-    )
+            *ordered_key,
+        )
+
+    ordered = sorted(tasks, key=sort_key)
     for index, task in enumerate(ordered, start=1):
         owner = _task_owners(
             task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
@@ -625,6 +706,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         user_id: _m3_department_code_label(department_id, department_codes)
         for user_id, department_id in (await db.execute(select(User.id, User.department_id))).all()
     }
+    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task, department_codes)
 
     today_todo = [
         task for task in tasks

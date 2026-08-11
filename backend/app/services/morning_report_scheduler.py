@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, time
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -23,6 +23,18 @@ from app.services.report_section_merge import preserve_keyed_line, preserve_manu
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 
 logger = logging.getLogger(__name__)
+M1_AUTO_SEND_TIMES = (time(7, 0), time(9, 0))
+
+
+def _due_m1_send_slot(now: datetime, sent_slots: set[str]) -> str | None:
+    """Return the latest due M1 slot that has not already been delivered."""
+    current_time = now.time().replace(second=0, microsecond=0)
+    due_slots = [
+        send_time.strftime("%H:%M")
+        for send_time in M1_AUTO_SEND_TIMES
+        if current_time >= send_time and send_time.strftime("%H:%M") not in sent_slots
+    ]
+    return due_slots[-1] if due_slots else None
 
 
 async def get_or_create_morning_report_settings() -> MorningReportSettings:
@@ -51,22 +63,13 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
         report_day = local_now.date()
         if local_now.weekday() not in (settings.weekdays or []):
             return False
-        if local_now.time().replace(second=0, microsecond=0) < settings.send_time:
-            return False
-
         row = (
             await db.execute(select(MorningReportDraft).where(MorningReportDraft.report_date == report_day))
         ).scalar_one_or_none()
-        if row and row.status == "SENT":
-            sent_at = row.sent_at
-            settings_updated_at = settings.updated_at
-            if sent_at and settings_updated_at and settings_updated_at > sent_at:
-                logger.info(
-                    "morning_report_scheduler_resend_allowed reason=settings_changed report_date=%s",
-                    report_day,
-                )
-            else:
-                return False
+        sent_slots = {str(slot) for slot in (getattr(row, "auto_sent_slots", None) or [])}
+        delivery_slot = _due_m1_send_slot(local_now, sent_slots)
+        if delivery_slot is None:
+            return False
 
         recipients = normalize_recipients(settings.recipients)
         if not recipients["to"]:
@@ -134,10 +137,11 @@ async def run_morning_report_scheduler_once(now: datetime | None = None) -> bool
         row.sent_at = datetime.now(timezone)
         row.gmail_message_id = message.get("id")
         row.gmail_thread_id = message.get("threadId")
+        row.auto_sent_slots = [*sorted(sent_slots), delivery_slot]
         row.last_error = None
         settings.last_run_date = datetime.now(timezone)
         await db.commit()
-        logger.info("morning_report_scheduler_sent report_date=%s", report_day)
+        logger.info("morning_report_scheduler_sent report_date=%s slot=%s", report_day, delivery_slot)
         return True
 
 

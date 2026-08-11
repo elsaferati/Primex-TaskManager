@@ -14,11 +14,13 @@ from app.models.enums import CommonApprovalStatus, CommonCategory, UserRole
 from app.models.morning_report_draft import MorningReportDraft
 from app.models.task import Task
 from app.services import morning_report_scheduler
+from app.services.morning_report_scheduler import _due_m1_send_slot
 from app.services.after_break_report import _personal_section
 from app.services.meetings_report import PERSONAL_GA
 from app.services.morning_report import (
     SECTION_TITLES,
     _attendance_section,
+    _day_context_section,
     normalize_morning_report_sections,
     render_html,
     subject_for,
@@ -83,6 +85,17 @@ def make_draft() -> MorningReportDraft:
 
 
 class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    def test_m1_auto_delivery_uses_only_the_0700_and_0900_slots(self) -> None:
+        timezone = ZoneInfo("Europe/Tirane")
+        self.assertIsNone(_due_m1_send_slot(datetime(2026, 8, 5, 6, 59, tzinfo=timezone), set()))
+        self.assertEqual(_due_m1_send_slot(datetime(2026, 8, 5, 7, 0, tzinfo=timezone), set()), "07:00")
+        self.assertEqual(_due_m1_send_slot(datetime(2026, 8, 5, 9, 0, tzinfo=timezone), {"07:00"}), "09:00")
+        # Deploying after 09:00 must not backfill 07:00 and 09:00 as two rapid emails.
+        self.assertEqual(_due_m1_send_slot(datetime(2026, 8, 5, 9, 15, tzinfo=timezone), set()), "09:00")
+        self.assertIsNone(
+            _due_m1_send_slot(datetime(2026, 8, 5, 9, 15, tzinfo=timezone), {"07:00", "09:00"})
+        )
+
     def test_normalization_keeps_all_six_m1_questions_and_saved_edits(self) -> None:
         sections = normalize_morning_report_sections(
             [{"title": SECTION_TITLES[1], "body": "GA replied at 07:55"}]
@@ -164,6 +177,35 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn("08:00-12:00", body)
         self.assertIn("NDRYSHON PLANI: (Ploteso manualisht)", body)
 
+    async def test_day_context_renders_annual_leave_without_tuple_unpack_error(self) -> None:
+        user_id = uuid.uuid4()
+        leave = CommonEntry(
+            id=uuid.uuid4(),
+            category=CommonCategory.annual_leave,
+            title="Annual leave",
+            description="Date: 2026-08-05 (Full day)",
+            entry_date=date(2026, 8, 5),
+            created_by_user_id=user_id,
+            assigned_to_user_id=user_id,
+            approval_status=CommonApprovalStatus.approved,
+        )
+        empty_result = SimpleNamespace(
+            scalars=lambda: SimpleNamespace(all=lambda: []),
+            all=lambda: [],
+        )
+        db = SimpleNamespace(execute=AsyncMock(return_value=empty_result))
+
+        with (
+            patch("app.services.morning_report._all_participant_user_ids", new=AsyncMock(return_value=set())),
+            patch("app.services.morning_report._bz_alignment_lines", new=AsyncMock(return_value=[])),
+        ):
+            body, count = await _day_context_section(
+                db, [leave], {user_id: "Drita Vela"}, [], {}, date(2026, 8, 5)
+            )
+
+        self.assertEqual(count, 1)
+        self.assertIn("05.08.2026", body)
+
     def test_email_html_is_mobile_safe_and_contains_m1_heading(self) -> None:
         subject = subject_for(date(2026, 8, 5))
         html = render_html(
@@ -228,14 +270,15 @@ class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
             due_date=datetime(2026, 8, 5, 10, 0, tzinfo=ZoneInfo("Europe/Tirane")),
         )
 
-        lines = await _personal_section(
-            SimpleNamespace(),
-            [ka_task, ga_task],
-            {assignee_id: "Arta Test"},
-            {ka_task.id: {assignee_id}, ga_task.id: {assignee_id}},
-            date(2026, 8, 5),
-            title_pattern=PERSONAL_GA,
-        )
+        with patch("app.services.after_break_report._all_participant_user_ids", new=AsyncMock(return_value=set())):
+            lines = await _personal_section(
+                SimpleNamespace(),
+                [ka_task, ga_task],
+                {assignee_id: "Arta Test"},
+                {ka_task.id: {assignee_id}, ga_task.id: {assignee_id}},
+                date(2026, 8, 5),
+                title_pattern=PERSONAL_GA,
+            )
         body = "\n".join(lines)
 
         self.assertIn("DM/GA: BZ GA - P/P PARA PF", body)

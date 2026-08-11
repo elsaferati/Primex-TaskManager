@@ -481,7 +481,7 @@ export default function MorningReportPage() {
               <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic Send</div>
               <div className="text-sm text-muted-foreground">
                 {settings.is_active
-                  ? "Automatic sending is ON. This report will send on the selected days and time."
+                  ? "Automatic sending is ON. This report regenerates and sends at 07:00 and 09:00 on the selected days."
                   : "Automatic sending is OFF. This report will not send by itself."}
               </div>
             </div>
@@ -507,8 +507,10 @@ export default function MorningReportPage() {
           </div>
           <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
             <div>
-              <Label>Send time</Label>
-              <Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} />
+              <Label>Automatic times</Label>
+              <div className="mt-1 flex h-9 items-center rounded-md border bg-slate-50 px-3 text-sm font-medium">
+                07:00 and 09:00
+              </div>
             </div>
             <div>
               <Label>Timezone</Label>

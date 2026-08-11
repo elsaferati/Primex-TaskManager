@@ -22,6 +22,7 @@ CHECKLIST_ITEM = re.compile(r"(?m)^\s*(?:\d+\.\s+|[•*-]\s+)")
 class StrikePoint:
     key: str
     text: str
+    legacy_key: str = ""
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,13 @@ def point_key(value: str, *, field_name: str = "DESCRIPTION") -> str:
     source = _normalise(value).casefold()
     if field_name != "DESCRIPTION":
         source = f"{field_name}|{source}"
+    return hashlib.sha256(source.encode("utf-8")).hexdigest()
+
+
+def _point_identity_key(value: str, occurrence: int, *, field_name: str) -> str:
+    """Key a point by its content and duplicate occurrence, so bullets differ."""
+
+    source = f"{field_name}|{occurrence}|{_normalise(value).casefold()}"
     return hashlib.sha256(source.encode("utf-8")).hexdigest()
 
 
@@ -69,6 +77,56 @@ def _numbered_point_spans(value: str) -> list[tuple[int, int]]:
         (match.start(), matches[index + 1].start() if index + 1 < len(matches) else len(raw))
         for index, match in enumerate(matches)
     ]
+
+
+def _point_entries(value: str | None, *, field_name: str) -> list[tuple[StrikePoint, int, int]]:
+    """Return point text with offsets so selected lines can be identified."""
+
+    raw = value or ""
+    masked = TECHNICAL_TAGS.sub(lambda match: " " * len(match.group(0)), raw)
+    checklist_matches = list(CHECKLIST_ITEM.finditer(masked))
+    if checklist_matches:
+        spans = [
+            (match.start(), checklist_matches[index + 1].start() if index + 1 < len(checklist_matches) else len(raw))
+            for index, match in enumerate(checklist_matches)
+        ]
+    else:
+        # Plain multiline text has one independently strikable point per line.
+        spans = [(match.start(), match.end()) for match in re.finditer(r"(?m)^.*\S.*$", masked)]
+
+    entries: list[tuple[StrikePoint, int, int]] = []
+    occurrences: dict[str, int] = {}
+    for start, end in spans:
+        text = TECHNICAL_TAGS.sub("", raw[start:end]).strip()
+        if not text:
+            continue
+        normalized = _normalise(text).casefold()
+        occurrence = occurrences.get(normalized, 0)
+        occurrences[normalized] = occurrence + 1
+        entries.append((
+            StrikePoint(
+                _point_identity_key(text, occurrence, field_name=field_name),
+                text,
+                point_key(text, field_name=field_name),
+            ),
+            start,
+            end,
+        ))
+    return entries
+
+
+def _struck_points_by_identity(value: str | None, *, field_name: str) -> dict[str, StrikePoint]:
+    """Return currently struck points using the position-aware key."""
+
+    raw = value or ""
+    entries = _point_entries(raw, field_name=field_name)
+    result: dict[str, StrikePoint] = {}
+    for match in DONE_BLOCK.finditer(raw):
+        done_start, done_end = match.span()
+        for point, start, end in entries:
+            if start < done_end and done_start < end:
+                result[point.key] = point
+    return result
 
 
 def struck_points(value: str | None, *, field_name: str = "DESCRIPTION") -> dict[str, StrikePoint]:
@@ -109,8 +167,8 @@ def record_text_strike_events(
 ) -> None:
     """Queue events only for actual done/un-done transitions in task points."""
 
-    before = struck_points(before_text, field_name=field_name)
-    after = struck_points(after_text, field_name=field_name)
+    before = _struck_points_by_identity(before_text, field_name=field_name)
+    after = _struck_points_by_identity(after_text, field_name=field_name)
     for key in after.keys() - before.keys():
         point = after[key]
         db.add(TaskStrikeEvent(
@@ -170,24 +228,15 @@ def record_title_strike_events(
 
 
 def _text_points(value: str | None, *, field_name: str) -> tuple[str, list[StrikePoint], set[str]]:
-    """Split title/description text into points while retaining legacy marks."""
+    """Split text into report points, keeping numbered headings out of the list."""
 
     raw = value or ""
     cleaned = TECHNICAL_TAGS.sub("", raw).strip()
     matches = list(CHECKLIST_ITEM.finditer(cleaned))
-    if not matches:
-        points = [cleaned] if cleaned else []
-        heading = ""
-    else:
-        heading = cleaned[:matches[0].start()].strip()
-        points = [
-            cleaned[match.start():matches[index + 1].start() if index + 1 < len(matches) else len(cleaned)].strip()
-            for index, match in enumerate(matches)
-        ]
-    legacy_done = set(struck_points(raw, field_name=field_name))
-    return heading, [
-        StrikePoint(point_key(text, field_name=field_name), text) for text in points if text
-    ], legacy_done
+    heading = cleaned[:matches[0].start()].strip() if matches else ""
+    points = [point for point, _start, _end in _point_entries(raw, field_name=field_name)]
+    current_done = set(_struck_points_by_identity(raw, field_name=field_name))
+    return heading, points, current_done
 
 
 def render_text_for_interval(
@@ -219,6 +268,13 @@ def render_text_for_interval(
         exact = latest.get(point.key)
         if exact is not None:
             return exact
+        # Old events only have a text-based key. One such event cannot identify
+        # which of several identical bullets was actually struck.
+        if sum(candidate.legacy_key == point.legacy_key for candidate in points) != 1:
+            return None
+        legacy = latest.get(point.legacy_key)
+        if legacy is not None:
+            return legacy
         full = _normalise(point.text).casefold()
         without_marker = re.sub(r"^(?:\d+\.|[•*-])\s*", "", full)
         compatible = []
@@ -230,7 +286,7 @@ def render_text_for_interval(
                 compatible.append(event)
         return compatible[-1] if compatible else None
 
-    heading, points, legacy_done = _text_points(text, field_name=field_name)
+    heading, points, current_done = _text_points(text, field_name=field_name)
     plain_parts = [heading] if heading else []
     marked_parts = [heading] if heading else []
     for point in points:
@@ -239,7 +295,7 @@ def render_text_for_interval(
             # A mark without a timestamp cannot be claimed as work from this
             # interval. Treat it as historical and omit it, rather than showing
             # a misleading new strike in every following 1H report.
-            if point.key in legacy_done:
+            if point.key in current_done:
                 continue
             else:
                 plain_parts.append(point.text)

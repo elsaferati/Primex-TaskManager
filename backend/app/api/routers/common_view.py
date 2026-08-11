@@ -65,7 +65,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "8"
+COMMON_VIEW_CACHE_VERSION = "10"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -855,6 +855,7 @@ async def get_common_view(
                             "person": owner_label,
                             "assignees": assignee_names or None,
                             "user_id": str(assignee_id) if assignee_id else None,
+                            "department_id": str(dept_id) if dept_id else None,
                             "date": task_date.isoformat(),
                             "note": t.description or None,
                             "description": t.description,
@@ -1028,6 +1029,44 @@ async def get_common_view(
                 )
 
         items["priority"] = expanded_priority
+
+        # Keep Common View task buckets in the same department/person sequence
+        # used by the Weekly Planner. M3 consumes these rows as a fallback, so
+        # the ordering metadata travels with the task instead of being inferred
+        # again from display initials.
+        department_by_id = {str(department.id): department for department in departments_map.values()}
+        users_by_id = {str(user.id): user for user in users_map.values()}
+        department_rank_by_code = {"DEV": 0, "GD": 1, "PCM": 2}
+
+        def weekly_planner_sort(item: dict[str, Any]) -> tuple[int, str, int, int, str]:
+            user = users_by_id.get(str(item.get("user_id") or item.get("userId") or ""))
+            department_id = (
+                str(user.department_id) if user and user.department_id else str(item.get("department_id") or item.get("departmentId") or "")
+            )
+            department = department_by_id.get(department_id)
+            code = ((department.code or "") if department else "").strip().upper()
+            aliases = {
+                "DEVELOPMENT": "DEV",
+                "GRAPHIC DESIGN": "GD",
+                "GDS": "GD",
+                "PRODUCT CONTENT": "PCM",
+                "PROJECT CONTENT MANAGER": "PCM",
+            }
+            code = aliases.get(code, code or "-")
+            order = user.weekly_planner_sort_order if user else None
+            name = (user.full_name or user.username or user.email) if user else (item.get("person") or item.get("owner") or "")
+            return (
+                department_rank_by_code.get(code, len(department_rank_by_code)),
+                code.casefold(),
+                1 if order is None else 0,
+                order or 0,
+                str(name).casefold(),
+            )
+
+        for bucket in ("blocked", "oneH", "personal", "r1"):
+            for item in items[bucket]:
+                item["weekly_planner_sort"] = weekly_planner_sort(item)
+
         included.append("tasks")
         _time_end("tasks", ts)
 
@@ -1183,6 +1222,7 @@ async def get_common_view(
             "role": u.role,
             "department_id": str(u.department_id) if u.department_id else None,
             "is_active": u.is_active,
+            "weekly_planner_sort_order": u.weekly_planner_sort_order,
         } for u in users_map.values()] if "users" in requested else None,
         departments=[{"id": str(d.id), "code": d.code, "name": d.name} for d in departments_map.values()] if "departments" in requested else None,
         meetings=None,

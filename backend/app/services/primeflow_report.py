@@ -38,6 +38,7 @@ STATUS_COLORS = {
     "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
     "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
 }
+BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-15:30"
 
 
 class GmailVerificationError(RuntimeError):
@@ -51,6 +52,7 @@ class ReportTask(BaseModel):
     description: str
     marked_title: str = ""
     marked_description: str = ""
+    department: str = "-"
     status: str
     marker: str
 
@@ -189,6 +191,40 @@ def employee_initials(name: str) -> str:
     return "".join(part[0] for part in parts).upper()
 
 
+def _weekly_planner_user_sort_key(item: dict[str, Any]) -> tuple[int, str, int, int, str] | None:
+    """Read the user order supplied by the Common View payload.
+
+    Common View assigns this key to 1H rows using the same department and
+    Weekly Planner user order used by M1, M2, and M3.  Keep it as payload
+    metadata so the report can use one normalized order for every output.
+    """
+    raw = item.get("weekly_planner_sort") or item.get("weeklyPlannerSort")
+    if not isinstance(raw, (list, tuple)) or len(raw) < 5:
+        return None
+    try:
+        return (
+            int(raw[0]),
+            str(raw[1]).casefold(),
+            int(raw[2]),
+            int(raw[3]),
+            str(raw[4]).casefold(),
+        )
+    except (TypeError, ValueError):
+        return None
+
+
+def _employee_sort_key(employee: str, tasks: list[dict[str, Any]]) -> tuple[int, str, int, int, str]:
+    keys = [key for task in tasks if (key := _weekly_planner_user_sort_key(task)) is not None]
+    return min(keys) if keys else (10**6, "~", 1, 10**6, employee.casefold())
+
+
+def _group_tasks_by_employee(tasks: list[dict[str, Any]]) -> list[tuple[str, list[dict[str, Any]]]]:
+    grouped: dict[str, list[dict[str, Any]]] = {}
+    for task in tasks:
+        grouped.setdefault(_employee(task), []).append(task)
+    return sorted(grouped.items(), key=lambda group: _employee_sort_key(*group))
+
+
 def filter_tasks(
     items: list[dict[str, Any]], day: date, slot: str | None = None,
 ) -> list[dict[str, Any]]:
@@ -215,18 +251,16 @@ def filter_tasks(
 
 def _render_section(title: str, tasks: list[dict[str, Any]]) -> str:
     lines = [title]
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for task in tasks:
-        grouped.setdefault(_employee(task), []).append(task)
-    for employee_index, employee in enumerate(sorted(grouped, key=str.casefold), 1):
+    employee_groups = _group_tasks_by_employee(tasks)
+    for employee_index, (employee, employee_tasks) in enumerate(employee_groups, 1):
         lines.append(f"{employee_index}. {employee}")
-        ordered = sorted(grouped[employee], key=lambda x: (STATUS_ORDER[str(x.get("status")).upper()], str(x.get("task_title") or x.get("title") or x.get("task"))))
+        ordered = sorted(employee_tasks, key=lambda x: (STATUS_ORDER[str(x.get("status")).upper()], str(x.get("task_title") or x.get("title") or x.get("task"))))
         for task_index, task in enumerate(ordered, 1):
             status = str(task.get("status")).upper()
             title_value = clean_title(str(task.get("task_title") or task.get("title") or task.get("task")))
             description = clean_description(task.get("description") if "description" in task else task.get("note"))
             lines.extend([f"{employee_index}.{task_index} {STATUS_MARKERS[status]} {title_value}", "Përshkrimi:", description])
-    if not grouped:
+    if not employee_groups:
         lines.append("(Asnjë detyrë)")
     return "\n".join(lines)
 
@@ -236,13 +270,11 @@ def _document_section(
     tasks: list[dict[str, Any]],
     title_overrides: dict[str, tuple[str, str]] | None = None,
     description_overrides: dict[str, tuple[str, str]] | None = None,
+    department_codes: dict[str, str] | None = None,
 ) -> ReportSection:
-    grouped: dict[str, list[dict[str, Any]]] = {}
-    for task in tasks:
-        grouped.setdefault(_employee(task), []).append(task)
     employees = []
-    for employee in sorted(grouped, key=str.casefold):
-        ordered = sorted(grouped[employee], key=lambda x: (
+    for employee, employee_tasks in _group_tasks_by_employee(tasks):
+        ordered = sorted(employee_tasks, key=lambda x: (
             STATUS_ORDER[str(x.get("status")).upper()],
             str(x.get("task_title") or x.get("title") or x.get("task")),
         ))
@@ -259,6 +291,13 @@ def _document_section(
             description_duplicates_title = bool(raw_description) and (
                 clean_description(raw_description) == clean_title(raw_title)
             )
+            department_id = str(task.get("department_id") or task.get("departmentId") or "")
+            department = (
+                task.get("department_code")
+                or task.get("departmentCode")
+                or (department_codes or {}).get(department_id)
+                or "-"
+            )
             report_tasks.append(ReportTask(
                 title=title_override[0] if title_override else clean_title(raw_title),
                 description="" if description_duplicates_title else (
@@ -268,6 +307,7 @@ def _document_section(
                 marked_description="" if description_duplicates_title else (
                     description_override[1] if description_override else preserve_done_marks(raw_description)
                 ),
+                department=str(department).strip() or "-",
                 status=str(task.get("status")).upper(),
                 marker=STATUS_MARKERS[str(task.get("status")).upper()],
             ))
@@ -292,13 +332,18 @@ def build_report_document(
     if truncated:
         raise ValueError("Common View contains truncated buckets")
     items = data.get("items") or {}
+    department_codes = {
+        str(department.get("id")): str(department.get("code") or "").strip()
+        for department in (data.get("departments") or [])
+        if isinstance(department, dict) and department.get("id")
+    }
     one_h = items.get("oneH") or data.get("tasks") or []
     definitions: list[tuple[str, list[dict[str, Any]]]] = []
     if slot == "10:00":
         for candidate in SLOTS:
             definitions.append(
                 (
-                    f"SLOTI {report_day:%d.%m.%Y} {candidate}",
+                    f"{candidate} SLOTI {report_day:%d.%m.%Y}",
                     filter_tasks(one_h, report_day, candidate),
                 )
             )
@@ -306,7 +351,6 @@ def build_report_document(
             ("DETYRA PA SLOT – E GJITHË DITA", [
                 task for task in filter_tasks(one_h, report_day, None) if _slot(task) is None
             ]),
-            ("DETYRAT E BLLOKUT", filter_tasks(items.get("blocked") or [], report_day)),
             ("P: PERSONALE", filter_tasks(items.get("personal") or [], report_day)),
             ("R1 = 1H", filter_tasks(items.get("r1") or [], report_day)),
         ])
@@ -314,14 +358,21 @@ def build_report_document(
         previous_slot = SLOTS[SLOTS.index(slot) - 1]
         definitions.extend([
             (
-                f"SLOTI {report_day:%d.%m.%Y} {slot}",
+                f"{slot} SLOTI {report_day:%d.%m.%Y}",
                 filter_tasks(one_h, report_day, slot),
             ),
             (
-                f"SLOTI PARAPRAK {report_day:%d.%m.%Y} {previous_slot}",
+                f"{previous_slot} SLOTI PARAPRAK {report_day:%d.%m.%Y}",
                 filter_tasks(one_h, report_day, previous_slot),
             ),
         ])
+        # The 14:20 report is delivered by the 14:10 schedule. Its final
+        # section keeps the day's BLL work visible with that 1H follow-up.
+        if slot == "14:20":
+            definitions.append((
+                f"{BLOCKED_SECTION_TITLE_PREFIX} {report_day:%d.%m.%Y}",
+                filter_tasks(items.get("blocked") or [], report_day),
+            ))
     generated_value = data.get("generated_at") or datetime.now(report_timezone()).isoformat()
     source_generated = datetime.fromisoformat(str(generated_value).replace("Z", "+00:00"))
     return ReportDocument(
@@ -332,7 +383,13 @@ def build_report_document(
         source_generated_at=source_generated,
         recipients=recipients or {"to": [], "cc": [], "bcc": []},
         sections=[
-            _document_section(title, tasks, title_overrides, description_overrides)
+            _document_section(
+                title,
+                tasks,
+                title_overrides,
+                description_overrides,
+                department_codes,
+            )
             for title, tasks in definitions
         ],
         board_reminders=_board_reminder_questions(),
@@ -423,6 +480,57 @@ def render_html(document: ReportDocument) -> str:
             "</td></tr></table>"
         )
 
+    def section_separator() -> str:
+        """A reliable visual break between report slots in Gmail and Outlook."""
+        return (
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-report-section-separator="true" '
+            'style="width:100%;border-collapse:collapse;margin:30px 0 4px;">'
+            '<tr><td height="4" bgcolor="#334155" '
+            'style="height:4px;line-height:4px;font-size:0;background-color:#334155;">&nbsp;</td></tr>'
+            '</table>'
+        )
+
+    def bll_task_table(section: ReportSection) -> str:
+        """Compact BLL table used at the end of the 14:10 delivery."""
+        rows: list[str] = []
+        number = 0
+        for employee in section.employees:
+            for task in employee.tasks:
+                number += 1
+                background, _, accent = STATUS_COLORS[task.status]
+                heading, detail_lines = split_task_display(task.title)
+                details = "".join(
+                    detail_row(marked_html(item, task.marked_title)) for item in detail_lines
+                )
+                if task.description:
+                    details += detail_row(marked_html(task.description, task.marked_description))
+                rows.append(
+                    "<tr>"
+                    f'<td style="padding:9px;border:1px solid #cbd5e1;text-align:center;font-family:Arial,sans-serif;">{number}</td>'
+                    f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-weight:700;">{html.escape(employee.name)}</td>'
+                    f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;">{html.escape(task.department)}</td>'
+                    f'<td bgcolor="{background}" style="padding:9px;border:1px solid {accent};font-family:Arial,sans-serif;">'
+                    f'<div style="font-size:14px;font-weight:700;color:#050505;">{marked_html(heading or task.title, task.marked_title)}</div>{details}'
+                    "</td></tr>"
+                )
+        if not rows:
+            rows.append(
+                '<tr><td colspan="4" style="padding:10px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;color:#64748b;">(Asnjë detyrë)</td></tr>'
+            )
+        return (
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-bll-task-table="true" style="width:100%;border-collapse:collapse;margin:8px 0 4px;">'
+            '<tr bgcolor="#e2e8f0">'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:center;font-size:12px;">NR</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">KUSH</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">DEP</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">TITULLI</th>'
+            "</tr>"
+            f"{''.join(rows)}"
+            "</table>"
+        )
+
     body_chunks: list[str] = []
     for reminder_title, questions in (
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
@@ -445,8 +553,13 @@ def render_html(document: ReportDocument) -> str:
                 )
             )
 
-    for section in document.sections:
+    for section_index, section in enumerate(document.sections):
+        if section_index:
+            body_chunks.append(section_separator())
         body_chunks.append(section_title_block(section.title))
+        if section.title.startswith(BLOCKED_SECTION_TITLE_PREFIX):
+            body_chunks.append(bll_task_table(section))
+            continue
         if not section.employees:
             body_chunks.append(
                 "<div style=\"font-family:Arial,sans-serif;color:#64748b;padding:8px 0;\">(Asnjë detyrë)</div>"

@@ -226,6 +226,10 @@ jobs:
           set REDIS_URL=redis://127.0.0.1:6379/0
           set APP_TIMEZONE=Europe/Budapest
           set APP_BUILD_SHA=${{ github.sha }}
+          REM MCP and the report scheduler must verify the freshly restarted
+          REM private backend. Falling back to api-flow here can test an older
+          REM public deployment and make the functional MCP check fail.
+          set PRIMEFLOW_API_BASE_URL=http://127.0.0.1:8000
           set PRIMEFLOW_EMAIL=%PRIMEFLOW_MCP_EMAIL%
           set PRIMEFLOW_PASSWORD=%PRIMEFLOW_MCP_PASSWORD%
           set PRIMEFLOW_REPORT_TIMEZONE=Europe/Tirane
