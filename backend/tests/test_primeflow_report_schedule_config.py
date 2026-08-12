@@ -51,3 +51,21 @@ class PrimeFlowReportScheduleConfigTests(TestCase):
 
         self.assertTrue(any("missing active defaults: 1H 16:00" in error for error in errors))
         self.assertTrue(any("1H 11:00" in error and "execution_time" in error for error in errors))
+
+    def test_validation_ignores_defaults_for_other_report_types(self) -> None:
+        rows = _valid_rows()
+        rows.append(
+            {
+                "name": "RLZ Daily Control 16:00",
+                "report_type": "RLZ_DAILY_CONTROL",
+                "report_slot": None,
+                "execution_time": time(16, 0),
+                "timezone": DEFAULT_TIMEZONE,
+                "weekdays": list(DEFAULT_WEEKDAYS),
+                "is_default": True,
+                "backfill_enabled": False,
+                "predecessor_name": None,
+            }
+        )
+
+        self.assertEqual(default_schedule_validation_errors(rows), [])

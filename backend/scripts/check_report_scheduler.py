@@ -18,7 +18,7 @@ async def main() -> None:
                 text(
                     """
                     SELECT schedule.name, schedule.report_slot,
-                           schedule.execution_time, schedule.timezone,
+                           schedule.report_type, schedule.execution_time, schedule.timezone,
                            schedule.weekdays, schedule.is_default,
                            schedule.backfill_enabled,
                            predecessor.name AS predecessor_name
@@ -27,6 +27,7 @@ async def main() -> None:
                       ON predecessor.id = schedule.predecessor_schedule_id
                     WHERE schedule.is_active IS TRUE
                       AND schedule.is_default IS TRUE
+                      AND schedule.report_type = 'ONE_H'
                     ORDER BY schedule.sort_order, schedule.name
                     """
                 )

@@ -29,7 +29,14 @@ DEFAULT_1H_SCHEDULES = (
 
 def default_schedule_validation_errors(rows: Sequence[Mapping[str, object]]) -> list[str]:
     expected_by_name = {schedule.name: schedule for schedule in DEFAULT_1H_SCHEDULES}
-    actual_by_name = {str(row["name"]): row for row in rows}
+    # Default schedules are now shared by more than one report type.  This
+    # validator protects only the built-in 1H chain; a valid RLZ schedule must
+    # not make that chain appear to have an unexpected default.
+    actual_by_name = {
+        str(row["name"]): row
+        for row in rows
+        if row.get("report_type", "ONE_H") == "ONE_H"
+    }
     errors: list[str] = []
 
     missing = sorted(set(expected_by_name) - set(actual_by_name))
