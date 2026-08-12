@@ -84,7 +84,7 @@ const primaryItems: NavItem[] = [
   },
   {
     href: "/next-week-plan",
-    label: "Next Week Plan",
+    label: "PX JAV",
     icon: CalendarClock,
   },
   {

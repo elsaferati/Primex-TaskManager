@@ -5,7 +5,7 @@ import logging
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from app.db import SessionLocal
 from app.models.after_break_report_draft import AfterBreakReportDraft
@@ -51,22 +51,24 @@ async def run_after_break_report_scheduler_once(now: datetime | None = None) -> 
         report_day = local_now.date()
         if local_now.weekday() not in (settings.weekdays or []):
             return False
-        if local_now.time().replace(second=0, microsecond=0) < settings.send_time:
+        current_minute = local_now.time().replace(second=0, microsecond=0)
+        configured_send_minute = settings.send_time.replace(second=0, microsecond=0)
+        if current_minute != configured_send_minute:
+            return False
+
+        lock_key = f"after_break_report_auto|{report_day.isoformat()}"
+        lock_acquired = (
+            await db.execute(select(func.pg_try_advisory_xact_lock(func.hashtext(lock_key))))
+        ).scalar_one()
+        if not lock_acquired:
+            logger.info("after_break_report_scheduler_skipped reason=send_locked report_date=%s", report_day)
             return False
 
         row = (
             await db.execute(select(AfterBreakReportDraft).where(AfterBreakReportDraft.report_date == report_day))
         ).scalar_one_or_none()
         if row and row.status == "SENT":
-            sent_at = row.sent_at
-            settings_updated_at = settings.updated_at
-            if sent_at and settings_updated_at and settings_updated_at > sent_at:
-                logger.info(
-                    "after_break_report_scheduler_resend_allowed reason=settings_changed report_date=%s",
-                    report_day,
-                )
-            else:
-                return False
+            return False
 
         recipients = normalize_recipients(settings.recipients)
         if not recipients["to"]:

@@ -2768,8 +2768,7 @@ export default function GaKaNotesPage() {
                 aria-label="Search notes"
               />
             </div>
-          </div>
-          <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2">
             <Button
               variant="outline"
               className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
@@ -3028,6 +3027,7 @@ export default function GaKaNotesPage() {
             >
               {exportingDailyReport ? "Exporting..." : "Export Excel"}
             </Button>
+            </div>
           </div>
           {loading ? (
             <div className="text-sm text-muted-foreground">Loading notes...</div>
