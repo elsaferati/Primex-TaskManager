@@ -29,6 +29,7 @@ from app.services.meetings_report import (
     _local_time,
     _m3_am_pm_label,
     _m3_department_label,
+    _m3_finance_ga_sections,
     _normalize_section,
     _render_group_label_html,
     _render_section_block_html,
@@ -49,6 +50,8 @@ SECTION_TITLES = [
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED",
+    "GA MBYLLJA E DET",
+    "HV MBYLLJA E DET",
 ]
 MANUAL_SECTION_TITLES = set(SECTION_TITLES[:4])
 SECTION_TITLE_ALIASES = {
@@ -338,6 +341,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             body = "\n".join(["NEW SYSTEM TASKS: 0", "", "PYETJE PER KONFIRMIM: 0"])
         elif title == SECTION_TITLES[5]:
             body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WAITING CONFIRMATION: 0", "", "DONE: 0"])
+        elif title in {SECTION_TITLES[7], SECTION_TITLES[8]}:
+            body = "TODO: 0\n\nIN PROGRESS: 0\n\nDONE: 0\n\nLATE: 0"
         else:
             body = "NOTES: 0"
         normalized.append({"title": title, "body": body})
@@ -515,6 +520,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         [("NR", 2), ("DISK", 4), ("NOTE", 60), ("FROM", 8), ("TIME", 5)],
         await _blue_note_rows(db),
     )
+    ga_section, hv_section = await _m3_finance_ga_sections(db, tasks, names, report_day)
 
     sections = [
         {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
@@ -524,6 +530,8 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         {"title": SECTION_TITLES[4], "body": _normalize_section(section_1)},
         {"title": SECTION_TITLES[5], "body": _normalize_section(section_2)},
         {"title": SECTION_TITLES[6], "body": _normalize_section(section_3)},
+        {"title": SECTION_TITLES[7], "body": ga_section},
+        {"title": SECTION_TITLES[8], "body": hv_section},
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
@@ -535,6 +543,8 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             SECTION_TITLES[4]: len(section_1),
             SECTION_TITLES[5]: len(section_2),
             SECTION_TITLES[6]: len(section_3),
+            SECTION_TITLES[7]: ga_section.count("\n- ") + (1 if ga_section.startswith("- ") else 0),
+            SECTION_TITLES[8]: hv_section.count("\n- ") + (1 if hv_section.startswith("- ") else 0),
         },
     }
     return sections, snapshot

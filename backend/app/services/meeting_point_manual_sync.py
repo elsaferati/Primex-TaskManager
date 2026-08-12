@@ -83,8 +83,13 @@ def is_known_report_title(kind: ReportKind, title: str | None) -> bool:
         raw = SECTION_TITLE_ALIASES.get(raw, raw)
         compact = _compact(raw)
     else:
-        from app.services.meetings_report import canonical_meetings_section_title
+        from app.services.meetings_report import (
+            canonical_meetings_section_title,
+            is_retired_meetings_section_title,
+        )
 
+        if is_retired_meetings_section_title(raw):
+            return True
         raw = canonical_meetings_section_title(raw)
         compact = _compact(raw)
     return any(_compact(known_title) == compact for known_title in known)
@@ -106,8 +111,13 @@ def is_manual_section_title(kind: ReportKind, title: str | None) -> bool:
 
         raw = SECTION_TITLE_ALIASES.get(raw, raw)
     else:
-        from app.services.meetings_report import canonical_meetings_section_title
+        from app.services.meetings_report import (
+            canonical_meetings_section_title,
+            is_retired_meetings_section_title,
+        )
 
+        if is_retired_meetings_section_title(raw):
+            return False
         raw = canonical_meetings_section_title(raw)
 
     known, manuals, _ = _report_title_sets(kind)

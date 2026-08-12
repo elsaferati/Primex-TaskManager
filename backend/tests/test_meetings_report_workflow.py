@@ -289,30 +289,28 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         self.assertTrue(attachments[1][1].startswith(b"\x89PNG"))
 
     def test_normalize_collapses_common_view_aliases_into_auto_sections(self) -> None:
-        auto_ga = "GA TASKS:\n- done item"
         auto_tickets = "STD TICKETS: 2"
         normalized = normalize_meetings_report_sections(
             [
                 {"title": "A JEMI BRENDA MESATARES ME PROJEKTE/", "body": "(Ploteso manualisht)"},
                 {"title": "(GA) M3 DET GA MBYLLJA ME HV/OH?", "body": "(Ploteso manualisht)"},
                 {"title": "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", "body": "(Ploteso manualisht)"},
-                {"title": SECTION_TITLES[1], "body": auto_ga},
-                {"title": SECTION_TITLES[3], "body": auto_tickets},
+                {"title": SECTION_TITLES[1], "body": auto_tickets},
                 {"title": "Brand new Common View pike", "body": "(Ploteso manualisht)"},
             ]
         )
         titles = [section["title"] for section in normalized]
         self.assertEqual(titles[0], SECTION_TITLES[0])  # manual first
-        auto_titles = [title for title in titles if title in {SECTION_TITLES[1], SECTION_TITLES[3]}]
-        self.assertEqual(auto_titles[0], SECTION_TITLES[3])  # tickets first among auto-filled
+        auto_titles = [title for title in titles if title == SECTION_TITLES[1]]
+        self.assertEqual(auto_titles[0], SECTION_TITLES[1])  # tickets first among auto-filled
         self.assertEqual(titles.count(SECTION_TITLES[1]), 1)
-        self.assertEqual(titles.count(SECTION_TITLES[3]), 1)
+        self.assertNotIn("GA MBYLLJA E DET", titles)
+        self.assertNotIn("HV MBYLLJA E DET", titles)
         self.assertNotIn("(GA) M3 DET GA MBYLLJA ME HV/OH?", titles)
         self.assertNotIn("(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", titles)
         self.assertIn("Brand new Common View pike", titles)
         by_title = {section["title"]: section["body"] for section in normalized}
-        self.assertEqual(by_title[SECTION_TITLES[1]], auto_ga)
-        self.assertEqual(by_title[SECTION_TITLES[3]], auto_tickets)
+        self.assertEqual(by_title[SECTION_TITLES[1]], auto_tickets)
 
     def test_ticket_wording_variant_alone_maps_to_auto_title(self) -> None:
         normalized = normalize_meetings_report_sections(
@@ -323,22 +321,18 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         )
         titles = [section["title"] for section in normalized]
         self.assertNotIn("(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3", titles)
-        self.assertIn(SECTION_TITLES[3], titles)
+        self.assertIn(SECTION_TITLES[1], titles)
 
-    def test_ga_and_hv_closing_sections_are_distinct_and_ordered(self) -> None:
+    def test_ga_and_hv_closing_sections_are_removed_from_m3(self) -> None:
         normalized = normalize_meetings_report_sections(
             [
                 {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
-                {"title": SECTION_TITLES[3], "body": "STD tasks"},
-                {"title": SECTION_TITLES[1], "body": "GA tasks"},
-                {"title": SECTION_TITLES[2], "body": "HV tasks"},
+                {"title": "GA MBYLLJA E DET", "body": "GA tasks"},
+                {"title": "HV MBYLLJA E DET", "body": "HV tasks"},
             ]
         )
 
-        self.assertEqual(
-            [section["title"] for section in normalized],
-            [SECTION_TITLES[0], SECTION_TITLES[3], SECTION_TITLES[1], SECTION_TITLES[2]],
-        )
+        self.assertEqual([section["title"] for section in normalized], [SECTION_TITLES[0]])
 
     def test_common_view_aliases_are_known_auto_not_manual(self) -> None:
         self.assertTrue(is_known_report_title("meetings", "(GA) M3 DET GA MBYLLJA ME HV/OH?"))

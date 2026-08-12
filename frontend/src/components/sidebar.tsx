@@ -92,6 +92,11 @@ const primaryItems: NavItem[] = [
     label: "Admin Tasks",
     icon: ClipboardCheck,
   },
+  {
+    href: "/waiting-confirmation-ga",
+    label: "Awaiting Confirmation",
+    icon: Clock3,
+  },
 ]
 
 const navGroups: NavGroup[] = [
@@ -102,7 +107,6 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/primeflow-classifications", label: "Classifications", icon: Layers },
       { href: "/primeflow-pyetje", label: "Questions", icon: ClipboardCheck },
-      { href: "/waiting-confirmation-ga", label: "Awaiting Confirmation", icon: Clock3 },
       { href: "/system-tasks", label: "System Tasks", icon: Layers },
       { href: "/open-tasks", label: "Open Tasks", icon: ListTodo },
     ],

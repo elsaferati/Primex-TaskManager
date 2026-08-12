@@ -57,9 +57,6 @@ function canonicalMeetingsSectionTitle(title: string) {
   if (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3")) {
     return "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3"
   }
-  if (key.includes("M3DETGAMBYLLJAMEHV")) {
-    return "GA MBYLLJA E DET"
-  }
   if (key === compactSectionTitle("DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?")) {
     return "SYSTEM TASK LATE"
   }
@@ -103,8 +100,6 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
     "A JEMI BRENDA MESATARES ME PROJEKTE?",
     "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
-    "GA MBYLLJA E DET",
-    "HV MBYLLJA E DET",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "TAK E PA KRYERA?",
@@ -159,12 +154,7 @@ function sectionGroupLabel(title: string) {
   if (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3")) {
     return "Auto-filled from PrimeFlow"
   }
-  if (key === compactSectionTitle("GA MBYLLJA E DET") || key === compactSectionTitle("HV MBYLLJA E DET")) {
-    return "Auto-filled from PrimeFlow"
-  }
   const knownAuto = [
-    "GA MBYLLJA E DET",
-    "HV MBYLLJA E DET",
     "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",

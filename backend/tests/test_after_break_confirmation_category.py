@@ -3,13 +3,26 @@ from datetime import datetime
 from types import SimpleNamespace
 
 from app.services.after_break_report import (
+    SECTION_TITLES,
     _blue_note_rows,
     _format_confirmation_questions,
     _new_system_task_rows,
+    normalize_after_break_report_sections,
 )
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
+    def test_closing_sections_follow_blue_notes(self) -> None:
+        sections = normalize_after_break_report_sections([])
+
+        self.assertEqual(
+            [section["title"] for section in sections],
+            SECTION_TITLES,
+        )
+        self.assertEqual(sections[6]["title"], "NOTES TE REJA ME TE KALTER DHE DISSCUSED")
+        self.assertEqual(sections[7]["title"], "GA MBYLLJA E DET")
+        self.assertEqual(sections[8]["title"], "HV MBYLLJA E DET")
+
     def test_empty_confirmation_questions(self) -> None:
         lines = _format_confirmation_questions([])
         self.assertEqual(lines, ["PYETJE PER KONFIRMIM: 0"])

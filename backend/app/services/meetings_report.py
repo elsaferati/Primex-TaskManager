@@ -30,8 +30,6 @@ from app.services.system_task_schedule import matches_template_date
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
     "A JEMI BRENDA MESATARES ME PROJEKTE?",
-    "GA MBYLLJA E DET",
-    "HV MBYLLJA E DET",
     "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
@@ -44,38 +42,47 @@ SECTION_TITLES = [
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
-    SECTION_TITLES[3],  # STD tickets first among auto-filled
-    SECTION_TITLES[1],
+    SECTION_TITLES[1],  # STD tickets first among auto-filled
     SECTION_TITLES[2],
-    SECTION_TITLES[4],
-    SECTION_TITLES[5],
-    SECTION_TITLES[9],
-    SECTION_TITLES[6],
-    SECTION_TITLES[8],
+    SECTION_TITLES[3],
     SECTION_TITLES[7],
-    SECTION_TITLES[10],
-    SECTION_TITLES[11],
+    SECTION_TITLES[4],
+    SECTION_TITLES[6],
+    SECTION_TITLES[5],
+    SECTION_TITLES[8],
+    SECTION_TITLES[9],
 ]
 MANUAL_SECTION_TITLES = {
     SECTION_TITLES[0],
 }
 SECTION_TITLE_ALIASES = {
-    "(GA) M3 DET GA MBYLLJA ME HV?": SECTION_TITLES[1],
-    "(GA) M3 DET GA MBYLLJA ME HV/OH?": SECTION_TITLES[1],
-    "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[3],
-    "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?": SECTION_TITLES[9],
-    "TAKIMET E PA KRYERA ?": SECTION_TITLES[9],
-    "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?": SECTION_TITLES[4],
-    "DET. PA PROGRES (PINK)?": SECTION_TITLES[5],
-    "N- (GA) SHIKOHET COMMON VIEW NESER, VETEM DETYRAT E REJA ME TE KALTER, 08:00 DHE ME DEADLINE?": SECTION_TITLES[8],
-    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK, 08:00, ME DEADLINE?": SECTION_TITLES[8],
-    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK": SECTION_TITLES[8],
-    "DET TE REJA LAST WEEK DHE THIS WEEK": SECTION_TITLES[8],
-    "N- (GA) TAKIMET EXTERNE/ TAKIMET INTERNE/ BZ ME GA/BLLOK?": SECTION_TITLES[7],
-    "N- A KA DETYRA 1H PA SLOT?": SECTION_TITLES[10],
-    "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[11],
-    "N- (GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[11],
+    "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[1],
+    "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?": SECTION_TITLES[7],
+    "TAKIMET E PA KRYERA ?": SECTION_TITLES[7],
+    "DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?": SECTION_TITLES[2],
+    "DET. PA PROGRES (PINK)?": SECTION_TITLES[3],
+    "N- (GA) SHIKOHET COMMON VIEW NESER, VETEM DETYRAT E REJA ME TE KALTER, 08:00 DHE ME DEADLINE?": SECTION_TITLES[6],
+    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK, 08:00, ME DEADLINE?": SECTION_TITLES[6],
+    "N- (GA) DET TE REJA LAST WEEK DHE THIS WEEK": SECTION_TITLES[6],
+    "DET TE REJA LAST WEEK DHE THIS WEEK": SECTION_TITLES[6],
+    "N- (GA) TAKIMET EXTERNE/ TAKIMET INTERNE/ BZ ME GA/BLLOK?": SECTION_TITLES[5],
+    "N- A KA DETYRA 1H PA SLOT?": SECTION_TITLES[8],
+    "(GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[9],
+    "N- (GA/KA) KUSH KA DET PERSONALISHT?": SECTION_TITLES[9],
 }
+RETIRED_CLOSING_SECTION_TITLES = {
+    "GA MBYLLJA E DET",
+    "HV MBYLLJA E DET",
+    "(GA) M3 DET GA MBYLLJA ME HV?",
+    "(GA) M3 DET GA MBYLLJA ME HV/OH?",
+}
+RETIRED_CLOSING_SECTION_KEYS = {
+    re.sub(r"[^A-Z0-9]+", "", title.upper()) for title in RETIRED_CLOSING_SECTION_TITLES
+}
+
+
+def is_retired_meetings_section_title(title: str | None) -> bool:
+    return _compact_section_title(title) in RETIRED_CLOSING_SECTION_KEYS
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 # Same rule for M1/M2/M3: personal rows only when the title marks GA (not KA).
 PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
@@ -112,8 +119,6 @@ def canonical_meetings_section_title(raw_title: str | None) -> str:
     # Wording variants that still mean the same auto-filled questions.
     if "TIKETATESTD" in compact and "RAPORTOHENNEM3" in compact:
         return SECTION_TITLES[3]
-    if "M3DETGAMBYLLJAMEHV" in compact:
-        return SECTION_TITLES[1]
     return raw
 
 
@@ -155,6 +160,8 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
     seen_unknown: set[str] = set()
     for section in existing_sections:
         raw_title = str(section.get("title") or "").strip()
+        if is_retired_meetings_section_title(raw_title):
+            continue
         title = canonical_meetings_section_title(raw_title)
         if not title:
             continue
@@ -747,7 +754,6 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     names = await _assignee_names(db, tasks)
     assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
     all_participant_ids = await _all_participant_user_ids(db)
-    ga_section, hv_section = await _m3_finance_ga_sections(db, tasks, names, report_day)
     std_tickets_section = await std_tickets_report_section(db, report_day)
 
     system_tasks = [task for task in tasks if task.system_template_origin_id and _is_open(task)]
@@ -893,11 +899,9 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
 
     by_title = {
         SECTION_TITLES[0]: "(Ploteso manualisht)",
-        SECTION_TITLES[1]: ga_section,
-        SECTION_TITLES[2]: hv_section,
-        SECTION_TITLES[3]: std_tickets_section,
-        SECTION_TITLES[4]: _normalize_section(section_1),
-        SECTION_TITLES[5]: _normalize_section(
+        SECTION_TITLES[1]: std_tickets_section,
+        SECTION_TITLES[2]: _normalize_section(section_1),
+        SECTION_TITLES[3]: _normalize_section(
             _m3_status_table(
                 "TODO",
                 today_todo,
@@ -908,13 +912,13 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 **table_kwargs,
             )
         ),
-        SECTION_TITLES[9]: section_6,
-        SECTION_TITLES[6]: _empty_aware(
+        SECTION_TITLES[7]: section_6,
+        SECTION_TITLES[4]: _empty_aware(
             _leave_lines(leave_tomorrow, names, user_department_codes, leave_user_sort_keys)
         ),
-        SECTION_TITLES[8]: _normalize_section(section_5),
-        SECTION_TITLES[7]: _normalize_section(section_4),
-        SECTION_TITLES[10]: _normalize_section(
+        SECTION_TITLES[6]: _normalize_section(section_5),
+        SECTION_TITLES[5]: _normalize_section(section_4),
+        SECTION_TITLES[8]: _normalize_section(
             _m3_status_table(
                 "1H PA SLOT",
                 one_h_no_slot,
@@ -926,7 +930,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 **table_kwargs,
             )
         ),
-        SECTION_TITLES[11]: _normalize_section(
+        SECTION_TITLES[9]: _normalize_section(
             _m3_status_table(
                 "PERSONAL GA",
                 personal_ga,

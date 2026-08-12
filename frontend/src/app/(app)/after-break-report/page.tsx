@@ -49,6 +49,8 @@ function sectionGroupLabel(title: string, index: number) {
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED",
+    "GA MBYLLJA E DET",
+    "HV MBYLLJA E DET",
   ]
   const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
   const key = compact(title)
