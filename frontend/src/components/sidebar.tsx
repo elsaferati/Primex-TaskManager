@@ -172,6 +172,7 @@ const navGroups: NavGroup[] = [
       { href: "/external-tickets", label: "STD Tickets EXT", icon: TicketCheck },
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
+      { href: "/reports/rlz-daily-control", label: "Kontrolli ditor RLZ", icon: Activity, roles: ["ADMIN", "MANAGER"] },
       { href: "/tomorrow-print-report", label: "1H SHTYPI", icon: MailCheck, roles: ["ADMIN"] },
       {
         href: "/reports/weekly-planning-audit",

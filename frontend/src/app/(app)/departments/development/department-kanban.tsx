@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
+import { DailyRlzPanel } from "@/components/daily-rlz-panel"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
@@ -6637,6 +6638,7 @@ export default function DepartmentKanban() {
 
   return (
     <div className="min-h-screen">
+      <DailyRlzPanel />
       <style jsx>{`
         .common-sticky {
           position: sticky;

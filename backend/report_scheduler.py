@@ -14,12 +14,13 @@ from app.db import SessionLocal
 from app.models.primeflow_report_schedule import PrimeFlowReportSchedule
 from app.services.primeflow_report import previous_working_day, report_timezone
 from app.services.primeflow_report_delivery import deliver_report, execute_chain, validate_report_config
+from app.services.daily_rlz_control_delivery import deliver_daily_rlz_control
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s %(message)s")
 logger = logging.getLogger("primeflow-report-scheduler")
 
 
-async def scheduled_job(schedule_id: str, slot: str, version: int, timezone_name: str) -> None:
+async def scheduled_job(schedule_id: str, slot: str | None, version: int, timezone_name: str) -> None:
     now = datetime.now(__import__("zoneinfo").ZoneInfo(timezone_name))
     async with SessionLocal() as db:
         schedule = await db.get(PrimeFlowReportSchedule, uuid.UUID(schedule_id))
@@ -43,7 +44,24 @@ async def scheduled_job(schedule_id: str, slot: str, version: int, timezone_name
         )
         return
 
+    if getattr(schedule, "report_type", "ONE_H") == "RLZ_DAILY_CONTROL":
+        retry_count = max(1, int(schedule.retry_count or 1))
+        delays = list(schedule.retry_delays_seconds or [0])
+        for attempt in range(retry_count):
+            delay = delays[min(attempt, len(delays) - 1)] if delays else 0
+            if delay:
+                await asyncio.sleep(delay)
+            run = await deliver_daily_rlz_control(
+                now.date(), schedule_id=schedule_id, schedule_version=schedule.version,
+                scheduled_for=now, trigger_type="SCHEDULED",
+            )
+            if run.status in {"SENT", "ALREADY_SENT"}:
+                break
+        return
     slot = schedule.report_slot
+    if not slot:
+        logger.error("scheduler_job_skipped schedule_id=%s reason=one_h_slot_missing", schedule_id)
+        return
     if not schedule.backfill_enabled:
         await deliver_report(
             now.date(), slot, schedule_id=schedule_id, schedule_version=schedule.version,
@@ -76,7 +94,11 @@ async def sync_jobs(scheduler: AsyncIOScheduler) -> int:
         )).scalars().all()
     desired = set()
     for row in rows:
-        job_id = f"primeflow-1h-schedule-{row.id}"
+        job_id = (
+            f"primeflow-1h-schedule-{row.id}"
+            if getattr(row, "report_type", "ONE_H") == "ONE_H"
+            else f"primeflow-report-schedule-{row.id}"
+        )
         desired.add(job_id)
         weekdays = ",".join(str(day) for day in row.weekdays)
         scheduler.add_job(
@@ -90,7 +112,7 @@ async def sync_jobs(scheduler: AsyncIOScheduler) -> int:
             misfire_grace_time=row.grace_period_minutes * 60, replace_existing=True,
         )
     for job in scheduler.get_jobs():
-        if job.id.startswith("primeflow-1h-schedule-") and job.id not in desired:
+        if (job.id.startswith("primeflow-1h-schedule-") or job.id.startswith("primeflow-report-schedule-")) and job.id not in desired:
             scheduler.remove_job(job.id)
     return len(desired)
 

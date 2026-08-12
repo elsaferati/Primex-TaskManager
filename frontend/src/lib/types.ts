@@ -344,6 +344,14 @@ export interface DailyReportTaskItem {
   original_planned_end?: string | null
   is_overdue: boolean
   late_days?: number | null
+  rlz_daily_state?: {
+    reason_code?: string | null
+    reason_label?: string | null
+    comment?: string | null
+    updated_at?: string | null
+    is_editable: boolean
+    editable_until: string
+  } | null
 }
 
 export interface DailyReportSystemOccurrence {
@@ -367,6 +375,14 @@ export interface DailyReportResponse {
   tasks_overdue: DailyReportTaskItem[]
   system_today: DailyReportSystemOccurrence[]
   system_overdue: DailyReportSystemOccurrence[]
+  rlz_close_state?: {
+    status: "NOT_SAVED" | "SAVED" | "STALE" | "CLOSED_EDIT_WINDOW"
+    saved: boolean
+    stale: boolean
+    saved_at?: string | null
+    is_editable: boolean
+    editable_until?: string | null
+  } | null
 }
 
 export interface DailyReportGaEntry {

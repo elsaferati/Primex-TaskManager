@@ -24,6 +24,8 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.services.one_h_slots import effective_slot_date
 from app.models.task_user_comment import TaskUserComment
+from app.models.task_daily_rlz_state import TaskDailyRlzState
+from app.models.realization import RealizationDailyCloseEvent, RealizationPeriod
 from app.models.user import User
 from app.schemas.daily_report import (
     DailyReportResponse,
@@ -33,6 +35,10 @@ from app.schemas.daily_report import (
     DailyReportGaEntryUpsert,
     DailyReportGaNoteOut,
     DailyReportGaTableResponse,
+    DailyRlzStateUpsert,
+    DailyRlzTaskStateOut,
+    DailyRlzCloseStateOut,
+    DailyRlzStateCorrection,
 )
 from app.schemas.task import TaskAssigneeOut, TaskOut
 from app.services.project_display_title import build_project_display_title_map
@@ -43,6 +49,11 @@ from app.services.daily_report_logic import (
     task_is_visible_to_user,
     business_days_between,
 )
+from app.services.daily_rlz_compliance import (
+    REASON_LABELS, build_daily_rlz_compliance, build_daily_rlz_control,
+    editable_until, is_editable_day,
+)
+from app.services.audit import add_audit_log
 
 
 router = APIRouter()
@@ -85,7 +96,10 @@ def _enforce_daily_report_target_scope(
     effective_department_id: uuid.UUID | None,
     target_user: User,
 ) -> None:
-    return
+    if current_user.role == UserRole.ADMIN and effective_department_id is None:
+        return
+    if effective_department_id is None or target_user.department_id != effective_department_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 async def _resolve_daily_report_scope(
@@ -328,6 +342,15 @@ async def daily_report(
     task_ids = [t.id for t in tasks]
     assignee_out_map = await _assignees_for_tasks(db, task_ids)
     comment_map = await _user_comments_for_tasks(db, task_ids, user_id)
+    daily_rlz_map = {}
+    if task_ids:
+        daily_rlz_map = {row.task_id: row for row in (await db.execute(
+            select(TaskDailyRlzState).where(
+                TaskDailyRlzState.task_id.in_(task_ids),
+                TaskDailyRlzState.user_id == user_id,
+                TaskDailyRlzState.day_date == day,
+            )
+        )).scalars().all()}
     one_h_slot_map: dict[uuid.UUID, str] = {}
     if task_ids:
         rows = (
@@ -402,6 +425,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=False,
                     late_days=None,
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day),
                 )
             )
             continue
@@ -421,6 +445,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=False,
                     late_days=None,
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day),
                 )
             )
         elif planned_end < day:
@@ -441,6 +466,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=True,
                     late_days=late_days,
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day),
                 )
             )
 
@@ -578,13 +604,129 @@ async def daily_report(
     tasks_today.sort(key=_daily_task_sort_key)
     tasks_overdue.sort(key=_daily_task_sort_key)
 
+    compliance = await build_daily_rlz_compliance(db, user_id=user_id, day=day)
     return DailyReportResponse(
         day=day,
         tasks_today=tasks_today,
         tasks_overdue=tasks_overdue,
         system_today=system_today,
         system_overdue=system_overdue,
+        rlz_close_state=DailyRlzCloseStateOut(**compliance["rlz_close_state"]),
     )
+
+
+def _daily_rlz_state_out(row: TaskDailyRlzState | None, day: date) -> DailyRlzTaskStateOut:
+    return DailyRlzTaskStateOut(
+        reason_code=row.reason_code if row else None,
+        reason_label=REASON_LABELS.get(row.reason_code) if row else None,
+        comment=row.comment if row else None,
+        updated_at=row.updated_at if row else None,
+        is_editable=is_editable_day(day),
+        editable_until=editable_until(day),
+    )
+
+
+@router.put("/daily-rlz-state/{task_id}", response_model=DailyRlzTaskStateOut)
+async def upsert_daily_rlz_state(
+    task_id: uuid.UUID,
+    payload: DailyRlzStateUpsert,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> DailyRlzTaskStateOut:
+    if user.role != UserRole.STAFF:
+        raise HTTPException(status_code=403, detail="Only STAFF can edit their Daily RLZ state")
+    if not is_editable_day(payload.day):
+        raise HTTPException(status_code=409, detail={
+            "code": "DAILY_RLZ_EDIT_WINDOW_CLOSED",
+            "message": "Arsyeja dhe komenti për këtë ditë mund të ndryshohen vetëm deri në orën 17:00.",
+        })
+    task = await db.get(Task, task_id)
+    if task is None or not task.is_active:
+        raise HTTPException(status_code=404, detail="Task not found")
+    assigned = task.assigned_to == user.id or bool(await db.scalar(select(TaskAssignee.task_id).where(
+        TaskAssignee.task_id == task_id, TaskAssignee.user_id == user.id,
+    )))
+    if not assigned:
+        raise HTTPException(status_code=403, detail="You can edit only your own Daily Report tasks")
+    row = (await db.execute(select(TaskDailyRlzState).where(
+        TaskDailyRlzState.task_id == task_id, TaskDailyRlzState.user_id == user.id,
+        TaskDailyRlzState.day_date == payload.day,
+    ).with_for_update())).scalar_one_or_none()
+    if row is None:
+        row = TaskDailyRlzState(task_id=task_id, user_id=user.id, day_date=payload.day)
+        db.add(row)
+    row.reason_code = payload.reason_code
+    row.comment = payload.comment.strip() if payload.comment and payload.comment.strip() else None
+    await db.commit()
+    await db.refresh(row)
+    return _daily_rlz_state_out(row, payload.day)
+
+
+@router.put("/daily-rlz-state/{task_id}/correction", response_model=DailyRlzTaskStateOut)
+async def correct_daily_rlz_state(
+    task_id: uuid.UUID, payload: DailyRlzStateCorrection,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> DailyRlzTaskStateOut:
+    if user.role not in {UserRole.MANAGER, UserRole.ADMIN}:
+        raise HTTPException(status_code=403, detail="Only manager/admin can correct closed Daily RLZ evidence")
+    subject = await db.get(User, payload.user_id)
+    task = await db.get(Task, task_id)
+    if not subject or not task:
+        raise HTTPException(status_code=404, detail="User or task not found")
+    if user.role == UserRole.MANAGER and subject.department_id != user.department_id:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    subject_assigned = task.assigned_to == subject.id or bool(await db.scalar(select(TaskAssignee.task_id).where(
+        TaskAssignee.task_id == task_id, TaskAssignee.user_id == subject.id,
+    )))
+    if not subject_assigned:
+        raise HTTPException(status_code=409, detail="The task is not assigned to the selected employee")
+    latest = (await db.execute(select(RealizationDailyCloseEvent).join(
+        RealizationPeriod, RealizationPeriod.id == RealizationDailyCloseEvent.period_id
+    ).where(
+        RealizationDailyCloseEvent.user_id == payload.user_id,
+        RealizationPeriod.period_type == "DAILY", RealizationPeriod.start_date == payload.day,
+    ).order_by(RealizationDailyCloseEvent.created_at.desc(), RealizationDailyCloseEvent.id.desc()).limit(1))).scalar_one_or_none()
+    if latest is None or latest.action != "REOPEN":
+        raise HTTPException(status_code=409, detail="Reopen the Realization day before correcting historical evidence")
+    row = (await db.execute(select(TaskDailyRlzState).where(
+        TaskDailyRlzState.task_id == task_id, TaskDailyRlzState.user_id == payload.user_id,
+        TaskDailyRlzState.day_date == payload.day,
+    ).with_for_update())).scalar_one_or_none()
+    before = {"reason_code": row.reason_code, "comment": row.comment} if row else None
+    if row is None:
+        row = TaskDailyRlzState(task_id=task_id, user_id=payload.user_id, day_date=payload.day)
+        db.add(row)
+    row.reason_code = payload.reason_code
+    row.comment = payload.comment.strip() if payload.comment and payload.comment.strip() else None
+    await db.flush()
+    add_audit_log(db=db, actor_user_id=user.id, entity_type="task_daily_rlz_state", entity_id=row.id,
+                  action="AUTHORIZED_CORRECTION", before=before,
+                  after={"reason_code": row.reason_code, "comment": row.comment,
+                         "correction_reason": payload.correction_reason, "reopen_event_id": str(latest.id)})
+    await db.commit()
+    await db.refresh(row)
+    return _daily_rlz_state_out(row, payload.day)
+
+
+@router.get("/daily-rlz-compliance")
+async def daily_rlz_compliance(
+    day: date, user_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    target_id = user.id if user.role == UserRole.STAFF else (user_id or user.id)
+    return await build_daily_rlz_compliance(db, user_id=target_id, day=day)
+
+
+@router.get("/daily-rlz-control")
+async def daily_rlz_control(
+    day: date, department_id: uuid.UUID | None = None, user_id: uuid.UUID | None = None,
+    db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user),
+) -> dict:
+    if user.role == UserRole.STAFF:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if user.role == UserRole.MANAGER:
+        department_id = user.department_id
+    return await build_daily_rlz_control(db, day=day, department_id=department_id, user_id=user_id)
 
 
 @router.get("/daily-ga-table", response_model=DailyReportGaTableResponse)

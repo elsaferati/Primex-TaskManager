@@ -3,10 +3,47 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from app.schemas.task import TaskOut
 from app.models.enums import GaNotePriority, GaNoteStatus, GaNoteType
+
+
+class DailyRlzTaskStateOut(BaseModel):
+    reason_code: str | None = None
+    reason_label: str | None = None
+    comment: str | None = None
+    updated_at: datetime | None = None
+    is_editable: bool
+    editable_until: datetime
+
+
+class DailyRlzCloseStateOut(BaseModel):
+    status: str
+    saved: bool = False
+    stale: bool = False
+    saved_at: datetime | None = None
+    is_editable: bool = False
+    editable_until: datetime | None = None
+
+
+class DailyRlzStateUpsert(BaseModel):
+    day: date
+    reason_code: str | None = None
+    comment: str | None = Field(default=None, max_length=10000)
+
+    @field_validator("reason_code")
+    @classmethod
+    def validate_reason(cls, value: str | None) -> str | None:
+        from app.services.daily_rlz_compliance import REASON_LABELS
+        if value is not None and value not in REASON_LABELS:
+            raise ValueError("Invalid Daily RLZ reason code")
+        return value
+
+
+class DailyRlzStateCorrection(DailyRlzStateUpsert):
+    user_id: uuid.UUID
+    correction_reason: str = Field(min_length=3, max_length=2000)
 
 
 class DailyReportTaskItem(BaseModel):
@@ -17,6 +54,7 @@ class DailyReportTaskItem(BaseModel):
     original_planned_end: date | None = None
     is_overdue: bool
     late_days: int | None = None
+    rlz_daily_state: DailyRlzTaskStateOut | None = None
 
 
 class DailyReportSystemOccurrence(BaseModel):
@@ -40,6 +78,7 @@ class DailyReportResponse(BaseModel):
     tasks_overdue: list[DailyReportTaskItem]
     system_today: list[DailyReportSystemOccurrence]
     system_overdue: list[DailyReportSystemOccurrence]
+    rlz_close_state: DailyRlzCloseStateOut | None = None
 
 
 class DailyReportGaEntryOut(BaseModel):

@@ -1,5 +1,21 @@
 # PrimeFlow 1H report automation
 
+## RLZ Daily Control extension
+
+The same `primeflow-report-scheduler` PM2 process also owns the database schedule
+with `report_type=RLZ_DAILY_CONTROL`. It creates an APScheduler `CronTrigger`
+from the stored execution time, weekdays and timezone, hot-reloads changes every
+45 seconds, and dispatches the RLZ generator at the seeded default of 16:00
+Europe/Tirane Monday-Friday. RLZ delivery does not use Celery.
+
+Schedules and recipients are report-type aware. RLZ recipients have no guessed
+or environment fallback address: a valid `RLZ_DAILY_CONTROL` recipient must be
+configured in Report Management. Delivery runs and immutable snapshots reuse
+`primeflow_report_delivery_runs` and `primeflow_report_snapshots`.
+
+Daily Report close validation, Reports & Control, fresh/manual previews, and the
+scheduled email all call the shared Daily RLZ compliance service.
+
 ## Decision and root cause
 
 The missed reports were caused by an intermittent connector/tool-discovery path before the PrimeFlow API was called. Scheduled delivery now runs in the dedicated `primeflow-report-scheduler` PM2 process and calls the authenticated FastAPI Common View endpoint directly. MCP remains available for interactive work.

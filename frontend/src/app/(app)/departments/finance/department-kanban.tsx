@@ -4,6 +4,7 @@ import * as React from "react"
 import { toast } from "sonner"
 
 import { TaskEditDialog } from "@/components/task-edit-dialog"
+import { DailyRlzPanel } from "@/components/daily-rlz-panel"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -669,6 +670,7 @@ export default function DepartmentKanban() {
 
   return (
     <div className="space-y-6">
+      <DailyRlzPanel />
       <Card>
         <CardHeader className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
           <div className="space-y-1">

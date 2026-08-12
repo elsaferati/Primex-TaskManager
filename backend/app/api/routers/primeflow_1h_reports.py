@@ -23,6 +23,11 @@ from app.services.audit import add_audit_log
 from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, render_html, render_plain_text, render_png
 from app.services.primeflow_report_delivery import configured_recipients, deliver_report, generate_fresh
+from app.services.daily_rlz_control_delivery import (
+    SCHEDULE_TYPE as RLZ_SCHEDULE_TYPE, REPORT_TYPE as RLZ_REPORT_TYPE,
+    deliver_daily_rlz_control, generate_fresh as generate_rlz_fresh,
+    render_html as render_rlz_html, render_plain as render_rlz_plain,
+)
 from app.services.primeflow_report_schedule_config import (
     DEFAULT_1H_SCHEDULES,
     DEFAULT_TIMEZONE,
@@ -40,7 +45,7 @@ async def require_report_manager(user: User = Depends(get_current_user)) -> User
 
 def _recipient(row: PrimeFlowReportRecipient) -> dict:
     data = {key: getattr(row, key) for key in (
-        "id", "email", "recipient_type", "is_active", "sort_order", "is_default",
+        "id", "email", "report_type", "recipient_type", "is_active", "sort_order", "is_default",
         "created_at", "updated_at", "created_by", "updated_by",
     )}
     return {key: value.isoformat() if isinstance(value, datetime) else str(value) if isinstance(value, uuid.UUID) else value for key, value in data.items()}
@@ -61,7 +66,7 @@ def _schedule(row: PrimeFlowReportSchedule) -> dict:
         next_runs.append(following.isoformat())
         previous = following
     return {
-        "id": str(row.id), "name": row.name, "report_slot": row.report_slot,
+        "id": str(row.id), "name": row.name, "report_type": row.report_type, "report_slot": row.report_slot,
         "execution_time": row.execution_time.strftime("%H:%M"), "timezone": row.timezone,
         "weekdays": row.weekdays, "is_active": row.is_active, "is_default": row.is_default,
         "backfill_enabled": row.backfill_enabled, "predecessor_schedule_id": str(row.predecessor_schedule_id) if row.predecessor_schedule_id else None,
@@ -97,11 +102,32 @@ class SendRequest(PreviewRequest):
     source_run_id: uuid.UUID | None = None
 
 
+class RlzPreviewRequest(BaseModel):
+    report_date: date
+    to: list[EmailStr] = Field(default_factory=list)
+    cc: list[EmailStr] = Field(default_factory=list)
+    bcc: list[EmailStr] = Field(default_factory=list)
+    use_default_recipients: bool = True
+
+
+class RlzSendRequest(RlzPreviewRequest):
+    reason: str = Field(min_length=3, max_length=2000)
+
+
 class RecipientCreate(BaseModel):
     email: EmailStr
+    report_type: str = "ONE_H"
     recipient_type: str = "TO"
     is_active: bool = True
     sort_order: int = Field(default=0, ge=0, le=10000)
+
+    @field_validator("report_type")
+    @classmethod
+    def report_type_valid(cls, value: str) -> str:
+        value = value.upper()
+        if value not in {"ONE_H", "RLZ_DAILY_CONTROL"}:
+            raise ValueError("Unsupported report type")
+        return value
 
     @field_validator("recipient_type")
     @classmethod
@@ -121,7 +147,8 @@ class RecipientUpdate(BaseModel):
 
 class SchedulePayload(BaseModel):
     name: str = Field(min_length=2, max_length=120)
-    report_slot: str
+    report_type: str = "ONE_H"
+    report_slot: str | None = None
     execution_time: str
     timezone: str = "Europe/Tirane"
     weekdays: list[int]
@@ -133,7 +160,15 @@ class SchedulePayload(BaseModel):
     retry_delays_seconds: list[int] = Field(default_factory=lambda: [0, 2, 5])
     sort_order: int = Field(default=0, ge=0, le=10000)
 
-    @field_validator("report_slot", "execution_time")
+    @field_validator("report_type")
+    @classmethod
+    def schedule_report_type_valid(cls, value: str) -> str:
+        value = value.upper()
+        if value not in {"ONE_H", "RLZ_DAILY_CONTROL"}:
+            raise ValueError("Unsupported report type")
+        return value
+
+    @field_validator("execution_time")
     @classmethod
     def valid_time(cls, value: str) -> str:
         time.fromisoformat(value)
@@ -171,15 +206,26 @@ async def _recipient_map(request: PreviewRequest) -> dict[str, list[str]]:
     return result
 
 
+async def _rlz_recipient_map(request: RlzPreviewRequest, *, require_any: bool) -> dict[str, list[str]]:
+    result = await configured_recipients(RLZ_SCHEDULE_TYPE) if request.use_default_recipients else {"to": [], "cc": [], "bcc": []}
+    result = {key: list(value) for key, value in result.items()}
+    for key in ("to", "cc", "bcc"):
+        result[key].extend(str(value) for value in getattr(request, key))
+        result[key] = list(dict.fromkeys(result[key]))
+    if require_any and not any(result.values()):
+        raise HTTPException(422, "Configure at least one valid RLZ Daily Control recipient")
+    return result
+
+
 def _file_response(content: bytes, media_type: str, filename: str) -> Response:
     return Response(content, media_type=media_type, headers={"Content-Disposition": f'attachment; filename="{filename}"'})
 
 
 @router.get("/overview")
 async def overview(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)) -> dict:
-    recipients = (await db.execute(select(PrimeFlowReportRecipient).order_by(PrimeFlowReportRecipient.sort_order))).scalars().all()
-    schedules = (await db.execute(select(PrimeFlowReportSchedule).order_by(PrimeFlowReportSchedule.sort_order))).scalars().all()
-    recent = (await db.execute(select(PrimeFlowReportDeliveryRun).order_by(PrimeFlowReportDeliveryRun.created_at.desc()).limit(10))).scalars().all()
+    recipients = (await db.execute(select(PrimeFlowReportRecipient).where(PrimeFlowReportRecipient.report_type == "ONE_H").order_by(PrimeFlowReportRecipient.sort_order))).scalars().all()
+    schedules = (await db.execute(select(PrimeFlowReportSchedule).where(PrimeFlowReportSchedule.report_type == "ONE_H").order_by(PrimeFlowReportSchedule.sort_order))).scalars().all()
+    recent = (await db.execute(select(PrimeFlowReportDeliveryRun).where(PrimeFlowReportDeliveryRun.report_type == "primeflow_1h").order_by(PrimeFlowReportDeliveryRun.created_at.desc()).limit(10))).scalars().all()
     return {"recipients": [_recipient(row) for row in recipients], "schedules": [_schedule(row) for row in schedules], "recent_runs": [_run(row) for row in recent]}
 
 
@@ -226,9 +272,49 @@ async def manual_send(payload: SendRequest, db: AsyncSession = Depends(get_db), 
     return _run(run)
 
 
+@router.get("/rlz/overview")
+async def rlz_overview(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)) -> dict:
+    recipients = (await db.execute(select(PrimeFlowReportRecipient).where(
+        PrimeFlowReportRecipient.report_type == RLZ_SCHEDULE_TYPE
+    ).order_by(PrimeFlowReportRecipient.sort_order))).scalars().all()
+    schedules = (await db.execute(select(PrimeFlowReportSchedule).where(
+        PrimeFlowReportSchedule.report_type == RLZ_SCHEDULE_TYPE
+    ).order_by(PrimeFlowReportSchedule.sort_order))).scalars().all()
+    recent = (await db.execute(select(PrimeFlowReportDeliveryRun).where(
+        PrimeFlowReportDeliveryRun.report_type == RLZ_REPORT_TYPE
+    ).order_by(PrimeFlowReportDeliveryRun.created_at.desc()).limit(50))).scalars().all()
+    return {"recipients": [_recipient(row) for row in recipients], "schedules": [_schedule(row) for row in schedules],
+            "recent_runs": [_run(row) for row in recent]}
+
+
+@router.post("/rlz/preview")
+async def rlz_preview(payload: RlzPreviewRequest, _: User = Depends(require_report_manager)) -> dict:
+    recipients = await _rlz_recipient_map(payload, require_any=False)
+    report = await generate_rlz_fresh(payload.report_date)
+    return {"report": report, "recipients": recipients, "plain_text": render_rlz_plain(report),
+            "html": render_rlz_html(report)}
+
+
+@router.post("/rlz/send")
+async def rlz_send(payload: RlzSendRequest, db: AsyncSession = Depends(get_db),
+                   user: User = Depends(require_report_manager)) -> dict:
+    recipients = await _rlz_recipient_map(payload, require_any=True)
+    run = await deliver_daily_rlz_control(
+        payload.report_date, recipient_map=recipients, trigger_type="MANUAL",
+        triggered_by_user_id=user.id, manual_reason=payload.reason,
+    )
+    add_audit_log(db=db, actor_user_id=user.id, entity_type="primeflow_report_run", entity_id=run.id,
+                  action="MANUAL_SEND", after={"report_type": RLZ_REPORT_TYPE, "status": run.status, "reason": payload.reason})
+    await db.commit()
+    if run.status not in {"SENT", "ALREADY_SENT"}:
+        raise HTTPException(502, detail={"message": "RLZ Daily Control delivery failed", "run_id": str(run.id),
+                                         "status": run.status, "error_message": run.error_message})
+    return _run(run)
+
+
 def _run(row: PrimeFlowReportDeliveryRun) -> dict:
     return {key: getattr(row, key) for key in (
-        "id", "report_date", "report_slot", "trigger_type", "schedule_id", "schedule_version",
+        "id", "report_type", "report_date", "report_slot", "trigger_type", "schedule_id", "schedule_version",
         "status", "attempt_count", "data_generated_at", "subject", "recipients", "gmail_message_id",
         "gmail_thread_id", "error_code", "error_message", "triggered_by_user_id", "manual_reason",
         "created_at", "started_at", "finished_at",
@@ -237,7 +323,7 @@ def _run(row: PrimeFlowReportDeliveryRun) -> dict:
 
 @router.get("/runs")
 async def runs(limit: int = Query(100, ge=1, le=500), db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
-    rows = (await db.execute(select(PrimeFlowReportDeliveryRun).order_by(PrimeFlowReportDeliveryRun.created_at.desc()).limit(limit))).scalars().all()
+    rows = (await db.execute(select(PrimeFlowReportDeliveryRun).where(PrimeFlowReportDeliveryRun.report_type == "primeflow_1h").order_by(PrimeFlowReportDeliveryRun.created_at.desc()).limit(limit))).scalars().all()
     return [_run(row) for row in rows]
 
 
@@ -273,8 +359,8 @@ async def download(run_id: uuid.UUID, format: str, db: AsyncSession = Depends(ge
 
 
 @router.get("/recipients")
-async def recipients(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
-    rows = (await db.execute(select(PrimeFlowReportRecipient).order_by(PrimeFlowReportRecipient.sort_order, PrimeFlowReportRecipient.email))).scalars().all()
+async def recipients(report_type: str = "ONE_H", db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
+    rows = (await db.execute(select(PrimeFlowReportRecipient).where(PrimeFlowReportRecipient.report_type == report_type).order_by(PrimeFlowReportRecipient.sort_order, PrimeFlowReportRecipient.email))).scalars().all()
     return [_recipient(row) for row in rows]
 
 
@@ -296,9 +382,10 @@ async def restore_default_recipients(db: AsyncSession = Depends(get_db), user: U
         row = (await db.execute(select(PrimeFlowReportRecipient).where(
             PrimeFlowReportRecipient.email == email,
             PrimeFlowReportRecipient.recipient_type == "TO",
+            PrimeFlowReportRecipient.report_type == "ONE_H",
         ))).scalar_one_or_none()
         if row is None:
-            row = PrimeFlowReportRecipient(email=email, recipient_type="TO", created_by=user.id)
+            row = PrimeFlowReportRecipient(email=email, report_type="ONE_H", recipient_type="TO", created_by=user.id)
             db.add(row)
             await db.flush()
         row.is_active, row.is_default, row.sort_order, row.updated_by = True, True, order * 10, user.id
@@ -309,7 +396,11 @@ async def restore_default_recipients(db: AsyncSession = Depends(get_db), user: U
 
 
 async def _ensure_active_recipient(db: AsyncSession, excluding: uuid.UUID) -> None:
-    count = (await db.execute(select(func.count()).select_from(PrimeFlowReportRecipient).where(PrimeFlowReportRecipient.is_active.is_(True), PrimeFlowReportRecipient.id != excluding))).scalar_one()
+    target = await db.get(PrimeFlowReportRecipient, excluding)
+    count = (await db.execute(select(func.count()).select_from(PrimeFlowReportRecipient).where(
+        PrimeFlowReportRecipient.is_active.is_(True), PrimeFlowReportRecipient.id != excluding,
+        PrimeFlowReportRecipient.report_type == (target.report_type if target else "ONE_H"),
+    ))).scalar_one()
     if count == 0:
         raise HTTPException(422, "Automatic reports require at least one active recipient")
 
@@ -351,14 +442,23 @@ async def delete_recipient(recipient_id: uuid.UUID, db: AsyncSession = Depends(g
 
 
 @router.get("/schedules")
-async def schedules(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
-    rows = (await db.execute(select(PrimeFlowReportSchedule).order_by(PrimeFlowReportSchedule.sort_order))).scalars().all()
+async def schedules(report_type: str = "ONE_H", db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)):
+    rows = (await db.execute(select(PrimeFlowReportSchedule).where(PrimeFlowReportSchedule.report_type == report_type).order_by(PrimeFlowReportSchedule.sort_order))).scalars().all()
     return [_schedule(row) for row in rows]
 
 
 async def _validate_schedule(db: AsyncSession, payload: SchedulePayload, row_id: uuid.UUID | None = None) -> None:
+    if payload.report_type not in {"ONE_H", "RLZ_DAILY_CONTROL"}:
+        raise HTTPException(422, "Unsupported report type")
+    if payload.report_type == "ONE_H" and payload.report_slot not in SLOTS:
+        raise HTTPException(422, "ONE_H schedules require a supported report slot")
+    if payload.report_type == "RLZ_DAILY_CONTROL" and (
+        payload.report_slot is not None or payload.backfill_enabled or payload.predecessor_schedule_id is not None
+    ):
+        raise HTTPException(422, "RLZ Daily Control has no 1H slot, predecessor, or backfill chain")
     duplicate = (await db.execute(select(PrimeFlowReportSchedule).where(
         PrimeFlowReportSchedule.id != row_id if row_id else PrimeFlowReportSchedule.id.isnot(None),
+        PrimeFlowReportSchedule.report_type == payload.report_type,
         PrimeFlowReportSchedule.report_slot == payload.report_slot,
         PrimeFlowReportSchedule.is_active.is_(True),
     ))).scalars().first()
@@ -409,7 +509,7 @@ async def update_schedule(schedule_id: uuid.UUID, payload: SchedulePayload, db: 
 
 @router.post("/schedules/restore-defaults")
 async def restore_default_schedules(db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
-    rows = (await db.execute(select(PrimeFlowReportSchedule))).scalars().all()
+    rows = (await db.execute(select(PrimeFlowReportSchedule).where(PrimeFlowReportSchedule.report_type == "ONE_H"))).scalars().all()
     rows_by_name = {row.name: row for row in rows}
     restored: list[PrimeFlowReportSchedule] = []
     predecessor_id: uuid.UUID | None = None
@@ -420,6 +520,7 @@ async def restore_default_schedules(db: AsyncSession = Depends(get_db), user: Us
         if row is None:
             row = PrimeFlowReportSchedule(
                 name=default.name,
+                report_type="ONE_H",
                 report_slot=default.report_slot,
                 execution_time=default.execution_time,
                 created_by=user.id,
@@ -467,7 +568,7 @@ async def schedule_action(schedule_id: uuid.UUID, action: str, db: AsyncSession 
         raise HTTPException(404, "Schedule not found")
     if action == "duplicate":
         copy = PrimeFlowReportSchedule(
-            name=f"{row.name} copy {datetime.now():%H%M%S}", report_slot=row.report_slot,
+            name=f"{row.name} copy {datetime.now():%H%M%S}", report_type=row.report_type, report_slot=row.report_slot,
             execution_time=row.execution_time, timezone=row.timezone, weekdays=row.weekdays,
             is_active=False, backfill_enabled=row.backfill_enabled,
             predecessor_schedule_id=row.predecessor_schedule_id, grace_period_minutes=row.grace_period_minutes,
@@ -481,7 +582,7 @@ async def schedule_action(schedule_id: uuid.UUID, action: str, db: AsyncSession 
         return _schedule(copy)
     if action == "enable":
         candidate = SchedulePayload(
-            name=row.name, report_slot=row.report_slot, execution_time=row.execution_time.strftime("%H:%M"),
+            name=row.name, report_type=row.report_type, report_slot=row.report_slot, execution_time=row.execution_time.strftime("%H:%M"),
             timezone=row.timezone, weekdays=row.weekdays, is_active=True,
             backfill_enabled=row.backfill_enabled, predecessor_schedule_id=row.predecessor_schedule_id,
             grace_period_minutes=row.grace_period_minutes, retry_count=row.retry_count,

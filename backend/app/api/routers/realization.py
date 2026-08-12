@@ -35,6 +35,7 @@ from app.models.realization import (
 )
 from app.models.task import Task
 from app.models.task_user_comment import TaskUserComment
+from app.services.daily_rlz_compliance import build_daily_rlz_compliance, is_editable_day
 from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.schemas.realization import (
@@ -1584,6 +1585,11 @@ async def close_realization_day(
         raise HTTPException(status_code=403, detail="Forbidden")
     if user.role == UserRole.STAFF and result.user_id != user.id:
         raise HTTPException(status_code=403, detail="STAFF can close only their own day")
+    if user.role == UserRole.STAFF and not is_editable_day(period.start_date):
+        raise HTTPException(status_code=409, detail={
+            "code": "DAILY_RLZ_EDIT_WINDOW_CLOSED",
+            "message": "Arsyeja dhe komenti për këtë ditë mund të ndryshohen vetëm deri në orën 17:00.",
+        })
     require_unlocked(period)
     planned, _ = await _pinned_snapshots(db, period)
     if planned is None:
@@ -1600,12 +1606,16 @@ async def close_realization_day(
     await db.flush()
     await db.refresh(result)
     facts = dict(result.facts_json or {})
-    if int(facts.get("missing_comment_count") or 0) > 0:
+    daily_report_state = await build_daily_rlz_compliance(
+        db, user_id=result.user_id, day=period.start_date
+    )
+    if daily_report_state["blockers"]:
         raise HTTPException(
             status_code=409,
             detail={
-                "code": "RLZ_TASK_COMMENT_REQUIRED",
-                "message": "Para mbylljes, plotëso komentet e rezultateve që mungojnë.",
+                "code": "RLZ_DAILY_REPORT_VALIDATION_FAILED",
+                "message": "Plotëso detyrat para ruajtjes.",
+                "blockers": daily_report_state["blockers"],
             },
         )
     if int(facts.get("missing_pink_explanation_count") or 0) > 0:
@@ -1645,18 +1655,21 @@ async def close_realization_day(
         raise HTTPException(status_code=409, detail="DIAMOND requires verified DIAMOND evidence")
 
     latest = await _latest_close_event(db, period_id=period.id, user_id=result.user_id)
-    if latest is not None and latest.action in {
+    latest_is_closed = latest is not None and latest.action in {
         RealizationDailyCloseAction.CLOSE.value,
         RealizationDailyCloseAction.CORRECT.value,
-    }:
-        raise HTTPException(status_code=409, detail="The day is already closed; reopen it before correction")
+    }
+    if latest_is_closed and not daily_report_state["rlz_close_state"]["stale"]:
+        raise HTTPException(status_code=409, detail="The day is already closed and has no later Daily Report changes")
+    if latest_is_closed and user.role != UserRole.STAFF:
+        raise HTTPException(status_code=409, detail="Manager/admin correction requires the explicit reopen flow")
     action = (
         RealizationDailyCloseAction.CORRECT
         if latest is not None
         else RealizationDailyCloseAction.CLOSE
     )
     if action is RealizationDailyCloseAction.CORRECT and not reason:
-        raise HTTPException(status_code=422, detail="A corrected daily close requires a reason")
+        reason = "DAILY_REPORT_STATE_UPDATED"
     event = RealizationDailyCloseEvent(
         period_id=period.id,
         result_id=result.id,
@@ -1673,6 +1686,11 @@ async def close_realization_day(
             "recovery": facts.get("recovery"),
             "counters": facts.get("counters"),
             "task_ids": [item.get("task_id") for item in facts.get("tasks") or [] if item.get("task_id")],
+            "daily_report_state": {
+                "day": period.start_date.isoformat(),
+                "saved_at": datetime.now(ZoneInfo(settings.APP_TIMEZONE)).isoformat(),
+                "tasks": daily_report_state["tasks"],
+            },
         },
         supersedes_event_id=latest.id if latest else None,
         actor_user_id=user.id,

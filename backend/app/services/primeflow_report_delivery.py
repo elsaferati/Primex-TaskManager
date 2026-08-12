@@ -47,15 +47,18 @@ def validate_report_config(*, require_gmail: bool = True) -> None:
     report_timezone()
 
 
-async def configured_recipients() -> dict[str, list[str]]:
+async def configured_recipients(report_type: str = "ONE_H") -> dict[str, list[str]]:
     async with SessionLocal() as db:
         rows = (await db.execute(
             select(PrimeFlowReportRecipient)
             .where(PrimeFlowReportRecipient.is_active.is_(True))
+            .where(PrimeFlowReportRecipient.report_type == report_type)
             .order_by(PrimeFlowReportRecipient.sort_order, PrimeFlowReportRecipient.email)
         )).scalars().all()
-    if not rows:
+    if not rows and report_type == "ONE_H":
         return {"to": _environment_recipients(), "cc": [], "bcc": []}
+    if not rows:
+        return {"to": [], "cc": [], "bcc": []}
     result = {"to": [], "cc": [], "bcc": []}
     for row in rows:
         result[row.recipient_type.lower()].append(row.email)

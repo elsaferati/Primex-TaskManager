@@ -9,10 +9,11 @@ from app.db import Base
 
 class PrimeFlowReportSchedule(Base):
     __tablename__ = "primeflow_report_schedules"
-    __table_args__ = (UniqueConstraint("name", name="uq_primeflow_report_schedule_name"),)
+    __table_args__ = (UniqueConstraint("report_type", "name", name="uq_primeflow_report_schedule_type_name"),)
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
-    report_slot: Mapped[str] = mapped_column(String(5), nullable=False)
+    report_type: Mapped[str] = mapped_column(String(40), nullable=False, default="ONE_H", server_default="ONE_H")
+    report_slot: Mapped[str | None] = mapped_column(String(5))
     execution_time: Mapped[time] = mapped_column(Time, nullable=False)
     timezone: Mapped[str] = mapped_column(String(80), nullable=False, default="Europe/Tirane")
     weekdays: Mapped[list[int]] = mapped_column(ARRAY(Integer), nullable=False, default=lambda: [0, 1, 2, 3, 4])
