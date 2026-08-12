@@ -30,13 +30,13 @@ from app.services.system_task_schedule import matches_template_date
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
     "A JEMI BRENDA MESATARES ME PROJEKTE?",
-    "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
+    "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "N- (GA) PV/FESTE?",
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
     "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?",
-    "TAK E PA KRYERA?",
+    "TAK STATUSI?",
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
 ]
@@ -56,6 +56,7 @@ MANUAL_SECTION_TITLES = {
     SECTION_TITLES[0],
 }
 SECTION_TITLE_ALIASES = {
+    "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3": SECTION_TITLES[1],
     "(GA) TIKETAT E STD DHE TONAT? RAPORTOHEN NE M3": SECTION_TITLES[1],
     "TAKIMET PA KRY (KONTROLLO PLATFORMEN)?": SECTION_TITLES[7],
     "TAKIMET E PA KRYERA ?": SECTION_TITLES[7],
@@ -118,7 +119,7 @@ def canonical_meetings_section_title(raw_title: str | None) -> str:
 
     # Wording variants that still mean the same auto-filled questions.
     if "TIKETATESTD" in compact and "RAPORTOHENNEM3" in compact:
-        return SECTION_TITLES[3]
+        return SECTION_TITLES[1]
     return raw
 
 
@@ -365,6 +366,11 @@ async def apply_weekly_planner_task_order(
         primary_user = users_by_id.get(primary_user_id)
         department_id = primary_user.department_id if primary_user and primary_user.department_id else task.department_id
         department_code = _weekly_planner_department_code(department_id, codes)
+        # Report tables must show the department of the person responsible for
+        # the task, never the department of the project that owns the task.
+        # Keep it on the request-local task instance alongside the existing
+        # Weekly Planner ordering metadata.
+        setattr(task, "_report_user_department_code", department_code if primary_user else "-")
         setattr(
             task,
             "_weekly_planner_report_sort",
@@ -560,7 +566,15 @@ def _m3_department_code_label(department_id: Any, department_codes: dict[Any, st
 
 
 def _m3_department_label(task: Task, department_codes: dict[Any, str] | None) -> str:
-    """Return the short department labels used in the M3 system-task table."""
+    """Return the responsible user's department for report task tables.
+
+    ``apply_weekly_planner_task_order`` resolves the primary assignee and adds
+    the code to each report task. The fallback supports isolated legacy callers
+    that have not been prepared by that shared report pipeline.
+    """
+    user_department = str(getattr(task, "_report_user_department_code", "") or "").strip()
+    if user_department:
+        return _m3_department_code_label(user_department, {user_department: user_department})
     return _m3_department_code_label(getattr(task, "department_id", None), department_codes)
 
 
@@ -647,11 +661,14 @@ def _m3_status_table(
         ordered_key = common_view_task_sort_key(
             item, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
         )
+        # Completed work is always listed after active work in a task table.
+        done_last = 1 if getattr(item, "completed_at", None) or _normalize_report_status(item.status) == "DONE" else 0
         if getattr(item, "_weekly_planner_report_sort", None):
-            return ordered_key
+            return (done_last, *ordered_key)
         # Preserve the legacy order for direct callers that do not have the
         # Weekly Planner metadata available.
         return (
+            done_last,
             0 if include_type and getattr(item, "system_template_origin_id", None) is not None else 1,
             _m3_department_sort_key(item, department_codes) if include_department else 0,
             *ordered_key,
@@ -798,6 +815,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     bz_alignment_lines = await _bz_alignment_lines(
         db, tomorrow, tasks, names, assignee_ids_by_task, include_status=True
     )
+    bz_template_metadata = await _bz_template_metadata(db)
 
     meeting_stmt = select(Meeting).where(Meeting.starts_at.is_not(None))
     meetings = (await db.execute(meeting_stmt)).scalars().all()
@@ -852,12 +870,31 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
             blocked, names, assignee_ids_by_task, include_status=True, all_participant_ids=all_participant_ids
         ),
         bz_task_metadata=_merged_task_metadata(
-            _task_metadata_by_title(tomorrow_tasks, department_codes),
-            _common_task_metadata_by_title(common_items.get("bz") or [], tomorrow, department_codes),
+            _merged_task_metadata(
+                _task_metadata_by_title(
+                    tomorrow_tasks,
+                    department_codes,
+                    names,
+                    assignee_ids_by_task,
+                    all_participant_ids,
+                ),
+                bz_template_metadata,
+            ),
+            _common_task_metadata_by_title(
+                common_items.get("bz") or [], tomorrow, department_codes, user_department_codes
+            ),
         ),
         blocked_task_metadata=_merged_task_metadata(
-            _task_metadata_by_title(blocked, department_codes),
-            _common_task_metadata_by_title(common_items.get("blocked") or [], tomorrow, department_codes),
+            _task_metadata_by_title(
+                blocked,
+                department_codes,
+                names,
+                assignee_ids_by_task,
+                all_participant_ids,
+            ),
+            _common_task_metadata_by_title(
+                common_items.get("blocked") or [], tomorrow, department_codes, user_department_codes
+            ),
         ),
         with_status=True,
     )
@@ -996,19 +1033,38 @@ def _task_lines(
 
 
 def _task_metadata_by_title(
-    tasks: list[Task], department_codes: dict[Any, str] | None
+    tasks: list[Task],
+    department_codes: dict[Any, str] | None,
+    names: dict[Any, str] | None = None,
+    assignee_ids_by_task: dict[Any, set[Any]] | None = None,
+    all_participant_ids: set[Any] | None = None,
 ) -> dict[str, tuple[str, str]]:
-    """Metadata for line-based BZ/BLLOK tables, keyed by their displayed task title."""
-    return {
-        _clean_task_title(task.title): (_m3_department_label(task, department_codes), _m3_am_pm_label(task))
-        for task in tasks
-    }
+    """Metadata for line-based BZ/BLLOK tables.
+
+    A title can legitimately occur for different users.  Store an owner+title
+    key for the table renderer, while retaining a title-only fallback for old
+    callers and non-owned sources.
+    """
+    metadata: dict[str, tuple[str, str]] = {}
+    for task in tasks:
+        title = _clean_task_title(task.title)
+        value = (_m3_department_label(task, department_codes), _m3_am_pm_label(task))
+        metadata.setdefault(title, value)
+        if names is not None:
+            owner = _task_owners(
+                task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids
+            )
+            metadata[f"{owner}\0{title}"] = value
+    return metadata
 
 
 def _common_task_metadata_by_title(
-    items: list[dict[str, Any]], day: date, department_codes: dict[Any, str] | None
+    items: list[dict[str, Any]],
+    day: date,
+    department_codes: dict[Any, str] | None,
+    user_department_codes: dict[Any, str] | None = None,
 ) -> dict[str, tuple[str, str]]:
-    """Read department and AM/PM directly from Common View task rows.
+    """Read the responsible user's department and AM/PM from Common View rows.
 
     The BZ and Block tables may use Common View rows whose effective date does
     not match the report's fallback task list.  Those rows already include the
@@ -1022,9 +1078,15 @@ def _common_task_metadata_by_title(
         title = _common_title(item)
         if not title:
             continue
-        department = _m3_department_code_label(
-            item.get("department_id") or item.get("departmentId"), department_codes
+        user_id = str(item.get("user_id") or item.get("userId") or "")
+        department = next(
+            (code for candidate_id, code in (user_department_codes or {}).items() if str(candidate_id) == user_id),
+            "",
         )
+        if not department:
+            department = _m3_department_code_label(
+                item.get("department_id") or item.get("departmentId"), department_codes
+            )
         period = str(item.get("finish_period") or item.get("finishPeriod") or "").strip().upper()
         am_pm = period if period in {"AM", "PM", "AM/PM"} else "-"
         metadata[title] = (department, am_pm)
@@ -1380,6 +1442,10 @@ async def _bz_alignment_lines(
 
     users = (await db.execute(select(User).where(User.id.in_(user_ids)))).scalars().all()
     users_map = {user.id: user for user in users}
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
     ga_user = next((user for user in users if (user.username or "").lower() == "gane.arifaj"), None)
     ga_user_id = ga_user.id if ga_user else None
     if ga_user_id is None:
@@ -1404,9 +1470,28 @@ async def _bz_alignment_lines(
         if current is None or status_rank.get(status, 0) > status_rank.get(current, 0):
             task_status_by_template[template_id] = status
 
+    def template_planner_sort_key(template: SystemTaskTemplate) -> tuple:
+        assignee_ids = list(template.assignee_ids or [])
+        # BZ rows use the first configured assignee as their one report
+        # reference user; the template default is used only when no list exists.
+        primary_user_id = assignee_ids[0] if assignee_ids else template.default_assignee_id
+        primary_user = users_map.get(primary_user_id)
+        department = _m3_department_code_label(
+            getattr(primary_user, "department_id", None), department_codes
+        ) if primary_user else "-"
+        return (
+            WEEKLY_PLANNER_DEPARTMENT_ORDER.get(department, len(WEEKLY_PLANNER_DEPARTMENT_ORDER)),
+            department.casefold(),
+            1 if not primary_user or primary_user.weekly_planner_sort_order is None else 0,
+            primary_user.weekly_planner_sort_order if primary_user and primary_user.weekly_planner_sort_order is not None else 10**9,
+            (primary_user.full_name or primary_user.username or primary_user.email or "").casefold() if primary_user else "~",
+            template.alignment_time or datetime.max.time(),
+            (template.title or "").casefold(),
+        )
+
     lines: list[str] = []
     seen: set[tuple[Any, str]] = set()
-    for template in sorted(templates, key=lambda item: (item.alignment_time or datetime.min.time(), item.title or "")):
+    for template in sorted(templates, key=template_planner_sort_key):
         alignment_ids = alignment_users_map.get(template.id, [])
         if not alignment_ids or (ga_user_id is not None and ga_user_id not in alignment_ids):
             continue
@@ -1434,6 +1519,45 @@ async def _bz_alignment_lines(
         else:
             lines.append(f"- {owner_label}: {title}")
     return lines
+
+
+async def _bz_template_metadata(db: AsyncSession) -> dict[str, tuple[str, str]]:
+    """Resolve BZ metadata from each template's first assigned user.
+
+    This keeps BZ's displayed department and sorting reference consistent for
+    templates that have multiple assignees.
+    """
+    templates = (
+        await db.execute(
+            select(SystemTaskTemplate)
+            .where(SystemTaskTemplate.is_active.is_(True))
+            .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
+        )
+    ).scalars().all()
+    user_ids = {
+        (list(template.assignee_ids or [])[0] if list(template.assignee_ids or []) else template.default_assignee_id)
+        for template in templates
+        if list(template.assignee_ids or []) or template.default_assignee_id
+    }
+    users = (
+        await db.execute(select(User).where(User.id.in_(user_ids)))
+    ).scalars().all() if user_ids else []
+    users_by_id = {user.id: user for user in users}
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
+    metadata: dict[str, tuple[str, str]] = {}
+    for template in templates:
+        assignee_ids = list(template.assignee_ids or [])
+        primary_user_id = assignee_ids[0] if assignee_ids else template.default_assignee_id
+        primary_user = users_by_id.get(primary_user_id)
+        metadata[_clean_task_title(template.title)] = (
+            _m3_department_code_label(getattr(primary_user, "department_id", None), department_codes)
+            if primary_user else "-",
+            "-",
+        )
+    return metadata
 
 
 def _common_meeting_lines(items: list[dict[str, Any]], day: date) -> list[str]:
@@ -1579,11 +1703,25 @@ def _tomorrow_task_table(
         border,
     ]
     values = [_strip_list_marker(line) for line in lines if line and not line.startswith("(")]
+
+    def metadata_for(value: str) -> tuple[str, str]:
+        """Resolve metadata for the exact rendered owner/title pair.
+
+        Different tasks can share a title (for example one task for DV and one
+        for LH).  Looking up only the title lets one person's department leak
+        into the other's row.
+        """
+        _, owner, raw_title = _parse_owned_task_line(value)
+        owner_display = re.sub(r"\s+", " ", owner).strip() or "-"
+        title_value = _strip_status_markers(raw_title).strip()
+        metadata = task_metadata or {}
+        return metadata.get(f"{owner_display}\0{title_value}", metadata.get(title_value, ("-", "-")))
+
     department_order = M3_DEPARTMENT_ORDER
     values.sort(
-        key=lambda value: department_order.get(
-            (task_metadata or {}).get(_strip_status_markers(_parse_owned_task_line(value)[2]), ("-", "-"))[0],
-            len(department_order),
+        key=lambda value: (
+            1 if _normalize_report_status(_parse_owned_task_line(value)[0]) == "DONE" else 0,
+            department_order.get(metadata_for(value)[0], len(department_order)),
         )
     )
     if not values:
@@ -1599,7 +1737,7 @@ def _tomorrow_task_table(
             status = status or "TODO"
         # Keep all assignees in one WHO cell so one task is never split by a mid-row border.
         owner_display = re.sub(r"\s+", " ", owner).strip() or "-"
-        department, am_pm = (task_metadata or {}).get(title_value, ("-", "-"))
+        department, am_pm = metadata_for(value)
         if include_am_pm_times:
             am_pm = {"AM": "AM (08:15)", "PM": "PM (13:30)"}.get(am_pm, am_pm)
         title_lines = _wrap_fixed_width(title_value, title_width)

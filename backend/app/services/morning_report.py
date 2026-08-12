@@ -53,8 +53,8 @@ SECTION_TITLES = [
     # Auto-filled from PrimeFlow
     "(GA) DET NGA EMAILS TE REJA",
     "(GA) VONESA/MUNGESA. A NDRYSHON PLANI PER SOT?",
-    "(GA) NOTES TE REJA?",
-    "PV/FESTA EXTERNE/TAKIMET EXTERNE/ TAKIME INTERNE/ BZ ME GA/BLLOK:",
+    "(GA) NOTES TE REJA ( NOT DISSCUSED)?",
+    "PV/FESTA EXT/TAK EXT/ TAK INT/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
 ]
 MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
@@ -70,6 +70,7 @@ LEGACY_NOTES_TITLE = (
     "VENDOS DET: STATUS (1H: EM(08:00),08:00,DL,AM,AM&PM,PM/P/R1)"
 )
 SECTION_TITLE_ALIASES = {
+    "(GA) NOTES TE REJA?": SECTION_TITLES[3],
     "(GA) NOTES TE REJA?- SELEKTO NOTES TE KALTRA DHE DISKUTO (ADM & DSG) SECILEN A KRIJOHET DETYRE?": SECTION_TITLES[3],
     LEGACY_NOTES_TITLE: SECTION_TITLES[3],
 }
@@ -269,9 +270,9 @@ def _attendance_section(entries: list[CommonEntry], names: dict[Any, str], repor
 
     return _normalize_section(
         [
-            *_ascii_table("VONESA", [("NR", 2), ("WHO", 10), ("TIME", 11), ("NOTE", 48)], delay_rows),
+            *_ascii_table("VONESA", [("NR", 2), ("KUSH", 10), ("KOHA", 11), ("NOTE", 48)], delay_rows),
             "",
-            *_ascii_table("MUNGESA", [("NR", 2), ("WHO", 10), ("TIME", 11), ("NOTE", 48)], absence_rows),
+            *_ascii_table("MUNGESA", [("NR", 2), ("KUSH", 10), ("KOHA", 11), ("NOTE", 48)], absence_rows),
             "",
             "NDRYSHON PLANI: (Ploteso manualisht)",
         ]
@@ -322,7 +323,13 @@ def _emails_section(
                     all_participant_ids=all_participant_ids,
                 ),
                 with_status=True,
-                task_metadata=_task_metadata_by_title(source_tasks, department_codes),
+                task_metadata=_task_metadata_by_title(
+                    source_tasks,
+                    department_codes,
+                    names,
+                    assignee_ids_by_task,
+                    all_participant_ids,
+                ),
                 include_am_pm_times=True,
             )
         )
@@ -362,7 +369,11 @@ async def _day_context_section(
     external_meetings = [meeting for meeting in today_meetings if meeting.meeting_type == "external"]
     internal_meetings = [meeting for meeting in today_meetings if meeting.meeting_type != "external"]
 
-    today_tasks = [task for task in tasks if _belongs_to_day(task, report_day) and _is_open(task)]
+    # BZ can include a completed alignment task. Keep the open-task list for
+    # normal report filtering, but retain all tasks for BZ row metadata so a
+    # completed row still displays its responsible user's department and AM/PM.
+    today_report_tasks = [task for task in tasks if _belongs_to_day(task, report_day)]
+    today_tasks = [task for task in today_report_tasks if _is_open(task)]
     bz_tasks = [task for task in today_tasks if re.search(r"\bBZ\b", task.title or "", re.I)]
     blocked_tasks = [task for task in today_tasks if task.is_bllok]
     all_participant_ids = await _all_participant_user_ids(db)
@@ -407,7 +418,13 @@ async def _day_context_section(
             "BZ ME GA",
             bz_lines,
             with_status=True,
-            task_metadata=_task_metadata_by_title(today_tasks, department_codes),
+            task_metadata=_task_metadata_by_title(
+                today_report_tasks,
+                department_codes,
+                names,
+                assignee_ids_by_task,
+                all_participant_ids,
+            ),
             include_am_pm_times=True,
         ),
         "",
@@ -415,7 +432,13 @@ async def _day_context_section(
             "BLLOK",
             block_lines,
             with_status=True,
-            task_metadata=_task_metadata_by_title(blocked_tasks, department_codes),
+            task_metadata=_task_metadata_by_title(
+                blocked_tasks,
+                department_codes,
+                names,
+                assignee_ids_by_task,
+                all_participant_ids,
+            ),
         ),
     ]
     count = len(leave_rows) + len(holiday_rows) + len(today_meetings) + len(bz_lines) + len(block_lines)

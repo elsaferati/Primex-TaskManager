@@ -54,8 +54,8 @@ function canonicalMeetingsSectionTitle(title: string) {
   if (key === compactSectionTitle("A JEMI BRENDA MESATARES ME PROJEKTE?")) {
     return "A JEMI BRENDA MESATARES ME PROJEKTE?"
   }
-  if (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3")) {
-    return "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3"
+  if (key.includes("TIKETATESTD")) {
+    return "(GA) ZHV: TIKETAT E STD?"
   }
   if (key === compactSectionTitle("DET NE PROCES SISTEMIT - SYSTEM TASKS REPORT - LATE?")) {
     return "SYSTEM TASK LATE"
@@ -76,13 +76,16 @@ function canonicalMeetingsSectionTitle(title: string) {
     return "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?"
   }
   if (key === compactSectionTitle("TAKIMET PA KRY (KONTROLLO PLATFORMEN)?")) {
-    return "TAK E PA KRYERA?"
+    return "TAK STATUSI?"
   }
   if (key === compactSectionTitle("TAKIMET E PA KRYERA ?")) {
-    return "TAK E PA KRYERA?"
+    return "TAK STATUSI?"
   }
   if (key === compactSectionTitle("TAK E PA KRYERA?")) {
-    return "TAK E PA KRYERA?"
+    return "TAK STATUSI?"
+  }
+  if (key === compactSectionTitle("TAK STATUSI?")) {
+    return "TAK STATUSI?"
   }
   if (key === compactSectionTitle("N- (GA) TAKIMET EXTERNE/ TAKIMET INTERNE/ BZ ME GA/BLLOK?")) {
     return "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK"
@@ -99,10 +102,10 @@ function canonicalMeetingsSectionTitle(title: string) {
 function collapseMeetingsSections(sections: Section[]): Section[] {
   const displayOrder = [
     "A JEMI BRENDA MESATARES ME PROJEKTE?",
-    "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
+    "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
-    "TAK E PA KRYERA?",
+    "TAK STATUSI?",
     "N- (GA) PV/FESTE?",
     "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?",
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
@@ -151,17 +154,17 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
 
 function sectionGroupLabel(title: string) {
   const key = compactSectionTitle(title)
-  if (key.includes("TIKETATESTD") && key.includes("RAPORTOHENNEM3")) {
+  if (key.includes("TIKETATESTD")) {
     return "Auto-filled from PrimeFlow"
   }
   const knownAuto = [
-    "(GA) ZHV: TIKETAT E STD? RAPORTOHEN NE M3",
+    "(GA) ZHV: TIKETAT E STD?",
     "SYSTEM TASK LATE",
     "DET PA PROGRES PINK (FT DHE PRJK)",
     "N- (GA) PV/FESTE?",
     "N- (GA) TAK EXT/TAK INT/BZ ME GA/BLLOK",
     "N- (GA) DET TE REJA LAST WEEK/THIS WEEK/08:00/ME DEADLINE?",
-    "TAK E PA KRYERA?",
+    "TAK STATUSI?",
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
   ]

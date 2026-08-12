@@ -49,12 +49,13 @@ SECTION_TITLES = [
     "PIKAT E BORDIT/DISKUTO APLIKANTAT",
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
-    "NOTES TE REJA ME TE KALTER DHE DISSCUSED",
+    "NOTES TE REJA ( NOT DISSCUSED)",
     "GA MBYLLJA E DET",
     "HV MBYLLJA E DET",
 ]
 MANUAL_SECTION_TITLES = set(SECTION_TITLES[:4])
 SECTION_TITLE_ALIASES = {
+    "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[6],
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED?": SECTION_TITLES[6],
 }
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
@@ -186,11 +187,16 @@ async def _new_system_task_rows(
             if user_id in users_map
         ]
         owner_label = " ".join(dict.fromkeys([owner for owner in owners if owner != "-"])) or "-"
+        primary_user_id = template.default_assignee_id or (assignee_ids[0] if assignee_ids else None)
+        primary_user = users_map.get(primary_user_id)
+        user_department = _m3_department_code_label(
+            getattr(primary_user, "department_id", None), department_codes
+        ) if primary_user else "-"
         created = _local_date(template.created_at)
         rows.append([
             str(len(rows) + 1),
             owner_label,
-            _m3_department_label(template, department_codes),
+            user_department,
             _m3_am_pm_label(template),
             _display_title(template.title),
             created.strftime("%d.%m.%Y") if created else "-",

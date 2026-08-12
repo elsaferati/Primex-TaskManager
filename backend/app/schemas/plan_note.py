@@ -86,6 +86,7 @@ class PlanNoteTaskDeadlineUpdate(BaseModel):
 class PlanNoteTaskAssigneeStateUpdate(BaseModel):
     assignee_id: uuid.UUID
     status: TaskStatus
+    confirmation_assignee_id: uuid.UUID | None = None
     start_date: datetime | None = None
     due_date: datetime | None = None
     finish_period: TaskFinishPeriod | None = None

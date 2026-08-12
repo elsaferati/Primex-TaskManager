@@ -91,6 +91,7 @@ const COMMON_FAST_PRINT_ROW_IDS: readonly CommonType[] = [
   "r1",
   "personal",
 ]
+const COMMON_MEETING_PRINT_ROW_IDS: readonly CommonType[] = ["external", "internal"]
 const getCommonPrintRowRank = (id: CommonType) => {
   const rank = COMMON_PRINT_ROW_ORDER.indexOf(id)
   return rank === -1 ? COMMON_PRINT_ROW_ORDER.length : rank
@@ -100,7 +101,23 @@ const orderCommonRowsForPrint = <T extends { id: CommonType }>(rows: readonly T[
     .map((row, index) => ({ row, index }))
     .sort((a, b) => getCommonPrintRowRank(a.row.id) - getCommonPrintRowRank(b.row.id) || a.index - b.index)
     .map(({ row }) => row)
-const getCommonPrintRowSubtext = (id: CommonType) => (id === "blocked" ? "14:30 - 15:30" : "")
+const getCommonPrintRowSubtext = (id: CommonType) => {
+  if (id === "blocked") return "14:30 - 15:30"
+  if (id === "personal") return "GA: (08:15 / 13:15)\nDV/LH: (10:15 / 14:30)"
+  return ""
+}
+
+const getNextWorkingDay = (from: Date) => {
+  const next = new Date(from.getFullYear(), from.getMonth(), from.getDate())
+  next.setDate(next.getDate() + 1)
+  while (next.getDay() === 0 || next.getDay() === 6) {
+    next.setDate(next.getDate() + 1)
+  }
+  return next
+}
+
+const escapePrintHtml = (value: string) =>
+  value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;")
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
@@ -120,6 +137,7 @@ type ExternalHolidayItem = { entryId?: string; title: string; date: string; note
 type FastTaskItemMeta = {
   taskId?: string
   userId?: string
+  departmentId?: string
   fastTaskOrder?: number | null
   finishPeriod?: "AM" | "PM" | null
   oneHReportSlot?: OneHReportSlot | null
@@ -676,6 +694,12 @@ const commonPrintTaskTitle = (entry: { title: string; assignees?: string[]; pers
   return assigneeInitials.length ? `${assigneeInitials.join("/")}: ${title}` : title
 }
 const commonPrintPersonalTaskTitle = (entry: { title: string }) => commonPrintTitleLine(entry.title)
+const personalTaskTitleHasInitials = (title: string, targetInitials: string) => {
+  const titlePrefix = commonPrintPersonalTaskTitle(title).trim().toUpperCase()
+  const match = titlePrefix.match(/^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|\/|$)/)
+  const participants = (match?.[0] || "").split(/[:/]/).map((value) => value.trim())
+  return participants.includes(targetInitials.trim().toUpperCase())
+}
 
 const getCommonTitleMarkClass = (isDone: boolean, isAdded: boolean) => {
   if (isDone && isAdded) {
@@ -1251,6 +1275,7 @@ export default function CommonViewPage() {
   const [commonUserMenuOpen, setCommonUserMenuOpen] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
   const [printOrientationHint, setPrintOrientationHint] = React.useState<"portrait" | "landscape">("landscape")
+  const [printingTomorrow, setPrintingTomorrow] = React.useState(false)
   const weekTablePrintRef = React.useRef<HTMLDivElement | null>(null)
   const weekTablePrintContentRef = React.useRef<HTMLDivElement | null>(null)
   const commonUserFilterRef = React.useRef<HTMLDivElement | null>(null)
@@ -1494,6 +1519,79 @@ export default function CommonViewPage() {
       return sorted
     },
     [compareTaskOrder]
+  )
+  const compareReportPrintOrder = React.useCallback(
+    (
+      a: {
+        departmentId?: string
+        person?: string
+        owner?: string
+        assignees?: string[]
+        userId?: string
+        title?: string
+        fastTaskOrder?: number | null
+        isDeadlineImportant?: boolean
+        createdAt?: string | null
+      },
+      b: {
+        departmentId?: string
+        person?: string
+        owner?: string
+        assignees?: string[]
+        userId?: string
+        title?: string
+        fastTaskOrder?: number | null
+        isDeadlineImportant?: boolean
+        createdAt?: string | null
+      }
+    ) => {
+      // Keep print-only task ordering aligned with M1/M2/M3's
+      // common_view_task_sort_key: Weekly Planner department/person order,
+      // then deadline, 08:00, owner, manual order, title, and creation date.
+      const metaA = getDepartmentMeta(a.departmentId)
+      const metaB = getDepartmentMeta(b.departmentId)
+      if (metaA.rank !== metaB.rank) return metaA.rank - metaB.rank
+      if (metaA.rank === 3) {
+        const nameCmp = metaA.name.localeCompare(metaB.name)
+        if (nameCmp) return nameCmp
+      }
+      const personA = getWeeklyPlannerPersonSortKey(a)
+      const personB = getWeeklyPlannerPersonSortKey(b)
+      if (personA[0] !== personB[0]) return personA[0] - personB[0]
+      if (personA[1] !== personB[1]) return personA[1] - personB[1]
+      if (personA[2] !== personB[2]) return personA[2].localeCompare(personB[2])
+      if (Boolean(a.isDeadlineImportant) !== Boolean(b.isDeadlineImportant)) {
+        return a.isDeadlineImportant ? -1 : 1
+      }
+      if (hasEightAmIndicator(a.title) !== hasEightAmIndicator(b.title)) {
+        return hasEightAmIndicator(a.title) ? -1 : 1
+      }
+      const ownerA = getPersonSortKey(a)
+      const ownerB = getPersonSortKey(b)
+      const ownerCmp = ownerA.localeCompare(ownerB)
+      if (ownerCmp) return ownerCmp
+      const orderA = a.fastTaskOrder ?? Number.MAX_SAFE_INTEGER
+      const orderB = b.fastTaskOrder ?? Number.MAX_SAFE_INTEGER
+      if (orderA !== orderB) return orderA - orderB
+      const titleCmp = (a.title || "").localeCompare(b.title || "")
+      if (titleCmp) return titleCmp
+      return String(a.createdAt || "").localeCompare(String(b.createdAt || ""))
+    },
+    [getDepartmentMeta, getPersonSortKey, getWeeklyPlannerPersonSortKey]
+  )
+  const sortTasksForReportPrint = React.useCallback(
+    <T extends {
+      departmentId?: string
+      person?: string
+      owner?: string
+      assignees?: string[]
+      userId?: string
+      title?: string
+      fastTaskOrder?: number | null
+      isDeadlineImportant?: boolean
+      createdAt?: string | null
+    }>(items: T[]) => [...items].sort(compareReportPrintOrder),
+    [compareReportPrintOrder]
   )
   const [creatingExternalMeeting, setCreatingExternalMeeting] = React.useState(false)
   const [editingExternalMeetingId, setEditingExternalMeetingId] = React.useState<string | null>(null)
@@ -4178,6 +4276,174 @@ export default function CommonViewPage() {
     }
   }, [allDaysSelected, applyWeekTablePrintFit])
 
+  const handlePrintTomorrow = async () => {
+    if (printingTomorrow) return
+
+    // Open synchronously so browsers do not treat the report window as a popup.
+    // The Common View itself is never changed while this data is being loaded.
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) {
+      toast.error("The browser blocked the print window. Please allow popups and try again.")
+      return
+    }
+
+    printWindow.document.write("<!doctype html><title>Loading report…</title><p>Loading tomorrow's report…</p>")
+    printWindow.document.close()
+    setPrintingTomorrow(true)
+
+    try {
+      const targetDate = getNextWorkingDay(new Date())
+      const targetIso = toISODate(targetDate)
+      const targetWeekStartIso = toISODate(getMonday(targetDate))
+      const freezeParam = freezeOneHSlots ? "&freeze_one_h_slots=true" : ""
+      const res = await apiFetch(
+        `/common-view?week_start=${encodeURIComponent(targetWeekStartIso)}&include=tasks,meetings&include_all_departments=true${freezeParam}`
+      )
+      if (!res?.ok) {
+        throw new Error(`Could not load tomorrow's report (${res?.status || "network error"}).`)
+      }
+
+      const payload = (await res.json()) as CommonViewPayload
+      type PrintTask = FastTaskEntry & { weekly_planner_sort?: unknown; department_id?: string; user_id?: string }
+      const normalizeTasks = (items: unknown[]) =>
+        items
+          .filter((item): item is Record<string, unknown> => Boolean(item) && typeof item === "object")
+          .filter((item) => item.date === targetIso)
+          .map(
+            (item) =>
+              ({
+                ...item,
+                title: String(item.title || ""),
+                person: typeof item.person === "string" ? item.person : "",
+                owner: typeof item.owner === "string" ? item.owner : "",
+                date: String(item.date || ""),
+                assignees: Array.isArray(item.assignees) ? item.assignees.filter((name): name is string => typeof name === "string") : [],
+                taskId: typeof item.taskId === "string" ? item.taskId : typeof item.task_id === "string" ? item.task_id : undefined,
+                userId: typeof item.userId === "string" ? item.userId : typeof item.user_id === "string" ? item.user_id : undefined,
+                departmentId:
+                  typeof item.departmentId === "string" ? item.departmentId : typeof item.department_id === "string" ? item.department_id : undefined,
+                fastTaskOrder:
+                  typeof item.fastTaskOrder === "number"
+                    ? item.fastTaskOrder
+                    : typeof item.fast_task_order === "number"
+                      ? item.fast_task_order
+                      : undefined,
+                oneHReportSlot: normalizeOneHReportSlot(
+                  typeof item.oneHReportSlot === "string"
+                    ? item.oneHReportSlot
+                    : typeof item.one_h_report_slot === "string"
+                      ? item.one_h_report_slot
+                      : undefined
+                ),
+                isDeadlineImportant: Boolean(item.isDeadlineImportant ?? item.is_deadline_important),
+                createdAt:
+                  typeof item.createdAt === "string" ? item.createdAt : typeof item.created_at === "string" ? item.created_at : undefined,
+                status: typeof item.status === "string" ? item.status : undefined,
+                isDone: Boolean(item.isDone),
+              }) as PrintTask
+          )
+
+      const taskRows: Array<{ id: CommonType; label: string; items: PrintTask[] }> = [
+        ...ONE_H_SLOT_ROWS.map((slot) => ({
+          id: slot.id,
+          label: slot.label,
+          items: normalizeTasks(payload.items.oneH).filter((item) =>
+            slot.slot === null
+              ? !normalizeOneHReportSlot(item.oneHReportSlot)
+              : normalizeOneHReportSlot(item.oneHReportSlot) === slot.slot
+          ),
+        })),
+        { id: "blocked", label: "BLL", items: normalizeTasks(payload.items.blocked) },
+        { id: "r1", label: "R1=1H", items: normalizeTasks(payload.items.r1) },
+        { id: "personal", label: "P:", items: normalizeTasks(payload.items.personal) },
+      ]
+
+      const sortedTaskRows = taskRows.map((row) => ({
+        ...row,
+        items: mergePrintTaskEntries(row.id, sortTasksForReportPrint(row.items)),
+      }))
+      const meetingRows = ([
+        { id: "external" as const, label: "TAK EXT", items: payload.items.external as unknown as Array<Record<string, unknown>> },
+        { id: "internal" as const, label: "TAK INT", items: payload.items.internal as unknown as Array<Record<string, unknown>> },
+      ] satisfies Array<{ id: CommonType; label: string; items: Array<Record<string, unknown>> }>).map((row) => ({
+        ...row,
+        items: row.items
+          .filter((item) => item.date === targetIso)
+          .sort((a, b) => String(a.time || "").localeCompare(String(b.time || "")) || String(a.title || "").localeCompare(String(b.title || ""))),
+      }))
+
+      const buildTableRows = (
+        rows: Array<{ id: CommonType; label: string; items: Array<PrintTask | Record<string, unknown>> }>,
+        isMeetingTable = false
+      ) =>
+        rows
+          .map((row, rowIndex) => {
+            const rowItems = row.items
+            const chunks = Math.max(1, Math.ceil(rowItems.length / 6))
+            const subtext = getCommonPrintRowSubtext(row.id)
+            return Array.from({ length: chunks }, (_, chunkIndex) => {
+              const cells = rowItems.slice(chunkIndex * 6, chunkIndex * 6 + 6)
+              const itemCells = Array.from({ length: 6 }, (_, cellIndex) => {
+                const item = cells[cellIndex]
+                if (!item) return "<td></td>"
+                const meetingItem = item as Record<string, unknown>
+                const title = isMeetingTable
+                  ? `${commonPrintTitleLine(String(meetingItem.title || ""))}${meetingItem.time ? ` ${String(meetingItem.time)}` : ""}`.trim()
+                  : row.id === "personal"
+                    ? commonPrintPersonalTaskTitle(item as PrintTask)
+                    : commonPrintTaskTitle(item as PrintTask)
+                return `<td>${chunkIndex * 6 + cellIndex + 1}. ${escapePrintHtml(title)}</td>`
+              }).join("")
+              const rowHeaders =
+                chunkIndex === 0
+                  ? `<th rowspan="${chunks}">${rowIndex + 1}</th><th rowspan="${chunks}">${escapePrintHtml(row.label)}${
+                      subtext ? `<span class="print-slot-subtext">${escapePrintHtml(subtext)}</span>` : ""
+                    }</th>`
+                  : ""
+              return `<tr>${rowHeaders}${itemCells}</tr>`
+            }).join("")
+          })
+          .join("")
+
+      const reportDate = formatDateHuman(targetIso)
+      const reportHtml = `<!doctype html>
+<html><head><meta charset="utf-8"><title>1H SHTYPI — ${escapePrintHtml(reportDate)}</title>
+<style>
+  @page { size: landscape; margin: 0.45in 0.35in 0.51in; }
+  * { box-sizing: border-box; }
+  body { margin: 0; color: #000; font-family: Arial, sans-serif; }
+  .print-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin: 0 0 8px; }
+  .print-title { font-size: 16px; font-weight: 700; text-align: center; }
+  .print-date { text-align: right; font-size: 10px; }
+  table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
+  table + table { margin-top: 12px; }
+  th, td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
+  thead th { text-align: center; font-weight: 700; vertical-align: middle; }
+  thead th:first-child, tbody th:first-child { width: 20px; min-width: 20px; padding-left: 3px; padding-right: 3px; white-space: nowrap; }
+  col.print-number-column { width: 20px; }
+  col.print-label-column { width: 78px; }
+  tbody th:nth-child(2) { padding-left: 2px; padding-right: 2px; }
+  .print-slot-subtext { display: block; white-space: pre; overflow-wrap: normal !important; word-break: normal !important; font-size: 5.2px; font-weight: 400 !important; line-height: 1.05; }
+</style></head><body>
+  <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
+  <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji dhe sloti</th><th colspan="6">Tasks</th></tr></thead><tbody>${buildTableRows(sortedTaskRows)}</tbody></table>
+  <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji</th><th colspan="6">Meeting</th></tr></thead><tbody>${buildTableRows(meetingRows, true)}</tbody></table>
+</body></html>`
+
+      printWindow.document.open()
+      printWindow.document.write(reportHtml)
+      printWindow.document.close()
+      printWindow.focus()
+      window.setTimeout(() => printWindow.print(), 100)
+    } catch (err) {
+      console.error("Failed to print tomorrow's Common View report", err)
+      printWindow.close()
+      toast.error(err instanceof Error ? err.message : "Failed to load tomorrow's report.")
+    } finally {
+      setPrintingTomorrow(false)
+    }
+  }
+
   const handlePrint = () => {
     if (allDaysSelected) {
       const orientation = getPrintOrientation()
@@ -5830,6 +6096,7 @@ export default function CommonViewPage() {
       number: getFastTaskDisplayNumber(blockedSource, x),
       taskId: x.taskId,
       userId: x.userId,
+      departmentId: x.departmentId,
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       oneHReportSlot: x.oneHReportSlot,
@@ -5854,6 +6121,7 @@ export default function CommonViewPage() {
       number: getFastTaskDisplayNumber(oneHSource, x),
       taskId: x.taskId,
       userId: x.userId,
+      departmentId: x.departmentId,
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       oneHReportSlot: x.oneHReportSlot,
@@ -5878,6 +6146,7 @@ export default function CommonViewPage() {
       number: getFastTaskDisplayNumber(personalSource, x),
       taskId: x.taskId,
       userId: x.userId,
+      departmentId: x.departmentId,
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       entryDate: x.date,
@@ -5947,6 +6216,7 @@ export default function CommonViewPage() {
       number: getFastTaskDisplayNumber(r1Source, x),
       taskId: x.taskId,
       userId: x.userId,
+      departmentId: x.departmentId,
       fastTaskOrder: x.fastTaskOrder,
       finishPeriod: x.finishPeriod,
       oneHReportSlot: x.oneHReportSlot,
@@ -6523,6 +6793,60 @@ export default function CommonViewPage() {
     [addDraft, apiFetch, meetingTemplates, reloadMeetingTemplates]
   )
 
+  const renderSingleDayPrintRows = (rowIds: readonly CommonType[]) =>
+    orderCommonRowsForPrint(
+      swimlaneRows
+        .filter((row) => showCard(row.id))
+        .filter((row) => rowIds.includes(row.id))
+    )
+      .flatMap((row, rowIndex) => {
+        const items = mergePrintTaskEntries(
+          row.id,
+          sortTasksForReportPrint(row.items.filter((item) => !item.placeholder))
+        )
+        const rowCount = Math.max(1, Math.ceil(items.length / 6))
+        return Array.from({ length: rowCount }, (_, chunkIndex) => {
+          const taskCells = items.slice(chunkIndex * 6, chunkIndex * 6 + 6)
+          return (
+            <tr key={`${row.id}-${chunkIndex}`}>
+              {chunkIndex === 0 ? (
+                <>
+                  <th rowSpan={rowCount} scope="row">{rowIndex + 1}</th>
+                  <th rowSpan={rowCount}>
+                    <span>{row.label}</span>
+                    {getCommonPrintRowSubtext(row.id) ? (
+                      <span className="week-table-label-subtext">{getCommonPrintRowSubtext(row.id)}</span>
+                    ) : null}
+                  </th>
+                </>
+              ) : null}
+              {Array.from({ length: 6 }, (_, cellIndex) => {
+                const item = taskCells[cellIndex]
+                const isPersonalTaskForGa = Boolean(
+                  item &&
+                    row.id === "personal" &&
+                    personalTaskTitleHasInitials(item.title, "GA")
+                )
+                return (
+                  <td
+                    key={`${row.id}-${chunkIndex}-${cellIndex}`}
+                    className={isPersonalTaskForGa ? "single-day-print-cell-personal-ga" : undefined}
+                  >
+                    {item
+                      ? `${chunkIndex * 6 + cellIndex + 1}. ${
+                          row.id === "personal"
+                            ? commonPrintPersonalTaskTitle(item)
+                            : commonPrintTaskTitle(item)
+                        }`
+                      : ""}
+                  </td>
+                )
+              })}
+            </tr>
+          )
+        })
+      })
+
   return (
     <div
       className="common-view-page-root"
@@ -6869,6 +7193,15 @@ export default function CommonViewPage() {
             font-size: 9px;
             line-height: 1.2;
           }
+          .single-day-print-number-column {
+            width: 20px;
+          }
+          .single-day-print-label-column {
+            width: 78px;
+          }
+          .single-day-print-meetings-table {
+            margin-top: 12px;
+          }
           .single-day-print-table th,
           .single-day-print-table td {
             border: 1px solid #000 !important;
@@ -6878,8 +7211,27 @@ export default function CommonViewPage() {
             font-weight: 400 !important;
             overflow-wrap: anywhere;
           }
-          .single-day-print-table th {
-            width: 64px;
+          .single-day-print-table thead th:first-child,
+          .single-day-print-table tbody th:first-child {
+            width: 20px;
+            min-width: 20px;
+            padding-left: 3px;
+            padding-right: 3px;
+            white-space: nowrap;
+          }
+          .single-day-print-table tbody th:nth-child(2) {
+            padding-left: 2px;
+            padding-right: 2px;
+          }
+          .single-day-print-table thead th {
+            font-weight: 700 !important;
+            text-align: center;
+            vertical-align: middle;
+          }
+          .single-day-print-table td.single-day-print-cell-personal-ga {
+            background-color: #f3e8ff !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
           }
           /* A one-day Common View printout is the compact fast-task report. */
           .single-day-print .swimlane-row:not(
@@ -8800,10 +9152,12 @@ export default function CommonViewPage() {
           .week-table-label-subtext {
             display: block;
             margin-top: 2px;
-            font-size: 8px;
-            font-weight: 700;
-            line-height: 1;
-            white-space: nowrap;
+            font-size: 5.2px;
+            font-weight: 400;
+            line-height: 1.05;
+            white-space: pre;
+            overflow-wrap: normal !important;
+            word-break: normal !important;
           }
           .week-table-cell,
           .week-table-entry > span:not(.week-table-avatar) {
@@ -9607,6 +9961,15 @@ export default function CommonViewPage() {
             </button>
             <button className="btn-primary no-print" type="button" onClick={handlePrint}>
               Print
+            </button>
+            <button
+              className="btn-outline no-print"
+              type="button"
+              onClick={handlePrintTomorrow}
+              disabled={printingTomorrow}
+              title="Print tasks and meetings for the next working day without changing Common View"
+            >
+              {printingTomorrow ? "Preparing tomorrow..." : "Print Tomorrow"}
             </button>
             {allDaysSelected ? (
               <span
@@ -12407,55 +12770,42 @@ export default function CommonViewPage() {
         <div className={`print-page single-day-print ${allDaysSelected ? "hide-when-all-days" : ""}`}>
           <div className="print-header">
             <div />
-            <div className="print-title">COMMON VIEW</div>
+            <div className="print-title">1H SHTYPI</div>
             <div className="print-datetime">
               {formatDateTimeDMY(printedAt)}
             </div>
           </div>
           <table className="single-day-print-table">
+            <colgroup>
+              <col className="single-day-print-number-column" />
+              <col className="single-day-print-label-column" />
+              <col span={6} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th scope="col">NR</th>
+                <th scope="col">LLoji dhe sloti</th>
+                <th scope="col" colSpan={6}>Tasks</th>
+              </tr>
+            </thead>
             <tbody>
-              {orderCommonRowsForPrint(
-                swimlaneRows
-                  .filter((row) => showCard(row.id))
-                  .filter((row) => COMMON_FAST_PRINT_ROW_IDS.includes(row.id))
-              )
-                .flatMap((row) => {
-                  const items = mergePrintTaskEntries(
-                    row.id,
-                    row.items.filter((item) => !item.placeholder)
-                  )
-                  const rowCount = Math.max(1, Math.ceil(items.length / 6))
-                  return Array.from({ length: rowCount }, (_, chunkIndex) => {
-                    const taskCells = items.slice(chunkIndex * 6, chunkIndex * 6 + 6)
-                    return (
-                      <tr key={`${row.id}-${chunkIndex}`}>
-                        {chunkIndex === 0 ? (
-                          <th rowSpan={rowCount}>
-                            <span>{row.label}</span>
-                            {getCommonPrintRowSubtext(row.id) ? (
-                              <span className="week-table-label-subtext">{getCommonPrintRowSubtext(row.id)}</span>
-                            ) : null}
-                          </th>
-                        ) : null}
-                        {Array.from({ length: 6 }, (_, cellIndex) => {
-                          const item = taskCells[cellIndex]
-                          return (
-                            <td key={`${row.id}-${chunkIndex}-${cellIndex}`}>
-                              {item
-                                ? `${chunkIndex * 6 + cellIndex + 1}. ${
-                                    row.id === "personal"
-                                      ? commonPrintPersonalTaskTitle(item)
-                                      : commonPrintTaskTitle(item)
-                                  }`
-                                : ""}
-                            </td>
-                          )
-                        })}
-                      </tr>
-                    )
-                  })
-                })}
+              {renderSingleDayPrintRows(COMMON_FAST_PRINT_ROW_IDS)}
             </tbody>
+          </table>
+          <table className="single-day-print-table single-day-print-meetings-table">
+            <colgroup>
+              <col className="single-day-print-number-column" />
+              <col className="single-day-print-label-column" />
+              <col span={6} />
+            </colgroup>
+            <thead>
+              <tr>
+                <th scope="col">NR</th>
+                <th scope="col">LLoji</th>
+                <th scope="col" colSpan={6}>Meeting</th>
+              </tr>
+            </thead>
+            <tbody>{renderSingleDayPrintRows(COMMON_MEETING_PRINT_ROW_IDS)}</tbody>
           </table>
           <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
             {swimlaneRows

@@ -37,6 +37,7 @@ from app.api.routers.primeflow_1h_reports import router as primeflow_1h_reports_
 from app.api.routers.meetings_report import router as meetings_report_router
 from app.api.routers.after_break_report import router as after_break_report_router
 from app.api.routers.morning_report import router as morning_report_router
+from app.api.routers.tomorrow_print_report import router as tomorrow_print_report_router
 from app.api.routers.realization import router as realization_router
 from app.api.routers.weekly_planning_audit import router as weekly_planning_audit_router
 from app.api.routers.standards import router as standards_router
@@ -81,6 +82,7 @@ api_router.include_router(primeflow_1h_reports_router, prefix="/admin/primeflow-
 api_router.include_router(meetings_report_router, prefix="/meetings-report", tags=["meetings-report"])
 api_router.include_router(after_break_report_router, prefix="/after-break-report", tags=["after-break-report"])
 api_router.include_router(morning_report_router, prefix="/morning-report", tags=["morning-report"])
+api_router.include_router(tomorrow_print_report_router, prefix="/tomorrow-print-report", tags=["tomorrow-print-report"])
 api_router.include_router(realization_router, prefix="/realization", tags=["realization"])
 api_router.include_router(
     weekly_planning_audit_router,

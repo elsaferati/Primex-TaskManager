@@ -294,6 +294,14 @@ function meetingStatusCellTone(headers: string[], cells: string[], cellIndex: nu
   return "text-center"
 }
 
+function createdWeekCellTone(headers: string[], cells: string[], cellIndex: number) {
+  if (normalizeHeader(headers[cellIndex] || "") !== "ADDED") return ""
+  const value = cells[cellIndex]?.trim().toUpperCase()
+  if (value === "THIS W") return "!bg-sky-200 !text-sky-950 font-semibold"
+  if (value === "LAST W") return "!bg-amber-200 !text-amber-950 font-semibold"
+  return ""
+}
+
 function splitStatusMarker(value: string) {
   const matches = [...value.matchAll(/\s*\[\[\s*st\s*:?\s*([A-Z_]+)\s*\]\]/gi)]
   if (!matches.length) return { text: value, status: "" }
@@ -633,6 +641,8 @@ export function ReportSectionPreview({
                               ? "px-1 text-center"
                               : "px-2"
                           } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
+                            createdWeekCellTone(visible.headers, visible.cells, cellIndex)
+                          } ${
                             narrow ? "w-[1%] whitespace-nowrap" : "whitespace-pre-wrap break-words"
                           } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${meetingFrame} ${
                             highlightedMeeting && header === "TITLE" ? "text-blue-700 font-semibold" : ""

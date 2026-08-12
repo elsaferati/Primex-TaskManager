@@ -65,7 +65,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "10"
+COMMON_VIEW_CACHE_VERSION = "11"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -1063,7 +1063,7 @@ async def get_common_view(
                 str(name).casefold(),
             )
 
-        for bucket in ("blocked", "oneH", "personal", "r1"):
+        for bucket in ("blocked", "oneH", "personal", "r1", "bz"):
             for item in items[bucket]:
                 item["weekly_planner_sort"] = weekly_planner_sort(item)
 
@@ -1162,6 +1162,10 @@ async def get_common_view(
                 if not matches_template_date(tmpl, day):
                     continue
                 assignee_ids = tmpl.assignee_ids or ([tmpl.default_assignee_id] if tmpl.default_assignee_id else [])
+                # For a multi-user BZ template, the first assignee is the
+                # report reference user (department and Weekly Planner order).
+                primary_assignee_id = assignee_ids[0] if assignee_ids else tmpl.default_assignee_id
+                primary_assignee = users_map.get(primary_assignee_id)
                 assignees = []
                 for uid in assignee_ids:
                     user_obj = users_map.get(uid)
@@ -1180,6 +1184,9 @@ async def get_common_view(
                         "date": day.isoformat(),
                         "time": tmpl.alignment_time.strftime("%H:%M") if tmpl.alignment_time else "TBD",
                         "assignees": assignees or None,
+                        "user_id": str(primary_assignee_id) if primary_assignee_id else None,
+                        "department_id": str(primary_assignee.department_id)
+                        if primary_assignee and primary_assignee.department_id else None,
                         "bzWithLabel": bz_label,
                     }
                 )

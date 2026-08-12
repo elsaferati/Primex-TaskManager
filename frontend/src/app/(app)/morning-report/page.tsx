@@ -53,13 +53,13 @@ type DeliveryHistory = {
   last_error?: string | null
 }
 
-function sectionGroupLabel(title: string, _index: number) {
+function sectionGroupLabel(title: string) {
   // Built-in manuals are first; Common View–synced extras sit after them and before autos.
   const knownAuto = [
     "(GA) DET NGA EMAILS TE REJA",
     "(GA) VONESA/MUNGESA. A NDRYSHON PLANI PER SOT?",
-    "(GA) NOTES TE REJA?",
-    "PV/FESTA EXTERNE/TAKIMET EXTERNE/ TAKIME INTERNE/ BZ ME GA/BLLOK:",
+    "(GA) NOTES TE REJA ( NOT DISSCUSED)?",
+    "PV/FESTA EXT/TAK EXT/ TAK INT/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
   ]
   const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
@@ -73,7 +73,7 @@ function sectionGroupLabel(title: string, _index: number) {
 
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
-  return sectionGroupLabel(sections[index].title, index) !== sectionGroupLabel(sections[index - 1].title, index - 1)
+  return sectionGroupLabel(sections[index].title) !== sectionGroupLabel(sections[index - 1].title)
 }
 
 const API = "/morning-report"
@@ -584,7 +584,7 @@ export default function MorningReportPage() {
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
                     <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                      {sectionGroupLabel(section.title, index)}
+                      {sectionGroupLabel(section.title)}
                     </div>
                   ) : null}
                   <div className="rounded-lg border bg-white p-4 shadow-sm">

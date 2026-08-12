@@ -2560,7 +2560,7 @@ export default function GaKaNotesPage() {
               </div>
             )}
           </div>
-          <div className="hidden justify-end sm:flex">
+          <div className="hidden justify-start sm:flex">
             <Button onClick={() => void createNote()} disabled={posting}>
               {posting ? "Saving..." : "Save note"}
             </Button>

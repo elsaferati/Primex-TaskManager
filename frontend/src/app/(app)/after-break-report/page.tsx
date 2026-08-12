@@ -48,7 +48,7 @@ function sectionGroupLabel(title: string, index: number) {
   const knownAuto = [
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
-    "NOTES TE REJA ME TE KALTER DHE DISSCUSED",
+    "NOTES TE REJA ( NOT DISSCUSED)",
     "GA MBYLLJA E DET",
     "HV MBYLLJA E DET",
   ]

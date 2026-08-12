@@ -24,6 +24,8 @@ from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
+from app.models.tomorrow_print_report_delivery import TomorrowPrintReportDelivery
+from app.models.tomorrow_print_report_settings import TomorrowPrintReportSettings
 from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
@@ -112,6 +114,8 @@ __all__ = [
     "MeetingsReportSettings",
     "AfterBreakReportDraft",
     "AfterBreakReportSettings",
+    "TomorrowPrintReportDelivery",
+    "TomorrowPrintReportSettings",
     "MorningReportDraft",
     "MorningReportSettings",
     "MeetingOccurrenceStatus",
