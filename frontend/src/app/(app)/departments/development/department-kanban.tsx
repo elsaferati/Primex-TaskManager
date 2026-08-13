@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
-import { DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
+import { DailyRlzCommentField, DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
@@ -7392,8 +7392,6 @@ export default function DepartmentKanban() {
                         dailyUserReportFilteredEntries.map(({ id: rowId, row }, index) => {
                           const commentKey = row.taskId ? `task:${row.taskId}` : ""
                           const previousValue = row.comment ?? ""
-                          const commentValue = commentKey ? (dailyReportCommentEdits[commentKey] ?? previousValue) : ""
-                          const isSaving = commentKey ? Boolean(savingDailyReportComments[commentKey]) : false
                           const isDeadlineImportant = row.taskId ? deadlineImportantTaskIds.has(row.taskId) : false
                           const hasEightAmIndicator = titleHasEightAmIndicator(row.title)
                           const isTitleExpanded = Boolean(expandedDailyReportTitleIds[rowId])
@@ -7589,40 +7587,12 @@ export default function DepartmentKanban() {
                                 />
                               </td>
                               <td className="border border-slate-200 px-2 py-2 align-top">
-                                <div className="flex items-center gap-2">
-                                  <input
-                                    type="text"
-                                    aria-label="Koment"
-                                    className="h-4 w-full border-b border-slate-300 bg-transparent"
-                                    value={commentValue}
-                                    onChange={(e) => {
-                                      if (!commentKey) return
-                                      const nextValue = e.target.value
-                                      setDailyReportCommentEdits((prev) => ({ ...prev, [commentKey]: nextValue }))
-                                    }}
-                                    onBlur={(e) => {
-                                      if (!commentKey) return
-                                      const nextValue = e.target.value
-                                      if (row.taskId) {
-                                        void saveDailyReportTaskComment(row.taskId, nextValue, previousValue, commentKey)
-                                      }
-                                    }}
-                                    disabled={!commentKey}
-                                  />
-                                  <button
-                                    type="button"
-                                    className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
-                                    disabled={!commentKey || isSaving}
-                                    onClick={() => {
-                                      if (!commentKey) return
-                                      if (row.taskId) {
-                                        void saveDailyReportTaskComment(row.taskId, commentValue, previousValue, commentKey)
-                                      }
-                                    }}
-                                  >
-                                    {isSaving ? "Saving" : "Save"}
-                                  </button>
-                                </div>
+                                <DailyRlzCommentField
+                                  taskId={row.taskId}
+                                  day={selectedAllReportIso}
+                                  state={row.taskId ? dailyRlzStateByTask(dailyReport).get(row.taskId) : null}
+                                  onSaved={refreshDailyReport}
+                                />
                               </td>
                             </tr>
                           )

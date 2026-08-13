@@ -59,7 +59,9 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
           body: JSON.stringify({
             day,
             reason_code: reasonCode === DAILY_RLZ_EMPTY_REASON ? null : reasonCode,
-            comment: null,
+            // Preserve whatever comment was already saved for this day — never wipe it
+            // just because the reason dropdown changed.
+            comment: state?.comment ?? null,
           }),
         })
         if (!response.ok) {
@@ -76,6 +78,60 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
       {DAILY_RLZ_REASONS.map(([code,label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}
     </SelectContent>
   </Select>
+}
+
+// Day-scoped comment field for the RLZ Daily Report table. Writes into the same
+// TaskDailyRlzState row as DailyRlzReasonCell (via /reports/daily-rlz-state/{taskId}),
+// so the comment is actually part of the daily RLZ evidence instead of overwriting the
+// task's single, non-dated Task.comment field.
+export function DailyRlzCommentField({ taskId, day, state, onSaved }: {
+  taskId?: string | null
+  day: string
+  state?: DailyRlzTaskState | null
+  onSaved: () => Promise<void> | void
+}) {
+  const { apiFetch } = useAuth()
+  const [value, setValue] = React.useState(state?.comment ?? "")
+  const [saving, setSaving] = React.useState(false)
+
+  React.useEffect(() => { setValue(state?.comment ?? "") }, [state?.comment, taskId])
+
+  if (!taskId) return <span>—</span>
+
+  const save = async () => {
+    const trimmed = value.trim()
+    if (trimmed === (state?.comment ?? "").trim()) return
+    setSaving(true)
+    try {
+      const response = await apiFetch(`/reports/daily-rlz-state/${taskId}`, {
+        method: "PUT", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          day,
+          reason_code: state?.reason_code || null,
+          comment: trimmed || null,
+        }),
+      })
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}))
+        throw new Error(payload?.detail?.message || payload?.detail || "Komenti nuk u ruajt")
+      }
+      await onSaved()
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Komenti nuk u ruajt")
+      setValue(state?.comment ?? "")
+    } finally { setSaving(false) }
+  }
+
+  return <div className="flex items-center gap-2">
+    <input type="text" aria-label="Koment" className="h-4 w-full border-b border-slate-300 bg-transparent"
+      value={value} disabled={!state?.is_editable || saving}
+      onChange={e => setValue(e.target.value)}
+      onBlur={() => void save()} />
+    <button type="button" className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
+      disabled={!state?.is_editable || saving} onClick={() => void save()}>
+      {saving ? "Saving" : "Save"}
+    </button>
+  </div>
 }
 
 export function DailyRlzSaveButton({ day, report, onSaved }: {
