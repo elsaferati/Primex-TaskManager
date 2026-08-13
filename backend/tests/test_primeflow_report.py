@@ -24,6 +24,7 @@ from app.services.task_strike_events import (
     record_title_strike_events,
     render_description_for_interval,
     render_text_for_interval,
+    split_strike_timestamp,
 )
 from app.services.primeflow_report_delivery import strike_interval_end, strike_interval_start
 
@@ -636,7 +637,34 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(strike_interval_start(report_day, "11:00").strftime("%H:%M"), "09:00")
         self.assertEqual(strike_interval_end(report_day, "11:00").strftime("%H:%M"), "10:50")
         self.assertEqual(strike_interval_start(report_day, "16:00").strftime("%H:%M"), "14:10")
-        self.assertEqual(strike_interval_end(report_day, "16:00").strftime("%H:%M"), "15:40")
+        self.assertEqual(strike_interval_end(report_day, "16:00").strftime("%H:%M"), "15:50")
+
+    def test_timestamp_does_not_change_a_struck_point_identity_or_colour(self) -> None:
+        text = "[[done]]1. Test1[[/done]] 08:46 13.08\n2. Test2"
+        event = SimpleNamespace(
+            id="timestamped", point_key="legacy-key-with-timestamp",
+            point_text="1. Test1 08:46 13.08", action="STRUCK",
+            occurred_at=datetime(2026, 8, 10, 8, 46, tzinfo=timezone.utc),
+        )
+        plain, marked = render_description_for_interval(
+            text,
+            [event],
+            interval_start=datetime(2026, 8, 10, 9, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 10, 10, 50, tzinfo=timezone.utc),
+        )
+        self.assertEqual(split_strike_timestamp("1. Test1 08:46 13.08"), ("1. Test1", "08:46 13.08"))
+        self.assertIn("1. Test1 08:46 13.08", plain)
+        self.assertIn("[[done:green]]1. Test1[[/done]] 08:46 13.08", marked)
+
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {"oneH": [{
+                "id": "timestamped", "date": "2026-08-10", "slot": "11:00", "person": "Anisa",
+                "status": "TODO", "title": "Task", "description": text,
+            }]}},
+            date(2026, 8, 10), "11:00", description_overrides={"timestamped": (plain, marked)},
+        )
+        html = render_html(document)
+        self.assertIn("color:#16a34a;text-decoration:line-through;text-decoration-thickness:2px;\">1. Test1</span> 08:46 13.08", html)
 
     def test_partial_bullet_selection_is_reported_as_the_bullet_subtask(self) -> None:
         title = "EF: TEST TASK\n• [[done]]Test[[/done]]\n• Still open"

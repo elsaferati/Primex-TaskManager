@@ -15,6 +15,7 @@ from app.models.task_strike_event import TaskStrikeEvent
 DONE_BLOCK = re.compile(r"\[\[\s*done\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]", re.IGNORECASE | re.DOTALL)
 TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
 # Checklist points can be numbered or use the bullet controls in PX/GA notes.
+STRIKE_TIMESTAMP_SUFFIX = re.compile(r"\s+\d{2}:\d{2}\s+\d{2}\.\d{2}\s*$")
 CHECKLIST_ITEM = re.compile(r"(?m)^\s*(?:\d+\.\s+|[•*-]\s+)")
 
 
@@ -32,7 +33,16 @@ class StrikeState:
 
 
 def _normalise(value: str) -> str:
-    return " ".join(value.split())
+    return " ".join(STRIKE_TIMESTAMP_SUFFIX.sub("", value).split())
+
+
+def split_strike_timestamp(value: str) -> tuple[str, str]:
+    """Separate a point's visible completion timestamp from its task text."""
+
+    match = STRIKE_TIMESTAMP_SUFFIX.search(value)
+    if match is None:
+        return value, ""
+    return value[:match.start()].rstrip(), match.group(0).strip()
 
 
 def point_key(value: str, *, field_name: str = "DESCRIPTION") -> str:
@@ -310,8 +320,12 @@ def render_text_for_interval(
                 colour = "blue"
             else:
                 colour = "green"
+            strike_text, timestamp = split_strike_timestamp(point.text)
             plain_parts.append(point.text)
-            marked_parts.append(f"[[done:{colour}]]{point.text}[[/done]]")
+            marked_parts.append(
+                f"[[done:{colour}]]{strike_text}[[/done]]"
+                f"{' ' + timestamp if timestamp else ''}"
+            )
             continue
         plain_parts.append(point.text)
         marked_parts.append(point.text)

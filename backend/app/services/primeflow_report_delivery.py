@@ -40,8 +40,7 @@ STRIKE_INTERVAL_ENDS = {
     "11:00": time(10, 50),
     "11:50": time(11, 40),
     "14:20": time(14, 10),
-    # This report is delivered at 15:50, after its 14:10–15:40 work window.
-    "16:00": time(15, 40),
+    "16:00": time(15, 50),
 }
 
 
