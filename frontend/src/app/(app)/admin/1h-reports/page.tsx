@@ -20,7 +20,7 @@ type Audit = { id:string; action:string; entity_type:string; actor_user_id?:stri
 type Preview = { document:{subject:string;generated_at:string;source_generated_at:string;recipients:Record<string,string[]>}; html:string; plain_text:string; task_count:number; warning?:string|null }
 
 const API = "/admin/primeflow-1h-reports"
-const slots = ["10:00","11:00","11:50","14:20","16:00"]
+const slots = ["10:00","11:00","11:50","14:10","14:20","16:00"]
 
 export default function ReportManagementPage() {
   const { apiFetch, user } = useAuth()

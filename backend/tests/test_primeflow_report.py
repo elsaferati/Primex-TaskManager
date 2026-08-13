@@ -102,6 +102,37 @@ class PrimeFlowReportTests(unittest.TestCase):
         tasks = [base, dict(base), {**base, "id": "2", "date": "2026-07-29"}, {**base, "id": "3", "slot": "11:00"}, {**base, "id": "4", "employee": ""}]
         self.assertEqual(filter_tasks(tasks, date(2026, 7, 28), "10:00"), [base])
 
+    def test_1420_today_report_includes_today_through_1420_but_not_later_tasks(self) -> None:
+        report_day = date(2026, 8, 13)
+        tasks = [
+            {"id": "ten", "date": report_day.isoformat(), "slot": "10:00", "person": "Anisa", "title": "Morning", "status": "TODO"},
+            {"id": "eleven", "date": report_day.isoformat(), "slot": "11:00", "person": "Anisa", "title": "Midday", "status": "TODO"},
+            {"id": "afternoon", "date": report_day.isoformat(), "slot": "14:20", "person": "Anisa", "title": "Afternoon", "status": "TODO"},
+            {"id": "late", "date": report_day.isoformat(), "slot": "16:00", "person": "Anisa", "title": "Late task", "status": "TODO"},
+        ]
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {"oneH": tasks}}, report_day, "14:20"
+        )
+        rendered = render_plain_text(document)
+
+        self.assertEqual(document.report_slot, "14:20")
+        self.assertIn("Morning", rendered)
+        self.assertIn("Midday", rendered)
+        self.assertIn("Afternoon", rendered)
+        self.assertNotIn("Late task", rendered)
+
+    def test_1410_report_reads_the_existing_1420_task_bucket(self) -> None:
+        report_day = date(2026, 8, 13)
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {"oneH": [{
+                "id": "afternoon", "date": report_day.isoformat(), "slot": "14:20", "person": "Anisa",
+                "title": "Afternoon bucket task", "status": "TODO",
+            }]}},
+            report_day,
+            "14:10",
+        )
+        self.assertIn("Afternoon bucket task", render_plain_text(document))
+
     def test_status_sort_numbering_order_and_description_preservation(self) -> None:
         tasks = [
             {"id": "d", "date": "2026-07-28", "slot": "10:00", "employee": "Besa", "title": "Done EXACT", "description": "Zeile 1\n\nZeile 3", "status": "DONE"},
@@ -244,7 +275,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertNotIn("DETYRAT E BLLOKUT", body)
         self.assertNotIn("SLOTI 27.07.2026", body)
         self.assertEqual(predecessor(date(2026, 7, 28), "10:00"), (date(2026, 7, 27), "16:00"))
-        self.assertEqual(predecessor(date(2026, 7, 28), "14:20"), (date(2026, 7, 28), "11:50"))
+        self.assertEqual(predecessor(date(2026, 7, 28), "14:10"), (date(2026, 7, 28), "11:50"))
+        self.assertEqual(predecessor(date(2026, 7, 28), "14:20"), (date(2026, 7, 28), "14:10"))
 
     def test_after_ten_includes_current_then_immediately_previous_slot(self) -> None:
         common = {"date": "2026-07-28", "person": "Anisa Tërnava", "status": "TODO"}
@@ -263,11 +295,11 @@ class PrimeFlowReportTests(unittest.TestCase):
                 "r1": [{**common, "id": "r1", "title": "R1 task"}],
             },
         }
-        document = build_report_document(data, date(2026, 7, 28), "14:20")
+        document = build_report_document(data, date(2026, 7, 28), "14:10")
         self.assertEqual(
             [section.title for section in document.sections],
             [
-                "14:20 SLOTI 28.07.2026",
+                "14:10 SLOTI 28.07.2026",
                 "11:50 SLOTI PARAPRAK 28.07.2026",
                 "BLLOK 14:30-15:30 28.07.2026",
             ],
@@ -293,7 +325,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         expected = {
             "11:00": "10:00",
             "11:50": "11:00",
-            "14:20": "11:50",
+            "14:10": "11:50",
             "16:00": "14:20",
         }
         for current, previous in expected.items():
@@ -303,7 +335,7 @@ class PrimeFlowReportTests(unittest.TestCase):
                     f"{current} SLOTI 28.07.2026",
                     f"{previous} SLOTI PARAPRAK 28.07.2026",
                 ]
-                if current == "14:20":
+                if current == "14:10":
                     expected_titles.append("BLLOK 14:30-15:30 28.07.2026")
                 self.assertEqual([section.title for section in document.sections], expected_titles)
                 self.assertEqual(document.task_count, 2)
@@ -317,7 +349,7 @@ class PrimeFlowReportTests(unittest.TestCase):
                 {"id": "previous", "date": "2026-07-28", "slot": "11:50", "person": "Anisa", "status": "TODO", "title": "Previous"},
             ]},
         }
-        html = render_html(build_report_document(data, date(2026, 7, 28), "14:20"))
+        html = render_html(build_report_document(data, date(2026, 7, 28), "14:10"))
         # Current slot, prior slot, and BLL need two unmistakable dividers.
         self.assertEqual(html.count('data-report-section-separator="true"'), 2)
 
@@ -403,7 +435,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             ]},
         }
 
-        document = build_report_document(data, date(2026, 7, 28), "14:20")
+        document = build_report_document(data, date(2026, 7, 28), "14:10")
         blocked_section = document.sections[-1]
         self.assertEqual(blocked_section.title, "BLLOK 14:30-15:30 28.07.2026")
         self.assertEqual([employee.name for employee in blocked_section.employees], ["ZDF", "ADF", "BP"])
@@ -637,7 +669,11 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(strike_interval_end(report_day, "10:00").strftime("%H:%M"), "09:00")
         self.assertEqual(strike_interval_start(report_day, "11:00").strftime("%H:%M"), "09:00")
         self.assertEqual(strike_interval_end(report_day, "11:00").strftime("%H:%M"), "10:50")
-        self.assertEqual(strike_interval_start(report_day, "16:00").strftime("%H:%M"), "14:10")
+        self.assertEqual(strike_interval_start(report_day, "14:10").strftime("%H:%M"), "11:40")
+        self.assertEqual(strike_interval_end(report_day, "14:10").strftime("%H:%M"), "14:10")
+        self.assertEqual(strike_interval_start(report_day, "14:20").strftime("%H:%M"), "14:10")
+        self.assertEqual(strike_interval_end(report_day, "14:20").strftime("%H:%M"), "14:20")
+        self.assertEqual(strike_interval_start(report_day, "16:00").strftime("%H:%M"), "14:20")
         self.assertEqual(strike_interval_end(report_day, "16:00").strftime("%H:%M"), "15:50")
 
     def test_timestamp_does_not_change_a_struck_point_identity_or_colour(self) -> None:
@@ -665,7 +701,8 @@ class PrimeFlowReportTests(unittest.TestCase):
             date(2026, 8, 10), "11:00", description_overrides={"timestamped": (plain, marked)},
         )
         html = render_html(document)
-        self.assertIn("color:#16a34a;text-decoration:line-through;text-decoration-thickness:2px;\">1. Test1</span> 08:46 13.08", html)
+        self.assertIn("color:#16a34a;text-decoration:line-through;text-decoration-thickness:2px;\">1. Test1</span>", html)
+        self.assertNotIn("08:46 13.08", html)
 
     def test_timestamp_colours_a_strike_that_predates_its_linked_task_event(self) -> None:
         text = "[[done]]1. Test1[[/done]] 08:46 13.08\n[[done]]2. Test2[[/done]] 08:50 13.08"

@@ -22,7 +22,7 @@ import httpx
 from pydantic import BaseModel, Field
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
-SLOTS = ("10:00", "11:00", "11:50", "14:20", "16:00")
+SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00")
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
@@ -190,6 +190,11 @@ def _slot(item: dict[str, Any]) -> str | None:
     return item.get("one_h_report_slot") or item.get("slot") or item.get("time_slot")
 
 
+def _source_slot_for_report_slot(slot: str) -> str:
+    """The long-standing 14:20 task bucket is reported at the 14:10 send."""
+    return "14:20" if slot == "14:10" else slot
+
+
 def _employee(item: dict[str, Any]) -> str:
     return str(
         item.get("employee") or item.get("person") or item.get("owner")
@@ -350,8 +355,13 @@ def build_report_document(
     }
     one_h = items.get("oneH") or data.get("tasks") or []
     definitions: list[tuple[str, list[dict[str, Any]]]] = []
-    if slot == "10:00":
-        for candidate in SLOTS:
+    if slot in {"10:00", "14:20"}:
+        # The morning report is the full-day baseline. The new 14:20 report
+        # repeats today's work completed or planned through 14:20 only.
+        candidate_slots = ("10:00", "11:00", "11:50", "14:20", "16:00") if slot == "10:00" else (
+            "10:00", "11:00", "11:50", "14:20"
+        )
+        for candidate in candidate_slots:
             definitions.append(
                 (
                     f"{candidate} SLOTI {report_day:%d.%m.%Y}",
@@ -370,16 +380,16 @@ def build_report_document(
         definitions.extend([
             (
                 f"{slot} SLOTI {report_day:%d.%m.%Y}",
-                filter_tasks(one_h, report_day, slot),
+                filter_tasks(one_h, report_day, _source_slot_for_report_slot(slot)),
             ),
             (
                 f"{previous_slot} SLOTI PARAPRAK {report_day:%d.%m.%Y}",
-                filter_tasks(one_h, report_day, previous_slot),
+                filter_tasks(one_h, report_day, _source_slot_for_report_slot(previous_slot)),
             ),
         ])
-        # The 14:20 report is delivered by the 14:10 schedule. Its final
+        # The 14:10 report covers the legacy 14:20 task bucket. Its final
         # section keeps the day's BLL work visible with that 1H follow-up.
-        if slot == "14:20":
+        if slot == "14:10":
             definitions.append((
                 f"{BLOCKED_SECTION_TITLE_PREFIX} {report_day:%d.%m.%Y}",
                 filter_tasks(items.get("blocked") or [], report_day),

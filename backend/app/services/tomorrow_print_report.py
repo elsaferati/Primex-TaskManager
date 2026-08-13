@@ -33,7 +33,9 @@ VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
 TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:fixed;margin:12px 0;font-family:Arial,sans-serif;font-size:12px;line-height:1.25;color:#000"
 CELL_STYLE = "border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word"
 HEADER_STYLE = f"{CELL_STYLE};text-align:center;font-weight:700"
-PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:#f3e8ff"
+PERSONAL_GA_COLOR = "#D8B4FE"
+PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:{PERSONAL_GA_COLOR}"
+NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
 PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|/|$)", re.I)
 NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 STATUS_COLORS = {
@@ -87,9 +89,9 @@ def _task_status(item: dict[str, Any]) -> str:
 
 
 def _task_cell_style(item: dict[str, Any], *, personal: bool) -> tuple[str, str]:
-    """GA personal cells remain purple; otherwise colour by the task's status."""
+    """GA personal cells use a distinct purple; otherwise colour by status."""
     if personal and _is_personal_task_for_ga(item):
-        return PERSONAL_GA_CELL_STYLE, "#f3e8ff"
+        return PERSONAL_GA_CELL_STYLE, PERSONAL_GA_COLOR
     color = STATUS_COLORS[_task_status(item)]
     return f"{CELL_STYLE};background-color:{color}", color
 
@@ -161,7 +163,9 @@ def _task_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list
         if bucket == "oneH":
             values = [item for item in values if _slot(item) == requested_slot]
         values = _dedupe(values)
-        values.sort(key=common_view_item_sort_key)
+        # Completed work belongs at the end of its slot so unfinished work is
+        # immediately visible in the printed report.
+        values.sort(key=lambda item: (_task_status(item) == "DONE", common_view_item_sort_key(item)))
         rows.append((label, values, bucket == "personal"))
     return rows
 
@@ -173,6 +177,11 @@ def _meeting_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, l
         values.sort(key=lambda item: (str(item.get("time") or ""), _first_line(item.get("title")).casefold()))
         rows.append((label, values))
     return rows
+
+
+def _is_non_routine_meeting(item: dict[str, Any]) -> bool:
+    recurrence = str(item.get("recurrence_type") or item.get("recurrenceType") or "").strip().lower()
+    return recurrence not in {"daily", "weekly"}
 
 
 def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False) -> str:
@@ -190,7 +199,14 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
                     if meeting
                     else _task_title(item, personal=personal)
                 )
-                cell_style, color = _task_cell_style(item, personal=personal) if not meeting else (CELL_STYLE, "")
+                if meeting:
+                    cell_style = (
+                        f"{CELL_STYLE};border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR}"
+                        if _is_non_routine_meeting(item) else CELL_STYLE
+                    )
+                    color = ""
+                else:
+                    cell_style, color = _task_cell_style(item, personal=personal)
                 background = f' bgcolor="{color}"' if color else ""
                 cells.append(
                     f'<td{background} style="{cell_style}">{item_index + (chunk_index * 6) + 1}. {html.escape(value)}</td>'
@@ -235,7 +251,13 @@ def _excel_table_attachment(
         status: PatternFill("solid", fgColor=color.removeprefix("#"))
         for status, color in STATUS_COLORS.items()
     }
-    ga_fill = PatternFill("solid", fgColor="F3E8FF")
+    ga_fill = PatternFill("solid", fgColor=PERSONAL_GA_COLOR.removeprefix("#"))
+    non_routine_meeting_border = Border(
+        left=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
+        right=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
+        top=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
+        bottom=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
+    )
     headers = ["NR", "LLoji dhe sloti", "Task 1", "Task 2", "Task 3", "Task 4", "Task 5", "Task 6"]
 
     def write_section(
@@ -264,9 +286,18 @@ def _excel_table_attachment(
                     cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
                     if not meeting:
                         cell.fill = ga_fill if personal and _is_personal_task_for_ga(item) else fills[_task_status(item)]
+                    elif _is_non_routine_meeting(item):
+                        cell.border = non_routine_meeting_border
                 for column in range(1, 9):
                     cell = sheet.cell(row_number, column)
-                    cell.border = border
+                    is_highlighted_meeting_cell = (
+                        meeting
+                        and column >= 3
+                        and column - 3 < len(chunk)
+                        and _is_non_routine_meeting(chunk[column - 3])
+                    )
+                    if not is_highlighted_meeting_cell:
+                        cell.border = border
                     cell.alignment = Alignment(vertical="top", wrap_text=True)
                 row_number += 1
             if len(chunks) > 1:
