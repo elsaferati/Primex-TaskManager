@@ -34,6 +34,10 @@ def _close_state_reason(status: str) -> str:
     }.get(status, "Gjendja për RLZ javor kërkon kontroll.")
 
 
+def _task_title(title: str) -> str:
+    return next((line.strip() for line in title.splitlines() if line.strip()), title)
+
+
 def render_plain(report: dict, report_time: str = REPORT_SLOT) -> str:
     summary = report["summary"]
     lines = [
@@ -55,7 +59,7 @@ def render_plain(report: dict, report_time: str = REPORT_SLOT) -> str:
             f"RLZ State: {close_status}", f"Arsyeja: {_close_state_reason(close_status)}",
         ])
         for blocker in person["blockers"]:
-            lines.append(f"  {blocker['title']} ({blocker['status']})")
+            lines.append(f"  {_task_title(blocker['title'])} ({blocker['status']})")
             lines.append(
                 f"    Deadline: {blocker.get('due_date') or '—'} | Slot: {blocker.get('one_h_report_slot') or '—'} | "
                 f"Arsyeja: {blocker.get('reason_label') or 'Empty'} | Koment: {blocker.get('comment') or '—'}"
@@ -110,7 +114,7 @@ def render_html(report: dict, report_time: str = REPORT_SLOT) -> str:
             blocker_rows.append(
                 '<tr>'
                 f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;'
-                f'font-size:12px;font-weight:700;color:#0f172a;">{html.escape(blocker["title"])}</td>'
+                f'font-size:12px;font-weight:700;color:#0f172a;">{html.escape(_task_title(blocker["title"]))}</td>'
                 f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-size:12px;">{html.escape(blocker.get("status") or "—")}</td>'
                 f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-size:12px;">{html.escape(blocker.get("due_date") or "—")}</td>'
                 f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-size:12px;">{html.escape(blocker.get("one_h_report_slot") or "—")}</td>'

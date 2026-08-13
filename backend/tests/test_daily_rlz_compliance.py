@@ -64,7 +64,7 @@ def test_control_email_contains_task_evidence():
         "employees_stale": 0, "tasks_missing_reason": 1,
         "tasks_deadline_not_moved": 1, "tasks_missing_slot": 0,
     }, "people": [{"department": "Development", "employee": "Elsa", "rlz_close_state": {"status": "NOT_SAVED"},
-        "blockers": [{"title": "Task", "status": "TODO", "due_date": DAY.isoformat(),
+        "blockers": [{"title": "Task\nKy shënim i gjatë nuk duhet të shfaqet", "status": "TODO", "due_date": DAY.isoformat(),
                       "one_h_report_slot": None, "reason_label": None, "comment": None,
                       "issues": [{"code": "REASON_MISSING", "message": "Mungon arsyeja"}]}]}]}
     body = render_plain(report)
@@ -89,6 +89,7 @@ def test_control_html_is_colored_and_explains_why_rlz_was_not_saved():
     assert "ÇFARË KA MBETUR" in rendered
     assert "Mungon arsyeja" in rendered
     assert "Empty" in rendered
+    assert "Ky shënim i gjatë nuk duhet të shfaqet" not in rendered
 
 
 def test_control_subject_uses_configured_schedule_time():
