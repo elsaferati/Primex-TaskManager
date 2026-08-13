@@ -106,11 +106,11 @@ const PULSE_LABEL: Record<RealizationPulse, string> = {
 }
 
 const PULSE_STYLE: Record<RealizationPulse, string> = {
-  "+": "border-emerald-300 bg-emerald-50 text-emerald-900",
-  "++": "border-blue-300 bg-blue-50 text-blue-900",
-  DIAMOND: "border-violet-300 bg-violet-50 text-violet-900",
-  "?": "border-rose-300 bg-rose-50 text-rose-900",
-  OK: "border-amber-300 bg-amber-50 text-amber-950",
+  "+": "border-emerald-500 bg-emerald-100 text-emerald-950 font-semibold",
+  "++": "border-blue-500 bg-blue-100 text-blue-950 font-semibold",
+  DIAMOND: "border-violet-500 bg-violet-100 text-violet-950 font-semibold",
+  "?": "border-rose-600 bg-rose-200 text-rose-950 font-semibold",
+  OK: "border-amber-500 bg-amber-200 text-amber-950 font-semibold",
 }
 
 function pulseText(pulse?: RealizationPulse | null) {
@@ -119,13 +119,13 @@ function pulseText(pulse?: RealizationPulse | null) {
 }
 
 const LEVEL_STYLE: Record<RealizationLevel, string> = {
-  "A+": "border-emerald-600 bg-emerald-600 text-white",
-  A: "border-lime-600 bg-lime-600 text-white",
-  B: "border-emerald-200 bg-emerald-100 text-emerald-900",
-  C: "border-amber-300 bg-amber-200 text-amber-950",
-  M: "border-orange-300 bg-orange-200 text-orange-950",
-  D: "border-red-300 bg-red-300 text-red-950",
-  E: "border-red-700 bg-red-700 text-white",
+  "A+": "border-emerald-700 bg-emerald-600 text-white font-bold",
+  A: "border-lime-700 bg-lime-600 text-white font-bold",
+  B: "border-emerald-500 bg-emerald-300 text-emerald-950 font-bold",
+  C: "border-amber-500 bg-amber-300 text-amber-950 font-bold",
+  M: "border-orange-500 bg-orange-300 text-orange-950 font-bold",
+  D: "border-red-500 bg-red-400 text-red-950 font-bold",
+  E: "border-red-800 bg-red-700 text-white font-bold",
 }
 
 const LEVEL_SYMBOL: Record<RealizationLevel, "+" | "+/-" | "-"> = {
@@ -176,20 +176,20 @@ function taskPalette(task: RealizationTaskFact) {
   const isAdditional = task.attribution === "added_after_weekly_plan"
   if (taskIsCompleted(task)) {
     return isAdditional
-      ? "border-l-4 border-l-emerald-500 border-y border-r border-emerald-200 bg-emerald-50 text-emerald-900"
-      : "border-l-4 border-l-emerald-600 border-y border-r border-emerald-200 bg-emerald-50/70 text-emerald-900"
+      ? "border-l-4 border-l-emerald-600 border-y border-r border-emerald-300 bg-emerald-100 text-emerald-950"
+      : "border-l-4 border-l-emerald-700 border-y border-r border-emerald-300 bg-emerald-100/80 text-emerald-950"
   }
   if (task.classification === "in_progress" || task.status?.toUpperCase() === "IN_PROGRESS") {
-    return "border-l-4 border-l-amber-500 border-y border-r border-amber-200 bg-amber-50 text-amber-900"
+    return "border-l-4 border-l-amber-600 border-y border-r border-amber-300 bg-amber-100 text-amber-950"
   }
   if (
     task.classification === "pending_confirmation"
     || task.status?.toUpperCase() === "WAITING_CONFIRMATION"
   ) {
-    return "border-l-4 border-l-orange-500 border-y border-r border-orange-200 bg-orange-50 text-orange-900"
+    return "border-l-4 border-l-orange-600 border-y border-r border-orange-300 bg-orange-100 text-orange-950"
   }
-  if (isAdditional) return "border-l-4 border-l-blue-500 border-y border-r border-blue-200 bg-blue-50 text-blue-900"
-  return "border-l-4 border-l-rose-500 border-y border-r border-rose-200 bg-rose-50 text-rose-900"
+  if (isAdditional) return "border-l-4 border-l-blue-600 border-y border-r border-blue-300 bg-blue-100 text-blue-950"
+  return "border-l-4 border-l-rose-600 border-y border-r border-rose-300 bg-rose-100 text-rose-950"
 }
 
 function DayTaskCard({
@@ -1191,11 +1191,11 @@ export default function RealizationPage() {
           ].map(([label, rawPulse]) => {
             const pulse = rawPulse as RealizationPulse | undefined
             return (
-              <Card key={label} className={cn("border-2", pulse ? PULSE_STYLE[pulse] : "border-muted")}>
+              <Card key={label} className={cn("border-[3px] shadow-sm", pulse ? PULSE_STYLE[pulse] : "border-muted")}>
                 <CardContent className="flex items-center justify-between py-4">
                   <div>
-                    <p className="text-xs font-semibold uppercase tracking-wide">{label}</p>
-                    <p className="mt-1 text-sm">{pulse ? PULSE_LABEL[pulse] : "Pa të dhëna"}</p>
+                    <p className="text-xs font-bold uppercase tracking-wide">{label}</p>
+                    <p className="mt-1 text-sm font-semibold">{pulse ? PULSE_LABEL[pulse] : "Pa të dhëna"}</p>
                   </div>
                   <span className="text-3xl font-black" aria-label={pulse ? PULSE_LABEL[pulse] : "Pa të dhëna"}>
                     {pulseText(pulse)}

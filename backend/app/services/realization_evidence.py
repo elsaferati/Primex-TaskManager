@@ -17,7 +17,9 @@ from app.models.realization import RealizationObservation, RealizationPeriod
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
+from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
+from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.realization_people import (
     full_period_leave_user_ids,
     load_active_users_and_common_leave,
@@ -488,6 +490,11 @@ async def collect_weekly_evidence(
                 "attendance": {},
                 "counters": defaultdict(int),
                 "needs_review": [],
+                # Daily RLZ reason + comment saved by the person themselves each working
+                # day (see build_daily_rlz_compliance / TaskDailyRlzState). This is the
+                # evidence the person entered while closing their own Daily Report — the
+                # weekly Realization export surfaces it so managers don't re-collect it.
+                "daily_rlz": [],
             }
         elif people[user_id]["user_name"] == "Employee" and canonical_name != "Employee":
             people[user_id]["user_name"] = canonical_name
@@ -965,6 +972,36 @@ async def collect_weekly_evidence(
                 "common_entry_ids": [str(entry_id) for entry_id in leave.entry_ids],
             }
 
+    daily_rlz_rows = (
+        (
+            await db.execute(
+                select(TaskDailyRlzState, Task.title)
+                .join(Task, Task.id == TaskDailyRlzState.task_id)
+                .where(
+                    TaskDailyRlzState.user_id.in_(people.keys()),
+                    TaskDailyRlzState.day_date >= period.start_date,
+                    TaskDailyRlzState.day_date <= period.end_date,
+                )
+                .order_by(TaskDailyRlzState.day_date.asc(), TaskDailyRlzState.updated_at.asc())
+            )
+        ).all()
+        if people
+        else []
+    )
+    for state, task_title in daily_rlz_rows:
+        person = people.get(state.user_id)
+        if person is None or (not state.reason_code and not state.comment):
+            continue
+        person["daily_rlz"].append(
+            {
+                "date": state.day_date,
+                "task_title": task_title,
+                "reason_code": state.reason_code,
+                "reason_label": REASON_LABELS.get(state.reason_code) if state.reason_code else None,
+                "comment": state.comment,
+            }
+        )
+
     for person in people.values():
         person["tasks"].sort(
             key=lambda item: (
@@ -977,6 +1014,7 @@ async def collect_weekly_evidence(
             key=lambda item: (str(item.get("kind") or ""), str(item.get("match_key") or ""))
         )
         person["attendance"] = dict(sorted(person["attendance"].items()))
+        person["daily_rlz"].sort(key=lambda item: (item.get("date") or date.min, item.get("task_title") or ""))
 
     return {
         "people": {

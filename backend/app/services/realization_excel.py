@@ -328,13 +328,76 @@ def build_realization_workbook(
                 )
                 current_row += 1
 
+        # Daily RLZ evidence: the reason + comment each person saved themselves every
+        # working day via "Ruaj gjendjen për RLZ" (TaskDailyRlzState). Plus one manual
+        # "extra evidence" line the manager can fill in by hand, matching the physical
+        # BARAZIMI JAVOR sheet.
         ws.merge_cells(
             start_row=current_row,
             start_column=1,
             end_row=current_row,
             end_column=width,
         )
-        ws.cell(current_row, 1, "5. SNAPSHOT-ET DITORE")
+        ws.cell(current_row, 1, "5. RLZ DITORE — ARSYEJA, KOMENTI DHE EVIDENCA")
+        _header(ws.cell(current_row, 1), "1F4E78")
+        ws.cell(current_row, 1).alignment = Alignment(horizontal="left", vertical="center")
+        ws.row_dimensions[current_row].height = 22
+        current_row += 1
+
+        def _daily_rlz_reason_text(items: list[dict[str, Any]]) -> str:
+            parts = [
+                f"{item.get('date')}: {item.get('reason_label') or item.get('reason_code')}"
+                for item in items
+                if item.get("reason_label") or item.get("reason_code")
+            ]
+            return " | ".join(parts) if parts else "—"
+
+        def _daily_rlz_comment_text(items: list[dict[str, Any]]) -> str:
+            parts = [
+                f"{item.get('date')}: {item.get('comment')}"
+                for item in items
+                if item.get("comment")
+            ]
+            return " | ".join(parts) if parts else "—"
+
+        for label, formatter in (
+            ("Arsyeja (RLZ ditore)", _daily_rlz_reason_text),
+            ("Koment (RLZ ditore)", _daily_rlz_comment_text),
+        ):
+            ws.cell(current_row, 1, label)
+            ws.cell(current_row, 1).font = Font(bold=True)
+            ws.cell(current_row, 1).fill = PatternFill("solid", fgColor=BLUE)
+            ws.cell(current_row, 1).alignment = Alignment(vertical="top", wrap_text=True)
+            ws.cell(current_row, 1).border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+            for index, person in enumerate(people):
+                col = 2 + index * 2
+                daily_items = (person.get("facts_json") or {}).get("daily_rlz") or []
+                ws.merge_cells(start_row=current_row, start_column=col, end_row=current_row, end_column=col + 1)
+                cell = ws.cell(current_row, col, formatter(daily_items))
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+            ws.row_dimensions[current_row].height = 46
+            current_row += 1
+
+        ws.cell(current_row, 1, "Evidencë shtesë (manuale)")
+        ws.cell(current_row, 1).font = Font(bold=True)
+        ws.cell(current_row, 1).fill = PatternFill("solid", fgColor=BLUE)
+        ws.cell(current_row, 1).border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+        for index, person in enumerate(people):
+            col = 2 + index * 2
+            ws.merge_cells(start_row=current_row, start_column=col, end_row=current_row, end_column=col + 1)
+            ws.cell(current_row, col, "")
+            ws.cell(current_row, col).border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+        ws.row_dimensions[current_row].height = 28
+        current_row += 1
+
+        ws.merge_cells(
+            start_row=current_row,
+            start_column=1,
+            end_row=current_row,
+            end_column=width,
+        )
+        ws.cell(current_row, 1, "6. SNAPSHOT-ET DITORE")
         _header(ws.cell(current_row, 1), "1F4E78")
         ws.cell(current_row, 1).alignment = Alignment(horizontal="left", vertical="center")
         current_row += 1
@@ -400,7 +463,7 @@ def build_realization_workbook(
                 end_row=current_row,
                 end_column=width,
             )
-            ws.cell(current_row, 1, "6. PROJEKTET MST / TT")
+            ws.cell(current_row, 1, "7. PROJEKTET MST / TT")
             _header(ws.cell(current_row, 1), "1F4E78")
             ws.cell(current_row, 1).alignment = Alignment(
                 horizontal="left", vertical="center"
@@ -451,7 +514,7 @@ def build_realization_workbook(
             end_row=grade_row,
             end_column=width,
         )
-        evaluation_section_number = 7 if project_keys else 6
+        evaluation_section_number = 8 if project_keys else 7
         ws.cell(
             grade_row,
             1,
@@ -567,6 +630,31 @@ def build_realization_workbook(
             ws.row_dimensions[evaluation_row].height = 46 if is_tall else 32
         last_row = grade_row + len(evaluation_rows)
 
+        # 6. PAGA — filled in manually by the board/HR after the level is confirmed;
+        # this system does not track salaries, so these three rows are left blank
+        # ("___") exactly like the physical BARAZIMI JAVOR sheet.
+        paga_section_row = last_row + 1
+        ws.merge_cells(
+            start_row=paga_section_row, start_column=1, end_row=paga_section_row, end_column=width
+        )
+        ws.cell(paga_section_row, 1, "9. PAGA" if project_keys else "8. PAGA")
+        _header(ws.cell(paga_section_row, 1), "1F4E78")
+        ws.cell(paga_section_row, 1).alignment = Alignment(horizontal="left", vertical="center")
+        paga_rows = ["Paga bazë (€)", "Bonus mujor (€)", "TOTAL MUJOR (€)"]
+        for offset, label in enumerate(paga_rows, 1):
+            paga_row = paga_section_row + offset
+            ws.cell(paga_row, 1, label)
+            ws.cell(paga_row, 1).font = Font(bold=True)
+            ws.cell(paga_row, 1).fill = PatternFill("solid", fgColor=BLUE)
+            ws.cell(paga_row, 1).border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+            for index, person in enumerate(people):
+                col = 2 + index * 2
+                ws.merge_cells(start_row=paga_row, start_column=col, end_row=paga_row, end_column=col + 1)
+                ws.cell(paga_row, col, "___")
+                ws.cell(paga_row, col).alignment = Alignment(horizontal="center")
+                ws.cell(paga_row, col).border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+        last_row = paga_section_row + len(paga_rows)
+
         totals_row = last_row + 2
         ws.merge_cells(
             start_row=totals_row, start_column=1, end_row=totals_row, end_column=width
@@ -605,7 +693,20 @@ def build_realization_workbook(
         ws.cell(signature_row, 1).fill = PatternFill("solid", fgColor=GRAY)
         ws.cell(signature_row + 1, 1, "Barazoi: ____________________")
         ws.cell(signature_row + 1, min(4, width), "Konfirmoi (GA): ____________________")
-        last_row = signature_row + 1
+
+        legend_row = signature_row + 3
+        ws.merge_cells(start_row=legend_row, start_column=1, end_row=legend_row, end_column=width)
+        ws.cell(
+            legend_row,
+            1,
+            "LEGJENDA:  A+(50€)=gjitha+2+ekstra  A(40€)=gjitha+1ekstra  B(30€)=gjitha,pa ekstra  "
+            "C(20€)=vonesa  M(15€)=mungese e miratuar  D(max 10€)=pjeserisht  E(0€)=pa progres",
+        )
+        ws.cell(legend_row, 1).font = Font(italic=True, size=9)
+        ws.cell(legend_row, 1).fill = PatternFill("solid", fgColor=GRAY)
+        ws.cell(legend_row, 1).alignment = Alignment(horizontal="left", wrap_text=True)
+        ws.row_dimensions[legend_row].height = 22
+        last_row = legend_row
         # The totals-by-level table (7 levels + TOTAL + Komente) can be wider
         # than the per-person columns for small departments — make sure the
         # print area and auto-filter cover it.
@@ -734,6 +835,238 @@ def build_realization_workbook(
     for index, width in enumerate([18, 24, 65, 45], 1):
         guide.column_dimensions[get_column_letter(index)].width = width
     guide.freeze_panes = "A5"
+
+    detailed_guide = workbook.create_sheet("Udhëzuesi i Vlerësimit")
+    _title(
+        detailed_guide,
+        "UDHËZUESI I VLERËSIMIT — SI VLERËSOHET NJË PUNËTOR ÇDO TË HËNË",
+        "Rregulli kyç: A+ fitohet vetëm nëse janë kryer të gjitha detyrat dhe nuk i është "
+        "prishur plani asnjë kolegu.",
+        4,
+    )
+    detailed_row = 4
+
+    def _guide_section_header(text: str) -> None:
+        nonlocal detailed_row
+        detailed_guide.merge_cells(
+            start_row=detailed_row, start_column=1, end_row=detailed_row, end_column=4
+        )
+        detailed_guide.cell(detailed_row, 1, text)
+        _header(detailed_guide.cell(detailed_row, 1), "1F4E78")
+        detailed_guide.cell(detailed_row, 1).alignment = Alignment(horizontal="left")
+        detailed_row += 1
+
+    def _guide_note(text: str, fill: str = AMBER) -> None:
+        nonlocal detailed_row
+        detailed_guide.merge_cells(
+            start_row=detailed_row, start_column=1, end_row=detailed_row, end_column=4
+        )
+        cell = detailed_guide.cell(detailed_row, 1, text)
+        cell.font = Font(bold=True, size=9)
+        cell.fill = PatternFill("solid", fgColor=fill)
+        cell.alignment = Alignment(horizontal="left", wrap_text=True, vertical="center")
+        detailed_guide.row_dimensions[detailed_row].height = 30
+        detailed_row += 1
+
+    def _guide_checklist(title: str, items: list[str]) -> None:
+        nonlocal detailed_row
+        _guide_section_header(title)
+        detailed_guide.cell(detailed_row, 1, "Nr")
+        detailed_guide.cell(detailed_row, 2, "Pyetja / Hapi i kontrollit")
+        detailed_guide.cell(detailed_row, 3, "Kontrolluar (✓)")
+        detailed_guide.cell(detailed_row, 4, "Shënime")
+        for column in range(1, 5):
+            _header(detailed_guide.cell(detailed_row, column), "5B9BD5")
+        detailed_row += 1
+        for index, item in enumerate(items, 1):
+            detailed_guide.cell(detailed_row, 1, index)
+            detailed_guide.cell(detailed_row, 2, item)
+            for column in range(1, 5):
+                cell = detailed_guide.cell(detailed_row, column)
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+                cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+            detailed_row += 1
+        detailed_row += 1
+
+    _guide_note(
+        "Bordi e barazon stafin dhe veten me të njëjtat kritere. Në fund, rezultatet "
+        "barazohen dhe konfirmohen me Menaxheren (GA)."
+    )
+    _guide_note(
+        "RREGULL KYÇ: A+ fitohet vetëm nëse janë kryer të gjitha detyrat dhe nuk i "
+        "është prishur plani asnjë kolegu. Përmbushja e një afati NUK mjafton nëse për "
+        "ta arritur i është prishur plani dikujt tjetër — niveli ulet automatikisht.",
+        fill=RED,
+    )
+
+    _guide_checklist(
+        "HAPI 2 — KONTROLLI I DETYRAVE (ditë për ditë, për çdo punëtor)",
+        [
+            "A janë përfunduar detyrat sipas planit?",
+            "A ka detyra që nuk kanë pasur fare progres?",
+            "A ka detyra që mbesin në proces edhe për këtë javë?",
+            "A i janë shtuar punëtorit detyra të reja gjatë javës?",
+            "A ka ndryshuar prioriteti i detyrave / a janë shtyrë detyra për javën "
+            "tjetër ME KONFIRMIM?",
+        ],
+    )
+    _guide_checklist(
+        "HAPI 3 — KONTROLLI I ANGAZHIMIT",
+        [
+            "A i ka realizuar të gjitha detyrat e planit?",
+            "A ka arritur t'i përfundojë dhe ka kërkuar edhe detyra të tjera?",
+            "A ka ndihmuar ndonjë koleg gjatë javës?",
+            "A ka dhënë ndonjë propozim për përmirësim?",
+        ],
+    )
+    _guide_checklist(
+        "HAPI 4 — KONTROLLI I DISIPLINËS",
+        [
+            "A i ka respektuar të gjitha oraret e takimeve?",
+            "A i ka mbyllur dhe barazuar detyrat me rregull?",
+            "A ka pasur vonesa të shpeshta gjatë javës?",
+            "A ka pasur mungesa të papritura? (Mungesa e miratuar paraprakisht NUK "
+            "penalizohet — shih nivelin M.)",
+        ],
+    )
+    _guide_checklist(
+        "HAPI 5 — VLERËSIMI ME + / +/- / -",
+        [
+            "Jepni + nëse: i ka realizuar të gjitha detyrat e planit, i ka respektuar "
+            "oraret e takimeve dhe i ka mbyllur detyrat me rregull.",
+            "Jepni + (dallon) nëse përveç realizimit të plotë ka edhe angazhim ekstra "
+            "jashtë planit; + (dallon dukshëm) nëse ka disa angazhime ekstra së bashku.",
+            "Jepni +/- për rastet e ndërmjetme: detyrat e kryera por me vonesa të "
+            "shpeshta (C), ose mungesë e arsyetuar me shtyrje të konfirmuar (M).",
+            "Jepni - nëse: nuk i ka kryer detyrat, nuk ka respektuar deadline/takimet, "
+            "ose ka pasur mungesa të papritura pa arsye.",
+        ],
+    )
+
+    _guide_section_header("HAPI 6 — CAKTIMI I NIVELIT TË REALIZIMIT (A+ deri E)")
+    detailed_guide.cell(detailed_row, 1, "Niveli")
+    detailed_guide.cell(detailed_row, 2, "Kur fitohet (kriteret)")
+    detailed_guide.cell(detailed_row, 3, "Shembuj / Kundërshembuj")
+    detailed_guide.cell(detailed_row, 4, "Bonusi")
+    for column in range(1, 5):
+        _header(detailed_guide.cell(detailed_row, column), "5B9BD5")
+    detailed_row += 1
+    level_rules: list[tuple[str, str, list[str], str]] = [
+        (
+            "A+",
+            "Të gjitha detyrat + deadline + takimet + TË PAKTËN 2 nga: kërkoi shtesë / "
+            "ndihmoi koleg / angazhim ekstra / propozim. DHE NUK IA KA PRISHUR PLANIN "
+            "ASNJË KOLEGU (as pjesërisht, as edhe nëse vetë ka arritur afatin).",
+            [
+                "I kreu të gjitha detyrat, kërkoi detyra shtesë dhe propozoi automatizim → A+",
+                "Kundërshembull: mbylli gjithçka brenda afatit POR informacioni i vonuar "
+                "ia prishi planin një kolegu → NUK merret A+.",
+            ],
+            "50 €",
+        ),
+        (
+            "A",
+            "Të gjitha detyrat + deadline + takimet + VETËM 1 nga: kërkoi shtesë / "
+            "ndihmoi koleg / angazhim ekstra / propozim.",
+            [
+                "Kreu gjithçka me kohë dhe ndihmoi 1 koleg → A",
+                "Kundërshembull: ndihmoi 1 koleg POR ia prishi planin një tjetri → "
+                "humb ekstrën, zbret në B.",
+            ],
+            "40 €",
+        ),
+        (
+            "B",
+            "Të gjitha detyrat + deadline + takimet. Pa vonesa, pa mungesa, pa ekstra. "
+            "(Shtyrja ME konfirmim nuk e ul nivelin.) Pushim vjetor tërë javën → B automatik.",
+            [
+                "Javë e rregullt: plan i kryer, takime të respektuara, pa ekstra → B",
+                "Kundërshembull: pa vonesa vetjake POR vonoi një informacion dhe kolegu "
+                "duhej të rirregullonte planin → zbret në C.",
+            ],
+            "30 €",
+        ),
+        (
+            "C",
+            "Të gjitha detyrat + takimet, POR pati vonesa të shpeshta (3+ gjatë javës) "
+            "ose mungoi 1 ditë PA njoftim (detyrat u kryen).",
+            [
+                "Plan i kryer plotësisht, por vonoi çdo ditë → C",
+                "Mungoi 1 ditë PA lajmërim, të tjerat i kreu → C.",
+            ],
+            "20 €",
+        ),
+        (
+            "M",
+            "Mungesë/pushim personal E MIRATUAR paraprakisht me bordin. Detyrat e ditëve "
+            "të punës të kryera; pjesa tjetër e shtyrë ME konfirmim.",
+            [
+                "Mungoi 2 ditë me miratim + detyrat e mbetura u shtynë me konfirmim → M",
+                "Kundërshembull: mungesë e miratuar, por la pezull një detyrë urgjente "
+                "të një kolegu pa njoftim → D, jo M.",
+            ],
+            "15 €",
+        ),
+        (
+            "D",
+            "NUK i kreu të gjitha detyrat pa konfirmim shtyrjeje, OSE nuk respektoi "
+            "takimet, OSE mungoi 1 ditë PA njoftim dhe nuk i kreu detyrat.",
+            [
+                "Kreu 3 nga 5 detyra, 2 mbetën pa konfirmim, mungoi 1 takim → D",
+                "RREGULLI D vs M: edhe 1 ditë PA njoftim → D automatikisht.",
+            ],
+            "max 10 €",
+        ),
+        (
+            "E",
+            "PA PROGRES gjatë gjithë javës, OSE mungesa të papritura 2+ ditë pa njoftim "
+            "fare (zhdukje e plotë).",
+            [
+                "Asnjë detyrë e hapur, asnjë komunikim, 2 ditë mungesë pa njoftim → E",
+                "Prezent fizikisht por 0 detyra të mbyllura dhe 0 progres → E",
+            ],
+            "0 €",
+        ),
+    ]
+    for level, condition, examples, bonus in level_rules:
+        row_start = detailed_row
+        detailed_guide.cell(detailed_row, 1, level)
+        detailed_guide.cell(detailed_row, 1).fill = PatternFill("solid", fgColor=LEVEL_COLORS[level])
+        detailed_guide.cell(detailed_row, 1).font = Font(
+            bold=True, color=WHITE if level in {"A+", "A", "E"} else "000000"
+        )
+        detailed_guide.cell(detailed_row, 2, condition)
+        detailed_guide.cell(detailed_row, 3, "\n".join(f"• {item}" for item in examples))
+        detailed_guide.cell(detailed_row, 4, bonus)
+        detailed_guide.cell(detailed_row, 4).font = Font(bold=True)
+        detailed_guide.cell(detailed_row, 4).alignment = Alignment(horizontal="center", vertical="top")
+        for column in range(1, 5):
+            cell = detailed_guide.cell(row_start, column)
+            cell.alignment = Alignment(
+                vertical="top", wrap_text=True,
+                horizontal="center" if column in (1, 4) else "left",
+            )
+            cell.border = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
+        detailed_guide.row_dimensions[row_start].height = 70
+        detailed_row += 1
+
+    detailed_row += 1
+    _guide_note(
+        "MUNGESA — TABELA E SHPEJTË:  1 ditë ME njoftim → M  |  1 ditë PA njoftim, "
+        "detyra kryer → C  |  1 ditë PA njoftim, detyra pa kryer → D  |  2+ ditë PA "
+        "njoftim → E",
+        fill=BLUE,
+    )
+    _guide_note(
+        "RREGULLI: Fillo nga A+ dhe zbrit poshtë — niveli i parë ku përgjigjja është "
+        "'Po' është niveli i punëtorit. Mungesa e miratuar paraprakisht = M, jo D/E.",
+        fill=GREEN,
+    )
+    detailed_guide.freeze_panes = "A5"
+    detailed_guide.column_dimensions["A"].width = 10
+    detailed_guide.column_dimensions["B"].width = 55
+    detailed_guide.column_dimensions["C"].width = 55
+    detailed_guide.column_dimensions["D"].width = 16
 
     for ws in workbook.worksheets:
         ws.sheet_view.showGridLines = False
