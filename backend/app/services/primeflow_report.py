@@ -27,7 +27,7 @@ STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
 BOARD_REMINDER_SECTION_TITLE = "PYETJET PER 1H - BORD"
-REMINDER_SECTION_TITLE = "PYETJET PER 1H - STAFF"
+REMINDER_SECTION_TITLE = "STAFF - HAPAT PER 1H"
 TECHNICAL_TAGS = re.compile(
     r"\[\[\s*/?\s*(?:added|done(?:\s*:\s*(?:grey|gray|blue|green))?)\s*\]\]",
     re.IGNORECASE,
@@ -82,9 +82,12 @@ class ReportReminderQuestion(BaseModel):
 
 def _board_reminder_questions() -> list[ReportReminderQuestion]:
     return [
-        ReportReminderQuestion(text="Done?"),
-        ReportReminderQuestion(text="Strike?"),
-        ReportReminderQuestion(text="Notes te reja?"),
+        ReportReminderQuestion(text="Slotin paraprak/aktual"),
+        ReportReminderQuestion(text="A ke filluar me slotin aktual?"),
+        ReportReminderQuestion(text="Nese jo, kur?"),
+        ReportReminderQuestion(text="A kryhet sot?"),
+        ReportReminderQuestion(text="A kryhet kete jave?"),
+        ReportReminderQuestion(text="A arrihet RLZ javor?"),
     ]
 
 

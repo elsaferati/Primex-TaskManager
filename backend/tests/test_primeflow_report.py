@@ -240,26 +240,23 @@ class PrimeFlowReportTests(unittest.TestCase):
             }]},
         }
         reminders = [
-            ReportReminderQuestion(
-                text="A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?",
-                guidance="DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!",
-            ),
-            ReportReminderQuestion(text="Nese jo, pse?"),
+            ReportReminderQuestion(text="Hap doc dhe det"),
+            ReportReminderQuestion(text="Share screen side by side DET/REZULTATIN"),
+            ReportReminderQuestion(text="Sqaro slotin paraprak pastaj aktual"),
         ]
         document = build_report_document(data, date(2026, 8, 6), "11:00", reminders=reminders)
         plain = render_plain_text(document)
         html = render_html(document)
         self.assertLess(plain.index(BOARD_REMINDER_SECTION_TITLE), plain.index(REMINDER_SECTION_TITLE))
         self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("11:00 SLOTI 06.08.2026"))
-        self.assertIn("1. Done?", plain)
-        self.assertIn("2. Strike?", plain)
-        self.assertIn("3. Notes te reja?", plain)
-        self.assertIn("1. A eshte perfunduar detyra", plain)
-        self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", plain)
+        self.assertIn("1. Slotin paraprak/aktual", plain)
+        self.assertIn("6. A arrihet RLZ javor?", plain)
+        self.assertIn("1. Hap doc dhe det", plain)
+        self.assertIn("2. Share screen side by side DET/REZULTATIN", plain)
         self.assertIn(REMINDER_SECTION_TITLE, html)
         self.assertIn(BOARD_REMINDER_SECTION_TITLE, html)
-        self.assertIn("1. A eshte perfunduar detyra sipas planifikimit per slotin e caktuar?", html)
-        self.assertIn("DIREKT NE TEME, SHKURT, QARTE DHE SAKTE!!!!", html)
+        self.assertIn("A ke filluar me slotin aktual?", html)
+        self.assertIn("Sqaro slotin paraprak pastaj aktual", html)
         self.assertIn("color:#64748b", html)
         self.assertLess(html.index(REMINDER_SECTION_TITLE), html.index("11:00 SLOTI 06.08.2026"))
 

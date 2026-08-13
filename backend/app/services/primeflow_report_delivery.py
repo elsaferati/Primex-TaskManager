@@ -17,10 +17,9 @@ from app.db import SessionLocal
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
-from app.models.question_library import QuestionCategory, QuestionDefinition
 from app.models.task_strike_event import TaskStrikeEvent
 from app.services.primeflow_report import (
-    GmailService, GmailVerificationError, PrimeFlowClient, REMINDER_CATEGORY_NORMALIZED,
+    GmailService, GmailVerificationError, PrimeFlowClient,
     ReportDocument, ReportReminderQuestion, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
@@ -82,25 +81,11 @@ async def configured_recipients(report_type: str = "ONE_H") -> dict[str, list[st
 
 
 async def load_1h_reminder_questions() -> list[ReportReminderQuestion]:
-    async with SessionLocal() as db:
-        category = await db.scalar(
-            select(QuestionCategory).where(
-                QuestionCategory.normalized_name == REMINDER_CATEGORY_NORMALIZED
-            )
-        )
-        if category is None:
-            return []
-        rows = (
-            await db.execute(
-                select(QuestionDefinition)
-                .where(QuestionDefinition.category_id == category.id)
-                .order_by(QuestionDefinition.sort_order, QuestionDefinition.created_at)
-            )
-        ).scalars().all()
+    """The 1H staff meeting steps are fixed, not editable question-library data."""
     return [
-        ReportReminderQuestion(text=row.text.strip(), guidance=(row.guidance or "").strip())
-        for row in rows
-        if row.text and row.text.strip()
+        ReportReminderQuestion(text="Hap doc dhe det"),
+        ReportReminderQuestion(text="Share screen side by side DET/REZULTATIN"),
+        ReportReminderQuestion(text="Sqaro slotin paraprak pastaj aktual"),
     ]
 
 
