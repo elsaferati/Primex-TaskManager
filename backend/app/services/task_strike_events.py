@@ -15,7 +15,9 @@ from app.models.task_strike_event import TaskStrikeEvent
 DONE_BLOCK = re.compile(r"\[\[\s*done\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]", re.IGNORECASE | re.DOTALL)
 TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
 # Checklist points can be numbered or use the bullet controls in PX/GA notes.
-STRIKE_TIMESTAMP_SUFFIX = re.compile(r"\s+\d{2}:\d{2}\s+\d{2}\.\d{2}\s*$")
+STRIKE_TIMESTAMP_SUFFIX = re.compile(
+    r"\s+(?P<hour>\d{2}):(?P<minute>\d{2})\s+(?P<day>\d{2})\.(?P<month>\d{2})\s*$"
+)
 CHECKLIST_ITEM = re.compile(r"(?m)^\s*(?:\d+\.\s+|[•*-]\s+)")
 
 
@@ -43,6 +45,38 @@ def split_strike_timestamp(value: str) -> tuple[str, str]:
     if match is None:
         return value, ""
     return value[:match.start()].rstrip(), match.group(0).strip()
+
+
+def strike_timestamp_datetime(value: str, *, report_at: datetime) -> datetime | None:
+    """Read the UI's `HH:MM DD.MM` completion timestamp when no event exists."""
+
+    match = STRIKE_TIMESTAMP_SUFFIX.search(value)
+    if match is None:
+        return None
+    try:
+        return datetime(
+            report_at.year,
+            int(match.group("month")),
+            int(match.group("day")),
+            int(match.group("hour")),
+            int(match.group("minute")),
+            tzinfo=report_at.tzinfo,
+        )
+    except ValueError:
+        return None
+
+
+def _strike_colour(occurred_at: datetime | None, *, interval_start: datetime, interval_end: datetime) -> str:
+    if occurred_at is None:
+        return "grey"
+    if occurred_at.tzinfo is None:
+        occurred_at = occurred_at.replace(tzinfo=interval_end.tzinfo)
+    local_occurred_at = occurred_at.astimezone(interval_end.tzinfo)
+    if local_occurred_at.date() < interval_end.date():
+        return "grey"
+    if interval_start < occurred_at <= interval_end:
+        return "blue"
+    return "green"
 
 
 def point_key(value: str, *, field_name: str = "DESCRIPTION") -> str:
@@ -303,23 +337,25 @@ def render_text_for_interval(
         event = event_for_point(point)
         if event is None:
             if point.key in current_done:
+                strike_text, timestamp = split_strike_timestamp(point.text)
+                colour = _strike_colour(
+                    strike_timestamp_datetime(point.text, report_at=interval_end),
+                    interval_start=interval_start,
+                    interval_end=interval_end,
+                )
                 plain_parts.append(point.text)
-                marked_parts.append(f"[[done:grey]]{point.text}[[/done]]")
+                marked_parts.append(
+                    f"[[done:{colour}]]{strike_text}[[/done]]"
+                    f"{' ' + timestamp if timestamp else ''}"
+                )
             else:
                 plain_parts.append(point.text)
                 marked_parts.append(point.text)
             continue
         if event.action == "STRUCK":
-            occurred_at = event.occurred_at
-            if occurred_at.tzinfo is None:
-                occurred_at = occurred_at.replace(tzinfo=interval_end.tzinfo)
-            local_occurred_at = occurred_at.astimezone(interval_end.tzinfo)
-            if local_occurred_at.date() < interval_end.date():
-                colour = "grey"
-            elif interval_start < occurred_at <= interval_end:
-                colour = "blue"
-            else:
-                colour = "green"
+            colour = _strike_colour(
+                event.occurred_at, interval_start=interval_start, interval_end=interval_end
+            )
             strike_text, timestamp = split_strike_timestamp(point.text)
             plain_parts.append(point.text)
             marked_parts.append(

@@ -24,6 +24,7 @@ from app.services.task_strike_events import (
     record_title_strike_events,
     render_description_for_interval,
     render_text_for_interval,
+    strike_timestamp_datetime,
     split_strike_timestamp,
 )
 from app.services.primeflow_report_delivery import strike_interval_end, strike_interval_start
@@ -665,6 +666,21 @@ class PrimeFlowReportTests(unittest.TestCase):
         )
         html = render_html(document)
         self.assertIn("color:#16a34a;text-decoration:line-through;text-decoration-thickness:2px;\">1. Test1</span> 08:46 13.08", html)
+
+    def test_timestamp_colours_a_strike_that_predates_its_linked_task_event(self) -> None:
+        text = "[[done]]1. Test1[[/done]] 08:46 13.08\n[[done]]2. Test2[[/done]] 08:50 13.08"
+        interval_start = datetime(2026, 8, 13, 9, 0, tzinfo=timezone.utc)
+        interval_end = datetime(2026, 8, 13, 10, 50, tzinfo=timezone.utc)
+        plain, marked = render_description_for_interval(
+            text, [], interval_start=interval_start, interval_end=interval_end
+        )
+        self.assertEqual(
+            strike_timestamp_datetime("1. Test1 08:46 13.08", report_at=interval_end),
+            datetime(2026, 8, 13, 8, 46, tzinfo=timezone.utc),
+        )
+        self.assertIn("1. Test1 08:46 13.08", plain)
+        self.assertIn("[[done:green]]1. Test1[[/done]] 08:46 13.08", marked)
+        self.assertIn("[[done:green]]2. Test2[[/done]] 08:50 13.08", marked)
 
     def test_partial_bullet_selection_is_reported_as_the_bullet_subtask(self) -> None:
         title = "EF: TEST TASK\n• [[done]]Test[[/done]]\n• Still open"
