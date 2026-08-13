@@ -19,6 +19,7 @@ from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
 from app.models.primeflow_report_schedule import PrimeFlowReportSchedule
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
 from app.models.user import User
+from app.models.enums import UserRole
 from app.services.audit import add_audit_log
 from app.services.primeflow_report_access import can_manage_reports
 from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, render_html, render_plain_text, render_png
@@ -41,6 +42,22 @@ async def require_report_manager(user: User = Depends(get_current_user)) -> User
     if not can_manage_reports(user):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
     return user
+
+
+async def require_rlz_report_manager(user: User = Depends(get_current_user)) -> User:
+    if user.role not in {UserRole.ADMIN, UserRole.MANAGER}:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    return user
+
+
+def require_report_type_access(user: User, report_type: str) -> None:
+    allowed = (
+        user.role in {UserRole.ADMIN, UserRole.MANAGER}
+        if report_type == RLZ_SCHEDULE_TYPE
+        else can_manage_reports(user)
+    )
+    if not allowed:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
 
 
 def _recipient(row: PrimeFlowReportRecipient) -> dict:
@@ -273,7 +290,7 @@ async def manual_send(payload: SendRequest, db: AsyncSession = Depends(get_db), 
 
 
 @router.get("/rlz/overview")
-async def rlz_overview(db: AsyncSession = Depends(get_db), _: User = Depends(require_report_manager)) -> dict:
+async def rlz_overview(db: AsyncSession = Depends(get_db), _: User = Depends(require_rlz_report_manager)) -> dict:
     recipients = (await db.execute(select(PrimeFlowReportRecipient).where(
         PrimeFlowReportRecipient.report_type == RLZ_SCHEDULE_TYPE
     ).order_by(PrimeFlowReportRecipient.sort_order))).scalars().all()
@@ -287,21 +304,32 @@ async def rlz_overview(db: AsyncSession = Depends(get_db), _: User = Depends(req
             "recent_runs": [_run(row) for row in recent]}
 
 
+async def _rlz_configured_time(db: AsyncSession) -> str:
+    value = await db.scalar(select(PrimeFlowReportSchedule.execution_time).where(
+        PrimeFlowReportSchedule.report_type == RLZ_SCHEDULE_TYPE,
+        PrimeFlowReportSchedule.is_active.is_(True),
+    ).order_by(PrimeFlowReportSchedule.sort_order).limit(1))
+    return value.strftime("%H:%M") if value else "16:00"
+
+
 @router.post("/rlz/preview")
-async def rlz_preview(payload: RlzPreviewRequest, _: User = Depends(require_report_manager)) -> dict:
+async def rlz_preview(payload: RlzPreviewRequest, db: AsyncSession = Depends(get_db),
+                      _: User = Depends(require_rlz_report_manager)) -> dict:
     recipients = await _rlz_recipient_map(payload, require_any=False)
     report = await generate_rlz_fresh(payload.report_date)
-    return {"report": report, "recipients": recipients, "plain_text": render_rlz_plain(report),
-            "html": render_rlz_html(report)}
+    report_time = await _rlz_configured_time(db)
+    return {"report": report, "recipients": recipients, "plain_text": render_rlz_plain(report, report_time),
+            "html": render_rlz_html(report, report_time)}
 
 
 @router.post("/rlz/send")
 async def rlz_send(payload: RlzSendRequest, db: AsyncSession = Depends(get_db),
-                   user: User = Depends(require_report_manager)) -> dict:
+                   user: User = Depends(require_rlz_report_manager)) -> dict:
     recipients = await _rlz_recipient_map(payload, require_any=True)
+    report_time = await _rlz_configured_time(db)
     run = await deliver_daily_rlz_control(
         payload.report_date, recipient_map=recipients, trigger_type="MANUAL",
-        triggered_by_user_id=user.id, manual_reason=payload.reason,
+        triggered_by_user_id=user.id, manual_reason=payload.reason, report_time=report_time,
     )
     add_audit_log(db=db, actor_user_id=user.id, entity_type="primeflow_report_run", entity_id=run.id,
                   action="MANUAL_SEND", after={"report_type": RLZ_REPORT_TYPE, "status": run.status, "reason": payload.reason})
@@ -365,7 +393,8 @@ async def recipients(report_type: str = "ONE_H", db: AsyncSession = Depends(get_
 
 
 @router.post("/recipients", status_code=201)
-async def create_recipient(payload: RecipientCreate, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
+async def create_recipient(payload: RecipientCreate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
+    require_report_type_access(user, payload.report_type)
     row = PrimeFlowReportRecipient(**payload.model_dump(mode="json"), created_by=user.id, updated_by=user.id)
     db.add(row)
     await db.flush()
@@ -406,10 +435,11 @@ async def _ensure_active_recipient(db: AsyncSession, excluding: uuid.UUID) -> No
 
 
 @router.patch("/recipients/{recipient_id}")
-async def update_recipient(recipient_id: uuid.UUID, payload: RecipientUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
+async def update_recipient(recipient_id: uuid.UUID, payload: RecipientUpdate, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     row = await db.get(PrimeFlowReportRecipient, recipient_id)
     if not row:
         raise HTTPException(404, "Recipient not found")
+    require_report_type_access(user, row.report_type)
     before = _recipient(row)
     changes = payload.model_dump(exclude_unset=True)
     if changes.get("recipient_type"):
@@ -428,10 +458,11 @@ async def update_recipient(recipient_id: uuid.UUID, payload: RecipientUpdate, db
 
 
 @router.delete("/recipients/{recipient_id}", status_code=204)
-async def delete_recipient(recipient_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
+async def delete_recipient(recipient_id: uuid.UUID, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     row = await db.get(PrimeFlowReportRecipient, recipient_id)
     if not row:
         raise HTTPException(404, "Recipient not found")
+    require_report_type_access(user, row.report_type)
     if row.is_active:
         await _ensure_active_recipient(db, row.id)
     before = _recipient(row)
@@ -492,10 +523,13 @@ async def create_schedule(payload: SchedulePayload, db: AsyncSession = Depends(g
 
 
 @router.patch("/schedules/{schedule_id}")
-async def update_schedule(schedule_id: uuid.UUID, payload: SchedulePayload, db: AsyncSession = Depends(get_db), user: User = Depends(require_report_manager)):
+async def update_schedule(schedule_id: uuid.UUID, payload: SchedulePayload, db: AsyncSession = Depends(get_db), user: User = Depends(get_current_user)):
     row = await db.get(PrimeFlowReportSchedule, schedule_id)
     if not row:
         raise HTTPException(404, "Schedule not found")
+    require_report_type_access(user, row.report_type)
+    if payload.report_type != row.report_type:
+        raise HTTPException(422, "Report type cannot be changed")
     await _validate_schedule(db, payload, row.id)
     before = _schedule(row)
     for key, value in payload.model_dump(exclude={"execution_time"}).items():

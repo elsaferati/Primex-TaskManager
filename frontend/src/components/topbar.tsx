@@ -1,7 +1,8 @@
 "use client"
 
 import * as React from "react"
-import { CheckCheck, PanelLeftOpen, Trash2 } from "lucide-react"
+import Link from "next/link"
+import { Briefcase, CheckCheck, PanelLeftOpen, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
@@ -30,6 +31,16 @@ function initials(user: User) {
     .join("")
 }
 
+function departmentRoute(department: { name: string; code?: string | null }) {
+  const key = (department.code || department.name).trim().toLowerCase().replace(/[_\s]+/g, "-")
+  if (["development", "dev"].includes(key)) return "/departments/development"
+  if (["project-content-manager", "product-content", "pcm"].includes(key)) return "/departments/project-content-manager"
+  if (["graphic-design", "gd"].includes(key)) return "/departments/graphic-design"
+  if (["human-resource", "human-resources", "hr"].includes(key)) return "/departments/human-resource"
+  if (["finance", "fin"].includes(key)) return "/departments/finance"
+  return `/departments/${encodeURIComponent(key)}`
+}
+
 export function Topbar() {
   const { user, apiFetch, logout } = useAuth()
   const { isOpen, toggle } = useSidebar()
@@ -39,6 +50,7 @@ export function Topbar() {
   const [markingAllRead, setMarkingAllRead] = React.useState(false)
   const [deletingAll, setDeletingAll] = React.useState(false)
   const [deletingIds, setDeletingIds] = React.useState<string[]>([])
+  const [departmentViewHref, setDepartmentViewHref] = React.useState<string | null>(null)
   const isDev = process.env.NODE_ENV !== "production"
   const apiTargetLabel = React.useMemo(() => API_HTTP_URL, [])
 
@@ -193,8 +205,23 @@ export function Topbar() {
   }, [buildFailureDescription, deleteNotificationCompat, deletingAll, notifications, requestWithTrace])
 
   React.useEffect(() => {
-    void loadUnreadCount()
+    const timer = window.setTimeout(() => void loadUnreadCount(), 0)
+    return () => window.clearTimeout(timer)
   }, [loadUnreadCount])
+
+  React.useEffect(() => {
+    if (!user.department_id) return
+    let cancelled = false
+    const loadDepartmentRoute = async () => {
+      const response = await apiFetch("/departments")
+      if (!response.ok || cancelled) return
+      const departments = (await response.json()) as Array<{ id: string; name: string; code?: string | null }>
+      const department = departments.find((item) => item.id === user.department_id)
+      if (!cancelled && department) setDepartmentViewHref(`${departmentRoute(department)}?view=mine&daily=full`)
+    }
+    void loadDepartmentRoute()
+    return () => { cancelled = true }
+  }, [apiFetch, user.department_id])
 
   React.useEffect(() => {
     const handleNotification = () => {
@@ -226,6 +253,14 @@ export function Topbar() {
         <div className="text-sm text-muted-foreground hidden md:block">Ctrl+K to search</div>
       </div>
       <div className="flex items-center gap-2">
+        {departmentViewHref ? (
+          <Button asChild variant="outline">
+            <Link href={departmentViewHref} title="Open your department directly in My View">
+              <Briefcase className="h-4 w-4" />
+              <span className="hidden sm:inline">My View Dep</span>
+            </Link>
+          </Button>
+        ) : null}
         <Sheet open={sheetOpen} onOpenChange={(open) => void handleNotificationsOpenChange(open)}>
           <SheetTrigger asChild>
             <Button variant="outline">

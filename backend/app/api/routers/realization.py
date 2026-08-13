@@ -1585,7 +1585,7 @@ async def close_realization_day(
         raise HTTPException(status_code=403, detail="Forbidden")
     if user.role == UserRole.STAFF and result.user_id != user.id:
         raise HTTPException(status_code=403, detail="STAFF can close only their own day")
-    if user.role == UserRole.STAFF and not is_editable_day(period.start_date):
+    if result.user_id == user.id and not is_editable_day(period.start_date):
         raise HTTPException(status_code=409, detail={
             "code": "DAILY_RLZ_EDIT_WINDOW_CLOSED",
             "message": "Arsyeja dhe komenti për këtë ditë mund të ndryshohen vetëm deri në orën 17:00.",

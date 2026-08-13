@@ -19,7 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
-import { DailyRlzPanel } from "@/components/daily-rlz-panel"
+import { DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
@@ -1059,6 +1059,11 @@ export default function DepartmentKanban() {
   const [loading, setLoading] = React.useState(true)
   const [loadingExtras, setLoadingExtras] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
+  React.useEffect(() => {
+    if (searchParams.get("view") !== "mine") return
+    const timer = window.setTimeout(() => setViewMode("mine"), 0)
+    return () => window.clearTimeout(timer)
+  }, [searchParams])
   const [activeTab, setActiveTab] = React.useState<TabId>(
     isTabId ? (normalizedTab as TabId) : "all"
   )
@@ -1085,6 +1090,14 @@ export default function DepartmentKanban() {
   const [dailyReportManualOrder, setDailyReportManualOrder] = React.useState<string[]>([])
   const [expandedDailyReportTitleIds, setExpandedDailyReportTitleIds] = React.useState<Record<string, boolean>>({})
   const [showFullDailyReportTable, setShowFullDailyReportTable] = React.useState(false)
+  React.useEffect(() => {
+    if (searchParams.get("daily") !== "full") return
+    const timer = window.setTimeout(() => {
+      setShowDailyUserReport(true)
+      setShowFullDailyReportTable(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [searchParams])
   const [dailyReportPeriodFilter, setDailyReportPeriodFilter] = React.useState<"all" | "am_side" | "pm_side">("all")
   const [dailyReportStatusFilter, setDailyReportStatusFilter] = React.useState<string[]>([])
   const [dragDailyReportRowId, setDragDailyReportRowId] = React.useState<string | null>(null)
@@ -5606,7 +5619,6 @@ export default function DepartmentKanban() {
   // --- RENDER ---
   return (
     <div className="min-h-screen ">
-      <DailyRlzPanel />
       <div className="relative rounded-3xl bg-gradient-to-br from-slate-50 via-white to-emerald-50/40 p-6 print:hidden dark:from-slate-950 dark:via-slate-950 dark:to-emerald-950/30">
         <div className="pointer-events-none absolute inset-0 overflow-hidden rounded-2xl">
           <div className="absolute -top-24 right-0 h-56 w-56 rounded-full bg-emerald-200/40 blur-3xl dark:bg-emerald-900/30" />
@@ -6237,6 +6249,7 @@ export default function DepartmentKanban() {
                           </button>
                         )
                       })}
+                      <DailyRlzSaveButton day={selectedAllReportIso} report={dailyReport} onSaved={refreshDailyReport} />
                     </div>
                     <div
                       ref={dailyReportScrollRef}
@@ -6247,7 +6260,7 @@ export default function DepartmentKanban() {
                       onMouseUp={handleDailyReportMouseEnd}
                       onMouseLeave={handleDailyReportMouseEnd}
                     >
-                      <table className="min-w-[1180px] w-full table-fixed border border-slate-200 text-[11px] daily-report-table">
+                      <table className="min-w-[1350px] w-full table-fixed border border-slate-200 text-[11px] daily-report-table">
                         <colgroup>
                           <col className="w-[24px]" />
                           <col className="w-[32px]" />
@@ -6260,6 +6273,7 @@ export default function DepartmentKanban() {
                           <col className="w-[64px]" />
                           <col className="w-[88px]" />
                           <col className="w-[72px]" />
+                          <col className="w-[170px]" />
                           <col className="w-[140px]" />
                         </colgroup>
                         <thead className="sticky top-0 z-10 bg-slate-50">
@@ -6277,6 +6291,7 @@ export default function DepartmentKanban() {
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">BZ</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-normal">KOHA BARAZIMIT</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase whitespace-nowrap">T/Y/O</th>
+                            <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Arsyeja</th>
                             <th className="border border-slate-200 px-2 py-2 text-left text-xs uppercase">Koment</th>
                           </tr>
                         </thead>
@@ -6435,6 +6450,14 @@ export default function DepartmentKanban() {
                                     )}
                                   </td>
                                   <td className="border border-slate-200 px-2 py-2 align-top">
+                                    <DailyRlzReasonCell
+                                      taskId={row.taskId}
+                                      day={selectedAllReportIso}
+                                      state={row.taskId ? dailyRlzStateByTask(dailyReport).get(row.taskId) : null}
+                                      onSaved={refreshDailyReport}
+                                    />
+                                  </td>
+                                  <td className="border border-slate-200 px-2 py-2 align-top">
                                     <div className="flex items-center gap-2">
                                       <input
                                         type="text"
@@ -6475,7 +6498,7 @@ export default function DepartmentKanban() {
                             })
                           ) : (
                             <tr>
-                              <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={12}>
+                              <td className="border border-slate-200 px-2 py-4 text-center italic text-slate-500" colSpan={13}>
                                 No data available.
                               </td>
                             </tr>

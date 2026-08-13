@@ -6,7 +6,7 @@ import pytest
 from app.services.daily_rlz_compliance import (
     REASON_LABELS, is_editable_day, next_working_day, task_issue_codes,
 )
-from app.services.daily_rlz_control_delivery import render_plain
+from app.services.daily_rlz_control_delivery import render_html, render_plain, subject_for
 
 
 DAY = date(2026, 8, 12)
@@ -29,13 +29,13 @@ DAY = date(2026, 8, 12)
 )
 def test_daily_rlz_task_rules(status, reason, due, is_1h, slot, expected):
     assert task_issue_codes(status=status, reason_code=reason, due_date=due,
-                            is_1h_report=is_1h, one_h_report_slot=slot, day=DAY) == expected
+                            requires_one_h_slot=is_1h, one_h_report_slot=slot, day=DAY) == expected
 
 
 def test_friday_moves_to_monday():
     assert next_working_day(date(2026, 8, 14)) == date(2026, 8, 17)
     assert task_issue_codes(status="TODO", reason_code="OTHER", due_date=date(2026, 8, 17),
-                            is_1h_report=False, one_h_report_slot=None, day=date(2026, 8, 14)) == []
+                            requires_one_h_slot=False, one_h_report_slot=None, day=date(2026, 8, 14)) == []
 
 
 def test_reason_codes_are_stable_and_complete():
@@ -64,8 +64,48 @@ def test_control_email_contains_task_evidence():
         "employees_stale": 0, "tasks_missing_reason": 1,
         "tasks_deadline_not_moved": 1, "tasks_missing_slot": 0,
     }, "people": [{"department": "Development", "employee": "Elsa", "rlz_close_state": {"status": "NOT_SAVED"},
-        "blockers": [{"title": "Task", "status": "TODO", "due_date": DAY.isoformat(),
+        "blockers": [{"title": "Task\nKy shënim i gjatë nuk duhet të shfaqet", "status": "TODO", "due_date": DAY.isoformat(),
                       "one_h_report_slot": None, "reason_label": None, "comment": None,
                       "issues": [{"code": "REASON_MISSING", "message": "Mungon arsyeja"}]}]}]}
     body = render_plain(report)
     assert "Development" in body and "Deadline: 2026-08-12" in body and "Mungon arsyeja" in body
+
+
+def test_control_html_is_colored_and_explains_why_rlz_was_not_saved():
+    report = {"day": DAY.isoformat(), "all_good": False, "summary": {
+        "departments_checked": 1, "employees_checked": 1, "employees_not_saved": 1,
+        "employees_stale": 0, "tasks_missing_reason": 1,
+        "tasks_deadline_not_moved": 1, "tasks_missing_slot": 0,
+    }, "people": [{"department": "Development", "employee": "Elsa",
+        "rlz_close_state": {"status": "NOT_SAVED"},
+        "blockers": [{"title": "Task", "status": "TODO", "due_date": DAY.isoformat(),
+                      "one_h_report_slot": None, "reason_label": None, "comment": None,
+                      "issues": [{"code": "REASON_MISSING", "message": "Mungon arsyeja"}]}]}]}
+
+    rendered = render_html(report)
+
+    assert 'bgcolor="#2563eb"' in rendered
+    assert "Gjendja për RLZ javor nuk është ruajtur." in rendered
+    assert "ÇFARË KA MBETUR" in rendered
+    assert "Mungon arsyeja" in rendered
+    assert "Empty" in rendered
+    assert 'bgcolor="#f9a8d4"' in rendered
+    assert "Ky shënim i gjatë nuk duhet të shfaqet" not in rendered
+
+
+def test_control_html_colors_in_progress_yellow():
+    report = {"day": DAY.isoformat(), "all_good": False, "summary": {
+        "departments_checked": 1, "employees_checked": 1, "employees_not_saved": 1,
+        "employees_stale": 0, "tasks_missing_reason": 0,
+        "tasks_deadline_not_moved": 0, "tasks_missing_slot": 1,
+    }, "people": [{"department": "Development", "employee": "Elsa",
+        "rlz_close_state": {"status": "NOT_SAVED"},
+        "blockers": [{"title": "Task", "status": "IN_PROGRESS", "due_date": "2026-08-13",
+                      "one_h_report_slot": None, "reason_label": "Tjetër", "comment": None,
+                      "issues": [{"code": "ONE_H_SLOT_MISSING", "message": "Mungon 1H sloti"}]}]}]}
+
+    assert 'bgcolor="#ffff00"' in render_html(report)
+
+
+def test_control_subject_uses_configured_schedule_time():
+    assert subject_for(DAY, "15:30").endswith("15:30")
