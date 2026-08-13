@@ -73,6 +73,7 @@ const DONE_MARK_END = "[[/done]]"
 const ADDED_MARK_START = "[[added]]"
 const ADDED_MARK_END = "[[/added]]"
 const NOTE_MARK_TOKEN_RE = /\[\[(done|added)\]\]|\[\[\/(done|added)\]\]/g
+const STRIKE_TIMESTAMP_RE = /^ \d{2}:\d{2} \d{2}\.\d{2}(?=$|\s)/
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
@@ -248,6 +249,49 @@ function toggleDoneRange(ranges: DoneMarkRange[], selectedRange: DoneMarkRange) 
   }
 
   return normalizeDoneRanges(nextRanges)
+}
+
+function formatStrikeTimestamp(now = new Date()) {
+  return `${pad2(now.getHours())}:${pad2(now.getMinutes())} ${pad2(now.getDate())}.${pad2(now.getMonth() + 1)}`
+}
+
+function toggleDoneRangeWithTimestamp(
+  text: string,
+  ranges: DoneMarkRange[],
+  selectedRange: DoneMarkRange,
+  timestamp = formatStrikeTimestamp()
+) {
+  const normalizedRanges = normalizeDoneRanges(ranges)
+  const removesExistingStrike = normalizedRanges.some(
+    (range) => selectedRange.start < range.end && selectedRange.end > range.start
+  )
+  let nextText = text
+  let nextRanges = toggleDoneRange(normalizedRanges, selectedRange)
+
+  if (!removesExistingStrike) {
+    const stamp = ` ${timestamp}`
+    nextText = `${text.slice(0, selectedRange.end)}${stamp}${text.slice(selectedRange.end)}`
+    return {
+      text: nextText,
+      doneRanges: adjustTextRangesForTextChange(text, nextText, nextRanges),
+    }
+  }
+
+  // A timestamp belongs to a fully un-struck range only. This keeps partial
+  // un-strikes from removing the completion time for text that remains done.
+  const completedRangesToClear = normalizedRanges
+    .filter((range) => selectedRange.start <= range.start && selectedRange.end >= range.end)
+    .sort((left, right) => right.end - left.end)
+
+  for (const range of completedRangesToClear) {
+    const stampMatch = nextText.slice(range.end).match(STRIKE_TIMESTAMP_RE)
+    if (!stampMatch) continue
+    const nextValue = `${nextText.slice(0, range.end)}${nextText.slice(range.end + stampMatch[0].length)}`
+    nextRanges = adjustTextRangesForTextChange(nextText, nextValue, nextRanges)
+    nextText = nextValue
+  }
+
+  return { text: nextText, doneRanges: nextRanges }
 }
 
 function serializeMarkedNoteContent(text: string, doneRanges: TextMarkRange[], addedRanges: TextMarkRange[] = []) {
@@ -578,6 +622,17 @@ function renderInlineMarkedSegments(segments: MarkedSegment[], keyPrefix: string
 
   return runs.map((run, index) => {
     const className = getNoteMarkClass(run.isDone, run.isAdded)
+    const timestampMatch = !run.isDone && runs[index - 1]?.isDone
+      ? run.text.match(STRIKE_TIMESTAMP_RE)
+      : null
+    if (timestampMatch) {
+      return (
+        <React.Fragment key={`${keyPrefix}-run-${index}`}>
+          <span className="text-slate-400">{timestampMatch[0]}</span>
+          {run.text.slice(timestampMatch[0].length)}
+        </React.Fragment>
+      )
+    }
     const contentNode = run.isBold ? <strong>{run.text}</strong> : run.text
 
     if (!className) {
@@ -1736,9 +1791,10 @@ export default function GaKaNotesPage() {
       return
     }
 
-    const nextRanges = toggleDoneRange(editDoneRanges, { start, end })
-
-    setEditDoneRanges(nextRanges)
+    const nextContent = toggleDoneRangeWithTimestamp(editContent, editDoneRanges, { start, end })
+    setEditContent(nextContent.text)
+    setEditDoneRanges(nextContent.doneRanges)
+    setEditAddedRanges((current) => adjustTextRangesForTextChange(editContent, nextContent.text, current))
     window.setTimeout(() => {
       textarea.focus()
       textarea.setSelectionRange(start, end)
@@ -1777,9 +1833,19 @@ export default function GaKaNotesPage() {
       return
     }
 
+    const toggledContent = toggleDoneRangeWithTimestamp(
+      parsedContent.text,
+      parsedContent.doneRanges,
+      selectionRange
+    )
     const nextContent = synchronizeNumberedListProgress({
-      ...parsedContent,
-      doneRanges: toggleDoneRange(parsedContent.doneRanges, selectionRange),
+      text: toggledContent.text,
+      doneRanges: toggledContent.doneRanges,
+      addedRanges: adjustTextRangesForTextChange(
+        parsedContent.text,
+        toggledContent.text,
+        parsedContent.addedRanges
+      ),
     })
 
     setMarkingSelectedNoteId(note.id)

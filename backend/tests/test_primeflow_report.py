@@ -25,6 +25,7 @@ from app.services.task_strike_events import (
     render_description_for_interval,
     render_text_for_interval,
 )
+from app.services.primeflow_report_delivery import strike_interval_end, strike_interval_start
 
 
 class PrimeFlowReportTests(unittest.TestCase):
@@ -440,7 +441,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertTrue(png.startswith(b"\x89PNG\r\n\x1a\n"))
         self.assertGreater(document.task_count, 0)
 
-    def test_checklist_points_are_reported_once_then_hidden_until_reopened(self) -> None:
+    def test_checklist_points_keep_their_strike_colour_until_reopened(self) -> None:
         struck_at = datetime(2026, 8, 10, 10, 20, tzinfo=timezone.utc)
         description = "[[done]]1. Finished during this hour[[/done]]\n2. Still open"
         struck_event = SimpleNamespace(
@@ -454,7 +455,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             interval_end=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
         )
         self.assertEqual(plain, "1. Finished during this hour\n2. Still open")
-        self.assertIn("[[done]]1. Finished during this hour[[/done]]", marked)
+        self.assertIn("[[done:blue]]1. Finished during this hour[[/done]]", marked)
 
         next_plain, next_marked = render_description_for_interval(
             description,
@@ -462,8 +463,8 @@ class PrimeFlowReportTests(unittest.TestCase):
             interval_start=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
             interval_end=datetime(2026, 8, 10, 11, 50, tzinfo=timezone.utc),
         )
-        self.assertEqual(next_plain, "2. Still open")
-        self.assertNotIn("Finished during this hour", next_marked)
+        self.assertEqual(next_plain, "1. Finished during this hour\n2. Still open")
+        self.assertIn("[[done:green]]1. Finished during this hour[[/done]]", next_marked)
 
         reopened_at = datetime(2026, 8, 10, 11, 30, tzinfo=timezone.utc)
         reopened_event = SimpleNamespace(
@@ -524,16 +525,17 @@ class PrimeFlowReportTests(unittest.TestCase):
             field_name="TITLE",
         )
         self.assertEqual(plain, "OH: 14 TT CAT VERS\n1. Completed point\n2. Open point")
-        self.assertIn("[[done]]1. Completed point[[/done]]", marked)
+        self.assertIn("[[done:blue]]1. Completed point[[/done]]", marked)
 
-        next_plain, _ = render_text_for_interval(
+        next_plain, next_marked = render_text_for_interval(
             title,
             [event],
             interval_start=datetime(2026, 8, 10, 11, 0, tzinfo=timezone.utc),
             interval_end=datetime(2026, 8, 10, 11, 50, tzinfo=timezone.utc),
             field_name="TITLE",
         )
-        self.assertEqual(next_plain, "OH: 14 TT CAT VERS\n2. Open point")
+        self.assertEqual(next_plain, "OH: 14 TT CAT VERS\n1. Completed point\n2. Open point")
+        self.assertIn("[[done:green]]1. Completed point[[/done]]", next_marked)
 
         class FakeSession:
             def __init__(self):
@@ -576,10 +578,9 @@ class PrimeFlowReportTests(unittest.TestCase):
             field_name="TITLE",
         )
         self.assertIn(full_point, plain)
-        self.assertIn(f"[[done]]{full_point}[[/done]]", marked)
+        self.assertIn(f"[[done:blue]]{full_point}[[/done]]", marked)
 
-        # A legacy marker without any recorded timestamp is historical, so it
-        # must not look like a strike from the current hour.
+        # A legacy marker without a recorded timestamp is historical and grey.
         legacy_plain, legacy_marked = render_text_for_interval(
             title,
             [],
@@ -587,9 +588,55 @@ class PrimeFlowReportTests(unittest.TestCase):
             interval_end=datetime(2026, 8, 10, 11, 50, tzinfo=timezone.utc),
             field_name="TITLE",
         )
-        self.assertNotIn(full_point, legacy_plain)
-        self.assertNotIn(full_point, legacy_marked)
+        self.assertIn(full_point, legacy_plain)
+        self.assertIn(f"[[done:grey]]{full_point}[[/done]]", legacy_marked)
         self.assertIn("2. Ende e hapur", legacy_plain)
+
+    def test_strikes_are_blue_current_green_earlier_today_and_grey_previous_day(self) -> None:
+        interval_start = datetime(2026, 8, 10, 9, 0, tzinfo=timezone.utc)
+        interval_end = datetime(2026, 8, 10, 10, 50, tzinfo=timezone.utc)
+        description = (
+            "[[done]]1. Previous-day point[[/done]]\n"
+            "[[done]]2. Earlier today point[[/done]]\n"
+            "[[done]]3. Current interval point[[/done]]\n"
+            "4. Still open"
+        )
+        events = [
+            SimpleNamespace(id="old", point_key=point_key("1. Previous-day point"), action="STRUCK", occurred_at=datetime(2026, 8, 9, 16, 0, tzinfo=timezone.utc)),
+            SimpleNamespace(id="earlier", point_key=point_key("2. Earlier today point"), action="STRUCK", occurred_at=datetime(2026, 8, 10, 8, 30, tzinfo=timezone.utc)),
+            SimpleNamespace(id="current", point_key=point_key("3. Current interval point"), action="STRUCK", occurred_at=datetime(2026, 8, 10, 10, 20, tzinfo=timezone.utc)),
+        ]
+        plain, marked = render_description_for_interval(
+            description, events, interval_start=interval_start, interval_end=interval_end
+        )
+        self.assertIn("1. Previous-day point", plain)
+        self.assertIn("4. Still open", plain)
+        self.assertIn("[[done:grey]]1. Previous-day point[[/done]]", marked)
+        self.assertIn("[[done:green]]2. Earlier today point[[/done]]", marked)
+        self.assertIn("[[done:blue]]3. Current interval point[[/done]]", marked)
+
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {"oneH": [{
+                "id": "colours", "date": "2026-08-10", "slot": "11:00", "person": "Anisa",
+                "status": "TODO", "title": "Colour task", "description": description,
+            }]}},
+            date(2026, 8, 10),
+            "11:00",
+            description_overrides={"colours": (plain, marked)},
+        )
+        html = render_html(document)
+        self.assertIn("color:#6b7280;text-decoration:line-through", html)
+        self.assertIn("color:#16a34a;text-decoration:line-through", html)
+        self.assertIn("color:#2563eb;text-decoration:line-through", html)
+
+    def test_strike_report_windows_end_before_the_final_email_delivery(self) -> None:
+        report_day = date(2026, 8, 10)
+        self.assertEqual(strike_interval_start(report_day, "10:00").strftime("%H:%M"), "08:00")
+        self.assertEqual(strike_interval_end(report_day, "10:00").strftime("%H:%M"), "09:00")
+        self.assertEqual(strike_interval_start(report_day, "11:00").strftime("%H:%M"), "09:00")
+        self.assertEqual(strike_interval_end(report_day, "11:00").strftime("%H:%M"), "10:50")
+        self.assertEqual(strike_interval_start(report_day, "16:00").strftime("%H:%M"), "14:10")
+        self.assertEqual(strike_interval_end(report_day, "16:00").strftime("%H:%M"), "15:40")
 
     def test_partial_bullet_selection_is_reported_as_the_bullet_subtask(self) -> None:
         title = "EF: TEST TASK\n• [[done]]Test[[/done]]\n• Still open"
@@ -609,7 +656,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             field_name="TITLE",
         )
         self.assertIn(full_point, plain)
-        self.assertIn(f"[[done]]{full_point}[[/done]]", marked)
+        self.assertIn(f"[[done:blue]]{full_point}[[/done]]", marked)
         self.assertIn("• Still open", plain)
     def test_duplicate_bullets_keep_individual_strike_identity(self) -> None:
         class FakeSession:
@@ -642,7 +689,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             field_name="TITLE",
         )
         self.assertEqual(plain.count("- Repeat"), 2)
-        self.assertEqual(marked.count("[[done]]- Repeat[[/done]]"), 1)
+        self.assertEqual(marked.count("[[done:blue]]- Repeat[[/done]]"), 1)
 
     def test_plain_multiline_title_strike_is_matched_line_by_line(self) -> None:
         class FakeSession:
@@ -676,8 +723,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         )
         self.assertIn("First plain line", plain)
         self.assertIn("Second plain line", plain)
-        self.assertIn("[[done]]First plain line[[/done]]", marked)
-        self.assertNotIn("[[done]]Second plain line[[/done]]", marked)
+        self.assertIn("[[done:blue]]First plain line[[/done]]", marked)
+        self.assertNotIn("[[done:blue]]Second plain line[[/done]]", marked)
 
 
 if __name__ == "__main__":

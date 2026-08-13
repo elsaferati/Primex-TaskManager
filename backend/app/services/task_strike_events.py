@@ -247,11 +247,11 @@ def render_text_for_interval(
     interval_end: datetime,
     field_name: str = "DESCRIPTION",
 ) -> tuple[str, str]:
-    """Return plain and marked text for a 1H report interval.
+    """Return plain and colour-marked text for a 1H report interval.
 
-    Open points are always shown. A point struck during this interval is shown
-    once with a strike-through; an older struck point is omitted. Reopening a
-    point makes it open and visible again immediately.
+    Open points are always shown. Current-day strikes from this reporting
+    interval are blue; earlier strikes from the same day are green; strikes
+    from an earlier day are grey. Reopening a point makes it open immediately.
     """
 
     latest: dict[str, TaskStrikeEvent] = {}
@@ -292,19 +292,26 @@ def render_text_for_interval(
     for point in points:
         event = event_for_point(point)
         if event is None:
-            # A mark without a timestamp cannot be claimed as work from this
-            # interval. Treat it as historical and omit it, rather than showing
-            # a misleading new strike in every following 1H report.
             if point.key in current_done:
-                continue
+                plain_parts.append(point.text)
+                marked_parts.append(f"[[done:grey]]{point.text}[[/done]]")
             else:
                 plain_parts.append(point.text)
                 marked_parts.append(point.text)
             continue
         if event.action == "STRUCK":
-            if interval_start < event.occurred_at <= interval_end:
-                plain_parts.append(point.text)
-                marked_parts.append(f"[[done]]{point.text}[[/done]]")
+            occurred_at = event.occurred_at
+            if occurred_at.tzinfo is None:
+                occurred_at = occurred_at.replace(tzinfo=interval_end.tzinfo)
+            local_occurred_at = occurred_at.astimezone(interval_end.tzinfo)
+            if local_occurred_at.date() < interval_end.date():
+                colour = "grey"
+            elif interval_start < occurred_at <= interval_end:
+                colour = "blue"
+            else:
+                colour = "green"
+            plain_parts.append(point.text)
+            marked_parts.append(f"[[done:{colour}]]{point.text}[[/done]]")
             continue
         plain_parts.append(point.text)
         marked_parts.append(point.text)

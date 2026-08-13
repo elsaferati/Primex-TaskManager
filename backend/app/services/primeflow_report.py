@@ -28,9 +28,16 @@ STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE":
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
 BOARD_REMINDER_SECTION_TITLE = "PYETJET PER 1H - BORD"
 REMINDER_SECTION_TITLE = "PYETJET PER 1H - STAFF"
-TECHNICAL_TAGS = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.IGNORECASE)
+TECHNICAL_TAGS = re.compile(
+    r"\[\[\s*/?\s*(?:added|done(?:\s*:\s*(?:grey|gray|blue|green))?)\s*\]\]",
+    re.IGNORECASE,
+)
 ADDED_TAGS = re.compile(r"\[\[\s*/?\s*added\s*\]\]", re.IGNORECASE)
-DONE_BLOCK = re.compile(r"\[\[\s*done\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]", re.IGNORECASE | re.DOTALL)
+DONE_BLOCK = re.compile(
+    r"\[\[\s*done(?:\s*:\s*(grey|gray|blue|green))?\s*\]\](.*?)\[\[\s*/\s*done\s*\]\]",
+    re.IGNORECASE | re.DOTALL,
+)
+STRIKE_COLORS = {"grey": "#6b7280", "gray": "#6b7280", "blue": "#2563eb", "green": "#16a34a"}
 NUMBERED_ITEM = re.compile(r"(?<!\S)(\d+)\.\s*")
 TRANSIENT_CODES = {429, 500, 502, 503, 504}
 STATUS_COLORS = {
@@ -155,14 +162,15 @@ def split_task_display(title: str) -> tuple[str, list[str]]:
     return heading_lines[0], [*heading_lines[1:], *numbered_items]
 
 
-def done_ranges(value: str, marked_source: str) -> list[tuple[int, int]]:
+def done_ranges(value: str, marked_source: str) -> list[tuple[int, int, str]]:
     ranges = []
     cursor = 0
     for match in DONE_BLOCK.finditer(marked_source):
-        selected = TECHNICAL_TAGS.sub("", match.group(1))
+        selected = TECHNICAL_TAGS.sub("", match.group(2))
         start = value.find(selected, cursor)
         if start >= 0:
-            ranges.append((start, start + len(selected)))
+            colour = STRIKE_COLORS.get((match.group(1) or "grey").lower(), STRIKE_COLORS["grey"])
+            ranges.append((start, start + len(selected), colour))
             cursor = start + len(selected)
     return ranges
 
@@ -435,13 +443,14 @@ def render_html(document: ReportDocument) -> str:
 
     def marked_html(value: str, marked_source: str) -> str:
         ranges = done_ranges(value, marked_source)
-        boundaries = sorted({0, len(value), *(point for item in ranges for point in item)})
+        boundaries = sorted({0, len(value), *(point for start, end, _colour in ranges for point in (start, end))})
         parts = []
         for start, end in zip(boundaries, boundaries[1:]):
             content = html.escape(value[start:end]).replace(chr(10), "<br>")
-            if any(left <= start and right >= end for left, right in ranges):
+            mark = next((item for item in ranges if item[0] <= start and item[1] >= end), None)
+            if mark is not None:
                 content = (
-                    f"<span style=\"text-decoration:line-through;text-decoration-thickness:2px;\">"
+                    f"<span style=\"color:{mark[2]};text-decoration:line-through;text-decoration-thickness:2px;\">"
                     f"{content}</span>"
                 )
             parts.append(content)
@@ -636,13 +645,14 @@ def render_docx(document: ReportDocument) -> bytes:
 
     def add_marked_runs(paragraph: Any, value: str, marked_source: str, *, bold: bool, color: str) -> None:
         ranges = done_ranges(value, marked_source)
-        boundaries = sorted({0, len(value), *(point for item in ranges for point in item)})
+        boundaries = sorted({0, len(value), *(point for start, end, _colour in ranges for point in (start, end))})
         for start, end in zip(boundaries, boundaries[1:]):
             run = paragraph.add_run(value[start:end])
             run.bold = bold
-            run.font.strike = any(left <= start and right >= end for left, right in ranges)
+            mark = next((item for item in ranges if item[0] <= start and item[1] >= end), None)
+            run.font.strike = mark is not None
             run.font.size = Pt(9.5 if bold else 9)
-            run.font.color.rgb = RGBColor.from_string(color.lstrip("#"))
+            run.font.color.rgb = RGBColor.from_string((mark[2] if mark else color).lstrip("#"))
 
     output = io.BytesIO()
     doc = Document()
@@ -735,12 +745,19 @@ def render_png(document: ReportDocument) -> bytes:
     import textwrap
 
     def draw_line_with_marks(x: int, line_y: int, line: str, marked_source: str, line_font: Any, color: str) -> None:
-        draw.text((x, line_y), line, fill=color, font=line_font)
-        selected_values = [TECHNICAL_TAGS.sub("", match.group(1)).strip() for match in DONE_BLOCK.finditer(marked_source)]
-        if any(line.strip() in selected or selected in line for selected in selected_values if selected):
+        marked_values = [
+            (TECHNICAL_TAGS.sub("", match.group(2)).strip(), STRIKE_COLORS.get((match.group(1) or "grey").lower(), STRIKE_COLORS["grey"]))
+            for match in DONE_BLOCK.finditer(marked_source)
+        ]
+        mark_colour = next(
+            (strike_colour for selected, strike_colour in marked_values if selected and (line.strip() in selected or selected in line)),
+            None,
+        )
+        draw.text((x, line_y), line, fill=mark_colour or color, font=line_font)
+        if mark_colour:
             bounds = draw.textbbox((x, line_y), line, font=line_font)
             strike_y = (bounds[1] + bounds[3]) // 2
-            draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
+            draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=mark_colour, width=2)
 
     estimated_lines = (
         8

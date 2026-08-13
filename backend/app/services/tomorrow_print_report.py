@@ -24,6 +24,14 @@ TASK_ROWS = (
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
 VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
 
+# Gmail can remove style blocks from message bodies. Keep the styles that form
+# the report grid inline so the received email matches the preview.
+TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:fixed;margin:12px 0;font-family:Arial,sans-serif;font-size:12px;line-height:1.25;color:#000"
+CELL_STYLE = "border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word"
+HEADER_STYLE = f"{CELL_STYLE};text-align:center;font-weight:700"
+PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:#f3e8ff"
+PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|/|$)", re.I)
+
 
 def subject_for(target_date: date) -> str:
     return f"1H SHTYPI - {target_date:%d.%m.%Y}"
@@ -76,6 +84,15 @@ def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)
     owners = _assignees(item)
     return f"{'/'.join(owners)}: {title}" if owners else title
+
+
+def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
+    """Match the GA-assignee rule used by the P row in Common View printouts."""
+    title = re.sub(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", "", _first_line(item.get("title")))
+    match = PERSONAL_TASK_INITIALS.match(title.strip())
+    if match is None:
+        return False
+    return "GA" in {value.strip().upper() for value in re.split(r"[:/]", match.group(0))}
 
 
 def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -135,16 +152,23 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
                     if meeting
                     else _task_title(item, personal=personal)
                 )
-                cells.append(f"<td>{item_index + (chunk_index * 6) + 1}. {html.escape(value)}</td>")
-            cells.extend("<td></td>" for _ in range(6 - len(cells)))
+                cell_style = PERSONAL_GA_CELL_STYLE if personal and _is_personal_task_for_ga(item) else CELL_STYLE
+                background = ' bgcolor="#f3e8ff"' if cell_style == PERSONAL_GA_CELL_STYLE else ""
+                cells.append(
+                    f'<td{background} style="{cell_style}">{item_index + (chunk_index * 6) + 1}. {html.escape(value)}</td>'
+                )
+            cells.extend(f'<td style="{CELL_STYLE}"></td>' for _ in range(6 - len(cells)))
             row_header = (
-                f"<th rowspan=\"{len(chunks)}\">{number}</th><th rowspan=\"{len(chunks)}\">{html.escape(label).replace(chr(10), '<br>')}</th>"
+                f'<th rowspan="{len(chunks)}" style="{CELL_STYLE}">{number}</th>'
+                f'<th rowspan="{len(chunks)}" style="{CELL_STYLE}">{html.escape(label).replace(chr(10), "<br>")}</th>'
                 if chunk_index == 0 else ""
             )
             body.append(f"<tr>{row_header}{''.join(cells)}</tr>")
     return (
-        '<table><colgroup><col class="nr"><col class="label"><col span="6"></colgroup>'
-        f"<thead><tr><th>NR</th><th>{label_header}</th><th colspan=\"6\">{header}</th></tr></thead>"
+        f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{TABLE_STYLE}">'
+        '<colgroup><col width="4%"><col width="9%"><col width="14.5%" span="6"></colgroup>'
+        f'<thead><tr><th style="{HEADER_STYLE}">NR</th><th style="{HEADER_STYLE}">{label_header}</th>'
+        f'<th colspan="6" style="{HEADER_STYLE}">{header}</th></tr></thead>'
         f"<tbody>{''.join(body)}</tbody></table>"
     )
 
@@ -163,7 +187,6 @@ async def build_tomorrow_print_report(delivery_date: date) -> dict[str, str]:
     meeting_rows = [(label, values, False) for label, values in _meeting_rows(items, target_date)]
     report_date = target_date.strftime("%d.%m.%Y")
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
-<style>table{{width:100%;border-collapse:collapse;table-layout:fixed;font-size:12px;line-height:1.25;margin:12px 0}}th,td{{border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere}}thead th{{text-align:center;font-weight:700}}.nr{{width:28px}}.label{{width:106px}}</style>
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">1H SHTYPI — {report_date}</div>
 {_html_table(task_rows)}{_html_table(meeting_rows, meeting=True)}</body></html>"""
     plain_rows = [f"1H SHTYPI - {report_date}", "", "TASKS"]

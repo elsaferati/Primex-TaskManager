@@ -185,7 +185,7 @@ export default function WaitingConfirmationGaPage() {
     <div className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="space-y-1">
-          <h1 className="text-xl font-semibold tracking-tight">Awaiting Confirmation</h1>
+          <h1 className="text-xl font-semibold tracking-tight">WFC</h1>
           <p className="text-sm text-muted-foreground">
             Tasks waiting for your confirmation.
           </p>

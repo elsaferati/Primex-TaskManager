@@ -6,7 +6,7 @@ import logging
 import os
 import uuid
 from pathlib import Path
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 from sqlalchemy import select, text
 from dotenv import load_dotenv
@@ -28,6 +28,21 @@ from app.services.task_strike_events import render_text_for_interval
 
 logger = logging.getLogger(__name__)
 TERMINAL = {"SENT", "ALREADY_SENT"}
+STRIKE_INTERVAL_STARTS = {
+    "10:00": time(8, 0),
+    "11:00": time(9, 0),
+    "11:50": time(10, 50),
+    "14:20": time(11, 40),
+    "16:00": time(14, 10),
+}
+STRIKE_INTERVAL_ENDS = {
+    "10:00": time(9, 0),
+    "11:00": time(10, 50),
+    "11:50": time(11, 40),
+    "14:20": time(14, 10),
+    # This report is delivered at 15:50, after its 14:10–15:40 work window.
+    "16:00": time(15, 40),
+}
 
 
 def _environment_recipients() -> list[str]:
@@ -113,9 +128,21 @@ def _report_task_text(data: dict) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID,
     return titles, descriptions
 
 
-def _slot_cutoff(day: date, slot: str) -> datetime:
-    hour, minute = (int(part) for part in slot.split(":"))
-    return datetime(day.year, day.month, day.day, hour, minute, tzinfo=report_timezone())
+def strike_interval_start(day: date, slot: str) -> datetime:
+    """Fixed reporting windows agreed for the five weekday 1H emails."""
+    try:
+        start = STRIKE_INTERVAL_STARTS[slot]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported 1H report slot: {slot}") from exc
+    return datetime.combine(day, start, tzinfo=report_timezone())
+
+
+def strike_interval_end(day: date, slot: str) -> datetime:
+    try:
+        end = STRIKE_INTERVAL_ENDS[slot]
+    except KeyError as exc:
+        raise ValueError(f"Unsupported 1H report slot: {slot}") from exc
+    return datetime.combine(day, end, tzinfo=report_timezone())
 
 
 async def _text_overrides_for_1h_interval(
@@ -129,23 +156,8 @@ async def _text_overrides_for_1h_interval(
     task_ids = set(titles) | set(descriptions)
     if not task_ids:
         return {}, {}
-    previous_day, previous_slot = predecessor(day, slot)
     async with SessionLocal() as db:
-        # Prefer the real generation time of the preceding email. This avoids a
-        # gap or overlap if a schedule was manually delayed or re-run.
-        previous_generated_at = await db.scalar(
-            select(PrimeFlowReportDeliveryRun.data_generated_at)
-            .where(
-                PrimeFlowReportDeliveryRun.report_type == "primeflow_1h",
-                PrimeFlowReportDeliveryRun.report_date == previous_day,
-                PrimeFlowReportDeliveryRun.report_slot == previous_slot,
-                PrimeFlowReportDeliveryRun.status.in_(TERMINAL),
-                PrimeFlowReportDeliveryRun.data_generated_at.is_not(None),
-            )
-            .order_by(PrimeFlowReportDeliveryRun.data_generated_at.desc())
-            .limit(1)
-        )
-        interval_start = previous_generated_at or _slot_cutoff(previous_day, previous_slot)
+        interval_start = strike_interval_start(day, slot)
         events = (await db.execute(
             select(TaskStrikeEvent)
             .where(TaskStrikeEvent.task_id.in_(task_ids))
@@ -187,7 +199,7 @@ async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] 
     data = await client.common_view(day)
     reminders = await load_1h_reminder_questions()
     title_overrides, description_overrides = await _text_overrides_for_1h_interval(
-        data, day, slot, interval_end=datetime.now(report_timezone()),
+        data, day, slot, interval_end=strike_interval_end(day, slot),
     )
     return build_report_document(
         data,

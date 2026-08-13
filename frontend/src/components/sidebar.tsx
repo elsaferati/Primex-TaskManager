@@ -94,7 +94,7 @@ const primaryItems: NavItem[] = [
   },
   {
     href: "/waiting-confirmation-ga",
-    label: "Awaiting Confirmation",
+    label: "WFC",
     icon: Clock3,
   },
 ]
