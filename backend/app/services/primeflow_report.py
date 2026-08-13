@@ -38,6 +38,7 @@ DONE_BLOCK = re.compile(
     re.IGNORECASE | re.DOTALL,
 )
 STRIKE_COLORS = {"grey": "#6b7280", "gray": "#6b7280", "blue": "#2563eb", "green": "#16a34a"}
+STRIKE_TIMESTAMP_DISPLAY = re.compile(r"\s+\d{2}:\d{2}\s+\d{2}\.\d{2}\s*$", re.MULTILINE)
 NUMBERED_ITEM = re.compile(r"(?<!\S)(\d+)\.\s*")
 TRANSIENT_CODES = {429, 500, 502, 503, 504}
 STATUS_COLORS = {
@@ -130,7 +131,7 @@ def exact_subject(headers: list[dict[str, str]], expected: str) -> bool:
 
 def clean_description(value: str | None) -> str:
     cleaned = TECHNICAL_TAGS.sub("", value or "")
-    return re.sub(r"[ \t]+", " ", cleaned).strip()
+    return STRIKE_TIMESTAMP_DISPLAY.sub("", re.sub(r"[ \t]+", " ", cleaned)).strip()
 
 
 def clean_title(value: str | None) -> str:
@@ -309,9 +310,9 @@ def _document_section(
                 or "-"
             )
             report_tasks.append(ReportTask(
-                title=title_override[0] if title_override else clean_title(raw_title),
+                title=clean_title(title_override[0]) if title_override else clean_title(raw_title),
                 description="" if description_duplicates_title else (
-                    description_override[0] if description_override else clean_description(raw_description)
+                    clean_description(description_override[0]) if description_override else clean_description(raw_description)
                 ),
                 marked_title=title_override[1] if title_override else preserve_done_marks(raw_title),
                 marked_description="" if description_duplicates_title else (

@@ -175,6 +175,12 @@ function parseMarkedNoteContent(content?: string | null): ParsedMarkedNoteConten
     }
 
     lastIndex = match.index + match[0].length
+    // Older notes can have a closing marker on its own line:
+    // `4. Item\n[[/done]]\n5. Item`. Removing the marker must not leave
+    // an empty line, otherwise the browser restarts the ordered list at 1.
+    if (closingMark && text.endsWith("\n") && content[lastIndex] === "\n") {
+      lastIndex += 1
+    }
   }
   text += content.slice(lastIndex)
 
@@ -667,7 +673,7 @@ function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[
         const match = itemText.match(/^\s*[•\-*]\s+/)
         if (!match) break
         items.push(
-          <li key={`note-bullet-${index}`}>
+          <li key={`note-bullet-${index}`} data-note-line-index={index}>
             {renderInlineMarkedSegments(trimLinePrefix(itemSegments, match[0].length), `note-bullet-${index}`)}
           </li>
         )
@@ -689,7 +695,7 @@ function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[
         const match = itemText.match(/^\s*\d+\.\s+/)
         if (!match) break
         items.push(
-          <li key={`note-ordered-${index}`}>
+          <li key={`note-ordered-${index}`} data-note-line-index={index}>
             {renderInlineMarkedSegments(trimLinePrefix(itemSegments, match[0].length), `note-ordered-${index}`)}
           </li>
         )
@@ -704,7 +710,7 @@ function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[
     }
 
     blocks.push(
-      <div key={`note-line-${index}`} className={lineText ? "" : "min-h-[1.25rem]"}>
+      <div key={`note-line-${index}`} data-note-line-index={index} className={lineText ? "" : "min-h-[1.25rem]"}>
         {lineText ? renderInlineMarkedSegments(lineSegments, `note-line-${index}`) : "\u00A0"}
       </div>
     )
@@ -727,6 +733,17 @@ function applyTextSelectionTransform(
   transform: (value: string, selectionStart: number, selectionEnd: number) => TextSelectionTransformResult
 ) {
   return transform(value, selectionStart, selectionEnd)
+}
+
+function completeLineRange(value: string, selectionStart: number, selectionEnd: number): TextMarkRange | null {
+  const start = value.lastIndexOf("\n", Math.max(0, selectionStart - 1)) + 1
+  const lastSelectedCharacter = Math.max(selectionStart, selectionEnd - 1)
+  const lastSelectedLineStart = value.lastIndexOf("\n", Math.max(0, lastSelectedCharacter - 1)) + 1
+  if (lastSelectedLineStart !== start) return null
+  const endOfSelectedLine = value.indexOf("\n", lastSelectedCharacter)
+  const end = endOfSelectedLine === -1 ? value.length : endOfSelectedLine
+  const selectedText = value.slice(start, end)
+  return selectedText.trim() ? { start, end } : null
 }
 
 function wrapSelectedText(value: string, selectionStart: number, selectionEnd: number, wrapper: string): TextSelectionTransformResult {
@@ -1779,17 +1796,13 @@ export default function GaKaNotesPage() {
     let start = textarea.selectionStart
     let end = textarea.selectionEnd
 
-    if (start === end) {
-      start = value.lastIndexOf("\n", start - 1) + 1
-      const nextLineBreak = value.indexOf("\n", end)
-      end = nextLineBreak === -1 ? value.length : nextLineBreak
-    }
-
-    const selected = value.slice(start, end)
-    if (!selected.trim()) {
+    const lineRange = completeLineRange(value, start, end)
+    if (!lineRange) {
       toast.error("Select the text or place cursor on the line to mark done")
       return
     }
+    start = lineRange.start
+    end = lineRange.end
 
     const nextContent = toggleDoneRangeWithTimestamp(editContent, editDoneRanges, { start, end })
     setEditContent(nextContent.text)
@@ -1810,13 +1823,34 @@ export default function GaKaNotesPage() {
     const containsNode = (node: Node) => node === container || container.contains(node)
     if (!containsNode(range.startContainer) || !containsNode(range.endContainer)) return null
 
+    const lineElement = (node: Node) => {
+      const element = node.nodeType === Node.ELEMENT_NODE ? node as Element : node.parentElement
+      return element?.closest<HTMLElement>("[data-note-line-index]") ?? null
+    }
+    const startLine = lineElement(range.startContainer)
+    const endLine = lineElement(range.endContainer)
+    if (startLine && endLine && startLine.dataset.noteLineIndex === endLine.dataset.noteLineIndex) {
+      const lineIndex = Number(startLine.dataset.noteLineIndex)
+      if (Number.isInteger(lineIndex) && lineIndex >= 0) {
+        const parsed = parseMarkedNoteContentWithProgress(notes.find((note) => note.id === noteId)?.content)
+        const lines = parsed.text.split("\n")
+        const start = lines.slice(0, lineIndex).reduce((total, line) => total + line.length + 1, 0)
+        const end = start + (lines[lineIndex]?.length ?? 0)
+        if (parsed.text.slice(start, end).trim()) return { start, end }
+      }
+    }
+
     const beforeSelection = range.cloneRange()
     beforeSelection.selectNodeContents(container)
     beforeSelection.setEnd(range.startContainer, range.startOffset)
 
     const start = beforeSelection.toString().length
     const end = start + range.toString().length
-    return end > start ? { start, end } : null
+    return completeLineRange(
+      parseMarkedNoteContentWithProgress(notes.find((note) => note.id === noteId)?.content).text,
+      start,
+      end
+    )
   }
 
   const markSelectedNoteTextDone = async (note: GaNote) => {

@@ -682,6 +682,52 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("[[done:green]]1. Test1[[/done]] 08:46 13.08", marked)
         self.assertIn("[[done:green]]2. Test2[[/done]] 08:50 13.08", marked)
 
+    def test_old_strike_event_does_not_restrike_a_currently_open_point(self) -> None:
+        event = SimpleNamespace(
+            id="old-strike", point_key=point_key("1. Reopened"), point_text="1. Reopened",
+            action="STRUCK", occurred_at=datetime(2026, 8, 12, 10, 0, tzinfo=timezone.utc),
+        )
+        plain, marked = render_description_for_interval(
+            "1. Reopened\n2. Still done",
+            [event],
+            interval_start=datetime(2026, 8, 13, 9, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 13, 10, 50, tzinfo=timezone.utc),
+        )
+        self.assertEqual(plain, "1. Reopened\n2. Still done")
+        self.assertNotIn("[[done", marked)
+
+    def test_closing_done_marker_does_not_strike_the_next_numbered_point(self) -> None:
+        text = "[[done]]1. Done point[[/done]]\n2. Open point"
+        current = struck_points(text, field_name="TITLE")
+        self.assertEqual([point.text for point in current.values()], ["1. Done point"])
+        plain, marked = render_text_for_interval(
+            text,
+            [],
+            interval_start=datetime(2026, 8, 13, 9, 0, tzinfo=timezone.utc),
+            interval_end=datetime(2026, 8, 13, 10, 50, tzinfo=timezone.utc),
+            field_name="TITLE",
+        )
+        self.assertIn("[[done:grey]]1. Done point[[/done]]", marked)
+        self.assertIn("\n2. Open point", marked)
+        self.assertNotIn("[[done:grey]]2. Open point", marked)
+
+    def test_1h_report_hides_strike_timestamps_but_keeps_the_coloured_strike(self) -> None:
+        marked = "[[done:green]]1. Test1[[/done]] 08:46 13.08\n2. Test2"
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {"oneH": [{
+                "id": "hide-time", "date": "2026-08-13", "slot": "11:00", "person": "Anisa",
+                "status": "TODO", "title": "Task", "description": marked,
+            }]}},
+            date(2026, 8, 13), "11:00",
+            description_overrides={"hide-time": ("1. Test1 08:46 13.08\n2. Test2", marked)},
+        )
+        plain = render_plain_text(document)
+        html = render_html(document)
+        self.assertIn("1. Test1", plain)
+        self.assertNotIn("08:46 13.08", plain)
+        self.assertIn("color:#16a34a;text-decoration:line-through", html)
+        self.assertNotIn("08:46 13.08", html)
+
     def test_partial_bullet_selection_is_reported_as_the_bullet_subtask(self) -> None:
         title = "EF: TEST TASK\n• [[done]]Test[[/done]]\n• Still open"
         full_point = "• Test"

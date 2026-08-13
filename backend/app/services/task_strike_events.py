@@ -166,7 +166,9 @@ def _struck_points_by_identity(value: str | None, *, field_name: str) -> dict[st
     entries = _point_entries(raw, field_name=field_name)
     result: dict[str, StrikePoint] = {}
     for match in DONE_BLOCK.finditer(raw):
-        done_start, done_end = match.span()
+        # Only the content inside the markers is struck. Including the closing
+        # marker can overlap the following numbered point on the next line.
+        done_start, done_end = match.span(1)
         for point, start, end in entries:
             if start < done_end and done_start < end:
                 result[point.key] = point
@@ -180,7 +182,7 @@ def struck_points(value: str | None, *, field_name: str = "DESCRIPTION") -> dict
     result: dict[str, StrikePoint] = {}
     numbered_spans = _numbered_point_spans(raw)
     for match in DONE_BLOCK.finditer(raw):
-        done_start, done_end = match.span()
+        done_start, done_end = match.span(1)
         affected_spans = [
             (start, end)
             for start, end in numbered_spans
@@ -334,23 +336,26 @@ def render_text_for_interval(
     plain_parts = [heading] if heading else []
     marked_parts = [heading] if heading else []
     for point in points:
+        # The current note text is authoritative. Historical events must never
+        # re-strike a point that is presently open (including legacy malformed
+        # selections that were later repaired).
+        if point.key not in current_done:
+            plain_parts.append(point.text)
+            marked_parts.append(point.text)
+            continue
         event = event_for_point(point)
         if event is None:
-            if point.key in current_done:
-                strike_text, timestamp = split_strike_timestamp(point.text)
-                colour = _strike_colour(
-                    strike_timestamp_datetime(point.text, report_at=interval_end),
-                    interval_start=interval_start,
-                    interval_end=interval_end,
-                )
-                plain_parts.append(point.text)
-                marked_parts.append(
-                    f"[[done:{colour}]]{strike_text}[[/done]]"
-                    f"{' ' + timestamp if timestamp else ''}"
-                )
-            else:
-                plain_parts.append(point.text)
-                marked_parts.append(point.text)
+            strike_text, timestamp = split_strike_timestamp(point.text)
+            colour = _strike_colour(
+                strike_timestamp_datetime(point.text, report_at=interval_end),
+                interval_start=interval_start,
+                interval_end=interval_end,
+            )
+            plain_parts.append(point.text)
+            marked_parts.append(
+                f"[[done:{colour}]]{strike_text}[[/done]]"
+                f"{' ' + timestamp if timestamp else ''}"
+            )
             continue
         if event.action == "STRUCK":
             colour = _strike_colour(
