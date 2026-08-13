@@ -28,6 +28,7 @@ STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE":
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
 BOARD_REMINDER_SECTION_TITLE = "PYETJET PER 1H - BORD"
 REMINDER_SECTION_TITLE = "STAFF - HAPAT PER 1H"
+UNDISCUSSED_NOTES_SECTION_TITLE = "NOTA PA DISKUTUARA"
 TECHNICAL_TAGS = re.compile(
     r"\[\[\s*/?\s*(?:added|done(?:\s*:\s*(?:grey|gray|blue|green))?)\s*\]\]",
     re.IGNORECASE,
@@ -80,6 +81,12 @@ class ReportReminderQuestion(BaseModel):
     guidance: str = ""
 
 
+class ReportUndiscussedNote(BaseModel):
+    content: str
+    author: str = "-"
+    created_at: datetime | None = None
+
+
 def _board_reminder_questions() -> list[ReportReminderQuestion]:
     return [
         ReportReminderQuestion(text="Slotin paraprak/aktual"),
@@ -101,6 +108,7 @@ class ReportDocument(BaseModel):
     sections: list[ReportSection]
     board_reminders: list[ReportReminderQuestion] = Field(default_factory=_board_reminder_questions)
     reminders: list[ReportReminderQuestion] = Field(default_factory=list)
+    undiscussed_notes: list[ReportUndiscussedNote] = Field(default_factory=list)
     truncated: bool = False
 
     @property
@@ -345,6 +353,7 @@ def build_report_document(
     reminders: list[ReportReminderQuestion] | None = None,
     title_overrides: dict[str, tuple[str, str]] | None = None,
     description_overrides: dict[str, tuple[str, str]] | None = None,
+    undiscussed_notes: list[ReportUndiscussedNote] | None = None,
 ) -> ReportDocument:
     guardrails = data.get("guardrails") or {}
     truncated = any((guardrails.get("truncated") or {}).values())
@@ -418,6 +427,7 @@ def build_report_document(
         ],
         board_reminders=_board_reminder_questions(),
         reminders=list(reminders or []),
+        undiscussed_notes=list(undiscussed_notes or []),
     )
 
 
@@ -449,6 +459,12 @@ def render_plain_text(document: ReportDocument) -> str:
                 if task.description:
                     lines.append(task.description)
         blocks.append("\n".join(lines))
+    if document.undiscussed_notes:
+        note_lines = [UNDISCUSSED_NOTES_SECTION_TITLE, "NR | NOTE | KUSH | DATA"]
+        for index, note in enumerate(document.undiscussed_notes, 1):
+            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
+            note_lines.append(f"{index} | {note.content} | {note.author} | {created}")
+        blocks.append("\n".join(note_lines))
     return "\n\n".join(blocks)
 
 
@@ -556,6 +572,31 @@ def render_html(document: ReportDocument) -> str:
             "</table>"
         )
 
+    def undiscussed_notes_table(notes: list[ReportUndiscussedNote]) -> str:
+        rows = []
+        for index, note in enumerate(notes, 1):
+            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
+            rows.append(
+                "<tr>"
+                f'<td style="padding:8px;border:1px solid #cbd5e1;text-align:center;font-family:Arial,sans-serif;vertical-align:top;">{index}</td>'
+                f'<td style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;vertical-align:top;white-space:pre-wrap;">{html.escape(note.content).replace(chr(10), "<br>")}</td>'
+                f'<td style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;vertical-align:top;">{html.escape(note.author)}</td>'
+                f'<td style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;vertical-align:top;white-space:nowrap;">{created}</td>'
+                "</tr>"
+            )
+        return (
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-undiscussed-notes-table="true" style="width:100%;border-collapse:collapse;margin:8px 0 4px;">'
+            '<tr bgcolor="#e2e8f0">'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:center;font-size:12px;">NR</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">NOTE</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">KUSH</th>'
+            '<th style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;text-align:left;font-size:12px;">DATA</th>'
+            '</tr>'
+            f"{''.join(rows)}"
+            "</table>"
+        )
+
     body_chunks: list[str] = []
     for reminder_title, questions in (
         (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
@@ -612,6 +653,11 @@ def render_html(document: ReportDocument) -> str:
                         detail_html,
                     )
                 )
+
+    if document.undiscussed_notes:
+        body_chunks.append(section_separator())
+        body_chunks.append(section_title_block(UNDISCUSSED_NOTES_SECTION_TITLE))
+        body_chunks.append(undiscussed_notes_table(document.undiscussed_notes))
 
     meta = (
         f"Generated {html.escape(document.generated_at.isoformat())} · {document.task_count} tasks"
@@ -741,6 +787,26 @@ def render_docx(document: ReportDocument) -> bytes:
                         description, task.description, task.marked_description, bold=False, color="#64748b"
                     )
                 doc.add_paragraph().paragraph_format.space_after = Pt(0)
+    if document.undiscussed_notes:
+        doc.add_paragraph()
+        notes_header = doc.add_table(rows=1, cols=1).cell(0, 0)
+        shade(notes_header, "#eef2ff")
+        notes_title = notes_header.paragraphs[0].add_run(UNDISCUSSED_NOTES_SECTION_TITLE)
+        notes_title.bold = True
+        notes_title.font.size = Pt(13)
+        table = doc.add_table(rows=1, cols=4)
+        table.style = "Table Grid"
+        for cell, label in zip(table.rows[0].cells, ("NR", "NOTE", "KUSH", "DATA")):
+            shade(cell, "#e2e8f0")
+            run = cell.paragraphs[0].add_run(label)
+            run.bold = True
+        for index, note in enumerate(document.undiscussed_notes, 1):
+            cells = table.add_row().cells
+            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
+            for cell, value in zip(cells, (str(index), note.content, note.author, created)):
+                cell.text = value
+                for run in cell.paragraphs[0].runs:
+                    run.font.size = Pt(9)
     doc.save(output)
     return output.getvalue()
 
@@ -789,6 +855,7 @@ def render_png(document: ReportDocument) -> bytes:
             for section in document.sections
             for employee in section.employees
         )
+        + sum(2 + len(textwrap.wrap(note.content, 82)) for note in document.undiscussed_notes)
     )
     height = max(650, 140 + estimated_lines * 30)
     image = Image.new("RGB", (width, height), "white")
@@ -862,6 +929,34 @@ def render_png(document: ReportDocument) -> bytes:
                     draw_line_with_marks(margin + 25, line_y, line, task.marked_description, font, "#64748b")
                     line_y += 28
                 y += card_height + 12
+        y += 14
+    if document.undiscussed_notes:
+        draw.rectangle((margin, y, width - margin, y + 48), fill="#eef2ff")
+        draw.rectangle((margin, y, margin + 7, y + 48), fill="#2563eb")
+        draw.text((margin + 18, y + 11), UNDISCUSSED_NOTES_SECTION_TITLE, fill="#0f172a", font=bold)
+        y += 62
+        table_left, table_right = margin + 5, width - margin
+        columns = (table_left, table_left + 60, table_left + 900, table_left + 1080, table_right)
+        header_height = 34
+        draw.rectangle((table_left, y, table_right, y + header_height), fill="#e2e8f0", outline="#94a3b8", width=1)
+        for x in columns[1:-1]:
+            draw.line((x, y, x, y + header_height), fill="#94a3b8", width=1)
+        for label, x in zip(("NR", "NOTE", "KUSH", "DATA"), columns[:-1]):
+            draw.text((x + 7, y + 7), label, fill="#0f172a", font=bold)
+        y += header_height
+        for index, note in enumerate(document.undiscussed_notes, 1):
+            note_lines = textwrap.wrap(note.content, 68) or [""]
+            row_height = max(32, 26 * len(note_lines))
+            draw.rectangle((table_left, y, table_right, y + row_height), fill="#ffffff", outline="#cbd5e1", width=1)
+            for x in columns[1:-1]:
+                draw.line((x, y, x, y + row_height), fill="#cbd5e1", width=1)
+            draw.text((columns[0] + 7, y + 6), str(index), fill="#0f172a", font=font)
+            for line_index, line in enumerate(note_lines):
+                draw.text((columns[1] + 7, y + 6 + 25 * line_index), line, fill="#0f172a", font=font)
+            draw.text((columns[2] + 7, y + 6), note.author, fill="#0f172a", font=font)
+            created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
+            draw.text((columns[3] + 7, y + 6), created, fill="#0f172a", font=font)
+            y += row_height
         y += 14
     image = image.crop((0, 0, width, y + margin))
     output = io.BytesIO()

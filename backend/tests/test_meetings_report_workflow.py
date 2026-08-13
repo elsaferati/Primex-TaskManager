@@ -22,6 +22,7 @@ from app.services.meetings_report import (
     _common_meeting_lines,
     _common_task_metadata_by_title,
     _is_new_task_for_m3_day,
+    _is_system_task,
     _meeting_lines,
     _meeting_status_checkbox_table,
     _m3_department_label,
@@ -732,6 +733,15 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             status="TODO",
         )
         self.assertFalse(_is_new_task_for_m3_day(no_start_date, wednesday))
+
+    def test_new_task_review_excludes_system_task_occurrences(self) -> None:
+        regular_task = SimpleNamespace(system_template_origin_id=None, system_task_slot_id=None)
+        system_task = SimpleNamespace(system_template_origin_id=uuid.uuid4(), system_task_slot_id=None)
+        slot_based_system_task = SimpleNamespace(system_template_origin_id=None, system_task_slot_id=uuid.uuid4())
+
+        self.assertFalse(_is_system_task(regular_task))
+        self.assertTrue(_is_system_task(system_task))
+        self.assertTrue(_is_system_task(slot_based_system_task))
 
     def test_todo_table_includes_department_after_who(self) -> None:
         department_id = uuid.uuid4()

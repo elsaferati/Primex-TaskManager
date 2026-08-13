@@ -14,13 +14,16 @@ from dotenv import load_dotenv
 load_dotenv(Path(__file__).resolve().parents[2] / ".env", override=False)
 
 from app.db import SessionLocal
+from app.models.enums import GaNoteStatus
+from app.models.ga_note import GaNote
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
 from app.models.task_strike_event import TaskStrikeEvent
+from app.models.user import User
 from app.services.primeflow_report import (
     GmailService, GmailVerificationError, PrimeFlowClient,
-    ReportDocument, ReportReminderQuestion, build_report_document,
+    ReportDocument, ReportReminderQuestion, ReportUndiscussedNote, clean_description, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
 from app.services.task_strike_events import render_text_for_interval
@@ -86,6 +89,27 @@ async def load_1h_reminder_questions() -> list[ReportReminderQuestion]:
         ReportReminderQuestion(text="Hap doc dhe det"),
         ReportReminderQuestion(text="Share screen side by side DET/REZULTATIN"),
         ReportReminderQuestion(text="Sqaro slotin paraprak pastaj aktual"),
+    ]
+
+
+async def load_undiscussed_notes() -> list[ReportUndiscussedNote]:
+    """Open PX notes remain in every 1H report until they are discussed."""
+    async with SessionLocal() as db:
+        rows = (await db.execute(
+            select(GaNote, User.full_name, User.username, User.email)
+            .outerjoin(User, User.id == GaNote.created_by)
+            .where(GaNote.status != GaNoteStatus.CLOSED)
+            .where(GaNote.is_discussed.is_(False))
+            .order_by(GaNote.created_at.asc(), GaNote.updated_at.asc())
+        )).all()
+    return [
+        ReportUndiscussedNote(
+            content=clean_description(note.content),
+            author=(full_name or username or email or "-"),
+            created_at=note.created_at,
+        )
+        for note, full_name, username, email in rows
+        if clean_description(note.content)
     ]
 
 
@@ -184,6 +208,7 @@ async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] 
     )
     data = await client.common_view(day)
     reminders = await load_1h_reminder_questions()
+    undiscussed_notes = await load_undiscussed_notes()
     title_overrides, description_overrides = await _text_overrides_for_1h_interval(
         data, day, slot, interval_end=strike_interval_end(day, slot),
     )
@@ -193,6 +218,7 @@ async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] 
         slot,
         recipients or await configured_recipients(),
         reminders=reminders,
+        undiscussed_notes=undiscussed_notes,
         title_overrides=title_overrides,
         description_overrides=description_overrides,
     )

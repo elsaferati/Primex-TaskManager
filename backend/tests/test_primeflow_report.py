@@ -16,7 +16,7 @@ from app.services.primeflow_report import (
     exact_subject, filter_tasks,
     build_report_document, predecessor, previous_working_day, render_docx, render_html,
     render_plain_text, render_png, report_subject, ReportReminderQuestion, BOARD_REMINDER_SECTION_TITLE,
-    REMINDER_SECTION_TITLE,
+    REMINDER_SECTION_TITLE, ReportUndiscussedNote, UNDISCUSSED_NOTES_SECTION_TITLE,
 )
 from app.services.task_strike_events import (
     point_key, struck_points,
@@ -259,6 +259,34 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("Sqaro slotin paraprak pastaj aktual", html)
         self.assertIn("color:#64748b", html)
         self.assertLess(html.index(REMINDER_SECTION_TITLE), html.index("11:00 SLOTI 06.08.2026"))
+
+    def test_undiscussed_notes_table_is_only_rendered_when_notes_exist(self) -> None:
+        report_day = date(2026, 8, 13)
+        base_data = {"guardrails": {"truncated": {}}, "items": {}}
+        without_notes = build_report_document(base_data, report_day, "10:00")
+        self.assertNotIn(UNDISCUSSED_NOTES_SECTION_TITLE, render_plain_text(without_notes))
+        self.assertNotIn("data-undiscussed-notes-table", render_html(without_notes))
+
+        document = build_report_document(
+            base_data,
+            report_day,
+            "10:00",
+            undiscussed_notes=[ReportUndiscussedNote(
+                content="Please discuss this PX note", author="Anisa", created_at=datetime(2026, 8, 13, 8, 30, tzinfo=timezone.utc)
+            )],
+        )
+        plain = render_plain_text(document)
+        html = render_html(document)
+        word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode("utf-8")
+        png = render_png(document)
+
+        self.assertIn(UNDISCUSSED_NOTES_SECTION_TITLE, plain)
+        self.assertIn("Please discuss this PX note", plain)
+        self.assertIn('data-undiscussed-notes-table="true"', html)
+        self.assertIn("Please discuss this PX note", html)
+        self.assertIn(UNDISCUSSED_NOTES_SECTION_TITLE, word_xml)
+        self.assertIn("Please discuss this PX note", word_xml)
+        self.assertTrue(png.startswith(b"\x89PNG"))
 
     def test_truncation_blocks_report(self) -> None:
         with self.assertRaisesRegex(ValueError, "truncated"):

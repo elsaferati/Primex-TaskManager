@@ -228,6 +228,14 @@ def _is_new_task_for_m3_day(task: Task, day: date) -> bool:
     return _is_open(task) and _local_date(task.start_date) == day
 
 
+def _is_system_task(task: Task) -> bool:
+    """System-template occurrences are intentionally excluded from M3 new-task review."""
+    return bool(
+        getattr(task, "system_template_origin_id", None)
+        or getattr(task, "system_task_slot_id", None)
+    )
+
+
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
     recurrence = (meeting.recurrence_type or "").lower()
     if recurrence == "weekly":
@@ -794,11 +802,12 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     ]
 
     tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
+    new_task_review_tasks = [task for task in tomorrow_tasks if not _is_system_task(task)]
     # "Detyrat e reja" is a one-day list: a task is new on its planned start
     # date, rather than on every day up to its due date.
-    new_tomorrow = [task for task in tasks if _is_new_task_for_m3_day(task, tomorrow)]
-    at_0800 = [task for task in tomorrow_tasks if task.due_date and _local_time(task.due_date) == "08:00"]
-    deadline = [task for task in tomorrow_tasks if task.is_deadline_important]
+    new_tomorrow = [task for task in new_task_review_tasks if _is_new_task_for_m3_day(task, tomorrow)]
+    at_0800 = [task for task in new_task_review_tasks if task.due_date and _local_time(task.due_date) == "08:00"]
+    deadline = [task for task in new_task_review_tasks if task.is_deadline_important]
     one_h_no_slot = [task for task in tomorrow_tasks if task.is_1h_report and not task.one_h_report_slot]
     personal_ga = [
         task for task in tasks
