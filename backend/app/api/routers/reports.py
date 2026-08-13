@@ -425,7 +425,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=False,
                     late_days=None,
-                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day),
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id)),
                 )
             )
             continue
@@ -445,7 +445,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=False,
                     late_days=None,
-                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day),
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id)),
                 )
             )
         elif planned_end < day:
@@ -466,7 +466,7 @@ async def daily_report(
                     original_planned_end=t.original_due_date.date() if t.original_due_date else planned_end,
                     is_overdue=True,
                     late_days=late_days,
-                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day),
+                    rlz_daily_state=_daily_rlz_state_out(daily_rlz_map.get(t.id), day, comment_map.get(t.id)),
                 )
             )
 
@@ -615,11 +615,13 @@ async def daily_report(
     )
 
 
-def _daily_rlz_state_out(row: TaskDailyRlzState | None, day: date) -> DailyRlzTaskStateOut:
+def _daily_rlz_state_out(
+    row: TaskDailyRlzState | None, day: date, fallback_comment: str | None = None
+) -> DailyRlzTaskStateOut:
     return DailyRlzTaskStateOut(
         reason_code=row.reason_code if row else None,
         reason_label=REASON_LABELS.get(row.reason_code) if row else None,
-        comment=row.comment if row else None,
+        comment=row.comment if row and row.comment is not None else fallback_comment,
         updated_at=row.updated_at if row else None,
         is_editable=is_editable_day(day),
         editable_until=editable_until(day),
@@ -633,8 +635,6 @@ async def upsert_daily_rlz_state(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> DailyRlzTaskStateOut:
-    if user.role != UserRole.STAFF:
-        raise HTTPException(status_code=403, detail="Only STAFF can edit their Daily RLZ state")
     if not is_editable_day(payload.day):
         raise HTTPException(status_code=409, detail={
             "code": "DAILY_RLZ_EDIT_WINDOW_CLOSED",

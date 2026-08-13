@@ -12,6 +12,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
+from app.models.task_user_comment import TaskUserComment
 from app.models.user import User
 from app.models.department import Department
 from app.models.enums import UserRole
@@ -95,10 +96,14 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
     task_ids = [task.id for task in tasks]
     states = {}
     slots = {}
+    comments = {}
     if task_ids:
         states = {row.task_id: row for row in (await db.execute(select(TaskDailyRlzState).where(
             TaskDailyRlzState.user_id == user_id, TaskDailyRlzState.day_date == day,
             TaskDailyRlzState.task_id.in_(task_ids),
+        ))).scalars().all()}
+        comments = {row.task_id: row for row in (await db.execute(select(TaskUserComment).where(
+            TaskUserComment.user_id == user_id, TaskUserComment.task_id.in_(task_ids),
         ))).scalars().all()}
         slot_rows = (await db.execute(select(
             TaskOneHReportSlot.task_id, TaskOneHReportSlot.one_h_report_slot, TaskOneHReportSlot.updated_at
@@ -116,6 +121,7 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
     minimum_due = next_working_day(day)
     for task in tasks:
         state = states.get(task.id)
+        task_comment = comments.get(task.id)
         status = "DONE" if task.completed_at else str(getattr(task.status, "value", task.status))
         due = task.due_date.date() if task.due_date else None
         slot = slots.get(task.id) or task.one_h_report_slot
@@ -126,7 +132,7 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
             "task_id": str(task.id), "title": task.title, "status": status,
             "due_date": due.isoformat() if due else None, "one_h_report_slot": slot,
             "reason_code": reason, "reason_label": REASON_LABELS.get(reason),
-            "comment": state.comment if state else None,
+            "comment": state.comment if state and state.comment is not None else task_comment.comment if task_comment else None,
         }
         evidence.append(item)
         if issue_codes:
@@ -137,7 +143,8 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
                 "reason_label": REASON_LABELS.get(reason), "comment": item["comment"],
                 "issues": [{"code": code, "message": ISSUE_MESSAGES[code]} for code in issue_codes],
             })
-        for changed in (task.updated_at, state.updated_at if state else None, slot_changed.get(task.id)):
+        for changed in (task.updated_at, state.updated_at if state else None,
+                        task_comment.updated_at if task_comment else None, slot_changed.get(task.id)):
             if changed and (latest_change is None or changed > latest_change):
                 latest_change = changed
     latest_close = (await db.execute(
