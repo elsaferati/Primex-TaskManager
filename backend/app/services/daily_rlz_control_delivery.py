@@ -105,6 +105,11 @@ def render_html(report: dict, report_time: str = REPORT_SLOT) -> str:
         )
         blocker_rows: list[str] = []
         for blocker in person["blockers"]:
+            task_status = blocker.get("status") or "—"
+            status_background = {
+                "TODO": "#f9a8d4",
+                "IN_PROGRESS": "#ffff00",
+            }.get(task_status, "#ffffff")
             issue_labels = "".join(
                 f'<span style="display:inline-block;margin:2px 4px 2px 0;padding:3px 7px;'
                 f'background:#ffffff;border:1px solid {accent};color:{accent};font-size:11px;font-weight:700;">'
@@ -115,7 +120,8 @@ def render_html(report: dict, report_time: str = REPORT_SLOT) -> str:
                 '<tr>'
                 f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;'
                 f'font-size:12px;font-weight:700;color:#0f172a;">{html.escape(_task_title(blocker["title"]))}</td>'
-                f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-size:12px;">{html.escape(blocker.get("status") or "—")}</td>'
+                f'<td bgcolor="{status_background}" style="background-color:{status_background};padding:9px;'
+                f'border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-size:12px;">{html.escape(task_status)}</td>'
                 f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-size:12px;">{html.escape(blocker.get("due_date") or "—")}</td>'
                 f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-size:12px;">{html.escape(blocker.get("one_h_report_slot") or "—")}</td>'
                 f'<td style="padding:9px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;font-size:12px;">{html.escape(blocker.get("reason_label") or "Empty")}</td>'

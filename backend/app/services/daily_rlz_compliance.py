@@ -56,7 +56,7 @@ def is_editable_day(day: date, now: datetime | None = None) -> bool:
     return day.weekday() < 5 and day == current.date() and current < editable_until(day)
 
 
-def task_issue_codes(*, status: str, due_date: date | None, is_1h_report: bool,
+def task_issue_codes(*, status: str, due_date: date | None, requires_one_h_slot: bool,
                      one_h_report_slot: str | None, reason_code: str | None, day: date) -> list[str]:
     if status not in UNFINISHED:
         return []
@@ -65,7 +65,7 @@ def task_issue_codes(*, status: str, due_date: date | None, is_1h_report: bool,
         issues.append("REASON_MISSING")
     if due_date is None or due_date <= day:
         issues.append("DUE_DATE_NOT_MOVED")
-    if is_1h_report and not one_h_report_slot:
+    if requires_one_h_slot and not one_h_report_slot:
         issues.append("ONE_H_SLOT_MISSING")
     return issues
 
@@ -126,7 +126,8 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
         due = task.due_date.date() if task.due_date else None
         slot = slots.get(task.id) or task.one_h_report_slot
         reason = state.reason_code if state else None
-        issue_codes = task_issue_codes(status=status, due_date=due, is_1h_report=bool(task.is_1h_report),
+        issue_codes = task_issue_codes(status=status, due_date=due,
+                                       requires_one_h_slot=bool(task.is_1h_report or task.is_r1),
                                        one_h_report_slot=slot, reason_code=reason, day=day)
         item = {
             "task_id": str(task.id), "title": task.title, "status": status,
