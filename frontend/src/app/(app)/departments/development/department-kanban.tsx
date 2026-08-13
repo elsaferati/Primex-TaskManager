@@ -1226,6 +1226,11 @@ export default function DepartmentKanban() {
   const [loading, setLoading] = React.useState(true)
   const [loadingExtras, setLoadingExtras] = React.useState(false)
   const [viewMode, setViewMode] = React.useState<"department" | "mine">("department")
+  React.useEffect(() => {
+    if (searchParams.get("view") !== "mine") return
+    const timer = window.setTimeout(() => setViewMode("mine"), 0)
+    return () => window.clearTimeout(timer)
+  }, [searchParams])
   const [activeTab, setActiveTab] = React.useState<TabId>(
     isTabId ? (normalizedTab as TabId) : "all"
   )
@@ -1259,6 +1264,14 @@ export default function DepartmentKanban() {
   const [dailyReportManualOrder, setDailyReportManualOrder] = React.useState<string[]>([])
   const [expandedDailyReportTitleIds, setExpandedDailyReportTitleIds] = React.useState<Record<string, boolean>>({})
   const [showFullDailyReportTable, setShowFullDailyReportTable] = React.useState(false)
+  React.useEffect(() => {
+    if (searchParams.get("daily") !== "full") return
+    const timer = window.setTimeout(() => {
+      setShowDailyUserReport(true)
+      setShowFullDailyReportTable(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [searchParams])
   const [dailyReportPeriodFilter, setDailyReportPeriodFilter] = React.useState<"all" | "am_side" | "pm_side">("all")
   const [dailyReportStatusFilter, setDailyReportStatusFilter] = React.useState<string[]>([])
   const [dragDailyReportRowId, setDragDailyReportRowId] = React.useState<string | null>(null)

@@ -23,9 +23,15 @@ export const DAILY_RLZ_REASONS = [
   ["OTHER", "Tjetër"],
 ] as const
 
+const DAILY_RLZ_EMPTY_REASON = "__EMPTY__"
+
 export type DailyRlzTaskState = NonNullable<DailyReportResponse["tasks_today"][number]["rlz_daily_state"]>
 type Blocker = { task_id: string; title: string; status: string; minimum_due_date?: string | null;
   issues: Array<{ code: string; message: string }> }
+
+function blockerTitle(title: string) {
+  return title.split(/\r?\n/).map(line => line.trim()).find(Boolean) || title
+}
 
 export function dailyRlzStateByTask(report: DailyReportResponse | null) {
   const map = new Map<string, DailyRlzTaskState>()
@@ -50,7 +56,11 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
       try {
         const response = await apiFetch(`/reports/daily-rlz-state/${taskId}`, {
           method: "PUT", headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ day, reason_code: reasonCode, comment: null }),
+          body: JSON.stringify({
+            day,
+            reason_code: reasonCode === DAILY_RLZ_EMPTY_REASON ? null : reasonCode,
+            comment: null,
+          }),
         })
         if (!response.ok) {
           const payload = await response.json().catch(() => ({}))
@@ -61,7 +71,10 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
       finally { setSaving(false) }
     }}>
     <SelectTrigger className="h-7 min-w-[150px] bg-white text-[11px]"><SelectValue placeholder="Zgjidh arsyen"/></SelectTrigger>
-    <SelectContent>{DAILY_RLZ_REASONS.map(([code,label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}</SelectContent>
+    <SelectContent>
+      <SelectItem value={DAILY_RLZ_EMPTY_REASON}>Empty</SelectItem>
+      {DAILY_RLZ_REASONS.map(([code,label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}
+    </SelectContent>
   </Select>
 }
 
@@ -121,7 +134,7 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
       <DialogHeader><DialogTitle>Nuk mund ta ruash gjendjen për RLZ</DialogTitle></DialogHeader>
       <p className="text-sm">Plotëso pikat e mëposhtme para se të vazhdosh.</p>
       <div className="max-h-[55vh] space-y-3 overflow-y-auto">{blockers.map(blocker => <div key={blocker.task_id} className="rounded border border-red-200 bg-red-50 p-3">
-        <p className="font-semibold">{blocker.title}</p><ul className="mt-1 list-disc pl-5 text-sm">{blocker.issues.map(issue => <li key={issue.code}>{issue.message}{issue.code === "DUE_DATE_NOT_MOVED" && blocker.minimum_due_date ? ` · Shtyje në ${blocker.minimum_due_date} ose më vonë` : ""}</li>)}</ul>
+        <p className="font-semibold">{blockerTitle(blocker.title)}</p><ul className="mt-1 list-disc pl-5 text-sm">{blocker.issues.map(issue => <li key={issue.code}>{issue.message}{issue.code === "DUE_DATE_NOT_MOVED" && blocker.minimum_due_date ? ` · Shtyje në ${blocker.minimum_due_date} ose më vonë` : ""}</li>)}</ul>
       </div>)}</div>
     </DialogContent></Dialog>
   </>

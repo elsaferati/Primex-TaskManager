@@ -287,21 +287,32 @@ async def rlz_overview(db: AsyncSession = Depends(get_db), _: User = Depends(req
             "recent_runs": [_run(row) for row in recent]}
 
 
+async def _rlz_configured_time(db: AsyncSession) -> str:
+    value = await db.scalar(select(PrimeFlowReportSchedule.execution_time).where(
+        PrimeFlowReportSchedule.report_type == RLZ_SCHEDULE_TYPE,
+        PrimeFlowReportSchedule.is_active.is_(True),
+    ).order_by(PrimeFlowReportSchedule.sort_order).limit(1))
+    return value.strftime("%H:%M") if value else "16:00"
+
+
 @router.post("/rlz/preview")
-async def rlz_preview(payload: RlzPreviewRequest, _: User = Depends(require_report_manager)) -> dict:
+async def rlz_preview(payload: RlzPreviewRequest, db: AsyncSession = Depends(get_db),
+                      _: User = Depends(require_report_manager)) -> dict:
     recipients = await _rlz_recipient_map(payload, require_any=False)
     report = await generate_rlz_fresh(payload.report_date)
-    return {"report": report, "recipients": recipients, "plain_text": render_rlz_plain(report),
-            "html": render_rlz_html(report)}
+    report_time = await _rlz_configured_time(db)
+    return {"report": report, "recipients": recipients, "plain_text": render_rlz_plain(report, report_time),
+            "html": render_rlz_html(report, report_time)}
 
 
 @router.post("/rlz/send")
 async def rlz_send(payload: RlzSendRequest, db: AsyncSession = Depends(get_db),
                    user: User = Depends(require_report_manager)) -> dict:
     recipients = await _rlz_recipient_map(payload, require_any=True)
+    report_time = await _rlz_configured_time(db)
     run = await deliver_daily_rlz_control(
         payload.report_date, recipient_map=recipients, trigger_type="MANUAL",
-        triggered_by_user_id=user.id, manual_reason=payload.reason,
+        triggered_by_user_id=user.id, manual_reason=payload.reason, report_time=report_time,
     )
     add_audit_log(db=db, actor_user_id=user.id, entity_type="primeflow_report_run", entity_id=run.id,
                   action="MANUAL_SEND", after={"report_type": RLZ_REPORT_TYPE, "status": run.status, "reason": payload.reason})
