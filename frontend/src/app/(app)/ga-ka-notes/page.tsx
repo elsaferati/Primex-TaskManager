@@ -477,10 +477,10 @@ function getNoteMarkClass(isDone: boolean, isAdded: boolean) {
   return ""
 }
 
-function renderMarkedNoteContent(content?: string | null) {
+function renderMarkedNoteContent(content?: string | null, showStrikeTimestamps = false) {
   if (!content) return "-"
   const parsed = parseMarkedNoteContentWithProgress(content)
-  return renderNoteContentWithRanges(parsed.text, parsed.doneRanges, parsed.addedRanges)
+  return renderNoteContentWithRanges(parsed.text, parsed.doneRanges, parsed.addedRanges, showStrikeTimestamps)
 }
 
 type MarkedSegment = {
@@ -571,7 +571,11 @@ function trimLinePrefix(segments: MarkedSegment[], charsToTrim: number) {
   return trimmed.filter((segment) => segment.text.length > 0)
 }
 
-function renderInlineMarkedSegments(segments: MarkedSegment[], keyPrefix: string) {
+function renderInlineMarkedSegments(
+  segments: MarkedSegment[],
+  keyPrefix: string,
+  showStrikeTimestamps = false
+) {
   if (segments.length === 0) return null
 
   const chars = segments.flatMap((segment) =>
@@ -634,7 +638,7 @@ function renderInlineMarkedSegments(segments: MarkedSegment[], keyPrefix: string
     if (timestampMatch) {
       return (
         <React.Fragment key={`${keyPrefix}-run-${index}`}>
-          <span className="text-slate-400">{timestampMatch[0]}</span>
+          {showStrikeTimestamps ? <span className="text-slate-400">{timestampMatch[0]}</span> : null}
           {run.text.slice(timestampMatch[0].length)}
         </React.Fragment>
       )
@@ -653,7 +657,12 @@ function renderInlineMarkedSegments(segments: MarkedSegment[], keyPrefix: string
   })
 }
 
-function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[], addedRanges: TextMarkRange[] = []) {
+function renderNoteContentWithRanges(
+  content: string,
+  doneRanges: TextMarkRange[],
+  addedRanges: TextMarkRange[] = [],
+  showStrikeTimestamps = false
+) {
   if (!content) return "-"
   const lines = splitSegmentsByNewline(buildMarkedSegments(content, doneRanges, addedRanges))
   const blocks: React.ReactNode[] = []
@@ -674,7 +683,11 @@ function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[
         if (!match) break
         items.push(
           <li key={`note-bullet-${index}`} data-note-line-index={index}>
-            {renderInlineMarkedSegments(trimLinePrefix(itemSegments, match[0].length), `note-bullet-${index}`)}
+            {renderInlineMarkedSegments(
+              trimLinePrefix(itemSegments, match[0].length),
+              `note-bullet-${index}`,
+              showStrikeTimestamps
+            )}
           </li>
         )
         index += 1
@@ -696,7 +709,11 @@ function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[
         if (!match) break
         items.push(
           <li key={`note-ordered-${index}`} data-note-line-index={index}>
-            {renderInlineMarkedSegments(trimLinePrefix(itemSegments, match[0].length), `note-ordered-${index}`)}
+            {renderInlineMarkedSegments(
+              trimLinePrefix(itemSegments, match[0].length),
+              `note-ordered-${index}`,
+              showStrikeTimestamps
+            )}
           </li>
         )
         index += 1
@@ -711,7 +728,7 @@ function renderNoteContentWithRanges(content: string, doneRanges: TextMarkRange[
 
     blocks.push(
       <div key={`note-line-${index}`} data-note-line-index={index} className={lineText ? "" : "min-h-[1.25rem]"}>
-        {lineText ? renderInlineMarkedSegments(lineSegments, `note-line-${index}`) : "\u00A0"}
+        {lineText ? renderInlineMarkedSegments(lineSegments, `note-line-${index}`, showStrikeTimestamps) : "\u00A0"}
       </div>
     )
     index += 1
@@ -959,6 +976,7 @@ function isGraphicDesignDepartment(dept?: Department | null) {
 
 export default function GaKaNotesPage() {
   const { user, apiFetch } = useAuth()
+  const canViewStrikeTimestamps = user?.role === "ADMIN"
   const confirm = useConfirm()
   const searchParams = useSearchParams()
   const [notes, setNotes] = React.useState<GaNotesTableNote[]>([])
@@ -3282,7 +3300,7 @@ export default function GaKaNotesPage() {
                                   </span>
                                 ) : null}
                                 <span id={`ga-note-content-${note.id}`} className="min-w-0 text-sm break-words">
-                                  {renderMarkedNoteContent(note.content)}
+                                  {renderMarkedNoteContent(note.content, canViewStrikeTimestamps)}
                                 </span>
                               </div>
                               <div className="flex items-center justify-end gap-2 flex-wrap">
@@ -3689,7 +3707,7 @@ export default function GaKaNotesPage() {
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
                 <div className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-500">Note</div>
                 <div className="mt-1 whitespace-pre-wrap break-words text-sm text-slate-700">
-                  {renderMarkedNoteContent(attachmentsDialogNote.content)}
+                  {renderMarkedNoteContent(attachmentsDialogNote.content, canViewStrikeTimestamps)}
                 </div>
               </div>
               {attachmentsDialogCanAddFiles ? (
@@ -4215,7 +4233,8 @@ export default function GaKaNotesPage() {
                     return renderNoteContentWithRanges(
                       previewContent.text,
                       previewContent.doneRanges,
-                      previewContent.addedRanges
+                      previewContent.addedRanges,
+                      canViewStrikeTimestamps
                     )
                   })()}
                 </div>
