@@ -3,8 +3,12 @@ from __future__ import annotations
 import html
 import os
 import re
+from io import BytesIO
 from datetime import date
 from typing import Any
+
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient
@@ -31,6 +35,13 @@ CELL_STYLE = "border:1px solid #000;padding:5px;vertical-align:top;text-align:le
 HEADER_STYLE = f"{CELL_STYLE};text-align:center;font-weight:700"
 PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:#f3e8ff"
 PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|/|$)", re.I)
+NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
+STATUS_COLORS = {
+    "TODO": "#FFC4ED",
+    "IN_PROGRESS": "#FFFF00",
+    "WAITING_CONFIRMATION": "#FFEDD5",
+    "DONE": "#C4FDC4",
+}
 
 
 def subject_for(target_date: date) -> str:
@@ -56,6 +67,33 @@ def _first_line(value: Any) -> str:
     return next((line.strip() for line in str(value or "").splitlines() if line.strip()), "")
 
 
+def _report_text(value: Any) -> str:
+    """Remove note-editor markup; recipients must only see the task text."""
+    return re.sub(r"\s{2,}", " ", NOTE_MARKERS_RE.sub("", str(value or ""))).strip()
+
+
+def _task_status(item: dict[str, Any]) -> str:
+    raw = str(item.get("status") or item.get("task_status") or item.get("state") or "TODO")
+    normalized = raw.strip().upper().replace(" ", "_").replace("-", "_")
+    if normalized in {"COMPLETED", "COMPLETE"}:
+        return "DONE"
+    if normalized in {"TO_DO", "TODO"}:
+        return "TODO"
+    if normalized in {"INPROGRESS", "IN_PROGRESS"}:
+        return "IN_PROGRESS"
+    if normalized in {"WAITING", "PENDING_CONFIRMATION", "WAITING_CONFIRMATION"}:
+        return "WAITING_CONFIRMATION"
+    return normalized if normalized in STATUS_COLORS else "TODO"
+
+
+def _task_cell_style(item: dict[str, Any], *, personal: bool) -> tuple[str, str]:
+    """GA personal cells remain purple; otherwise colour by the task's status."""
+    if personal and _is_personal_task_for_ga(item):
+        return PERSONAL_GA_CELL_STYLE, "#f3e8ff"
+    color = STATUS_COLORS[_task_status(item)]
+    return f"{CELL_STYLE};background-color:{color}", color
+
+
 def _initials(value: str) -> str:
     cleaned = value.strip()
     if not cleaned:
@@ -78,7 +116,7 @@ def _assignees(item: dict[str, Any]) -> list[str]:
 
 
 def _task_title(item: dict[str, Any], *, personal: bool) -> str:
-    title = _first_line(item.get("title"))
+    title = _report_text(_first_line(item.get("title")))
     if personal:
         return title
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)
@@ -88,7 +126,7 @@ def _task_title(item: dict[str, Any], *, personal: bool) -> str:
 
 def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
     """Match the GA-assignee rule used by the P row in Common View printouts."""
-    title = re.sub(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", "", _first_line(item.get("title")))
+    title = _report_text(_first_line(item.get("title")))
     match = PERSONAL_TASK_INITIALS.match(title.strip())
     if match is None:
         return False
@@ -148,12 +186,12 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
             cells: list[str] = []
             for item_index, item in enumerate(chunk):
                 value = (
-                    f"{_first_line(item.get('title'))} {str(item.get('time') or '').strip()}".strip()
+                    f"{_report_text(_first_line(item.get('title')))} {str(item.get('time') or '').strip()}".strip()
                     if meeting
                     else _task_title(item, personal=personal)
                 )
-                cell_style = PERSONAL_GA_CELL_STYLE if personal and _is_personal_task_for_ga(item) else CELL_STYLE
-                background = ' bgcolor="#f3e8ff"' if cell_style == PERSONAL_GA_CELL_STYLE else ""
+                cell_style, color = _task_cell_style(item, personal=personal) if not meeting else (CELL_STYLE, "")
+                background = f' bgcolor="{color}"' if color else ""
                 cells.append(
                     f'<td{background} style="{cell_style}">{item_index + (chunk_index * 6) + 1}. {html.escape(value)}</td>'
                 )
@@ -173,7 +211,88 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
     )
 
 
-async def build_tomorrow_print_report(delivery_date: date) -> dict[str, str]:
+def _excel_table_attachment(
+    task_rows: list[tuple[str, list[dict[str, Any]], bool]],
+    meeting_rows: list[tuple[str, list[dict[str, Any]], bool]],
+    target_date: date,
+) -> tuple[str, bytes, str]:
+    """Create the same printable grid as an XLSX attachment for email recipients."""
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.title = "1H SHTYPI"
+    sheet.merge_cells("A1:H1")
+    title_cell = sheet["A1"]
+    title_cell.value = f"1H SHTYPI - {target_date:%d.%m.%Y}"
+    title_cell.font = Font(bold=True, size=14)
+    title_cell.alignment = Alignment(horizontal="center")
+
+    border = Border(
+        left=Side(style="thin", color="000000"), right=Side(style="thin", color="000000"),
+        top=Side(style="thin", color="000000"), bottom=Side(style="thin", color="000000"),
+    )
+    header_fill = PatternFill("solid", fgColor="EAF0FF")
+    fills = {
+        status: PatternFill("solid", fgColor=color.removeprefix("#"))
+        for status, color in STATUS_COLORS.items()
+    }
+    ga_fill = PatternFill("solid", fgColor="F3E8FF")
+    headers = ["NR", "LLoji dhe sloti", "Task 1", "Task 2", "Task 3", "Task 4", "Task 5", "Task 6"]
+
+    def write_section(
+        rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool, row_number: int
+    ) -> int:
+        section_headers = ["NR", "LLoji", "Meeting 1", "Meeting 2", "Meeting 3", "Meeting 4", "Meeting 5", "Meeting 6"] if meeting else headers
+        for column, value in enumerate(section_headers, 1):
+            cell = sheet.cell(row_number, column, value)
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+            cell.border = border
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        row_number += 1
+        for number, (label, values, personal) in enumerate(rows, 1):
+            chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
+            first_row = row_number
+            for chunk_index, chunk in enumerate(chunks):
+                if chunk_index == 0:
+                    sheet.cell(row_number, 1, number)
+                    sheet.cell(row_number, 2, label)
+                for item_index, item in enumerate(chunk, 3):
+                    value = (
+                        f"{_report_text(_first_line(item.get('title')))} {str(item.get('time') or '').strip()}".strip()
+                        if meeting else _task_title(item, personal=personal)
+                    )
+                    cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
+                    if not meeting:
+                        cell.fill = ga_fill if personal and _is_personal_task_for_ga(item) else fills[_task_status(item)]
+                for column in range(1, 9):
+                    cell = sheet.cell(row_number, column)
+                    cell.border = border
+                    cell.alignment = Alignment(vertical="top", wrap_text=True)
+                row_number += 1
+            if len(chunks) > 1:
+                sheet.merge_cells(start_row=first_row, start_column=1, end_row=row_number - 1, end_column=1)
+                sheet.merge_cells(start_row=first_row, start_column=2, end_row=row_number - 1, end_column=2)
+        return row_number
+
+    next_row = write_section(task_rows, meeting=False, row_number=3)
+    write_section(meeting_rows, meeting=True, row_number=next_row + 1)
+    widths = [6, 22, 29, 29, 29, 29, 29, 29]
+    for index, width in enumerate(widths, 1):
+        sheet.column_dimensions[chr(64 + index)].width = width
+    sheet.freeze_panes = "C4"
+
+    output = BytesIO()
+    workbook.save(output)
+    return (
+        f"1H_SHTYPI_{target_date:%Y-%m-%d}.xlsx",
+        output.getvalue(),
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+
+
+async def build_tomorrow_print_report(
+    delivery_date: date, *, include_attachment: bool = False
+) -> dict[str, Any]:
     target_date = next_working_day(delivery_date)
     base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
     if not base_url:
@@ -195,14 +314,24 @@ async def build_tomorrow_print_report(delivery_date: date) -> dict[str, str]:
     plain_rows.append("")
     plain_rows.append("MEETINGS")
     for label, values, _ in meeting_rows:
-        plain_rows.append(f"{label}: " + "; ".join(f"{_first_line(item.get('title'))} {item.get('time') or ''}".strip() for item in values))
-    return {
+        plain_rows.append(
+            f"{label}: " + "; ".join(
+                f"{_report_text(_first_line(item.get('title')))} {item.get('time') or ''}".strip()
+                for item in values
+            )
+        )
+    report: dict[str, Any] = {
         "subject": subject_for(target_date),
         "target_date": target_date.isoformat(),
         "html": html_body,
         "plain_text": "\n".join(plain_rows),
     }
+    if include_attachment:
+        report["attachments"] = [_excel_table_attachment(task_rows, meeting_rows, target_date)]
+    return report
 
 
-async def send_tomorrow_print_report(report: dict[str, str], recipients: dict[str, list[str]]) -> dict[str, Any]:
-    return await GmailService().send_verified(report["subject"], recipients, report["plain_text"], report["html"])
+async def send_tomorrow_print_report(report: dict[str, Any], recipients: dict[str, list[str]]) -> dict[str, Any]:
+    return await GmailService().send_verified(
+        report["subject"], recipients, report["plain_text"], report["html"], attachments=report.get("attachments")
+    )

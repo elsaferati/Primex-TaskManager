@@ -120,7 +120,7 @@ async def send(report_date: date | None = None, db: AsyncSession = Depends(get_d
     ).scalar_one_or_none()
     if existing is not None and existing.status == "SENT":
         return _history(existing)
-    report = await build_tomorrow_print_report(delivery_date)
+    report = await build_tomorrow_print_report(delivery_date, include_attachment=True)
     if existing is None:
         existing = TomorrowPrintReportDelivery(
             delivery_date=delivery_date,

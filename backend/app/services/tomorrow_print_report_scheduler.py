@@ -43,7 +43,7 @@ async def run_tomorrow_print_report_scheduler_once(now: datetime | None = None) 
             logger.warning("tomorrow_print_report_scheduler_skipped reason=no_to_recipients")
             return False
         try:
-            report = await build_tomorrow_print_report(delivery_date)
+            report = await build_tomorrow_print_report(delivery_date, include_attachment=True)
             if row is None:
                 row = TomorrowPrintReportDelivery(
                     delivery_date=delivery_date,
