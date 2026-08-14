@@ -651,8 +651,199 @@ type GaTimeSlotEntry = {
   start_time: string
   end_time: string
   content: string
+  background_color: string
+  text_color: string
+  is_bold: boolean
+  is_italic: boolean
   created_at: string
   updated_at: string
+}
+
+function taskRequiresRlzCompletionComment(task: Task) {
+  if (task.system_template_origin_id) return true
+  if (task.ga_note_origin_id || task.plan_note_origin_id) return false
+  return !Boolean(task.is_bllok || task.is_1h_report || task.is_r1 || task.is_personal)
+}
+
+function apiErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback
+  const detail = (payload as { detail?: unknown }).detail
+  if (typeof detail === "string" && detail.trim()) return detail
+  if (detail && typeof detail === "object") {
+    const message = (detail as { message?: unknown }).message
+    if (typeof message === "string" && message.trim()) return message
+  }
+  return fallback
+}
+
+function apiErrorCode(payload: unknown) {
+  if (!payload || typeof payload !== "object") return null
+  const detail = (payload as { detail?: unknown }).detail
+  if (!detail || typeof detail !== "object") return null
+  const code = (detail as { code?: unknown }).code
+  return typeof code === "string" ? code : null
+}
+
+type GaTimeEntryFormat = Pick<
+  GaTimeSlotEntry,
+  "background_color" | "text_color" | "is_bold" | "is_italic"
+>
+
+const DEFAULT_GA_TIME_ENTRY_FORMAT: GaTimeEntryFormat = {
+  background_color: "#FFFFFF",
+  text_color: "#0F172A",
+  is_bold: false,
+  is_italic: false,
+}
+
+const GA_TIME_BACKGROUND_COLORS = [
+  "#FFFFFF",
+  "#FEF3C7",
+  "#FFEDD5",
+  "#DCFCE7",
+  "#DBEAFE",
+  "#EDE9FE",
+  "#FCE7F3",
+  "#E2E8F0",
+] as const
+
+const normalizeGaTimeEntryFormat = (
+  entry?: Partial<GaTimeEntryFormat> | null
+): GaTimeEntryFormat => ({
+  background_color: entry?.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+  text_color: entry?.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+  is_bold: Boolean(entry?.is_bold),
+  is_italic: Boolean(entry?.is_italic),
+})
+
+const gaTimeEntryStyle = (entry: Partial<GaTimeEntryFormat>): React.CSSProperties => ({
+  backgroundColor: entry.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+  color: entry.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+  fontWeight: entry.is_bold ? 700 : 400,
+  fontStyle: entry.is_italic ? "italic" : "normal",
+})
+
+function GaTimeEntryEditor({
+  initialContent = "",
+  initialFormat,
+  saving = false,
+  onSave,
+  onCancel,
+}: {
+  initialContent?: string
+  initialFormat?: Partial<GaTimeEntryFormat>
+  saving?: boolean
+  onSave: (content: string, format: GaTimeEntryFormat) => Promise<boolean>
+  onCancel: () => void
+}) {
+  const [content, setContent] = React.useState(initialContent)
+  const [format, setFormat] = React.useState<GaTimeEntryFormat>(() =>
+    normalizeGaTimeEntryFormat(initialFormat)
+  )
+  const [submitting, setSubmitting] = React.useState(false)
+  const isSaving = saving || submitting
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    if (!content.trim() || isSaving) return
+    setSubmitting(true)
+    try {
+      await onSave(content.trim(), format)
+    } finally {
+      setSubmitting(false)
+    }
+  }
+
+  return (
+    <form className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2" onSubmit={submit}>
+      <Input
+        className="h-8 text-xs"
+        value={content}
+        onChange={(event) => setContent(event.target.value)}
+        placeholder="Write task..."
+        disabled={isSaving}
+        autoFocus
+      />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[10px] font-medium text-slate-500">Cell</span>
+        {GA_TIME_BACKGROUND_COLORS.map((color) => (
+          <button
+            key={color}
+            type="button"
+            className={cn(
+              "h-5 w-5 rounded-full border border-slate-300",
+              format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
+            )}
+            style={{ backgroundColor: color }}
+            onClick={() => setFormat((current) => ({ ...current, background_color: color }))}
+            disabled={isSaving}
+            aria-label={`Cell color ${color}`}
+            title={`Cell color ${color}`}
+          />
+        ))}
+        <label className="ml-1 flex items-center gap-1 text-[10px] font-medium text-slate-500" title="Custom cell color">
+          More
+          <input
+            type="color"
+            className="h-6 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+            value={format.background_color}
+            onChange={(event) =>
+              setFormat((current) => ({ ...current, background_color: event.target.value.toUpperCase() }))
+            }
+            disabled={isSaving}
+            aria-label="Custom cell color"
+          />
+        </label>
+        <label className="ml-1 flex items-center gap-1 text-[10px] font-medium text-slate-500" title="Text color">
+          Text
+          <input
+            type="color"
+            className="h-6 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+            value={format.text_color}
+            onChange={(event) =>
+              setFormat((current) => ({ ...current, text_color: event.target.value.toUpperCase() }))
+            }
+            disabled={isSaving}
+            aria-label="Text color"
+          />
+        </label>
+        <button
+          type="button"
+          className={cn(
+            "ml-1 h-7 min-w-7 rounded border px-2 text-xs font-bold",
+            format.is_bold ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"
+          )}
+          onClick={() => setFormat((current) => ({ ...current, is_bold: !current.is_bold }))}
+          disabled={isSaving}
+          aria-pressed={format.is_bold}
+          title="Bold"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "h-7 min-w-7 rounded border px-2 text-xs italic",
+            format.is_italic ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"
+          )}
+          onClick={() => setFormat((current) => ({ ...current, is_italic: !current.is_italic }))}
+          disabled={isSaving}
+          aria-pressed={format.is_italic}
+          title="Italic"
+        >
+          I
+        </button>
+      </div>
+      <div className="flex justify-end gap-1.5">
+        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onCancel} disabled={isSaving}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" className="h-7 px-3 text-xs" disabled={!content.trim() || isSaving}>
+          {isSaving ? "Saving..." : "Save"}
+        </Button>
+      </div>
+    </form>
+  )
 }
 
 type GaTimeRow = {
@@ -760,14 +951,15 @@ const normalizeGaTimeRows = (rows: GaTimeTableRowResponse[]): GaTimeRow[] =>
     .map((row) => {
       const start = normalizeGaTimeValue(row.start_time)
       const end = normalizeGaTimeValue(row.end_time)
+      const isSpecial = Boolean(row.is_special)
       return {
         id: row.id,
         sortOrder: row.sort_order,
         start,
         end,
-        label: row.label || (start && end ? formatGaTimeRowLabel(start, end) : ""),
+        label: isSpecial ? "" : row.label || (start && end ? formatGaTimeRowLabel(start, end) : ""),
         nrLabel: row.nr_label || "",
-        isSpecial: Boolean(row.is_special),
+        isSpecial,
       }
     })
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.start.localeCompare(b.start))
@@ -1079,6 +1271,11 @@ export default function AdminTasksPage() {
   const [pendingStatusTaskId, setPendingStatusTaskId] = React.useState<string | null>(null)
   const [pendingStatusValue, setPendingStatusValue] = React.useState("TODO")
   const [pendingConfirmationAssigneeId, setPendingConfirmationAssigneeId] = React.useState("")
+  const [pendingCompletionOverrideTaskId, setPendingCompletionOverrideTaskId] = React.useState<string | null>(null)
+  const [pendingCompletionOverrideReason, setPendingCompletionOverrideReason] = React.useState("")
+  const [pendingCompletionCommentTaskId, setPendingCompletionCommentTaskId] = React.useState<string | null>(null)
+  const [pendingCompletionComment, setPendingCompletionComment] = React.useState("")
+  const [pendingCompletionCommentSaving, setPendingCompletionCommentSaving] = React.useState(false)
 
   const [printTarget, setPrintTarget] = React.useState<"common" | "ga-time" | "all-tasks" | null>(null)
   const [printTotalPages, setPrintTotalPages] = React.useState(1)
@@ -1132,12 +1329,19 @@ export default function AdminTasksPage() {
   const [gaTimeSaving, setGaTimeSaving] = React.useState<Record<string, boolean>>({})
   const [gaTimeDeleting, setGaTimeDeleting] = React.useState<Record<string, boolean>>({})
   const [gaTimeEditingId, setGaTimeEditingId] = React.useState<string | null>(null)
-  const [gaTimeDrafts, setGaTimeDrafts] = React.useState<Record<string, string>>({})
   const [gaTimeAddingCell, setGaTimeAddingCell] = React.useState<string | null>(null)
-  const [gaTimeAddDrafts, setGaTimeAddDrafts] = React.useState<Record<string, string>>({})
   const [gaTimeRowsDialogOpen, setGaTimeRowsDialogOpen] = React.useState(false)
   const [gaTimeRowsDraft, setGaTimeRowsDraft] = React.useState<GaTimeRow[]>([])
+  const [gaTimeRowsDraftVersion, setGaTimeRowsDraftVersion] = React.useState(0)
   const [gaTimeRowsSaving, setGaTimeRowsSaving] = React.useState(false)
+  const [gaTimeNewRowOpen, setGaTimeNewRowOpen] = React.useState(false)
+  const [gaTimeNewRowSaving, setGaTimeNewRowSaving] = React.useState(false)
+  const gaTimeRowsDialogRef = React.useRef<HTMLDivElement | null>(null)
+  const gaTimeRowInputRefs = React.useRef<
+    Record<number, { start: HTMLInputElement | null; end: HTMLInputElement | null }>
+  >({})
+  const gaTimeNewRowStartRef = React.useRef<HTMLInputElement | null>(null)
+  const gaTimeNewRowEndRef = React.useRef<HTMLInputElement | null>(null)
   const [secondarySectionsReady, setSecondarySectionsReady] = React.useState(false)
   const confirmerCandidates = React.useMemo(
     () => getConfirmerCandidates(users as UserLookup[]),
@@ -1489,16 +1693,16 @@ export default function AdminTasksPage() {
   }, [adminDepartmentId, apiFetch, commonWeekISOs, ganeUserId, secondarySectionsReady])
 
   const loadDailyReport = React.useCallback(async () => {
-    if (!user?.id) return
+    // This section always displays Gane's report for the GA department.
+    // Wait until both async lookups are ready so we never briefly request
+    // the logged-in admin's report with GA's department (which returns 403).
+    if (!ganeUserId || !adminDepartmentId) return
     setLoadingDailyReport(true)
     try {
-      const targetUserId = ganeUserId ?? user.id
       const params: Record<string, string> = {
         day: todayIso,
-        user_id: targetUserId,
-      }
-      if (adminDepartmentId) {
-        params.department_id = adminDepartmentId
+        user_id: ganeUserId,
+        department_id: adminDepartmentId,
       }
       const qs = new URLSearchParams(params)
       const res = await apiFetch(`/reports/daily?${qs.toString()}`)
@@ -1513,7 +1717,7 @@ export default function AdminTasksPage() {
     } finally {
       setLoadingDailyReport(false)
     }
-  }, [adminDepartmentId, apiFetch, ganeUserId, todayIso, user?.id])
+  }, [adminDepartmentId, apiFetch, ganeUserId, todayIso])
 
   React.useEffect(() => {
     void load()
@@ -2396,14 +2600,46 @@ export default function AdminTasksPage() {
     }
   }
 
-  const updateTaskStatus = async (taskId: string, status: string) => {
+  const updateTaskStatus = async (
+    taskId: string,
+    status: string,
+    completionOverrideReason?: string,
+    personalCommentVerified = false
+  ): Promise<boolean> => {
     const task = tasks.find((t) => t.id === taskId)
-    if (!task) return
+    if (!task) return false
     if (isWaitingConfirmation(status) && !task.confirmation_assignee_id) {
       setPendingStatusTaskId(taskId)
       setPendingStatusValue(status)
       setPendingConfirmationAssigneeId("")
-      return
+      return false
+    }
+    const actorIsAssignee = Boolean(
+      user?.id &&
+      (task.assigned_to === user.id || task.assignees?.some((assignee) => assignee.id === user.id))
+    )
+    const needsPrivilegedOverride = Boolean(
+      status === "DONE" &&
+      taskRequiresRlzCompletionComment(task) &&
+      (user?.role === "ADMIN" || user?.role === "MANAGER") &&
+      !actorIsAssignee
+    )
+    const needsPersonalComment = Boolean(
+      status === "DONE" &&
+      taskRequiresRlzCompletionComment(task) &&
+      actorIsAssignee &&
+      !personalCommentVerified &&
+      !task.user_comment?.trim()
+    )
+    if (needsPersonalComment) {
+      setPendingCompletionCommentTaskId(taskId)
+      setPendingCompletionComment(task.user_comment || "")
+      return false
+    }
+    if (needsPrivilegedOverride && !completionOverrideReason?.trim()) {
+      setPendingCompletionOverrideTaskId(taskId)
+      setPendingCompletionOverrideReason("")
+      return false
     }
     const key = `task:${taskId}`
     setTaskStatusUpdating((prev) => ({ ...prev, [key]: true }))
@@ -2412,20 +2648,37 @@ export default function AdminTasksPage() {
       if (isWaitingConfirmation(status) && task.confirmation_assignee_id) {
         payload.confirmation_assignee_id = task.confirmation_assignee_id
       }
+      if (completionOverrideReason?.trim()) {
+        payload.completion_override_reason = completionOverrideReason.trim()
+      }
       const res = await apiFetch(`/tasks/${taskId}`, {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
       })
       if (!res.ok) {
-        toast.error("Failed to update task status")
-        return
+        const data = await res.json().catch(() => null)
+        const code = apiErrorCode(data)
+        if (code === "RLZ_COMPLETION_OVERRIDE_REASON_REQUIRED" && (user?.role === "ADMIN" || user?.role === "MANAGER")) {
+          setPendingCompletionOverrideTaskId(taskId)
+          setPendingCompletionOverrideReason("")
+          return false
+        }
+        if (code === "RLZ_TASK_COMMENT_REQUIRED") {
+          setPendingCompletionCommentTaskId(taskId)
+          setPendingCompletionComment(task.user_comment || "")
+          return false
+        }
+        toast.error(apiErrorMessage(data, "Failed to update task status"))
+        return false
       }
       const updated = (await res.json()) as Task
       setTasks((prev) => prev.map((task) => (task.id === updated.id ? updated : task)))
+      return true
     } catch (error) {
       console.error("Failed to update task status", error)
       toast.error("Failed to update task status")
+      return false
     } finally {
       setTaskStatusUpdating((prev) => ({ ...prev, [key]: false }))
     }
@@ -2566,7 +2819,7 @@ export default function AdminTasksPage() {
   ) => {
     const trimmed = nextValue.trim()
     const previousTrimmed = previousValue.trim()
-    if (trimmed === previousTrimmed) return
+    if (trimmed === previousTrimmed) return true
 
     const payloadComment = trimmed.length ? trimmed : null
     setAllTasksReportCommentSaving(commentKey, true)
@@ -2577,20 +2830,96 @@ export default function AdminTasksPage() {
         body: JSON.stringify({ comment: payloadComment }),
       })
       if (!res.ok) {
-        const data = await res.json()
-        toast.error(data.detail || "Failed to save comment")
+        const data = await res.json().catch(() => null)
+        toast.error(apiErrorMessage(data, "Failed to save comment"))
         setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
-        return
+        return false
       }
       updateTaskCommentState(taskId, payloadComment)
       setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: trimmed }))
+      return true
     } catch (error) {
       console.error("Failed to save comment", error)
       toast.error("Failed to save comment")
       setAllTasksReportCommentEdits((prev) => ({ ...prev, [commentKey]: previousValue }))
+      return false
     } finally {
       setAllTasksReportCommentSaving(commentKey, false)
     }
+  }
+
+  const completeTaskFromAllTasksReport = async (
+    task: Task,
+    nextComment: string,
+    previousComment: string,
+    commentKey: string,
+    isConfirmationAction: boolean
+  ) => {
+    const actorIsAssignee = Boolean(
+      user?.id &&
+      (task.assigned_to === user.id || task.assignees?.some((assignee) => assignee.id === user.id))
+    )
+    const requiresPersonalComment = Boolean(
+      !isConfirmationAction && actorIsAssignee && taskRequiresRlzCompletionComment(task)
+    )
+
+    if (requiresPersonalComment && !nextComment.trim()) {
+      setPendingCompletionCommentTaskId(task.id)
+      setPendingCompletionComment(nextComment)
+      return
+    }
+    if (requiresPersonalComment && nextComment.trim() !== previousComment.trim()) {
+      const saved = await saveAllTasksReportTaskComment(
+        task.id,
+        nextComment,
+        previousComment,
+        commentKey
+      )
+      if (!saved) return
+    }
+    await updateTaskStatus(task.id, "DONE", undefined, requiresPersonalComment)
+  }
+
+  const submitCompletionComment = async () => {
+    if (!pendingCompletionCommentTaskId) return
+    const comment = pendingCompletionComment.trim()
+    if (!comment) {
+      toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
+      return
+    }
+    const task = tasks.find((item) => item.id === pendingCompletionCommentTaskId)
+    if (!task) return
+
+    setPendingCompletionCommentSaving(true)
+    try {
+      const commentKey = `completion:${task.id}`
+      const saved = await saveAllTasksReportTaskComment(
+        task.id,
+        comment,
+        task.user_comment || "",
+        commentKey
+      )
+      if (!saved) return
+      const updated = await updateTaskStatus(task.id, "DONE", undefined, true)
+      if (!updated) return
+      setPendingCompletionCommentTaskId(null)
+      setPendingCompletionComment("")
+    } finally {
+      setPendingCompletionCommentSaving(false)
+    }
+  }
+
+  const submitCompletionOverride = async () => {
+    if (!pendingCompletionOverrideTaskId) return
+    const reason = pendingCompletionOverrideReason.trim()
+    if (!reason) {
+      toast.error("Shkruaj arsyen pse po e mbyll këtë detyrë në emër të assignee-t.")
+      return
+    }
+    const updated = await updateTaskStatus(pendingCompletionOverrideTaskId, "DONE", reason)
+    if (!updated) return
+    setPendingCompletionOverrideTaskId(null)
+    setPendingCompletionOverrideReason("")
   }
 
   const saveAllTasksReportSystemComment = async (
@@ -3752,49 +4081,179 @@ export default function AdminTasksPage() {
   const normalizeSlotTime = (value: string) => (value ? value.slice(0, 5) : "")
   const toDayOfWeek = (iso: string) => getMondayBasedDay(fromISODate(iso))
 
-  const openGaTimeRowsDialog = React.useCallback(() => {
-    setGaTimeRowsDraft(sortVisibleGaTimeRows(gaTimeRows.filter((row) => !row.isSpecial)))
-    setGaTimeRowsDialogOpen(true)
-  }, [gaTimeRows])
+  const remountGaTimeRowInputs = React.useCallback(() => {
+    gaTimeRowInputRefs.current = {}
+    setGaTimeRowsDraftVersion((version) => version + 1)
+  }, [])
 
-  const updateGaTimeRowDraft = React.useCallback(
-    (index: number, field: "start" | "end", value: string) => {
-      setGaTimeRowsDraft((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)))
+  const setGaTimeRowInputRef = React.useCallback(
+    (index: number, field: "start" | "end", node: HTMLInputElement | null) => {
+      const refs = gaTimeRowInputRefs.current[index] ?? { start: null, end: null }
+      refs[field] = node
+      gaTimeRowInputRefs.current[index] = refs
     },
     []
   )
 
-  const addGaTimeRowDraft = React.useCallback(() => {
-    setGaTimeRowsDraft((prev) => {
-      const sorted = sortVisibleGaTimeRows(prev)
-      const lastEnd = sorted[sorted.length - 1]?.end || "08:00"
-      return [
-        ...sorted,
-        {
-          start: lastEnd,
-          end: addMinutesToTimeValue(lastEnd, 30),
-          label: "",
-          nrLabel: "",
-        },
-      ]
-    })
+  const readGaTimeRowsDraft = React.useCallback(
+    () => gaTimeRowsDraft.map((row, index) => {
+      const inputRefs = gaTimeRowInputRefs.current[index]
+      return {
+        ...row,
+        start: normalizeGaTimeValue(inputRefs?.start?.value ?? row.start),
+        end: normalizeGaTimeValue(inputRefs?.end?.value ?? row.end),
+      }
+    }),
+    [gaTimeRowsDraft]
+  )
+
+  const openGaTimeRowsDialog = React.useCallback(() => {
+    setGaTimeRowsDraft(sortVisibleGaTimeRows(gaTimeRows.filter((row) => !row.isSpecial)))
+    remountGaTimeRowInputs()
+    setGaTimeNewRowOpen(false)
+    setGaTimeRowsDialogOpen(true)
+  }, [gaTimeRows, remountGaTimeRowInputs])
+
+  const hasUnsavedGaTimeRowChanges = React.useCallback(() => {
+    const persisted = sortVisibleGaTimeRows(gaTimeRows.filter((row) => !row.isSpecial))
+    const draft = sortVisibleGaTimeRows(readGaTimeRowsDraft())
+    if (persisted.length !== draft.length) return true
+    return persisted.some((row, index) => (
+      normalizeGaTimeValue(row.start) !== normalizeGaTimeValue(draft[index]?.start || "") ||
+      normalizeGaTimeValue(row.end) !== normalizeGaTimeValue(draft[index]?.end || "")
+    ))
+  }, [gaTimeRows, readGaTimeRowsDraft])
+
+  const openGaTimeNewRowForm = React.useCallback(() => {
+    if (hasUnsavedGaTimeRowChanges()) {
+      toast.error("Save or cancel the existing time changes before adding a new row.")
+      return
+    }
+    setGaTimeNewRowOpen(true)
+    window.requestAnimationFrame(() => gaTimeNewRowStartRef.current?.focus({ preventScroll: true }))
+  }, [hasUnsavedGaTimeRowChanges])
+
+  const cancelGaTimeNewRow = React.useCallback(() => {
+    setGaTimeNewRowOpen(false)
   }, [])
 
+  const saveGaTimeNewRow = React.useCallback(async () => {
+    if (hasUnsavedGaTimeRowChanges()) {
+      toast.error("Save or cancel the existing time changes before adding a new row.")
+      return
+    }
+    const start = normalizeGaTimeValue(gaTimeNewRowStartRef.current?.value || "")
+    const startValue = parseTimeValue(start)
+    if (!startValue) {
+      toast.error("Enter a valid start time.")
+      gaTimeNewRowStartRef.current?.focus()
+      return
+    }
+    const enteredEnd = normalizeGaTimeValue(gaTimeNewRowEndRef.current?.value || "")
+    if (!enteredEnd && startValue.hours * 60 + startValue.minutes > 23 * 60 + 29) {
+      toast.error("Enter an end time for starts after 23:29.")
+      return
+    }
+    const end = enteredEnd || addMinutesToTimeValue(start, 30)
+    const endValue = parseTimeValue(end)
+    if (!endValue) {
+      toast.error("Enter a valid end time.")
+      return
+    }
+    const startMinutes = startValue.hours * 60 + startValue.minutes
+    const endMinutes = endValue.hours * 60 + endValue.minutes
+    if (startMinutes >= endMinutes) {
+      toast.error("End time must be after start time.")
+      return
+    }
+    const overlappingRows = gaTimeRows.filter((row) => {
+      if (row.isSpecial) return false
+      const existingStart = parseTimeToMinutes(row.start)
+      const existingEnd = parseTimeToMinutes(row.end)
+      return existingStart !== null && existingEnd !== null && existingStart < endMinutes && startMinutes < existingEnd
+    })
+    const containingRow = overlappingRows.length === 1 ? overlappingRows[0] : null
+    const containingStart = containingRow ? parseTimeToMinutes(containingRow.start) : null
+    const containingEnd = containingRow ? parseTimeToMinutes(containingRow.end) : null
+    const canSplitContainingRow = Boolean(
+      containingRow &&
+      containingStart !== null &&
+      containingEnd !== null &&
+      containingStart <= startMinutes &&
+      endMinutes <= containingEnd
+    )
+    if (
+      canSplitContainingRow &&
+      containingStart === startMinutes &&
+      containingEnd === endMinutes
+    ) {
+      toast.error("This time row already exists.")
+      return
+    }
+    if (overlappingRows.length && !canSplitContainingRow) {
+      toast.error("This time partially overlaps another row. Choose a time fully inside one row to split it.")
+      return
+    }
+
+    setGaTimeNewRowSaving(true)
+    try {
+      const res = await apiFetch("/ga-time-slots/rows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start_time: start, end_time: end }),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null) as { detail?: string } | null
+        throw new Error(detail?.detail || `ga_time_row_create_failed_${res.status}`)
+      }
+      const rows = normalizeGaTimeRows((await res.json()) as GaTimeTableRowResponse[])
+      setGaTimeRows(rows.length ? rows : renumberGaTimeRows([...DEFAULT_GA_TIME_ROWS]))
+      setGaTimeRowsDraft(sortVisibleGaTimeRows(rows.filter((row) => !row.isSpecial)))
+      remountGaTimeRowInputs()
+      cancelGaTimeNewRow()
+      if (canSplitContainingRow && containingRow) {
+        const splitLabels = [
+          containingStart !== null && containingStart < startMinutes
+            ? formatGaTimeRowLabel(containingRow.start, start)
+            : null,
+          formatGaTimeRowLabel(start, end),
+          containingEnd !== null && endMinutes < containingEnd
+            ? formatGaTimeRowLabel(end, containingRow.end)
+            : null,
+        ].filter((label): label is string => Boolean(label))
+        toast.success(`Time ${containingRow.label} split into ${splitLabels.join(", ")}.`)
+      } else {
+        toast.success(`Time ${formatGaTimeRowLabel(start, end)} added.`)
+      }
+    } catch (err) {
+      console.error("Failed to add GA timetable row", err)
+      toast.error(err instanceof Error ? err.message : "Failed to add time row.")
+    } finally {
+      setGaTimeNewRowSaving(false)
+    }
+  }, [apiFetch, cancelGaTimeNewRow, gaTimeRows, hasUnsavedGaTimeRowChanges, remountGaTimeRowInputs])
+
   const removeGaTimeRowDraft = React.useCallback((index: number) => {
-    setGaTimeRowsDraft((prev) => prev.filter((_, rowIndex) => rowIndex !== index))
-  }, [])
+    setGaTimeRowsDraft(readGaTimeRowsDraft().filter((_, rowIndex) => rowIndex !== index))
+    remountGaTimeRowInputs()
+  }, [readGaTimeRowsDraft, remountGaTimeRowInputs])
 
   const resetGaTimeRowsDraft = React.useCallback(() => {
     setGaTimeRowsDraft(sortVisibleGaTimeRows(DEFAULT_GA_TIME_ROWS.filter((row) => !row.isSpecial)))
-  }, [])
+    remountGaTimeRowInputs()
+  }, [remountGaTimeRowInputs])
 
   const saveGaTimeRows = React.useCallback(async () => {
     const visibleRows = sortVisibleGaTimeRows(
-      gaTimeRowsDraft.map((row) => ({
-        ...row,
-        start: normalizeGaTimeValue(row.start),
-        end: normalizeGaTimeValue(row.end),
-      }))
+      readGaTimeRowsDraft().map((row) => {
+        const start = normalizeGaTimeValue(row.start)
+        const enteredEnd = normalizeGaTimeValue(row.end)
+        return {
+          ...row,
+          start,
+          end: enteredEnd || (start ? addMinutesToTimeValue(start, 30) : ""),
+        }
+      })
     )
     if (!visibleRows.length) {
       toast.error("Add at least one time row.")
@@ -3804,8 +4263,12 @@ export default function AdminTasksPage() {
       const row = visibleRows[idx]
       const start = parseTimeValue(row.start)
       const end = parseTimeValue(row.end)
-      if (!start || !end) {
-        toast.error("Use valid HH:MM times.")
+      if (!start) {
+        toast.error("Enter a start time for every row.")
+        return
+      }
+      if (!end) {
+        toast.error("Use a valid HH:MM end time.")
         return
       }
       const startMinutes = start.hours * 60 + start.minutes
@@ -3846,7 +4309,7 @@ export default function AdminTasksPage() {
     } finally {
       setGaTimeRowsSaving(false)
     }
-  }, [apiFetch, gaTimeRowsDraft])
+  }, [apiFetch, readGaTimeRowsDraft])
 
   const gaTimeEntriesByCell = React.useMemo(() => {
     const map = new Map<string, GaTimeSlotEntry[]>()
@@ -3862,9 +4325,15 @@ export default function AdminTasksPage() {
   }, [gaTimeEntries, gaTimeRows])
 
   const createGaTimeEntry = React.useCallback(
-    async (dayOfWeek: string, startTime: string, endTime: string, content: string) => {
+    async (
+      dayOfWeek: string,
+      startTime: string,
+      endTime: string,
+      content: string,
+      format: GaTimeEntryFormat
+    ) => {
       const trimmed = content.trim()
-      if (!trimmed) return
+      if (!trimmed) return false
       const key = `${dayOfWeek}|${startTime}`
       setGaTimeSaving((prev) => ({ ...prev, [key]: true }))
       try {
@@ -3876,6 +4345,7 @@ export default function AdminTasksPage() {
             start_time: startTime,
             end_time: endTime,
             content: trimmed,
+            ...format,
           }),
         })
         if (!res.ok) {
@@ -3883,9 +4353,11 @@ export default function AdminTasksPage() {
         }
         const created = (await res.json()) as GaTimeSlotEntry
         setGaTimeEntries((prev) => [...prev, created])
+        return true
       } catch (err) {
         console.error("Failed to create GA time slot entry", err)
         toast.error("Failed to save time slot entry.")
+        return false
       } finally {
         setGaTimeSaving((prev) => ({ ...prev, [key]: false }))
       }
@@ -3894,24 +4366,26 @@ export default function AdminTasksPage() {
   )
 
   const updateGaTimeEntry = React.useCallback(
-    async (entryId: string, content: string) => {
+    async (entryId: string, content: string, format: GaTimeEntryFormat) => {
       const trimmed = content.trim()
-      if (!trimmed) return
+      if (!trimmed) return false
       setGaTimeSaving((prev) => ({ ...prev, [entryId]: true }))
       try {
         const res = await apiFetch(`/ga-time-slots/${entryId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ content: trimmed }),
+          body: JSON.stringify({ content: trimmed, ...format }),
         })
         if (!res.ok) {
           throw new Error(`ga_time_slot_update_failed_${res.status}`)
         }
         const updated = (await res.json()) as GaTimeSlotEntry
         setGaTimeEntries((prev) => prev.map((entry) => (entry.id === entryId ? updated : entry)))
+        return true
       } catch (err) {
         console.error("Failed to update GA time slot entry", err)
         toast.error("Failed to update time slot entry.")
+        return false
       } finally {
         setGaTimeSaving((prev) => ({ ...prev, [entryId]: false }))
       }
@@ -4566,7 +5040,17 @@ export default function AdminTasksPage() {
                           size="sm"
                           className="h-6 px-2 text-[10px]"
                           disabled={isUpdating}
-                          onClick={() => void updateTaskStatus(row.taskId, "DONE")}
+                          onMouseDown={(event) => event.preventDefault()}
+                          onClick={() => {
+                            if (!rowTask) return
+                            void completeTaskFromAllTasksReport(
+                              rowTask,
+                              commentValue,
+                              previousValue,
+                              commentKey,
+                              isConfirmAction
+                            )
+                          }}
                         >
                           {isUpdating ? "Updating..." : actionLabel}
                         </Button>
@@ -4607,8 +5091,8 @@ export default function AdminTasksPage() {
     }
 
     return (
-      <div className="admin-week-table">
-        <div className="print-section" data-print-section="all-tasks">
+      <div className="admin-week-table flex flex-col">
+        <div className="print-section order-1" data-print-section="all-tasks">
           <AdminTasksSection
             title="ALL TASKS"
             description=""
@@ -4714,7 +5198,7 @@ export default function AdminTasksPage() {
           ) : null}
           </AdminTasksSection>
         </div>
-        <div className="print-section" data-print-section="common">
+        <div className="print-section order-3" data-print-section="common">
           <div className="print-only week-table-view">
             <div className="print-page">
               <div className="print-header">
@@ -4870,7 +5354,7 @@ export default function AdminTasksPage() {
             </AdminTasksSection>
           </div>
         </div>
-        <div className="print-section" data-print-section="ga-time">
+        <div className="print-section order-2" data-print-section="ga-time">
           <div className="print-only">
             <div className="print-page">
               <div className="print-header">
@@ -4920,7 +5404,11 @@ export default function AdminTasksPage() {
                               <div className="ga-time-cell-content">
                                 {entries.length ? (
                                   entries.map((entry) => (
-                                    <div key={`ga-print-${entry.id}`} className="ga-time-entry">
+                                    <div
+                                      key={`ga-print-${entry.id}`}
+                                      className="ga-time-entry"
+                                      style={gaTimeEntryStyle(entry)}
+                                    >
                                       <span>{entry.content}</span>
                                     </div>
                                   ))
@@ -4999,58 +5487,41 @@ export default function AdminTasksPage() {
                       const dayOfWeek = toDayOfWeek(iso)
                       const cellKey = `${dayOfWeek}|${slot.start}`
                       const entries = gaTimeEntriesByCell.get(cellKey) || []
-                      const addDraft = gaTimeAddDrafts[cellKey] ?? ""
                       return (
                         <td key={`${cellKey}`} className="ga-time-cell">
                           <div className="ga-time-cell-content">
                             {entries.map((entry) => {
                               const isEditing = gaTimeEditingId === entry.id
-                              const draft = gaTimeDrafts[entry.id] ?? entry.content
+                              if (isEditing) {
+                                return (
+                                  <GaTimeEntryEditor
+                                    key={entry.id}
+                                    initialContent={entry.content}
+                                    initialFormat={entry}
+                                    saving={Boolean(gaTimeSaving[entry.id])}
+                                    onSave={async (content, format) => {
+                                      const saved = await updateGaTimeEntry(entry.id, content, format)
+                                      if (saved) setGaTimeEditingId(null)
+                                      return saved
+                                    }}
+                                    onCancel={() => setGaTimeEditingId(null)}
+                                  />
+                                )
+                              }
                               return (
-                                <div key={entry.id} className="ga-time-entry">
-                                  {isEditing ? (
-                                    <input
-                                      className="ga-time-input"
-                                      value={draft}
-                                      onChange={(event) =>
-                                        setGaTimeDrafts((prev) => ({
-                                          ...prev,
-                                          [entry.id]: event.target.value,
-                                        }))
-                                      }
-                                      onBlur={async () => {
-                                        const nextValue = (gaTimeDrafts[entry.id] ?? entry.content).trim()
-                                        setGaTimeEditingId(null)
-                                        if (!nextValue || nextValue === entry.content) return
-                                        await updateGaTimeEntry(entry.id, nextValue)
-                                      }}
-                                      onKeyDown={async (event) => {
-                                        if (event.key === "Enter") {
-                                          event.preventDefault()
-                                          const nextValue = (gaTimeDrafts[entry.id] ?? entry.content).trim()
-                                          setGaTimeEditingId(null)
-                                          if (!nextValue || nextValue === entry.content) return
-                                          await updateGaTimeEntry(entry.id, nextValue)
-                                        }
-                                        if (event.key === "Escape") {
-                                          setGaTimeEditingId(null)
-                                        }
-                                      }}
-                                      autoFocus
-                                    />
-                                  ) : (
-                                    <button
-                                      type="button"
-                                      className="ga-time-entry-text"
-                                      onClick={() => {
-                                        if (!canEditGaTimeSlots) return
-                                        setGaTimeEditingId(entry.id)
-                                        setGaTimeDrafts((prev) => ({ ...prev, [entry.id]: entry.content }))
-                                      }}
-                                    >
-                                      {entry.content}
-                                    </button>
-                                  )}
+                                <div key={entry.id} className="ga-time-entry" style={gaTimeEntryStyle(entry)}>
+                                  <button
+                                    type="button"
+                                    className="ga-time-entry-text"
+                                    style={gaTimeEntryStyle(entry)}
+                                    onClick={() => {
+                                      if (!canEditGaTimeSlots) return
+                                      setGaTimeAddingCell(null)
+                                      setGaTimeEditingId(entry.id)
+                                    }}
+                                  >
+                                    {entry.content}
+                                  </button>
                                   {canEditGaTimeSlots ? (
                                     <button
                                       type="button"
@@ -5067,42 +5538,28 @@ export default function AdminTasksPage() {
                             })}
                             {canEditGaTimeSlots && (!slot.isSpecial || entries.length === 0) ? (
                               gaTimeAddingCell === cellKey ? (
-                                <input
-                                  className="ga-time-input"
-                                  value={addDraft}
-                                  onChange={(event) =>
-                                    setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: event.target.value }))
-                                  }
-                                  onBlur={async () => {
-                                    const nextValue = (gaTimeAddDrafts[cellKey] ?? "").trim()
-                                    setGaTimeAddingCell(null)
-                                    setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
-                                    if (!nextValue) return
-                                    await createGaTimeEntry(String(dayOfWeek), slot.start, slot.end, nextValue)
+                                <GaTimeEntryEditor
+                                  saving={Boolean(gaTimeSaving[cellKey])}
+                                  onSave={async (content, format) => {
+                                    const saved = await createGaTimeEntry(
+                                      String(dayOfWeek),
+                                      slot.start,
+                                      slot.end,
+                                      content,
+                                      format
+                                    )
+                                    if (saved) setGaTimeAddingCell(null)
+                                    return saved
                                   }}
-                                  onKeyDown={async (event) => {
-                                    if (event.key === "Enter") {
-                                      event.preventDefault()
-                                      const nextValue = (gaTimeAddDrafts[cellKey] ?? "").trim()
-                                      setGaTimeAddingCell(null)
-                                      setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
-                                      if (!nextValue) return
-                                      await createGaTimeEntry(String(dayOfWeek), slot.start, slot.end, nextValue)
-                                    }
-                                    if (event.key === "Escape") {
-                                      setGaTimeAddingCell(null)
-                                      setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
-                                    }
-                                  }}
-                                  autoFocus
+                                  onCancel={() => setGaTimeAddingCell(null)}
                                 />
                               ) : (
                                 <button
                                   type="button"
                                   className="ga-time-add"
                                   onClick={() => {
+                                    setGaTimeEditingId(null)
                                     setGaTimeAddingCell(cellKey)
-                                    setGaTimeAddDrafts((prev) => ({ ...prev, [cellKey]: "" }))
                                   }}
                                 >
                                   {slot.isSpecial ? "Add" : "+"}
@@ -5120,42 +5577,65 @@ export default function AdminTasksPage() {
           </div>
           </AdminTasksSection>
           </div>
-          <Dialog open={gaTimeRowsDialogOpen} onOpenChange={setGaTimeRowsDialogOpen}>
-            <DialogContent className="sm:max-w-2xl">
+          <Dialog
+            open={gaTimeRowsDialogOpen}
+            onOpenChange={(open) => {
+              setGaTimeRowsDialogOpen(open)
+              if (!open) cancelGaTimeNewRow()
+            }}
+          >
+            <DialogContent
+              ref={gaTimeRowsDialogRef}
+              className="sm:max-w-2xl"
+              onOpenAutoFocus={(event) => {
+                event.preventDefault()
+                gaTimeRowsDialogRef.current?.focus({ preventScroll: true })
+              }}
+            >
               <DialogHeader>
                 <DialogTitle>GA timetable times</DialogTitle>
+                <p className="text-xs text-slate-500">
+                  Edit the times, then click Save. Nothing is changed while you are typing.
+                </p>
               </DialogHeader>
               <div className="space-y-3">
-                <div className="max-h-[60vh] overflow-y-auto rounded-md border">
+                <div
+                  className={[
+                    gaTimeNewRowOpen ? "max-h-[42vh]" : "max-h-[60vh]",
+                    "overflow-y-auto rounded-md border",
+                  ].join(" ")}
+                >
                   <div className="grid grid-cols-[48px_minmax(0,1fr)_minmax(0,1fr)_48px] items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
                     <div>NR</div>
                     <div>Start</div>
                     <div>End</div>
                     <div />
                   </div>
-                  <div className="divide-y">
+                  <div key={gaTimeRowsDraftVersion} className="divide-y">
                     {gaTimeRowsDraft.map((row, index) => (
                       <div
-                        key={`${row.start}-${row.end}-${index}`}
+                        key={row.id || `ga-time-row-${index}`}
                         className="grid grid-cols-[48px_minmax(0,1fr)_minmax(0,1fr)_48px] items-center gap-2 px-3 py-2"
                       >
                         <div className="text-sm font-medium text-slate-700">{index + 1}</div>
                         <Input
+                          ref={(node) => setGaTimeRowInputRef(index, "start", node)}
                           type="time"
-                          value={row.start}
-                          onChange={(event) => updateGaTimeRowDraft(index, "start", event.target.value)}
+                          defaultValue={row.start}
+                          disabled={gaTimeNewRowOpen}
                         />
                         <Input
+                          ref={(node) => setGaTimeRowInputRef(index, "end", node)}
                           type="time"
-                          value={row.end}
-                          onChange={(event) => updateGaTimeRowDraft(index, "end", event.target.value)}
+                          defaultValue={row.end}
+                          disabled={gaTimeNewRowOpen}
                         />
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
                           onClick={() => removeGaTimeRowDraft(index)}
-                          disabled={gaTimeRowsDraft.length <= 1}
+                          disabled={gaTimeRowsDraft.length <= 1 || gaTimeNewRowOpen}
                           title="Delete row"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -5164,21 +5644,98 @@ export default function AdminTasksPage() {
                     ))}
                   </div>
                 </div>
+                {gaTimeNewRowOpen ? (
+                  <form
+                    className="rounded-md border border-blue-200 bg-blue-50/70 p-3"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void saveGaTimeNewRow()
+                    }}
+                  >
+                    <div className="mb-2 flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">New time row</div>
+                        <div className="text-xs text-slate-600">
+                          Enter both times, or leave End empty to use 30 minutes. Times inside an existing row split it automatically.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="ga-new-row-start" className="text-xs">Start</Label>
+                        <Input
+                          ref={gaTimeNewRowStartRef}
+                          id="ga-new-row-start"
+                          type="time"
+                          defaultValue=""
+                          disabled={gaTimeNewRowSaving}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="ga-new-row-end" className="text-xs">End (optional)</Label>
+                        <Input
+                          ref={gaTimeNewRowEndRef}
+                          id="ga-new-row-end"
+                          type="time"
+                          defaultValue=""
+                          disabled={gaTimeNewRowSaving}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-3 flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={cancelGaTimeNewRow}
+                        disabled={gaTimeNewRowSaving}
+                      >
+                        Cancel new row
+                      </Button>
+                      <Button type="submit" size="sm" disabled={gaTimeNewRowSaving}>
+                        {gaTimeNewRowSaving ? "Saving time..." : "Save time"}
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={addGaTimeRowDraft}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={openGaTimeNewRowForm}
+                      disabled={gaTimeNewRowOpen}
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add row
                     </Button>
-                    <Button type="button" variant="ghost" size="sm" onClick={resetGaTimeRowsDraft}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={resetGaTimeRowsDraft}
+                      disabled={gaTimeNewRowOpen}
+                    >
                       Reset defaults
                     </Button>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setGaTimeRowsDialogOpen(false)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setGaTimeRowsDialogOpen(false)}
+                      disabled={gaTimeNewRowSaving}
+                    >
                       Cancel
                     </Button>
-                    <Button type="button" size="sm" onClick={() => void saveGaTimeRows()} disabled={gaTimeRowsSaving}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void saveGaTimeRows()}
+                      disabled={gaTimeRowsSaving || gaTimeNewRowOpen}
+                    >
                       {gaTimeRowsSaving ? "Saving..." : "Save"}
                     </Button>
                   </div>
@@ -5555,6 +6112,133 @@ export default function AdminTasksPage() {
               </Button>
             </div>
           </div>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(pendingCompletionCommentTaskId)}
+        onOpenChange={(open) => {
+          if (!open && !pendingCompletionCommentSaving) {
+            setPendingCompletionCommentTaskId(null)
+            setPendingCompletionComment("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Complete task</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitCompletionComment()
+            }}
+          >
+            <div className="rounded-md border border-blue-200 bg-blue-50 p-3 text-sm text-blue-900">
+              Add a short result comment before closing this task.
+              {pendingCompletionCommentTaskId ? (
+                <div className="mt-1 font-semibold text-slate-900">
+                  {tasks.find((task) => task.id === pendingCompletionCommentTaskId)?.title || "Task"}
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="completion-result-comment">Result comment</Label>
+              <Input
+                id="completion-result-comment"
+                value={pendingCompletionComment}
+                onChange={(event) => setPendingCompletionComment(event.target.value)}
+                placeholder="What was completed?"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                disabled={pendingCompletionCommentSaving}
+                onClick={() => {
+                  setPendingCompletionCommentTaskId(null)
+                  setPendingCompletionComment("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={!pendingCompletionComment.trim() || pendingCompletionCommentSaving}
+              >
+                {pendingCompletionCommentSaving ? "Closing..." : "Save comment & close"}
+              </Button>
+            </div>
+          </form>
+        </DialogContent>
+      </Dialog>
+      <Dialog
+        open={Boolean(pendingCompletionOverrideTaskId)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setPendingCompletionOverrideTaskId(null)
+            setPendingCompletionOverrideReason("")
+          }
+        }}
+      >
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Close task with override</DialogTitle>
+          </DialogHeader>
+          <form
+            className="space-y-4"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void submitCompletionOverride()
+            }}
+          >
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              You are closing a task assigned to another user. This reason will be saved in the audit log.
+              {pendingCompletionOverrideTaskId ? (
+                <div className="mt-1 font-semibold text-slate-900">
+                  {tasks.find((task) => task.id === pendingCompletionOverrideTaskId)?.title || "Task"}
+                </div>
+              ) : null}
+            </div>
+            <div className="space-y-1.5">
+              <Label htmlFor="completion-override-reason">Reason</Label>
+              <Input
+                id="completion-override-reason"
+                value={pendingCompletionOverrideReason}
+                onChange={(event) => setPendingCompletionOverrideReason(event.target.value)}
+                placeholder="Why is this task being closed by Admin/Manager?"
+                autoFocus
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setPendingCompletionOverrideTaskId(null)
+                  setPendingCompletionOverrideReason("")
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="submit"
+                disabled={
+                  !pendingCompletionOverrideReason.trim() ||
+                  Boolean(
+                    pendingCompletionOverrideTaskId &&
+                    taskStatusUpdating[`task:${pendingCompletionOverrideTaskId}`]
+                  )
+                }
+              >
+                {pendingCompletionOverrideTaskId && taskStatusUpdating[`task:${pendingCompletionOverrideTaskId}`]
+                  ? "Closing..."
+                  : "Close task"}
+              </Button>
+            </div>
+          </form>
         </DialogContent>
       </Dialog>
       <Dialog

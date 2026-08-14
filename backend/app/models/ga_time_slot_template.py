@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, time
 
-from sqlalchemy import DateTime, ForeignKey, Index, Integer, String, Time, func
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, Time, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -28,6 +28,10 @@ class GaTimeSlotTemplate(Base):
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
     content: Mapped[str] = mapped_column(String(8000), nullable=False, server_default="")
+    background_color: Mapped[str] = mapped_column(String(7), nullable=False, server_default="#FFFFFF")
+    text_color: Mapped[str] = mapped_column(String(7), nullable=False, server_default="#0F172A")
+    is_bold: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    is_italic: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

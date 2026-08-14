@@ -443,13 +443,36 @@ function synchronizeNumberedListProgress(parsed: ParsedMarkedNoteContent): Parse
 
   const titleLine = lines[titleLineIndex]
   const titleMatch = titleLine.match(
-    /^(\s*[A-Za-zÀ-ž]{1,5}(?:\s*\/\s*[A-Za-zÀ-ž]{1,5})?\s*:\s*(?:[A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9/_-]{0,11}\s*-\s*)?)(?:(\d{1,3}(?:\s*\/\s*\d{1,3})?)(?:\s+|$))?/
+    /^(\s*[A-Za-zÀ-ž]{1,5}(?:\s*\/\s*[A-Za-zÀ-ž]{1,5})?\s*:\s*(?:[A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9/_-]{0,11}\s*-\s*)?)(?:(\d{1,3}(?:\s*\/\s*\d{1,3})?)(?=\s+|$|\/))?/
   )
   if (!titleMatch) return parsed
 
   const progressLabel = progress.completed > 0 ? `${progress.completed}/${progress.total}` : String(progress.total)
-  const titleSuffix = titleLine.slice(titleMatch[0].length)
-  const nextTitleLine = `${titleMatch[1]}${progressLabel}${titleSuffix ? ` ${titleSuffix}` : ""}`
+  let progressEnd = titleMatch[0].length
+  const slashParts = titleLine.slice(titleMatch[1].length).match(
+    /^\d{1,3}(?:\s*\/\s*[A-Za-zÀ-ž0-9_-]+)+/
+  )
+
+  if (slashParts) {
+    const separators = Array.from(slashParts[0].matchAll(/\s*\/\s*/g))
+    const firstValue = Number.parseInt(slashParts[0], 10)
+    const hasManualSuffix = separators.length >= 2 || firstValue === progress.total || progress.completed === 0
+
+    if (hasManualSuffix) {
+      // The last slash part is entered manually. Keep it intact while replacing
+      // only the leading automatic progress: `68/20` stays `68/20`, then becomes
+      // `1/68/20` after the first checklist point is struck. A plain automatic
+      // progress such as `1/68` continues to be replaced as one complete value.
+      const automaticPartCount = separators.length >= 2 ? 2 : 1
+      progressEnd = titleMatch[1].length + (
+        automaticPartCount === 2 ? separators[1].index : separators[0].index
+      )
+    }
+  }
+
+  const titleSuffix = titleLine.slice(progressEnd).trimStart()
+  const suffixSeparator = titleSuffix.startsWith("/") ? "" : " "
+  const nextTitleLine = `${titleMatch[1]}${progressLabel}${titleSuffix ? `${suffixSeparator}${titleSuffix}` : ""}`
   if (nextTitleLine === titleLine) return parsed
 
   lines[titleLineIndex] = nextTitleLine
@@ -1046,6 +1069,8 @@ export default function GaKaNotesPage() {
   const [markingSelectedNoteId, setMarkingSelectedNoteId] = React.useState<string | null>(null)
   const contentTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
   const editTextareaRef = React.useRef<HTMLTextAreaElement | null>(null)
+  const editContentLatestRef = React.useRef("")
+  const editDictationSelectionRef = React.useRef({ start: 0, end: 0 })
   const [attachmentsDialogOpen, setAttachmentsDialogOpen] = React.useState(false)
   const [attachmentsDialogNoteId, setAttachmentsDialogNoteId] = React.useState<string | null>(null)
   const [previewUrl, setPreviewUrl] = React.useState<string | null>(null)
@@ -1059,9 +1084,39 @@ export default function GaKaNotesPage() {
   const [internalMeetingTaskStartsAt, setInternalMeetingTaskStartsAt] = React.useState("")
   const [creatingInternalMeetingFromTask, setCreatingInternalMeetingFromTask] = React.useState(false)
   const internalMeetingDepartmentIdRef = React.useRef<string | null>(null)
-  const [voiceLanguage, setVoiceLanguage] = React.useState<"en" | "sq">("en")
+  const [voiceLanguage, setVoiceLanguage] = React.useState<"en" | "sq">("sq")
   const speechLang = voiceLanguage === "sq" ? "sq-AL" : "en-US"
   const cloudLang = voiceLanguage === "sq" ? "sq" : "en"
+
+  const insertEditDictationAtCursor = React.useCallback((spokenText: string) => {
+    const transcript = spokenText.trim()
+    if (!transcript) return
+
+    const current = editContentLatestRef.current
+    const selection = editDictationSelectionRef.current
+    const start = Math.max(0, Math.min(selection.start, current.length))
+    const end = Math.max(start, Math.min(selection.end, current.length))
+    const before = current.slice(0, start)
+    const after = current.slice(end)
+    const leadingSpace = before.length > 0 && !/\s$/.test(before) ? " " : ""
+    const trailingSpace = after.length > 0 && !/^\s|^[,.;:!?]/.test(after) ? " " : ""
+    const insertedText = `${leadingSpace}${transcript}${trailingSpace}`
+    const next = `${before}${insertedText}${after}`
+    const nextCursor = start + insertedText.length - trailingSpace.length
+
+    setEditDoneRanges((ranges) => adjustTextRangesForTextChange(current, next, ranges))
+    setEditAddedRanges((ranges) => addInsertedTextRange(current, next, ranges))
+    editContentLatestRef.current = next
+    editDictationSelectionRef.current = { start: nextCursor, end: nextCursor }
+    setEditContent(next)
+
+    window.setTimeout(() => {
+      const textarea = editTextareaRef.current
+      if (!textarea) return
+      textarea.focus()
+      textarea.setSelectionRange(nextCursor, nextCursor)
+    }, 0)
+  }, [])
 
   const {
     isSupported: isVoiceSupported,
@@ -1106,6 +1161,31 @@ export default function GaKaNotesPage() {
 
   const voiceMode = isVoiceSupported ? "browser" : isCloudSupported ? "cloud" : "none"
 
+  const {
+    isSupported: isEditVoiceSupported,
+    isListening: isEditVoiceListening,
+    interimText: editVoiceInterimText,
+    stop: stopEditVoice,
+    toggle: toggleEditVoice,
+  } = useSpeechDictation({
+    lang: speechLang,
+    onFinalText: insertEditDictationAtCursor,
+  })
+
+  const {
+    isSupported: isEditCloudSupported,
+    isRecording: isEditCloudRecording,
+    isTranscribing: isEditCloudTranscribing,
+    stop: stopEditCloud,
+    toggle: toggleEditCloud,
+  } = useCloudDictation({
+    apiFetch,
+    lang: cloudLang,
+    onFinalText: insertEditDictationAtCursor,
+  })
+
+  const editVoiceMode = isEditVoiceSupported ? "browser" : isEditCloudSupported ? "cloud" : "none"
+
   React.useEffect(() => {
     if (posting && isVoiceListening) stopVoice()
     if (posting && isCloudRecording) stopCloud()
@@ -1127,6 +1207,34 @@ export default function GaKaNotesPage() {
     }
     toast.error("Voice dictation not supported in this browser")
   }
+
+  const handleEditVoiceToggle = () => {
+    const textarea = editTextareaRef.current
+    if (textarea) {
+      editDictationSelectionRef.current = {
+        start: textarea.selectionStart ?? editContentLatestRef.current.length,
+        end: textarea.selectionEnd ?? textarea.selectionStart ?? editContentLatestRef.current.length,
+      }
+    }
+    if (isVoiceListening) stopVoice()
+    if (isCloudRecording) stopCloud()
+    if (editVoiceMode === "browser") {
+      toggleEditVoice()
+      return
+    }
+    if (editVoiceMode === "cloud") {
+      toggleEditCloud()
+      return
+    }
+    toast.error("Voice dictation not supported in this browser")
+  }
+
+  React.useEffect(() => {
+    if (!editNoteId || savingEdit) {
+      if (isEditVoiceListening) stopEditVoice()
+      if (isEditCloudRecording) stopEditCloud()
+    }
+  }, [editNoteId, isEditCloudRecording, isEditVoiceListening, savingEdit, stopEditCloud, stopEditVoice])
 
 
   const loadDepartments = React.useCallback(async () => {
@@ -1626,6 +1734,8 @@ export default function GaKaNotesPage() {
     if (value === voiceLanguage) return
     if (isVoiceListening) stopVoice()
     if (isCloudRecording) stopCloud()
+    if (isEditVoiceListening) stopEditVoice()
+    if (isEditCloudRecording) stopEditCloud()
     setVoiceLanguage(value)
   }
 
@@ -1731,6 +1841,11 @@ export default function GaKaNotesPage() {
   const openEditNote = (note: GaNote) => {
     const parsedContent = parseMarkedNoteContentWithProgress(note.content)
     setEditNoteId(note.id)
+    editContentLatestRef.current = parsedContent.text
+    editDictationSelectionRef.current = {
+      start: parsedContent.text.length,
+      end: parsedContent.text.length,
+    }
     setEditContent(parsedContent.text)
     setEditDoneRanges(parsedContent.doneRanges)
     setEditAddedRanges(parsedContent.addedRanges)
@@ -1746,8 +1861,16 @@ export default function GaKaNotesPage() {
   const handleEditContentChange = (nextContent: string) => {
     setEditDoneRanges((current) => adjustTextRangesForTextChange(editContent, nextContent, current))
     setEditAddedRanges((current) => addInsertedTextRange(editContent, nextContent, current))
+    editContentLatestRef.current = nextContent
     setEditContent(nextContent)
   }
+
+  const rememberEditDictationCursor = React.useCallback((textarea: HTMLTextAreaElement) => {
+    editDictationSelectionRef.current = {
+      start: textarea.selectionStart ?? textarea.value.length,
+      end: textarea.selectionEnd ?? textarea.selectionStart ?? textarea.value.length,
+    }
+  }, [])
 
   const applyTextEditToTextarea = React.useCallback(
     (
@@ -1825,6 +1948,7 @@ export default function GaKaNotesPage() {
     end = lineRange.end
 
     const nextContent = toggleDoneRangeWithTimestamp(editContent, editDoneRanges, { start, end })
+    editContentLatestRef.current = nextContent.text
     setEditContent(nextContent.text)
     setEditDoneRanges(nextContent.doneRanges)
     setEditAddedRanges((current) => adjustTextRangesForTextChange(editContent, nextContent.text, current))
@@ -4201,6 +4325,36 @@ export default function GaKaNotesPage() {
               <div className="flex flex-wrap items-center justify-between gap-2">
                 <Label>Note text</Label>
                 <div className="flex flex-wrap items-center gap-2">
+                  <Select value={voiceLanguage} onValueChange={handleVoiceLanguageChange}>
+                    <SelectTrigger className="h-8 w-[118px] text-xs">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="en">English</SelectItem>
+                      <SelectItem value="sq">Albanian</SelectItem>
+                    </SelectContent>
+                  </Select>
+                  <Button
+                    type="button"
+                    variant={isEditVoiceListening || isEditCloudRecording ? "default" : "outline"}
+                    size="sm"
+                    className="h-8 gap-2"
+                    onMouseDown={(event) => event.preventDefault()}
+                    onClick={handleEditVoiceToggle}
+                    disabled={editVoiceMode === "none" || isEditCloudTranscribing || savingEdit}
+                    title={isEditVoiceListening || isEditCloudRecording ? "Stop voice dictation" : "Dictate at cursor"}
+                  >
+                    {isEditVoiceListening || isEditCloudRecording ? (
+                      <Square className="h-4 w-4" />
+                    ) : (
+                      <Mic className="h-4 w-4" />
+                    )}
+                    {isEditVoiceListening || isEditCloudRecording
+                      ? "Stop"
+                      : isEditCloudTranscribing
+                        ? "Transcribing"
+                        : "Voice"}
+                  </Button>
                   <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={applyEditNoteBold}>
                     <Bold className="h-4 w-4" />
                     Bold
@@ -4227,9 +4381,26 @@ export default function GaKaNotesPage() {
               <Textarea
                 ref={editTextareaRef}
                 value={editContent}
-                onChange={(e) => handleEditContentChange(e.target.value)}
+                onChange={(event) => {
+                  handleEditContentChange(event.target.value)
+                  rememberEditDictationCursor(event.target)
+                }}
+                onFocus={(event) => rememberEditDictationCursor(event.currentTarget)}
+                onSelect={(event) => rememberEditDictationCursor(event.currentTarget)}
+                onClick={(event) => rememberEditDictationCursor(event.currentTarget)}
+                onKeyUp={(event) => rememberEditDictationCursor(event.currentTarget)}
                 className="min-h-[180px] max-h-[42vh] resize-y overflow-y-auto text-sm leading-normal"
               />
+              {isEditVoiceListening || isEditCloudRecording || isEditCloudTranscribing || editVoiceInterimText ? (
+                <div className="flex items-center gap-2 text-xs text-blue-700">
+                  <span className="inline-block h-2 w-2 animate-pulse rounded-full bg-red-500" />
+                  {isEditCloudTranscribing
+                    ? "Transcribing..."
+                    : editVoiceInterimText
+                      ? `Listening: ${editVoiceInterimText}`
+                      : "Listening — words will be inserted at the cursor."}
+                </div>
+              ) : null}
               <p className="text-xs text-muted-foreground">
                 Select text and click mark done to toggle it, or place the cursor on a line to toggle the whole line.
               </p>
