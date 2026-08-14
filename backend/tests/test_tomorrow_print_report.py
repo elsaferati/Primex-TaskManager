@@ -32,10 +32,10 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
 
     _, content, _ = _excel_table_attachment([], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["A3"].value == "PYETJET PER 1H - BORD"
-    assert sheet["E3"].value == "STAFF - HAPAT PER 1H"
-    assert sheet["A4"].value == "1. Slotin paraprak/aktual"
-    assert sheet["E4"].value == "1. Hap doc dhe det"
+    assert sheet["A3"].value == "STAFF - HAPAT PER 1H"
+    assert sheet["E3"].value == "PYETJET PER 1H - BORD"
+    assert sheet["A4"].value == "1. Hap doc dhe det"
+    assert sheet["E4"].value == "1. Slotin paraprak/aktual"
 
 
 def test_email_table_removes_added_and_done_editor_markers() -> None:

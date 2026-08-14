@@ -621,10 +621,10 @@ def render_html(document: ReportDocument) -> str:
             'data-reminder-columns="true" style="width:100%;border-collapse:collapse;">'
             '<tr>'
             '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-            f"{reminder_column(BOARD_REMINDER_SECTION_TITLE, document.board_reminders)}"
+            f"{reminder_column(REMINDER_SECTION_TITLE, document.reminders)}"
             '</td>'
             '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-            f"{reminder_column(REMINDER_SECTION_TITLE, document.reminders)}"
+            f"{reminder_column(BOARD_REMINDER_SECTION_TITLE, document.board_reminders)}"
             '</td>'
             '</tr></table>'
         )

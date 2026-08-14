@@ -109,6 +109,14 @@ const getCommonPrintRowSubtext = (id: CommonType) => {
 
 const ONE_H_PRINT_CHECKLISTS = [
   {
+    title: "STAFF - HAPAT PER 1H",
+    questions: [
+      "Hap doc dhe det",
+      "Share screen side by side DET/REZULTATIN",
+      "Sqaro slotin paraprak pastaj aktual",
+    ],
+  },
+  {
     title: "PYETJET PER 1H - BORD",
     questions: [
       "Slotin paraprak/aktual",
@@ -117,14 +125,6 @@ const ONE_H_PRINT_CHECKLISTS = [
       "A kryhet sot?",
       "A kryhet kete jave?",
       "A arrihet RLZ javor?",
-    ],
-  },
-  {
-    title: "STAFF - HAPAT PER 1H",
-    questions: [
-      "Hap doc dhe det",
-      "Share screen side by side DET/REZULTATIN",
-      "Sqaro slotin paraprak pastaj aktual",
     ],
   },
 ] as const

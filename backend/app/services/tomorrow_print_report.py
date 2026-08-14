@@ -237,10 +237,10 @@ def _one_h_checklists_html() -> str:
         'data-one-h-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 14px;">'
         '<tr>'
         '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
-        f"{checklist('PYETJET PER 1H - BORD', ONE_H_BOARD_CHECKLIST)}"
+        f"{checklist('STAFF - HAPAT PER 1H', ONE_H_STAFF_CHECKLIST)}"
         '</td>'
         '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-        f"{checklist('STAFF - HAPAT PER 1H', ONE_H_STAFF_CHECKLIST)}"
+        f"{checklist('PYETJET PER 1H - BORD', ONE_H_BOARD_CHECKLIST)}"
         '</td>'
         '</tr></table>'
     )
@@ -333,8 +333,8 @@ def _excel_table_attachment(
         """Write the board and staff preparation lists above the task table."""
         checklist_fill = PatternFill("solid", fgColor="EEF2FF")
         for start_column, end_column, title, questions in (
-            (1, 4, "PYETJET PER 1H - BORD", ONE_H_BOARD_CHECKLIST),
-            (5, 8, "STAFF - HAPAT PER 1H", ONE_H_STAFF_CHECKLIST),
+            (1, 4, "STAFF - HAPAT PER 1H", ONE_H_STAFF_CHECKLIST),
+            (5, 8, "PYETJET PER 1H - BORD", ONE_H_BOARD_CHECKLIST),
         ):
             sheet.merge_cells(start_row=row_number, start_column=start_column, end_row=row_number, end_column=end_column)
             title_cell = sheet.cell(row_number, start_column, title)
