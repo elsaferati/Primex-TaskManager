@@ -443,13 +443,30 @@ function synchronizeNumberedListProgress(parsed: ParsedMarkedNoteContent): Parse
 
   const titleLine = lines[titleLineIndex]
   const titleMatch = titleLine.match(
-    /^(\s*[A-Za-zÀ-ž]{1,5}(?:\s*\/\s*[A-Za-zÀ-ž]{1,5})?\s*:\s*(?:[A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9/_-]{0,11}\s*-\s*)?)(?:(\d{1,3}(?:\s*\/\s*\d{1,3})?)(?:\s+|$))?/
+    /^(\s*[A-Za-zÀ-ž]{1,5}(?:\s*\/\s*[A-Za-zÀ-ž]{1,5})?\s*:\s*(?:[A-Za-zÀ-ž0-9][A-Za-zÀ-ž0-9/_-]{0,11}\s*-\s*)?)(?:(\d{1,3}(?:\s*\/\s*\d{1,3})?)(?=\s+|$|\/))?/
   )
   if (!titleMatch) return parsed
 
   const progressLabel = progress.completed > 0 ? `${progress.completed}/${progress.total}` : String(progress.total)
-  const titleSuffix = titleLine.slice(titleMatch[0].length)
-  const nextTitleLine = `${titleMatch[1]}${progressLabel}${titleSuffix ? ` ${titleSuffix}` : ""}`
+  let progressEnd = titleMatch[0].length
+  const slashParts = titleLine.slice(titleMatch[1].length).match(
+    /^\d{1,3}(?:\s*\/\s*[A-Za-zÀ-ž0-9_-]+){2,}/
+  )
+
+  if (slashParts) {
+    // A chained suffix such as `/68/17` is entered manually. Keep its last
+    // two parts intact while replacing only the leading automatic progress:
+    // `4/68/17` -> `1/4/68/17` after the first checklist point is struck.
+    const separators = Array.from(slashParts[0].matchAll(/\s*\/\s*/g))
+    const automaticPartCount = separators.length >= 3 ? 2 : 1
+    progressEnd = titleMatch[1].length + (
+      automaticPartCount === 2 ? separators[1].index : separators[0].index
+    )
+  }
+
+  const titleSuffix = titleLine.slice(progressEnd).trimStart()
+  const suffixSeparator = titleSuffix.startsWith("/") ? "" : " "
+  const nextTitleLine = `${titleMatch[1]}${progressLabel}${titleSuffix ? `${suffixSeparator}${titleSuffix}` : ""}`
   if (nextTitleLine === titleLine) return parsed
 
   lines[titleLineIndex] = nextTitleLine
