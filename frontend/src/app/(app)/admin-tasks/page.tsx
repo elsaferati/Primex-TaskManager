@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { formatDateDMY, formatDateTimeDMY, toDateInputValue } from "@/lib/dates"
@@ -846,6 +847,47 @@ function GaTimeEntryEditor({
   )
 }
 
+function GaTimeRowCommentEditor({
+  initialComment,
+  saving,
+  onSave,
+  onCancel,
+}: {
+  initialComment: string
+  saving: boolean
+  onSave: (comment: string) => Promise<boolean>
+  onCancel: () => void
+}) {
+  const [comment, setComment] = React.useState(initialComment)
+
+  return (
+    <form
+      className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2"
+      onSubmit={async (event) => {
+        event.preventDefault()
+        await onSave(comment.trim())
+      }}
+    >
+      <Textarea
+        className="min-h-[72px] w-full resize-y text-sm leading-5"
+        value={comment}
+        onChange={(event) => setComment(event.target.value)}
+        placeholder="Add comment..."
+        disabled={saving}
+        autoFocus
+      />
+      <div className="flex justify-end gap-1.5">
+        <Button type="button" size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={onCancel} disabled={saving}>
+          Cancel
+        </Button>
+        <Button type="submit" size="sm" className="h-8 px-3 text-xs" disabled={saving}>
+          {saving ? "Saving..." : "Save"}
+        </Button>
+      </div>
+    </form>
+  )
+}
+
 type GaTimeRow = {
   id?: string | null
   start: string
@@ -854,6 +896,7 @@ type GaTimeRow = {
   nrLabel: string
   isSpecial?: boolean
   sortOrder?: number
+  comment: string
 }
 
 type GaTimeTableRowResponse = {
@@ -864,6 +907,7 @@ type GaTimeTableRowResponse = {
   start_time: string
   end_time: string
   is_special?: boolean
+  comment?: string | null
 }
 
 type CommonBucket =
@@ -920,26 +964,26 @@ const ALL_USERS_INITIALS = "ALL"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 
 const DEFAULT_GA_TIME_ROWS: readonly GaTimeRow[] = [
-  { start: "00:00", end: "00:01", label: "", nrLabel: "", isSpecial: true },
-  { start: "00:01", end: "00:02", label: "", nrLabel: "", isSpecial: true },
-  { start: "07:30", end: "08:00", label: "07:30 - 08:00", nrLabel: "1" },
-  { start: "08:00", end: "09:00", label: "08:00 - 09:00", nrLabel: "2" },
-  { start: "09:00", end: "10:00", label: "09:00 - 10:00", nrLabel: "3" },
-  { start: "10:00", end: "11:00", label: "10:00 - 11:00", nrLabel: "4" },
-  { start: "11:00", end: "12:00", label: "11:00 - 12:00", nrLabel: "5" },
-  { start: "12:00", end: "13:00", label: "12:00 - 13:00", nrLabel: "6" },
-  { start: "13:00", end: "13:30", label: "13:00 - 13:30", nrLabel: "7" },
-  { start: "13:30", end: "14:00", label: "13:30 - 14:00", nrLabel: "8" },
-  { start: "14:00", end: "14:30", label: "14:00 - 14:30", nrLabel: "9" },
-  { start: "14:30", end: "15:30", label: "14:30 - 15:30", nrLabel: "10" },
-  { start: "15:30", end: "16:00", label: "15:30 - 16:00", nrLabel: "11" },
-  { start: "16:00", end: "16:30", label: "16:00 - 16:30", nrLabel: "12" },
-  { start: "16:30", end: "17:00", label: "16:30 - 17:00", nrLabel: "13" },
-  { start: "17:00", end: "18:00", label: "17:00 - 18:00", nrLabel: "14" },
-  { start: "18:00", end: "19:00", label: "18:00 - 19:00", nrLabel: "15" },
-  { start: "19:00", end: "20:00", label: "19:00 - 20:00", nrLabel: "16" },
-  { start: "20:00", end: "21:00", label: "20:00 - 21:00", nrLabel: "17" },
-  { start: "21:00", end: "22:00", label: "21:00 - 22:00", nrLabel: "18" },
+  { start: "00:00", end: "00:01", label: "", nrLabel: "", isSpecial: true, comment: "" },
+  { start: "00:01", end: "00:02", label: "", nrLabel: "", isSpecial: true, comment: "" },
+  { start: "07:30", end: "08:00", label: "07:30 - 08:00", nrLabel: "1", comment: "" },
+  { start: "08:00", end: "09:00", label: "08:00 - 09:00", nrLabel: "2", comment: "" },
+  { start: "09:00", end: "10:00", label: "09:00 - 10:00", nrLabel: "3", comment: "" },
+  { start: "10:00", end: "11:00", label: "10:00 - 11:00", nrLabel: "4", comment: "" },
+  { start: "11:00", end: "12:00", label: "11:00 - 12:00", nrLabel: "5", comment: "" },
+  { start: "12:00", end: "13:00", label: "12:00 - 13:00", nrLabel: "6", comment: "" },
+  { start: "13:00", end: "13:30", label: "13:00 - 13:30", nrLabel: "7", comment: "" },
+  { start: "13:30", end: "14:00", label: "13:30 - 14:00", nrLabel: "8", comment: "" },
+  { start: "14:00", end: "14:30", label: "14:00 - 14:30", nrLabel: "9", comment: "" },
+  { start: "14:30", end: "15:30", label: "14:30 - 15:30", nrLabel: "10", comment: "" },
+  { start: "15:30", end: "16:00", label: "15:30 - 16:00", nrLabel: "11", comment: "" },
+  { start: "16:00", end: "16:30", label: "16:00 - 16:30", nrLabel: "12", comment: "" },
+  { start: "16:30", end: "17:00", label: "16:30 - 17:00", nrLabel: "13", comment: "" },
+  { start: "17:00", end: "18:00", label: "17:00 - 18:00", nrLabel: "14", comment: "" },
+  { start: "18:00", end: "19:00", label: "18:00 - 19:00", nrLabel: "15", comment: "" },
+  { start: "19:00", end: "20:00", label: "19:00 - 20:00", nrLabel: "16", comment: "" },
+  { start: "20:00", end: "21:00", label: "20:00 - 21:00", nrLabel: "17", comment: "" },
+  { start: "21:00", end: "22:00", label: "21:00 - 22:00", nrLabel: "18", comment: "" },
 ] as const
 
 const formatGaTimeRowLabel = (start: string, end: string) => `${start} - ${end}`
@@ -960,6 +1004,7 @@ const normalizeGaTimeRows = (rows: GaTimeTableRowResponse[]): GaTimeRow[] =>
         label: isSpecial ? "" : row.label || (start && end ? formatGaTimeRowLabel(start, end) : ""),
         nrLabel: row.nr_label || "",
         isSpecial,
+        comment: row.comment || "",
       }
     })
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.start.localeCompare(b.start))
@@ -1330,6 +1375,8 @@ export default function AdminTasksPage() {
   const [gaTimeDeleting, setGaTimeDeleting] = React.useState<Record<string, boolean>>({})
   const [gaTimeEditingId, setGaTimeEditingId] = React.useState<string | null>(null)
   const [gaTimeAddingCell, setGaTimeAddingCell] = React.useState<string | null>(null)
+  const [gaTimeCommentEditingKey, setGaTimeCommentEditingKey] = React.useState<string | null>(null)
+  const [gaTimeCommentSavingKey, setGaTimeCommentSavingKey] = React.useState<string | null>(null)
   const [gaTimeRowsDialogOpen, setGaTimeRowsDialogOpen] = React.useState(false)
   const [gaTimeRowsDraft, setGaTimeRowsDraft] = React.useState<GaTimeRow[]>([])
   const [gaTimeRowsDraftVersion, setGaTimeRowsDraftVersion] = React.useState(0)
@@ -3607,7 +3654,7 @@ export default function AdminTasksPage() {
         </div>
         {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
       </CardHeader>
-      {children ? <CardContent className={contentClassName}>{children}</CardContent> : null}
+      {children ? <CardContent className={cn("px-2", contentClassName)}>{children}</CardContent> : null}
     </Card>
   )
 
@@ -4295,6 +4342,7 @@ export default function AdminTasksPage() {
           rows: visibleRows.map((row) => ({
             start_time: row.start,
             end_time: row.end,
+            comment: row.comment,
           })),
         }),
       })
@@ -4310,6 +4358,41 @@ export default function AdminTasksPage() {
       setGaTimeRowsSaving(false)
     }
   }, [apiFetch, readGaTimeRowsDraft])
+
+  const saveGaTimeRowComment = React.useCallback(async (row: GaTimeRow, comment: string) => {
+    const key = `${row.start}|${row.end}`
+    setGaTimeCommentSavingKey(key)
+    try {
+      const res = await apiFetch("/ga-time-slots/rows/comment", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          start_time: row.start,
+          end_time: row.end,
+          comment,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(apiErrorMessage(data, "Failed to save row comment"))
+      }
+      const updated = (await res.json()) as GaTimeTableRowResponse
+      setGaTimeRows((current) => current.map((item) => (
+        item.start === row.start && item.end === row.end
+          ? { ...item, id: updated.id, comment: updated.comment || "" }
+          : item
+      )))
+      setGaTimeCommentEditingKey(null)
+      toast.success(comment ? "Comment saved." : "Comment cleared.")
+      return true
+    } catch (error) {
+      console.error("Failed to save GA timetable row comment", error)
+      toast.error(error instanceof Error ? error.message : "Failed to save row comment")
+      return false
+    } finally {
+      setGaTimeCommentSavingKey(null)
+    }
+  }, [apiFetch])
 
   const gaTimeEntriesByCell = React.useMemo(() => {
     const map = new Map<string, GaTimeSlotEntry[]>()
@@ -5097,7 +5180,7 @@ export default function AdminTasksPage() {
             title="ALL TASKS"
             description=""
             headerClassName="px-3 sm:px-6"
-            contentClassName="px-3 sm:px-6"
+            contentClassName="px-2"
             actions={
               <div className="flex items-center gap-2 print:hidden">
                 <Button variant="outline" size="sm" onClick={() => setFastTaskOpen(true)}>
@@ -5368,6 +5451,7 @@ export default function AdminTasksPage() {
                     <tr>
                       <th className="ga-time-header ga-time-nr">NR</th>
                       <th className="ga-time-header">Time</th>
+                      <th className="ga-time-header ga-time-comment">Koment</th>
                       {commonWeekISOs.map((iso) => {
                         const d = fromISODate(iso)
                         const dayCode = getDayCode(d)
@@ -5395,6 +5479,7 @@ export default function AdminTasksPage() {
                       >
                         <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
                         <td className="ga-time-slot-label">{slot.label || "\u00A0"}</td>
+                        <td className="ga-time-cell ga-time-comment">{slot.comment || null}</td>
                         {commonWeekISOs.map((iso) => {
                           const dayOfWeek = toDayOfWeek(iso)
                           const cellKey = `${dayOfWeek}|${slot.start}`
@@ -5467,6 +5552,7 @@ export default function AdminTasksPage() {
                 <tr>
                   <th className="ga-time-header ga-time-nr">NR</th>
                   <th className="ga-time-header">Time</th>
+                  <th className="ga-time-header ga-time-comment">Koment</th>
                   {commonWeekISOs.map((iso) => {
                     const d = fromISODate(iso)
                     const dayCode = getDayCode(d)
@@ -5483,6 +5569,41 @@ export default function AdminTasksPage() {
                   <tr key={slot.start} className={slot.isSpecial ? "ga-time-row-custom" : undefined}>
                     <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
                     <td className="ga-time-slot-label">{slot.label || "\u00A0"}</td>
+                    <td className="ga-time-cell ga-time-comment">
+                      {gaTimeCommentEditingKey === `${slot.start}|${slot.end}` ? (
+                        <GaTimeRowCommentEditor
+                          initialComment={slot.comment}
+                          saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
+                          onSave={(comment) => saveGaTimeRowComment(slot, comment)}
+                          onCancel={() => setGaTimeCommentEditingKey(null)}
+                        />
+                      ) : slot.comment ? (
+                        <button
+                          type="button"
+                          className="ga-time-comment-text"
+                          onClick={() => {
+                            if (!canEditGaTimeSlots) return
+                            setGaTimeAddingCell(null)
+                            setGaTimeEditingId(null)
+                            setGaTimeCommentEditingKey(`${slot.start}|${slot.end}`)
+                          }}
+                        >
+                          {slot.comment}
+                        </button>
+                      ) : canEditGaTimeSlots ? (
+                        <button
+                          type="button"
+                          className="ga-time-add"
+                          onClick={() => {
+                            setGaTimeAddingCell(null)
+                            setGaTimeEditingId(null)
+                            setGaTimeCommentEditingKey(`${slot.start}|${slot.end}`)
+                          }}
+                        >
+                          Add
+                        </button>
+                      ) : null}
+                    </td>
                     {commonWeekISOs.map((iso) => {
                       const dayOfWeek = toDayOfWeek(iso)
                       const cellKey = `${dayOfWeek}|${slot.start}`
@@ -5749,8 +5870,8 @@ export default function AdminTasksPage() {
   }
 
   return (
-    <div className="bg-slate-50/30" data-print-target={printTarget || ""}>
-      <div className="mx-auto max-w-none space-y-6 px-0 py-4 md:px-6 xl:px-16">
+    <div className="mx-4 bg-slate-50/30" data-print-target={printTarget || ""}>
+      <div className="w-full max-w-none space-y-6 px-0 py-4">
         <div className="space-y-8">
           <AdminCommonWeekTable />
         </div>
@@ -6561,6 +6682,25 @@ export default function AdminTasksPage() {
           width: 30px;
           text-align: center;
         }
+        .admin-week-table .ga-time-comment {
+          min-width: 180px;
+          width: 180px;
+        }
+        .admin-week-table .ga-time-comment-text {
+          width: 100%;
+          min-height: 36px;
+          border: 1px solid #e2e8f0;
+          border-radius: 6px;
+          background: #ffffff;
+          padding: 7px 8px;
+          color: #0f172a;
+          font-size: 13px;
+          line-height: 18px;
+          text-align: left;
+          white-space: pre-wrap;
+          overflow-wrap: anywhere;
+          cursor: pointer;
+        }
         .admin-week-table .ga-time-slot-label {
           border: 1px solid #e2e8f0;
           background: #f1f5f9;
@@ -6829,6 +6969,10 @@ export default function AdminTasksPage() {
           }
           .admin-week-table .ga-time-nr {
             width: 26px !important;
+          }
+          .admin-week-table .ga-time-comment {
+            min-width: 78px !important;
+            width: 78px !important;
           }
           .admin-week-table .ga-time-header:nth-child(2),
           .admin-week-table .ga-time-slot-label:nth-child(2) {

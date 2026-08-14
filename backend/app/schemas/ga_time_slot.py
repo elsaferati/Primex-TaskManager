@@ -2,7 +2,7 @@ import uuid
 import re
 from datetime import datetime, time
 
-from pydantic import BaseModel, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class GaTimeSlotFormatting(BaseModel):
@@ -60,6 +60,13 @@ class GaTimeSlotEntryOut(GaTimeSlotFormatting):
 class GaTimeTableRowIn(BaseModel):
     start_time: time
     end_time: time
+    comment: str = Field(default="", max_length=2000)
+
+
+class GaTimeTableRowCommentUpdate(BaseModel):
+    start_time: time
+    end_time: time
+    comment: str = Field(default="", max_length=2000)
 
 
 class GaTimeTableRowsUpdate(BaseModel):
@@ -74,3 +81,4 @@ class GaTimeTableRowOut(BaseModel):
     start_time: time
     end_time: time
     is_special: bool = False
+    comment: str = ""

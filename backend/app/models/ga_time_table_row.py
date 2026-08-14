@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime, time
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Time, func
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, Time, func
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -18,6 +18,7 @@ class GaTimeTableRow(Base):
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
     is_special: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    comment: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

@@ -15,6 +15,7 @@ class GaTimeTableRowData:
     start_time: time
     end_time: time
     is_special: bool = False
+    comment: str = ""
 
 
 def _time(value: str) -> time:
