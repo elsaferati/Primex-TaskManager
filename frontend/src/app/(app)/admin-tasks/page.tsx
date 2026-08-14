@@ -1120,7 +1120,16 @@ export default function AdminTasksPage() {
   const [gaTimeAddDrafts, setGaTimeAddDrafts] = React.useState<Record<string, string>>({})
   const [gaTimeRowsDialogOpen, setGaTimeRowsDialogOpen] = React.useState(false)
   const [gaTimeRowsDraft, setGaTimeRowsDraft] = React.useState<GaTimeRow[]>([])
+  const [gaTimeRowsDraftVersion, setGaTimeRowsDraftVersion] = React.useState(0)
   const [gaTimeRowsSaving, setGaTimeRowsSaving] = React.useState(false)
+  const [gaTimeNewRowOpen, setGaTimeNewRowOpen] = React.useState(false)
+  const [gaTimeNewRowSaving, setGaTimeNewRowSaving] = React.useState(false)
+  const gaTimeRowsDialogRef = React.useRef<HTMLDivElement | null>(null)
+  const gaTimeRowInputRefs = React.useRef<
+    Record<number, { start: HTMLInputElement | null; end: HTMLInputElement | null }>
+  >({})
+  const gaTimeNewRowStartRef = React.useRef<HTMLInputElement | null>(null)
+  const gaTimeNewRowEndRef = React.useRef<HTMLInputElement | null>(null)
   const [secondarySectionsReady, setSecondarySectionsReady] = React.useState(false)
   const confirmerCandidates = React.useMemo(
     () => getConfirmerCandidates(users as UserLookup[]),
@@ -1472,16 +1481,16 @@ export default function AdminTasksPage() {
   }, [adminDepartmentId, apiFetch, commonWeekISOs, ganeUserId, secondarySectionsReady])
 
   const loadDailyReport = React.useCallback(async () => {
-    if (!user?.id) return
+    // This section always displays Gane's report for the GA department.
+    // Wait until both async lookups are ready so we never briefly request
+    // the logged-in admin's report with GA's department (which returns 403).
+    if (!ganeUserId || !adminDepartmentId) return
     setLoadingDailyReport(true)
     try {
-      const targetUserId = ganeUserId ?? user.id
       const params: Record<string, string> = {
         day: todayIso,
-        user_id: targetUserId,
-      }
-      if (adminDepartmentId) {
-        params.department_id = adminDepartmentId
+        user_id: ganeUserId,
+        department_id: adminDepartmentId,
       }
       const qs = new URLSearchParams(params)
       const res = await apiFetch(`/reports/daily?${qs.toString()}`)
@@ -1496,7 +1505,7 @@ export default function AdminTasksPage() {
     } finally {
       setLoadingDailyReport(false)
     }
-  }, [adminDepartmentId, apiFetch, ganeUserId, todayIso, user?.id])
+  }, [adminDepartmentId, apiFetch, ganeUserId, todayIso])
 
   React.useEffect(() => {
     void load()
@@ -3730,49 +3739,148 @@ export default function AdminTasksPage() {
   const normalizeSlotTime = (value: string) => (value ? value.slice(0, 5) : "")
   const toDayOfWeek = (iso: string) => getMondayBasedDay(fromISODate(iso))
 
-  const openGaTimeRowsDialog = React.useCallback(() => {
-    setGaTimeRowsDraft(sortVisibleGaTimeRows(gaTimeRows.filter((row) => !row.isSpecial)))
-    setGaTimeRowsDialogOpen(true)
-  }, [gaTimeRows])
+  const remountGaTimeRowInputs = React.useCallback(() => {
+    gaTimeRowInputRefs.current = {}
+    setGaTimeRowsDraftVersion((version) => version + 1)
+  }, [])
 
-  const updateGaTimeRowDraft = React.useCallback(
-    (index: number, field: "start" | "end", value: string) => {
-      setGaTimeRowsDraft((prev) => prev.map((row, rowIndex) => (rowIndex === index ? { ...row, [field]: value } : row)))
+  const setGaTimeRowInputRef = React.useCallback(
+    (index: number, field: "start" | "end", node: HTMLInputElement | null) => {
+      const refs = gaTimeRowInputRefs.current[index] ?? { start: null, end: null }
+      refs[field] = node
+      gaTimeRowInputRefs.current[index] = refs
     },
     []
   )
 
-  const addGaTimeRowDraft = React.useCallback(() => {
-    setGaTimeRowsDraft((prev) => {
-      const sorted = sortVisibleGaTimeRows(prev)
-      const lastEnd = sorted[sorted.length - 1]?.end || "08:00"
-      return [
-        ...sorted,
-        {
-          start: lastEnd,
-          end: addMinutesToTimeValue(lastEnd, 30),
-          label: "",
-          nrLabel: "",
-        },
-      ]
-    })
+  const readGaTimeRowsDraft = React.useCallback(
+    () => gaTimeRowsDraft.map((row, index) => {
+      const inputRefs = gaTimeRowInputRefs.current[index]
+      return {
+        ...row,
+        start: normalizeGaTimeValue(inputRefs?.start?.value ?? row.start),
+        end: normalizeGaTimeValue(inputRefs?.end?.value ?? row.end),
+      }
+    }),
+    [gaTimeRowsDraft]
+  )
+
+  const openGaTimeRowsDialog = React.useCallback(() => {
+    setGaTimeRowsDraft(sortVisibleGaTimeRows(gaTimeRows.filter((row) => !row.isSpecial)))
+    remountGaTimeRowInputs()
+    setGaTimeNewRowOpen(false)
+    setGaTimeRowsDialogOpen(true)
+  }, [gaTimeRows, remountGaTimeRowInputs])
+
+  const hasUnsavedGaTimeRowChanges = React.useCallback(() => {
+    const persisted = sortVisibleGaTimeRows(gaTimeRows.filter((row) => !row.isSpecial))
+    const draft = sortVisibleGaTimeRows(readGaTimeRowsDraft())
+    if (persisted.length !== draft.length) return true
+    return persisted.some((row, index) => (
+      normalizeGaTimeValue(row.start) !== normalizeGaTimeValue(draft[index]?.start || "") ||
+      normalizeGaTimeValue(row.end) !== normalizeGaTimeValue(draft[index]?.end || "")
+    ))
+  }, [gaTimeRows, readGaTimeRowsDraft])
+
+  const openGaTimeNewRowForm = React.useCallback(() => {
+    if (hasUnsavedGaTimeRowChanges()) {
+      toast.error("Save or cancel the existing time changes before adding a new row.")
+      return
+    }
+    setGaTimeNewRowOpen(true)
+    window.requestAnimationFrame(() => gaTimeNewRowStartRef.current?.focus({ preventScroll: true }))
+  }, [hasUnsavedGaTimeRowChanges])
+
+  const cancelGaTimeNewRow = React.useCallback(() => {
+    setGaTimeNewRowOpen(false)
   }, [])
 
+  const saveGaTimeNewRow = React.useCallback(async () => {
+    if (hasUnsavedGaTimeRowChanges()) {
+      toast.error("Save or cancel the existing time changes before adding a new row.")
+      return
+    }
+    const start = normalizeGaTimeValue(gaTimeNewRowStartRef.current?.value || "")
+    const startValue = parseTimeValue(start)
+    if (!startValue) {
+      toast.error("Enter a valid start time.")
+      gaTimeNewRowStartRef.current?.focus()
+      return
+    }
+    const enteredEnd = normalizeGaTimeValue(gaTimeNewRowEndRef.current?.value || "")
+    if (!enteredEnd && startValue.hours * 60 + startValue.minutes > 23 * 60 + 29) {
+      toast.error("Enter an end time for starts after 23:29.")
+      return
+    }
+    const end = enteredEnd || addMinutesToTimeValue(start, 30)
+    const endValue = parseTimeValue(end)
+    if (!endValue) {
+      toast.error("Enter a valid end time.")
+      return
+    }
+    const startMinutes = startValue.hours * 60 + startValue.minutes
+    const endMinutes = endValue.hours * 60 + endValue.minutes
+    if (startMinutes >= endMinutes) {
+      toast.error("End time must be after start time.")
+      return
+    }
+    const overlaps = gaTimeRows.some((row) => {
+      if (row.isSpecial) return false
+      const existingStart = parseTimeToMinutes(row.start)
+      const existingEnd = parseTimeToMinutes(row.end)
+      return existingStart !== null && existingEnd !== null && existingStart < endMinutes && startMinutes < existingEnd
+    })
+    if (overlaps) {
+      toast.error("This time overlaps an existing row.")
+      return
+    }
+
+    setGaTimeNewRowSaving(true)
+    try {
+      const res = await apiFetch("/ga-time-slots/rows", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ start_time: start, end_time: end }),
+      })
+      if (!res.ok) {
+        const detail = await res.json().catch(() => null) as { detail?: string } | null
+        throw new Error(detail?.detail || `ga_time_row_create_failed_${res.status}`)
+      }
+      const rows = normalizeGaTimeRows((await res.json()) as GaTimeTableRowResponse[])
+      setGaTimeRows(rows.length ? rows : renumberGaTimeRows([...DEFAULT_GA_TIME_ROWS]))
+      setGaTimeRowsDraft(sortVisibleGaTimeRows(rows.filter((row) => !row.isSpecial)))
+      remountGaTimeRowInputs()
+      cancelGaTimeNewRow()
+      toast.success(`Time ${formatGaTimeRowLabel(start, end)} added.`)
+    } catch (err) {
+      console.error("Failed to add GA timetable row", err)
+      toast.error(err instanceof Error ? err.message : "Failed to add time row.")
+    } finally {
+      setGaTimeNewRowSaving(false)
+    }
+  }, [apiFetch, cancelGaTimeNewRow, gaTimeRows, hasUnsavedGaTimeRowChanges, remountGaTimeRowInputs])
+
   const removeGaTimeRowDraft = React.useCallback((index: number) => {
-    setGaTimeRowsDraft((prev) => prev.filter((_, rowIndex) => rowIndex !== index))
-  }, [])
+    setGaTimeRowsDraft(readGaTimeRowsDraft().filter((_, rowIndex) => rowIndex !== index))
+    remountGaTimeRowInputs()
+  }, [readGaTimeRowsDraft, remountGaTimeRowInputs])
 
   const resetGaTimeRowsDraft = React.useCallback(() => {
     setGaTimeRowsDraft(sortVisibleGaTimeRows(DEFAULT_GA_TIME_ROWS.filter((row) => !row.isSpecial)))
-  }, [])
+    remountGaTimeRowInputs()
+  }, [remountGaTimeRowInputs])
 
   const saveGaTimeRows = React.useCallback(async () => {
     const visibleRows = sortVisibleGaTimeRows(
-      gaTimeRowsDraft.map((row) => ({
-        ...row,
-        start: normalizeGaTimeValue(row.start),
-        end: normalizeGaTimeValue(row.end),
-      }))
+      readGaTimeRowsDraft().map((row) => {
+        const start = normalizeGaTimeValue(row.start)
+        const enteredEnd = normalizeGaTimeValue(row.end)
+        return {
+          ...row,
+          start,
+          end: enteredEnd || (start ? addMinutesToTimeValue(start, 30) : ""),
+        }
+      })
     )
     if (!visibleRows.length) {
       toast.error("Add at least one time row.")
@@ -3782,8 +3890,12 @@ export default function AdminTasksPage() {
       const row = visibleRows[idx]
       const start = parseTimeValue(row.start)
       const end = parseTimeValue(row.end)
-      if (!start || !end) {
-        toast.error("Use valid HH:MM times.")
+      if (!start) {
+        toast.error("Enter a start time for every row.")
+        return
+      }
+      if (!end) {
+        toast.error("Use a valid HH:MM end time.")
         return
       }
       const startMinutes = start.hours * 60 + start.minutes
@@ -3824,7 +3936,7 @@ export default function AdminTasksPage() {
     } finally {
       setGaTimeRowsSaving(false)
     }
-  }, [apiFetch, gaTimeRowsDraft])
+  }, [apiFetch, readGaTimeRowsDraft])
 
   const gaTimeEntriesByCell = React.useMemo(() => {
     const map = new Map<string, GaTimeSlotEntry[]>()
@@ -5098,42 +5210,65 @@ export default function AdminTasksPage() {
           </div>
           </AdminTasksSection>
           </div>
-          <Dialog open={gaTimeRowsDialogOpen} onOpenChange={setGaTimeRowsDialogOpen}>
-            <DialogContent className="sm:max-w-2xl">
+          <Dialog
+            open={gaTimeRowsDialogOpen}
+            onOpenChange={(open) => {
+              setGaTimeRowsDialogOpen(open)
+              if (!open) cancelGaTimeNewRow()
+            }}
+          >
+            <DialogContent
+              ref={gaTimeRowsDialogRef}
+              className="sm:max-w-2xl"
+              onOpenAutoFocus={(event) => {
+                event.preventDefault()
+                gaTimeRowsDialogRef.current?.focus({ preventScroll: true })
+              }}
+            >
               <DialogHeader>
                 <DialogTitle>GA timetable times</DialogTitle>
+                <p className="text-xs text-slate-500">
+                  Edit the times, then click Save. Nothing is changed while you are typing.
+                </p>
               </DialogHeader>
               <div className="space-y-3">
-                <div className="max-h-[60vh] overflow-y-auto rounded-md border">
+                <div
+                  className={[
+                    gaTimeNewRowOpen ? "max-h-[42vh]" : "max-h-[60vh]",
+                    "overflow-y-auto rounded-md border",
+                  ].join(" ")}
+                >
                   <div className="grid grid-cols-[48px_minmax(0,1fr)_minmax(0,1fr)_48px] items-center gap-2 border-b bg-slate-50 px-3 py-2 text-xs font-semibold text-slate-600">
                     <div>NR</div>
                     <div>Start</div>
                     <div>End</div>
                     <div />
                   </div>
-                  <div className="divide-y">
+                  <div key={gaTimeRowsDraftVersion} className="divide-y">
                     {gaTimeRowsDraft.map((row, index) => (
                       <div
-                        key={`${row.start}-${row.end}-${index}`}
+                        key={row.id || `ga-time-row-${index}`}
                         className="grid grid-cols-[48px_minmax(0,1fr)_minmax(0,1fr)_48px] items-center gap-2 px-3 py-2"
                       >
                         <div className="text-sm font-medium text-slate-700">{index + 1}</div>
                         <Input
+                          ref={(node) => setGaTimeRowInputRef(index, "start", node)}
                           type="time"
-                          value={row.start}
-                          onChange={(event) => updateGaTimeRowDraft(index, "start", event.target.value)}
+                          defaultValue={row.start}
+                          disabled={gaTimeNewRowOpen}
                         />
                         <Input
+                          ref={(node) => setGaTimeRowInputRef(index, "end", node)}
                           type="time"
-                          value={row.end}
-                          onChange={(event) => updateGaTimeRowDraft(index, "end", event.target.value)}
+                          defaultValue={row.end}
+                          disabled={gaTimeNewRowOpen}
                         />
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
                           onClick={() => removeGaTimeRowDraft(index)}
-                          disabled={gaTimeRowsDraft.length <= 1}
+                          disabled={gaTimeRowsDraft.length <= 1 || gaTimeNewRowOpen}
                           title="Delete row"
                         >
                           <Trash2 className="h-4 w-4" />
@@ -5142,21 +5277,98 @@ export default function AdminTasksPage() {
                     ))}
                   </div>
                 </div>
+                {gaTimeNewRowOpen ? (
+                  <form
+                    className="rounded-md border border-blue-200 bg-blue-50/70 p-3"
+                    onSubmit={(event) => {
+                      event.preventDefault()
+                      void saveGaTimeNewRow()
+                    }}
+                  >
+                    <div className="mb-2 flex items-start justify-between gap-3">
+                      <div>
+                        <div className="text-sm font-semibold text-slate-900">New time row</div>
+                        <div className="text-xs text-slate-600">
+                          Enter both times, or leave End empty to use 30 minutes.
+                        </div>
+                      </div>
+                    </div>
+                    <div className="grid gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label htmlFor="ga-new-row-start" className="text-xs">Start</Label>
+                        <Input
+                          ref={gaTimeNewRowStartRef}
+                          id="ga-new-row-start"
+                          type="time"
+                          defaultValue=""
+                          disabled={gaTimeNewRowSaving}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label htmlFor="ga-new-row-end" className="text-xs">End (optional)</Label>
+                        <Input
+                          ref={gaTimeNewRowEndRef}
+                          id="ga-new-row-end"
+                          type="time"
+                          defaultValue=""
+                          disabled={gaTimeNewRowSaving}
+                        />
+                      </div>
+                    </div>
+                    <div className="mt-3 flex justify-end gap-2">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={cancelGaTimeNewRow}
+                        disabled={gaTimeNewRowSaving}
+                      >
+                        Cancel new row
+                      </Button>
+                      <Button type="submit" size="sm" disabled={gaTimeNewRowSaving}>
+                        {gaTimeNewRowSaving ? "Saving time..." : "Save time"}
+                      </Button>
+                    </div>
+                  </form>
+                ) : null}
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={addGaTimeRowDraft}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={openGaTimeNewRowForm}
+                      disabled={gaTimeNewRowOpen}
+                    >
                       <Plus className="mr-2 h-4 w-4" />
                       Add row
                     </Button>
-                    <Button type="button" variant="ghost" size="sm" onClick={resetGaTimeRowsDraft}>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={resetGaTimeRowsDraft}
+                      disabled={gaTimeNewRowOpen}
+                    >
                       Reset defaults
                     </Button>
                   </div>
                   <div className="flex items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => setGaTimeRowsDialogOpen(false)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setGaTimeRowsDialogOpen(false)}
+                      disabled={gaTimeNewRowSaving}
+                    >
                       Cancel
                     </Button>
-                    <Button type="button" size="sm" onClick={() => void saveGaTimeRows()} disabled={gaTimeRowsSaving}>
+                    <Button
+                      type="button"
+                      size="sm"
+                      onClick={() => void saveGaTimeRows()}
+                      disabled={gaTimeRowsSaving || gaTimeNewRowOpen}
+                    >
                       {gaTimeRowsSaving ? "Saving..." : "Save"}
                     </Button>
                   </div>

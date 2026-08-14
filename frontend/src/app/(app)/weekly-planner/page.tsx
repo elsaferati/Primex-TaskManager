@@ -24,6 +24,7 @@ import { fetchUsersLookupCached, invalidateUsersLookupCache } from "@/lib/users-
 import { formatDepartmentName } from "@/lib/department-name"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { getPlainMarkedText, renderMarkedNoteContent } from "@/lib/note-markup"
+import { buildRepeatedTaskFirstDateMap, isRepeatedTaskInstance } from "@/lib/repeated-task-visibility"
 import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
@@ -129,6 +130,31 @@ type WeeklyTableResponse = {
   departments: WeeklyTableDepartment[]
   saved_plan_id: string | null
 }
+
+const getWeeklyTableUserDayTasks = (userDay?: WeeklyTableUserDay) => {
+  if (!userDay) return []
+
+  return [
+    ...(userDay.am_projects || []).flatMap((project) => project.tasks || []),
+    ...(userDay.pm_projects || []).flatMap((project) => project.tasks || []),
+    ...(userDay.am_system_tasks || []),
+    ...(userDay.pm_system_tasks || []),
+    ...(userDay.am_fast_tasks || []),
+    ...(userDay.pm_fast_tasks || []),
+  ]
+}
+
+const buildWeeklyPlannerRepeatedTaskFirstDateMap = (
+  department: WeeklyTableDepartment,
+  userId: string
+) => buildRepeatedTaskFirstDateMap(
+  department.days.map((day) => day.date),
+  (dateIso) => {
+    const day = department.days.find((entry) => entry.date === dateIso)
+    const userDay = day?.users.find((entry) => entry.user_id === userId)
+    return getWeeklyTableUserDayTasks(userDay)
+  }
+)
 
 type WeeklySnapshotVersion = {
   id: string
@@ -2149,6 +2175,11 @@ export default function WeeklyPlannerPage() {
             .task-status-new-open { background-color: #dbeafe; border-color: #1d4ed8; }
             .task-status-new-done { background-color: #6ee7b7; border-color: #059669; }
             .task-status-deadline { background-color: #dc2626; border-color: #991b1b; color: #ffffff; }
+            .task-item.repeat-task-muted,
+            .task-item.repeat-task-muted .badge,
+            .task-item.repeat-task-muted .products {
+              color: #9ca3af !important;
+            }
             .badge {
               display: inline-block;
               padding: 0.5px 2px;
@@ -2475,6 +2506,30 @@ export default function WeeklyPlannerPage() {
       return fallbackUsers.filter((user) => user.user_name.trim().length > 0)
     }
 
+    const repeatedTaskFirstDateByDepartmentUser = new Map(
+      data.departments.map((dept) => [
+        dept.department_id,
+        new Map(
+          getDepartmentUsersForPrint(dept).map((entry) => [
+            entry.user_id,
+            buildWeeklyPlannerRepeatedTaskFirstDateMap(dept, entry.user_id),
+          ])
+        ),
+      ])
+    )
+
+    const getPrintRepeatedTaskClassName = (
+      departmentId: string,
+      userId: string,
+      task: { task_id?: string | null },
+      dayIso: string
+    ) => {
+      const firstDateByTaskId = repeatedTaskFirstDateByDepartmentUser.get(departmentId)?.get(userId)
+      return firstDateByTaskId && isRepeatedTaskInstance(task, dayIso, firstDateByTaskId)
+        ? "repeat-task-muted"
+        : ""
+    }
+
     const getPrintableWidth = () => {
       if (measure.clientWidth) return measure.clientWidth
       return Math.max(0, Math.floor(printWindow.innerWidth * 0.9))
@@ -2605,7 +2660,13 @@ export default function WeeklyPlannerPage() {
       return ` <span class="badge badge-new">NEW</span>`
     }
 
-    const renderDayGroupHtml = (day: WeeklyTableDay, dayIndex: number, allUsers: WeeklyPrintUser[], departmentName?: string) => {
+    const renderDayGroupHtml = (
+      day: WeeklyTableDay,
+      dayIndex: number,
+      allUsers: WeeklyPrintUser[],
+      departmentId: string,
+      departmentName?: string
+    ) => {
       const dayName = DAY_NAMES[dayIndex]
       const dayDate = formatDate(day.date)
       const dayIso = day.date
@@ -2644,7 +2705,8 @@ export default function WeeklyPlannerPage() {
             html += `<div style="font-size: 4pt; color: #1e40af;">`
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
+              const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
             })
             html += `</div>`
           } else {
@@ -2673,7 +2735,8 @@ export default function WeeklyPlannerPage() {
             html += `<div style="font-size: 4pt; color: #0f172a;">`
             fastTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+              const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
               const badge = getFastTaskBadge({ ...task, day_date: dayIso })
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2725,8 +2788,9 @@ export default function WeeklyPlannerPage() {
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
+                const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
-                html += `<div class="task-item ${statusClass}">${taskNumber}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+                html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskNumber}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
                 const productLabel = formatTaskProducts(task, project, departmentName)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
@@ -2768,7 +2832,8 @@ export default function WeeklyPlannerPage() {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
-            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+            const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
+            html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
             const badge = getFastTaskBadge({ ...task, day_date: dayIso })
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2807,7 +2872,8 @@ export default function WeeklyPlannerPage() {
             html += `<div style="font-size: 4pt; color: #1e40af;">`
             systemTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
+              const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}${buildPrintNewBadge(task.created_at)}</div>`
             })
             html += `</div>`
           } else {
@@ -2836,7 +2902,8 @@ export default function WeeklyPlannerPage() {
             html += `<div style="font-size: 4pt; color: #0f172a;">`
             fastTasks.forEach((task, taskIndex) => {
               const statusClass = getPrintTaskStatusClass(task, dayIso)
-              html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+              const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
+              html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
               const badge = getFastTaskBadge({ ...task, day_date: dayIso })
               if (badge) {
                 html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2881,8 +2948,9 @@ export default function WeeklyPlannerPage() {
             if (project.tasks && project.tasks.length > 0) {
               project.tasks.forEach((task, taskIndex) => {
                 const statusClass = getPrintTaskStatusClass(task, dayIso)
+                const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
                 const taskNumber = `${projectIndex + 1}.${taskIndex + 1}`
-                html += `<div class="task-item ${statusClass}">${taskNumber}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+                html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskNumber}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
                 const productLabel = formatTaskProducts(task, project, departmentName)
                 if (productLabel) {
                   html += ` <span class="products">${productLabel}</span>`
@@ -2924,7 +2992,8 @@ export default function WeeklyPlannerPage() {
           html += `<div style="font-size: 4pt; color: #0f172a;">`
           fastTasks.forEach((task, taskIndex) => {
             const statusClass = getPrintTaskStatusClass(task, dayIso)
-            html += `<div class="task-item ${statusClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
+            const repeatedTaskClass = getPrintRepeatedTaskClassName(departmentId, user.user_id, task, dayIso)
+            html += `<div class="task-item ${statusClass} ${repeatedTaskClass}">${taskIndex + 1}. ${escapeHtml(getPlannerTaskDisplayTitle(task))}`
             const badge = getFastTaskBadge({ ...task, day_date: dayIso })
             if (badge) {
               html += ` <span class="badge ${buildBadgeClass(badge.label)}">${badge.label}</span>`
@@ -2986,7 +3055,13 @@ export default function WeeklyPlannerPage() {
         dept.days.forEach((day, dayIndex) => {
           const tbody = doc.createElement("tbody")
           tbody.className = "day-group"
-          tbody.innerHTML = renderDayGroupHtml(day, dayIndex, chunk, dept.department_name)
+          tbody.innerHTML = renderDayGroupHtml(
+            day,
+            dayIndex,
+            chunk,
+            dept.department_id,
+            dept.department_name
+          )
           table.appendChild(tbody)
         })
 
@@ -4515,6 +4590,12 @@ export default function WeeklyPlannerPage() {
                   {(() => {
                     const orderedUsers = getOrderedUsersForDept(dept)
                     const orderedUserIds = orderedUsers.map((u) => u.user_id)
+                    const repeatedTaskFirstDateByUserId = new Map(
+                      orderedUsers.map((entry) => [
+                        entry.user_id,
+                        buildWeeklyPlannerRepeatedTaskFirstDateMap(dept, entry.user_id),
+                      ])
+                    )
                     const isOrderingActive = canEditUserOrder && isOrderingUsers
 
                     return (
@@ -4566,6 +4647,15 @@ export default function WeeklyPlannerPage() {
                             const projectsList = (projects || []).filter(hasVisibleProjectTasks)
                             const systemTasksList = systemTasks || []
                             const fastTasksList = sortFastTasks(fastTasks || [])
+                            const repeatedTaskFirstDateById = repeatedTaskFirstDateByUserId.get(userId)
+                            const isRepeatedTaskForDay = (task: { task_id?: string | null }) => Boolean(
+                              repeatedTaskFirstDateById &&
+                              isRepeatedTaskInstance(task, dayDate, repeatedTaskFirstDateById)
+                            )
+                            const repeatedTaskCardClassName = (task: { task_id?: string | null }) =>
+                              isRepeatedTaskForDay(task)
+                                ? "[&>button]:!text-[#9ca3af] [&_span]:!text-[#9ca3af]"
+                                : ""
 
                             const hasContent = projectsList.length > 0 || systemTasksList.length > 0 || fastTasksList.length > 0
                             const block = getBlockForSlot(userId, dayDate, timeSlot)
@@ -4657,6 +4747,7 @@ export default function WeeklyPlannerPage() {
                                                 className={[
                                                   "text-[11px] flex items-center gap-1 rounded border pl-1.5 pr-0.5 py-0.5 group/task",
                                                   getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
+                                                  repeatedTaskCardClassName(task),
                                                 ].join(" ")}
                                               >
                                                   <button
@@ -4742,6 +4833,7 @@ export default function WeeklyPlannerPage() {
                                           className={[
                                             "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task",
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
+                                            repeatedTaskCardClassName(task),
                                           ].join(" ")}
                                         >
                                             <button
@@ -4809,6 +4901,7 @@ export default function WeeklyPlannerPage() {
                                           className={[
                                             "pl-1 pr-0.5 py-0.5 rounded border text-[11px] flex items-center gap-1 group/task",
                                             getTaskCardClassesForDay(task.status, task.completed_at, dayDate, task.daily_status, task.created_at, task.is_deadline_important),
+                                            repeatedTaskCardClassName(task),
                                           ].join(" ")}
                                         >
                                         <button

@@ -1058,7 +1058,7 @@ export default function GaKaNotesPage() {
   const [internalMeetingTaskStartsAt, setInternalMeetingTaskStartsAt] = React.useState("")
   const [creatingInternalMeetingFromTask, setCreatingInternalMeetingFromTask] = React.useState(false)
   const internalMeetingDepartmentIdRef = React.useRef<string | null>(null)
-  const [voiceLanguage, setVoiceLanguage] = React.useState<"en" | "sq">("en")
+  const [voiceLanguage, setVoiceLanguage] = React.useState<"en" | "sq">("sq")
   const speechLang = voiceLanguage === "sq" ? "sq-AL" : "en-US"
   const cloudLang = voiceLanguage === "sq" ? "sq" : "en"
 

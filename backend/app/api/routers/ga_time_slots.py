@@ -15,10 +15,16 @@ from app.schemas.ga_time_slot import (
     GaTimeSlotEntryIn,
     GaTimeSlotEntryOut,
     GaTimeSlotEntryUpdate,
+    GaTimeTableRowIn,
     GaTimeTableRowOut,
     GaTimeTableRowsUpdate,
 )
-from app.services.ga_time_table import GaTimeTableRowData, format_ga_time_label, get_ga_time_table_rows
+from app.services.ga_time_table import (
+    DEFAULT_GA_TIME_TABLE_ROWS,
+    GaTimeTableRowData,
+    format_ga_time_label,
+    get_ga_time_table_rows,
+)
 
 
 router = APIRouter()
@@ -117,6 +123,73 @@ async def update_ga_time_table_rows(
     await db.commit()
     for row in rows:
         await db.refresh(row)
+    return [_row_out(row) for row in rows]
+
+
+@router.post("/rows", response_model=list[GaTimeTableRowOut], status_code=status.HTTP_201_CREATED)
+async def create_ga_time_table_row(
+    payload: GaTimeTableRowIn,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[GaTimeTableRowOut]:
+    _ensure_can_edit(current_user)
+    if payload.start_time >= payload.end_time:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="End time must be after start time",
+        )
+
+    stored_rows = (
+        await db.execute(
+            select(GaTimeTableRow)
+            .order_by(GaTimeTableRow.sort_order, GaTimeTableRow.start_time)
+            .with_for_update()
+        )
+    ).scalars().all()
+
+    if not stored_rows:
+        stored_rows = [
+            GaTimeTableRow(
+                sort_order=row.sort_order,
+                nr_label=row.nr_label,
+                label=row.label,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                is_special=row.is_special,
+            )
+            for row in DEFAULT_GA_TIME_TABLE_ROWS
+        ]
+        db.add_all(stored_rows)
+        await db.flush()
+
+    visible_rows = [row for row in stored_rows if not row.is_special]
+    if any(
+        existing.start_time < payload.end_time and payload.start_time < existing.end_time
+        for existing in visible_rows
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="Rows cannot overlap",
+        )
+
+    new_row = GaTimeTableRow(
+        sort_order=len(visible_rows) + 2,
+        nr_label="",
+        label=format_ga_time_label(payload.start_time, payload.end_time),
+        start_time=payload.start_time,
+        end_time=payload.end_time,
+        is_special=False,
+    )
+    db.add(new_row)
+    visible_rows.append(new_row)
+    visible_rows.sort(key=lambda row: (row.start_time, row.end_time))
+    for idx, row in enumerate(visible_rows, start=1):
+        row.sort_order = idx + 1
+        row.nr_label = str(idx)
+        row.label = format_ga_time_label(row.start_time, row.end_time)
+
+    await db.commit()
+    rows = await get_ga_time_table_rows(db)
     return [_row_out(row) for row in rows]
 
 
