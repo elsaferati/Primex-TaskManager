@@ -318,6 +318,23 @@ function systemFrequencyDisplayLabel(frequency?: string | null) {
   return normalized || ""
 }
 
+const SYSTEM_FREQUENCY_SORT_ORDER: Record<string, number> = {
+  DAILY: 0,
+  WEEKLY: 1,
+  MONTHLY: 2,
+  "3_MONTHS": 3,
+  "6_MONTHS": 4,
+  YEARLY: 5,
+}
+
+function systemFrequencySortOrder(frequency?: string | null) {
+  return SYSTEM_FREQUENCY_SORT_ORDER[(frequency || "").toUpperCase()] ?? 99
+}
+
+function compareSystemFrequency(first?: string | null, second?: string | null) {
+  return systemFrequencySortOrder(first) - systemFrequencySortOrder(second)
+}
+
 function mergeAllTasksAssigneeBadges(a: AllTasksAssigneeBadge[], b: AllTasksAssigneeBadge[]): AllTasksAssigneeBadge[] {
   const map = new Map<string, AllTasksAssigneeBadge>()
   for (const item of [...a, ...b]) {
@@ -2252,6 +2269,8 @@ export default function AdminTasksPage() {
 
     const orderedRows = Array.from(dedupedRows.values())
     orderedRows.sort((a, b) => {
+      const frequencyComparison = compareSystemFrequency(a.systemFrequency, b.systemFrequency)
+      if (frequencyComparison) return frequencyComparison
       const aFast = Boolean(a.isFastTask)
       const bFast = Boolean(b.isFastTask)
       if (aFast !== bFast) return aFast ? 1 : -1
@@ -2322,7 +2341,10 @@ export default function AdminTasksPage() {
     [regularAllTasksRows]
   )
   const combinedNonConfirmationRows = React.useMemo(
-    () => [...highlightedAllTasksRows, ...regularNonConfirmationRows],
+    () =>
+      [...highlightedAllTasksRows, ...regularNonConfirmationRows].sort((a, b) =>
+        compareSystemFrequency(a.systemFrequency, b.systemFrequency)
+      ),
     [highlightedAllTasksRows, regularNonConfirmationRows]
   )
 

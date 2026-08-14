@@ -3,7 +3,7 @@ from datetime import date
 
 from openpyxl import load_workbook
 
-from app.services.tomorrow_print_report import _excel_table_attachment, _html_table, _task_rows
+from app.services.tomorrow_print_report import _excel_table_attachment, _html_table, _one_h_checklists_html, _task_rows
 
 
 def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
@@ -18,6 +18,24 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert 'bgcolor="#D8B4FE"' in report_html
     assert report_html.count('background-color:#D8B4FE') == 1
     assert '<style>' not in report_html
+
+
+def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
+    checklists_html = _one_h_checklists_html()
+
+    assert 'data-one-h-checklist-columns="true"' in checklists_html
+    assert 'width="50%"' in checklists_html
+    assert "PYETJET PER 1H - BORD" in checklists_html
+    assert "STAFF - HAPAT PER 1H" in checklists_html
+    assert "Slotin paraprak/aktual" in checklists_html
+    assert "Share screen side by side DET/REZULTATIN" in checklists_html
+
+    _, content, _ = _excel_table_attachment([], [], date(2026, 8, 14))
+    sheet = load_workbook(BytesIO(content)).active
+    assert sheet["A3"].value == "PYETJET PER 1H - BORD"
+    assert sheet["E3"].value == "STAFF - HAPAT PER 1H"
+    assert sheet["A4"].value == "1. Slotin paraprak/aktual"
+    assert sheet["E4"].value == "1. Hap doc dhe det"
 
 
 def test_email_table_removes_added_and_done_editor_markers() -> None:
@@ -72,6 +90,49 @@ def test_task_status_colours_apply_to_email_cells_but_ga_personal_stays_purple()
     assert 'bgcolor="#D8B4FE"' in report_html
 
 
+def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
+    tasks = [
+        {"title": "Deadline task", "status": "TODO", "is_deadline_important": True},
+        {"title": "08:00 task", "status": "TODO"},
+    ]
+    report_html = _html_table([("DEADLINE / 08:00", tasks, False)])
+
+    assert 'bgcolor="#DC2626"' in report_html
+    assert "border:2px solid #DC2626" in report_html
+
+    _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
+    sheet = load_workbook(BytesIO(content)).active
+    assert sheet["C11"].fill.fgColor.rgb.endswith("DC2626")
+    assert sheet["C11"].font.color.type == "rgb"
+    assert sheet["C11"].font.color.rgb.endswith("FFFFFF")
+    assert sheet["D11"].border.left.color.rgb.endswith("DC2626")
+
+
+def test_deadline_and_0800_tasks_have_a_dedicated_printed_row() -> None:
+    rows = _task_rows(
+        {
+            "important": [
+                {"title": "Deadline task", "date": "2026-08-14", "is_deadline_important": True},
+                {"title": "08:00 task", "date": "2026-08-14"},
+            ]
+        },
+        date(2026, 8, 14),
+    )
+
+    important_row = next(row for row in rows if row[0] == "DEADLINE / 08:00")
+    assert [item["title"] for item in important_row[1]] == ["Deadline task", "08:00 task"]
+
+
+def test_personal_row_label_has_a_gap_and_uses_compact_single_line_schedules() -> None:
+    rows = _task_rows({}, date(2026, 8, 14))
+    personal_row = next(row for row in rows if row[2])
+
+    assert personal_row[0] == "P:\nGA 08:15 / 13:15\n\nDV/LH 10:15 / 14:30"
+    report_html = _html_table([personal_row])
+    assert "font-size:10px" in report_html
+    assert "GA 08:15 / 13:15<br><br>DV/LH 10:15 / 14:30" in report_html
+
+
 def test_excel_status_colours_match_email_and_ga_personal_overrides_status() -> None:
     _, content, _ = _excel_table_attachment(
         [
@@ -83,9 +144,9 @@ def test_excel_status_colours_match_email_and_ga_personal_overrides_status() -> 
     )
 
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C4"].fill.fgColor.rgb.endswith("FFC4ED")
-    assert sheet["D4"].fill.fgColor.rgb.endswith("FFFF00")
-    assert sheet["C5"].fill.fgColor.rgb.endswith("D8B4FE")
+    assert sheet["C11"].fill.fgColor.rgb.endswith("FFC4ED")
+    assert sheet["D11"].fill.fgColor.rgb.endswith("FFFF00")
+    assert sheet["C12"].fill.fgColor.rgb.endswith("D8B4FE")
 
 
 def test_done_tasks_are_last_within_each_printed_row() -> None:
@@ -117,5 +178,5 @@ def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> N
 
     _, content, _ = _excel_table_attachment([], meetings, date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C6"].border.left.color.rgb.endswith("2563EB")
-    assert sheet["D6"].border.left.style == "thin"
+    assert sheet["C13"].border.left.color.rgb.endswith("2563EB")
+    assert sheet["D13"].border.left.style == "thin"

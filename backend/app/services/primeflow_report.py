@@ -577,11 +577,11 @@ def render_html(document: ReportDocument) -> str:
         for index, note in enumerate(notes, 1):
             created = note.created_at.astimezone(report_timezone()).strftime("%d.%m %H:%M") if note.created_at else "-"
             rows.append(
-                "<tr>"
-                f'<td style="padding:8px;border:1px solid #cbd5e1;text-align:center;font-family:Arial,sans-serif;vertical-align:top;">{index}</td>'
-                f'<td style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;vertical-align:top;white-space:pre-wrap;">{html.escape(note.content).replace(chr(10), "<br>")}</td>'
-                f'<td style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;vertical-align:top;">{html.escape(note.author)}</td>'
-                f'<td style="padding:8px;border:1px solid #cbd5e1;font-family:Arial,sans-serif;vertical-align:top;white-space:nowrap;">{created}</td>'
+                '<tr bgcolor="#dbeafe" style="background-color:#dbeafe;">'
+                f'<td bgcolor="#dbeafe" style="background-color:#dbeafe;padding:8px;border:1px solid #93c5fd;text-align:center;font-family:Arial,sans-serif;vertical-align:top;">{index}</td>'
+                f'<td bgcolor="#dbeafe" style="background-color:#dbeafe;padding:8px;border:1px solid #93c5fd;font-family:Arial,sans-serif;vertical-align:top;white-space:pre-wrap;">{html.escape(note.content).replace(chr(10), "<br>")}</td>'
+                f'<td bgcolor="#dbeafe" style="background-color:#dbeafe;padding:8px;border:1px solid #93c5fd;font-family:Arial,sans-serif;vertical-align:top;">{html.escape(note.author)}</td>'
+                f'<td bgcolor="#dbeafe" style="background-color:#dbeafe;padding:8px;border:1px solid #93c5fd;font-family:Arial,sans-serif;vertical-align:top;white-space:nowrap;">{created}</td>'
                 "</tr>"
             )
         return (
@@ -597,20 +597,14 @@ def render_html(document: ReportDocument) -> str:
             "</table>"
         )
 
-    body_chunks: list[str] = []
-    for reminder_title, questions in (
-        (BOARD_REMINDER_SECTION_TITLE, document.board_reminders),
-        (REMINDER_SECTION_TITLE, document.reminders),
-    ):
-        if not questions:
-            continue
-        body_chunks.append(section_title_block(reminder_title))
+    def reminder_column(title: str, questions: list[ReportReminderQuestion]) -> str:
+        chunks = [section_title_block(title)]
         for index, question in enumerate(questions, 1):
             guidance = (
                 detail_row(html.escape(question.guidance).replace(chr(10), "<br>"))
                 if question.guidance else ""
             )
-            body_chunks.append(
+            chunks.append(
                 task_card(
                     "#f8fafc",
                     "#64748b",
@@ -618,6 +612,26 @@ def render_html(document: ReportDocument) -> str:
                     guidance,
                 )
             )
+        return "".join(chunks)
+
+    body_chunks: list[str] = []
+    if document.board_reminders and document.reminders:
+        body_chunks.append(
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-reminder-columns="true" style="width:100%;border-collapse:collapse;">'
+            '<tr>'
+            '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
+            f"{reminder_column(BOARD_REMINDER_SECTION_TITLE, document.board_reminders)}"
+            '</td>'
+            '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
+            f"{reminder_column(REMINDER_SECTION_TITLE, document.reminders)}"
+            '</td>'
+            '</tr></table>'
+        )
+    elif document.board_reminders:
+        body_chunks.append(reminder_column(BOARD_REMINDER_SECTION_TITLE, document.board_reminders))
+    elif document.reminders:
+        body_chunks.append(reminder_column(REMINDER_SECTION_TITLE, document.reminders))
 
     for section_index, section in enumerate(document.sections):
         if section_index:

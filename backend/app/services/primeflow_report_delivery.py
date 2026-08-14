@@ -19,6 +19,7 @@ from app.models.ga_note import GaNote
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_recipient import PrimeFlowReportRecipient
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
+from app.models.task import Task
 from app.models.task_strike_event import TaskStrikeEvent
 from app.models.user import User
 from app.services.primeflow_report import (
@@ -92,16 +93,29 @@ async def load_1h_reminder_questions() -> list[ReportReminderQuestion]:
     ]
 
 
+def _undiscussed_px_notes_statement():
+    """Return the active, unconverted, undiscussed rows from the PX Notes page."""
+    active_task_exists = (
+        select(Task.id)
+        .where(Task.ga_note_origin_id == GaNote.id)
+        .where(Task.is_active.is_(True))
+        .exists()
+    )
+    return (
+        select(GaNote, User.full_name, User.username, User.email)
+        .outerjoin(User, User.id == GaNote.created_by)
+        .where(GaNote.status != GaNoteStatus.CLOSED)
+        .where(GaNote.is_discussed.is_(False))
+        .where(GaNote.is_converted_to_task.is_(False))
+        .where(~active_task_exists)
+        .order_by(GaNote.created_at.desc(), GaNote.updated_at.desc())
+    )
+
+
 async def load_undiscussed_notes() -> list[ReportUndiscussedNote]:
-    """Open PX notes remain in every 1H report until they are discussed."""
+    """Load the PX Notes rows that still need discussion in the 1H report."""
     async with SessionLocal() as db:
-        rows = (await db.execute(
-            select(GaNote, User.full_name, User.username, User.email)
-            .outerjoin(User, User.id == GaNote.created_by)
-            .where(GaNote.status != GaNoteStatus.CLOSED)
-            .where(GaNote.is_discussed.is_(False))
-            .order_by(GaNote.created_at.asc(), GaNote.updated_at.asc())
-        )).all()
+        rows = (await db.execute(_undiscussed_px_notes_statement())).all()
     return [
         ReportUndiscussedNote(
             content=clean_description(note.content),
