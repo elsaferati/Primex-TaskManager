@@ -107,6 +107,28 @@ const getCommonPrintRowSubtext = (id: CommonType) => {
   return ""
 }
 
+const ONE_H_PRINT_CHECKLISTS = [
+  {
+    title: "PYETJET PER 1H - BORD",
+    questions: [
+      "Slotin paraprak/aktual",
+      "A ke filluar me slotin aktual?",
+      "Nese jo, kur?",
+      "A kryhet sot?",
+      "A kryhet kete jave?",
+      "A arrihet RLZ javor?",
+    ],
+  },
+  {
+    title: "STAFF - HAPAT PER 1H",
+    questions: [
+      "Hap doc dhe det",
+      "Share screen side by side DET/REZULTATIN",
+      "Sqaro slotin paraprak pastaj aktual",
+    ],
+  },
+] as const
+
 const getNextWorkingDay = (from: Date) => {
   const next = new Date(from.getFullYear(), from.getMonth(), from.getDate())
   next.setDate(next.getDate() + 1)
@@ -118,6 +140,29 @@ const getNextWorkingDay = (from: Date) => {
 
 const escapePrintHtml = (value: string) =>
   value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#039;")
+
+const oneHPrintChecklistsHtml = () =>
+  `<section class="one-h-print-checklists">${ONE_H_PRINT_CHECKLISTS.map(
+    ({ title, questions }) =>
+      `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div>${questions
+        .map((question, index) => `<div class="one-h-print-checklist-item">${index + 1}. ${escapePrintHtml(question)}</div>`)
+        .join("")}</div>`
+  ).join("")}</section>`
+
+function OneHPrintChecklists() {
+  return (
+    <section className="one-h-print-checklists">
+      {ONE_H_PRINT_CHECKLISTS.map(({ title, questions }) => (
+        <div key={title} className="one-h-print-checklist">
+          <div className="one-h-print-checklist-title">{title}</div>
+          {questions.map((question, index) => (
+            <div key={question} className="one-h-print-checklist-item">{index + 1}. {question}</div>
+          ))}
+        </div>
+      ))}
+    </section>
+  )
+}
 
 type LateItem = { entryId?: string; person: string; date: string; until: string; start?: string; note?: string }
 type AbsentItem = { entryId?: string; person: string; date: string; from: string; to: string; note?: string; userId?: string }
@@ -4415,6 +4460,9 @@ export default function CommonViewPage() {
   .print-header { display: grid; grid-template-columns: 1fr auto 1fr; align-items: center; margin: 0 0 8px; }
   .print-title { font-size: 16px; font-weight: 700; text-align: center; }
   .print-date { text-align: right; font-size: 10px; }
+  .one-h-print-checklists { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin:0 0 12px; }
+  .one-h-print-checklist-title { background:#eef2ff; border-left:5px solid #2563eb; padding:8px 10px; font-size:11px; font-weight:700; }
+  .one-h-print-checklist-item { border:1px solid #64748b; margin-top:5px; padding:6px 8px; font-size:9px; font-weight:700; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
   table + table { margin-top: 12px; }
   th, td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
@@ -4426,6 +4474,7 @@ export default function CommonViewPage() {
   .print-slot-subtext { display: block; white-space: pre; overflow-wrap: normal !important; word-break: normal !important; font-size: 5.2px; font-weight: 400 !important; line-height: 1.05; }
 </style></head><body>
   <div class="print-header"><div></div><div class="print-title">1H SHTYPI — ${escapePrintHtml(reportDate)}</div><div class="print-date">${escapePrintHtml(formatDateTimeDMY(new Date()))}</div></div>
+  ${oneHPrintChecklistsHtml()}
   <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji dhe sloti</th><th colspan="6">Tasks</th></tr></thead><tbody>${buildTableRows(sortedTaskRows)}</tbody></table>
   <table><colgroup><col class="print-number-column"><col class="print-label-column"><col span="6"></colgroup><thead><tr><th>NR</th><th>LLoji</th><th colspan="6">Meeting</th></tr></thead><tbody>${buildTableRows(meetingRows, true)}</tbody></table>
 </body></html>`
@@ -7038,6 +7087,7 @@ export default function CommonViewPage() {
         .hide-when-all-days { display: none !important; }
         .swimlane-print-title { display: none; }
         .single-day-print-table { display: none; }
+        .one-h-print-checklists { display: none; }
         .print-header,
         .print-footer {
           display: none;
@@ -7166,6 +7216,31 @@ export default function CommonViewPage() {
           }
           .single-day-print .swimlane-board {
             display: none !important;
+          }
+          .one-h-print-checklists {
+            display: grid !important;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 12px;
+            margin: 0 0 12px;
+            page-break-inside: avoid;
+          }
+          .one-h-print-checklist-title {
+            background: #eef2ff !important;
+            border-left: 5px solid #2563eb !important;
+            padding: 8px 10px;
+            color: #0f172a !important;
+            font-size: 11px;
+            font-weight: 700;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .one-h-print-checklist-item {
+            border: 1px solid #64748b !important;
+            margin-top: 5px;
+            padding: 6px 8px;
+            color: #000 !important;
+            font-size: 9px;
+            font-weight: 700;
           }
           html,
           body,
@@ -12775,6 +12850,7 @@ export default function CommonViewPage() {
               {formatDateTimeDMY(printedAt)}
             </div>
           </div>
+          <OneHPrintChecklists />
           <table className="single-day-print-table">
             <colgroup>
               <col className="single-day-print-number-column" />

@@ -27,10 +27,24 @@ from app.services.task_strike_events import (
     strike_timestamp_datetime,
     split_strike_timestamp,
 )
-from app.services.primeflow_report_delivery import strike_interval_end, strike_interval_start
+from app.services.primeflow_report_delivery import (
+    _undiscussed_px_notes_statement,
+    strike_interval_end,
+    strike_interval_start,
+)
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_undiscussed_notes_query_matches_open_px_notes_without_tasks(self) -> None:
+        query = str(_undiscussed_px_notes_statement())
+
+        self.assertIn("FROM ga_notes", query)
+        self.assertIn("ga_notes.is_discussed IS false", query)
+        self.assertIn("ga_notes.is_converted_to_task IS false", query)
+        self.assertIn("NOT (EXISTS", query)
+        self.assertIn("tasks.ga_note_origin_id = ga_notes.id", query)
+        self.assertIn("ga_notes.created_at DESC", query)
+
     def test_report_management_access_includes_laurent_hoxha(self) -> None:
         laurent = SimpleNamespace(role=SimpleNamespace(value="STAFF"), full_name="Laurent Hoxha")
         other_staff = SimpleNamespace(role=SimpleNamespace(value="STAFF"), full_name="Other Staff")
@@ -255,6 +269,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("2. Share screen side by side DET/REZULTATIN", plain)
         self.assertIn(REMINDER_SECTION_TITLE, html)
         self.assertIn(BOARD_REMINDER_SECTION_TITLE, html)
+        self.assertIn('data-reminder-columns="true"', html)
+        self.assertIn('width="50%" valign="top"', html)
         self.assertIn("A ke filluar me slotin aktual?", html)
         self.assertIn("Sqaro slotin paraprak pastaj aktual", html)
         self.assertIn("color:#64748b", html)
@@ -283,6 +299,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn(UNDISCUSSED_NOTES_SECTION_TITLE, plain)
         self.assertIn("Please discuss this PX note", plain)
         self.assertIn('data-undiscussed-notes-table="true"', html)
+        self.assertIn('bgcolor="#dbeafe"', html)
         self.assertIn("Please discuss this PX note", html)
         self.assertIn(UNDISCUSSED_NOTES_SECTION_TITLE, word_xml)
         self.assertIn("Please discuss this PX note", word_xml)

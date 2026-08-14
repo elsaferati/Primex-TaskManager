@@ -60,12 +60,13 @@ BUCKETS = [
     "problems",
     "feedback",
     "priority",
+    "important",
     "bz",
 ]
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "11"
+COMMON_VIEW_CACHE_VERSION = "12"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -89,6 +90,7 @@ class CommonViewCounts(BaseModel):
     problems: int = 0
     feedback: int = 0
     priority: int = 0
+    important: int = 0
     bz: int = 0
 
 
@@ -106,6 +108,7 @@ class CommonViewItemPayload(BaseModel):
     problems: list[dict[str, Any]] = Field(default_factory=list)
     feedback: list[dict[str, Any]] = Field(default_factory=list)
     priority: list[dict[str, Any]] = Field(default_factory=list)
+    important: list[dict[str, Any]] = Field(default_factory=list)
     bz: list[dict[str, Any]] = Field(default_factory=list)
 
 
@@ -942,6 +945,34 @@ async def get_common_view(
                             "finish_period": t.finish_period,
                             "one_h_report_slot": one_h_slots_by_task_date.get((t.id, one_h_slot_date))
                             or t.one_h_report_slot,
+                            "is_deadline_important": bool(t.is_deadline_important),
+                            "due_date": t.due_date.isoformat() if t.due_date else None,
+                            "start_date": t.start_date.isoformat() if t.start_date else None,
+                            "created_at": t.created_at.isoformat() if t.created_at else None,
+                            "completed_at": t.completed_at.isoformat() if t.completed_at else None,
+                        }
+                    )
+                if (
+                    t.is_deadline_important
+                    or re.search(r"\b0?8:00\b", display_title or t.title or "")
+                ) and not (t.is_1h_report or t.is_bllok or t.is_r1 or t.is_personal):
+                    items["important"].append(
+                        {
+                            "id": f"task:{t.id}:{task_date.isoformat()}",
+                            "task_id": str(t.id),
+                            "title": display_title,
+                            "task_title": t.title,
+                            "person": owner_label,
+                            "assignees": assignee_names or None,
+                            "user_id": str(assignee_id) if assignee_id else None,
+                            "date": task_date.isoformat(),
+                            "note": t.description or None,
+                            "description": t.description,
+                            "department_id": str(dept_id) if dept_id else None,
+                            "status": task_status,
+                            "isDone": is_done,
+                            "fast_task_order": t.fast_task_order,
+                            "finish_period": t.finish_period,
                             "is_deadline_important": bool(t.is_deadline_important),
                             "due_date": t.due_date.isoformat() if t.due_date else None,
                             "start_date": t.start_date.isoformat() if t.start_date else None,

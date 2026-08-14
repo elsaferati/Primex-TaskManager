@@ -22,11 +22,25 @@ TASK_ROWS = (
     ("blocked", "BLL\n14:30 - 15:30", None),
     ("oneH", "1H 16:00", "16:00"),
     ("oneH", "1H NO SLOT", ""),
+    ("important", "DEADLINE / 08:00", None),
     ("r1", "R1=1H", None),
-    ("personal", "P:\nGA 08:15 / 13:15\nDV/LH 10:15 / 14:30", None),
+    ("personal", "P:\nGA 08:15 / 13:15\n\nDV/LH 10:15 / 14:30", None),
 )
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
 VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
+ONE_H_BOARD_CHECKLIST = (
+    "Slotin paraprak/aktual",
+    "A ke filluar me slotin aktual?",
+    "Nese jo, kur?",
+    "A kryhet sot?",
+    "A kryhet kete jave?",
+    "A arrihet RLZ javor?",
+)
+ONE_H_STAFF_CHECKLIST = (
+    "Hap doc dhe det",
+    "Share screen side by side DET/REZULTATIN",
+    "Sqaro slotin paraprak pastaj aktual",
+)
 
 # Gmail can remove style blocks from message bodies. Keep the styles that form
 # the report grid inline so the received email matches the preview.
@@ -35,9 +49,16 @@ CELL_STYLE = "border:1px solid #000;padding:5px;vertical-align:top;text-align:le
 HEADER_STYLE = f"{CELL_STYLE};text-align:center;font-weight:700"
 PERSONAL_GA_COLOR = "#D8B4FE"
 PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:{PERSONAL_GA_COLOR}"
+PERSONAL_ROW_LABEL_STYLE = (
+    f"{CELL_STYLE};font-size:10px;line-height:1.15;white-space:pre-line;"
+    "overflow-wrap:normal;word-break:normal"
+)
+DEADLINE_COLOR = "#DC2626"
+EIGHT_AM_BORDER_COLOR = "#DC2626"
 NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
 PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|/|$)", re.I)
 NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
+EIGHT_AM_MARKER_RE = re.compile(r"\b0?8:00\b")
 STATUS_COLORS = {
     "TODO": "#FFC4ED",
     "IN_PROGRESS": "#FFFF00",
@@ -89,11 +110,16 @@ def _task_status(item: dict[str, Any]) -> str:
 
 
 def _task_cell_style(item: dict[str, Any], *, personal: bool) -> tuple[str, str]:
-    """GA personal cells use a distinct purple; otherwise colour by status."""
-    if personal and _is_personal_task_for_ga(item):
-        return PERSONAL_GA_CELL_STYLE, PERSONAL_GA_COLOR
-    color = STATUS_COLORS[_task_status(item)]
-    return f"{CELL_STYLE};background-color:{color}", color
+    """Deadline tasks are red; 08:00 tasks receive a red border."""
+    if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
+        color = DEADLINE_COLOR
+    elif personal and _is_personal_task_for_ga(item):
+        color = PERSONAL_GA_COLOR
+    else:
+        color = STATUS_COLORS[_task_status(item)]
+    border = f";border:2px solid {EIGHT_AM_BORDER_COLOR}" if _is_eight_am_task(item) else ""
+    text_color = ";color:#fff;font-weight:700" if color == DEADLINE_COLOR else ""
+    return f"{CELL_STYLE};background-color:{color}{border}{text_color}", color
 
 
 def _initials(value: str) -> str:
@@ -124,6 +150,11 @@ def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)
     owners = _assignees(item)
     return f"{'/'.join(owners)}: {title}" if owners else title
+
+
+def _is_eight_am_task(item: dict[str, Any]) -> bool:
+    title = " ".join(str(item.get(key) or "") for key in ("title", "task_title"))
+    return bool(EIGHT_AM_MARKER_RE.search(title))
 
 
 def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
@@ -184,6 +215,37 @@ def _is_non_routine_meeting(item: dict[str, Any]) -> bool:
     return recurrence not in {"daily", "weekly"}
 
 
+def _one_h_checklists_html() -> str:
+    """The two preparation checklists shown above every 1H Shtypi task grid."""
+
+    def checklist(title: str, questions: tuple[str, ...]) -> str:
+        rows = "".join(
+            "<tr><td style=\"border:1px solid #64748b;padding:8px 10px;font-family:Arial,sans-serif;"
+            f"font-size:12px;font-weight:700;\">{index}. {html.escape(question)}</td></tr>"
+            for index, question in enumerate(questions, 1)
+        )
+        return (
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'style="width:100%;border-collapse:separate;border-spacing:0 6px;">'
+            '<tr><th style="background-color:#eef2ff;border-left:5px solid #2563eb;padding:10px 12px;'
+            f'font-family:Arial,sans-serif;font-size:14px;text-align:left;">{html.escape(title)}</th></tr>'
+            f"{rows}</table>"
+        )
+
+    return (
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+        'data-one-h-checklist-columns="true" style="width:100%;border-collapse:collapse;margin:0 0 14px;">'
+        '<tr>'
+        '<td width="50%" valign="top" style="width:50%;padding:0 6px 0 0;vertical-align:top;">'
+        f"{checklist('PYETJET PER 1H - BORD', ONE_H_BOARD_CHECKLIST)}"
+        '</td>'
+        '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
+        f"{checklist('STAFF - HAPAT PER 1H', ONE_H_STAFF_CHECKLIST)}"
+        '</td>'
+        '</tr></table>'
+    )
+
+
 def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False) -> str:
     header = "Meeting" if meeting else "Tasks"
     label_header = "LLoji" if meeting else "LLoji dhe sloti"
@@ -214,7 +276,7 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
             cells.extend(f'<td style="{CELL_STYLE}"></td>' for _ in range(6 - len(cells)))
             row_header = (
                 f'<th rowspan="{len(chunks)}" style="{CELL_STYLE}">{number}</th>'
-                f'<th rowspan="{len(chunks)}" style="{CELL_STYLE}">{html.escape(label).replace(chr(10), "<br>")}</th>'
+                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else CELL_STYLE}">{html.escape(label).replace(chr(10), "<br>")}</th>'
                 if chunk_index == 0 else ""
             )
             body.append(f"<tr>{row_header}{''.join(cells)}</tr>")
@@ -252,6 +314,13 @@ def _excel_table_attachment(
         for status, color in STATUS_COLORS.items()
     }
     ga_fill = PatternFill("solid", fgColor=PERSONAL_GA_COLOR.removeprefix("#"))
+    deadline_fill = PatternFill("solid", fgColor=DEADLINE_COLOR.removeprefix("#"))
+    eight_am_border = Border(
+        left=Side(style="medium", color=EIGHT_AM_BORDER_COLOR.removeprefix("#")),
+        right=Side(style="medium", color=EIGHT_AM_BORDER_COLOR.removeprefix("#")),
+        top=Side(style="medium", color=EIGHT_AM_BORDER_COLOR.removeprefix("#")),
+        bottom=Side(style="medium", color=EIGHT_AM_BORDER_COLOR.removeprefix("#")),
+    )
     non_routine_meeting_border = Border(
         left=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
         right=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
@@ -259,6 +328,33 @@ def _excel_table_attachment(
         bottom=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
     )
     headers = ["NR", "LLoji dhe sloti", "Task 1", "Task 2", "Task 3", "Task 4", "Task 5", "Task 6"]
+
+    def write_checklists(row_number: int) -> int:
+        """Write the board and staff preparation lists above the task table."""
+        checklist_fill = PatternFill("solid", fgColor="EEF2FF")
+        for start_column, end_column, title, questions in (
+            (1, 4, "PYETJET PER 1H - BORD", ONE_H_BOARD_CHECKLIST),
+            (5, 8, "STAFF - HAPAT PER 1H", ONE_H_STAFF_CHECKLIST),
+        ):
+            sheet.merge_cells(start_row=row_number, start_column=start_column, end_row=row_number, end_column=end_column)
+            title_cell = sheet.cell(row_number, start_column, title)
+            title_cell.fill = checklist_fill
+            title_cell.font = Font(bold=True, size=11)
+            title_cell.alignment = Alignment(vertical="center")
+            title_cell.border = border
+            for index, question in enumerate(questions, 1):
+                question_row = row_number + index
+                sheet.merge_cells(
+                    start_row=question_row,
+                    start_column=start_column,
+                    end_row=question_row,
+                    end_column=end_column,
+                )
+                question_cell = sheet.cell(question_row, start_column, f"{index}. {question}")
+                question_cell.font = Font(bold=True, size=10)
+                question_cell.alignment = Alignment(vertical="center", wrap_text=True)
+                question_cell.border = border
+        return row_number + len(ONE_H_BOARD_CHECKLIST) + 1
 
     def write_section(
         rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool, row_number: int
@@ -277,7 +373,10 @@ def _excel_table_attachment(
             for chunk_index, chunk in enumerate(chunks):
                 if chunk_index == 0:
                     sheet.cell(row_number, 1, number)
-                    sheet.cell(row_number, 2, label)
+                    label_cell = sheet.cell(row_number, 2, label)
+                    if personal:
+                        label_cell.font = Font(size=10)
+                        label_cell.alignment = Alignment(vertical="top", wrap_text=True)
                 for item_index, item in enumerate(chunk, 3):
                     value = (
                         f"{_report_text(_first_line(item.get('title')))} {str(item.get('time') or '').strip()}".strip()
@@ -285,7 +384,13 @@ def _excel_table_attachment(
                     )
                     cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
                     if not meeting:
-                        cell.fill = ga_fill if personal and _is_personal_task_for_ga(item) else fills[_task_status(item)]
+                        if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
+                            cell.fill = deadline_fill
+                            cell.font = Font(color="FFFFFF", bold=True)
+                        else:
+                            cell.fill = ga_fill if personal and _is_personal_task_for_ga(item) else fills[_task_status(item)]
+                        if _is_eight_am_task(item):
+                            cell.border = eight_am_border
                     elif _is_non_routine_meeting(item):
                         cell.border = non_routine_meeting_border
                 for column in range(1, 9):
@@ -296,7 +401,13 @@ def _excel_table_attachment(
                         and column - 3 < len(chunk)
                         and _is_non_routine_meeting(chunk[column - 3])
                     )
-                    if not is_highlighted_meeting_cell:
+                    is_eight_am_task_cell = (
+                        not meeting
+                        and column >= 3
+                        and column - 3 < len(chunk)
+                        and _is_eight_am_task(chunk[column - 3])
+                    )
+                    if not is_highlighted_meeting_cell and not is_eight_am_task_cell:
                         cell.border = border
                     cell.alignment = Alignment(vertical="top", wrap_text=True)
                 row_number += 1
@@ -305,12 +416,13 @@ def _excel_table_attachment(
                 sheet.merge_cells(start_row=first_row, start_column=2, end_row=row_number - 1, end_column=2)
         return row_number
 
-    next_row = write_section(task_rows, meeting=False, row_number=3)
+    task_header_row = write_checklists(3)
+    next_row = write_section(task_rows, meeting=False, row_number=task_header_row)
     write_section(meeting_rows, meeting=True, row_number=next_row + 1)
     widths = [6, 22, 29, 29, 29, 29, 29, 29]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
-    sheet.freeze_panes = "C4"
+    sheet.freeze_panes = f"C{task_header_row + 1}"
 
     output = BytesIO()
     workbook.save(output)
@@ -338,8 +450,18 @@ async def build_tomorrow_print_report(
     report_date = target_date.strftime("%d.%m.%Y")
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">1H SHTYPI — {report_date}</div>
-{_html_table(task_rows)}{_html_table(meeting_rows, meeting=True)}</body></html>"""
-    plain_rows = [f"1H SHTYPI - {report_date}", "", "TASKS"]
+{_one_h_checklists_html()}{_html_table(task_rows)}{_html_table(meeting_rows, meeting=True)}</body></html>"""
+    plain_rows = [
+        f"1H SHTYPI - {report_date}",
+        "",
+        "PYETJET PER 1H - BORD",
+        *(f"{index}. {question}" for index, question in enumerate(ONE_H_BOARD_CHECKLIST, 1)),
+        "",
+        "STAFF - HAPAT PER 1H",
+        *(f"{index}. {question}" for index, question in enumerate(ONE_H_STAFF_CHECKLIST, 1)),
+        "",
+        "TASKS",
+    ]
     for label, values, personal in task_rows:
         plain_rows.append(f"{label}: " + "; ".join(_task_title(item, personal=personal) for item in values))
     plain_rows.append("")
