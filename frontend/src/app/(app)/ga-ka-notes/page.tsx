@@ -450,18 +450,24 @@ function synchronizeNumberedListProgress(parsed: ParsedMarkedNoteContent): Parse
   const progressLabel = progress.completed > 0 ? `${progress.completed}/${progress.total}` : String(progress.total)
   let progressEnd = titleMatch[0].length
   const slashParts = titleLine.slice(titleMatch[1].length).match(
-    /^\d{1,3}(?:\s*\/\s*[A-Za-zÀ-ž0-9_-]+){2,}/
+    /^\d{1,3}(?:\s*\/\s*[A-Za-zÀ-ž0-9_-]+)+/
   )
 
   if (slashParts) {
-    // A chained suffix such as `/68/17` is entered manually. Keep its last
-    // two parts intact while replacing only the leading automatic progress:
-    // `4/68/17` -> `1/4/68/17` after the first checklist point is struck.
     const separators = Array.from(slashParts[0].matchAll(/\s*\/\s*/g))
-    const automaticPartCount = separators.length >= 3 ? 2 : 1
-    progressEnd = titleMatch[1].length + (
-      automaticPartCount === 2 ? separators[1].index : separators[0].index
-    )
+    const firstValue = Number.parseInt(slashParts[0], 10)
+    const hasManualSuffix = separators.length >= 2 || firstValue === progress.total || progress.completed === 0
+
+    if (hasManualSuffix) {
+      // The last slash part is entered manually. Keep it intact while replacing
+      // only the leading automatic progress: `68/20` stays `68/20`, then becomes
+      // `1/68/20` after the first checklist point is struck. A plain automatic
+      // progress such as `1/68` continues to be replaced as one complete value.
+      const automaticPartCount = separators.length >= 2 ? 2 : 1
+      progressEnd = titleMatch[1].length + (
+        automaticPartCount === 2 ? separators[1].index : separators[0].index
+      )
+    }
   }
 
   const titleSuffix = titleLine.slice(progressEnd).trimStart()
