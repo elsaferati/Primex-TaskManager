@@ -2,7 +2,7 @@ import uuid
 from datetime import date, time
 
 from fastapi import APIRouter, Depends, HTTPException, status
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -61,6 +61,23 @@ def _row_out(row: GaTimeTableRow | GaTimeTableRowData) -> GaTimeTableRowOut:
         start_time=row.start_time,
         end_time=row.end_time,
         is_special=row.is_special,
+    )
+
+
+def _entry_out(entry: GaTimeSlotTemplate) -> GaTimeSlotEntryOut:
+    return GaTimeSlotEntryOut(
+        id=entry.id,
+        user_id=entry.user_id,
+        day_of_week=entry.day_of_week,
+        start_time=entry.start_time,
+        end_time=entry.end_time,
+        content=entry.content,
+        background_color=entry.background_color,
+        text_color=entry.text_color,
+        is_bold=entry.is_bold,
+        is_italic=entry.is_italic,
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
     )
 
 
@@ -163,25 +180,87 @@ async def create_ga_time_table_row(
         await db.flush()
 
     visible_rows = [row for row in stored_rows if not row.is_special]
-    if any(
-        existing.start_time < payload.end_time and payload.start_time < existing.end_time
+    overlapping_rows = [
+        existing
         for existing in visible_rows
-    ):
-        raise HTTPException(
-            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-            detail="Rows cannot overlap",
-        )
+        if existing.start_time < payload.end_time and payload.start_time < existing.end_time
+    ]
 
-    new_row = GaTimeTableRow(
-        sort_order=len(visible_rows) + 2,
-        nr_label="",
-        label=format_ga_time_label(payload.start_time, payload.end_time),
-        start_time=payload.start_time,
-        end_time=payload.end_time,
-        is_special=False,
-    )
-    db.add(new_row)
-    visible_rows.append(new_row)
+    if overlapping_rows:
+        containing_row = overlapping_rows[0] if len(overlapping_rows) == 1 else None
+        if (
+            containing_row is None
+            or payload.start_time < containing_row.start_time
+            or payload.end_time > containing_row.end_time
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+                detail="Rows cannot partially overlap",
+            )
+        if (
+            payload.start_time == containing_row.start_time
+            and payload.end_time == containing_row.end_time
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This time row already exists",
+            )
+
+        original_start = containing_row.start_time
+        original_end = containing_row.end_time
+        containing_row.start_time = payload.start_time
+        containing_row.end_time = payload.end_time
+
+        split_rows: list[GaTimeTableRow] = []
+        if original_start < payload.start_time:
+            split_rows.append(
+                GaTimeTableRow(
+                    sort_order=0,
+                    nr_label="",
+                    label=format_ga_time_label(original_start, payload.start_time),
+                    start_time=original_start,
+                    end_time=payload.start_time,
+                    is_special=False,
+                )
+            )
+        if payload.end_time < original_end:
+            split_rows.append(
+                GaTimeTableRow(
+                    sort_order=0,
+                    nr_label="",
+                    label=format_ga_time_label(payload.end_time, original_end),
+                    start_time=payload.end_time,
+                    end_time=original_end,
+                    is_special=False,
+                )
+            )
+        db.add_all(split_rows)
+        visible_rows.extend(split_rows)
+
+        # Entries previously attached to the larger row stay with the segment
+        # explicitly selected by the user. The newly created remainder is empty.
+        ga_user = await _resolve_ga_user(db)
+        if ga_user is not None:
+            await db.execute(
+                update(GaTimeSlotTemplate)
+                .where(
+                    GaTimeSlotTemplate.user_id == ga_user.id,
+                    GaTimeSlotTemplate.start_time == original_start,
+                    GaTimeSlotTemplate.end_time == original_end,
+                )
+                .values(start_time=payload.start_time, end_time=payload.end_time)
+            )
+    else:
+        new_row = GaTimeTableRow(
+            sort_order=len(visible_rows) + 2,
+            nr_label="",
+            label=format_ga_time_label(payload.start_time, payload.end_time),
+            start_time=payload.start_time,
+            end_time=payload.end_time,
+            is_special=False,
+        )
+        db.add(new_row)
+        visible_rows.append(new_row)
     visible_rows.sort(key=lambda row: (row.start_time, row.end_time))
     for idx, row in enumerate(visible_rows, start=1):
         row.sort_order = idx + 1
@@ -209,19 +288,7 @@ async def list_ga_time_slots(
             .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.created_at)
         )
     ).scalars().all()
-    return [
-        GaTimeSlotEntryOut(
-            id=row.id,
-            user_id=row.user_id,
-            day_of_week=row.day_of_week,
-            start_time=row.start_time,
-            end_time=row.end_time,
-            content=row.content,
-            created_at=row.created_at,
-            updated_at=row.updated_at,
-        )
-        for row in rows
-    ]
+    return [_entry_out(row) for row in rows]
 
 
 @router.post("", response_model=GaTimeSlotEntryOut)
@@ -245,20 +312,15 @@ async def create_ga_time_slot(
         start_time=payload.start_time,
         end_time=payload.end_time,
         content=content,
+        background_color=payload.background_color,
+        text_color=payload.text_color,
+        is_bold=payload.is_bold,
+        is_italic=payload.is_italic,
     )
     db.add(entry)
     await db.commit()
     await db.refresh(entry)
-    return GaTimeSlotEntryOut(
-        id=entry.id,
-        user_id=entry.user_id,
-        day_of_week=entry.day_of_week,
-        start_time=entry.start_time,
-        end_time=entry.end_time,
-        content=entry.content,
-        created_at=entry.created_at,
-        updated_at=entry.updated_at,
-    )
+    return _entry_out(entry)
 
 
 @router.patch("/{entry_id}", response_model=GaTimeSlotEntryOut)
@@ -281,18 +343,17 @@ async def update_ga_time_slot(
     if not content:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Content is required")
     entry.content = content
+    if payload.background_color is not None:
+        entry.background_color = payload.background_color
+    if payload.text_color is not None:
+        entry.text_color = payload.text_color
+    if payload.is_bold is not None:
+        entry.is_bold = payload.is_bold
+    if payload.is_italic is not None:
+        entry.is_italic = payload.is_italic
     await db.commit()
     await db.refresh(entry)
-    return GaTimeSlotEntryOut(
-        id=entry.id,
-        user_id=entry.user_id,
-        day_of_week=entry.day_of_week,
-        start_time=entry.start_time,
-        end_time=entry.end_time,
-        content=entry.content,
-        created_at=entry.created_at,
-        updated_at=entry.updated_at,
-    )
+    return _entry_out(entry)
 
 
 @router.delete("/{entry_id}")

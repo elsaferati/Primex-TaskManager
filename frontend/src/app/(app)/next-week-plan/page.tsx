@@ -2357,7 +2357,7 @@ export default function NextWeekPlanPage() {
               </div>
             )}
           </div>
-          <div className="flex justify-end">
+          <div className="flex justify-start">
             <Button onClick={() => void createNote()} disabled={posting}>
               {posting ? "Saving..." : "Save note"}
             </Button>
