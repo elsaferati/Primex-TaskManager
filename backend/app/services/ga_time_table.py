@@ -16,6 +16,10 @@ class GaTimeTableRowData:
     end_time: time
     is_special: bool = False
     comment: str = ""
+    comment_background_color: str = "#FFFFFF"
+    comment_text_color: str = "#0F172A"
+    comment_is_bold: bool = False
+    comment_is_italic: bool = False
 
 
 def _time(value: str) -> time:
