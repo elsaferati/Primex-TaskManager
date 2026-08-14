@@ -15,6 +15,7 @@ from app.schemas.ga_time_slot import (
     GaTimeSlotEntryIn,
     GaTimeSlotEntryOut,
     GaTimeSlotEntryUpdate,
+    GaTimeTableRowCommentUpdate,
     GaTimeTableRowIn,
     GaTimeTableRowOut,
     GaTimeTableRowsUpdate,
@@ -61,6 +62,7 @@ def _row_out(row: GaTimeTableRow | GaTimeTableRowData) -> GaTimeTableRowOut:
         start_time=row.start_time,
         end_time=row.end_time,
         is_special=row.is_special,
+        comment=getattr(row, "comment", "") or "",
     )
 
 
@@ -106,6 +108,13 @@ async def update_ga_time_table_rows(
         if idx > 0 and visible_rows[idx - 1].end_time > row.start_time:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Rows cannot overlap")
 
+    existing_rows = (
+        await db.execute(select(GaTimeTableRow))
+    ).scalars().all()
+    existing_comments = {
+        (row.start_time, row.end_time, row.is_special): row.comment or ""
+        for row in existing_rows
+    }
     await db.execute(delete(GaTimeTableRow))
     rows: list[GaTimeTableRow] = [
         GaTimeTableRow(
@@ -115,6 +124,7 @@ async def update_ga_time_table_rows(
             start_time=time(0, 0),
             end_time=time(0, 1),
             is_special=True,
+            comment=existing_comments.get((time(0, 0), time(0, 1), True), ""),
         ),
         GaTimeTableRow(
             sort_order=1,
@@ -123,6 +133,7 @@ async def update_ga_time_table_rows(
             start_time=time(0, 1),
             end_time=time(0, 2),
             is_special=True,
+            comment=existing_comments.get((time(0, 1), time(0, 2), True), ""),
         ),
     ]
     for idx, row in enumerate(visible_rows, start=1):
@@ -134,6 +145,10 @@ async def update_ga_time_table_rows(
                 start_time=row.start_time,
                 end_time=row.end_time,
                 is_special=False,
+                comment=existing_comments.get(
+                    (row.start_time, row.end_time, False),
+                    row.comment.strip(),
+                ),
             )
         )
     db.add_all(rows)
@@ -173,6 +188,7 @@ async def create_ga_time_table_row(
                 start_time=row.start_time,
                 end_time=row.end_time,
                 is_special=row.is_special,
+                comment=row.comment,
             )
             for row in DEFAULT_GA_TIME_TABLE_ROWS
         ]
@@ -258,6 +274,7 @@ async def create_ga_time_table_row(
             start_time=payload.start_time,
             end_time=payload.end_time,
             is_special=False,
+            comment=payload.comment.strip(),
         )
         db.add(new_row)
         visible_rows.append(new_row)
@@ -270,6 +287,51 @@ async def create_ga_time_table_row(
     await db.commit()
     rows = await get_ga_time_table_rows(db)
     return [_row_out(row) for row in rows]
+
+
+@router.patch("/rows/comment", response_model=GaTimeTableRowOut)
+async def update_ga_time_table_row_comment(
+    payload: GaTimeTableRowCommentUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GaTimeTableRowOut:
+    _ensure_can_edit(current_user)
+    rows = (
+        await db.execute(
+            select(GaTimeTableRow)
+            .order_by(GaTimeTableRow.sort_order, GaTimeTableRow.start_time)
+            .with_for_update()
+        )
+    ).scalars().all()
+    if not rows:
+        rows = [
+            GaTimeTableRow(
+                sort_order=row.sort_order,
+                nr_label=row.nr_label,
+                label=row.label,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                is_special=row.is_special,
+                comment=row.comment,
+            )
+            for row in DEFAULT_GA_TIME_TABLE_ROWS
+        ]
+        db.add_all(rows)
+        await db.flush()
+
+    target = next(
+        (
+            row for row in rows
+            if row.start_time == payload.start_time and row.end_time == payload.end_time
+        ),
+        None,
+    )
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time row not found")
+    target.comment = payload.comment.strip()
+    await db.commit()
+    await db.refresh(target)
+    return _row_out(target)
 
 
 @router.get("", response_model=list[GaTimeSlotEntryOut])
