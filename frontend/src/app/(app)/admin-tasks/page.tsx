@@ -5069,8 +5069,8 @@ export default function AdminTasksPage() {
     }
 
     return (
-      <div className="admin-week-table">
-        <div className="print-section" data-print-section="all-tasks">
+      <div className="admin-week-table flex flex-col">
+        <div className="print-section order-1" data-print-section="all-tasks">
           <AdminTasksSection
             title="ALL TASKS"
             description=""
@@ -5176,7 +5176,7 @@ export default function AdminTasksPage() {
           ) : null}
           </AdminTasksSection>
         </div>
-        <div className="print-section" data-print-section="common">
+        <div className="print-section order-3" data-print-section="common">
           <div className="print-only week-table-view">
             <div className="print-page">
               <div className="print-header">
@@ -5332,7 +5332,7 @@ export default function AdminTasksPage() {
             </AdminTasksSection>
           </div>
         </div>
-        <div className="print-section" data-print-section="ga-time">
+        <div className="print-section order-2" data-print-section="ga-time">
           <div className="print-only">
             <div className="print-page">
               <div className="print-header">
