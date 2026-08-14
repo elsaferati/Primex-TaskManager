@@ -714,6 +714,12 @@ def _status_for_day(
 ) -> str:
     normalized = _normalize_task_status(status)
     normalized_daily = _normalize_task_status(daily_status) if daily_status is not None else None
+    completed_date = _as_local_date(completed_at) if completed_at is not None else None
+
+    # An explicit task completion is authoritative for its completion day. This
+    # also repairs display of legacy rows whose daily status remained stale.
+    if normalized == "DONE" and completed_date is not None and day_date == completed_date:
+        return "DONE"
 
     if normalized_daily == "DONE":
         return "DONE"
@@ -724,7 +730,6 @@ def _status_for_day(
     if normalized_daily is not None:
         return "TODO"
 
-    completed_date = _as_local_date(completed_at) if completed_at is not None else None
     if completed_date is not None and day_date is not None:
         if day_date == completed_date:
             return "DONE"
@@ -2172,6 +2177,10 @@ async def weekly_table_planner(
                 prior_status_by_task[task_id_row] = TaskStatus.TODO
 
     def _daily_status_for_task_day(task: Task, day_date: date) -> TaskStatus | None:
+        completed_day = _as_local_date(task.completed_at)
+        task_status = task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
+        if task_status == TaskStatus.DONE.value and completed_day == day_date:
+            return TaskStatus.DONE
         for check_date in sorted([d for d in working_days if d <= day_date], reverse=True):
             key = (task.id, check_date)
             if key in daily_status_by_task_day:

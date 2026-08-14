@@ -80,3 +80,47 @@ async def upsert_task_daily_progress(
     elif (existing.daily_status or "").upper() != TaskStatus.WAITING_CONFIRMATION.value:
         existing.daily_status = status.value
     existing.finish_period = finish_period_value
+
+
+async def upsert_explicit_task_daily_status(
+    db: AsyncSession,
+    *,
+    task_id: uuid.UUID,
+    day_date: date,
+    status: TaskStatus,
+    finish_period: str | None = None,
+) -> None:
+    """Keep the planner's per-day status aligned with an explicit task status change.
+
+    Status changes made outside the main task PATCH endpoint (for example through
+    the GA/PX note bundle editor) must update the same daily row used by Weekly
+    Planner. Existing product counters are intentionally preserved.
+    """
+
+    finish_period_value = finish_period if finish_period in {"AM", "PM", "ALL"} else "ALL"
+    existing = (
+        await db.execute(
+            select(TaskDailyProgress).where(
+                TaskDailyProgress.task_id == task_id,
+                TaskDailyProgress.day_date == day_date,
+            )
+        )
+    ).scalar_one_or_none()
+
+    if existing is None:
+        db.add(
+            TaskDailyProgress(
+                task_id=task_id,
+                day_date=day_date,
+                completed_value=0,
+                total_value=0,
+                completed_delta=0,
+                daily_status=status.value,
+                finish_period=finish_period_value,
+            )
+        )
+        return
+
+    existing.daily_status = status.value
+    if existing.finish_period is None:
+        existing.finish_period = finish_period_value

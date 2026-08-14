@@ -1,8 +1,12 @@
 import unittest
+import uuid
+from datetime import date, datetime, timezone
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
-from app.api.routers.planners import _override_daily_status_from_progress
+from app.api.routers.planners import _override_daily_status_from_progress, _status_for_day
 from app.models.enums import TaskStatus
-from app.services.task_daily_progress import _derive_daily_status
+from app.services.task_daily_progress import _derive_daily_status, upsert_explicit_task_daily_status
 
 
 class TestDeriveDailyStatus(unittest.TestCase):
@@ -43,6 +47,50 @@ class TestOverrideDailyStatusFromProgress(unittest.TestCase):
             _override_daily_status_from_progress(TaskStatus.IN_PROGRESS, None),
             TaskStatus.IN_PROGRESS,
         )
+
+
+class TestCompletedTaskStatusForDay(unittest.TestCase):
+    def test_completion_day_overrides_stale_in_progress_row(self) -> None:
+        completed_at = datetime(2026, 8, 14, 9, 30, tzinfo=timezone.utc)
+
+        self.assertEqual(
+            _status_for_day(
+                status="DONE",
+                daily_status="IN_PROGRESS",
+                completed_at=completed_at,
+                day_date=date(2026, 8, 14),
+            ),
+            "DONE",
+        )
+
+
+class TestExplicitDailyStatusSync(unittest.IsolatedAsyncioTestCase):
+    async def test_existing_progress_keeps_product_counts_and_becomes_done(self) -> None:
+        existing = SimpleNamespace(
+            completed_value=2,
+            total_value=5,
+            completed_delta=2,
+            daily_status="IN_PROGRESS",
+            finish_period="PM",
+        )
+        result = Mock()
+        result.scalar_one_or_none.return_value = existing
+        db = SimpleNamespace(execute=AsyncMock(return_value=result), add=Mock())
+
+        await upsert_explicit_task_daily_status(
+            db,
+            task_id=uuid.uuid4(),
+            day_date=date(2026, 8, 14),
+            status=TaskStatus.DONE,
+            finish_period="AM",
+        )
+
+        self.assertEqual(existing.daily_status, "DONE")
+        self.assertEqual(existing.completed_value, 2)
+        self.assertEqual(existing.total_value, 5)
+        self.assertEqual(existing.completed_delta, 2)
+        self.assertEqual(existing.finish_period, "PM")
+        db.add.assert_not_called()
 
 
 if __name__ == "__main__":

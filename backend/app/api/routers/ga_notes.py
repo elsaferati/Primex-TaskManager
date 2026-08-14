@@ -36,6 +36,7 @@ from app.schemas.ga_note import (
 from app.services.audit import add_audit_log
 from app.services.ga_note_task import ga_note_default_task_description, ga_note_task_title
 from app.services.task_strike_events import record_description_strike_events, record_title_strike_events
+from app.services.task_daily_progress import upsert_explicit_task_daily_status
 from app.services.ga_note_task_instances import (
     GaNoteAssigneeExecutionState,
     apply_ga_note_assignee_execution_states,
@@ -558,6 +559,10 @@ async def update_ga_note_task_bundle(
         try:
             from app.api.routers.tasks import _validate_waiting_confirmation_assignee
 
+            status_before_by_task_id = {
+                task.id: task.status.value if isinstance(task.status, TaskStatus) else str(task.status)
+                for task in active_tasks
+            }
             for item in payload.assignee_states:
                 if item.status == TaskStatus.WAITING_CONFIRMATION:
                     await _validate_waiting_confirmation_assignee(db, item.confirmation_assignee_id)
@@ -581,6 +586,25 @@ async def update_ga_note_task_bundle(
                     for item in payload.assignee_states
                 ],
             )
+            tasks_by_assignee = {
+                task.assigned_to: task
+                for task in active_tasks
+                if task.is_active and task.assigned_to is not None
+            }
+            today = datetime.now(timezone.utc).date()
+            for item in payload.assignee_states:
+                matching_task = tasks_by_assignee.get(item.assignee_id)
+                if matching_task is None:
+                    continue
+                if status_before_by_task_id.get(matching_task.id) == item.status.value:
+                    continue
+                await upsert_explicit_task_daily_status(
+                    db,
+                    task_id=matching_task.id,
+                    day_date=today,
+                    status=item.status,
+                    finish_period=item.finish_period.value if item.finish_period else None,
+                )
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
 
@@ -840,6 +864,14 @@ async def mark_note_waiting_tasks_done(
     for task in tasks:
         if task.status == TaskStatus.WAITING_CONFIRMATION:
             task.status = TaskStatus.DONE
+            task.completed_at = task.completed_at or datetime.now(timezone.utc)
+            await upsert_explicit_task_daily_status(
+                db,
+                task_id=task.id,
+                day_date=datetime.now(timezone.utc).date(),
+                status=TaskStatus.DONE,
+                finish_period=task.finish_period.value if hasattr(task.finish_period, "value") else task.finish_period,
+            )
             updated_count += 1
 
     await db.commit()
