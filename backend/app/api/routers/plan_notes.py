@@ -399,11 +399,24 @@ async def update_plan_note_task_bundle(
 
     fields_set = getattr(payload, "model_fields_set", getattr(payload, "__fields_set__", set()))
     old_content = note.content
+    old_project_id = note.project_id
     if "content" in fields_set:
         cleaned_content = (payload.content or "").strip()
         if not cleaned_content:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Note text cannot be empty")
         note.content = cleaned_content
+
+    if "project_id" in fields_set:
+        project = None
+        if payload.project_id is not None:
+            project = (await db.execute(select(Project).where(Project.id == payload.project_id))).scalar_one_or_none()
+            if project is None:
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
+            if project.department_id is not None:
+                ensure_department_access(user, project.department_id)
+        note.project_id = payload.project_id
+        if project is not None:
+            note.department_id = project.department_id
 
     if payload.assignee_ids is not None:
         if not payload.assignee_ids:
@@ -447,6 +460,17 @@ async def update_plan_note_task_bundle(
         description_is_set=description_is_set,
         description=payload.description,
     )
+    if "project_id" in fields_set:
+        for task in active_tasks:
+            changed = False
+            if task.project_id != payload.project_id:
+                task.project_id = payload.project_id
+                changed = True
+            if project is not None and task.department_id != project.department_id:
+                task.department_id = project.department_id
+                changed = True
+            if changed:
+                updated_count += 1
 
     if payload.assignee_states is not None:
         try:
@@ -525,9 +549,13 @@ async def update_plan_note_task_bundle(
         entity_type="plan_note",
         entity_id=note.id,
         action="task_bundle_updated",
-        before={"content": old_content},
+        before={
+            "content": old_content,
+            "project_id": str(old_project_id) if old_project_id else None,
+        },
         after={
             "content": note.content,
+            "project_id": str(note.project_id) if note.project_id else None,
             "assignees": [str(task.assigned_to) for task in active_tasks if task.assigned_to],
         },
     )
