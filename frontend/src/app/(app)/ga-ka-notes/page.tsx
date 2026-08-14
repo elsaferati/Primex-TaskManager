@@ -1038,6 +1038,7 @@ export default function GaKaNotesPage() {
   const [editDoneRanges, setEditDoneRanges] = React.useState<DoneMarkRange[]>([])
   const [editAddedRanges, setEditAddedRanges] = React.useState<TextMarkRange[]>([])
   const [editDescription, setEditDescription] = React.useState("")
+  const [editTaskProjectId, setEditTaskProjectId] = React.useState("NONE")
   const [editTaskAssigneeIds, setEditTaskAssigneeIds] = React.useState<string[]>([])
   const [editTaskAssigneeStates, setEditTaskAssigneeStates] = React.useState<Record<string, GaAssigneeTaskState>>({})
   const [savingEdit, setSavingEdit] = React.useState(false)
@@ -1735,6 +1736,7 @@ export default function GaKaNotesPage() {
     setEditAddedRanges(parsedContent.addedRanges)
     const taskInfo = noteTaskInfo.get(note.id)
     setEditDescription(taskInfo?.description || "")
+    setEditTaskProjectId(taskInfo?.taskProjectId ?? note.project_id ?? "NONE")
     setEditTaskAssigneeStates(taskInfo?.assigneeStates ?? {})
     setEditTaskAssigneeIds(
       Array.from(new Set((taskInfo?.assignees ?? []).map((assignee) => assignee.id).filter(Boolean)))
@@ -1977,6 +1979,7 @@ export default function GaKaNotesPage() {
         ? {
             content: serializedContent,
             description: editDescription.trim() || null,
+            project_id: editTaskProjectId === "NONE" ? null : editTaskProjectId,
             assignee_ids: editTaskAssigneeIds,
             assignee_states: editTaskAssigneeIds.map((assigneeId) => {
               const state = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
@@ -2018,6 +2021,7 @@ export default function GaKaNotesPage() {
         setEditNoteId(null)
         setEditDoneRanges([])
         setEditAddedRanges([])
+        setEditTaskProjectId("NONE")
         setEditTaskAssigneeIds([])
         setEditTaskAssigneeStates({})
       } else {
@@ -2303,7 +2307,7 @@ export default function GaKaNotesPage() {
     }
   }
 
-  // Project list is used only in the task creation dialog (filtered separately).
+  // Project list is used by task creation and task editing dialogs.
   const taskDialogNote = taskDialogNoteId ? notes.find((n) => n.id === taskDialogNoteId) || null : null
   const taskDepartmentLocked = false
   const effectiveTaskDepartmentIds = React.useMemo(() => {
@@ -2335,6 +2339,13 @@ export default function GaKaNotesPage() {
       return aLabel.localeCompare(bLabel)
     })
   }, [primaryDepartment, primaryDepartmentId, projects])
+
+  const editTaskProjectOptions = React.useMemo(
+    () => projects
+      .filter((project) => !project.is_template && (project.current_phase || "").toUpperCase() !== "CLOSED")
+      .sort((a, b) => (resolveProjectTitle(a) || "Untitled project").localeCompare(resolveProjectTitle(b) || "Untitled project")),
+    [projects]
+  )
 
   // Keep projects in sync when opening dialog or changing department
   React.useEffect(() => {
@@ -4176,6 +4187,7 @@ export default function GaKaNotesPage() {
           setEditDoneRanges([])
           setEditAddedRanges([])
           setEditDescription("")
+          setEditTaskProjectId("NONE")
           setEditTaskAssigneeIds([])
           setEditTaskAssigneeStates({})
         }
@@ -4244,6 +4256,22 @@ export default function GaKaNotesPage() {
               <div className="space-y-2">
                 <Label>Description</Label>
                 <BoldOnlyEditor value={editDescription} onChange={setEditDescription} />
+              </div>
+            ) : null}
+            {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
+              <div className="space-y-2">
+                <Label>PRJK</Label>
+                <Select value={editTaskProjectId} onValueChange={setEditTaskProjectId} disabled={savingEdit}>
+                  <SelectTrigger><SelectValue placeholder="Select project" /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="NONE">No project</SelectItem>
+                    {editTaskProjectOptions.map((project) => (
+                      <SelectItem key={project.id} value={project.id}>
+                        {resolveProjectTitle(project) || "Untitled project"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             ) : null}
             {editNoteId && noteTaskInfo.get(editNoteId)?.taskId ? (
@@ -4452,6 +4480,7 @@ export default function GaKaNotesPage() {
                 setEditDoneRanges([])
                 setEditAddedRanges([])
                 setEditDescription("")
+                setEditTaskProjectId("NONE")
                 setEditTaskAssigneeIds([])
                 setEditTaskAssigneeStates({})
               }}>

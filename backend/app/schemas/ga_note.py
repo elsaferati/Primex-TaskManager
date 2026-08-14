@@ -98,6 +98,7 @@ class GaNoteTaskBundleUpdate(BaseModel):
 
     content: str | None = None
     description: str | None = None
+    project_id: uuid.UUID | None = None
     assignee_ids: list[uuid.UUID] | None = None
     assignee_states: list[GaNoteTaskAssigneeStateUpdate] | None = None
     expected_updated_at: datetime | None = None
