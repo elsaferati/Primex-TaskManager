@@ -98,6 +98,7 @@ def _board_reminder_questions() -> list[ReportReminderQuestion]:
         ReportReminderQuestion(text="A kryhet sot?"),
         ReportReminderQuestion(text="A kryhet kete jave?"),
         ReportReminderQuestion(text="A arrihet RLZ javor?"),
+        ReportReminderQuestion(text="Done? / Strikes? / Notes te reja?"),
     ]
 
 
@@ -617,6 +618,28 @@ def render_html(document: ReportDocument) -> str:
             )
         return "".join(chunks)
 
+    def board_reminder_column(questions: list[ReportReminderQuestion]) -> str:
+        split_at = (len(questions) + 1) // 2
+        columns = []
+        for start_index, column_questions in ((0, questions[:split_at]), (split_at, questions[split_at:])):
+            cards = []
+            for index, question in enumerate(column_questions, start_index + 1):
+                guidance = (
+                    detail_row(html.escape(question.guidance).replace(chr(10), "<br>"))
+                    if question.guidance else ""
+                )
+                cards.append(task_card("#f8fafc", "#64748b", f"{index}. {html.escape(question.text)}", guidance))
+            columns.append("".join(cards))
+        return (
+            f"{section_title_block(BOARD_REMINDER_SECTION_TITLE)}"
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-board-reminder-columns="true" style="width:100%;border-collapse:collapse;">'
+            '<tr>'
+            f'<td width="50%" valign="top" style="width:50%;padding:0 4px 0 0;vertical-align:top;">{columns[0]}</td>'
+            f'<td width="50%" valign="top" style="width:50%;padding:0 0 0 4px;vertical-align:top;">{columns[1]}</td>'
+            '</tr></table>'
+        )
+
     body_chunks: list[str] = []
     if document.board_reminders and document.reminders:
         body_chunks.append(
@@ -627,12 +650,12 @@ def render_html(document: ReportDocument) -> str:
             f"{reminder_column(REMINDER_SECTION_TITLE, document.reminders)}"
             '</td>'
             '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-            f"{reminder_column(BOARD_REMINDER_SECTION_TITLE, document.board_reminders)}"
+            f"{board_reminder_column(document.board_reminders)}"
             '</td>'
             '</tr></table>'
         )
     elif document.board_reminders:
-        body_chunks.append(reminder_column(BOARD_REMINDER_SECTION_TITLE, document.board_reminders))
+        body_chunks.append(board_reminder_column(document.board_reminders))
     elif document.reminders:
         body_chunks.append(reminder_column(REMINDER_SECTION_TITLE, document.reminders))
 
