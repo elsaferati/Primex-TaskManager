@@ -41,7 +41,7 @@ All API calls go through the existing Primeflow FastAPI backend and use the conf
 
 Core language and business rules:
 - "1H" means a Primeflow 1H report task. It is not a request to set the deadline one hour from now. Set is_1h_report=true.
-- 1H slots, when requested, use one_h_report_slot values: 10:00, 11:00, 11:50, 14:20, 16:00.
+- 1H slots, when requested, use one_h_report_slot values: 10:00, 11:00, 11:50, 14:20, 15:50.
 - After the app's slot rollover time, Primeflow may apply 1H slot work to the next effective workday. Let the backend enforce this.
 - Initials such as LH should be resolved to users before assignment. LH normally means Laurent Hoxha if that is the unique matching user.
 - For task assignment, prefer assignee_name or assignee_ids in MCP tools. The MCP server resolves names/initials and sends assignees=[user_id] plus assigned_to.
@@ -499,7 +499,7 @@ async def _resolve_project_id(project_ref: str | None, department_ref: str | Non
     raise ValueError(f"Ambiguous Primeflow project '{project_ref}'. Matching candidates: {names}")
 
 
-ONE_H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
+ONE_H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "15:50"}
 TASK_TYPE_ALIASES = {
     "1H": "1H",
     "P": "P",
@@ -1526,8 +1526,8 @@ async def create_task_from_ga_note(
     normalized_priority = priority.upper()
     if normalized_priority not in {"NORMAL", "HIGH"}:
         raise ValueError("priority must be NORMAL or HIGH")
-    if one_h_report_slot and one_h_report_slot not in {"10:00", "11:00", "11:50", "14:20", "16:00"}:
-        raise ValueError("one_h_report_slot must be 10:00, 11:00, 11:50, 14:20, or 16:00")
+    if one_h_report_slot and one_h_report_slot not in {"10:00", "11:00", "11:50", "14:20", "15:50"}:
+        raise ValueError("one_h_report_slot must be 10:00, 11:00, 11:50, 14:20, or 15:50")
 
     content = note.get("content")
     task = await _request(
@@ -1712,7 +1712,7 @@ async def create_task(
     - Use assignee_name for names or initials such as "Laurent Hoxha" or "LH"; the MCP server resolves it to a user ID.
     - Use assignee_ids only when exact Primeflow user UUIDs are already known.
     - "1H" means set is_1h_report=true, not "due in one hour".
-    - one_h_report_slot, when known, must be one of 10:00, 11:00, 11:50, 14:20, 16:00.
+    - one_h_report_slot, when known, must be one of 10:00, 11:00, 11:50, 14:20, 15:50.
     - due_date should be an ISO datetime string.
     """
     if len(title.strip()) < 2:
@@ -1740,8 +1740,8 @@ async def create_task(
         raise ValueError("status must be TODO, IN_PROGRESS, WAITING_CONFIRMATION, or DONE")
     if progress_percentage is not None and not 0 <= progress_percentage <= 100:
         raise ValueError("progress_percentage must be between 0 and 100")
-    if one_h_report_slot and one_h_report_slot not in {"10:00", "11:00", "11:50", "14:20", "16:00"}:
-        raise ValueError("one_h_report_slot must be 10:00, 11:00, 11:50, 14:20, or 16:00")
+    if one_h_report_slot and one_h_report_slot not in {"10:00", "11:00", "11:50", "14:20", "15:50"}:
+        raise ValueError("one_h_report_slot must be 10:00, 11:00, 11:50, 14:20, or 15:50")
 
     return await _request(
         "POST",
@@ -2670,10 +2670,10 @@ async def schedule_task(
 ) -> Any:
     """
     Schedule a task onto days and slots: start/due dates (YYYY-MM-DD, sot, neser, or ISO
-    datetime), AM/PM finish period, and the 1H slot (10:00, 11:00, 11:50, 14:20, 16:00).
+    datetime), AM/PM finish period, and the 1H slot (10:00, 11:00, 11:50, 14:20, 15:50).
     """
     if one_h_report_slot and one_h_report_slot not in ONE_H_SLOTS:
-        raise ValueError("one_h_report_slot must be 10:00, 11:00, 11:50, 14:20, or 16:00")
+        raise ValueError("one_h_report_slot must be 10:00, 11:00, 11:50, 14:20, or 15:50")
     payload = {
         "start_date": _parse_date_arg(start_date),
         "due_date": _parse_date_arg(due_date),

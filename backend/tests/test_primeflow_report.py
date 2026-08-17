@@ -122,7 +122,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             {"id": "ten", "date": report_day.isoformat(), "slot": "10:00", "person": "Anisa", "title": "Morning", "status": "TODO"},
             {"id": "eleven", "date": report_day.isoformat(), "slot": "11:00", "person": "Anisa", "title": "Midday", "status": "TODO"},
             {"id": "afternoon", "date": report_day.isoformat(), "slot": "14:20", "person": "Anisa", "title": "Afternoon", "status": "TODO"},
-            {"id": "late", "date": report_day.isoformat(), "slot": "16:00", "person": "Anisa", "title": "Late task", "status": "TODO"},
+            {"id": "late", "date": report_day.isoformat(), "slot": "15:50", "person": "Anisa", "title": "Late task", "status": "TODO"},
         ]
         document = build_report_document(
             {"guardrails": {"truncated": {}}, "items": {"oneH": tasks}}, report_day, "14:20"
@@ -311,12 +311,12 @@ class PrimeFlowReportTests(unittest.TestCase):
 
     def test_section_order_and_backfill_chain(self) -> None:
         body = build_report({"guardrails": {"truncated": {}}, "items": {}}, date(2026, 7, 28), "10:00")
-        headings = ["10:00 SLOTI 28.07.2026", "11:00 SLOTI 28.07.2026", "16:00 SLOTI 28.07.2026", "DETYRA PA SLOT", "P: PERSONALE", "R1 = 1H"]
+        headings = ["10:00 SLOTI 28.07.2026", "11:00 SLOTI 28.07.2026", "15:50 SLOTI 28.07.2026", "DETYRA PA SLOT", "P: PERSONALE", "R1 = 1H"]
         positions = [body.index(value) for value in headings]
         self.assertEqual(positions, sorted(positions))
         self.assertNotIn("DETYRAT E BLLOKUT", body)
         self.assertNotIn("SLOTI 27.07.2026", body)
-        self.assertEqual(predecessor(date(2026, 7, 28), "10:00"), (date(2026, 7, 27), "16:00"))
+        self.assertEqual(predecessor(date(2026, 7, 28), "10:00"), (date(2026, 7, 27), "15:50"))
         self.assertEqual(predecessor(date(2026, 7, 28), "14:10"), (date(2026, 7, 28), "11:50"))
         self.assertEqual(predecessor(date(2026, 7, 28), "14:20"), (date(2026, 7, 28), "14:10"))
 
@@ -330,7 +330,7 @@ class PrimeFlowReportTests(unittest.TestCase):
                 "oneH": [
                     {**common, "id": "early", "slot": "11:50", "title": "Earlier"},
                     {**common, "id": "current", "slot": "14:20", "title": "Current"},
-                    {**common, "id": "later", "slot": "16:00", "title": "Later"},
+                    {**common, "id": "later", "slot": "15:50", "title": "Later"},
                 ],
                 "blocked": [{**common, "id": "blocked", "title": "Blocked", "department_id": "pcm"}],
                 "personal": [{**common, "id": "personal", "title": "Personal"}],
@@ -361,14 +361,14 @@ class PrimeFlowReportTests(unittest.TestCase):
         common = {"date": "2026-07-28", "person": "Anisa Tërnava", "status": "TODO"}
         tasks = [
             {**common, "id": slot, "slot": slot, "title": f"Task {slot}"}
-            for slot in ("10:00", "11:00", "11:50", "14:20", "16:00")
+            for slot in ("10:00", "11:00", "11:50", "14:20", "15:50")
         ]
         data = {"guardrails": {"truncated": {}}, "items": {"oneH": tasks}}
         expected = {
             "11:00": "10:00",
             "11:50": "11:00",
             "14:10": "11:50",
-            "16:00": "14:20",
+            "15:50": "14:20",
         }
         for current, previous in expected.items():
             with self.subTest(current=current):
@@ -715,8 +715,8 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(strike_interval_end(report_day, "14:10").strftime("%H:%M"), "14:10")
         self.assertEqual(strike_interval_start(report_day, "14:20").strftime("%H:%M"), "14:10")
         self.assertEqual(strike_interval_end(report_day, "14:20").strftime("%H:%M"), "14:20")
-        self.assertEqual(strike_interval_start(report_day, "16:00").strftime("%H:%M"), "14:20")
-        self.assertEqual(strike_interval_end(report_day, "16:00").strftime("%H:%M"), "15:50")
+        self.assertEqual(strike_interval_start(report_day, "15:50").strftime("%H:%M"), "14:20")
+        self.assertEqual(strike_interval_end(report_day, "15:50").strftime("%H:%M"), "15:50")
 
     def test_timestamp_does_not_change_a_struck_point_identity_or_colour(self) -> None:
         text = "[[done]]1. Test1[[/done]] 08:46 13.08\n2. Test2"

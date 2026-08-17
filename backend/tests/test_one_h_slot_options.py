@@ -1,8 +1,12 @@
 from app.api.routers.tasks import _normalize_one_h_report_slot
 
 
-def test_1600_is_a_valid_slot():
-    assert _normalize_one_h_report_slot("16:00") == "16:00"
+def test_1550_is_a_valid_slot():
+    assert _normalize_one_h_report_slot("15:50") == "15:50"
+
+
+def test_retired_1600_slot_is_rejected():
+    assert _normalize_one_h_report_slot("16:00") is None
 
 
 def test_existing_slots_still_valid():

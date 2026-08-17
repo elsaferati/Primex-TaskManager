@@ -331,7 +331,7 @@ async def _rlz_configured_time(db: AsyncSession) -> str:
         PrimeFlowReportSchedule.report_type == RLZ_SCHEDULE_TYPE,
         PrimeFlowReportSchedule.is_active.is_(True),
     ).order_by(PrimeFlowReportSchedule.sort_order).limit(1))
-    return value.strftime("%H:%M") if value else "16:00"
+    return value.strftime("%H:%M") if value else "15:50"
 
 
 async def _rlz_variant_time(db: AsyncSession, variant: str) -> str:

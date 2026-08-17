@@ -45,7 +45,7 @@ Report Management.
 The missed reports were caused by an intermittent connector/tool-discovery path before the PrimeFlow API was called. Scheduled delivery now runs in the dedicated `primeflow-report-scheduler` PM2 process and calls the authenticated FastAPI Common View endpoint directly. MCP remains available for interactive work.
 
 Five weekday jobs run in `Europe/Tirane`: 09:00→10:00, 10:50→11:00,
-11:40→11:50, 14:10→14:20, and 15:50→16:00. Every job first processes its
+11:40→11:50, 14:10→14:20, and 15:50→15:50. Every job first processes its
 predecessor. PostgreSQL uniqueness and row locking prevent duplicate sends.
 Common View truncation prevents delivery.
 
@@ -104,7 +104,7 @@ only a migration/bootstrap fallback.
 Example body structure:
 
 ```text
-SLOTI 27.07.2026 16:00
+SLOTI 27.07.2026 15:50
 1. Employee Name
 1.1 🟡 IN PROGRESS Exact task title
 Përshkrimi:

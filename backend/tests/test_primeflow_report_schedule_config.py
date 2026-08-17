@@ -37,7 +37,7 @@ class PrimeFlowReportScheduleConfigTests(TestCase):
                 ("11:50", time(11, 40)),
                 ("14:10", time(14, 10)),
                 ("14:20", time(14, 20)),
-                ("16:00", time(15, 50)),
+                ("15:50", time(15, 50)),
             ],
         )
         self.assertEqual(DEFAULT_WEEKDAYS, (0, 1, 2, 3, 4))
@@ -50,7 +50,7 @@ class PrimeFlowReportScheduleConfigTests(TestCase):
 
         errors = default_schedule_validation_errors(rows)
 
-        self.assertTrue(any("missing active defaults: 1H 16:00" in error for error in errors))
+        self.assertTrue(any("missing active defaults: 1H 15:50" in error for error in errors))
         self.assertTrue(any("1H 11:00" in error and "execution_time" in error for error in errors))
 
     def test_validation_ignores_defaults_for_other_report_types(self) -> None:

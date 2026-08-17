@@ -25,7 +25,7 @@ from app.config import settings
 
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
-SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00")
+SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "15:50")
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
@@ -373,7 +373,7 @@ def build_report_document(
     if slot in {"10:00", "14:20"}:
         # The morning report is the full-day baseline. The new 14:20 report
         # repeats today's work completed or planned through 14:20 only.
-        candidate_slots = ("10:00", "11:00", "11:50", "14:20", "16:00") if slot == "10:00" else (
+        candidate_slots = ("10:00", "11:00", "11:50", "14:20", "15:50") if slot == "10:00" else (
             "10:00", "11:00", "11:50", "14:20"
         )
         for candidate in candidate_slots:
@@ -1129,4 +1129,4 @@ class GmailService:
 
 def predecessor(day: date, slot: str) -> tuple[date, str]:
     index = SLOTS.index(slot)
-    return (previous_working_day(day), "16:00") if index == 0 else (day, SLOTS[index - 1])
+    return (previous_working_day(day), "15:50") if index == 0 else (day, SLOTS[index - 1])

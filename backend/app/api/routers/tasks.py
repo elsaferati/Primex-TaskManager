@@ -3461,7 +3461,7 @@ class TaskOneHReportSlotUpdate(BaseModel):
 
 def _normalize_one_h_report_slot(value: str | None) -> str | None:
     normalized = (value or "").strip()
-    return normalized if normalized in {"10:00", "11:00", "11:50", "14:20", "16:00"} else None
+    return normalized if normalized in {"10:00", "11:00", "11:50", "14:20", "15:50"} else None
 
 
 @router.patch("/{task_id}/one-h-report-slot", response_model=TaskOut)
