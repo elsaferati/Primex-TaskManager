@@ -4,6 +4,7 @@ import asyncio
 from datetime import date
 
 from app.celery_app import celery_app
+from app.config import settings
 from app.jobs.carryover import run_carryover as _run_carryover
 from app.jobs.ga_notes_cleanup import cleanup_old_closed_ga_notes as _cleanup_old_closed_ga_notes
 from app.jobs.internal_notes_cleanup import cleanup_old_done_internal_notes as _cleanup_old_done_internal_notes
@@ -26,6 +27,7 @@ from app.services.weekly_planning_audit_delivery import (
     cleanup_expired_report_files,
     generate_and_send_scheduled,
 )
+from app.services.px_jav_weekly_report import deliver_px_jav_weekly_report
 
 
 @celery_app.task(name="app.celery_tasks.generate_system_tasks")
@@ -105,4 +107,22 @@ def send_weekly_planning_audit_report(
 @celery_app.task(name="app.celery_tasks.cleanup_weekly_planning_audit_files")
 def cleanup_weekly_planning_audit_files() -> int:
     return asyncio.run(cleanup_expired_report_files())
+
+
+@celery_app.task(
+    bind=True,
+    name="app.celery_tasks.send_px_jav_weekly_report",
+    max_retries=4,
+)
+def send_px_jav_weekly_report(self) -> str | None:
+    if not settings.PX_JAV_WEEKLY_REPORT_ENABLED:
+        return None
+    run = asyncio.run(deliver_px_jav_weekly_report())
+    if run.status not in {"SENT", "ALREADY_SENT"}:
+        countdown = min(1800, 60 * (2 ** self.request.retries))
+        raise self.retry(
+            exc=RuntimeError(run.error_message or f"PX JAV delivery failed: {run.status}"),
+            countdown=countdown,
+        )
+    return str(run.id)
 

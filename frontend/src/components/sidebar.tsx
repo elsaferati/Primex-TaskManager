@@ -181,6 +181,11 @@ const navGroups: NavGroup[] = [
         roles: ["ADMIN", "MANAGER"],
       },
       {
+        href: "/reports/px-jav-weekly",
+        label: "PX JAV – Kontrolli",
+        icon: FileText,
+      },
+      {
         href: "/admin/1h-reports",
         label: "1H Report Management",
         icon: MailCheck,

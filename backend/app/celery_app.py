@@ -73,5 +73,9 @@ celery_app.conf.beat_schedule = {
         "task": "app.celery_tasks.cleanup_weekly_planning_audit_files",
         "schedule": crontab(day_of_week="sun", hour=3, minute=15),
     },
+    "px-jav-weekly-report-thursday-1550": {
+        "task": "app.celery_tasks.send_px_jav_weekly_report",
+        "schedule": crontab(day_of_week="thu", hour=15, minute=50),
+    },
 }
 

@@ -20,6 +20,9 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import BaseModel, Field
+
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
 SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00")
@@ -1057,10 +1060,18 @@ class PrimeFlowClient:
 
 class GmailService:
     def __init__(self) -> None:
-        self.sender = os.environ["EMAIL_USER"].strip()
-        self.password = os.environ["EMAIL_PASSWORD"].replace(" ", "")
-        self.host = os.getenv("EMAIL_HOST", "smtp.gmail.com").strip()
-        self.port = int(os.getenv("EMAIL_PORT", "587"))
+        sender = os.getenv("EMAIL_USER") or settings.EMAIL_USER
+        password = os.getenv("EMAIL_PASSWORD") or settings.EMAIL_PASSWORD
+        if not sender or not password:
+            missing = [
+                name for name, value in (("EMAIL_USER", sender), ("EMAIL_PASSWORD", password))
+                if not value
+            ]
+            raise ValueError(f"Missing email configuration: {', '.join(missing)}")
+        self.sender = sender.strip()
+        self.password = password.replace(" ", "")
+        self.host = (os.getenv("EMAIL_HOST") or settings.EMAIL_HOST).strip()
+        self.port = int(os.getenv("EMAIL_PORT") or settings.EMAIL_PORT)
 
     async def find_exact(self, subject: str, recipients: list[str] | None = None) -> dict[str, Any] | None:
         # SMTP has no mailbox-search operation. Database uniqueness and row locks

@@ -22,6 +22,11 @@ const sharedEnv = {
   WEEKLY_PLANNING_AUDIT_RECIPIENTS:
     process.env.WEEKLY_PLANNING_AUDIT_RECIPIENTS ??
     "130primex.eu@gmail.com,info@primexeu.com,ga@primexeu.com",
+  PX_JAV_WEEKLY_REPORT_ENABLED: process.env.PX_JAV_WEEKLY_REPORT_ENABLED ?? "true",
+  PX_JAV_WEEKLY_REPORT_TIMEZONE:
+    process.env.PX_JAV_WEEKLY_REPORT_TIMEZONE ?? "Europe/Tirane",
+  PX_JAV_WEEKLY_REPORT_RECIPIENT:
+    process.env.PX_JAV_WEEKLY_REPORT_RECIPIENT ?? "334primex.eu@gmail.com",
   REPORT_STORAGE_DIR: process.env.REPORT_STORAGE_DIR ?? "uploads/reports",
   REPORT_RETENTION_DAYS: process.env.REPORT_RETENTION_DAYS ?? "90",
   STD_FEEDBACK_API_BASE_URL:
