@@ -168,7 +168,7 @@ const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_VALUE = "__none__"
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
-const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "16:00"] as const
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "15:50"] as const
 type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
 const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS)
 const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
@@ -7090,7 +7090,7 @@ export default function DepartmentKanban() {
                                       08:00
                                     </span>
                                   ) : null}
-                                  <span className="whitespace-pre-wrap break-words">
+                                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                     {(() => {
                                       const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
                                       const renderedTitle = hasMarks ? renderMarkedNoteContent(visibleTitle, visibleTitle) : visibleTitle

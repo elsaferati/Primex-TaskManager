@@ -40,6 +40,7 @@ from app.api.routers.morning_report import router as morning_report_router
 from app.api.routers.tomorrow_print_report import router as tomorrow_print_report_router
 from app.api.routers.realization import router as realization_router
 from app.api.routers.weekly_planning_audit import router as weekly_planning_audit_router
+from app.api.routers.px_jav_weekly_report import router as px_jav_weekly_report_router
 from app.api.routers.standards import router as standards_router
 from app.api.routers.external_tickets import router as external_tickets_router
 
@@ -88,6 +89,11 @@ api_router.include_router(
     weekly_planning_audit_router,
     prefix="/reports/weekly-planning-audit",
     tags=["reports", "weekly-planning-audit"],
+)
+api_router.include_router(
+    px_jav_weekly_report_router,
+    prefix="/reports/px-jav-weekly",
+    tags=["reports", "px-jav-weekly"],
 )
 api_router.include_router(standards_router, prefix="/standards", tags=["standards"])
 api_router.include_router(external_tickets_router, prefix="/external-tickets", tags=["external-tickets"])

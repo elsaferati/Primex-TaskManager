@@ -19,6 +19,10 @@ class GaTimeTableRow(Base):
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
     is_special: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     comment: Mapped[str] = mapped_column(Text, nullable=False, server_default="")
+    comment_background_color: Mapped[str] = mapped_column(String(7), nullable=False, server_default="#FFFFFF")
+    comment_text_color: Mapped[str] = mapped_column(String(7), nullable=False, server_default="#0F172A")
+    comment_is_bold: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    comment_is_italic: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

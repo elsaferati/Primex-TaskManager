@@ -5,8 +5,15 @@
 The same `primeflow-report-scheduler` PM2 process also owns the database schedule
 with `report_type=RLZ_DAILY_CONTROL`. It creates an APScheduler `CronTrigger`
 from the stored execution time, weekdays and timezone, hot-reloads changes every
-45 seconds, and dispatches the RLZ generator at the seeded default of 16:00
-Europe/Tirane Monday-Friday. RLZ delivery does not use Celery.
+45 seconds, and dispatches three RLZ variants Monday-Friday in Europe/Tirane:
+
+- `PRECHECK` at 16:10: missing save, reason, required comment, moved deadline, or 1H slot.
+- `FINAL` at 16:30: per-person comparison of the saved weekly plan and the day's actual work.
+- `CORRECTION` at 17:05: only material changes made after FINAL; no email is sent when nothing changed.
+
+The separate official Daily Realization snapshot remains the existing Celery job
+at 16:20. User reason/comment inputs stay editable until 17:00. RLZ email delivery
+itself does not use Celery.
 
 Schedules and recipients are report-type aware. RLZ recipients have no guessed
 or environment fallback address: a valid `RLZ_DAILY_CONTROL` recipient must be
@@ -16,12 +23,29 @@ configured in Report Management. Delivery runs and immutable snapshots reuse
 Daily Report close validation, Reports & Control, fresh/manual previews, and the
 scheduled email all call the shared Daily RLZ compliance service.
 
+FINAL contains completed, unfinished, in-progress, extra, next-day carryover and
+postponed tasks, including reason, comment and deadline changes. System Tasks are
+included only when their template has `show_in_weekly_planner=true`.
+
+Before FINAL, every employee closes their own day and the department MANAGER
+approves that person's reasons, comments and postponements from Realization.
+ADMIN may approve any department; MANAGER may approve only users whose
+`department_id` matches their own. Approvals are append-only audit events tied to
+the exact personal close event. Any later task/reason/comment/deadline change
+makes the approval `STALE` until the employee closes again and the manager
+re-approves. PRECHECK reports pending/stale approvals and FINAL records the
+approval status for every person.
+
+The recipient group is shared by all three variants and supports TO/CC/BCC.
+ADMIN and MANAGER users can edit the active recipient and schedule settings in
+Report Management.
+
 ## Decision and root cause
 
 The missed reports were caused by an intermittent connector/tool-discovery path before the PrimeFlow API was called. Scheduled delivery now runs in the dedicated `primeflow-report-scheduler` PM2 process and calls the authenticated FastAPI Common View endpoint directly. MCP remains available for interactive work.
 
 Five weekday jobs run in `Europe/Tirane`: 09:00→10:00, 10:50→11:00,
-11:40→11:50, 14:10→14:20, and 15:50→16:00. Every job first processes its
+11:40→11:50, 14:10→14:20, and 15:50→15:50. Every job first processes its
 predecessor. PostgreSQL uniqueness and row locking prevent duplicate sends.
 Common View truncation prevents delivery.
 
@@ -31,6 +55,13 @@ Set all variables documented in `.env.example`. Delivery authenticates directly
 to `smtp.gmail.com:587` with STARTTLS. `EMAIL_USER` is used as both the SMTP
 login and the message/envelope sender; `EMAIL_PASSWORD` must be a Google app
 password. Secrets must remain in GitHub/PM2 configuration.
+
+AI narrative generation is optional. Deterministic application code always owns
+task selection, counts and classifications. Enable it with
+`REALIZATION_DAILY_REPORT_AI_ENABLED=true`, configure `OPENAI_API_KEY`, and
+optionally override `REALIZATION_DAILY_REPORT_AI_MODEL` (default
+`gpt-5.4-mini`). The integration uses the Responses API with strict structured
+output and `store=false`; failures fall back to the deterministic report.
 
 ## Migration and deployment
 
@@ -65,12 +96,15 @@ Management Center:
 
 `/admin/1h-reports`
 
-It is ADMIN-only and provides fresh HTML/text preview, DOCX/PNG downloads, confirmed manual send, database recipients, schedule editing/hot reload, exact snapshots, and configuration audit. Automatic delivery uses active database recipients; environment recipients are only a migration/bootstrap fallback.
+It provides fresh HTML/text preview, confirmed manual send, database recipients,
+variant schedule editing/hot reload, exact snapshots, and configuration audit.
+Automatic delivery uses active database recipients; environment recipients are
+only a migration/bootstrap fallback.
 
 Example body structure:
 
 ```text
-SLOTI 27.07.2026 16:00
+SLOTI 27.07.2026 15:50
 1. Employee Name
 1.1 🟡 IN PROGRESS Exact task title
 Përshkrimi:

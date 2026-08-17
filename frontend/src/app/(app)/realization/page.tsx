@@ -507,6 +507,10 @@ export default function RealizationPage() {
   const [dailyCloseComment, setDailyCloseComment] = React.useState("")
   const [dailyCloseReason, setDailyCloseReason] = React.useState("")
   const [dailyClosePulse, setDailyClosePulse] = React.useState<RealizationPulse | "">("")
+  const [dailyApprovalOpen, setDailyApprovalOpen] = React.useState(false)
+  const [dailyApprovalMode, setDailyApprovalMode] = React.useState<"APPROVE" | "REVOKE">("APPROVE")
+  const [dailyApprovalComment, setDailyApprovalComment] = React.useState("")
+  const [dailyApprovalReason, setDailyApprovalReason] = React.useState("")
   const [monthlyPulseByUser, setMonthlyPulseByUser] = React.useState<Record<string, RealizationPulse>>({})
   const [reviewLevel, setReviewLevel] = React.useState<RealizationLevel>("B")
   const [managerComment, setManagerComment] = React.useState("")
@@ -1007,6 +1011,40 @@ export default function RealizationPage() {
     }
   }
 
+  const openDailyApproval = (mode: "APPROVE" | "REVOKE") => {
+    setDailyApprovalMode(mode)
+    setDailyApprovalComment(todayTimeline?.manager_approval?.approval_comment || "")
+    setDailyApprovalReason("")
+    setDailyApprovalOpen(true)
+  }
+
+  const submitDailyApproval = async () => {
+    if (!todayTimeline?.period_id || !todayTimeline.result_id) return
+    if (dailyApprovalMode === "REVOKE" && !dailyApprovalReason.trim()) {
+      toast.error("Shëno arsyen e heqjes së aprovimit")
+      return
+    }
+    setAction("daily-approval")
+    try {
+      const endpoint = dailyApprovalMode === "APPROVE" ? "approve-day" : "revoke-day-approval"
+      const body = dailyApprovalMode === "APPROVE"
+        ? { approval_comment: dailyApprovalComment.trim() || null }
+        : { reason: dailyApprovalReason.trim() }
+      const response = await apiFetch(
+        `/realization/periods/${todayTimeline.period_id}/results/${todayTimeline.result_id}/${endpoint}`,
+        { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) },
+      )
+      if (!response.ok) throw new Error(await errorMessage(response))
+      toast.success(dailyApprovalMode === "APPROVE" ? "Dita u aprovua" : "Aprovimi u hoq")
+      setDailyApprovalOpen(false)
+      await loadReport()
+    } catch (error) {
+      toast.error("Aprovimi nuk u ruajt", { description: error instanceof Error ? error.message : undefined })
+    } finally {
+      setAction(null)
+    }
+  }
+
   if (authLoading) {
     return <div className="flex min-h-[60vh] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>
   }
@@ -1252,6 +1290,24 @@ export default function RealizationPage() {
                       <Button size="sm" onClick={openDailyClose} disabled={todayTimeline.close_state === "CLOSED" || !!action}>
                         <CalendarCheck className="h-4 w-4" /> {todayTimeline.close_state === "CLOSED" ? "Dita e mbyllur" : "Mbylle ditën"}
                       </Button>
+                    ) : null}
+                    {todayTimeline?.period_id && (
+                      user.role === "ADMIN" || (user.role === "MANAGER" && user.department_id === selected.department_id)
+                    ) ? (
+                      <>
+                        <Badge variant={todayTimeline.manager_approval?.status === "APPROVED" ? "default" : "outline"}>
+                          Aprovimi: {todayTimeline.manager_approval?.status || "PENDING"}
+                        </Badge>
+                        <Button
+                          size="sm"
+                          variant={todayTimeline.manager_approval?.status === "APPROVED" ? "outline" : "default"}
+                          onClick={() => openDailyApproval(todayTimeline.manager_approval?.status === "APPROVED" ? "REVOKE" : "APPROVE")}
+                          disabled={todayTimeline.close_state !== "CLOSED" || !!action}
+                        >
+                          <ShieldCheck className="h-4 w-4" />
+                          {todayTimeline.manager_approval?.status === "APPROVED" ? "Hiq aprovimin" : "Aprovo ditën"}
+                        </Button>
+                      </>
                     ) : null}
                     {user.role !== "STAFF" ? <Button size="sm" variant="outline" onClick={() => void openEvidence()} disabled={data?.period.status === "LOCKED"}><Plus className="h-4 w-4" /> Evidencë</Button> : null}
                     {user.role !== "STAFF" ? <Button size="sm" variant="outline" onClick={() => void runAI()} disabled={!!action || !data || data.period.status === "LOCKED"}>{action === "ai" ? <Loader2 className="h-4 w-4 animate-spin" /> : <Bot className="h-4 w-4" />} {selected?.ai_analysis_stale ? "Rigjenero analizën" : "Gjenero analizën"}</Button> : null}
@@ -1512,6 +1568,60 @@ export default function RealizationPage() {
             ) : null}
           </div>
           <DialogFooter><Button variant="outline" onClick={() => setDailyCloseOpen(false)}>Anulo</Button><Button onClick={() => void closeToday()} disabled={action === "close-day"}>{action === "close-day" && <Loader2 className="h-4 w-4 animate-spin" />} Mbylle ditën</Button></DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={dailyApprovalOpen} onOpenChange={setDailyApprovalOpen}>
+        <DialogContent className="max-h-[88vh] overflow-y-auto sm:max-w-2xl">
+          <DialogHeader>
+            <DialogTitle>{dailyApprovalMode === "APPROVE" ? "Aprovo mbylljen ditore" : "Hiq aprovimin ditor"}</DialogTitle>
+            <DialogDescription>
+              {dailyApprovalMode === "APPROVE"
+                ? `Kontrollo arsyet, komentet dhe shtyrjet e ${selected?.user_name || "personit"} para raportit FINAL.`
+                : "Heqja ruhet në audit dhe dita do të paraqitet përsëri si pa aprovim."}
+            </DialogDescription>
+          </DialogHeader>
+          {dailyApprovalMode === "APPROVE" ? (
+            <div className="space-y-4">
+              <div className="rounded-lg border bg-slate-50 p-3 text-sm">
+                <p><strong>Komenti i mbylljes:</strong> {todayTimeline?.close_event?.daily_comment || "—"}</p>
+                {todayTimeline?.close_event?.reason ? <p className="mt-1"><strong>Arsyeja e mbylljes:</strong> {todayTimeline.close_event.reason}</p> : null}
+              </div>
+              <div className="space-y-2">
+                {(todayTimeline?.close_event?.facts_json?.daily_report_state?.tasks || []).map((task) => (
+                  <div key={task.task_id} className="rounded-lg border p-3 text-sm">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <strong>{cleanTaskTitle(task.title)}</strong><Badge variant="outline">{task.status}</Badge>
+                    </div>
+                    <div className="mt-2 grid gap-1 text-xs text-slate-600 sm:grid-cols-2">
+                      <span>Afati: {task.planned_due_date || "—"} → {task.due_date || "—"}</span>
+                      <span>Arsyeja: {task.reason_label || "—"}</span>
+                      <span className="sm:col-span-2">Komenti: {task.comment || "—"}</span>
+                    </div>
+                  </div>
+                ))}
+                {!todayTimeline?.close_event?.facts_json?.daily_report_state?.tasks?.length ? (
+                  <p className="rounded-lg border border-dashed p-3 text-sm text-slate-500">Nuk ka detyra në evidencën e mbylljes.</p>
+                ) : null}
+              </div>
+              <div className="space-y-1.5">
+                <Label>Komenti i menaxherit (opsional)</Label>
+                <Textarea rows={3} value={dailyApprovalComment} onChange={(event) => setDailyApprovalComment(event.target.value)} />
+              </div>
+            </div>
+          ) : (
+            <div className="space-y-1.5">
+              <Label>Arsyeja e heqjes së aprovimit</Label>
+              <Textarea autoFocus rows={3} value={dailyApprovalReason} onChange={(event) => setDailyApprovalReason(event.target.value)} />
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDailyApprovalOpen(false)}>Anulo</Button>
+            <Button onClick={() => void submitDailyApproval()} disabled={action === "daily-approval"}>
+              {action === "daily-approval" && <Loader2 className="h-4 w-4 animate-spin" />}
+              {dailyApprovalMode === "APPROVE" ? "Konfirmo aprovimin" : "Hiq aprovimin"}
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
 

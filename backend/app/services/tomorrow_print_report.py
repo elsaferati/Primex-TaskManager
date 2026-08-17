@@ -20,14 +20,14 @@ TASK_ROWS = (
     ("oneH", "1H 11:50", "11:50"),
     ("oneH", "1H 14:20", "14:20"),
     ("blocked", "BLL\n14:30 - 15:30", None),
-    ("oneH", "1H 16:00", "16:00"),
+    ("oneH", "1H 15:50", "15:50"),
     ("oneH", "1H NO SLOT", ""),
     ("important", "DEADLINE / 08:00", None),
     ("r1", "R1=1H", None),
     ("personal", "P:\nGA 08:15 / 13:15\n\nDV/LH 10:15 / 14:30", None),
 )
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
-VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
+VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "15:50"}
 ONE_H_BOARD_CHECKLIST = (
     "Slotin paraprak/aktual",
     "A ke filluar me slotin aktual?",

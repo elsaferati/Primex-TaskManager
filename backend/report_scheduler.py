@@ -54,8 +54,9 @@ async def scheduled_job(schedule_id: str, slot: str | None, version: int, timezo
             run = await deliver_daily_rlz_control(
                 now.date(), schedule_id=schedule_id, schedule_version=schedule.version,
                 scheduled_for=now, trigger_type="SCHEDULED",
+                variant=getattr(schedule, "report_variant", None) or "PRECHECK",
             )
-            if run.status in {"SENT", "ALREADY_SENT"}:
+            if run.status in {"SENT", "ALREADY_SENT", "SKIPPED_NO_CHANGES"}:
                 break
         return
     slot = schedule.report_slot

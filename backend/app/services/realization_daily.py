@@ -19,6 +19,7 @@ from app.models.realization import (
     RealizationPeriod,
     RealizationPersonResult,
 )
+from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
@@ -158,7 +159,10 @@ async def calculate_daily_period(
     zone = ZoneInfo(settings.REALIZATION_TIMEZONE)
     day_end_local = datetime.combine(day, time.max, tzinfo=zone)
     day_end_utc = day_end_local.astimezone(timezone.utc)
-    task_query = select(Task).where(
+    task_query = select(Task).outerjoin(
+        SystemTaskTemplate,
+        Task.system_template_origin_id == SystemTaskTemplate.id,
+    ).where(
         or_(
             Task.department_id == period.department_id,
             Task.id.in_(planned_ids),
@@ -168,6 +172,12 @@ async def calculate_daily_period(
             ),
         ),
         Task.created_at <= day_end_utc,
+        # System work belongs in Realization only when its template was
+        # explicitly opted into the Weekly Planner.
+        or_(
+            Task.system_template_origin_id.is_(None),
+            SystemTaskTemplate.show_in_weekly_planner.is_(True),
+        ),
     )
     tasks = (await db.execute(task_query)).scalars().all()
     task_by_id = {task.id: task for task in tasks}

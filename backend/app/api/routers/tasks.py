@@ -47,7 +47,7 @@ from pydantic import BaseModel, Field
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, notification_task_preview, publish_notification
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
-from app.services.task_daily_progress import upsert_task_daily_progress
+from app.services.task_daily_progress import upsert_explicit_task_daily_status, upsert_task_daily_progress
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 from app.services.daily_report_logic import business_days_between
 from app.services.project_classification import (
@@ -2914,31 +2914,13 @@ async def update_task(
         # Record explicit per-day status change for all tasks (not just MST/TT).
         # This powers weekly planner day-by-day colors.
         today = datetime.now(timezone.utc).date()
-        existing_progress = (
-            await db.execute(
-                select(TaskDailyProgress).where(
-                    TaskDailyProgress.task_id == task.id,
-                    TaskDailyProgress.day_date == today,
-                )
-            )
-        ).scalar_one_or_none()
-        if existing_progress is None:
-            total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
-            db.add(
-                TaskDailyProgress(
-                    task_id=task.id,
-                    day_date=today,
-                    completed_value=completed or 0,
-                    total_value=total or 0,
-                    completed_delta=0,
-                    daily_status=task.status.value,
-                    finish_period=progress_finish_period,
-                )
-            )
-        else:
-            existing_progress.daily_status = task.status.value
-            if existing_progress.finish_period is None:
-                existing_progress.finish_period = progress_finish_period
+        await upsert_explicit_task_daily_status(
+            db,
+            task_id=task.id,
+            day_date=today,
+            status=task.status,
+            finish_period=progress_finish_period,
+        )
 
     if (
         task.status == TaskStatus.WAITING_CONFIRMATION
@@ -3479,7 +3461,7 @@ class TaskOneHReportSlotUpdate(BaseModel):
 
 def _normalize_one_h_report_slot(value: str | None) -> str | None:
     normalized = (value or "").strip()
-    return normalized if normalized in {"10:00", "11:00", "11:50", "14:20", "16:00"} else None
+    return normalized if normalized in {"10:00", "11:00", "11:50", "14:20", "15:50"} else None
 
 
 @router.patch("/{task_id}/one-h-report-slot", response_model=TaskOut)

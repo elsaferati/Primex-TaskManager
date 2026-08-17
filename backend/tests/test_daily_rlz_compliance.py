@@ -13,29 +13,32 @@ DAY = date(2026, 8, 12)
 
 
 @pytest.mark.parametrize(
-    "status,reason,due,is_1h,slot,expected",
+    "status,reason,comment,due,is_1h,slot,expected",
     [
-        ("TODO", None, date(2026, 8, 13), False, None, ["REASON_MISSING"]),
-        ("IN_PROGRESS", None, date(2026, 8, 13), False, None, ["REASON_MISSING"]),
-        ("TODO", "OTHER", DAY, False, None, ["DUE_DATE_NOT_MOVED"]),
-        ("IN_PROGRESS", "WAITING_CLIENT", date(2026, 8, 13), False, None, []),
-        ("TODO", "OTHER", date(2026, 8, 13), True, None, ["ONE_H_SLOT_MISSING"]),
-        ("TODO", "OTHER", date(2026, 8, 13), True, "10:00", []),
-        ("TODO", "OTHER", date(2026, 8, 13), False, None, []),
-        ("DONE", None, DAY, True, None, []),
-        ("WAITING_CONFIRMATION", None, DAY, True, None, []),
-        ("TODO", "OTHER", date(2026, 8, 11), False, None, ["DUE_DATE_NOT_MOVED"]),
+        ("TODO", None, None, date(2026, 8, 13), False, None, ["REASON_MISSING"]),
+        ("IN_PROGRESS", None, None, date(2026, 8, 13), False, None, ["REASON_MISSING"]),
+        ("TODO", "OTHER", "Shpjegim", DAY, False, None, ["DUE_DATE_NOT_MOVED"]),
+        ("IN_PROGRESS", "WAITING_CLIENT", None, date(2026, 8, 13), False, None, []),
+        ("TODO", "OTHER", "Shpjegim", date(2026, 8, 13), True, None, ["ONE_H_SLOT_MISSING"]),
+        ("TODO", "OTHER", "Shpjegim", date(2026, 8, 13), True, "10:00", []),
+        ("TODO", "OTHER", "Shpjegim", date(2026, 8, 13), False, None, []),
+        ("TODO", "OTHER", None, date(2026, 8, 13), False, None, ["COMMENT_MISSING"]),
+        ("DONE", None, None, DAY, True, None, []),
+        ("WAITING_CONFIRMATION", None, None, DAY, True, None, []),
+        ("TODO", "OTHER", "Shpjegim", date(2026, 8, 11), False, None, ["DUE_DATE_NOT_MOVED"]),
     ],
 )
-def test_daily_rlz_task_rules(status, reason, due, is_1h, slot, expected):
+def test_daily_rlz_task_rules(status, reason, comment, due, is_1h, slot, expected):
     assert task_issue_codes(status=status, reason_code=reason, due_date=due,
-                            requires_one_h_slot=is_1h, one_h_report_slot=slot, day=DAY) == expected
+                            requires_one_h_slot=is_1h, one_h_report_slot=slot,
+                            comment=comment, day=DAY) == expected
 
 
 def test_friday_moves_to_monday():
     assert next_working_day(date(2026, 8, 14)) == date(2026, 8, 17)
     assert task_issue_codes(status="TODO", reason_code="OTHER", due_date=date(2026, 8, 17),
-                            requires_one_h_slot=False, one_h_report_slot=None, day=date(2026, 8, 14)) == []
+                            requires_one_h_slot=False, one_h_report_slot=None, comment="Shpjegim",
+                            day=date(2026, 8, 14)) == []
 
 
 def test_reason_codes_are_stable_and_complete():

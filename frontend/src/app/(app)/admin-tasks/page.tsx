@@ -567,6 +567,7 @@ type OneHItem = {
 }
 type PersonalItem = { title: string; person: string; date: string; note?: string; assignees?: string[]; userId?: string; taskId?: string; finishPeriod?: string | null }
 type ExternalItem = {
+  id?: string
   title: string
   date: string
   time: string
@@ -578,6 +579,7 @@ type ExternalItem = {
   recurrence_type?: string | null
 }
 type InternalItem = {
+  id?: string
   title: string
   date: string
   time: string
@@ -849,23 +851,34 @@ function GaTimeEntryEditor({
 
 function GaTimeRowCommentEditor({
   initialComment,
+  initialFormat,
   saving,
   onSave,
   onCancel,
 }: {
   initialComment: string
+  initialFormat?: Partial<GaTimeEntryFormat>
   saving: boolean
-  onSave: (comment: string) => Promise<boolean>
+  onSave: (comment: string, format: GaTimeEntryFormat) => Promise<boolean>
   onCancel: () => void
 }) {
   const [comment, setComment] = React.useState(initialComment)
+  const [format, setFormat] = React.useState<GaTimeEntryFormat>(() => normalizeGaTimeEntryFormat(initialFormat))
+  const [submitting, setSubmitting] = React.useState(false)
+  const isSaving = saving || submitting
 
   return (
     <form
       className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2"
       onSubmit={async (event) => {
         event.preventDefault()
-        await onSave(comment.trim())
+        if (isSaving) return
+        setSubmitting(true)
+        try {
+          await onSave(comment.trim(), format)
+        } finally {
+          setSubmitting(false)
+        }
       }}
     >
       <Textarea
@@ -873,15 +886,81 @@ function GaTimeRowCommentEditor({
         value={comment}
         onChange={(event) => setComment(event.target.value)}
         placeholder="Add comment..."
-        disabled={saving}
+        disabled={isSaving}
         autoFocus
       />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[10px] font-medium text-slate-500">Cell</span>
+        {GA_TIME_BACKGROUND_COLORS.map((color) => (
+          <button
+            key={color}
+            type="button"
+            className={cn(
+              "h-5 w-5 rounded-full border border-slate-300",
+              format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
+            )}
+            style={{ backgroundColor: color }}
+            onClick={() => setFormat((current) => ({ ...current, background_color: color }))}
+            disabled={isSaving}
+            aria-label={`Comment cell color ${color}`}
+            title={`Comment cell color ${color}`}
+          />
+        ))}
+        <label className="flex items-center gap-1 text-[10px] font-medium text-slate-500" title="Custom cell color">
+          More
+          <input
+            type="color"
+            className="h-6 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+            value={format.background_color}
+            onChange={(event) => setFormat((current) => ({ ...current, background_color: event.target.value.toUpperCase() }))}
+            disabled={isSaving}
+            aria-label="Custom comment cell color"
+          />
+        </label>
+        <label className="flex items-center gap-1 text-[10px] font-medium text-slate-500" title="Text color">
+          Text
+          <input
+            type="color"
+            className="h-6 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
+            value={format.text_color}
+            onChange={(event) => setFormat((current) => ({ ...current, text_color: event.target.value.toUpperCase() }))}
+            disabled={isSaving}
+            aria-label="Comment text color"
+          />
+        </label>
+        <button
+          type="button"
+          className={cn(
+            "h-7 min-w-7 rounded border px-2 text-xs font-bold",
+            format.is_bold ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"
+          )}
+          onClick={() => setFormat((current) => ({ ...current, is_bold: !current.is_bold }))}
+          disabled={isSaving}
+          aria-pressed={format.is_bold}
+          title="Bold"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          className={cn(
+            "h-7 min-w-7 rounded border px-2 text-xs italic",
+            format.is_italic ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"
+          )}
+          onClick={() => setFormat((current) => ({ ...current, is_italic: !current.is_italic }))}
+          disabled={isSaving}
+          aria-pressed={format.is_italic}
+          title="Italic"
+        >
+          I
+        </button>
+      </div>
       <div className="flex justify-end gap-1.5">
-        <Button type="button" size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={onCancel} disabled={saving}>
+        <Button type="button" size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={onCancel} disabled={isSaving}>
           Cancel
         </Button>
-        <Button type="submit" size="sm" className="h-8 px-3 text-xs" disabled={saving}>
-          {saving ? "Saving..." : "Save"}
+        <Button type="submit" size="sm" className="h-8 px-3 text-xs" disabled={isSaving}>
+          {isSaving ? "Saving..." : "Save"}
         </Button>
       </div>
     </form>
@@ -897,6 +976,10 @@ type GaTimeRow = {
   isSpecial?: boolean
   sortOrder?: number
   comment: string
+  commentBackgroundColor?: string
+  commentTextColor?: string
+  commentIsBold?: boolean
+  commentIsItalic?: boolean
 }
 
 type GaTimeTableRowResponse = {
@@ -908,6 +991,10 @@ type GaTimeTableRowResponse = {
   end_time: string
   is_special?: boolean
   comment?: string | null
+  comment_background_color?: string | null
+  comment_text_color?: string | null
+  comment_is_bold?: boolean
+  comment_is_italic?: boolean
 }
 
 type CommonBucket =
@@ -1005,6 +1092,10 @@ const normalizeGaTimeRows = (rows: GaTimeTableRowResponse[]): GaTimeRow[] =>
         nrLabel: row.nr_label || "",
         isSpecial,
         comment: row.comment || "",
+        commentBackgroundColor: row.comment_background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+        commentTextColor: row.comment_text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+        commentIsBold: Boolean(row.comment_is_bold),
+        commentIsItalic: Boolean(row.comment_is_italic),
       }
     })
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.start.localeCompare(b.start))
@@ -4343,6 +4434,10 @@ export default function AdminTasksPage() {
             start_time: row.start,
             end_time: row.end,
             comment: row.comment,
+            comment_background_color: row.commentBackgroundColor || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+            comment_text_color: row.commentTextColor || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+            comment_is_bold: Boolean(row.commentIsBold),
+            comment_is_italic: Boolean(row.commentIsItalic),
           })),
         }),
       })
@@ -4359,7 +4454,7 @@ export default function AdminTasksPage() {
     }
   }, [apiFetch, readGaTimeRowsDraft])
 
-  const saveGaTimeRowComment = React.useCallback(async (row: GaTimeRow, comment: string) => {
+  const saveGaTimeRowComment = React.useCallback(async (row: GaTimeRow, comment: string, format: GaTimeEntryFormat) => {
     const key = `${row.start}|${row.end}`
     setGaTimeCommentSavingKey(key)
     try {
@@ -4370,6 +4465,10 @@ export default function AdminTasksPage() {
           start_time: row.start,
           end_time: row.end,
           comment,
+          comment_background_color: format.background_color,
+          comment_text_color: format.text_color,
+          comment_is_bold: format.is_bold,
+          comment_is_italic: format.is_italic,
         }),
       })
       if (!res.ok) {
@@ -4379,7 +4478,15 @@ export default function AdminTasksPage() {
       const updated = (await res.json()) as GaTimeTableRowResponse
       setGaTimeRows((current) => current.map((item) => (
         item.start === row.start && item.end === row.end
-          ? { ...item, id: updated.id, comment: updated.comment || "" }
+          ? {
+              ...item,
+              id: updated.id,
+              comment: updated.comment || "",
+              commentBackgroundColor: updated.comment_background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+              commentTextColor: updated.comment_text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+              commentIsBold: Boolean(updated.comment_is_bold),
+              commentIsItalic: Boolean(updated.comment_is_italic),
+            }
           : item
       )))
       setGaTimeCommentEditingKey(null)
@@ -4406,6 +4513,40 @@ export default function AdminTasksPage() {
     }
     return map
   }, [gaTimeEntries, gaTimeRows])
+
+  const gaInternalMeetingsByCell = React.useMemo(() => {
+    const map = new Map<string, InternalItem[]>()
+    for (const meeting of commonFiltered.internal) {
+      if (!commonWeekISOs.includes(meeting.date)) continue
+      const startMinutes = parseTimeToMinutes(meeting.time)
+      if (startMinutes === null) continue
+      const rowStart = resolveGaTimeRowStart(minutesToTimeValue(startMinutes), gaTimeRows)
+      if (!gaTimeRows.some((row) => row.start === rowStart)) continue
+      const dayOfWeek = toDayOfWeek(meeting.date)
+      const key = `${dayOfWeek}|${rowStart}`
+      const list = map.get(key) || []
+      list.push(meeting)
+      map.set(key, list)
+    }
+    return map
+  }, [commonFiltered.internal, commonWeekISOs, gaTimeRows])
+
+  const gaExternalMeetingsByCell = React.useMemo(() => {
+    const map = new Map<string, ExternalItem[]>()
+    for (const meeting of commonFiltered.external) {
+      if (!commonWeekISOs.includes(meeting.date)) continue
+      const startMinutes = parseTimeToMinutes(meeting.time)
+      if (startMinutes === null) continue
+      const rowStart = resolveGaTimeRowStart(minutesToTimeValue(startMinutes), gaTimeRows)
+      if (!gaTimeRows.some((row) => row.start === rowStart)) continue
+      const dayOfWeek = toDayOfWeek(meeting.date)
+      const key = `${dayOfWeek}|${rowStart}`
+      const list = map.get(key) || []
+      list.push(meeting)
+      map.set(key, list)
+    }
+    return map
+  }, [commonFiltered.external, commonWeekISOs, gaTimeRows])
 
   const createGaTimeEntry = React.useCallback(
     async (
@@ -5447,6 +5588,12 @@ export default function AdminTasksPage() {
               </div>
               <div className="ga-time-table">
                 <table className="ga-time-table-table">
+                  <colgroup>
+                    <col className="ga-time-nr-column" />
+                    <col className="ga-time-time-column" />
+                    <col className="ga-time-comment-column" />
+                    {commonWeekISOs.map((iso) => <col key={`ga-print-col-${iso}`} className="ga-time-day-column" />)}
+                  </colgroup>
                   <thead>
                     <tr>
                       <th className="ga-time-header ga-time-nr">NR</th>
@@ -5479,16 +5626,43 @@ export default function AdminTasksPage() {
                       >
                         <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
                         <td className="ga-time-slot-label">{slot.label || "\u00A0"}</td>
-                        <td className="ga-time-cell ga-time-comment">{slot.comment || null}</td>
+                        <td
+                          className="ga-time-cell ga-time-comment"
+                          style={gaTimeEntryStyle({
+                            background_color: slot.commentBackgroundColor,
+                            text_color: slot.commentTextColor,
+                            is_bold: slot.commentIsBold,
+                            is_italic: slot.commentIsItalic,
+                          })}
+                        >
+                          {slot.comment || null}
+                        </td>
                         {commonWeekISOs.map((iso) => {
                           const dayOfWeek = toDayOfWeek(iso)
                           const cellKey = `${dayOfWeek}|${slot.start}`
                           const entries = gaTimeEntriesByCell.get(cellKey) || []
+                          const internalMeetings = gaInternalMeetingsByCell.get(cellKey) || []
+                          const externalMeetings = gaExternalMeetingsByCell.get(cellKey) || []
                           return (
                             <td key={`ga-print-${cellKey}`} className="ga-time-cell">
                               <div className="ga-time-cell-content">
-                                {entries.length ? (
-                                  entries.map((entry) => (
+                                {internalMeetings.map((meeting, index) => (
+                                  <div
+                                    key={`ga-print-internal-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
+                                    className="ga-time-entry ga-time-internal-meeting"
+                                  >
+                                    <span><strong>TAK INT:</strong> {meeting.title}</span>
+                                  </div>
+                                ))}
+                                {externalMeetings.map((meeting, index) => (
+                                  <div
+                                    key={`ga-print-external-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
+                                    className="ga-time-entry ga-time-external-meeting"
+                                  >
+                                    <span><strong>TAK EXT:</strong> {meeting.title}</span>
+                                  </div>
+                                ))}
+                                {entries.map((entry) => (
                                     <div
                                       key={`ga-print-${entry.id}`}
                                       className="ga-time-entry"
@@ -5496,10 +5670,10 @@ export default function AdminTasksPage() {
                                     >
                                       <span>{entry.content}</span>
                                     </div>
-                                  ))
-                                ) : slot.isSpecial ? null : (
+                                  ))}
+                                {!entries.length && !internalMeetings.length && !externalMeetings.length && !slot.isSpecial ? (
                                   <span className="week-table-empty">-</span>
-                                )}
+                                ) : null}
                               </div>
                             </td>
                           )
@@ -5548,6 +5722,12 @@ export default function AdminTasksPage() {
           </div>
           <div className="mt-3 overflow-x-auto ga-time-table">
             <table className="ga-time-table-table">
+              <colgroup>
+                <col className="ga-time-nr-column" />
+                <col className="ga-time-time-column" />
+                <col className="ga-time-comment-column" />
+                {commonWeekISOs.map((iso) => <col key={`ga-col-${iso}`} className="ga-time-day-column" />)}
+              </colgroup>
               <thead>
                 <tr>
                   <th className="ga-time-header ga-time-nr">NR</th>
@@ -5573,14 +5753,26 @@ export default function AdminTasksPage() {
                       {gaTimeCommentEditingKey === `${slot.start}|${slot.end}` ? (
                         <GaTimeRowCommentEditor
                           initialComment={slot.comment}
+                          initialFormat={{
+                            background_color: slot.commentBackgroundColor,
+                            text_color: slot.commentTextColor,
+                            is_bold: slot.commentIsBold,
+                            is_italic: slot.commentIsItalic,
+                          }}
                           saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
-                          onSave={(comment) => saveGaTimeRowComment(slot, comment)}
+                          onSave={(comment, format) => saveGaTimeRowComment(slot, comment, format)}
                           onCancel={() => setGaTimeCommentEditingKey(null)}
                         />
                       ) : slot.comment ? (
                         <button
                           type="button"
                           className="ga-time-comment-text"
+                          style={gaTimeEntryStyle({
+                            background_color: slot.commentBackgroundColor,
+                            text_color: slot.commentTextColor,
+                            is_bold: slot.commentIsBold,
+                            is_italic: slot.commentIsItalic,
+                          })}
                           onClick={() => {
                             if (!canEditGaTimeSlots) return
                             setGaTimeAddingCell(null)
@@ -5608,9 +5800,29 @@ export default function AdminTasksPage() {
                       const dayOfWeek = toDayOfWeek(iso)
                       const cellKey = `${dayOfWeek}|${slot.start}`
                       const entries = gaTimeEntriesByCell.get(cellKey) || []
+                      const internalMeetings = gaInternalMeetingsByCell.get(cellKey) || []
+                      const externalMeetings = gaExternalMeetingsByCell.get(cellKey) || []
                       return (
                         <td key={`${cellKey}`} className="ga-time-cell">
                           <div className="ga-time-cell-content">
+                            {internalMeetings.map((meeting, index) => (
+                              <div
+                                key={`ga-internal-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
+                                className="ga-time-entry ga-time-internal-meeting"
+                                title={`${formatTimeLabel(meeting.time)} · ${meeting.title}`}
+                              >
+                                <span><strong>TAK INT:</strong> {meeting.title}</span>
+                              </div>
+                            ))}
+                            {externalMeetings.map((meeting, index) => (
+                              <div
+                                key={`ga-external-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
+                                className="ga-time-entry ga-time-external-meeting"
+                                title={`${formatTimeLabel(meeting.time)} · ${meeting.title}`}
+                              >
+                                <span><strong>TAK EXT:</strong> {meeting.title}</span>
+                              </div>
+                            ))}
                             {entries.map((entry) => {
                               const isEditing = gaTimeEditingId === entry.id
                               if (isEditing) {
@@ -6662,9 +6874,22 @@ export default function AdminTasksPage() {
         }
         .admin-week-table .ga-time-table-table {
           width: 100%;
+          table-layout: fixed;
           border-collapse: collapse;
           border: 1px solid #e2e8f0;
           font-size: 11px;
+        }
+        .admin-week-table .ga-time-nr-column {
+          width: 30px;
+        }
+        .admin-week-table .ga-time-time-column {
+          width: 100px;
+        }
+        .admin-week-table .ga-time-comment-column {
+          width: 180px;
+        }
+        .admin-week-table .ga-time-day-column {
+          width: calc((100% - 310px) / 5);
         }
         .admin-week-table .ga-time-header {
           border: 1px solid #e2e8f0;
@@ -6719,7 +6944,7 @@ export default function AdminTasksPage() {
           border: 1px solid #e2e8f0;
           padding: 6px;
           vertical-align: bottom;
-          min-width: 140px;
+          min-width: 0;
         }
         .admin-week-table .ga-time-cell-content {
           display: flex;
@@ -6737,6 +6962,22 @@ export default function AdminTasksPage() {
           border-radius: 6px;
           padding: 4px 6px;
           font-size: 11px;
+        }
+        .admin-week-table .ga-time-entry > span {
+          min-width: 0;
+          overflow-wrap: anywhere;
+        }
+        .admin-week-table .ga-time-internal-meeting {
+          border-color: #93c5fd;
+          background: #dbeafe;
+          color: #1e3a8a;
+          line-height: 1.35;
+        }
+        .admin-week-table .ga-time-external-meeting {
+          border-color: #fdba74;
+          background: #ffedd5;
+          color: #9a3412;
+          line-height: 1.35;
         }
         .admin-week-table .ga-time-entry-text {
           background: transparent;
@@ -6969,6 +7210,16 @@ export default function AdminTasksPage() {
           }
           .admin-week-table .ga-time-nr {
             width: 26px !important;
+          }
+          .admin-week-table .ga-time-nr-column {
+            width: 26px !important;
+          }
+          .admin-week-table .ga-time-time-column,
+          .admin-week-table .ga-time-comment-column {
+            width: 78px !important;
+          }
+          .admin-week-table .ga-time-day-column {
+            width: calc((100% - 182px) / 5) !important;
           }
           .admin-week-table .ga-time-comment {
             min-width: 78px !important;

@@ -11,7 +11,7 @@ from app.services.primeflow_report_delivery import deliver_report, validate_repo
 async def main() -> None:
     parser = argparse.ArgumentParser(description="Generate or safely deliver a PrimeFlow 1H report")
     parser.add_argument("--date", required=True, type=date.fromisoformat)
-    parser.add_argument("--slot", required=True, choices=["10:00", "11:00", "11:50", "14:10", "14:20", "16:00"])
+    parser.add_argument("--slot", required=True, choices=["10:00", "11:00", "11:50", "14:10", "14:20", "15:50"])
     parser.add_argument("--send", action="store_true", help="Send and verify through Gmail; default is dry-run")
     args = parser.parse_args()
     validate_report_config(require_gmail=args.send)

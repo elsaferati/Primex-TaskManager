@@ -1599,6 +1599,14 @@ async def export_ga_time_xlsx(
         time_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         comment_cell = ws.cell(row=row_idx, column=3, value=(row.comment or None))
         comment_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        comment_bg = (getattr(row, "comment_background_color", "#FFFFFF") or "#FFFFFF").lstrip("#").upper()
+        comment_fg = (getattr(row, "comment_text_color", "#0F172A") or "#0F172A").lstrip("#").upper()
+        comment_cell.fill = PatternFill(start_color=f"FF{comment_bg}", end_color=f"FF{comment_bg}", fill_type="solid")
+        comment_cell.font = Font(
+            color=f"FF{comment_fg}",
+            bold=bool(getattr(row, "comment_is_bold", False)),
+            italic=bool(getattr(row, "comment_is_italic", False)),
+        )
         for day_offset, _iso in enumerate(week_isos):
             day_value = day_offset
             cell_values = entry_map.get((day_value, start_label), [])

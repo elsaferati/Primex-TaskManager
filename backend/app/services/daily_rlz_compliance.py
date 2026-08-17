@@ -4,11 +4,12 @@ import uuid
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import Date as SQLDate, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.realization import RealizationDailyCloseEvent, RealizationPeriod
 from app.models.task import Task
+from app.models.system_task_template import SystemTaskTemplate
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
@@ -17,6 +18,7 @@ from app.models.user import User
 from app.models.department import Department
 from app.models.enums import UserRole
 from app.services.one_h_slots import effective_slot_date
+from app.services.daily_realization_approval import daily_approval_state
 
 TIMEZONE_NAME = "Europe/Tirane"
 EDIT_CUTOFF = time(17, 0)
@@ -57,21 +59,26 @@ def is_editable_day(day: date, now: datetime | None = None) -> bool:
 
 
 def task_issue_codes(*, status: str, due_date: date | None, requires_one_h_slot: bool,
-                     one_h_report_slot: str | None, reason_code: str | None, day: date) -> list[str]:
+                     one_h_report_slot: str | None, reason_code: str | None,
+                     comment: str | None = None, day: date,
+                     is_system_task: bool = False) -> list[str]:
     if status not in UNFINISHED:
         return []
     issues: list[str] = []
     if not reason_code:
         issues.append("REASON_MISSING")
-    if due_date is None or due_date <= day:
+    if reason_code == "OTHER" and not (comment or "").strip():
+        issues.append("COMMENT_MISSING")
+    if not is_system_task and (due_date is None or due_date <= day):
         issues.append("DUE_DATE_NOT_MOVED")
-    if requires_one_h_slot and not one_h_report_slot:
+    if not is_system_task and requires_one_h_slot and not one_h_report_slot:
         issues.append("ONE_H_SLOT_MISSING")
     return issues
 
 
 ISSUE_MESSAGES = {
     "REASON_MISSING": "Mungon arsyeja",
+    "COMMENT_MISSING": "Arsyeja Tjetër kërkon koment shpjegues",
     "DUE_DATE_NOT_MOVED": "Deadline-i duhet shtyrë për ditën tjetër të punës ose më vonë",
     "ONE_H_SLOT_MISSING": "Mungon 1H sloti",
 }
@@ -81,8 +88,25 @@ async def relevant_tasks(db: AsyncSession, *, user_id: uuid.UUID, day: date) -> 
     # Mirrors the regular-task membership used by Daily Report: assigned active tasks
     # with a due date that are current/overdue for the selected workday.
     rows = (await db.execute(
-        select(Task).outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id).where(
-            Task.is_active.is_(True), Task.system_template_origin_id.is_(None), Task.due_date.is_not(None),
+        select(Task)
+        .outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id)
+        .outerjoin(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+        .where(
+            Task.is_active.is_(True), Task.due_date.is_not(None),
+            or_(
+                Task.system_template_origin_id.is_(None),
+                SystemTaskTemplate.show_in_weekly_planner.is_(True),
+            ),
+            or_(
+                Task.system_template_origin_id.is_(None),
+                cast(
+                    func.timezone(
+                        func.coalesce(SystemTaskTemplate.timezone, TIMEZONE_NAME),
+                        func.coalesce(Task.origin_run_at, Task.start_date, Task.due_date),
+                    ),
+                    SQLDate,
+                ) == day,
+            ),
             or_(Task.assigned_to == user_id, TaskAssignee.user_id == user_id),
             func.date(func.coalesce(Task.start_date, Task.due_date)) <= day,
         ).distinct().order_by(Task.due_date, Task.created_at)
@@ -126,14 +150,18 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
         due = task.due_date.date() if task.due_date else None
         slot = slots.get(task.id) or task.one_h_report_slot
         reason = state.reason_code if state else None
+        comment = state.comment if state and state.comment is not None else task_comment.comment if task_comment else None
         issue_codes = task_issue_codes(status=status, due_date=due,
                                        requires_one_h_slot=bool(task.is_1h_report or task.is_r1),
-                                       one_h_report_slot=slot, reason_code=reason, day=day)
+                                       one_h_report_slot=slot, reason_code=reason, comment=comment, day=day,
+                                       is_system_task=task.system_template_origin_id is not None)
         item = {
             "task_id": str(task.id), "title": task.title, "status": status,
             "due_date": due.isoformat() if due else None, "one_h_report_slot": slot,
             "reason_code": reason, "reason_label": REASON_LABELS.get(reason),
-            "comment": state.comment if state and state.comment is not None else task_comment.comment if task_comment else None,
+            "comment": comment,
+            "source_type": "system" if task.system_template_origin_id else "project" if task.project_id else "fast",
+            "planned_due_date": task.original_due_date.date().isoformat() if task.original_due_date else None,
         }
         evidence.append(item)
         if issue_codes:
@@ -157,8 +185,12 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
     saved = bool(latest_close and latest_close.action in {"CLOSE", "CORRECT"})
     stale = bool(saved and latest_change and latest_close and latest_change > latest_close.created_at)
     close_status = "STALE" if stale else "SAVED" if saved else "CLOSED_EDIT_WINDOW" if not is_editable_day(day, now) else "NOT_SAVED"
+    manager_approval = await daily_approval_state(
+        db, user_id=user_id, day=day, personal_close_status=close_status
+    )
     return {
         "day": day.isoformat(), "user_id": str(user_id), "tasks": evidence, "blockers": blockers,
+        "manager_approval": manager_approval,
         "compliant": not blockers, "rlz_close_state": {
             "status": close_status, "saved": saved, "stale": stale,
             "saved_at": latest_close.created_at.isoformat() if saved and latest_close else None,
@@ -181,19 +213,25 @@ async def build_daily_rlz_control(db: AsyncSession, *, day: date, department_id:
         select(Department).where(Department.id.in_(department_ids))
     )).scalars().all()} if department_ids else {}
     people, totals = [], {"employees_checked": 0, "employees_not_saved": 0, "employees_stale": 0,
-                         "tasks_missing_reason": 0, "tasks_deadline_not_moved": 0, "tasks_missing_slot": 0}
+                         "employees_approval_pending": 0, "employees_approval_stale": 0,
+                         "tasks_missing_reason": 0, "tasks_missing_comment": 0,
+                         "tasks_deadline_not_moved": 0, "tasks_missing_slot": 0}
     for subject in users:
         report = await build_daily_rlz_compliance(db, user_id=subject.id, day=day)
         totals["employees_checked"] += 1
         state = report["rlz_close_state"]["status"]
         if state in {"NOT_SAVED", "CLOSED_EDIT_WINDOW"}: totals["employees_not_saved"] += 1
         if state == "STALE": totals["employees_stale"] += 1
+        approval_status = report["manager_approval"]["status"]
+        if approval_status in {"PENDING", "REVOKED"}: totals["employees_approval_pending"] += 1
+        if approval_status == "STALE": totals["employees_approval_stale"] += 1
         for blocker in report["blockers"]:
             codes = {issue["code"] for issue in blocker["issues"]}
             totals["tasks_missing_reason"] += int("REASON_MISSING" in codes)
+            totals["tasks_missing_comment"] += int("COMMENT_MISSING" in codes)
             totals["tasks_deadline_not_moved"] += int("DUE_DATE_NOT_MOVED" in codes)
             totals["tasks_missing_slot"] += int("ONE_H_SLOT_MISSING" in codes)
-        if report["blockers"] or state != "SAVED":
+        if report["blockers"] or state != "SAVED" or approval_status != "APPROVED":
             people.append({"user_id": str(subject.id), "employee": subject.full_name or subject.username or subject.email,
                            "department_id": str(subject.department_id), "department": departments.get(subject.department_id, "—"), **report})
     totals["departments_checked"] = len({person.department_id for person in users})

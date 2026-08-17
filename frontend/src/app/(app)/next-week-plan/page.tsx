@@ -3,7 +3,7 @@
 import * as React from "react"
 import Link from "next/link"
 import { useSearchParams } from "next/navigation"
-import { Bold, Calendar as CalendarIcon, Check, Clock, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Trash2, Upload } from "lucide-react"
+import { Bold, Calendar as CalendarIcon, Check, Clock, FileDown, FileSpreadsheet, FileText, Image as ImageIcon, List, ListOrdered, ListTodo, Paperclip, Pencil, Printer, Trash2, Upload } from "lucide-react"
 import { toast } from "sonner"
 
 import { Badge } from "@/components/ui/badge"
@@ -2072,9 +2072,38 @@ export default function NextWeekPlanPage() {
     }
   }
 
-  const exportDailyReport = async () => {
-    toast.info("Excel export for PX JAV is not available yet.")
+  const downloadPxJavReport = async (format: "xlsx" | "docx" | "pdf") => {
+    try {
+      const res = await apiFetch(`/reports/px-jav-weekly/download?format=${format}`)
+      if (!res?.ok) {
+        let message = `Could not export PX JAV as ${format.toUpperCase()}`
+        try {
+          const payload = (await res.json()) as { detail?: string }
+          if (payload.detail) message = payload.detail
+        } catch {
+          // Keep the fallback message.
+        }
+        throw new Error(message)
+      }
+      const blob = await res.blob()
+      const disposition = res.headers.get("content-disposition") || ""
+      const match = disposition.match(/filename="?([^";]+)"?/i)
+      const filename = match?.[1] || `Raporti_PX_JAV.${format}`
+      const url = URL.createObjectURL(blob)
+      const link = document.createElement("a")
+      link.href = url
+      link.download = filename
+      document.body.appendChild(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(url)
+      toast.success(`PX JAV ${format.toUpperCase()} exported.`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "PX JAV export failed")
+    }
   }
+
+  const exportDailyReport = async () => downloadPxJavReport("xlsx")
 
   // Project list is used only in the task creation dialog (filtered separately).
   const taskDialogNote = taskDialogNoteId ? notes.find((n) => n.id === taskDialogNoteId) || null : null
@@ -2791,7 +2820,24 @@ export default function NextWeekPlanPage() {
               className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
               onClick={() => void exportDailyReport()}
             >
+              <FileSpreadsheet className="mr-2 h-4 w-4" />
               Export Excel
+            </Button>
+            <Button
+              variant="outline"
+              className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+              onClick={() => void downloadPxJavReport("docx")}
+            >
+              <FileText className="mr-2 h-4 w-4" />
+              Export Word
+            </Button>
+            <Button
+              variant="outline"
+              className="h-8 rounded-lg border-slate-300 bg-white px-3 text-sm text-slate-900 shadow-sm hover:bg-slate-50"
+              onClick={() => void downloadPxJavReport("pdf")}
+            >
+              <FileDown className="mr-2 h-4 w-4" />
+              Export PDF
             </Button>
           </div>
           {loading ? (

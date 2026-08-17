@@ -367,6 +367,14 @@ export interface DailyReportSystemOccurrence {
   acted_at?: string | null
   is_overdue: boolean
   late_days?: number | null
+  rlz_daily_state?: {
+    reason_code?: string | null
+    reason_label?: string | null
+    comment?: string | null
+    updated_at?: string | null
+    is_editable: boolean
+    editable_until: string
+  } | null
 }
 
 export interface DailyReportResponse {
@@ -853,6 +861,7 @@ export interface RealizationPersonResult {
       close_state?: "OPEN" | "CLOSED" | "REOPENED"
       close_event?: RealizationDailyCloseEvent | null
       close_history?: RealizationDailyCloseEvent[]
+      manager_approval?: RealizationDailyApprovalState
     }>
     project_progress?: Array<{
       project_id: string
@@ -903,7 +912,34 @@ export interface RealizationDailyCloseEvent {
   confirmed_pulse?: RealizationPulse | null
   daily_comment?: string | null
   reason?: string | null
+  facts_json?: {
+    daily_report_state?: {
+      day: string
+      saved_at?: string
+      tasks: Array<{
+        task_id: string
+        title: string
+        status: string
+        due_date?: string | null
+        planned_due_date?: string | null
+        reason_code?: string | null
+        reason_label?: string | null
+        comment?: string | null
+      }>
+    }
+  }
   created_at: string
+}
+
+export interface RealizationDailyApprovalState {
+  status: "PENDING" | "APPROVED" | "STALE" | "REVOKED"
+  approval_id?: string | null
+  action?: "APPROVE" | "REVOKE" | null
+  approved_by?: string | null
+  approved_at?: string | null
+  approval_comment?: string | null
+  reason?: string | null
+  source_close_event_id?: string | null
 }
 
 export interface RealizationDepartmentResult {

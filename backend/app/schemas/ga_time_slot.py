@@ -57,13 +57,28 @@ class GaTimeSlotEntryOut(GaTimeSlotFormatting):
     updated_at: datetime
 
 
-class GaTimeTableRowIn(BaseModel):
+class GaTimeTableRowCommentFormatting(BaseModel):
+    comment_background_color: str = "#FFFFFF"
+    comment_text_color: str = "#0F172A"
+    comment_is_bold: bool = False
+    comment_is_italic: bool = False
+
+    @field_validator("comment_background_color", "comment_text_color")
+    @classmethod
+    def validate_comment_hex_color(cls, value: str) -> str:
+        normalized = value.strip().upper()
+        if not re.fullmatch(r"#[0-9A-F]{6}", normalized):
+            raise ValueError("Color must use #RRGGBB format")
+        return normalized
+
+
+class GaTimeTableRowIn(GaTimeTableRowCommentFormatting):
     start_time: time
     end_time: time
     comment: str = Field(default="", max_length=2000)
 
 
-class GaTimeTableRowCommentUpdate(BaseModel):
+class GaTimeTableRowCommentUpdate(GaTimeTableRowCommentFormatting):
     start_time: time
     end_time: time
     comment: str = Field(default="", max_length=2000)
@@ -73,7 +88,7 @@ class GaTimeTableRowsUpdate(BaseModel):
     rows: list[GaTimeTableRowIn]
 
 
-class GaTimeTableRowOut(BaseModel):
+class GaTimeTableRowOut(GaTimeTableRowCommentFormatting):
     id: uuid.UUID | None = None
     sort_order: int
     nr_label: str

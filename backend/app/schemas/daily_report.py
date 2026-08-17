@@ -70,6 +70,7 @@ class DailyReportSystemOccurrence(BaseModel):
     acted_at: datetime | None = None
     is_overdue: bool
     late_days: int | None = None
+    rlz_daily_state: DailyRlzTaskStateOut | None = None
 
 
 class DailyReportResponse(BaseModel):

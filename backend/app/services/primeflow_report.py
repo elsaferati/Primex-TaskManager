@@ -20,9 +20,12 @@ from zoneinfo import ZoneInfo
 
 import httpx
 from pydantic import BaseModel, Field
+
+from app.config import settings
+
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
-SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00")
+SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "15:50")
 STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
 STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
@@ -371,7 +374,7 @@ def build_report_document(
     if slot in {"10:00", "14:20"}:
         # The morning report is the full-day baseline. The new 14:20 report
         # repeats today's work completed or planned through 14:20 only.
-        candidate_slots = ("10:00", "11:00", "11:50", "14:20", "16:00") if slot == "10:00" else (
+        candidate_slots = ("10:00", "11:00", "11:50", "14:20", "15:50") if slot == "10:00" else (
             "10:00", "11:00", "11:50", "14:20"
         )
         for candidate in candidate_slots:
@@ -1080,10 +1083,18 @@ class PrimeFlowClient:
 
 class GmailService:
     def __init__(self) -> None:
-        self.sender = os.environ["EMAIL_USER"].strip()
-        self.password = os.environ["EMAIL_PASSWORD"].replace(" ", "")
-        self.host = os.getenv("EMAIL_HOST", "smtp.gmail.com").strip()
-        self.port = int(os.getenv("EMAIL_PORT", "587"))
+        sender = os.getenv("EMAIL_USER") or settings.EMAIL_USER
+        password = os.getenv("EMAIL_PASSWORD") or settings.EMAIL_PASSWORD
+        if not sender or not password:
+            missing = [
+                name for name, value in (("EMAIL_USER", sender), ("EMAIL_PASSWORD", password))
+                if not value
+            ]
+            raise ValueError(f"Missing email configuration: {', '.join(missing)}")
+        self.sender = sender.strip()
+        self.password = password.replace(" ", "")
+        self.host = (os.getenv("EMAIL_HOST") or settings.EMAIL_HOST).strip()
+        self.port = int(os.getenv("EMAIL_PORT") or settings.EMAIL_PORT)
 
     async def find_exact(self, subject: str, recipients: list[str] | None = None) -> dict[str, Any] | None:
         # SMTP has no mailbox-search operation. Database uniqueness and row locks
@@ -1141,4 +1152,4 @@ class GmailService:
 
 def predecessor(day: date, slot: str) -> tuple[date, str]:
     index = SLOTS.index(slot)
-    return (previous_working_day(day), "16:00") if index == 0 else (day, SLOTS[index - 1])
+    return (previous_working_day(day), "15:50") if index == 0 else (day, SLOTS[index - 1])

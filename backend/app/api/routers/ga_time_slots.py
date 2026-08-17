@@ -63,6 +63,10 @@ def _row_out(row: GaTimeTableRow | GaTimeTableRowData) -> GaTimeTableRowOut:
         end_time=row.end_time,
         is_special=row.is_special,
         comment=getattr(row, "comment", "") or "",
+        comment_background_color=getattr(row, "comment_background_color", "#FFFFFF") or "#FFFFFF",
+        comment_text_color=getattr(row, "comment_text_color", "#0F172A") or "#0F172A",
+        comment_is_bold=bool(getattr(row, "comment_is_bold", False)),
+        comment_is_italic=bool(getattr(row, "comment_is_italic", False)),
     )
 
 
@@ -112,7 +116,13 @@ async def update_ga_time_table_rows(
         await db.execute(select(GaTimeTableRow))
     ).scalars().all()
     existing_comments = {
-        (row.start_time, row.end_time, row.is_special): row.comment or ""
+        (row.start_time, row.end_time, row.is_special): {
+            "comment": row.comment or "",
+            "comment_background_color": row.comment_background_color or "#FFFFFF",
+            "comment_text_color": row.comment_text_color or "#0F172A",
+            "comment_is_bold": bool(row.comment_is_bold),
+            "comment_is_italic": bool(row.comment_is_italic),
+        }
         for row in existing_rows
     }
     await db.execute(delete(GaTimeTableRow))
@@ -124,7 +134,7 @@ async def update_ga_time_table_rows(
             start_time=time(0, 0),
             end_time=time(0, 1),
             is_special=True,
-            comment=existing_comments.get((time(0, 0), time(0, 1), True), ""),
+            **existing_comments.get((time(0, 0), time(0, 1), True), {}),
         ),
         GaTimeTableRow(
             sort_order=1,
@@ -133,7 +143,7 @@ async def update_ga_time_table_rows(
             start_time=time(0, 1),
             end_time=time(0, 2),
             is_special=True,
-            comment=existing_comments.get((time(0, 1), time(0, 2), True), ""),
+            **existing_comments.get((time(0, 1), time(0, 2), True), {}),
         ),
     ]
     for idx, row in enumerate(visible_rows, start=1):
@@ -145,9 +155,15 @@ async def update_ga_time_table_rows(
                 start_time=row.start_time,
                 end_time=row.end_time,
                 is_special=False,
-                comment=existing_comments.get(
+                **existing_comments.get(
                     (row.start_time, row.end_time, False),
-                    row.comment.strip(),
+                    {
+                        "comment": row.comment.strip(),
+                        "comment_background_color": row.comment_background_color,
+                        "comment_text_color": row.comment_text_color,
+                        "comment_is_bold": row.comment_is_bold,
+                        "comment_is_italic": row.comment_is_italic,
+                    },
                 ),
             )
         )
@@ -189,6 +205,10 @@ async def create_ga_time_table_row(
                 end_time=row.end_time,
                 is_special=row.is_special,
                 comment=row.comment,
+                comment_background_color=row.comment_background_color,
+                comment_text_color=row.comment_text_color,
+                comment_is_bold=row.comment_is_bold,
+                comment_is_italic=row.comment_is_italic,
             )
             for row in DEFAULT_GA_TIME_TABLE_ROWS
         ]
@@ -275,6 +295,10 @@ async def create_ga_time_table_row(
             end_time=payload.end_time,
             is_special=False,
             comment=payload.comment.strip(),
+            comment_background_color=payload.comment_background_color,
+            comment_text_color=payload.comment_text_color,
+            comment_is_bold=payload.comment_is_bold,
+            comment_is_italic=payload.comment_is_italic,
         )
         db.add(new_row)
         visible_rows.append(new_row)
@@ -313,6 +337,10 @@ async def update_ga_time_table_row_comment(
                 end_time=row.end_time,
                 is_special=row.is_special,
                 comment=row.comment,
+                comment_background_color=row.comment_background_color,
+                comment_text_color=row.comment_text_color,
+                comment_is_bold=row.comment_is_bold,
+                comment_is_italic=row.comment_is_italic,
             )
             for row in DEFAULT_GA_TIME_TABLE_ROWS
         ]
@@ -329,6 +357,10 @@ async def update_ga_time_table_row_comment(
     if target is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time row not found")
     target.comment = payload.comment.strip()
+    target.comment_background_color = payload.comment_background_color
+    target.comment_text_color = payload.comment_text_color
+    target.comment_is_bold = payload.comment_is_bold
+    target.comment_is_italic = payload.comment_is_italic
     await db.commit()
     await db.refresh(target)
     return _row_out(target)

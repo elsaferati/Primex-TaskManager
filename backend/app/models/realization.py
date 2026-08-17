@@ -627,3 +627,55 @@ class RealizationDailyCloseEvent(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, server_default=func.now()
     )
+
+
+class RealizationDailyApprovalEvent(Base):
+    """Append-only manager approval/revocation history for one person's day."""
+
+    __tablename__ = "realization_daily_approval_events"
+    __table_args__ = (
+        CheckConstraint(
+            "action IN ('APPROVE', 'REVOKE')",
+            name="ck_realization_daily_approval_action",
+        ),
+        CheckConstraint(
+            "action = 'APPROVE' OR NULLIF(BTRIM(reason), '') IS NOT NULL",
+            name="ck_realization_daily_approval_revoke_reason",
+        ),
+        CheckConstraint(
+            "action = 'REVOKE' OR source_close_event_id IS NOT NULL",
+            name="ck_realization_daily_approval_close_source",
+        ),
+        Index(
+            "ix_realization_daily_approval_latest",
+            "period_id",
+            "user_id",
+            "created_at",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    period_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("realization_periods.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    result_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("realization_person_results.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    department_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("departments.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    action: Mapped[str] = mapped_column(String(10), nullable=False)
+    source_close_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("realization_daily_close_events.id", ondelete="RESTRICT"), index=True
+    )
+    approval_comment: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    actor_user_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("users.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )

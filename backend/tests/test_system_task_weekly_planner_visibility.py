@@ -1,8 +1,11 @@
+import inspect
 import unittest
 
+from app.api.routers.realization import _weekly_response
 from app.models.enums import FrequencyType
 from app.models.system_task_template import SystemTaskTemplate
 from app.schemas.system_task_template import SystemTaskTemplateCreate, SystemTaskTemplateUpdate
+from app.services.realization_daily import calculate_daily_period
 
 
 class TestSystemTaskWeeklyPlannerVisibility(unittest.TestCase):
@@ -22,6 +25,16 @@ class TestSystemTaskWeeklyPlannerVisibility(unittest.TestCase):
         self.assertFalse(column.nullable)
         self.assertIsNotNone(column.server_default)
         self.assertEqual(str(column.server_default.arg).lower(), "false")
+
+    def test_daily_realization_only_loads_opted_in_system_tasks(self) -> None:
+        source = inspect.getsource(calculate_daily_period)
+
+        self.assertIn("SystemTaskTemplate.show_in_weekly_planner.is_(True)", source)
+
+    def test_weekly_realization_only_loads_opted_in_system_tasks(self) -> None:
+        source = inspect.getsource(_weekly_response)
+
+        self.assertIn("SystemTaskTemplate.show_in_weekly_planner.is_(True)", source)
 
 
 if __name__ == "__main__":

@@ -43,7 +43,7 @@ type CommonType =
   | "oneH11"
   | "oneH1150"
   | "oneH1420"
-  | "oneH1600"
+  | "oneH1550"
   | "oneHNoSlot"
   | "personal"
   | "external"
@@ -55,8 +55,8 @@ type CommonType =
   | "diamond"
   | "bz"
 
-const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1600", "oneHNoSlot", "r1", "personal"]
-const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1600", "oneHNoSlot", "r1", "personal", "feedback"]
+const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", "personal"]
+const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", "personal", "feedback"]
 const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
   "late",
   "absent",
@@ -71,7 +71,7 @@ const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
   "oneH1420",
   "oneH",
   "blocked",
-  "oneH1600",
+  "oneH1550",
   "oneHNoSlot",
   "r1",
   "personal",
@@ -86,7 +86,7 @@ const COMMON_FAST_PRINT_ROW_IDS: readonly CommonType[] = [
   "oneH1150",
   "oneH1420",
   "blocked",
-  "oneH1600",
+  "oneH1550",
   "oneHNoSlot",
   "r1",
   "personal",
@@ -330,7 +330,7 @@ type CommonBucket =
   | "priority"
   | "bz"
 type FastTaskRowId = "blocked" | "oneH" | "personal" | "r1"
-type OneHSlotRowId = "oneH" | "oneH10" | "oneH11" | "oneH1150" | "oneH1420" | "oneH1600" | "oneHNoSlot"
+type OneHSlotRowId = "oneH" | "oneH10" | "oneH11" | "oneH1150" | "oneH1420" | "oneH1550" | "oneHNoSlot"
 type FastTaskEntry = BlockedItem | OneHItem | PersonalItem | R1Item
 type CommonWeekTableEntry =
   | LateItem
@@ -667,7 +667,7 @@ const ALL_USERS_INITIALS = "ALL"
 const ALL_USERS_MARKER = "[ALL_USERS]"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 const MEETING_CHECK_STATUS_RE = /\[MEETING_CHECK_STATUS:(CHECK|X|O)\]/i
-const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "16:00"] as const
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "15:50"] as const
 type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
 const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS)
 const ONE_H_SLOT_ROWS: Array<{ id: OneHSlotRowId; slot: OneHReportSlot | null; label: string }> = [
@@ -675,7 +675,7 @@ const ONE_H_SLOT_ROWS: Array<{ id: OneHSlotRowId; slot: OneHReportSlot | null; l
   { id: "oneH11", slot: "11:00", label: "1H 11:00" },
   { id: "oneH1150", slot: "11:50", label: "1H 11:50" },
   { id: "oneH1420", slot: "14:20", label: "1H 14:20" },
-  { id: "oneH1600", slot: "16:00", label: "1H 16:00" },
+  { id: "oneH1550", slot: "15:50", label: "1H 15:50" },
   { id: "oneHNoSlot", slot: null, label: "1H NO SLOT" },
 ]
 
@@ -693,7 +693,7 @@ const oneHReportSlotRank = (value?: string | null) => {
 
 const getOneHReportSlotLabel = (value?: string | null) => normalizeOneHReportSlot(value) || "No slot"
 const isOneHSlotRowId = (rowId: CommonType): rowId is OneHSlotRowId =>
-  rowId === "oneH" || rowId === "oneH10" || rowId === "oneH11" || rowId === "oneH1150" || rowId === "oneH1420" || rowId === "oneH1600" || rowId === "oneHNoSlot"
+  rowId === "oneH" || rowId === "oneH10" || rowId === "oneH11" || rowId === "oneH1150" || rowId === "oneH1420" || rowId === "oneH1550" || rowId === "oneHNoSlot"
 const getOneHSlotRowSlot = (rowId: CommonType): OneHReportSlot | null | undefined =>
   ONE_H_SLOT_ROWS.find((row) => row.id === rowId)?.slot
 
@@ -5932,7 +5932,7 @@ export default function CommonViewPage() {
     oneH11: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
     oneH1150: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
     oneH1420: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
-    oneH1600: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
+    oneH1550: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
     oneHNoSlot: "DETYRA 1H QE NUK KANE SLOT TE CAKTUAR.",
     personal: "JANË DETYRA TË VENDOSURA NGA GA/KA DHE PERGJEGJESIT BARAZOHEMI VETËM ME TA ORA PËR BZ: 16:00",
     external: "Takime externe",
@@ -5972,7 +5972,7 @@ export default function CommonViewPage() {
     oneH11: "11:00",
     oneH1150: "11:50",
     oneH1420: "14:20",
-    oneH1600: "16:00",
+    oneH1550: "15:50",
     oneHNoSlot: "PA SLOT",
     r1:"AM: 08:50/10:00/11:00-11:50)\nPM: 14:30/16:00",
     blocked: "NUK PENGOHET.",
@@ -7338,7 +7338,7 @@ export default function CommonViewPage() {
             .swimlane-row-oneH11,
             .swimlane-row-oneH1150,
             .swimlane-row-oneH1420,
-            .swimlane-row-oneH1600,
+            .swimlane-row-oneH1550,
             .swimlane-row-oneHNoSlot,
             .swimlane-row-r1,
             .swimlane-row-personal

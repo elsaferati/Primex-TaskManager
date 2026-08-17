@@ -94,9 +94,19 @@ class Settings(BaseSettings):
     REALIZATION_AI_ENABLED: bool = False
     REALIZATION_AI_MODEL: str = "gpt-5.2"
     REALIZATION_AI_TIMEOUT_SECONDS: int = 45
+    REALIZATION_DAILY_REPORT_AI_ENABLED: bool = False
+    REALIZATION_DAILY_REPORT_AI_MODEL: str = "gpt-5.4-mini"
+    REALIZATION_DAILY_REPORT_AI_TIMEOUT_SECONDS: int = 30
     WEEKLY_PLANNING_AUDIT_AI_ENABLED: bool = True
     WEEKLY_PLANNING_AUDIT_AI_MODEL: str = "gpt-5.2"
     WEEKLY_PLANNING_AUDIT_AI_TIMEOUT_SECONDS: int = 90
+    PX_JAV_WEEKLY_REPORT_ENABLED: bool = True
+    PX_JAV_WEEKLY_REPORT_TIMEZONE: str = "Europe/Tirane"
+    PX_JAV_WEEKLY_REPORT_RECIPIENT: str = "334primex.eu@gmail.com"
+    EMAIL_HOST: str = "smtp.gmail.com"
+    EMAIL_PORT: int = 587
+    EMAIL_USER: str | None = None
+    EMAIL_PASSWORD: str | None = None
 
     @property
     def cors_origin_list(self) -> list[str]:
