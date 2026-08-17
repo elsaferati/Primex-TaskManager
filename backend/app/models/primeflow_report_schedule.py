@@ -13,6 +13,7 @@ class PrimeFlowReportSchedule(Base):
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     name: Mapped[str] = mapped_column(String(120), nullable=False)
     report_type: Mapped[str] = mapped_column(String(40), nullable=False, default="ONE_H", server_default="ONE_H")
+    report_variant: Mapped[str | None] = mapped_column(String(20))
     report_slot: Mapped[str | None] = mapped_column(String(5))
     execution_time: Mapped[time] = mapped_column(Time, nullable=False)
     timezone: Mapped[str] = mapped_column(String(80), nullable=False, default="Europe/Tirane")

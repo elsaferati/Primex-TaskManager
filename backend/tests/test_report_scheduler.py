@@ -45,7 +45,8 @@ def _friday_schedule(*, active: bool = True, backfill: bool = False):
 def _rlz_schedule():
     return SimpleNamespace(
         id=uuid.uuid4(), report_type="RLZ_DAILY_CONTROL", report_slot=None,
-        execution_time=time(16, 0), timezone="Europe/Tirane", weekdays=[0, 1, 2, 3, 4],
+        report_variant="PRECHECK", execution_time=time(16, 10),
+        timezone="Europe/Tirane", weekdays=[0, 1, 2, 3, 4],
         is_active=True, backfill_enabled=False, predecessor_schedule_id=None, version=1,
         retry_count=3, retry_delays_seconds=[0, 2, 5],
     )
@@ -54,7 +55,7 @@ def _rlz_schedule():
 class PrimeFlowReportSchedulerTests(IsolatedAsyncioTestCase):
     async def test_rlz_schedule_dispatches_through_same_scheduler(self) -> None:
         schedule = _rlz_schedule()
-        monday = datetime(2026, 8, 10, 16, 0, tzinfo=ZoneInfo("Europe/Tirane"))
+        monday = datetime(2026, 8, 10, 16, 10, tzinfo=ZoneInfo("Europe/Tirane"))
         with (
             patch.object(report_scheduler, "SessionLocal", new=lambda: _FakeSession(schedule)),
             patch.object(report_scheduler, "datetime", new=SimpleNamespace(now=lambda _timezone: monday)),
@@ -65,7 +66,7 @@ class PrimeFlowReportSchedulerTests(IsolatedAsyncioTestCase):
             await report_scheduler.scheduled_job(str(schedule.id), None, 1, schedule.timezone)
         deliver.assert_awaited_once_with(
             monday.date(), schedule_id=str(schedule.id), schedule_version=1,
-            scheduled_for=monday, trigger_type="SCHEDULED",
+            scheduled_for=monday, trigger_type="SCHEDULED", variant="PRECHECK",
         )
     async def test_friday_schedule_without_backfill_sends_only_current_report(self) -> None:
         schedule = _friday_schedule()

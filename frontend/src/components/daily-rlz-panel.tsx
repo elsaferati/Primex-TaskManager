@@ -38,6 +38,9 @@ export function dailyRlzStateByTask(report: DailyReportResponse | null) {
   for (const item of [...(report?.tasks_today || []), ...(report?.tasks_overdue || [])]) {
     if (item.rlz_daily_state) map.set(item.task.id, item.rlz_daily_state)
   }
+  for (const item of [...(report?.system_today || []), ...(report?.system_overdue || [])]) {
+    if (item.rlz_daily_state) map.set(item.task.id, item.rlz_daily_state)
+  }
   return map
 }
 

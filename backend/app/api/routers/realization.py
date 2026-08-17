@@ -26,6 +26,7 @@ from app.models.enums import (
     UserRole,
 )
 from app.models.realization import (
+    RealizationDailyApprovalEvent,
     RealizationDailyCloseEvent,
     RealizationDepartmentResult,
     RealizationObservation,
@@ -33,6 +34,7 @@ from app.models.realization import (
     RealizationPersonResult,
     RealizationQuestionAnswer,
 )
+from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_user_comment import TaskUserComment
 from app.services.daily_rlz_compliance import build_daily_rlz_compliance, is_editable_day
@@ -42,6 +44,9 @@ from app.schemas.realization import (
     RealizationDepartmentResultOut,
     RealizationAIAnalysisOut,
     RealizationDailyOut,
+    RealizationDailyApprovalOut,
+    RealizationDailyApprovalRequest,
+    RealizationDailyApprovalRevokeRequest,
     RealizationDailyCloseEventOut,
     RealizationDailyCloseRequest,
     RealizationDailyReopenRequest,
@@ -61,6 +66,11 @@ from app.schemas.realization import (
 )
 from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
 from app.services.audit import add_audit_log
+from app.services.daily_realization_approval import (
+    approval_state_from_events,
+    latest_daily_approval,
+    latest_daily_close,
+)
 from app.services.realization_access import (
     can_approve_realization,
     can_lock_realization,
@@ -508,6 +518,27 @@ async def _weekly_response(
         else []
     )
 
+    approval_events = (
+        (
+            await db.execute(
+                select(RealizationDailyApprovalEvent, RealizationPeriod)
+                .join(RealizationPeriod, RealizationPeriod.id == RealizationDailyApprovalEvent.period_id)
+                .where(
+                    RealizationDailyApprovalEvent.user_id.in_([row.user_id for row in visible]),
+                    RealizationPeriod.period_type == "DAILY",
+                    RealizationPeriod.start_date >= period.start_date,
+                    RealizationPeriod.end_date <= period.end_date,
+                )
+                .order_by(
+                    RealizationDailyApprovalEvent.created_at.asc(),
+                    RealizationDailyApprovalEvent.id.asc(),
+                )
+            )
+        ).all()
+        if visible
+        else []
+    )
+
 
     close_history: dict[tuple[uuid.UUID, str], list[dict]] = {}
     for close_event, close_period in close_events:
@@ -515,6 +546,19 @@ async def _weekly_response(
         close_history.setdefault(key, []).append(
             RealizationDailyCloseEventOut.model_validate(close_event).model_dump(mode="json")
         )
+    approval_history: dict[tuple[uuid.UUID, str], list[dict]] = {}
+    for approval_event, approval_period in approval_events:
+        key = (approval_event.user_id, approval_period.start_date.isoformat())
+        approval_history.setdefault(key, []).append({
+            "id": str(approval_event.id),
+            "action": approval_event.action,
+            "source_close_event_id": str(approval_event.source_close_event_id) if approval_event.source_close_event_id else None,
+            "approval_comment": approval_event.approval_comment,
+            "reason": approval_event.reason,
+            "actor_user_id": str(approval_event.actor_user_id),
+            "created_at": approval_event.created_at.isoformat(),
+        })
+    today_local = datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date().isoformat()
     for user_id, timeline in daily_by_user.items():
         for item in timeline:
             history = close_history.get((user_id, item["date"]), [])
@@ -528,6 +572,26 @@ async def _weekly_response(
                 else "OPEN"
             )
             item["close_event"] = latest
+            approvals = approval_history.get((user_id, item["date"]), [])
+            latest_approval = approvals[-1] if approvals else None
+            approval_status = (
+                "PENDING"
+                if latest_approval is None
+                else "REVOKED"
+                if latest_approval["action"] == "REVOKE"
+                else "STALE"
+                if not latest or latest_approval["source_close_event_id"] != str(latest["id"])
+                else "APPROVED"
+            )
+            item["manager_approval"] = {
+                "status": approval_status,
+                **(latest_approval or {}),
+            }
+            if item["date"] == today_local:
+                current_state = await build_daily_rlz_compliance(
+                    db, user_id=user_id, day=date.fromisoformat(item["date"])
+                )
+                item["manager_approval"] = current_state["manager_approval"]
             if (
                 latest
                 and item["close_state"] == "CLOSED"
@@ -599,10 +663,8 @@ async def _weekly_response(
                         ):
                             day_tasks.append(fact)
 
-    # System-task templates may intentionally be hidden from the Weekly Planner,
-    # but Realization is an execution report and must include every generated
-    # occurrence assigned to the employee. Load these independently from the
-    # planner snapshot and place them on their effective due/run day.
+    # Add generated system-task occurrences that are explicitly opted into the
+    # Weekly Planner. Realization follows the same visibility contract.
     system_tasks_by_user_day: dict[uuid.UUID, dict[str, list[dict]]] = {}
     system_task_day_by_id: dict[str, date] = {}
     visible_user_ids = [row.user_id for row in visible]
@@ -620,10 +682,16 @@ async def _weekly_response(
         )
         system_task_rows = (
             await db.execute(
-                select(Task).where(
+                select(Task)
+                .join(
+                    SystemTaskTemplate,
+                    Task.system_template_origin_id == SystemTaskTemplate.id,
+                )
+                .where(
                     Task.assigned_to.in_(visible_user_ids),
                     Task.system_template_origin_id.is_not(None),
                     Task.is_active.is_(True),
+                    SystemTaskTemplate.show_in_weekly_planner.is_(True),
                     effective_system_date >= range_start,
                     effective_system_date < range_end,
                 )
@@ -794,6 +862,70 @@ async def _weekly_response(
                 list(timeline_item.get("tasks") or [])
             )
 
+    # Older daily snapshots may have been calculated before the Weekly Planner
+    # opt-in was enforced in Realization. Filter those persisted facts at read
+    # time as well, so disabling the option cannot leave stale system cards in
+    # the report.
+    system_task_ids: set[uuid.UUID] = set()
+    system_facts = [
+        task
+        for timeline in daily_by_user.values()
+        for timeline_item in timeline
+        for task in timeline_item.get("tasks") or []
+    ]
+    system_facts.extend(
+        task
+        for row in visible
+        for task in (row.facts_json or {}).get("tasks") or []
+    )
+    for task in system_facts:
+        if task.get("source_type") != "system":
+            continue
+        try:
+            system_task_ids.add(uuid.UUID(str(task.get("task_id"))))
+        except (TypeError, ValueError):
+            continue
+    opted_in_system_task_ids = set(
+        (
+            await db.execute(
+                select(Task.id)
+                .join(
+                    SystemTaskTemplate,
+                    Task.system_template_origin_id == SystemTaskTemplate.id,
+                )
+                .where(
+                    Task.id.in_(system_task_ids),
+                    SystemTaskTemplate.show_in_weekly_planner.is_(True),
+                )
+            )
+        ).scalars().all()
+    ) if system_task_ids else set()
+
+    def is_realization_visible(task: dict) -> bool:
+        if task.get("source_type") != "system":
+            return True
+        try:
+            task_id = uuid.UUID(str(task.get("task_id")))
+        except (TypeError, ValueError):
+            # Snapshot-only planner facts are already sourced from the
+            # opt-in-filtered Weekly Planner.
+            return True
+        return task_id in opted_in_system_task_ids
+
+    for timeline in daily_by_user.values():
+        for timeline_item in timeline:
+            timeline_item["tasks"] = [
+                task
+                for task in timeline_item.get("tasks") or []
+                if is_realization_visible(task)
+            ]
+    for user_id, tasks_by_key in daily_tasks_by_user.items():
+        daily_tasks_by_user[user_id] = {
+            key: task
+            for key, task in tasks_by_key.items()
+            if is_realization_visible(task)
+        }
+
     visible_task_ids: set[uuid.UUID] = set()
     for row in visible:
         for timeline_item in daily_by_user.get(row.user_id, []):
@@ -883,7 +1015,7 @@ async def _weekly_response(
         facts["tasks"] = [
             task
             for task in facts.get("tasks") or []
-            if belongs_to_person(task, row.user_id)
+            if belongs_to_person(task, row.user_id) and is_realization_visible(task)
         ]
         for task in facts["tasks"]:
             try:
@@ -894,6 +1026,46 @@ async def _weekly_response(
                 task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
             )
         facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
+        expected_keys: set[str] = set()
+        completed_expected_keys: set[str] = set()
+        completed_keys: set[str] = set()
+        additional_keys: set[str] = set()
+        for timeline_item in facts["daily_timeline"]:
+            planned_today = 0
+            completed_today = 0
+            for task in timeline_item.get("tasks") or []:
+                identity = _timeline_task_identity(task)
+                if identity is None:
+                    continue
+                attribution = task.get("attribution")
+                is_expected = attribution in {"planned_today", "system_schedule"}
+                is_completed = task.get("classification") == "completed"
+                if is_expected:
+                    expected_keys.add(identity)
+                    planned_today += 1
+                    if is_completed:
+                        completed_expected_keys.add(identity)
+                        completed_today += 1
+                elif attribution == "added_after_weekly_plan":
+                    additional_keys.add(identity)
+                if is_completed:
+                    completed_keys.add(identity)
+            timeline_item["planned_count"] = planned_today
+            timeline_item["completed_count"] = completed_today
+            timeline_item["daily_progress_percent"] = (
+                round(completed_today * 100.0 / planned_today, 1)
+                if planned_today
+                else 0.0
+            )
+        facts["weekly_planned_count"] = len(expected_keys)
+        facts["weekly_completed_count"] = len(completed_expected_keys)
+        facts["weekly_all_completed_count"] = len(completed_keys)
+        facts["weekly_additional_count"] = len(additional_keys)
+        facts["weekly_progress_percent"] = (
+            round(len(completed_expected_keys) * 100.0 / len(expected_keys), 1)
+            if expected_keys
+            else 0.0
+        )
         facts["observations"] = live_by_user.get(row.user_id, [])
         pulse_history = [
             {
@@ -1714,6 +1886,153 @@ async def close_realization_day(
     await db.commit()
     await db.refresh(event)
     return RealizationDailyCloseEventOut.model_validate(event)
+
+
+def _require_daily_approval_access(user: User, department_id: uuid.UUID) -> None:
+    if user.role is UserRole.ADMIN:
+        return
+    if user.role is UserRole.MANAGER and user.department_id == department_id:
+        return
+    raise HTTPException(
+        status_code=403,
+        detail="Vetëm menaxheri i këtij departamenti ose ADMIN mund ta aprovojë ditën.",
+    )
+
+
+def _daily_approval_out(event: RealizationDailyApprovalEvent, status_value: str) -> dict:
+    return {
+        "id": event.id,
+        "period_id": event.period_id,
+        "result_id": event.result_id,
+        "user_id": event.user_id,
+        "department_id": event.department_id,
+        "action": event.action,
+        "source_close_event_id": event.source_close_event_id,
+        "approval_comment": event.approval_comment,
+        "reason": event.reason,
+        "actor_user_id": event.actor_user_id,
+        "created_at": event.created_at,
+        "status": status_value,
+    }
+
+
+@router.post(
+    "/periods/{period_id}/results/{result_id}/approve-day",
+    response_model=RealizationDailyApprovalOut,
+)
+async def approve_realization_day(
+    period_id: uuid.UUID,
+    result_id: uuid.UUID,
+    payload: RealizationDailyApprovalRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    period = await _period(db, period_id, for_update=True)
+    result = await db.get(RealizationPersonResult, result_id)
+    if (
+        result is None
+        or result.period_id != period.id
+        or period.period_type != "DAILY"
+        or result.department_id is None
+    ):
+        raise HTTPException(status_code=404, detail="Daily Realization result not found")
+    _require_daily_approval_access(user, result.department_id)
+    require_unlocked(period)
+    close_event = await latest_daily_close(db, period_id=period.id, user_id=result.user_id)
+    if close_event is None or close_event.action not in {"CLOSE", "CORRECT"}:
+        raise HTTPException(status_code=409, detail={
+            "code": "DAILY_REALIZATION_NOT_CLOSED",
+            "message": "Punonjësi duhet ta mbyllë ditën para aprovimit të menaxherit.",
+        })
+    compliance = await build_daily_rlz_compliance(
+        db, user_id=result.user_id, day=period.start_date
+    )
+    if compliance["blockers"] or compliance["rlz_close_state"]["status"] != "SAVED":
+        raise HTTPException(status_code=409, detail={
+            "code": "DAILY_REALIZATION_APPROVAL_NOT_READY",
+            "message": "Ka ndryshime ose të dhëna të paplotësuara pas mbylljes personale.",
+            "blockers": compliance["blockers"],
+            "close_state": compliance["rlz_close_state"],
+        })
+    latest_approval = await latest_daily_approval(
+        db, period_id=period.id, user_id=result.user_id
+    )
+    current_state = approval_state_from_events(
+        latest_approval, close_event, personal_close_status="SAVED"
+    )
+    if current_state["status"] == "APPROVED":
+        raise HTTPException(status_code=409, detail="Kjo ditë është aprovuar tashmë.")
+    event = RealizationDailyApprovalEvent(
+        period_id=period.id,
+        result_id=result.id,
+        user_id=result.user_id,
+        department_id=result.department_id,
+        action="APPROVE",
+        source_close_event_id=close_event.id,
+        approval_comment=(payload.approval_comment or "").strip() or None,
+        actor_user_id=user.id,
+    )
+    db.add(event)
+    await db.flush()
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="realization_daily_approval",
+        entity_id=event.id,
+        action="approve",
+        before={"status": current_state["status"]},
+        after={"user_id": str(result.user_id), "day": period.start_date.isoformat()},
+    )
+    await db.commit()
+    await db.refresh(event)
+    return _daily_approval_out(event, "APPROVED")
+
+
+@router.post(
+    "/periods/{period_id}/results/{result_id}/revoke-day-approval",
+    response_model=RealizationDailyApprovalOut,
+)
+async def revoke_realization_day_approval(
+    period_id: uuid.UUID,
+    result_id: uuid.UUID,
+    payload: RealizationDailyApprovalRevokeRequest,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    period = await _period(db, period_id, for_update=True)
+    result = await db.get(RealizationPersonResult, result_id)
+    if result is None or result.period_id != period.id or result.department_id is None:
+        raise HTTPException(status_code=404, detail="Daily Realization result not found")
+    _require_daily_approval_access(user, result.department_id)
+    latest_approval = await latest_daily_approval(
+        db, period_id=period.id, user_id=result.user_id
+    )
+    if latest_approval is None or latest_approval.action != "APPROVE":
+        raise HTTPException(status_code=409, detail="Nuk ka aprovim aktiv për t'u hequr.")
+    event = RealizationDailyApprovalEvent(
+        period_id=period.id,
+        result_id=result.id,
+        user_id=result.user_id,
+        department_id=result.department_id,
+        action="REVOKE",
+        source_close_event_id=latest_approval.source_close_event_id,
+        reason=payload.reason.strip(),
+        actor_user_id=user.id,
+    )
+    db.add(event)
+    await db.flush()
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="realization_daily_approval",
+        entity_id=event.id,
+        action="revoke",
+        before={"approval_id": str(latest_approval.id)},
+        after={"reason": event.reason},
+    )
+    await db.commit()
+    await db.refresh(event)
+    return _daily_approval_out(event, "REVOKED")
 
 
 @router.post(

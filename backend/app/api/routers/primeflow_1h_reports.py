@@ -26,6 +26,7 @@ from app.services.primeflow_report import ReportDocument, SLOTS, render_docx, re
 from app.services.primeflow_report_delivery import configured_recipients, deliver_report, generate_fresh
 from app.services.daily_rlz_control_delivery import (
     SCHEDULE_TYPE as RLZ_SCHEDULE_TYPE, REPORT_TYPE as RLZ_REPORT_TYPE,
+    DEFAULT_VARIANT_TIMES,
     deliver_daily_rlz_control, generate_fresh as generate_rlz_fresh,
     render_html as render_rlz_html, render_plain as render_rlz_plain,
 )
@@ -83,7 +84,8 @@ def _schedule(row: PrimeFlowReportSchedule) -> dict:
         next_runs.append(following.isoformat())
         previous = following
     return {
-        "id": str(row.id), "name": row.name, "report_type": row.report_type, "report_slot": row.report_slot,
+        "id": str(row.id), "name": row.name, "report_type": row.report_type,
+        "report_variant": row.report_variant, "report_slot": row.report_slot,
         "execution_time": row.execution_time.strftime("%H:%M"), "timezone": row.timezone,
         "weekdays": row.weekdays, "is_active": row.is_active, "is_default": row.is_default,
         "backfill_enabled": row.backfill_enabled, "predecessor_schedule_id": str(row.predecessor_schedule_id) if row.predecessor_schedule_id else None,
@@ -121,10 +123,19 @@ class SendRequest(PreviewRequest):
 
 class RlzPreviewRequest(BaseModel):
     report_date: date
+    report_variant: str = "FINAL"
     to: list[EmailStr] = Field(default_factory=list)
     cc: list[EmailStr] = Field(default_factory=list)
     bcc: list[EmailStr] = Field(default_factory=list)
     use_default_recipients: bool = True
+
+    @field_validator("report_variant")
+    @classmethod
+    def valid_variant(cls, value: str) -> str:
+        value = value.upper()
+        if value not in DEFAULT_VARIANT_TIMES:
+            raise ValueError("Unsupported RLZ report variant")
+        return value
 
 
 class RlzSendRequest(RlzPreviewRequest):
@@ -165,6 +176,7 @@ class RecipientUpdate(BaseModel):
 class SchedulePayload(BaseModel):
     name: str = Field(min_length=2, max_length=120)
     report_type: str = "ONE_H"
+    report_variant: str | None = None
     report_slot: str | None = None
     execution_time: str
     timezone: str = "Europe/Tirane"
@@ -183,6 +195,16 @@ class SchedulePayload(BaseModel):
         value = value.upper()
         if value not in {"ONE_H", "RLZ_DAILY_CONTROL"}:
             raise ValueError("Unsupported report type")
+        return value
+
+    @field_validator("report_variant")
+    @classmethod
+    def schedule_variant_valid(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        value = value.upper()
+        if value not in DEFAULT_VARIANT_TIMES:
+            raise ValueError("Unsupported RLZ report variant")
         return value
 
     @field_validator("execution_time")
@@ -312,12 +334,24 @@ async def _rlz_configured_time(db: AsyncSession) -> str:
     return value.strftime("%H:%M") if value else "16:00"
 
 
+async def _rlz_variant_time(db: AsyncSession, variant: str) -> str:
+    value = await db.scalar(select(PrimeFlowReportSchedule.execution_time).where(
+        PrimeFlowReportSchedule.report_type == RLZ_SCHEDULE_TYPE,
+        PrimeFlowReportSchedule.report_variant == variant,
+        PrimeFlowReportSchedule.is_active.is_(True),
+    ).order_by(PrimeFlowReportSchedule.sort_order).limit(1))
+    return value.strftime("%H:%M") if value else DEFAULT_VARIANT_TIMES[variant]
+
+
 @router.post("/rlz/preview")
 async def rlz_preview(payload: RlzPreviewRequest, db: AsyncSession = Depends(get_db),
                       _: User = Depends(require_rlz_report_manager)) -> dict:
     recipients = await _rlz_recipient_map(payload, require_any=False)
-    report = await generate_rlz_fresh(payload.report_date)
-    report_time = await _rlz_configured_time(db)
+    try:
+        report = await generate_rlz_fresh(payload.report_date, payload.report_variant)
+    except ValueError as exc:
+        raise HTTPException(409, str(exc)) from exc
+    report_time = await _rlz_variant_time(db, payload.report_variant)
     return {"report": report, "recipients": recipients, "plain_text": render_rlz_plain(report, report_time),
             "html": render_rlz_html(report, report_time)}
 
@@ -326,15 +360,16 @@ async def rlz_preview(payload: RlzPreviewRequest, db: AsyncSession = Depends(get
 async def rlz_send(payload: RlzSendRequest, db: AsyncSession = Depends(get_db),
                    user: User = Depends(require_rlz_report_manager)) -> dict:
     recipients = await _rlz_recipient_map(payload, require_any=True)
-    report_time = await _rlz_configured_time(db)
+    report_time = await _rlz_variant_time(db, payload.report_variant)
     run = await deliver_daily_rlz_control(
         payload.report_date, recipient_map=recipients, trigger_type="MANUAL",
         triggered_by_user_id=user.id, manual_reason=payload.reason, report_time=report_time,
+        variant=payload.report_variant,
     )
     add_audit_log(db=db, actor_user_id=user.id, entity_type="primeflow_report_run", entity_id=run.id,
                   action="MANUAL_SEND", after={"report_type": RLZ_REPORT_TYPE, "status": run.status, "reason": payload.reason})
     await db.commit()
-    if run.status not in {"SENT", "ALREADY_SENT"}:
+    if run.status not in {"SENT", "ALREADY_SENT", "SKIPPED_NO_CHANGES"}:
         raise HTTPException(502, detail={"message": "RLZ Daily Control delivery failed", "run_id": str(run.id),
                                          "status": run.status, "error_message": run.error_message})
     return _run(run)
@@ -483,14 +518,22 @@ async def _validate_schedule(db: AsyncSession, payload: SchedulePayload, row_id:
         raise HTTPException(422, "Unsupported report type")
     if payload.report_type == "ONE_H" and payload.report_slot not in SLOTS:
         raise HTTPException(422, "ONE_H schedules require a supported report slot")
+    if payload.report_type == "ONE_H" and payload.report_variant is not None:
+        raise HTTPException(422, "ONE_H schedules do not use report_variant")
     if payload.report_type == "RLZ_DAILY_CONTROL" and (
         payload.report_slot is not None or payload.backfill_enabled or payload.predecessor_schedule_id is not None
     ):
         raise HTTPException(422, "RLZ Daily Control has no 1H slot, predecessor, or backfill chain")
+    if payload.report_type == "RLZ_DAILY_CONTROL" and payload.report_variant not in DEFAULT_VARIANT_TIMES:
+        raise HTTPException(422, "RLZ Daily Control requires PRECHECK, FINAL, or CORRECTION")
     duplicate = (await db.execute(select(PrimeFlowReportSchedule).where(
         PrimeFlowReportSchedule.id != row_id if row_id else PrimeFlowReportSchedule.id.isnot(None),
         PrimeFlowReportSchedule.report_type == payload.report_type,
-        PrimeFlowReportSchedule.report_slot == payload.report_slot,
+        (
+            PrimeFlowReportSchedule.report_variant == payload.report_variant
+            if payload.report_type == "RLZ_DAILY_CONTROL"
+            else PrimeFlowReportSchedule.report_slot == payload.report_slot
+        ),
         PrimeFlowReportSchedule.is_active.is_(True),
     ))).scalars().first()
     if payload.is_active and duplicate:

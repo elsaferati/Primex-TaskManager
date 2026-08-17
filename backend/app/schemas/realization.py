@@ -400,6 +400,29 @@ class RealizationDailyReopenRequest(RealizationSchema):
     reason: str = Field(min_length=1, max_length=4000)
 
 
+class RealizationDailyApprovalRequest(RealizationSchema):
+    approval_comment: str | None = Field(default=None, max_length=2000)
+
+
+class RealizationDailyApprovalRevokeRequest(RealizationSchema):
+    reason: str = Field(min_length=1, max_length=4000)
+
+
+class RealizationDailyApprovalOut(RealizationSchema):
+    id: uuid.UUID
+    period_id: uuid.UUID
+    result_id: uuid.UUID
+    user_id: uuid.UUID
+    department_id: uuid.UUID
+    action: str
+    source_close_event_id: uuid.UUID | None
+    approval_comment: str | None
+    reason: str | None
+    actor_user_id: uuid.UUID
+    created_at: datetime
+    status: str
+
+
 class RealizationDailyCloseEventOut(RealizationSchema):
     id: uuid.UUID
     period_id: uuid.UUID

@@ -542,6 +542,14 @@ async def daily_report(
     all_system_task_ids = [task.id for task, _, _ in (system_today_rows + system_acted_today_rows + system_overdue_rows)]
     system_assignee_out_map = await _assignees_for_tasks(db, all_system_task_ids)
     system_comment_map = await _user_comments_for_tasks(db, all_system_task_ids, user_id)
+    system_daily_rlz_map = {
+        row.task_id: row
+        for row in (await db.execute(select(TaskDailyRlzState).where(
+            TaskDailyRlzState.task_id.in_(all_system_task_ids),
+            TaskDailyRlzState.user_id == user_id,
+            TaskDailyRlzState.day_date == day,
+        ))).scalars().all()
+    } if all_system_task_ids else {}
 
     def _to_occurrence_status(task_status: str | None) -> str:
         if task_status in done_like_statuses:
@@ -574,6 +582,9 @@ async def daily_report(
                 acted_at=task.completed_at,
                 is_overdue=is_from_overdue,
                 late_days=late_days,
+                rlz_daily_state=_daily_rlz_state_out(
+                    system_daily_rlz_map.get(task.id), day, system_comment_map.get(task.id)
+                ),
             )
         )
 
@@ -598,6 +609,9 @@ async def daily_report(
                 acted_at=task.completed_at,
                 is_overdue=True,
                 late_days=late_days,
+                rlz_daily_state=_daily_rlz_state_out(
+                    system_daily_rlz_map.get(task.id), day, system_comment_map.get(task.id)
+                ),
             )
         )
 

@@ -17,6 +17,7 @@ type Schedule = {
   id: string
   name: string
   report_type: string
+  report_variant: "PRECHECK" | "FINAL" | "CORRECTION"
   report_slot: string | null
   execution_time: string
   timezone: string
@@ -56,6 +57,7 @@ function schedulePayload(schedule: Schedule, changes: Partial<Schedule> = {}) {
   return {
     name: next.name,
     report_type: next.report_type,
+    report_variant: next.report_variant,
     report_slot: null,
     execution_time: next.execution_time,
     timezone: next.timezone,
@@ -76,6 +78,7 @@ export function RlzReportManagement() {
   const [date, setDate] = React.useState(new Date().toISOString().slice(0, 10))
   const [preview, setPreview] = React.useState<{ html: string; report: { summary: Record<string, number> } } | null>(null)
   const [reason, setReason] = React.useState("")
+  const [variant, setVariant] = React.useState<"PRECHECK" | "FINAL" | "CORRECTION">("FINAL")
   const [email, setEmail] = React.useState("")
   const [recipientType, setRecipientType] = React.useState<"TO" | "CC" | "BCC">("TO")
   const [busy, setBusy] = React.useState(false)
@@ -97,7 +100,7 @@ export function RlzReportManagement() {
       const response = await apiFetch(`${API}/rlz/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ report_date: date, use_default_recipients: true, to: [], cc: [], bcc: [] }),
+        body: JSON.stringify({ report_date: date, report_variant: variant, use_default_recipients: true, to: [], cc: [], bcc: [] }),
       })
       if (response.ok) setPreview(await response.json())
       else toast.error("Preview failed", { description: await response.text() })
@@ -112,10 +115,15 @@ export function RlzReportManagement() {
       const response = await apiFetch(`${API}/rlz/send`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ report_date: date, use_default_recipients: true, to: [], cc: [], bcc: [], reason }),
+        body: JSON.stringify({ report_date: date, report_variant: variant, use_default_recipients: true, to: [], cc: [], bcc: [], reason }),
       })
       if (response.ok) {
-        toast.success("RLZ Daily Control sent")
+        const result = await response.json() as { status?: string }
+        toast.success(
+          result.status === "SKIPPED_NO_CHANGES"
+            ? "Nuk ka ndryshime materiale; email-i nuk u dërgua"
+            : "RLZ Daily Control sent",
+        )
         setReason("")
         await load()
       } else toast.error("Send failed", { description: await response.text() })
@@ -177,7 +185,7 @@ export function RlzReportManagement() {
         <div>
           <h2 className="font-semibold">RLZ Daily Control</h2>
           <p className="text-sm text-muted-foreground">
-            Raporti dërgohet automatikisht në orën dhe ditët e zgjedhura. Parazgjedhja: 16:00, Hënë–Premte.
+            16:10 kontrolli, 16:30 raporti final dhe 17:05 korrigjimet me ndryshime. Hënë–Premte.
           </p>
         </div>
         <Button variant="outline" onClick={() => void load()}><RefreshCw />Refresh</Button>
@@ -187,6 +195,14 @@ export function RlzReportManagement() {
         <div className="space-y-3 rounded-lg border p-4">
           <h3 className="font-medium">Preview / manual send</h3>
           <Input type="date" value={date} onChange={(event) => setDate(event.target.value)} />
+          <Select value={variant} onValueChange={(value) => setVariant(value as typeof variant)}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="PRECHECK">16:10 · Kontrolli i mangësive</SelectItem>
+              <SelectItem value="FINAL">16:30 · Raporti final</SelectItem>
+              <SelectItem value="CORRECTION">17:05 · Korrigjimet</SelectItem>
+            </SelectContent>
+          </Select>
           <Button variant="outline" onClick={() => void previewNow()} disabled={busy}>Preview fresh</Button>
           {preview ? (
             <>
@@ -246,7 +262,9 @@ export function RlzReportManagement() {
         {overview?.schedules.map((schedule) => (
           <div key={schedule.id} className="space-y-3 rounded border p-3">
             <div className="flex flex-wrap items-center gap-3">
-              <div className="min-w-[220px] flex-1 font-medium">{schedule.name}</div>
+              <div className="min-w-[220px] flex-1 font-medium">
+                {schedule.name}<div className="text-xs font-normal text-muted-foreground">{schedule.report_variant}</div>
+              </div>
               <Input
                 aria-label="RLZ report time"
                 type="time"
