@@ -8,6 +8,7 @@ from sqlalchemy import Date as SQLDate, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.realization import RealizationDailyCloseEvent, RealizationPeriod
+from app.models.question_library import QuestionDefinition, QuestionUserStatus
 from app.models.task import Task
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task_assignee import TaskAssignee
@@ -84,6 +85,105 @@ ISSUE_MESSAGES = {
 }
 
 
+async def individual_question_task_states(
+    db: AsyncSession,
+    *,
+    tasks: list[Task],
+    user_id: uuid.UUID,
+) -> tuple[dict[uuid.UUID, str], dict[uuid.UUID, datetime]]:
+    """Resolve shared question tasks using only the selected user's answers.
+
+    Question tasks are shared by several assignees, so ``Task.status`` remains TODO
+    until everybody has answered. RLZ is personal and must instead consider a task
+    DONE as soon as this user has completed every question linked to that task.
+    """
+    candidate_tasks = [
+        task for task in tasks
+        if task.question_origin_id is not None or task.question_batch_date is not None
+    ]
+    if not candidate_tasks:
+        return {}, {}
+
+    task_ids = {task.id for task in candidate_tasks}
+    origin_ids = {
+        task.question_origin_id for task in candidate_tasks
+        if task.question_origin_id is not None
+    }
+    question_rows = (
+        await db.execute(
+            select(QuestionDefinition.id, QuestionDefinition.task_id).where(
+                or_(
+                    QuestionDefinition.task_id.in_(task_ids),
+                    QuestionDefinition.id.in_(origin_ids),
+                )
+            )
+        )
+    ).all()
+
+    questions_by_task: dict[uuid.UUID, set[uuid.UUID]] = {
+        task.id: set() for task in candidate_tasks
+    }
+    tasks_by_origin = {
+        task.question_origin_id: task.id
+        for task in candidate_tasks
+        if task.question_origin_id is not None
+    }
+    for question_id, linked_task_id in question_rows:
+        if linked_task_id in task_ids:
+            questions_by_task[linked_task_id].add(question_id)
+        origin_task_id = tasks_by_origin.get(question_id)
+        if origin_task_id is not None:
+            questions_by_task[origin_task_id].add(question_id)
+
+    all_question_ids = {
+        question_id
+        for question_ids in questions_by_task.values()
+        for question_id in question_ids
+    }
+    if not all_question_ids:
+        return {}, {}
+
+    user_status_rows = (
+        await db.execute(
+            select(
+                QuestionUserStatus.question_id,
+                QuestionUserStatus.status,
+                QuestionUserStatus.updated_at,
+            ).where(
+                QuestionUserStatus.question_id.in_(all_question_ids),
+                QuestionUserStatus.user_id == user_id,
+            )
+        )
+    ).all()
+    done_question_ids = {
+        question_id
+        for question_id, status, _ in user_status_rows
+        if status == "DONE"
+    }
+    changed_by_question = {
+        question_id: updated_at
+        for question_id, _, updated_at in user_status_rows
+        if updated_at is not None
+    }
+
+    statuses: dict[uuid.UUID, str] = {}
+    changed_at: dict[uuid.UUID, datetime] = {}
+    for task_id, question_ids in questions_by_task.items():
+        if not question_ids:
+            continue
+        statuses[task_id] = (
+            "DONE" if question_ids.issubset(done_question_ids) else "TODO"
+        )
+        task_changes = [
+            changed_by_question[question_id]
+            for question_id in question_ids
+            if question_id in changed_by_question
+        ]
+        if task_changes:
+            changed_at[task_id] = max(task_changes)
+    return statuses, changed_at
+
+
 async def relevant_tasks(db: AsyncSession, *, user_id: uuid.UUID, day: date) -> list[Task]:
     # Mirrors the regular-task membership used by Daily Report: assigned active tasks
     # with a due date that are current/overdue for the selected workday.
@@ -117,6 +217,9 @@ async def relevant_tasks(db: AsyncSession, *, user_id: uuid.UUID, day: date) -> 
 async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, day: date,
                                      now: datetime | None = None) -> dict:
     tasks = await relevant_tasks(db, user_id=user_id, day=day)
+    question_statuses, question_status_changes = await individual_question_task_states(
+        db, tasks=tasks, user_id=user_id
+    )
     task_ids = [task.id for task in tasks]
     states = {}
     slots = {}
@@ -146,7 +249,10 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
     for task in tasks:
         state = states.get(task.id)
         task_comment = comments.get(task.id)
-        status = "DONE" if task.completed_at else str(getattr(task.status, "value", task.status))
+        status = question_statuses.get(
+            task.id,
+            "DONE" if task.completed_at else str(getattr(task.status, "value", task.status)),
+        )
         due = task.due_date.date() if task.due_date else None
         slot = slots.get(task.id) or task.one_h_report_slot
         reason = state.reason_code if state else None
@@ -173,7 +279,8 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
                 "issues": [{"code": code, "message": ISSUE_MESSAGES[code]} for code in issue_codes],
             })
         for changed in (task.updated_at, state.updated_at if state else None,
-                        task_comment.updated_at if task_comment else None, slot_changed.get(task.id)):
+                        task_comment.updated_at if task_comment else None, slot_changed.get(task.id),
+                        question_status_changes.get(task.id)):
             if changed and (latest_change is None or changed > latest_change):
                 latest_change = changed
     latest_close = (await db.execute(

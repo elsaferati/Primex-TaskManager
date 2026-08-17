@@ -1,10 +1,14 @@
-from datetime import date, datetime
+import asyncio
+from datetime import date, datetime, timezone
+from types import SimpleNamespace
+import uuid
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.services.daily_rlz_compliance import (
-    REASON_LABELS, is_editable_day, next_working_day, task_issue_codes,
+    REASON_LABELS, individual_question_task_states, is_editable_day,
+    next_working_day, task_issue_codes,
 )
 from app.services.daily_rlz_control_delivery import render_html, render_plain, subject_for
 
@@ -50,6 +54,79 @@ def test_edit_window_uses_tirana_and_closes_at_1700():
     tz = ZoneInfo("Europe/Tirane")
     assert is_editable_day(DAY, datetime(2026, 8, 12, 16, 59, tzinfo=tz))
     assert not is_editable_day(DAY, datetime(2026, 8, 12, 17, 0, tzinfo=tz))
+
+
+class _Scalars:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+
+class _Result:
+    def __init__(self, rows):
+        self._rows = rows
+
+    def all(self):
+        return self._rows
+
+    def scalars(self):
+        return _Scalars(self._rows)
+
+
+class _QuestionStateDb:
+    def __init__(self, question_rows, status_rows):
+        self._results = [_Result(question_rows), _Result(status_rows)]
+
+    async def execute(self, _statement):
+        return self._results.pop(0)
+
+
+def test_shared_question_task_uses_only_current_users_status():
+    task_id = uuid.uuid4()
+    question_a = uuid.uuid4()
+    question_b = uuid.uuid4()
+    current_user_id = uuid.uuid4()
+    changed = datetime(2026, 8, 12, 14, 30, tzinfo=timezone.utc)
+    task = SimpleNamespace(
+        id=task_id,
+        question_origin_id=question_a,
+        question_batch_date=DAY,
+    )
+    db = _QuestionStateDb(
+        [(question_a, task_id), (question_b, task_id)],
+        [(question_a, "DONE", changed), (question_b, "DONE", changed)],
+    )
+
+    statuses, changes = asyncio.run(
+        individual_question_task_states(db, tasks=[task], user_id=current_user_id)
+    )
+
+    assert statuses[task_id] == "DONE"
+    assert changes[task_id] == changed
+
+
+def test_shared_question_task_stays_todo_when_current_user_has_not_finished_all():
+    task_id = uuid.uuid4()
+    question_a = uuid.uuid4()
+    question_b = uuid.uuid4()
+    current_user_id = uuid.uuid4()
+    task = SimpleNamespace(
+        id=task_id,
+        question_origin_id=question_a,
+        question_batch_date=DAY,
+    )
+    db = _QuestionStateDb(
+        [(question_a, task_id), (question_b, task_id)],
+        [(question_a, "DONE", datetime.now(timezone.utc))],
+    )
+
+    statuses, _ = asyncio.run(
+        individual_question_task_states(db, tasks=[task], user_id=current_user_id)
+    )
+
+    assert statuses[task_id] == "TODO"
 
 
 def test_all_good_report_is_still_rendered():
