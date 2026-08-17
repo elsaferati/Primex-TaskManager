@@ -22,6 +22,7 @@ from app.models.realization import (
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_user_comment import TaskUserComment
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
@@ -38,6 +39,21 @@ def _local_date(value: datetime | None) -> date | None:
     zone = ZoneInfo(settings.REALIZATION_TIMEZONE)
     localized = value.replace(tzinfo=zone) if value.tzinfo is None else value.astimezone(zone)
     return localized.date()
+
+
+def _effective_task_comment_map(
+    general_rows: list[TaskUserComment],
+    daily_rows: list[TaskDailyRlzState],
+) -> dict[tuple[uuid.UUID, uuid.UUID], str]:
+    """Prefer the day-scoped RLZ comment over the task's general comment."""
+    comments = {
+        (row.task_id, row.user_id): (row.comment or "").strip()
+        for row in general_rows
+    }
+    for row in daily_rows:
+        if row.comment is not None:
+            comments[(row.task_id, row.user_id)] = row.comment.strip()
+    return comments
 
 
 def _system_task_operational_day(task: Task) -> date | None:
@@ -516,7 +532,20 @@ async def calculate_daily_period(
         if relevant_task_ids and people
         else []
     )
-    comments = {(row.task_id, row.user_id): (row.comment or "").strip() for row in comment_rows}
+    daily_comment_rows = (
+        (
+            await db.execute(
+                select(TaskDailyRlzState).where(
+                    TaskDailyRlzState.task_id.in_(relevant_task_ids),
+                    TaskDailyRlzState.user_id.in_(list(people)),
+                    TaskDailyRlzState.day_date == period.start_date,
+                )
+            )
+        ).scalars().all()
+        if relevant_task_ids and people
+        else []
+    )
+    comments = _effective_task_comment_map(comment_rows, daily_comment_rows)
 
     observation_rows = (
         await db.execute(
