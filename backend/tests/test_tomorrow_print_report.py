@@ -133,6 +133,13 @@ def test_personal_row_label_has_a_gap_and_uses_compact_single_line_schedules() -
     assert "GA 08:15 / 13:15<br><br>DV/LH 10:15 / 14:30" in report_html
 
 
+def test_blocked_row_label_includes_the_1550_report_time() -> None:
+    rows = _task_rows({}, date(2026, 8, 14))
+    blocked_row = next(row for row in rows if row[0].startswith("BLL"))
+
+    assert blocked_row[0] == "BLL\n14:30 - 15:30\nRAP 15:50"
+
+
 def test_excel_status_colours_match_email_and_ga_personal_overrides_status() -> None:
     _, content, _ = _excel_table_attachment(
         [

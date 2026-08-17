@@ -2091,6 +2091,7 @@ export default function GaKaNotesPage() {
       ).trim()
       const taskInfo = noteTaskInfo.get(editNoteId)
       const currentNote = notes.find((note) => note.id === editNoteId) || null
+      const selectedProjectId = editTaskProjectId === "NONE" ? null : editTaskProjectId
       if (taskInfo?.taskId && editTaskAssigneeIds.length === 0) {
         toast.error("A task must keep at least one assignee")
         return
@@ -2103,7 +2104,9 @@ export default function GaKaNotesPage() {
         ? {
             content: serializedContent,
             description: editDescription.trim() || null,
-            project_id: editTaskProjectId === "NONE" ? null : editTaskProjectId,
+            ...(selectedProjectId !== (currentNote?.project_id ?? null)
+              ? { project_id: selectedProjectId }
+              : {}),
             assignee_ids: editTaskAssigneeIds,
             assignee_states: editTaskAssigneeIds.map((assigneeId) => {
               const state = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()

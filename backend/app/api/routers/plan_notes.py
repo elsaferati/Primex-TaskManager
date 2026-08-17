@@ -123,12 +123,8 @@ def _plan_note_upload_base_dir() -> Path:
 
 
 async def _ensure_note_access(note: PlanNote, user, db: AsyncSession) -> None:
-    if note.project_id is not None:
-        project = (await db.execute(select(Project).where(Project.id == note.project_id))).scalar_one_or_none()
-        if project and project.department_id is not None:
-            ensure_department_access(user, project.department_id)
-    elif note.department_id is not None:
-        ensure_department_access(user, note.department_id)
+    # Every authenticated PrimeFlow user may view, edit, and strike PX JAV notes.
+    return
 
 
 async def _get_note_or_404(note_id: uuid.UUID, db: AsyncSession) -> PlanNote:
@@ -413,7 +409,7 @@ async def update_plan_note_task_bundle(
             project = (await db.execute(select(Project).where(Project.id == payload.project_id))).scalar_one_or_none()
             if project is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-            if project.department_id is not None:
+            if payload.project_id != old_project_id and project.department_id is not None:
                 ensure_department_access(user, project.department_id)
         note.project_id = payload.project_id
         if project is not None:

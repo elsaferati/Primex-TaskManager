@@ -19,7 +19,7 @@ TASK_ROWS = (
     ("oneH", "1H 11:00", "11:00"),
     ("oneH", "1H 11:50", "11:50"),
     ("oneH", "1H 14:20", "14:20"),
-    ("blocked", "BLL\n14:30 - 15:30", None),
+    ("blocked", "BLL\n14:30 - 15:30\nRAP 15:50", None),
     ("oneH", "1H 15:50", "15:50"),
     ("oneH", "1H NO SLOT", ""),
     ("important", "DEADLINE / 08:00", None),
