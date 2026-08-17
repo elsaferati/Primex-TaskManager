@@ -163,6 +163,26 @@ async def calculate_daily_period(
     day = period.start_date
     planned = _snapshot_tasks(planned_snapshot)
     planned_ids = {row["task_id"] for row in planned.values() if row.get("task_id")}
+    question_task_ids = set(
+        (
+            await db.execute(
+                select(Task.id).where(
+                    Task.id.in_(planned_ids),
+                    or_(
+                        Task.question_origin_id.is_not(None),
+                        Task.question_batch_date.is_not(None),
+                    ),
+                )
+            )
+        ).scalars().all()
+    ) if planned_ids else set()
+    if question_task_ids:
+        planned = {
+            key: row
+            for key, row in planned.items()
+            if row.get("task_id") not in question_task_ids
+        }
+        planned_ids -= question_task_ids
 
     department_users, common_leave = await load_active_users_and_common_leave(
         db,
@@ -188,6 +208,8 @@ async def calculate_daily_period(
             ),
         ),
         Task.created_at <= day_end_utc,
+        Task.question_origin_id.is_(None),
+        Task.question_batch_date.is_(None),
         # System work belongs in Realization only when its template was
         # explicitly opted into the Weekly Planner.
         or_(
