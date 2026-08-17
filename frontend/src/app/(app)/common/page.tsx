@@ -125,6 +125,7 @@ const ONE_H_PRINT_CHECKLISTS = [
       "A kryhet sot?",
       "A kryhet kete jave?",
       "A arrihet RLZ javor?",
+      "Done? / Strikes? / Notes te reja?",
     ],
   },
 ] as const
@@ -143,10 +144,16 @@ const escapePrintHtml = (value: string) =>
 
 const oneHPrintChecklistsHtml = () =>
   `<section class="one-h-print-checklists">${ONE_H_PRINT_CHECKLISTS.map(
-    ({ title, questions }) =>
-      `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div>${questions
-        .map((question, index) => `<div class="one-h-print-checklist-item">${index + 1}. ${escapePrintHtml(question)}</div>`)
-        .join("")}</div>`
+    ({ title, questions }) => {
+      const items = (values: readonly string[], startIndex = 0) => values
+        .map((question, index) => `<div class="one-h-print-checklist-item">${startIndex + index + 1}. ${escapePrintHtml(question)}</div>`)
+        .join("")
+      const splitAt = Math.ceil(questions.length / 2)
+      const questionContent = title === "PYETJET PER 1H - BORD"
+        ? `<div class="one-h-print-board-columns"><div>${items(questions.slice(0, splitAt))}</div><div>${items(questions.slice(splitAt), splitAt)}</div></div>`
+        : items(questions)
+      return `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div>${questionContent}</div>`
+    }
   ).join("")}</section>`
 
 function OneHPrintChecklists() {
@@ -155,7 +162,17 @@ function OneHPrintChecklists() {
       {ONE_H_PRINT_CHECKLISTS.map(({ title, questions }) => (
         <div key={title} className="one-h-print-checklist">
           <div className="one-h-print-checklist-title">{title}</div>
-          {questions.map((question, index) => (
+          {title === "PYETJET PER 1H - BORD" ? (
+            <div className="one-h-print-board-columns">
+              {[questions.slice(0, Math.ceil(questions.length / 2)), questions.slice(Math.ceil(questions.length / 2))].map((column, columnIndex) => (
+                <div key={columnIndex}>
+                  {column.map((question, index) => (
+                    <div key={question} className="one-h-print-checklist-item">{columnIndex * Math.ceil(questions.length / 2) + index + 1}. {question}</div>
+                  ))}
+                </div>
+              ))}
+            </div>
+          ) : questions.map((question, index) => (
             <div key={question} className="one-h-print-checklist-item">{index + 1}. {question}</div>
           ))}
         </div>
@@ -4461,6 +4478,7 @@ export default function CommonViewPage() {
   .print-title { font-size: 16px; font-weight: 700; text-align: center; }
   .print-date { text-align: right; font-size: 10px; }
   .one-h-print-checklists { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin:0 0 12px; }
+  .one-h-print-board-columns { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; }
   .one-h-print-checklist-title { background:#eef2ff; border-left:5px solid #2563eb; padding:8px 10px; font-size:11px; font-weight:700; }
   .one-h-print-checklist-item { border:1px solid #64748b; margin-top:5px; padding:6px 8px; font-size:9px; font-weight:700; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
@@ -7223,6 +7241,11 @@ export default function CommonViewPage() {
             gap: 12px;
             margin: 0 0 12px;
             page-break-inside: avoid;
+          }
+          .one-h-print-board-columns {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 6px;
           }
           .one-h-print-checklist-title {
             background: #eef2ff !important;

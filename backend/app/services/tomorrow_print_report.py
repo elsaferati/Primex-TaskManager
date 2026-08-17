@@ -35,6 +35,7 @@ ONE_H_BOARD_CHECKLIST = (
     "A kryhet sot?",
     "A kryhet kete jave?",
     "A arrihet RLZ javor?",
+    "Done? / Strikes? / Notes te reja?",
 )
 ONE_H_STAFF_CHECKLIST = (
     "Hap doc dhe det",
@@ -218,18 +219,36 @@ def _is_non_routine_meeting(item: dict[str, Any]) -> bool:
 def _one_h_checklists_html() -> str:
     """The two preparation checklists shown above every 1H Shtypi task grid."""
 
-    def checklist(title: str, questions: tuple[str, ...]) -> str:
-        rows = "".join(
+    def question_rows(questions: tuple[str, ...], start_index: int = 1) -> str:
+        return "".join(
             "<tr><td style=\"border:1px solid #64748b;padding:8px 10px;font-family:Arial,sans-serif;"
             f"font-size:12px;font-weight:700;\">{index}. {html.escape(question)}</td></tr>"
-            for index, question in enumerate(questions, 1)
+            for index, question in enumerate(questions, start_index)
         )
+
+    def checklist(title: str, questions: tuple[str, ...]) -> str:
         return (
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
             'style="width:100%;border-collapse:separate;border-spacing:0 6px;">'
             '<tr><th style="background-color:#eef2ff;border-left:5px solid #2563eb;padding:10px 12px;'
             f'font-family:Arial,sans-serif;font-size:14px;text-align:left;">{html.escape(title)}</th></tr>'
-            f"{rows}</table>"
+            f"{question_rows(questions)}</table>"
+        )
+
+    def board_checklist() -> str:
+        split_at = (len(ONE_H_BOARD_CHECKLIST) + 1) // 2
+        left_questions = ONE_H_BOARD_CHECKLIST[:split_at]
+        right_questions = ONE_H_BOARD_CHECKLIST[split_at:]
+        table_style = 'width:100%;border-collapse:separate;border-spacing:0 6px;'
+        return (
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-board-checklist-columns="true" style="width:100%;border-collapse:collapse;">'
+            '<tr><th colspan="2" style="background-color:#eef2ff;border-left:5px solid #2563eb;padding:10px 12px;'
+            'font-family:Arial,sans-serif;font-size:14px;text-align:left;">PYETJET PER 1H - BORD</th></tr>'
+            '<tr>'
+            f'<td width="50%" valign="top" style="width:50%;padding:0 3px 0 0;vertical-align:top;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="{table_style}">{question_rows(left_questions)}</table></td>'
+            f'<td width="50%" valign="top" style="width:50%;padding:0 0 0 3px;vertical-align:top;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="{table_style}">{question_rows(right_questions, split_at + 1)}</table></td>'
+            '</tr></table>'
         )
 
     return (
@@ -240,7 +259,7 @@ def _one_h_checklists_html() -> str:
         f"{checklist('STAFF - HAPAT PER 1H', ONE_H_STAFF_CHECKLIST)}"
         '</td>'
         '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-        f"{checklist('PYETJET PER 1H - BORD', ONE_H_BOARD_CHECKLIST)}"
+        f"{board_checklist()}"
         '</td>'
         '</tr></table>'
     )
@@ -342,19 +361,28 @@ def _excel_table_attachment(
             title_cell.font = Font(bold=True, size=11)
             title_cell.alignment = Alignment(vertical="center")
             title_cell.border = border
+            split_at = (len(questions) + 1) // 2 if title == "PYETJET PER 1H - BORD" else len(questions)
             for index, question in enumerate(questions, 1):
                 question_row = row_number + index
+                question_start_column = start_column
+                question_end_column = end_column
+                if title == "PYETJET PER 1H - BORD" and index > split_at:
+                    question_row = row_number + index - split_at
+                    question_start_column = start_column + 2
+                    question_end_column = end_column
+                elif title == "PYETJET PER 1H - BORD":
+                    question_end_column = start_column + 1
                 sheet.merge_cells(
                     start_row=question_row,
-                    start_column=start_column,
+                    start_column=question_start_column,
                     end_row=question_row,
-                    end_column=end_column,
+                    end_column=question_end_column,
                 )
-                question_cell = sheet.cell(question_row, start_column, f"{index}. {question}")
+                question_cell = sheet.cell(question_row, question_start_column, f"{index}. {question}")
                 question_cell.font = Font(bold=True, size=10)
                 question_cell.alignment = Alignment(vertical="center", wrap_text=True)
                 question_cell.border = border
-        return row_number + len(ONE_H_BOARD_CHECKLIST) + 1
+        return row_number + max(len(ONE_H_STAFF_CHECKLIST), (len(ONE_H_BOARD_CHECKLIST) + 1) // 2) + 1
 
     def write_section(
         rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool, row_number: int

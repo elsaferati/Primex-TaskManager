@@ -28,6 +28,9 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     assert "PYETJET PER 1H - BORD" in checklists_html
     assert "STAFF - HAPAT PER 1H" in checklists_html
     assert "Slotin paraprak/aktual" in checklists_html
+    assert 'data-board-checklist-columns="true"' in checklists_html
+    assert "7. Done? / Strikes? / Notes te reja?" in checklists_html
+    assert "8. Strikes?" not in checklists_html
     assert "Share screen side by side DET/REZULTATIN" in checklists_html
 
     _, content, _ = _excel_table_attachment([], [], date(2026, 8, 14))
@@ -36,6 +39,8 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     assert sheet["E3"].value == "PYETJET PER 1H - BORD"
     assert sheet["A4"].value == "1. Hap doc dhe det"
     assert sheet["E4"].value == "1. Slotin paraprak/aktual"
+    assert sheet["G4"].value == "5. A kryhet kete jave?"
+    assert sheet["G6"].value == "7. Done? / Strikes? / Notes te reja?"
 
 
 def test_email_table_removes_added_and_done_editor_markers() -> None:
