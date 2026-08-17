@@ -7090,7 +7090,7 @@ export default function DepartmentKanban() {
                                       08:00
                                     </span>
                                   ) : null}
-                                  <span className="whitespace-pre-wrap break-words">
+                                  <span className="min-w-0 flex-1 whitespace-pre-wrap break-words [overflow-wrap:anywhere]">
                                     {(() => {
                                       const hasMarks = typeof visibleTitle === "string" && visibleTitle.includes("[[")
                                       const renderedTitle = hasMarks ? renderMarkedNoteContent(visibleTitle, visibleTitle) : visibleTitle
