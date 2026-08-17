@@ -6,6 +6,7 @@ import io
 import json
 import logging
 import os
+import re
 import uuid
 from collections import defaultdict
 from datetime import date, datetime, time, timedelta
@@ -32,7 +33,7 @@ from reportlab.lib.units import inch
 from reportlab.pdfbase import pdfmetrics
 from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import LongTable, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
-from sqlalchemy import select, text
+from sqlalchemy import and_, or_, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.db import SessionLocal
@@ -80,6 +81,7 @@ class PxJavNoteRow(BaseModel):
     task_due_dates: list[date] = Field(default_factory=list)
     year_end_task: bool = False
     year_end_task_count: int = 0
+    year_end_comment: bool = False
 
 
 class PxJavWeeklyReport(BaseModel):
@@ -90,6 +92,8 @@ class PxJavWeeklyReport(BaseModel):
     timezone: str
     recipient: str
     source_note_count: int = 0
+    period_note_count: int = 0
+    year_end_comment_count: int = 0
     excluded_task_count: int = 0
     excluded_next_week_count: int = 0
     rows: list[PxJavNoteRow]
@@ -116,7 +120,8 @@ class PxJavWeeklyReport(BaseModel):
 
     def summary(self) -> dict[str, int]:
         return {
-            "period_notes": self.source_note_count,
+            "period_notes": self.period_note_count,
+            "year_end_comments": self.year_end_comment_count,
             "report_notes": self.total_notes,
             "notes_without_task": self.notes_without_task,
             "next_week_tasks": self.next_week_tasks,
@@ -179,6 +184,10 @@ def _clean_note_text(value: str | None) -> str:
     return clean_description(value).strip() or "-"
 
 
+def _is_year_end_comment(value: str | None) -> bool:
+    return bool(re.search(r"(?<!\d)31[.\/-]12(?:[.\/-]\d{2,4})?(?!\d)", value or ""))
+
+
 def _in_timezone(value: datetime, timezone: ZoneInfo) -> datetime:
     if value.tzinfo is None:
         value = value.replace(tzinfo=ZoneInfo("UTC"))
@@ -198,6 +207,8 @@ def classify_note_result(
 
 
 def _review_label(row: PxJavNoteRow) -> str:
+    if row.year_end_comment:
+        return "31.12 / TASK" if row.task_count > 0 else "31.12 / PA TASK"
     if row.next_week and row.task_count > 0:
         return "TASK PËR J.T"
     if row.result == "MOSPËRPUTHJE":
@@ -232,13 +243,22 @@ async def build_px_jav_weekly_report(
     report_date = period_end.date()
     period_start = previous_thursday_cutoff(period_end)
 
-    notes = (
+    year_end_condition = or_(
+        PlanNote.comment.ilike("%31.12%"),
+        PlanNote.comment.ilike("%31/12%"),
+        PlanNote.comment.ilike("%31-12%"),
+    )
+    notes = list((
         await db.execute(
             select(PlanNote)
-            .where(PlanNote.created_at >= period_start, PlanNote.created_at < period_end)
+            .where(or_(
+                and_(PlanNote.created_at >= period_start, PlanNote.created_at < period_end),
+                year_end_condition,
+            ))
             .order_by(PlanNote.created_at.desc(), PlanNote.id.desc())
         )
-    ).scalars().all()
+    ).scalars().all())
+    notes.sort(key=lambda note: _is_year_end_comment(note.comment))
     note_ids = [note.id for note in notes]
 
     tasks: list[Task] = []
@@ -301,10 +321,11 @@ async def build_px_jav_weekly_report(
     excluded_next_week_count = 0
     for note in notes:
         linked_tasks = tasks_by_note.get(note.id, [])
-        if linked_tasks and not note.next_week:
+        year_end_comment = _is_year_end_comment(note.comment)
+        if linked_tasks and not note.next_week and not year_end_comment:
             excluded_task_count += 1
             continue
-        if note.next_week and not linked_tasks:
+        if note.next_week and not linked_tasks and not year_end_comment:
             excluded_next_week_count += 1
             continue
 
@@ -352,6 +373,7 @@ async def build_px_jav_weekly_report(
                 bool(task.due_date and task.due_date.day == 31 and task.due_date.month == 12)
                 for task in linked_tasks
             ),
+            year_end_comment=year_end_comment,
         ))
 
     return PxJavWeeklyReport(
@@ -362,6 +384,10 @@ async def build_px_jav_weekly_report(
         timezone=timezone_name,
         recipient=recipient or configured_recipient(),
         source_note_count=len(notes),
+        period_note_count=sum(
+            period_start <= _in_timezone(note.created_at, timezone) < period_end for note in notes
+        ),
+        year_end_comment_count=sum(_is_year_end_comment(note.comment) for note in notes),
         excluded_task_count=excluded_task_count,
         excluded_next_week_count=excluded_next_week_count,
         rows=rows,
@@ -372,17 +398,20 @@ def render_plain_text(report: PxJavWeeklyReport) -> str:
     summary = report.summary()
     return (
         "Përshëndetje,\n\n"
-        "Bashkëngjitur është raporti PX JAV për shënimet pa task dhe taskat e krijuara për J.T.\n"
+        "Bashkëngjitur është raporti PX JAV për shënimet pa task, taskat e krijuara për J.T "
+        "dhe shënimet me koment 31.12.\n"
         f"Periudha: {report.period_start:%d.%m.%Y %H:%M} - "
         f"{report.period_end:%d.%m.%Y %H:%M}.\n\n"
         "Përmbledhje:\n"
         f"- Shënime të krijuara në periudhë: {summary['period_notes']}\n"
+        f"- Shënime me koment 31.12 / fundvit: {summary['year_end_comments']}\n"
         f"- Pa task (në raport): {summary['notes_without_task']}\n"
         f"- Task i krijuar për J.T (në raport): {summary['next_week_tasks']}\n"
         f"- Task i zakonshëm (përjashtuar): {summary['excluded_with_task']}\n"
         f"- J.T pa task real (përjashtuar): {summary['excluded_next_week']}\n"
         f"- Mospërputhje converted pa task: {summary['inconsistencies']}\n\n"
-        "J.T me task real paraqitet si task i krijuar për javën tjetër; J.T pa task nuk numërohet si task i krijuar.\n\n"
+        "J.T me task real paraqitet si task i krijuar për javën tjetër. Shënimet me koment 31.12 "
+        "paraqiten pavarësisht datës së krijimit dhe shënohen si FUNDVIT.\n\n"
         "Me respekt,\nPrimeFlow"
     )
 
@@ -391,6 +420,7 @@ def render_html(report: PxJavWeeklyReport) -> str:
     summary = report.summary()
     cards = [
         ("Në periudhë", summary["period_notes"], "#e2e8f0"),
+        ("Koment 31.12", summary["year_end_comments"], "#fef3c7"),
         ("Pa task", summary["notes_without_task"], "#dbeafe"),
         ("Task për J.T", summary["next_week_tasks"], "#dcfce7"),
         ("Task normal - jashtë", summary["excluded_with_task"], "#f1f5f9"),
@@ -409,8 +439,9 @@ def render_html(report: PxJavWeeklyReport) -> str:
         f'<p style="margin-top:0;color:#475569">Periudha: {report.period_start:%d.%m.%Y %H:%M} - '
         f'{report.period_end:%d.%m.%Y %H:%M} | {html.escape(report.timezone)}</p>'
         f'<table role="presentation" cellspacing="0" cellpadding="0"><tr>{card_html}</tr></table>'
-        '<p>Raporti liston shënimet e reja pa task dhe shënimet J.T që kanë task real të krijuar.</p>'
+        '<p>Raporti liston shënimet e reja pa task, shënimet J.T me task real dhe çdo shënim me koment 31.12.</p>'
         '<p><strong>J.T:</strong> shfaqet si “Task për J.T” vetëm kur ekziston tasku real i lidhur.</p>'
+        '<p><strong>31.12:</strong> shfaqet pavarësisht datës së krijimit dhe shënohet si fundvit.</p>'
         '<p>Bashkëngjitur: Excel, Word dhe PDF.</p>'
         '</div>'
     )
@@ -431,7 +462,8 @@ def render_xlsx(report: PxJavWeeklyReport) -> bytes:
     summary_sheet.append([])
     summary_sheet.append(["Treguesi", "Vlera"])
     labels = [
-        ("Shënime të krijuara në periudhë", report.source_note_count),
+        ("Shënime të periudhës", report.period_note_count),
+        ("Koment 31.12 / fundvit", report.year_end_comment_count),
         ("Rreshta në raport", report.total_notes),
         ("Pa task - në raport", report.notes_without_task),
         ("Task i krijuar për J.T - në raport", report.next_week_tasks),
@@ -444,7 +476,7 @@ def render_xlsx(report: PxJavWeeklyReport) -> bytes:
 
     headers = [
         "NR", "KONTROLLI", "SHËNIMI", "KOMENT", "STATUS SHËNIMI", "PRIORITET",
-        "DISK", "J.T", "DATA/ORA", "NGA", "DEPARTAMENTI", "PROJEKTI",
+        "DISK", "J.T", "31.12", "DATA/ORA", "NGA", "DEPARTAMENTI", "PROJEKTI",
         "TASK / PËR", "STATUS TASK", "DEADLINE", "NOTE ID",
     ]
     detail_sheet.append(headers)
@@ -452,6 +484,7 @@ def render_xlsx(report: PxJavWeeklyReport) -> bytes:
         detail_sheet.append([
             row.number, _review_label(row), row.content, row.comment, row.note_status, row.priority,
             "YES" if row.discussed else "NO", "YES" if row.next_week else "NO",
+            "FUNDVIT" if row.year_end_comment else "NO",
             row.created_at.replace(tzinfo=None), row.created_by, row.department, row.project,
             "; ".join(row.assignees) or "-", "; ".join(row.task_statuses) or "-",
             _date_text(row.task_due_dates, mark_year_end=True), row.note_id,
@@ -480,18 +513,20 @@ def render_xlsx(report: PxJavWeeklyReport) -> bytes:
     detail_sheet.column_dimensions["D"].width = 35
     for column in range(5, len(headers) + 1):
         detail_sheet.column_dimensions[get_column_letter(column)].width = 16
-    detail_sheet.column_dimensions["M"].width = 30
-    detail_sheet.column_dimensions["P"].width = 38
+    detail_sheet.column_dimensions["N"].width = 30
+    detail_sheet.column_dimensions["Q"].width = 38
     result_fills = {
         "PA TASK": PatternFill("solid", fgColor="DBEAFE"),
         "TASK PËR J.T": PatternFill("solid", fgColor="DCFCE7"),
+        "31.12 / PA TASK": PatternFill("solid", fgColor="FEF3C7"),
+        "31.12 / TASK": PatternFill("solid", fgColor="FDE68A"),
         "FLAG CONVERTED, PA TASK": PatternFill("solid", fgColor="FEE2E2"),
     }
     for current_row in detail_sheet.iter_rows(min_row=2):
         for cell in current_row:
             cell.alignment = Alignment(vertical="top", wrap_text=True)
         current_row[1].fill = result_fills.get(str(current_row[1].value), PatternFill())
-        current_row[8].number_format = "dd.mm.yyyy hh:mm"
+        current_row[9].number_format = "dd.mm.yyyy hh:mm"
 
     output = io.BytesIO()
     workbook.save(output)
@@ -636,7 +671,7 @@ def render_docx(report: PxJavWeeklyReport) -> bytes:
     subtitle.paragraph_format.space_after = Pt(7)
     _set_run_font(
         subtitle.add_run(
-            f"Pa task + taskat për J.T | {report.period_start:%d.%m.%Y %H:%M} - "
+            f"Pa task + taskat për J.T + komentet 31.12 | {report.period_start:%d.%m.%Y %H:%M} - "
             f"{report.period_end:%d.%m.%Y %H:%M}"
         ),
         size=10,
@@ -644,7 +679,8 @@ def render_docx(report: PxJavWeeklyReport) -> bytes:
     )
 
     summary_values = [
-        ("NË PERIUDHË", report.source_note_count, "E2E8F0"),
+        ("NË PERIUDHË", report.period_note_count, "E2E8F0"),
+        ("KOMENT 31.12", report.year_end_comment_count, "FEF3C7"),
         ("PA TASK", report.notes_without_task, "DBEAFE"),
         ("TASK PËR J.T", report.next_week_tasks, "DCFCE7"),
         ("TASK NORMAL - JASHTË", report.excluded_task_count, "F1F5F9"),
@@ -663,14 +699,14 @@ def render_docx(report: PxJavWeeklyReport) -> bytes:
     note.paragraph_format.space_after = Pt(5)
     _set_run_font(
         note.add_run(
-            "Listohen shënimet pa task dhe shënimet J.T me task real të krijuar për javën tjetër."
+            "Listohen shënimet pa task, taskat J.T dhe komentet 31.12; komentet 31.12 shënohen FUNDVIT."
         ),
         size=7.5,
         bold=True,
         color="7A5A00",
     )
 
-    headers = ["NR", "KONTROLLI", "SHËNIMI / KOMENT", "ST / PRIO", "DISK / J.T", "DATA / NGA", "DEP / PRJK", "TASK / PËR", "STATUS TASK", "DEADLINE"]
+    headers = ["NR", "KONTROLLI", "SHËNIMI / KOMENT", "ST / PRIO", "DISK / J.T / 31.12", "DATA / NGA", "DEP / PRJK", "TASK / PËR", "STATUS TASK", "DEADLINE"]
     widths = [0.28, 0.9, 3.4, 0.55, 0.65, 1.0, 1.0, 0.9, 0.7, 0.92]
     detail = document.add_table(rows=1, cols=len(headers))
     detail.style = "Table Grid"
@@ -688,7 +724,8 @@ def render_docx(report: PxJavWeeklyReport) -> bytes:
         content = item.content + (f"\n\nKoment: {item.comment}" if item.comment else "")
         values = [
             str(item.number), _review_label(item), content, f"{item.note_status}\n{item.priority}",
-            f"D:{'YES' if item.discussed else 'NO'}\nJ.T:{'YES' if item.next_week else 'NO'}",
+            f"D:{'YES' if item.discussed else 'NO'}\nJ.T:{'YES' if item.next_week else 'NO'}\n"
+            f"31.12:{'YES' if item.year_end_comment else 'NO'}",
             f"{item.created_at:%d.%m.%Y %H:%M}\n{_initials(item.created_by)}",
             f"{item.department}\n{item.project}",
             "; ".join(item.assignees) or "-",
@@ -697,7 +734,7 @@ def render_docx(report: PxJavWeeklyReport) -> bytes:
         ]
         for index, (cell, value) in enumerate(zip(row.cells, values)):
             _write_docx_cell(cell, value, size=6.3, bold=index == 1, center=index in {0, 1, 3, 4, 8, 9})
-        _set_cell_shading(row.cells[1], result_fills[item.result])
+        _set_cell_shading(row.cells[1], "FEF3C7" if item.year_end_comment else result_fills[item.result])
 
     output = io.BytesIO()
     document.save(output)
@@ -764,7 +801,8 @@ def render_pdf(report: PxJavWeeklyReport) -> bytes:
     summary_data = [[
         Paragraph(f"<b>{value}</b><br/>{html.escape(label)}", cell_style)
         for label, value in [
-            ("NË PERIUDHË", report.source_note_count),
+            ("NË PERIUDHË", report.period_note_count),
+            ("KOMENT 31.12", report.year_end_comment_count),
             ("PA TASK", report.notes_without_task),
             ("TASK PËR J.T", report.next_week_tasks),
             ("TASK NORMAL - JASHTË", report.excluded_task_count),
@@ -772,14 +810,15 @@ def render_pdf(report: PxJavWeeklyReport) -> bytes:
             ("MOSPËRPUTHJE", report.inconsistencies),
         ]
     ]]
-    summary = Table(summary_data, colWidths=[1.68 * inch] * 6)
+    summary = Table(summary_data, colWidths=[1.44 * inch] * 7)
     summary.setStyle(TableStyle([
         ("BACKGROUND", (0, 0), (0, 0), colors.HexColor("#E2E8F0")),
-        ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#DBEAFE")),
-        ("BACKGROUND", (2, 0), (2, 0), colors.HexColor("#DCFCE7")),
-        ("BACKGROUND", (3, 0), (3, 0), colors.HexColor("#F1F5F9")),
-        ("BACKGROUND", (4, 0), (4, 0), colors.HexColor("#EDE9FE")),
-        ("BACKGROUND", (5, 0), (5, 0), colors.HexColor("#FEE2E2")),
+        ("BACKGROUND", (1, 0), (1, 0), colors.HexColor("#FEF3C7")),
+        ("BACKGROUND", (2, 0), (2, 0), colors.HexColor("#DBEAFE")),
+        ("BACKGROUND", (3, 0), (3, 0), colors.HexColor("#DCFCE7")),
+        ("BACKGROUND", (4, 0), (4, 0), colors.HexColor("#F1F5F9")),
+        ("BACKGROUND", (5, 0), (5, 0), colors.HexColor("#EDE9FE")),
+        ("BACKGROUND", (6, 0), (6, 0), colors.HexColor("#FEE2E2")),
         ("GRID", (0, 0), (-1, -1), 0.4, colors.HexColor("#CBD5E1")),
         ("ALIGN", (0, 0), (-1, -1), "CENTER"),
         ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
@@ -789,12 +828,12 @@ def render_pdf(report: PxJavWeeklyReport) -> bytes:
         summary,
         Spacer(1, 5),
         Paragraph(
-            "Listohen shënimet pa task dhe shënimet J.T me task real të krijuar për javën tjetër.",
+            "Listohen shënimet pa task, taskat J.T dhe komentet 31.12; komentet 31.12 shënohen FUNDVIT.",
             meta_style,
         ),
     ])
 
-    headers = ["NR", "KONTROLLI", "SHËNIMI / KOMENT", "ST / PRIO", "DISK / J.T", "DATA / NGA", "DEP / PRJK", "TASK / PËR", "STATUS TASK", "DEADLINE"]
+    headers = ["NR", "KONTROLLI", "SHËNIMI / KOMENT", "ST / PRIO", "DISK / J.T / 31.12", "DATA / NGA", "DEP / PRJK", "TASK / PËR", "STATUS TASK", "DEADLINE"]
     data: list[list[Any]] = [[Paragraph(html.escape(value), header_style) for value in headers]]
     result_rows: dict[str, list[int]] = defaultdict(list)
     for item in report.rows:
@@ -802,13 +841,18 @@ def render_pdf(report: PxJavWeeklyReport) -> bytes:
         if item.comment:
             content += f"<br/><br/><b>Koment:</b> {html.escape(item.comment).replace(chr(10), '<br/>')}"
         row_index = len(data)
-        result_rows[item.result].append(row_index)
+        result_rows[_review_label(item)].append(row_index)
         data.append([
             Paragraph(str(item.number), cell_style),
             Paragraph(html.escape(_review_label(item)), cell_bold),
             Paragraph(content, cell_style),
             Paragraph(f"{html.escape(item.note_status)}<br/>{html.escape(item.priority)}", cell_style),
-            Paragraph(f"D:{'YES' if item.discussed else 'NO'}<br/>J.T:{'YES' if item.next_week else 'NO'}", cell_style),
+            Paragraph(
+                f"D:{'YES' if item.discussed else 'NO'}<br/>"
+                f"J.T:{'YES' if item.next_week else 'NO'}<br/>"
+                f"31.12:{'YES' if item.year_end_comment else 'NO'}",
+                cell_style,
+            ),
             Paragraph(f"{item.created_at:%d.%m.%Y %H:%M}<br/>{html.escape(_initials(item.created_by))}", cell_style),
             Paragraph(f"{html.escape(item.department)}<br/>{html.escape(item.project)}", cell_style),
             Paragraph(html.escape("; ".join(item.assignees) or "-"), cell_style),
@@ -825,7 +869,13 @@ def render_pdf(report: PxJavWeeklyReport) -> bytes:
         ("TOPPADDING", (0, 0), (-1, -1), 2.5), ("BOTTOMPADDING", (0, 0), (-1, -1), 2.5),
         ("ALIGN", (0, 1), (1, -1), "CENTER"), ("ALIGN", (3, 1), (5, -1), "CENTER"),
     ]
-    fills = {"DETYRË": "#DCFCE7", "VETËM SHËNIM": "#DBEAFE", "MOSPËRPUTHJE": "#FEE2E2"}
+    fills = {
+        "PA TASK": "#DBEAFE",
+        "TASK PËR J.T": "#DCFCE7",
+        "FLAG CONVERTED, PA TASK": "#FEE2E2",
+        "31.12 / PA TASK": "#FEF3C7",
+        "31.12 / TASK": "#FDE68A",
+    }
     for result, indices in result_rows.items():
         for index in indices:
             commands.append(("BACKGROUND", (1, index), (1, index), colors.HexColor(fills[result])))

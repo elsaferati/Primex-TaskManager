@@ -27,6 +27,7 @@ type ReportRow = {
   assignees: string[]
   task_statuses: string[]
   task_due_dates: string[]
+  year_end_comment: boolean
 }
 
 type Preview = {
@@ -38,6 +39,7 @@ type Preview = {
   recipient: string
   summary: {
     period_notes: number
+    year_end_comments: number
     report_notes: number
     notes_without_task: number
     next_week_tasks: number
@@ -122,6 +124,7 @@ export default function PxJavWeeklyReportPage() {
 
   const metrics = preview ? [
     ["Në periudhë", preview.summary.period_notes],
+    ["Koment 31.12", preview.summary.year_end_comments],
     ["Pa task", preview.summary.notes_without_task],
     ["Task për J.T", preview.summary.next_week_tasks],
     ["Task normal – jashtë", preview.summary.excluded_with_task],
@@ -135,7 +138,7 @@ export default function PxJavWeeklyReportPage() {
         <div>
           <h1 className="text-2xl font-semibold text-slate-900">PX JAV – Kontrolli i taskave</h1>
           <p className="mt-1 text-sm text-slate-600">
-            Nga e enjtja e kaluar në 15:50: shënimet pa task dhe taskat e krijuara për J.T.
+            Nga e enjtja e kaluar në 15:50, plus të gjitha shënimet me koment 31.12 / fundvit.
           </p>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -155,7 +158,7 @@ export default function PxJavWeeklyReportPage() {
 
       {preview ? (
         <>
-          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-6">
+          <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-7">
             {metrics.map(([label, value]) => (
               <Card key={label}>
                 <CardContent className="p-4">
@@ -187,8 +190,13 @@ export default function PxJavWeeklyReportPage() {
                       <tr key={row.note_id} className="border-t align-top">
                         <td className="p-3">{row.number}</td>
                         <td className="p-3">
-                          <Badge variant={row.result === "MOSPËRPUTHJE" ? "destructive" : "secondary"}>
-                            {row.result === "DETYRË" ? "TASK PËR J.T" : row.result === "MOSPËRPUTHJE" ? "FLAG PA TASK" : "PA TASK"}
+                          <Badge
+                            variant={row.year_end_comment ? "outline" : row.result === "MOSPËRPUTHJE" ? "destructive" : "secondary"}
+                            className={row.year_end_comment ? "border-amber-300 bg-amber-100 text-amber-900" : undefined}
+                          >
+                            {row.year_end_comment
+                              ? row.task_count > 0 ? "31.12 / TASK" : "31.12 / PA TASK"
+                              : row.result === "DETYRË" ? "TASK PËR J.T" : row.result === "MOSPËRPUTHJE" ? "FLAG PA TASK" : "PA TASK"}
                           </Badge>
                         </td>
                         <td className="max-w-xl whitespace-pre-wrap p-3">

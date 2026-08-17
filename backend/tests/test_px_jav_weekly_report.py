@@ -46,7 +46,9 @@ class PxJavWeeklyReportTests(unittest.TestCase):
             period_end=generated_at,
             timezone="Europe/Tirane",
             recipient="334primex.eu@gmail.com",
-            source_note_count=6,
+            source_note_count=7,
+            period_note_count=6,
+            year_end_comment_count=1,
             excluded_task_count=1,
             excluded_next_week_count=1,
             rows=[
@@ -81,6 +83,19 @@ class PxJavWeeklyReportTests(unittest.TestCase):
                     year_end_task_count=1,
                     **common,
                 ),
+                PxJavNoteRow(
+                    note_id="note-year-end-comment",
+                    number=4,
+                    content="Shënim i vjetër i fundvitit",
+                    comment="31.12.2026",
+                    next_week=False,
+                    result="VETËM SHËNIM",
+                    year_end_comment=True,
+                    **{
+                        **common,
+                        "created_at": datetime(2026, 6, 4, 10, 37, tzinfo=ZoneInfo("Europe/Tirane")),
+                    },
+                ),
             ],
         )
 
@@ -104,16 +119,18 @@ class PxJavWeeklyReportTests(unittest.TestCase):
     def test_summary_includes_missing_tasks_and_created_next_week_tasks(self) -> None:
         self.assertEqual(self.report.summary(), {
             "period_notes": 6,
-            "report_notes": 3,
-            "notes_without_task": 2,
+            "year_end_comments": 1,
+            "report_notes": 4,
+            "notes_without_task": 3,
             "next_week_tasks": 1,
-            "note_only": 1,
+            "note_only": 2,
             "inconsistencies": 1,
             "excluded_with_task": 1,
             "excluded_next_week": 1,
         })
         text = render_plain_text(self.report)
-        self.assertIn("Pa task (në raport): 2", text)
+        self.assertIn("Pa task (në raport): 3", text)
+        self.assertIn("Shënime me koment 31.12 / fundvit: 1", text)
         self.assertIn("Task i krijuar për J.T (në raport): 1", text)
         self.assertIn("J.T pa task real (përjashtuar): 1", text)
         self.assertIn("13.08.2026 15:50", text)
@@ -122,13 +139,16 @@ class PxJavWeeklyReportTests(unittest.TestCase):
         workbook = load_workbook(io.BytesIO(render_xlsx(self.report)), data_only=False)
         self.assertEqual(workbook.sheetnames, ["PËRMBLEDHJE", "KONTROLLI PX JAV"])
         detail = workbook["KONTROLLI PX JAV"]
-        self.assertEqual(detail.max_row, 4)
-        self.assertEqual(detail.max_column, 16)
+        self.assertEqual(detail.max_row, 5)
+        self.assertEqual(detail.max_column, 17)
         self.assertEqual(detail["B2"].value, "PA TASK")
         self.assertEqual(detail["B3"].value, "FLAG CONVERTED, PA TASK")
         self.assertEqual(detail["B4"].value, "TASK PËR J.T")
         self.assertEqual(detail["H4"].value, "YES")
-        self.assertEqual(detail["O4"].value, "31.12.2026 (FUNDVIT)")
+        self.assertEqual(detail["P4"].value, "31.12.2026 (FUNDVIT)")
+        self.assertEqual(detail["B5"].value, "31.12 / PA TASK")
+        self.assertEqual(detail["D5"].value, "31.12.2026")
+        self.assertEqual(detail["I5"].value, "FUNDVIT")
         workbook.close()
 
     def test_docx_is_landscape_with_repeating_header_and_all_rows(self) -> None:
@@ -137,12 +157,14 @@ class PxJavWeeklyReportTests(unittest.TestCase):
         section = document.sections[0]
         self.assertGreater(section.page_width, section.page_height)
         self.assertEqual(len(document.tables), 2)
-        self.assertEqual(len(document.tables[1].rows), 4)
+        self.assertEqual(len(document.tables[1].rows), 5)
         self.assertEqual(len(document.tables[1].columns), 10)
         self.assertEqual(document.tables[1].cell(1, 1).text, "PA TASK")
         self.assertEqual(document.tables[1].cell(2, 1).text, "FLAG CONVERTED, PA TASK")
         self.assertEqual(document.tables[1].cell(3, 1).text, "TASK PËR J.T")
         self.assertIn("31.12.2026 (FUNDVIT)", document.tables[1].cell(3, 9).text)
+        self.assertEqual(document.tables[1].cell(4, 1).text, "31.12 / PA TASK")
+        self.assertIn("Koment: 31.12.2026", document.tables[1].cell(4, 2).text)
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
             xml = archive.read("word/document.xml").decode("utf-8")
         self.assertIn("w:tblHeader", xml)
