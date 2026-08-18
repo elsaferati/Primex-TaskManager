@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, Mock, patch
 import pytest
 
 from app.api.routers.realization import (
+    _merge_daily_report_timeline_evidence,
     _merge_daily_report_task_evidence,
     prepare_daily_realization,
 )
@@ -46,6 +47,34 @@ def test_saved_daily_reason_and_comment_are_merged_into_timeline_cards():
     assert tasks[0]["daily_report_comment"] == "Komenti ditor i ruajtur"
     assert tasks[0]["user_comment"] == "Komenti ditor i ruajtur"
     assert "reason_label" not in tasks[1]
+
+
+def test_evidence_is_merged_after_planned_tasks_are_added_to_timeline():
+    user_id = uuid.uuid4()
+    task_id = uuid.uuid4()
+    timeline = {
+        user_id: [{
+            "date": DAY.isoformat(),
+            "tasks": [{
+                "task_id": str(task_id),
+                "title": "Task i shtuar nga PLANNED pas snapshot-it ditor",
+            }],
+        }]
+    }
+    evidence = {
+        (user_id, DAY.isoformat()): [{
+            "task_id": str(task_id),
+            "reason_code": "OTHER_URGENCY",
+            "reason_label": "Urgjencë tjetër",
+            "comment": "Komenti i mbylljes",
+        }]
+    }
+
+    _merge_daily_report_timeline_evidence(timeline, evidence)
+
+    task = timeline[user_id][0]["tasks"][0]
+    assert task["reason_label"] == "Urgjencë tjetër"
+    assert task["user_comment"] == "Komenti i mbylljes"
 
 
 def test_prepare_at_1530_creates_a_separate_result_for_each_person():

@@ -330,6 +330,19 @@ def _merge_daily_report_task_evidence(
             task["user_comment"] = evidence.get("comment")
 
 
+def _merge_daily_report_timeline_evidence(
+    daily_by_user: dict[uuid.UUID, list[dict]],
+    evidence_by_user_day: dict[tuple[uuid.UUID, str], list[dict]],
+) -> None:
+    """Merge evidence after PLANNED/live task lists have been fully assembled."""
+    for user_id, timeline in daily_by_user.items():
+        for item in timeline:
+            _merge_daily_report_task_evidence(
+                item.get("tasks") or [],
+                evidence_by_user_day.get((user_id, item["date"]), []),
+            )
+
+
 def _timeline_task_belongs_on_day(
     task: dict, day: date, system_task_days: dict[str, date]
 ) -> bool:
@@ -584,6 +597,9 @@ async def _weekly_response(
             "created_at": approval_event.created_at.isoformat(),
         })
     today_local = datetime.now(ZoneInfo(settings.APP_TIMEZONE)).date().isoformat()
+    daily_report_evidence_by_user_day: dict[
+        tuple[uuid.UUID, str], list[dict]
+    ] = {}
     for user_id, timeline in daily_by_user.items():
         for item in timeline:
             history = close_history.get((user_id, item["date"]), [])
@@ -635,7 +651,7 @@ async def _weekly_response(
                     else []
                 )
             ) or []
-            _merge_daily_report_task_evidence(item.get("tasks") or [], evidence_tasks)
+            daily_report_evidence_by_user_day[(user_id, item["date"])] = evidence_tasks
             if (
                 latest
                 and item["close_state"] == "CLOSED"
@@ -963,6 +979,9 @@ async def _weekly_response(
                 for task in timeline_item.get("tasks") or []
                 if is_realization_visible(task)
             ]
+    _merge_daily_report_timeline_evidence(
+        daily_by_user, daily_report_evidence_by_user_day
+    )
     for user_id, tasks_by_key in daily_tasks_by_user.items():
         daily_tasks_by_user[user_id] = {
             key: task
