@@ -19,9 +19,11 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.user import User
 from app.services.common_leave import parse_common_view_annual_leave
-from app.services.daily_report_logic import business_days_between
+from app.services.daily_report_logic import business_days_between, planned_range_for_daily_report
+from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.primeflow_report import GmailService, report_timezone
 from app.services.primeflow_report import PrimeFlowClient
 from app.services.std_feedback_tickets import std_tickets_report_section
@@ -621,6 +623,7 @@ def _m3_status_table(
     week_start: date | None = None,
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     all_participant_ids: set[Any] | None = None,
+    daily_rlz_by_task: dict[Any, tuple[str, str]] | None = None,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -632,6 +635,8 @@ def _m3_status_table(
     if include_type:
         columns.append(("LLOJI", 7))
     columns.append(("TITULLI", 64))
+    if daily_rlz_by_task is not None:
+        columns.extend((("ARSYEJA", 24), ("KOMENT", 36)))
     if include_late_days:
         columns.append(("LATE", 12))
 
@@ -660,6 +665,8 @@ def _m3_status_table(
         if include_type:
             values.append("-")
         values.append(empty_title)
+        if daily_rlz_by_task is not None:
+            values.extend(("-", "-"))
         if include_late_days:
             values.append("-")
         rows.append(table_row(values))
@@ -693,6 +700,9 @@ def _m3_status_table(
         am_pm = _m3_am_pm_label(task) if include_am_pm else ""
         display_title = _clean_task_title(task.title)
         title_lines = _wrap_fixed_width(display_title, 64)
+        reason, comment = (daily_rlz_by_task or {}).get(task.id, ("-", "-"))
+        reason_lines = _wrap_fixed_width(reason or "-", 24) if daily_rlz_by_task is not None else []
+        comment_lines = _wrap_fixed_width(comment or "-", 36) if daily_rlz_by_task is not None else []
         status = _normalize_report_status(task.status) if with_status else None
         padded_titles = _append_status_marker_to_lines(title_lines, status, 64)
         values = [str(index), owner]
@@ -705,10 +715,13 @@ def _m3_status_table(
         if include_type:
             values.append(task_type)
         values.append(padded_titles[0])
+        if daily_rlz_by_task is not None:
+            values.extend((reason_lines[0], comment_lines[0]))
         if include_late_days:
             values.append(_late_days_label(_late_days(task)))
         rows.append(table_row(values))
-        for line in padded_titles[1:]:
+        continuation_count = max(len(padded_titles), len(reason_lines), len(comment_lines))
+        for line_index in range(1, continuation_count):
             continuation = ["", ""]
             if include_department:
                 continuation.append("")
@@ -718,7 +731,12 @@ def _m3_status_table(
                 continuation.append("")
             if include_type:
                 continuation.append("")
-            continuation.append(line)
+            continuation.append(padded_titles[line_index] if line_index < len(padded_titles) else "")
+            if daily_rlz_by_task is not None:
+                continuation.extend((
+                    reason_lines[line_index] if line_index < len(reason_lines) else "",
+                    comment_lines[line_index] if line_index < len(comment_lines) else "",
+                ))
             if include_late_days:
                 continuation.append("")
             rows.append(table_row(continuation))
@@ -759,6 +777,61 @@ def _week_start(day: date) -> date:
     return day - timedelta(days=day.weekday())
 
 
+def _is_without_progress_for_m3_day(task: Task, day: date) -> bool:
+    """Match the unfinished pink rows shown in Daily Report My View.
+
+    A task remains relevant throughout its planned range (and while overdue),
+    rather than only on its due date. This is important for project tasks that
+    start today but have a later deadline.
+    """
+    if _is_system_task(task) or not _is_open(task) or _normalize_report_status(task.status) != "TODO":
+        return False
+    planned_start, planned_end = planned_range_for_daily_report(task, None)
+    if planned_start is None or planned_end is None:
+        return False
+    return planned_start <= day
+
+
+async def _daily_rlz_values_by_task(
+    db: AsyncSession,
+    tasks: list[Task],
+    day: date,
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+) -> dict[Any, tuple[str, str]]:
+    """Return the day-scoped reason/comment saved in Daily Report My View."""
+    task_ids = [task.id for task in tasks]
+    if not task_ids:
+        return {}
+    states = (
+        await db.execute(
+            select(TaskDailyRlzState)
+            .where(TaskDailyRlzState.task_id.in_(task_ids))
+            .where(TaskDailyRlzState.day_date == day)
+        )
+    ).scalars().all()
+    grouped: dict[Any, list[TaskDailyRlzState]] = {}
+    for state in states:
+        grouped.setdefault(state.task_id, []).append(state)
+
+    result: dict[Any, tuple[str, str]] = {}
+    for task_id, task_states in grouped.items():
+        task_states.sort(key=lambda state: (_initials(names.get(state.user_id)), str(state.user_id)))
+        show_owner = len(assignee_ids_by_task.get(task_id, set())) > 1 or len(task_states) > 1
+        reasons: list[str] = []
+        comments: list[str] = []
+        for state in task_states:
+            owner = _initials(names.get(state.user_id))
+            prefix = f"{owner}: " if show_owner else ""
+            reason = REASON_LABELS.get(state.reason_code) if state.reason_code else None
+            if reason:
+                reasons.append(f"{prefix}{reason}")
+            if state.comment and state.comment.strip():
+                comments.append(f"{prefix}{state.comment.strip()}")
+        result[task_id] = ("; ".join(reasons) or "-", "; ".join(comments) or "-")
+    return result
+
+
 async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> tuple[date, list[dict[str, str]], dict[str, Any]]:
     tomorrow = next_working_day(report_day)
     week_start = _week_start(report_day)
@@ -793,13 +866,10 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     }
     await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task, department_codes)
 
-    today_todo = [
-        task for task in tasks
-        if not task.system_template_origin_id
-        and _task_day(task) == report_day
-        and _is_open(task)
-        and str(task.status or "").upper() == "TODO"
-    ]
+    today_todo = [task for task in tasks if _is_without_progress_for_m3_day(task, report_day)]
+    daily_rlz_by_task = await _daily_rlz_values_by_task(
+        db, today_todo, report_day, names, assignee_ids_by_task
+    )
 
     tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
     new_task_review_tasks = [task for task in tomorrow_tasks if not _is_system_task(task)]
@@ -955,6 +1025,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_department=True,
                 include_am_pm=True,
                 department_codes=department_codes,
+                daily_rlz_by_task=daily_rlz_by_task,
                 **table_kwargs,
             )
         ),
@@ -2015,6 +2086,8 @@ def _normalized_table_header(value: str) -> str:
         "TOTALI": "COUNT",
         "LLOJI": "TYPE",
         "KRIJUAR": "ADDED",
+        "ARSYEJA": "REASON",
+        "KOMENT": "COMMENT",
     }.get(normalized, normalized)
 
 
@@ -2250,7 +2323,10 @@ def _email_column_widths(header: list[str]) -> list[str]:
         "ANULUAR": "58",
         "PA STATUS": "64",
     }
-    content_names = {"TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION", "PYETJA"}
+    content_names = {
+        "TITLE", "NOTE", "SHENIMI", "PERSHKRIMI", "DESCRIPTION", "PYETJA",
+        "REASON", "COMMENT",
+    }
     normalized = [_normalized_table_header(cell) for cell in header]
     widths = ["auto" if name in content_names else fixed_by_name.get(name, "56") for name in normalized]
     if normalized and not any(name in content_names for name in normalized):

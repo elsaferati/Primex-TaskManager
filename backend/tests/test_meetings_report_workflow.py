@@ -23,6 +23,7 @@ from app.services.meetings_report import (
     _common_task_metadata_by_title,
     _is_new_task_for_m3_day,
     _is_system_task,
+    _is_without_progress_for_m3_day,
     _meeting_lines,
     _meeting_status_checkbox_table,
     _m3_department_label,
@@ -769,6 +770,40 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         header = next(row for row in rows if "KUSH" in row and "DEP" in row and "TITULLI" in row)
         self.assertLess(header.index("KUSH"), header.index("DEP"))
         self.assertTrue(any("PCM" in row and "Pink task" in row for row in rows))
+
+    def test_without_progress_includes_task_active_before_later_due_date(self) -> None:
+        task = SimpleNamespace(
+            status="TO DO",
+            completed_at=None,
+            system_template_origin_id=None,
+            system_task_slot_id=None,
+            project_id=uuid.uuid4(),
+            start_date=date(2026, 8, 18),
+            due_date=date(2026, 8, 20),
+        )
+
+        self.assertTrue(_is_without_progress_for_m3_day(task, date(2026, 8, 18)))
+        self.assertFalse(_is_without_progress_for_m3_day(task, date(2026, 8, 17)))
+
+    def test_todo_table_includes_daily_rlz_reason_and_comment(self) -> None:
+        task = SimpleNamespace(
+            id=uuid.uuid4(), title="Platforma PrimeFlow", status="TODO",
+            system_template_origin_id=None, department_id=None, assigned_to=None,
+            fast_task_order=None, is_deadline_important=False, due_date=None,
+            start_date=None, completed_at=None, created_at=None,
+        )
+        rows = _m3_status_table(
+            "TODO", [task], {},
+            daily_rlz_by_task={task.id: ("Urgjence tjeter", "Po pres inputin")},
+        )
+
+        header = next(row for row in rows if "ARSYEJA" in row and "KOMENT" in row)
+        self.assertLess(header.index("TITULLI"), header.index("ARSYEJA"))
+        self.assertTrue(any("Urgjence tjeter" in row and "Po pres inputin" in row for row in rows))
+        rendered = _render_ascii_table_html(rows, "todo")
+        self.assertIn("ARSYEJA", rendered)
+        self.assertIn("Urgjence tjeter", rendered)
+        self.assertIn("Po pres inputin", rendered)
 
 
 if __name__ == "__main__":
