@@ -93,6 +93,8 @@ async def relevant_tasks(db: AsyncSession, *, user_id: uuid.UUID, day: date) -> 
         .outerjoin(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
         .where(
             Task.is_active.is_(True), Task.due_date.is_not(None),
+            Task.question_origin_id.is_(None),
+            Task.question_batch_date.is_(None),
             or_(
                 Task.system_template_origin_id.is_(None),
                 SystemTaskTemplate.show_in_weekly_planner.is_(True),

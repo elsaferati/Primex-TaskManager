@@ -24,6 +24,19 @@ export const DAILY_RLZ_REASONS = [
 ] as const
 
 const DAILY_RLZ_EMPTY_REASON = "__EMPTY__"
+const pendingDailyRlzSaves = new Set<Promise<void>>()
+
+function trackDailyRlzSave(operation: Promise<void>) {
+  pendingDailyRlzSaves.add(operation)
+  void operation.finally(() => pendingDailyRlzSaves.delete(operation))
+  return operation
+}
+
+async function waitForPendingDailyRlzSaves() {
+  while (pendingDailyRlzSaves.size) {
+    await Promise.allSettled([...pendingDailyRlzSaves])
+  }
+}
 
 export type DailyRlzTaskState = NonNullable<DailyReportResponse["tasks_today"][number]["rlz_daily_state"]>
 type Blocker = { task_id: string; title: string; status: string; minimum_due_date?: string | null;
@@ -129,9 +142,9 @@ export function DailyRlzCommentField({ taskId, day, state, onSaved }: {
     <input type="text" aria-label="Koment" className="h-4 w-full border-b border-slate-300 bg-transparent"
       value={value} disabled={!state?.is_editable || saving}
       onChange={e => setValue(e.target.value)}
-      onBlur={() => void save()} />
+      onBlur={() => void trackDailyRlzSave(save())} />
     <button type="button" className="print:hidden text-[10px] font-semibold uppercase text-slate-500 hover:text-slate-700 disabled:text-slate-300"
-      disabled={!state?.is_editable || saving} onClick={() => void save()}>
+      disabled={!state?.is_editable || saving} onClick={() => void trackDailyRlzSave(save())}>
       {saving ? "Saving" : "Save"}
     </button>
   </div>
@@ -151,6 +164,8 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
     if (!user?.id || !user.department_id) return
     setSaving(true)
     try {
+      if (document.activeElement instanceof HTMLElement) document.activeElement.blur()
+      await waitForPendingDailyRlzSaves()
       const checkResponse = await apiFetch(`/reports/daily-rlz-compliance?day=${day}`)
       const check = await checkResponse.json().catch(() => ({}))
       if (!checkResponse.ok || check.blockers?.length) {
