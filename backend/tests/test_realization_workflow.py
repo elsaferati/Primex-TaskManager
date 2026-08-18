@@ -12,7 +12,10 @@ from alembic.operations import Operations
 from app.models.enums import RealizationLevel, RealizationPeriodStatus
 from app.api.routers.realization import _can_capture_current_week_final
 from app.services.realization_calculator import build_questions
-from app.services.realization_daily import _include_nonplanned_weekly_task
+from app.services.realization_daily import (
+    _include_nonplanned_weekly_task,
+    _include_task_in_daily_facts,
+)
 from app.services.realization_evidence import (
     _classify_planned_task,
     _planned_deadline,
@@ -234,6 +237,45 @@ class TestWorkflow(unittest.TestCase):
                 completed_day=None,
                 week_start=date(2026, 8, 3),
                 as_of_day=date(2026, 8, 6),
+            )
+        )
+
+    def test_future_unstarted_task_is_not_a_daily_pink_fact(self) -> None:
+        task = SimpleNamespace(
+            start_date=datetime(2026, 8, 20, 7, tzinfo=timezone.utc),
+        )
+
+        self.assertFalse(
+            _include_task_in_daily_facts(
+                task=task,
+                classification="no_progress",
+                day=date(2026, 8, 17),
+            )
+        )
+
+    def test_future_task_with_actual_progress_stays_in_daily_facts(self) -> None:
+        task = SimpleNamespace(
+            start_date=datetime(2026, 8, 20, 7, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(
+            _include_task_in_daily_facts(
+                task=task,
+                classification="in_progress",
+                day=date(2026, 8, 17),
+            )
+        )
+
+    def test_task_starting_today_stays_in_daily_facts(self) -> None:
+        task = SimpleNamespace(
+            start_date=datetime(2026, 8, 17, 7, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(
+            _include_task_in_daily_facts(
+                task=task,
+                classification="no_progress",
+                day=date(2026, 8, 17),
             )
         )
 

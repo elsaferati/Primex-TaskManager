@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import re
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -60,17 +59,8 @@ class PlanNoteTaskDeadlineResponse(BaseModel):
 
 
 def _plan_note_task_title(content: str | None) -> str:
-    lines = [
-        re.sub(r"[ \t\f\v]+", " ", line).strip()
-        for line in (content or "").replace("\r\n", "\n").replace("\r", "\n").split("\n")
-    ]
-    cleaned = [line for line in lines if line]
-    if not cleaned:
-        return "Plan note task"
-    first_line = cleaned[0]
-    if len(first_line) <= 100:
-        return first_line
-    return first_line[:100].rsplit(" ", 1)[0].rstrip(" ,;:-") or first_line[:100]
+    normalized = (content or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return normalized or "Plan note task"
 
 
 def _plan_note_default_task_description(content: str | None) -> str | None:

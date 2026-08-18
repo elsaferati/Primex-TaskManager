@@ -67,6 +67,28 @@ def _include_nonplanned_weekly_task(
     )
 
 
+def _include_task_in_daily_facts(
+    *,
+    task: Task | None,
+    classification: str,
+    day: date,
+) -> bool:
+    """Keep future, untouched work out of today's Realization facts.
+
+    A pinned weekly snapshot can still contain an occurrence for today after the
+    live task has been moved to a later start date.  That historical occurrence
+    remains useful for weekly-plan accounting, but it must not become a Pink
+    no-progress blocker for a day on which the task has not started yet.
+
+    Actual progress or completion is still reported even when the live dates are
+    inconsistent, so this guard only excludes ``no_progress`` facts.
+    """
+    if task is None or classification != "no_progress":
+        return True
+    start_day = _local_date(task.start_date)
+    return start_day is None or start_day <= day
+
+
 def _daily_classification(
     task: Task | None,
     progress: TaskDailyProgress | None,
@@ -357,6 +379,12 @@ async def calculate_daily_period(
                 day=day,
                 attribution="planned_today",
             )
+            if not _include_task_in_daily_facts(
+                task=task,
+                classification=fact["classification"],
+                day=day,
+            ):
+                continue
             people[user_id]["tasks"].append(fact)
             people[user_id]["counters"]["planned_count"] += 1
             people[user_id]["counters"][f"{fact['classification']}_count"] += 1
@@ -463,6 +491,12 @@ async def calculate_daily_period(
                     "system_schedule" if is_system_task else "added_after_weekly_plan"
                 ),
             )
+            if not _include_task_in_daily_facts(
+                task=task,
+                classification=fact["classification"],
+                day=day,
+            ):
+                continue
             people[user_id]["tasks"].append(fact)
             if is_system_task:
                 people[user_id]["counters"]["system_task_count"] += 1

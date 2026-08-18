@@ -956,10 +956,23 @@ function getDailyReportTitlePreview(title?: string | null) {
   return raw.split(/\r?\n/).map((line) => line.trim()).find(Boolean) || raw
 }
 
-function hasDailyReportTitleDetails(title?: string | null) {
-  const raw = (title || "").trim()
-  if (!raw) return false
-  return getDailyReportTitlePreview(raw) !== raw
+function getCompleteTaskTitle(task: Task, sourceContent?: string | null) {
+  const title = (task.title || "").trim()
+  const sourceTitle = (sourceContent || "").trim()
+  if (sourceTitle) return sourceTitle
+  const description = (task.description || "").trim()
+  if (!(task.ga_note_origin_id || task.plan_note_origin_id) || !description) return title || "-"
+
+  const normalizedTitle = title.replace(/[ \t\f\v]+/g, " ")
+  const descriptionFirstLine = description
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t\f\v]+/g, " ").trim())
+    .find(Boolean) || ""
+  const descriptionContinuesTitle =
+    Boolean(normalizedTitle) &&
+    (descriptionFirstLine === normalizedTitle || descriptionFirstLine.startsWith(normalizedTitle))
+
+  return descriptionContinuesTitle ? description : title || description || "-"
 }
 
 function taskStatusValue(task: Task): Task["status"] {
@@ -1282,6 +1295,7 @@ export default function DepartmentKanban() {
   const [showDailyUserReport, setShowDailyUserReport] = React.useState(false)
   const [dailyReportManualOrder, setDailyReportManualOrder] = React.useState<string[]>([])
   const [expandedDailyReportTitleIds, setExpandedDailyReportTitleIds] = React.useState<Record<string, boolean>>({})
+  const [noteTitleByOriginId, setNoteTitleByOriginId] = React.useState<Record<string, string>>({})
   const [showFullDailyReportTable, setShowFullDailyReportTable] = React.useState(false)
   React.useEffect(() => {
     if (searchParams.get("daily") !== "full") return
@@ -2143,15 +2157,23 @@ export default function DepartmentKanban() {
       ].join(" "),
     [isDateStartingOnSelectedAllDate]
   )
+  const completeTaskTitle = React.useCallback(
+    (task: Task) => {
+      const originId = task.ga_note_origin_id || task.plan_note_origin_id
+      return getCompleteTaskTitle(task, originId ? noteTitleByOriginId[originId] : null)
+    },
+    [noteTitleByOriginId]
+  )
   const renderAllTodayTaskTitle = React.useCallback(
     (task: Task) => {
-      if (typeof task.title !== "string" || !task.title.includes("[[")) return task.title
-      if (task.ga_note_origin_id) return renderMarkedNoteContent(task.title, task.title)
+      const completeTitle = completeTaskTitle(task)
+      if (!completeTitle.includes("[[")) return completeTitle
+      if (task.ga_note_origin_id) return renderMarkedNoteContent(completeTitle, completeTitle)
       return isTaskStartingOnSelectedAllDate(task)
-        ? renderMarkedNoteContent(task.title, task.title)
-        : getPlainMarkedText(task.title)
+        ? renderMarkedNoteContent(completeTitle, completeTitle)
+        : getPlainMarkedText(completeTitle)
     },
-    [isTaskStartingOnSelectedAllDate]
+    [completeTaskTitle, isTaskStartingOnSelectedAllDate]
   )
   const isMineView = viewMode === "mine" && Boolean(user?.id)
   const isTaskAssignedToUser = React.useCallback(
@@ -3032,6 +3054,42 @@ export default function DepartmentKanban() {
       return createdKey <= reportDayKey
     })
   }, [projectTasks, selectedAllReportDate, viewMode, selectedUserId, user?.id, isTaskOwnedByViewUser, isTaskActiveForDate])
+  React.useEffect(() => {
+    const origins = new Map<string, "ga" | "plan">()
+    for (const task of [...dailyReportFastTasks, ...dailyReportProjectTasks]) {
+      if (task.ga_note_origin_id) origins.set(task.ga_note_origin_id, "ga")
+      if (task.plan_note_origin_id) origins.set(task.plan_note_origin_id, "plan")
+    }
+    const missing = Array.from(origins.entries()).filter(([originId]) => !noteTitleByOriginId[originId])
+    if (!missing.length) return
+
+    let cancelled = false
+    void Promise.all(
+      missing.map(async ([originId, source]) => {
+        try {
+          const response = await apiFetch(`/${source === "ga" ? "ga-notes" : "plan-notes"}/${originId}`)
+          if (!response.ok) return null
+          const note = (await response.json()) as { content?: string | null }
+          const content = (note.content || "").trim()
+          return content ? ([originId, content] as const) : null
+        } catch {
+          return null
+        }
+      })
+    ).then((results) => {
+      if (cancelled) return
+      setNoteTitleByOriginId((previous) => {
+        const next = { ...previous }
+        for (const result of results) {
+          if (result) next[result[0]] = result[1]
+        }
+        return next
+      })
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, dailyReportFastTasks, dailyReportProjectTasks, noteTitleByOriginId])
   const deadlineImportantTaskIds = React.useMemo(() => {
     const ids = new Set<string>()
     for (const task of dailyReportFastTasks) {
@@ -3360,7 +3418,7 @@ export default function DepartmentKanban() {
           subtype: fastReportSubtypeShort(task),
           period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.planned_for || task.created_at),
           department: departmentCode,
-          title: task.title || "-",
+          title: completeTaskTitle(task),
           description: task.description || "-",
           status: taskStatusLabel(task),
           statusKey: normalizeTaskStatusKey(task),
@@ -3402,7 +3460,7 @@ export default function DepartmentKanban() {
         subtype: projectReportSubtypeShort(task),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
         department: departmentCode,
-        title: task.title || "-",
+        title: completeTaskTitle(task),
         projectTitle: projectLabel,
         description: task.description || "-",
         status: taskStatusLabel(task),
@@ -3527,6 +3585,7 @@ export default function DepartmentKanban() {
     userMap,
     departmentCode,
     printInitials,
+    completeTaskTitle,
   ])
 
   const dailyUserReportDisplayRows = React.useMemo(() => {
@@ -7464,7 +7523,7 @@ export default function DepartmentKanban() {
                           const isDeadlineImportant = row.taskId ? deadlineImportantTaskIds.has(row.taskId) : false
                           const hasEightAmIndicator = titleHasEightAmIndicator(row.title)
                           const isTitleExpanded = Boolean(expandedDailyReportTitleIds[rowId])
-                          const canExpandTitle = hasDailyReportTitleDetails(row.title)
+                          const canExpandTitle = Boolean((row.title || "").trim())
                           const visibleTitle = isTitleExpanded ? row.title : getDailyReportTitlePreview(row.title)
                           const selectedDayClass = row.taskId
                             ? selectedDayDateRowClass(

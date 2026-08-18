@@ -815,6 +815,23 @@ function hasDailyReportTitleDetails(title?: string | null) {
   return getDailyReportTitlePreview(raw) !== raw
 }
 
+function getCompleteTaskTitle(task: Task) {
+  const title = (task.title || "").trim()
+  const description = (task.description || "").trim()
+  if (!(task.ga_note_origin_id || task.plan_note_origin_id) || !description) return title || "-"
+
+  const normalizedTitle = title.replace(/[ \t\f\v]+/g, " ")
+  const descriptionFirstLine = description
+    .split(/\r?\n/)
+    .map((line) => line.replace(/[ \t\f\v]+/g, " ").trim())
+    .find(Boolean) || ""
+  const descriptionContinuesTitle =
+    Boolean(normalizedTitle) &&
+    (descriptionFirstLine === normalizedTitle || descriptionFirstLine.startsWith(normalizedTitle))
+
+  return descriptionContinuesTitle ? description : title || description || "-"
+}
+
 function taskStatusValue(task: Task): Task["status"] {
   if (task.status === "DONE" || task.completed_at) return "DONE"
   if (task.status === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
@@ -1802,11 +1819,12 @@ export default function DepartmentKanban() {
   )
   const renderAllTodayTaskTitle = React.useCallback(
     (task: Task) => {
-      if (typeof task.title !== "string" || !task.title.includes("[[")) return task.title
-      if (task.ga_note_origin_id) return renderMarkedNoteContent(task.title, task.title)
+      const completeTitle = getCompleteTaskTitle(task)
+      if (!completeTitle.includes("[[")) return completeTitle
+      if (task.ga_note_origin_id) return renderMarkedNoteContent(completeTitle, completeTitle)
       return isTaskStartingOnSelectedAllDate(task)
-        ? renderMarkedNoteContent(task.title, task.title)
-        : getPlainMarkedText(task.title)
+        ? renderMarkedNoteContent(completeTitle, completeTitle)
+        : getPlainMarkedText(completeTitle)
     },
     [isTaskStartingOnSelectedAllDate]
   )
@@ -2899,7 +2917,7 @@ export default function DepartmentKanban() {
           typeLabel: "FT",
           subtype: fastReportSubtypeShort(task),
           period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.planned_for || task.created_at),
-          title: task.title || "-",
+          title: getCompleteTaskTitle(task),
           description: task.description || "-",
           status: taskStatusLabel(task),
           statusKey: normalizeTaskStatusKey(task),
@@ -2935,7 +2953,7 @@ export default function DepartmentKanban() {
         typeLabel: "PRJK",
         subtype: projectReportSubtypeShort(task),
         period: resolvePeriod(task.finish_period, task.due_date || task.start_date || task.created_at),
-        title: task.title || "-",
+        title: getCompleteTaskTitle(task),
         projectTitle: projectLabel,
         description: task.description || "-",
         status: taskStatusLabel(task),
