@@ -737,6 +737,9 @@ export interface RealizationTaskFact {
   meeting_origin_id?: string | null
   status_progress_inconsistent?: boolean
   user_comment?: string | null
+  daily_report_comment?: string | null
+  reason_code?: string | null
+  reason_label?: string | null
   comment_required_before_close?: boolean
   rlz_impact?: string
 }

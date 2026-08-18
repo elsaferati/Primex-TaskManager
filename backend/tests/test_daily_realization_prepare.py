@@ -8,7 +8,10 @@ from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
 
-from app.api.routers.realization import prepare_daily_realization
+from app.api.routers.realization import (
+    _merge_daily_report_task_evidence,
+    prepare_daily_realization,
+)
 from app.models.enums import UserRole
 
 
@@ -21,6 +24,28 @@ class _DepartmentResult:
 
     def scalar_one_or_none(self):
         return self.department
+
+
+def test_saved_daily_reason_and_comment_are_merged_into_timeline_cards():
+    task_id = uuid.uuid4()
+    tasks = [
+        {"task_id": str(task_id), "title": "Task", "user_comment": "Koment i vjetër"},
+        {"task_id": str(uuid.uuid4()), "title": "Task pa evidencë"},
+    ]
+    evidence = [{
+        "task_id": str(task_id),
+        "reason_code": "NEW_REQUESTS",
+        "reason_label": "Kërkesa të reja",
+        "comment": "Komenti ditor i ruajtur",
+    }]
+
+    _merge_daily_report_task_evidence(tasks, evidence)
+
+    assert tasks[0]["reason_code"] == "NEW_REQUESTS"
+    assert tasks[0]["reason_label"] == "Kërkesa të reja"
+    assert tasks[0]["daily_report_comment"] == "Komenti ditor i ruajtur"
+    assert tasks[0]["user_comment"] == "Komenti ditor i ruajtur"
+    assert "reason_label" not in tasks[1]
 
 
 def test_prepare_at_1530_creates_a_separate_result_for_each_person():

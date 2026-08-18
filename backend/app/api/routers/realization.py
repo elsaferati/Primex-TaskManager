@@ -309,6 +309,27 @@ def _dedupe_timeline_tasks(tasks: list[dict]) -> list[dict]:
     return [*unique.values(), *anonymous]
 
 
+def _merge_daily_report_task_evidence(
+    tasks: list[dict], evidence_tasks: list[dict]
+) -> None:
+    """Attach the saved Daily Report reason/comment to timeline task cards."""
+    evidence_by_task_id = {
+        str(item["task_id"]): item
+        for item in evidence_tasks
+        if item.get("task_id")
+    }
+    for task in tasks:
+        task_id = task.get("task_id")
+        evidence = evidence_by_task_id.get(str(task_id)) if task_id else None
+        if evidence is None:
+            continue
+        task["reason_code"] = evidence.get("reason_code")
+        task["reason_label"] = evidence.get("reason_label")
+        task["daily_report_comment"] = evidence.get("comment")
+        if evidence.get("comment") is not None:
+            task["user_comment"] = evidence.get("comment")
+
+
 def _timeline_task_belongs_on_day(
     task: dict, day: date, system_task_days: dict[str, date]
 ) -> bool:
@@ -567,6 +588,14 @@ async def _weekly_response(
         for item in timeline:
             history = close_history.get((user_id, item["date"]), [])
             latest = history[-1] if history else None
+            latest_closed = next(
+                (
+                    event
+                    for event in reversed(history)
+                    if event.get("action") in {"CLOSE", "CORRECT"}
+                ),
+                None,
+            )
             item["close_history"] = history
             item["close_state"] = (
                 "CLOSED"
@@ -591,11 +620,22 @@ async def _weekly_response(
                 "status": approval_status,
                 **(latest_approval or {}),
             }
+            current_state = None
             if item["date"] == today_local:
                 current_state = await build_daily_rlz_compliance(
                     db, user_id=user_id, day=date.fromisoformat(item["date"])
                 )
                 item["manager_approval"] = current_state["manager_approval"]
+            evidence_tasks = (
+                current_state.get("tasks")
+                if current_state is not None
+                else (
+                    ((latest_closed.get("facts_json") or {}).get("daily_report_state") or {}).get("tasks")
+                    if latest_closed
+                    else []
+                )
+            ) or []
+            _merge_daily_report_task_evidence(item.get("tasks") or [], evidence_tasks)
             if (
                 latest
                 and item["close_state"] == "CLOSED"
@@ -997,8 +1037,11 @@ async def _weekly_response(
                     task_uuid = uuid.UUID(str(task.get("task_id")))
                 except (TypeError, ValueError):
                     task_uuid = None
+                daily_comment = task.get("daily_report_comment")
                 task["user_comment"] = (
-                    task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
+                    daily_comment
+                    if daily_comment is not None
+                    else task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
                 )
     answers_by_result = await _latest_question_answers(db, [row.id for row in visible])
     answerer_ids = {
@@ -1026,8 +1069,11 @@ async def _weekly_response(
                 task_uuid = uuid.UUID(str(task.get("task_id")))
             except (TypeError, ValueError):
                 task_uuid = None
+            daily_comment = task.get("daily_report_comment")
             task["user_comment"] = (
-                task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
+                daily_comment
+                if daily_comment is not None
+                else task_comment_map.get((task_uuid, row.user_id)) if task_uuid else None
             )
         facts["daily_timeline"] = daily_by_user.get(row.user_id, [])
         expected_keys: set[str] = set()
