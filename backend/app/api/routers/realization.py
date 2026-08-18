@@ -37,7 +37,11 @@ from app.models.realization import (
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_user_comment import TaskUserComment
-from app.services.daily_rlz_compliance import build_daily_rlz_compliance, is_editable_day
+from app.services.daily_rlz_compliance import (
+    build_daily_rlz_compliance,
+    closable_from,
+    is_closable_day,
+)
 from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.schemas.realization import (
@@ -1713,6 +1717,69 @@ async def calculate_daily_realization(
     )
 
 
+@router.post("/daily/prepare", response_model=RealizationDailyOut)
+async def prepare_daily_realization(
+    department_id: uuid.UUID,
+    day: date,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationDailyOut:
+    """Create or refresh the caller's Daily RLZ result after slot rollover."""
+    _ensure_department_scope(user, department_id)
+    if user.department_id != department_id:
+        raise HTTPException(
+            status_code=403,
+            detail="Daily RLZ can be prepared only for your department",
+        )
+    if not is_closable_day(day):
+        raise HTTPException(status_code=409, detail={
+            "code": "DAILY_RLZ_CLOSE_WINDOW_NOT_OPEN",
+            "message": "Gjendja ditore RLZ mund të ruhet nga ora 15:30 deri në 17:00.",
+            "closable_from": closable_from(day).isoformat(),
+        })
+    department = (
+        await db.execute(select(Department).where(Department.id == department_id))
+    ).scalar_one_or_none()
+    if department is None:
+        raise HTTPException(status_code=404, detail="Department not found")
+    try:
+        period, planned = await ensure_daily_period(
+            db, department_id=department_id, day=day, created_by=user.id
+        )
+        if planned is None:
+            raise HTTPException(
+                status_code=409,
+                detail="PLANNED snapshot is required before saving Daily RLZ",
+            )
+        period = await _period(db, period.id, for_update=True)
+        await calculate_daily_period(
+            db,
+            period=period,
+            planned_snapshot=planned,
+            actor_id=user.id,
+            only_user_id=user.id,
+        )
+        add_audit_log(
+            db=db,
+            actor_user_id=user.id,
+            entity_type="realization_period",
+            entity_id=period.id,
+            action="daily_result_prepared_for_close",
+            after={"day": day.isoformat(), "user_id": str(user.id)},
+        )
+        await db.commit()
+        await db.refresh(period)
+    except HTTPException:
+        await db.rollback()
+        raise
+    except (ValueError, RealizationWorkflowError) as exc:
+        await db.rollback()
+        raise _error(exc)
+    return await _daily_response(
+        db, period=period, department_name=department.name, user=user
+    )
+
+
 async def _latest_close_event(
     db: AsyncSession, *, period_id: uuid.UUID, user_id: uuid.UUID
 ) -> RealizationDailyCloseEvent | None:
@@ -1757,10 +1824,10 @@ async def close_realization_day(
         raise HTTPException(status_code=403, detail="Forbidden")
     if user.role == UserRole.STAFF and result.user_id != user.id:
         raise HTTPException(status_code=403, detail="STAFF can close only their own day")
-    if result.user_id == user.id and not is_editable_day(period.start_date):
+    if result.user_id == user.id and not is_closable_day(period.start_date):
         raise HTTPException(status_code=409, detail={
-            "code": "DAILY_RLZ_EDIT_WINDOW_CLOSED",
-            "message": "Arsyeja dhe komenti për këtë ditë mund të ndryshohen vetëm deri në orën 17:00.",
+            "code": "DAILY_RLZ_CLOSE_WINDOW_CLOSED",
+            "message": "Gjendja ditore RLZ mund të ruhet nga ora 15:30 deri në 17:00.",
         })
     require_unlocked(period)
     planned, _ = await _pinned_snapshots(db, period)

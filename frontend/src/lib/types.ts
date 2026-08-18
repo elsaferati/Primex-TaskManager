@@ -389,6 +389,7 @@ export interface DailyReportResponse {
     stale: boolean
     saved_at?: string | null
     is_editable: boolean
+    closable_from?: string | null
     editable_until?: string | null
   } | null
 }

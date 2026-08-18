@@ -22,6 +22,7 @@ from app.services.daily_realization_approval import daily_approval_state
 
 TIMEZONE_NAME = "Europe/Tirane"
 EDIT_CUTOFF = time(17, 0)
+RLZ_CLOSE_OPEN = time(15, 30)
 UNFINISHED = {"TODO", "IN_PROGRESS"}
 REASON_DEFINITIONS = (
     ("TOOK_LONGER", "Mori më shumë kohë"),
@@ -53,9 +54,19 @@ def editable_until(day: date) -> datetime:
     return datetime.combine(day, EDIT_CUTOFF, tzinfo=ZoneInfo(TIMEZONE_NAME))
 
 
+def closable_from(day: date) -> datetime:
+    return datetime.combine(day, RLZ_CLOSE_OPEN, tzinfo=ZoneInfo(TIMEZONE_NAME))
+
+
 def is_editable_day(day: date, now: datetime | None = None) -> bool:
     current = now or tirana_now()
     return day.weekday() < 5 and day == current.date() and current < editable_until(day)
+
+
+def is_closable_day(day: date, now: datetime | None = None) -> bool:
+    """Daily RLZ can be saved after the 1H slots roll over at 15:30."""
+    current = now or tirana_now()
+    return is_editable_day(day, current) and current >= closable_from(day)
 
 
 def task_issue_codes(*, status: str, due_date: date | None, requires_one_h_slot: bool,
@@ -196,7 +207,8 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
         "compliant": not blockers, "rlz_close_state": {
             "status": close_status, "saved": saved, "stale": stale,
             "saved_at": latest_close.created_at.isoformat() if saved and latest_close else None,
-            "is_editable": is_editable_day(day, now),
+            "is_editable": is_closable_day(day, now),
+            "closable_from": closable_from(day).isoformat(),
             "editable_until": editable_until(day).isoformat(),
         },
     }

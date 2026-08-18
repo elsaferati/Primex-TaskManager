@@ -172,8 +172,13 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
         setBlockers(check.blockers || check.detail?.blockers || [])
         return
       }
-      const dailyResponse = await apiFetch(`/realization/daily?department_id=${user.department_id}&day=${day}`)
-      if (!dailyResponse.ok) throw new Error("Realization Daily nuk është gati")
+      const dailyResponse = await apiFetch(`/realization/daily/prepare?department_id=${user.department_id}&day=${day}`, {
+        method: "POST",
+      })
+      if (!dailyResponse.ok) {
+        const payload = await dailyResponse.json().catch(() => ({}))
+        throw new Error(payload?.detail?.message || payload?.detail || "Realization Daily nuk është gati")
+      }
       const daily = await dailyResponse.json()
       const person = daily.people?.find((entry: { user_id: string }) => entry.user_id === user.id)
       if (!person) throw new Error("Rezultati yt ditor i Realization nuk u gjet")
