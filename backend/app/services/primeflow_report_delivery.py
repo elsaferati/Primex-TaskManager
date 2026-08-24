@@ -127,6 +127,10 @@ async def load_1h_reminder_questions() -> list[ReportReminderQuestion]:
         ReportReminderQuestion(text="Hap doc dhe det"),
         ReportReminderQuestion(text="Share screen side by side DET/REZULTATIN"),
         ReportReminderQuestion(text="Sqaro slotin paraprak pastaj aktual"),
+        ReportReminderQuestion(
+            text="BZ Det nga Stafi per GA",
+            guidance="Komunikimi GA temas Det nga Stafi/ KA email",
+        ),
     ]
 
 

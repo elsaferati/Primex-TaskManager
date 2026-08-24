@@ -29,12 +29,22 @@ from app.services.task_strike_events import (
 )
 from app.services.primeflow_report_delivery import (
     _undiscussed_px_notes_statement,
+    load_1h_reminder_questions,
     strike_interval_end,
     strike_interval_start,
 )
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_fixed_staff_reminders_include_ga_staff_bz_step(self) -> None:
+        reminders = asyncio.run(load_1h_reminder_questions())
+
+        self.assertEqual(reminders[-1].text, "BZ Det nga Stafi per GA")
+        self.assertEqual(
+            reminders[-1].guidance,
+            "Komunikimi GA temas Det nga Stafi/ KA email",
+        )
+
     def test_undiscussed_notes_query_matches_open_px_notes_without_tasks(self) -> None:
         query = str(_undiscussed_px_notes_statement())
 
@@ -257,6 +267,10 @@ class PrimeFlowReportTests(unittest.TestCase):
             ReportReminderQuestion(text="Hap doc dhe det"),
             ReportReminderQuestion(text="Share screen side by side DET/REZULTATIN"),
             ReportReminderQuestion(text="Sqaro slotin paraprak pastaj aktual"),
+            ReportReminderQuestion(
+                text="BZ Det nga Stafi per GA",
+                guidance="Komunikimi GA temas Det nga Stafi/ KA email",
+            ),
         ]
         document = build_report_document(data, date(2026, 8, 6), "11:00", reminders=reminders)
         plain = render_plain_text(document)
@@ -265,10 +279,13 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertLess(plain.index(REMINDER_SECTION_TITLE), plain.index("11:00 SLOTI 06.08.2026"))
         self.assertIn("1. Slotin paraprak/aktual", plain)
         self.assertIn("6. A arrihet RLZ javor?", plain)
-        self.assertIn("7. Done? / Strikes? / Notes te reja?", plain)
-        self.assertNotIn("8. Strikes?", plain)
+        self.assertIn("7. Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?", plain)
+        self.assertIn("8. BZ Notes", plain)
+        self.assertIn("Secili i lexon vet para BZ me GA", plain)
         self.assertIn("1. Hap doc dhe det", plain)
         self.assertIn("2. Share screen side by side DET/REZULTATIN", plain)
+        self.assertIn("4. BZ Det nga Stafi per GA", plain)
+        self.assertIn("Komunikimi GA temas Det nga Stafi/ KA email", plain)
         self.assertIn(REMINDER_SECTION_TITLE, html)
         self.assertIn('data-board-reminder-columns="true"', html)
         self.assertIn(BOARD_REMINDER_SECTION_TITLE, html)
@@ -278,6 +295,9 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn('<strong>1.</strong> Hap doc dhe det', html)
         self.assertIn('<strong>2.</strong> Share screen side by side DET/REZULTATIN', html)
         self.assertIn('<strong>3.</strong> Sqaro slotin paraprak pastaj aktual', html)
+        self.assertIn('<strong>4.</strong> BZ Det nga Stafi per GA', html)
+        self.assertIn("font-size:20px", html)
+        self.assertIn("font-weight:900", html)
         self.assertIn("A ke filluar me slotin aktual?", html)
         self.assertIn("Sqaro slotin paraprak pastaj aktual", html)
         self.assertIn("color:#64748b", html)

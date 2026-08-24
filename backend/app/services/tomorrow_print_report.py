@@ -4,7 +4,7 @@ import html
 import os
 import re
 from io import BytesIO
-from datetime import date
+from datetime import date, datetime
 from typing import Any
 
 from openpyxl import Workbook
@@ -29,18 +29,20 @@ TASK_ROWS = (
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
 VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "15:50"}
 ONE_H_BOARD_CHECKLIST = (
-    "Slotin paraprak/aktual",
-    "A ke filluar me slotin aktual?",
-    "Nese jo, kur?",
-    "A kryhet sot?",
-    "A kryhet kete jave?",
-    "A arrihet RLZ javor?",
-    "Done? / Strikes? / Notes te reja?",
+    ("Slotin paraprak/aktual", ""),
+    ("A ke filluar me slotin aktual?", ""),
+    ("Nese jo, kur?", ""),
+    ("A kryhet sot?", ""),
+    ("A kryhet kete jave?", ""),
+    ("A arrihet RLZ javor?", ""),
+    ("Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?", ""),
+    ("BZ Notes", "Secili i lexon vet para BZ me GA"),
 )
 ONE_H_STAFF_CHECKLIST = (
-    "Hap doc dhe det",
-    "Share screen side by side DET/REZULTATIN",
-    "Sqaro slotin paraprak pastaj aktual",
+    ("Hap doc dhe det", ""),
+    ("Share screen side by side DET/REZULTATIN", ""),
+    ("Sqaro slotin paraprak pastaj aktual", ""),
+    ("BZ Det nga Stafi per GA", "Komunikimi GA temas Det nga Stafi/ KA email"),
 )
 
 # Gmail can remove style blocks from message bodies. Keep the styles that form
@@ -158,7 +160,55 @@ def _task_title(item: dict[str, Any], *, personal: bool) -> str:
 
 def _is_eight_am_task(item: dict[str, Any]) -> bool:
     title = " ".join(str(item.get(key) or "") for key in ("title", "task_title"))
-    return bool(EIGHT_AM_MARKER_RE.search(title))
+    if EIGHT_AM_MARKER_RE.search(title):
+        return True
+    raw_due_date = item.get("due_date") or item.get("dueDate")
+    if isinstance(raw_due_date, datetime):
+        return raw_due_date.hour == 8 and raw_due_date.minute == 0
+    match = re.search(r"T08:00(?::00)?", str(raw_due_date or ""))
+    return bool(match)
+
+
+def _task_due_day(item: dict[str, Any]) -> date | None:
+    raw = (
+        item.get("due_date")
+        or item.get("dueDate")
+        or item.get("deadline_date")
+        or item.get("deadlineDate")
+    )
+    if isinstance(raw, datetime):
+        return raw.date()
+    if isinstance(raw, date):
+        return raw
+    try:
+        return date.fromisoformat(str(raw or "")[:10])
+    except ValueError:
+        return None
+
+
+def _task_badges_html(item: dict[str, Any], report_date: date | None) -> str:
+    badges: list[str] = []
+    base_style = (
+        "display:inline-block;float:right;margin:0 0 3px 4px;padding:2px 5px;border:2px solid #111827;"
+        "background-color:#fff;color:#111827;font-family:Arial,sans-serif;font-size:10px;"
+        "font-weight:800;line-height:1.1;white-space:nowrap;"
+    )
+    if _is_eight_am_task(item):
+        badges.append(f'<span data-task-badge="08:00" style="{base_style}">08:00</span>')
+    if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
+        due_day = _task_due_day(item)
+        if due_day:
+            due_today = report_date is not None and due_day == report_date
+            style = base_style
+            label = f"DUE {due_day:%d.%m.%Y}"
+            if due_today:
+                style += "font-size:13px;font-weight:900;border-width:3px;background-color:#FEF08A;"
+                label = f"DUE TODAY {due_day:%d.%m.%Y}"
+            badges.append(
+                f'<span data-task-badge="due-date" data-due-today="{str(due_today).lower()}" '
+                f'style="{style}">{label}</span>'
+            )
+    return "".join(badges)
 
 
 def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
@@ -222,36 +272,23 @@ def _is_non_routine_meeting(item: dict[str, Any]) -> bool:
 def _one_h_checklists_html() -> str:
     """The two preparation checklists shown above every 1H Shtypi task grid."""
 
-    def question_rows(questions: tuple[str, ...], start_index: int = 1) -> str:
-        return "".join(
-            "<tr><td style=\"border:1px solid #64748b;padding:8px 10px;font-family:Arial,sans-serif;"
-            f"font-size:12px;font-weight:700;\">{index}. {html.escape(question)}</td></tr>"
-            for index, question in enumerate(questions, start_index)
+    def checklist(title: str, questions: tuple[tuple[str, str], ...], *, board: bool = False) -> str:
+        separators = (
+            '<span style="font-size:20px;font-weight:900;color:#111827;line-height:12px;"> / </span>'
         )
-
-    def checklist(title: str, questions: tuple[str, ...]) -> str:
+        question_text = separators.join(
+            f'<strong>{index}. {html.escape(question)}</strong>'
+            + (f' <span style="color:#475569;">({html.escape(description)})</span>' if description else "")
+            for index, (question, description) in enumerate(questions, 1)
+        )
+        board_marker = ' data-board-checklist-columns="true"' if board else ""
         return (
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
-            'style="width:100%;border-collapse:separate;border-spacing:0 6px;">'
+            f'data-compact-checklist-row="true"{board_marker} style="width:100%;border-collapse:collapse;">'
             '<tr><th style="background-color:#eef2ff;border-left:5px solid #2563eb;padding:10px 12px;'
             f'font-family:Arial,sans-serif;font-size:14px;text-align:left;">{html.escape(title)}</th></tr>'
-            f"{question_rows(questions)}</table>"
-        )
-
-    def board_checklist() -> str:
-        split_at = (len(ONE_H_BOARD_CHECKLIST) + 1) // 2
-        left_questions = ONE_H_BOARD_CHECKLIST[:split_at]
-        right_questions = ONE_H_BOARD_CHECKLIST[split_at:]
-        table_style = 'width:100%;border-collapse:separate;border-spacing:0 6px;'
-        return (
-            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
-            'data-board-checklist-columns="true" style="width:100%;border-collapse:collapse;">'
-            '<tr><th colspan="2" style="background-color:#eef2ff;border-left:5px solid #2563eb;padding:10px 12px;'
-            'font-family:Arial,sans-serif;font-size:14px;text-align:left;">PYETJET PER 1H - BORD</th></tr>'
-            '<tr>'
-            f'<td width="50%" valign="top" style="width:50%;padding:0 3px 0 0;vertical-align:top;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="{table_style}">{question_rows(left_questions)}</table></td>'
-            f'<td width="50%" valign="top" style="width:50%;padding:0 0 0 3px;vertical-align:top;"><table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="{table_style}">{question_rows(right_questions, split_at + 1)}</table></td>'
-            '</tr></table>'
+            '<tr><td style="border:1px solid #64748b;padding:8px 10px;font-family:Arial,sans-serif;'
+            f'font-size:12px;line-height:1.45;">{question_text}</td></tr></table>'
         )
 
     return (
@@ -262,15 +299,17 @@ def _one_h_checklists_html() -> str:
         f"{checklist('STAFF - HAPAT PER 1H', ONE_H_STAFF_CHECKLIST)}"
         '</td>'
         '<td width="50%" valign="top" style="width:50%;padding:0 0 0 6px;vertical-align:top;">'
-        f"{board_checklist()}"
+        f"{checklist('PYETJET PER 1H - BORD', ONE_H_BOARD_CHECKLIST, board=True)}"
         '</td>'
         '</tr></table>'
     )
 
 
-def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False) -> str:
-    header = "Meeting" if meeting else "Tasks"
-    label_header = "LLoji" if meeting else "LLoji dhe sloti"
+def _html_table(
+    rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool = False, report_date: date | None = None
+) -> str:
+    header = "MEETING" if meeting else "TASK"
+    label_header = "LLOJI" if meeting else "LLOJI DHE SLOTI"
     body: list[str] = []
     for number, (label, values, *rest) in enumerate(rows, 1):
         personal = bool(rest and rest[0])
@@ -294,8 +333,10 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
                     cell_style, color = _task_cell_style(item, personal=personal)
                 cell_style = f"{cell_style};{row_divider_style}"
                 background = f' bgcolor="{color}"' if color else ""
+                badges = "" if meeting else _task_badges_html(item, report_date)
                 cells.append(
-                    f'<td{background} style="{cell_style}">{item_index + (chunk_index * 6) + 1}. {html.escape(value)}</td>'
+                    f'<td{background} style="{cell_style}">{badges}'
+                    f'{item_index + (chunk_index * 6) + 1}. {html.escape(value)}</td>'
                 )
             cells.extend(f'<td style="{CELL_STYLE};{row_divider_style}"></td>' for _ in range(6 - len(cells)))
             row_header = (
@@ -308,7 +349,8 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
         f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{TABLE_STYLE}">'
         '<colgroup><col width="4%"><col width="9%"><col width="14.5%" span="6"></colgroup>'
         f'<thead><tr><th style="{HEADER_STYLE}">NR</th><th style="{HEADER_STYLE}">{label_header}</th>'
-        f'<th colspan="6" style="{HEADER_STYLE}">{header}</th></tr></thead>'
+        + "".join(f'<th style="{HEADER_STYLE}">{header} {index}</th>' for index in range(1, 7))
+        + '</tr></thead>'
         f"<tbody>{''.join(body)}</tbody></table>"
     )
 
@@ -359,10 +401,10 @@ def _excel_table_attachment(
         top=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
         bottom=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
     )
-    headers = ["NR", "LLoji dhe sloti", "Task 1", "Task 2", "Task 3", "Task 4", "Task 5", "Task 6"]
+    headers = ["NR", "LLOJI DHE SLOTI", "TASK 1", "TASK 2", "TASK 3", "TASK 4", "TASK 5", "TASK 6"]
 
     def write_checklists(row_number: int) -> int:
-        """Write the board and staff preparation lists above the task table."""
+        """Write each preparation list as a title row plus one compact content row."""
         checklist_fill = PatternFill("solid", fgColor="EEF2FF")
         for start_column, end_column, title, questions in (
             (1, 4, "STAFF - HAPAT PER 1H", ONE_H_STAFF_CHECKLIST),
@@ -374,33 +416,30 @@ def _excel_table_attachment(
             title_cell.font = Font(bold=True, size=11)
             title_cell.alignment = Alignment(vertical="center")
             title_cell.border = border
-            split_at = (len(questions) + 1) // 2 if title == "PYETJET PER 1H - BORD" else len(questions)
-            for index, question in enumerate(questions, 1):
-                question_row = row_number + index
-                question_start_column = start_column
-                question_end_column = end_column
-                if title == "PYETJET PER 1H - BORD" and index > split_at:
-                    question_row = row_number + index - split_at
-                    question_start_column = start_column + 2
-                    question_end_column = end_column
-                elif title == "PYETJET PER 1H - BORD":
-                    question_end_column = start_column + 1
-                sheet.merge_cells(
-                    start_row=question_row,
-                    start_column=question_start_column,
-                    end_row=question_row,
-                    end_column=question_end_column,
-                )
-                question_cell = sheet.cell(question_row, question_start_column, f"{index}. {question}")
-                question_cell.font = Font(bold=True, size=10)
-                question_cell.alignment = Alignment(vertical="center", wrap_text=True)
-                question_cell.border = border
-        return row_number + max(len(ONE_H_STAFF_CHECKLIST), (len(ONE_H_BOARD_CHECKLIST) + 1) // 2) + 1
+            sheet.merge_cells(
+                start_row=row_number + 1,
+                start_column=start_column,
+                end_row=row_number + 1,
+                end_column=end_column,
+            )
+            question_cell = sheet.cell(
+                row_number + 1,
+                start_column,
+                " / ".join(
+                    f"{index}. {question}" + (f" ({description})" if description else "")
+                    for index, (question, description) in enumerate(questions, 1)
+                ),
+            )
+            question_cell.font = Font(bold=True, size=10)
+            question_cell.alignment = Alignment(vertical="center", wrap_text=True)
+            question_cell.border = border
+        sheet.row_dimensions[row_number + 1].height = 72
+        return row_number + 2
 
     def write_section(
         rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool, row_number: int
     ) -> int:
-        section_headers = ["NR", "LLoji", "Meeting 1", "Meeting 2", "Meeting 3", "Meeting 4", "Meeting 5", "Meeting 6"] if meeting else headers
+        section_headers = ["NR", "LLOJI", "MEETING 1", "MEETING 2", "MEETING 3", "MEETING 4", "MEETING 5", "MEETING 6"] if meeting else headers
         for column, value in enumerate(section_headers, 1):
             cell = sheet.cell(row_number, column, value)
             cell.font = Font(bold=True)
@@ -424,11 +463,24 @@ def _excel_table_attachment(
                         f"{_report_text(_first_line(item.get('title')))} {str(item.get('time') or '').strip()}".strip()
                         if meeting else _task_title(item, personal=personal)
                     )
+                    if not meeting:
+                        labels: list[str] = []
+                        if _is_eight_am_task(item):
+                            labels.append("[08:00]")
+                        if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
+                            due_day = _task_due_day(item)
+                            if due_day:
+                                due_label = "DUE TODAY" if due_day == target_date else "DUE"
+                                labels.append(f"[{due_label} {due_day:%d.%m.%Y}]")
+                        if labels:
+                            value = f"{' '.join(labels)}\n{value}"
                     cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
                     if not meeting:
                         if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
                             cell.fill = deadline_fill
                             cell.font = Font(color="FFFFFF", bold=True)
+                            if _task_due_day(item) == target_date:
+                                cell.font = Font(color="FFFFFF", bold=True, size=12)
                         else:
                             cell.fill = ga_fill if personal and _is_personal_task_for_ga(item) else fills[_task_status(item)]
                         if _is_eight_am_task(item):
@@ -492,15 +544,21 @@ async def build_tomorrow_print_report(
     report_date = target_date.strftime("%d.%m.%Y")
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">1H SHTYPI — {report_date}</div>
-{_one_h_checklists_html()}{_html_table(task_rows)}{_html_table(meeting_rows, meeting=True)}</body></html>"""
+{_one_h_checklists_html()}{_html_table(task_rows, report_date=target_date)}{_html_table(meeting_rows, meeting=True, report_date=target_date)}</body></html>"""
     plain_rows = [
         f"1H SHTYPI - {report_date}",
         "",
         "PYETJET PER 1H - BORD",
-        *(f"{index}. {question}" for index, question in enumerate(ONE_H_BOARD_CHECKLIST, 1)),
+        *(
+            f"{index}. {question}" + (f" ({description})" if description else "")
+            for index, (question, description) in enumerate(ONE_H_BOARD_CHECKLIST, 1)
+        ),
         "",
         "STAFF - HAPAT PER 1H",
-        *(f"{index}. {question}" for index, question in enumerate(ONE_H_STAFF_CHECKLIST, 1)),
+        *(
+            f"{index}. {question}" + (f" ({description})" if description else "")
+            for index, (question, description) in enumerate(ONE_H_STAFF_CHECKLIST, 1)
+        ),
         "",
         "TASKS",
     ]

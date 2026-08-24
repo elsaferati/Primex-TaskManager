@@ -98,7 +98,8 @@ def _board_reminder_questions() -> list[ReportReminderQuestion]:
         ReportReminderQuestion(text="A kryhet sot?"),
         ReportReminderQuestion(text="A kryhet kete jave?"),
         ReportReminderQuestion(text="A arrihet RLZ javor?"),
-        ReportReminderQuestion(text="Done? / Strikes? / Notes te reja?"),
+        ReportReminderQuestion(text="Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?"),
+        ReportReminderQuestion(text="BZ Notes", guidance="Secili i lexon vet para BZ me GA"),
     ]
 
 
@@ -625,7 +626,8 @@ def render_html(
             '<tr><td bgcolor="#f8fafc" style="background-color:#f8fafc;border:1px solid #94a3b8;'
             'border-left:6px solid #64748b;padding:9px 10px;font-family:Arial,sans-serif;'
             'font-size:13px;line-height:1.45;color:#0f172a;">'
-            + ' <strong style="color:#64748b;">/</strong> '.join(question_parts)
+            + ' <strong style="display:inline-block;color:#1e3a5f;font-size:20px;line-height:1;'
+            'font-weight:900;vertical-align:-2px;padding:0 5px;">/</strong> '.join(question_parts)
             + '</td></tr></table>'
         )
 

@@ -15,6 +15,10 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert 'style="width:100%;border-collapse:collapse;table-layout:fixed' in report_html
     assert 'style="border:1px solid #000;padding:5px' in report_html
     assert '<col width="4%"><col width="9%"><col width="14.5%" span="6">' in report_html
+    assert ">LLOJI DHE SLOTI</th>" in report_html
+    assert ">TASK 1</th>" in report_html
+    assert ">TASK 6</th>" in report_html
+    assert 'colspan="6"' not in report_html
     assert 'bgcolor="#D8B4FE"' in report_html
     assert report_html.count('background-color:#D8B4FE') == 1
     assert '<style>' not in report_html
@@ -39,18 +43,26 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     assert "STAFF - HAPAT PER 1H" in checklists_html
     assert "Slotin paraprak/aktual" in checklists_html
     assert 'data-board-checklist-columns="true"' in checklists_html
-    assert "7. Done? / Strikes? / Notes te reja?" in checklists_html
-    assert "8. Strikes?" not in checklists_html
+    assert "7. Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?" in checklists_html
+    assert "8. BZ Notes" in checklists_html
+    assert "Secili i lexon vet para BZ me GA" in checklists_html
     assert "Share screen side by side DET/REZULTATIN" in checklists_html
+    assert "4. BZ Det nga Stafi per GA" in checklists_html
+    assert "Komunikimi GA temas Det nga Stafi/ KA email" in checklists_html
+    assert checklists_html.count('data-compact-checklist-row="true"') == 2
+    assert 'font-size:20px;font-weight:900' in checklists_html
 
     _, content, _ = _excel_table_attachment([], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
     assert sheet["A3"].value == "STAFF - HAPAT PER 1H"
     assert sheet["E3"].value == "PYETJET PER 1H - BORD"
-    assert sheet["A4"].value == "1. Hap doc dhe det"
-    assert sheet["E4"].value == "1. Slotin paraprak/aktual"
-    assert sheet["G4"].value == "5. A kryhet kete jave?"
-    assert sheet["G6"].value == "7. Done? / Strikes? / Notes te reja?"
+    assert sheet["A4"].value.startswith("1. Hap doc dhe det / 2. Share screen")
+    assert "4. BZ Det nga Stafi per GA (Komunikimi GA temas Det nga Stafi/ KA email)" in sheet["A4"].value
+    assert sheet["E4"].value.startswith("1. Slotin paraprak/aktual / 2. A ke filluar")
+    assert "7. Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?" in sheet["E4"].value
+    assert "8. BZ Notes (Secili i lexon vet para BZ me GA)" in sheet["E4"].value
+    assert sheet["B5"].value == "LLOJI DHE SLOTI"
+    assert sheet["C5"].value == "TASK 1"
 
 
 def test_email_table_removes_added_and_done_editor_markers() -> None:
@@ -107,20 +119,50 @@ def test_task_status_colours_apply_to_email_cells_but_ga_personal_stays_purple()
 
 def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     tasks = [
-        {"title": "Deadline task", "status": "TODO", "is_deadline_important": True},
-        {"title": "08:00 task", "status": "TODO"},
+        {
+            "title": "Deadline task",
+            "status": "TODO",
+            "is_deadline_important": True,
+            "due_date": "2026-08-14T16:00:00+02:00",
+        },
+        {"title": "Morning task", "status": "TODO", "due_date": "2026-08-14T08:00:00+02:00"},
     ]
-    report_html = _html_table([("DEADLINE / 08:00", tasks, False)])
+    report_html = _html_table([("DEADLINE / 08:00", tasks, False)], report_date=date(2026, 8, 14))
 
     assert 'bgcolor="#DC2626"' in report_html
     assert "border:2px solid #DC2626" in report_html
+    assert 'data-task-badge="08:00"' in report_html
+    assert 'data-task-badge="due-date"' in report_html
+    assert 'data-due-today="true"' in report_html
+    assert "DUE TODAY 14.08.2026" in report_html
+    assert "font-size:13px;font-weight:900" in report_html
 
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C11"].fill.fgColor.rgb.endswith("DC2626")
-    assert sheet["C11"].font.color.type == "rgb"
-    assert sheet["C11"].font.color.rgb.endswith("FFFFFF")
-    assert sheet["D11"].border.left.color.rgb.endswith("DC2626")
+    assert sheet["C6"].fill.fgColor.rgb.endswith("DC2626")
+    assert sheet["C6"].font.color.type == "rgb"
+    assert sheet["C6"].font.color.rgb.endswith("FFFFFF")
+    assert sheet["C6"].font.sz == 12
+    assert "[DUE TODAY 14.08.2026]" in sheet["C6"].value
+    assert "[08:00]" in sheet["D6"].value
+    assert sheet["D6"].border.left.color.rgb.endswith("DC2626")
+
+
+def test_future_deadline_badge_is_smaller_than_due_today_badge() -> None:
+    report_html = _html_table(
+        [
+            (
+                "1H 10:00",
+                [{"title": "Future deadline", "is_deadline_important": True, "due_date": "2026-08-15"}],
+                False,
+            )
+        ],
+        report_date=date(2026, 8, 14),
+    )
+
+    assert 'data-due-today="false"' in report_html
+    assert "DUE 15.08.2026" in report_html
+    assert "DUE TODAY" not in report_html
 
 
 def test_deadline_and_0800_tasks_have_a_dedicated_printed_row() -> None:
@@ -166,9 +208,9 @@ def test_excel_status_colours_match_email_and_ga_personal_overrides_status() -> 
     )
 
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C11"].fill.fgColor.rgb.endswith("FFC4ED")
-    assert sheet["D11"].fill.fgColor.rgb.endswith("FFFF00")
-    assert sheet["C12"].fill.fgColor.rgb.endswith("D8B4FE")
+    assert sheet["C6"].fill.fgColor.rgb.endswith("FFC4ED")
+    assert sheet["D6"].fill.fgColor.rgb.endswith("FFFF00")
+    assert sheet["C7"].fill.fgColor.rgb.endswith("D8B4FE")
 
 
 def test_done_tasks_are_last_within_each_printed_row() -> None:
@@ -200,5 +242,5 @@ def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> N
 
     _, content, _ = _excel_table_attachment([], meetings, date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C13"].border.left.color.rgb.endswith("2563EB")
-    assert sheet["D13"].border.left.style == "thin"
+    assert sheet["C8"].border.left.color.rgb.endswith("2563EB")
+    assert sheet["D8"].border.left.style == "thin"
