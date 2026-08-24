@@ -1,15 +1,19 @@
 from __future__ import annotations
 
 import re
-from datetime import date, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.models.enums import CommonApprovalStatus, GaNoteStatus, TaskStatus
+from app.models.after_break_report_settings import AfterBreakReportSettings
 from app.models.department import Department
+from app.models.enums import CommonApprovalStatus, GaNoteStatus, TaskStatus
 from app.models.ga_note import GaNote
+from app.models.meeting import Meeting
+from app.models.meeting_occurrence_status import MeetingOccurrenceStatus
 from app.models.question_library import QuestionCategory, QuestionDefinition, QuestionUserStatus
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
@@ -27,9 +31,13 @@ from app.services.meetings_report import (
     _is_open,
     _local_date,
     _local_time,
+    _meeting_group_title,
+    _meeting_occurs_on_date,
+    _meeting_status_checkbox_table,
     _m3_am_pm_label,
     _m3_department_label,
     _m3_finance_ga_sections,
+    _m3_task_type_label,
     _normalize_section,
     _render_group_label_html,
     _render_section_block_html,
@@ -42,11 +50,17 @@ from app.services.meetings_report import (
 
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
+UNFINISHED_PRIORITY_TABLE_LABEL = "DET TE PAKRYERA, 08:00/DEADLINE"
+DONE_AM_TABLE_LABEL = "DET E KRYERA NE AM"
+UNHELD_MEETINGS_TABLE_LABEL = "TAK INT/EXT TE PAMBAJTURA"
 SECTION_TITLES = [
     "DET NGA EMAIL/ PX INFO & ZHVILLIM",
     "PROJEKTET: ATO QE KEMI PUNU DHE SKEMI PUNU",
     "A JEMI BRENDA PLANIT ME PROJEKTE/DIZAJN?",
     "PIKAT E BORDIT/DISKUTO APLIKANTAT",
+    UNFINISHED_PRIORITY_TABLE_LABEL,
+    DONE_AM_TABLE_LABEL,
+    UNHELD_MEETINGS_TABLE_LABEL,
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     "NOTES TE REJA ( NOT DISSCUSED)",
@@ -55,13 +69,19 @@ SECTION_TITLES = [
 ]
 MANUAL_SECTION_TITLES = set(SECTION_TITLES[:4])
 SECTION_TITLE_ALIASES = {
-    "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[6],
-    "NOTES TE REJA ME TE KALTER DHE DISSCUSED?": SECTION_TITLES[6],
+    "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[9],
+    "NOTES TE REJA ME TE KALTER DHE DISSCUSED?": SECTION_TITLES[9],
 }
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
 PERSONAL_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56)]
 SYSTEM_TASK_COLUMNS = [("NR", 2), ("WHO", 20), ("DEP", 5), ("AM/PM", 5), ("TITLE", 56), ("DATA", 10)]
+UNFINISHED_PRIORITY_COLUMNS = [
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("LLOJI", 18), ("TITULLI", 45), ("AFATI", 16),
+]
+DONE_AM_COLUMNS = [
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
+]
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
     ("IN PROGRESS", "IN_PROGRESS"),
@@ -91,7 +111,7 @@ def _ascii_table(label: str, columns: list[tuple[str, int]], rows_values: list[l
         border,
     ]
     # Keep short identity columns on one line so one logical row is not split visually.
-    no_wrap = {"NR", "WHO", "FROM", "PER", "DISK", "TIME", "ORA", "KOHA", "DATA", "DATE", "LATE"}
+    no_wrap = {"NR", "WHO", "KUSH", "FROM", "PER", "DISK", "TIME", "ORA", "KOHA", "DATA", "DATE", "AFATI", "LATE"}
     for values in rows_values:
         wrapped = []
         for value, (name, width) in zip(values, columns):
@@ -140,6 +160,147 @@ def _days_between(start: date, end: date):
 
 def _is_done(task: Task) -> bool:
     return bool(task.completed_at) or str(task.status or "").upper() in {"DONE", "COMPLETED"}
+
+
+def _as_timezone(value: datetime | None, timezone: ZoneInfo) -> datetime | None:
+    if value is None:
+        return None
+    return value.astimezone(timezone) if value.tzinfo else value.replace(tzinfo=timezone)
+
+
+def _unfinished_priority_task_rows(
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    report_day: date,
+    cutoff: datetime,
+    timezone: ZoneInfo,
+    department_codes: dict[Any, str] | None = None,
+) -> list[list[str]]:
+    """Deadline/08:00 tasks due today that were still unfinished at the M2 cutoff."""
+    selected: list[tuple[Task, datetime, str]] = []
+    for task in tasks:
+        due_at = _as_timezone(task.due_date, timezone)
+        if due_at is None or due_at.date() != report_day:
+            continue
+
+        # Match Common View: its 08:00 badge/filter is driven by the title marker,
+        # while due_date only determines which calendar day the task belongs to.
+        is_eight_am = bool(re.search(r"\b0?8:00\b", task.title or ""))
+        is_deadline = bool(task.is_deadline_important)
+        if not (is_eight_am or is_deadline):
+            continue
+
+        created_at = _as_timezone(task.created_at, timezone)
+        if created_at is not None and created_at > cutoff:
+            continue
+
+        completed_at = _as_timezone(task.completed_at, timezone)
+        if completed_at is not None and completed_at <= cutoff:
+            continue
+        if completed_at is None and str(task.status or "").upper() in {"DONE", "COMPLETED"}:
+            continue
+
+        task_type = (
+            "DEADLINE / 08:00"
+            if is_deadline and is_eight_am
+            else ("DEADLINE" if is_deadline else "08:00")
+        )
+        selected.append((task, due_at, task_type))
+
+    selected.sort(
+        key=lambda item: (
+            0 if item[2] == "08:00" else (1 if "08:00" in item[2] else 2),
+            common_view_task_sort_key(item[0], names, assignee_ids_by_task),
+        )
+    )
+    return [
+        [
+            str(index),
+            _task_owners(task, names, assignee_ids_by_task),
+            _m3_department_label(task, department_codes),
+            task_type,
+            _display_title(task.title),
+            due_at.strftime("%d.%m.%Y %H:%M"),
+        ]
+        for index, (task, due_at, task_type) in enumerate(selected, start=1)
+    ]
+
+
+async def _after_break_cutoff(db: AsyncSession, report_day: date) -> tuple[datetime, ZoneInfo]:
+    settings = (
+        await db.execute(select(AfterBreakReportSettings).order_by(AfterBreakReportSettings.created_at.asc()))
+    ).scalars().first()
+    timezone_name = settings.timezone if settings and settings.timezone else "Europe/Tirane"
+    try:
+        timezone = ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError:
+        timezone = ZoneInfo("Europe/Tirane")
+    send_time = settings.send_time if settings and settings.send_time else time(13, 20)
+    return datetime.combine(report_day, send_time, tzinfo=timezone), timezone
+
+
+def _done_am_task_rows(
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    report_day: date,
+    timezone: ZoneInfo,
+    department_codes: dict[Any, str] | None = None,
+) -> list[list[str]]:
+    done_am: list[tuple[Task, datetime]] = []
+    for task in tasks:
+        if (
+            getattr(task, "system_template_origin_id", None) is not None
+            or getattr(task, "system_task_slot_id", None) is not None
+        ):
+            continue
+        completed_at = _as_timezone(task.completed_at, timezone)
+        if completed_at is None or completed_at.date() != report_day or completed_at.hour >= 12:
+            continue
+        if str(task.status or "").upper() not in {"DONE", "COMPLETED"}:
+            continue
+        done_am.append((task, completed_at))
+
+    done_am.sort(
+        key=lambda item: (
+            *common_view_task_sort_key(item[0], names, assignee_ids_by_task),
+            item[1],
+        )
+    )
+    return [
+        [
+            str(index),
+            _task_owners(task, names, assignee_ids_by_task),
+            _m3_department_label(task, department_codes),
+            _m3_am_pm_label(task),
+            _m3_task_type_label(task),
+            _display_title(task.title),
+        ]
+        for index, (task, _completed_at) in enumerate(done_am, start=1)
+    ]
+
+
+def _unheld_meeting_section(
+    meetings: list[Meeting], status_by_meeting: dict[Any, str]
+) -> tuple[list[str], int]:
+    unheld = []
+    for meeting in meetings:
+        meeting_time = _local_time(meeting.starts_at)
+        if meeting_time == "-" or meeting_time >= "12:00":
+            continue
+        if str(status_by_meeting.get(meeting.id, "") or "").strip().lower() == "held":
+            continue
+        unheld.append(meeting)
+    external = [meeting for meeting in unheld if str(getattr(meeting, "meeting_type", "")).lower() == "external"]
+    internal = [meeting for meeting in unheld if str(getattr(meeting, "meeting_type", "")).lower() != "external"]
+    return ([
+        *_meeting_group_title("TAK EXTERNE"),
+        *_meeting_status_checkbox_table(external, status_by_meeting),
+        "",
+        *_meeting_group_title("TAK INTERNE"),
+        *_meeting_status_checkbox_table(internal, status_by_meeting),
+    ], len(unheld))
 
 
 def _belongs_to_day(task: Task, day: date) -> bool:
@@ -344,10 +505,16 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         elif title in MANUAL_SECTION_TITLES:
             body = "(Ploteso manualisht)"
         elif title == SECTION_TITLES[4]:
-            body = "\n".join(["NEW SYSTEM TASKS: 0", "", "PYETJE PER KONFIRMIM: 0"])
+            body = f"{UNFINISHED_PRIORITY_TABLE_LABEL}: 0"
         elif title == SECTION_TITLES[5]:
+            body = f"{DONE_AM_TABLE_LABEL}: 0"
+        elif title == SECTION_TITLES[6]:
+            body = f"{UNHELD_MEETINGS_TABLE_LABEL}: 0"
+        elif title == SECTION_TITLES[7]:
+            body = "\n".join(["NEW SYSTEM TASKS: 0", "", "PYETJE PER KONFIRMIM: 0"])
+        elif title == SECTION_TITLES[8]:
             body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WAITING CONFIRMATION: 0", "", "DONE: 0"])
-        elif title in {SECTION_TITLES[7], SECTION_TITLES[8]}:
+        elif title in {SECTION_TITLES[10], SECTION_TITLES[11]}:
             body = "TODO: 0\n\nIN PROGRESS: 0\n\nDONE: 0\n\nLATE: 0"
         else:
             body = "NOTES: 0"
@@ -366,7 +533,7 @@ async def apply_1h_confirmation_questions(
     question_lines = _format_confirmation_questions(await _load_1h_confirmation_questions(db))
     updated: list[dict[str, str]] = []
     for section in sections:
-        if section.get("title") == SECTION_TITLES[4]:
+        if section.get("title") == SECTION_TITLES[7]:
             updated.append({
                 "title": section["title"],
                 "body": _replace_confirmation_questions_block(section.get("body") or "", question_lines),
@@ -500,6 +667,35 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         department_id: code
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
+    cutoff, cutoff_timezone = await _after_break_cutoff(db, report_day)
+    unfinished_priority_rows = _unfinished_priority_task_rows(
+        tasks,
+        names,
+        assignee_ids_by_task,
+        report_day,
+        cutoff,
+        cutoff_timezone,
+        department_codes,
+    )
+    done_am_rows = _done_am_task_rows(
+        tasks,
+        names,
+        assignee_ids_by_task,
+        report_day,
+        cutoff_timezone,
+        department_codes,
+    )
+    meetings = (await db.execute(select(Meeting).where(Meeting.starts_at.is_not(None)))).scalars().all()
+    today_meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, report_day)]
+    meeting_statuses = (
+        await db.execute(
+            select(MeetingOccurrenceStatus).where(MeetingOccurrenceStatus.occurrence_date == report_day)
+        )
+    ).scalars().all()
+    unheld_meeting_section, unheld_meeting_count = _unheld_meeting_section(
+        today_meetings,
+        {row.meeting_id: row.status for row in meeting_statuses},
+    )
 
     confirmation_ids = {
         task.confirmation_assignee_id for task in tasks
@@ -533,11 +729,31 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         {"title": SECTION_TITLES[1], "body": "(Ploteso manualisht)"},
         {"title": SECTION_TITLES[2], "body": "(Ploteso manualisht)"},
         {"title": SECTION_TITLES[3], "body": "(Ploteso manualisht)"},
-        {"title": SECTION_TITLES[4], "body": _normalize_section(section_1)},
-        {"title": SECTION_TITLES[5], "body": _normalize_section(section_2)},
-        {"title": SECTION_TITLES[6], "body": _normalize_section(section_3)},
-        {"title": SECTION_TITLES[7], "body": ga_section},
-        {"title": SECTION_TITLES[8], "body": hv_section},
+        {
+            "title": SECTION_TITLES[4],
+            "body": _normalize_section(
+                _ascii_table(
+                    UNFINISHED_PRIORITY_TABLE_LABEL,
+                    UNFINISHED_PRIORITY_COLUMNS,
+                    unfinished_priority_rows,
+                )
+            ),
+        },
+        {
+            "title": SECTION_TITLES[5],
+            "body": _normalize_section(
+                _ascii_table(DONE_AM_TABLE_LABEL, DONE_AM_COLUMNS, done_am_rows)
+            ),
+        },
+        {
+            "title": SECTION_TITLES[6],
+            "body": _normalize_section(unheld_meeting_section),
+        },
+        {"title": SECTION_TITLES[7], "body": _normalize_section(section_1)},
+        {"title": SECTION_TITLES[8], "body": _normalize_section(section_2)},
+        {"title": SECTION_TITLES[9], "body": _normalize_section(section_3)},
+        {"title": SECTION_TITLES[10], "body": ga_section},
+        {"title": SECTION_TITLES[11], "body": hv_section},
     ]
     snapshot = {
         "report_day": report_day.isoformat(),
@@ -546,11 +762,14 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             SECTION_TITLES[1]: 0,
             SECTION_TITLES[2]: 0,
             SECTION_TITLES[3]: 0,
-            SECTION_TITLES[4]: len(section_1),
-            SECTION_TITLES[5]: len(section_2),
-            SECTION_TITLES[6]: len(section_3),
-            SECTION_TITLES[7]: ga_section.count("\n- ") + (1 if ga_section.startswith("- ") else 0),
-            SECTION_TITLES[8]: hv_section.count("\n- ") + (1 if hv_section.startswith("- ") else 0),
+            SECTION_TITLES[4]: len(unfinished_priority_rows),
+            SECTION_TITLES[5]: len(done_am_rows),
+            SECTION_TITLES[6]: unheld_meeting_count,
+            SECTION_TITLES[7]: len(section_1),
+            SECTION_TITLES[8]: len(section_2),
+            SECTION_TITLES[9]: len(section_3),
+            SECTION_TITLES[10]: ga_section.count("\n- ") + (1 if ga_section.startswith("- ") else 0),
+            SECTION_TITLES[11]: hv_section.count("\n- ") + (1 if hv_section.startswith("- ") else 0),
         },
     }
     return sections, snapshot

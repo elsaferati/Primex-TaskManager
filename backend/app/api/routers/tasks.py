@@ -392,6 +392,14 @@ def _payload_has_field(payload: BaseModel, field_name: str) -> bool:
     return False
 
 
+def _confirmation_assignee_was_provided(payload: TaskUpdate) -> bool:
+    """Recognize a submitted confirmer without relying only on model metadata."""
+    return (
+        payload.confirmation_assignee_id is not None
+        or _payload_has_field(payload, "confirmation_assignee_id")
+    )
+
+
 def _iter_workdays(start_day: date, end_day: date) -> list[date]:
     if end_day < start_day:
         return []
@@ -2742,7 +2750,12 @@ async def update_task(
         ensure_department_access(user, payload.department_id)
         task.department_id = payload.department_id
 
-    confirmation_set = _payload_has_field(payload, "confirmation_assignee_id")
+    # A non-null confirmer in the parsed payload is authoritative even if the
+    # runtime's Pydantic field-set metadata is unavailable or incomplete.  The
+    # latter was causing WAITING_CONFIRMATION updates to validate against the
+    # task's old null value even though the browser submitted a selected user.
+    # Keep the metadata check so an explicit null can still clear the field.
+    confirmation_set = _confirmation_assignee_was_provided(payload)
     previous_confirmation_assignee_id = task.confirmation_assignee_id
     if confirmation_set:
         if payload.confirmation_assignee_id is not None:

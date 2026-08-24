@@ -182,6 +182,14 @@ const getReportRowOneHReportSlot = (row: unknown) => {
   if (!row || typeof row !== "object" || !("oneHReportSlot" in row)) return null
   return normalizeOneHReportSlot((row as { oneHReportSlot?: string | null }).oneHReportSlot)
 }
+const compareOneHReportSlots = (a: unknown, b: unknown) => {
+  const aSlot = getReportRowOneHReportSlot(a)
+  const bSlot = getReportRowOneHReportSlot(b)
+  const noSlotRank = ONE_H_REPORT_SLOT_OPTIONS.length
+  const aRank = aSlot ? ONE_H_REPORT_SLOT_OPTIONS.indexOf(aSlot) : noSlotRank
+  const bRank = bSlot ? ONE_H_REPORT_SLOT_OPTIONS.indexOf(bSlot) : noSlotRank
+  return aRank - bRank
+}
 const buildDailyReportOneHSlotMap = (report: DailyReportResponse | null) => {
   const map: Record<string, OneHReportSlot | null> = {}
   const items = [...(report?.tasks_today || []), ...(report?.tasks_overdue || [])]
@@ -3337,7 +3345,9 @@ export default function DepartmentKanban() {
         if (eightAmDiff !== 0) return eightAmDiff
         const statusDiff =
           statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
-        return statusDiff !== 0 ? statusDiff : a.index - b.index
+        if (statusDiff !== 0) return statusDiff
+        const oneHSlotDiff = compareOneHReportSlots(a.row, b.row)
+        return oneHSlotDiff !== 0 ? oneHSlotDiff : a.index - b.index
       })
       .map((entry) => entry.row)
   }, [
@@ -3748,7 +3758,9 @@ export default function DepartmentKanban() {
           if (eightAmDiff !== 0) return eightAmDiff
           const statusDiff =
             statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
-          return statusDiff !== 0 ? statusDiff : a.index - b.index
+          if (statusDiff !== 0) return statusDiff
+          const oneHSlotDiff = compareOneHReportSlots(a.row, b.row)
+          return oneHSlotDiff !== 0 ? oneHSlotDiff : a.index - b.index
         })
         .map((entry) => entry.row)
     },

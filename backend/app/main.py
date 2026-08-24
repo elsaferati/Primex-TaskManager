@@ -61,7 +61,8 @@ async def _startup() -> None:
     meetings_report_scheduler_task = asyncio.create_task(run_meetings_report_scheduler_forever())
     after_break_report_scheduler_task = asyncio.create_task(run_after_break_report_scheduler_forever())
     morning_report_scheduler_task = asyncio.create_task(run_morning_report_scheduler_forever())
-    tomorrow_print_report_scheduler_task = asyncio.create_task(run_tomorrow_print_report_scheduler_forever())
+    if settings.TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED:
+        tomorrow_print_report_scheduler_task = asyncio.create_task(run_tomorrow_print_report_scheduler_forever())
     if settings.STD_FEEDBACK_SYNC_ENABLED:
         std_feedback_sync_task = asyncio.create_task(run_std_feedback_ticket_sync_forever())
 

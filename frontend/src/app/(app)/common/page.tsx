@@ -4458,11 +4458,11 @@ export default function CommonViewPage() {
               }).join("")
               const rowHeaders =
                 chunkIndex === 0
-                  ? `<th rowspan="${chunks}">${rowIndex + 1}</th><th rowspan="${chunks}">${escapePrintHtml(row.label)}${
+                  ? `<th class="print-slot-number" rowspan="${chunks}">${rowIndex + 1}</th><th class="print-slot-type" rowspan="${chunks}">${escapePrintHtml(row.label)}${
                       subtext ? `<span class="print-slot-subtext">${escapePrintHtml(subtext)}</span>` : ""
                     }</th>`
                   : ""
-              return `<tr>${rowHeaders}${itemCells}</tr>`
+              return `<tr class="${chunkIndex === 0 ? "print-slot-start" : "print-slot-continuation"}">${rowHeaders}${itemCells}</tr>`
             }).join("")
           })
           .join("")
@@ -4485,6 +4485,9 @@ export default function CommonViewPage() {
   table + table { margin-top: 12px; }
   th, td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
   thead th { text-align: center; font-weight: 700; vertical-align: middle; }
+  tbody tr.print-slot-start > th, tbody tr.print-slot-start > td { border-top: 2px solid #111827; }
+  tbody tr.print-slot-continuation > td { border-top: 1px solid #cbd5e1; }
+  .print-slot-number, .print-slot-type { font-weight: 700; }
   thead th:first-child, tbody th:first-child { width: 20px; min-width: 20px; padding-left: 3px; padding-right: 3px; white-space: nowrap; }
   col.print-number-column { width: 20px; }
   col.print-label-column { width: 78px; }
@@ -7264,6 +7267,17 @@ export default function CommonViewPage() {
             color: #000 !important;
             font-size: 9px;
             font-weight: 700;
+          }
+          .single-day-print-table tbody tr.print-slot-start > th,
+          .single-day-print-table tbody tr.print-slot-start > td {
+            border-top: 2px solid #111827 !important;
+          }
+          .single-day-print-table tbody tr.print-slot-continuation > td {
+            border-top: 1px solid #cbd5e1 !important;
+          }
+          .single-day-print-table .print-slot-number,
+          .single-day-print-table .print-slot-type {
+            font-weight: 700 !important;
           }
           html,
           body,

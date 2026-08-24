@@ -34,6 +34,8 @@ const sharedEnv = {
     "https://std.primexeu.com/api/integrations/primeflow/v1",
   STD_FEEDBACK_API_TOKEN: process.env.STD_FEEDBACK_API_TOKEN ?? "",
   STD_FEEDBACK_SYNC_ENABLED: process.env.STD_FEEDBACK_SYNC_ENABLED ?? "true",
+  TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED:
+    process.env.TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED ?? "true",
   STD_FEEDBACK_SYNC_INTERVAL_MINUTES:
     process.env.STD_FEEDBACK_SYNC_INTERVAL_MINUTES ?? "5",
   STD_FEEDBACK_EXTERNAL_DOMAINS:
@@ -77,6 +79,8 @@ module.exports = {
         SYSTEM_TASK_SCHEDULER_ENABLED: "false",
         // The primary API owns the STD sync loop; the public fallback stays read-only.
         STD_FEEDBACK_SYNC_ENABLED: "false",
+        // The primary API exclusively owns the daily 1H SHTYPI delivery loop.
+        TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: "false",
       },
     },
     {
