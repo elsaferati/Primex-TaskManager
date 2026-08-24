@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     REDIS_URL: str = "redis://localhost:6379/0"
     APP_TIMEZONE: str = "Europe/Budapest"
     SYSTEM_TASK_SCHEDULER_ENABLED: bool = True
+    TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: bool = True
     SYSTEM_TASK_SCHEDULER_HOUR: int = 6
     SYSTEM_TASK_SCHEDULER_MINUTE: int = 0
     SYSTEM_TASK_SCHEDULER_DAY_OF_WEEK: str = "fri"

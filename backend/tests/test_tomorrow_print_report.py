@@ -20,6 +20,16 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert '<style>' not in report_html
 
 
+def test_task_grid_uses_light_dividers_inside_a_slot_and_bold_slot_labels() -> None:
+    report_html = _html_table(
+        [("BLL", [{"title": f"Task {index}"} for index in range(7)], False)]
+    )
+
+    assert "border-top:2px solid #111827" in report_html
+    assert "border-top:1px solid #cbd5e1" in report_html
+    assert 'style="border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word;font-weight:700;border-top:2px solid #111827">BLL</th>' in report_html
+
+
 def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     checklists_html = _one_h_checklists_html()
 

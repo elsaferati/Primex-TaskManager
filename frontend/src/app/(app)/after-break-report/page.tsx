@@ -46,6 +46,9 @@ type Draft = {
 function sectionGroupLabel(title: string, index: number) {
   if (index < 4) return "Manual questions"
   const knownAuto = [
+    "DET TE PAKRYERA, 08:00/DEADLINE",
+    "DET E KRYERA NE AM",
+    "TAK INT/EXT TE PAMBAJTURA",
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
     "NOTES TE REJA ( NOT DISSCUSED)",

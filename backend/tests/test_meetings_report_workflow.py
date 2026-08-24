@@ -19,6 +19,7 @@ from app.services import meetings_report_scheduler
 from app.services.meeting_point_manual_sync import is_known_report_title, is_manual_section_title
 from app.services.meetings_report import (
     SECTION_TITLES,
+    _completed_tasks_for_report_day,
     _common_meeting_lines,
     _common_task_metadata_by_title,
     _is_new_task_for_m3_day,
@@ -345,6 +346,74 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
 
 
 class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
+    def test_m3_completed_day_tasks_include_am_and_pm_but_exclude_system_and_reopened(self) -> None:
+        timezone = ZoneInfo("Europe/Tirane")
+
+        def task(title: str, hour: int, **overrides) -> SimpleNamespace:
+            values = {
+                "title": title,
+                "completed_at": datetime(2026, 8, 24, hour, 0, tzinfo=timezone),
+                "status": "DONE",
+                "system_template_origin_id": None,
+                "system_task_slot_id": None,
+            }
+            values.update(overrides)
+            return SimpleNamespace(**values)
+
+        tasks = [
+            task("AM done", 9),
+            task("PM done", 16),
+            task("System done", 10, system_template_origin_id=uuid.uuid4()),
+            task("Legacy system done", 11, system_task_slot_id=uuid.uuid4()),
+            task("Reopened", 8, status="TODO"),
+            task("Yesterday", 18, completed_at=datetime(2026, 8, 23, 18, 0, tzinfo=timezone)),
+        ]
+
+        completed = _completed_tasks_for_report_day(tasks, date(2026, 8, 24))
+
+        self.assertEqual([item.title for item in completed], ["AM done", "PM done"])
+
+    def test_m3_completed_day_table_has_requested_columns_and_green_rows(self) -> None:
+        task = SimpleNamespace(
+            id=uuid.uuid4(),
+            title="Completed PM task",
+            status="DONE",
+            completed_at=datetime(2026, 8, 24, 16, 0, tzinfo=ZoneInfo("Europe/Tirane")),
+            system_template_origin_id=None,
+            system_task_slot_id=None,
+            project_id=None,
+            assigned_to=None,
+            fast_task_order=None,
+            is_deadline_important=False,
+            is_bllok=False,
+            is_r1=False,
+            is_1h_report=False,
+            is_personal=False,
+            department_id="development",
+            finish_period="PM",
+            due_date=None,
+            start_date=None,
+            created_at=None,
+        )
+
+        rows = _m3_status_table(
+            "DET E KRYERA SOT (AM/PM)",
+            [task],
+            {},
+            with_status=True,
+            include_type=True,
+            include_department=True,
+            include_am_pm=True,
+            department_codes={"development": "DEV"},
+        )
+        header = next(row for row in rows if "KUSH" in row and "LLOJI" in row)
+        html = _render_ascii_table_html(rows)
+
+        for column in ("NR", "KUSH", "DEP", "AM/PM", "LLOJI", "TITULLI"):
+            self.assertIn(column, header)
+        self.assertIn("Completed PM task", html)
+        self.assertIn('class="done"', html)
+
     def test_meeting_status_table_sorts_by_clock_time_not_source_date(self) -> None:
         meetings = [
             SimpleNamespace(

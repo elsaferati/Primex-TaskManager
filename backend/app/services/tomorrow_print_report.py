@@ -48,6 +48,9 @@ ONE_H_STAFF_CHECKLIST = (
 TABLE_STYLE = "width:100%;border-collapse:collapse;table-layout:fixed;margin:12px 0;font-family:Arial,sans-serif;font-size:12px;line-height:1.25;color:#000"
 CELL_STYLE = "border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word"
 HEADER_STYLE = f"{CELL_STYLE};text-align:center;font-weight:700"
+SLOT_DIVIDER_STYLE = "border-top:2px solid #111827"
+INTRA_SLOT_DIVIDER_STYLE = "border-top:1px solid #cbd5e1"
+SLOT_LABEL_STYLE = f"{CELL_STYLE};font-weight:700"
 PERSONAL_GA_COLOR = "#D8B4FE"
 PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:{PERSONAL_GA_COLOR}"
 PERSONAL_ROW_LABEL_STYLE = (
@@ -273,6 +276,7 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
         personal = bool(rest and rest[0])
         chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
         for chunk_index, chunk in enumerate(chunks):
+            row_divider_style = INTRA_SLOT_DIVIDER_STYLE if chunk_index else SLOT_DIVIDER_STYLE
             cells: list[str] = []
             for item_index, item in enumerate(chunk):
                 value = (
@@ -288,14 +292,15 @@ def _html_table(rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: 
                     color = ""
                 else:
                     cell_style, color = _task_cell_style(item, personal=personal)
+                cell_style = f"{cell_style};{row_divider_style}"
                 background = f' bgcolor="{color}"' if color else ""
                 cells.append(
                     f'<td{background} style="{cell_style}">{item_index + (chunk_index * 6) + 1}. {html.escape(value)}</td>'
                 )
-            cells.extend(f'<td style="{CELL_STYLE}"></td>' for _ in range(6 - len(cells)))
+            cells.extend(f'<td style="{CELL_STYLE};{row_divider_style}"></td>' for _ in range(6 - len(cells)))
             row_header = (
-                f'<th rowspan="{len(chunks)}" style="{CELL_STYLE}">{number}</th>'
-                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else CELL_STYLE}">{html.escape(label).replace(chr(10), "<br>")}</th>'
+                f'<th rowspan="{len(chunks)}" style="{SLOT_LABEL_STYLE};{row_divider_style}">{number}</th>'
+                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{row_divider_style}">{html.escape(label).replace(chr(10), "<br>")}</th>'
                 if chunk_index == 0 else ""
             )
             body.append(f"<tr>{row_header}{''.join(cells)}</tr>")
@@ -326,6 +331,14 @@ def _excel_table_attachment(
     border = Border(
         left=Side(style="thin", color="000000"), right=Side(style="thin", color="000000"),
         top=Side(style="thin", color="000000"), bottom=Side(style="thin", color="000000"),
+    )
+    slot_divider_border = Border(
+        left=Side(style="thin", color="000000"), right=Side(style="thin", color="000000"),
+        top=Side(style="medium", color="111827"), bottom=Side(style="thin", color="000000"),
+    )
+    intra_slot_divider_border = Border(
+        left=Side(style="thin", color="000000"), right=Side(style="thin", color="000000"),
+        top=Side(style="thin", color="CBD5E1"), bottom=Side(style="thin", color="000000"),
     )
     header_fill = PatternFill("solid", fgColor="EAF0FF")
     fills = {
@@ -399,11 +412,12 @@ def _excel_table_attachment(
             chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
             first_row = row_number
             for chunk_index, chunk in enumerate(chunks):
+                row_border = intra_slot_divider_border if chunk_index else slot_divider_border
                 if chunk_index == 0:
                     sheet.cell(row_number, 1, number)
                     label_cell = sheet.cell(row_number, 2, label)
+                    label_cell.font = Font(bold=True, size=10)
                     if personal:
-                        label_cell.font = Font(size=10)
                         label_cell.alignment = Alignment(vertical="top", wrap_text=True)
                 for item_index, item in enumerate(chunk, 3):
                     value = (
@@ -436,7 +450,7 @@ def _excel_table_attachment(
                         and _is_eight_am_task(chunk[column - 3])
                     )
                     if not is_highlighted_meeting_cell and not is_eight_am_task_cell:
-                        cell.border = border
+                        cell.border = row_border
                     cell.alignment = Alignment(vertical="top", wrap_text=True)
                 row_number += 1
             if len(chunks) > 1:

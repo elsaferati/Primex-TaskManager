@@ -1,11 +1,24 @@
 import unittest
 import uuid
 
-from app.api.routers.tasks import _can_complete_waiting_confirmation
+from app.api.routers.tasks import (
+    _can_complete_waiting_confirmation,
+    _confirmation_assignee_was_provided,
+)
 from app.models.enums import UserRole
+from app.schemas.task import TaskUpdate
 
 
 class TestTaskWaitingConfirmationPermissions(unittest.TestCase):
+    def test_non_null_confirmer_does_not_depend_on_field_set_metadata(self) -> None:
+        confirmer_id = uuid.uuid4()
+        payload = TaskUpdate(confirmation_assignee_id=confirmer_id)
+        # Reproduce a runtime where Pydantic's explicit-field metadata is
+        # incomplete even though the parsed request contains the UUID.
+        payload.__pydantic_fields_set__.clear()
+
+        self.assertTrue(_confirmation_assignee_was_provided(payload))
+
     def test_confirmer_can_complete(self) -> None:
         actor_id = uuid.uuid4()
         allowed = _can_complete_waiting_confirmation(

@@ -260,16 +260,20 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
   const titleStatus = titleIndex >= 0 ? splitStatusMarker(cells[titleIndex] || "").status : ""
   const resolvedStatus = (titleStatus || statusValue).toUpperCase().replace(/_/g, " ")
+  const typeIndex = headers.findIndex((header) => normalizeHeader(header) === "TYPE")
+  const typeValue = typeIndex >= 0 ? cells[typeIndex]?.trim().toUpperCase() : ""
   if (resolvedStatus.includes("WAITING")) return "bg-orange-100 text-orange-900"
   if (resolvedStatus.includes("IN PROGRESS")) return "bg-yellow-100"
   if (resolvedStatus === "TODO") return "bg-pink-200"
   if (resolvedStatus === "DONE") return "bg-green-100"
+  if (typeValue.includes("08:00")) return "bg-white text-slate-950"
+  if (typeValue.includes("DEADLINE")) return "bg-red-600 text-white"
   if (normalizedLabel.includes("DEADLINE")) return "bg-red-600 text-white"
   if (normalizedLabel.includes("LATE")) return "bg-red-100"
   if (normalizedLabel.includes("TODO") || normalizedLabel.includes("DETYRAT E REJA") || normalizedLabel.includes("DET TE REJA")) return "bg-pink-200"
   if (normalizedLabel.includes("IN PROGRESS")) return "bg-yellow-100"
   if (normalizedLabel.includes("WAITING")) return "bg-orange-100 text-orange-900"
-  if (normalizedLabel.includes("DONE")) return "bg-green-100"
+  if (normalizedLabel.includes("DONE") || normalizedLabel.includes("DET E KRYERA NE AM")) return "bg-green-100"
   // NOTES stay blue; DISK yes/no colors only the DISK cell (see diskCellTone).
   if (normalizedLabel.includes("NOTES") || headers.some((header) => normalizeHeader(header) === "NOTE")) {
     return "bg-blue-100"
@@ -292,6 +296,20 @@ function meetingStatusCellTone(headers: string[], cells: string[], cellIndex: nu
   if (value === "✓") return "bg-green-100 text-green-800 font-semibold text-center"
   if (value === "✕") return "bg-red-100 text-red-800 font-semibold text-center"
   return "text-center"
+}
+
+function isEightAmTaskRow(headers: string[], cells: string[]) {
+  const typeIndex = headers.findIndex((header) => normalizeHeader(header) === "TYPE")
+  return typeIndex >= 0 && cells[typeIndex]?.trim().toUpperCase().includes("08:00")
+}
+
+function priorityTaskTypeRank(headers: string[], cells: string[]) {
+  const typeIndex = headers.findIndex((header) => normalizeHeader(header) === "TYPE")
+  const typeValue = typeIndex >= 0 ? cells[typeIndex]?.trim().toUpperCase() : ""
+  if (typeValue === "08:00") return 0
+  if (typeValue.includes("08:00")) return 1
+  if (typeValue.includes("DEADLINE")) return 2
+  return 3
 }
 
 function createdWeekCellTone(headers: string[], cells: string[], cellIndex: number) {
@@ -557,9 +575,16 @@ export function ReportSectionPreview({
     const createdColumnIndex = headers.findIndex((header) => normalizeHeader(header) === "ADDED")
     const canFilterCreatedWeek = filterCreatedWeek && createdColumnIndex >= 0
     const dataRows = rows.filter((row) => !row.isHeader)
+    const hasPriorityTaskTypes = dataRows.some((row) => priorityTaskTypeRank(row.headers, row.cells) < 3)
+    const orderedDataRows = hasPriorityTaskTypes
+      ? [...dataRows].sort(
+          (left, right) =>
+            priorityTaskTypeRank(left.headers, left.cells) - priorityTaskTypeRank(right.headers, right.cells),
+        )
+      : dataRows
     const visibleDataRows = !canFilterCreatedWeek || createdWeekFilter === "all"
-      ? dataRows
-      : dataRows.filter((row) => {
+      ? orderedDataRows
+      : orderedDataRows.filter((row) => {
           const value = row.cells[createdColumnIndex]?.trim().toUpperCase()
           return createdWeekFilter === "this" ? value === "THIS W" : value === "LAST W"
         })
@@ -624,6 +649,7 @@ export function ReportSectionPreview({
             {visibleDataRows.map((row) => {
                 const visible = withoutStatusColumn(row.headers, row.cells)
                 const tone = rowTone(row.label, row.cells, row.headers)
+                const eightAmTask = isEightAmTaskRow(row.headers, row.cells)
                 const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)
                 return (
                   <tr key={row.key} className={tone}>
@@ -632,6 +658,9 @@ export function ReportSectionPreview({
                       const narrow = isNarrowTableHeader(header)
                       const meetingFrame = highlightedMeeting
                         ? `border-y-[3px] border-y-blue-600 ${cellIndex === 0 ? "border-l-[3px] border-l-blue-600" : ""} ${cellIndex === visible.cells.length - 1 ? "border-r-[3px] border-r-blue-600" : ""}`
+                        : ""
+                      const eightAmFrame = eightAmTask
+                        ? `border-y-[3px] border-y-red-600 ${cellIndex === 0 ? "border-l-[3px] border-l-red-600" : ""} ${cellIndex === visible.cells.length - 1 ? "border-r-[3px] border-r-red-600" : ""}`
                         : ""
                       return (
                         <td
@@ -644,7 +673,7 @@ export function ReportSectionPreview({
                             createdWeekCellTone(visible.headers, visible.cells, cellIndex)
                           } ${
                             narrow ? "w-[1%] whitespace-nowrap" : "whitespace-pre-wrap break-words"
-                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${meetingFrame} ${
+                          } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${meetingFrame} ${eightAmFrame} ${
                             highlightedMeeting && header === "TITLE" ? "text-blue-700 font-semibold" : ""
                           }`}
                         >

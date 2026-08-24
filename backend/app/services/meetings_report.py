@@ -41,12 +41,14 @@ SECTION_TITLES = [
     "TAK STATUSI?",
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
+    "DET E KRYERA SOT (AM/PM)",
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
     SECTION_TITLES[1],  # STD tickets first among auto-filled
     SECTION_TITLES[2],
     SECTION_TITLES[3],
+    SECTION_TITLES[10],
     SECTION_TITLES[7],
     SECTION_TITLES[4],
     SECTION_TITLES[6],
@@ -236,6 +238,18 @@ def _is_system_task(task: Task) -> bool:
         getattr(task, "system_template_origin_id", None)
         or getattr(task, "system_task_slot_id", None)
     )
+
+
+def _completed_tasks_for_report_day(tasks: list[Task], report_day: date) -> list[Task]:
+    """Non-system tasks that are still completed and were closed on the M3 day."""
+    return [
+        task
+        for task in tasks
+        if not _is_system_task(task)
+        and getattr(task, "completed_at", None) is not None
+        and _local_date(task.completed_at) == report_day
+        and _normalize_report_status(task.status) == "DONE"
+    ]
 
 
 def _meeting_occurs_on_date(meeting: Meeting, day: date) -> bool:
@@ -870,6 +884,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     daily_rlz_by_task = await _daily_rlz_values_by_task(
         db, today_todo, report_day, names, assignee_ids_by_task
     )
+    done_today = _completed_tasks_for_report_day(tasks, report_day)
 
     tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
     new_task_review_tasks = [task for task in tomorrow_tasks if not _is_system_task(task)]
@@ -1026,6 +1041,33 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_am_pm=True,
                 department_codes=department_codes,
                 daily_rlz_by_task=daily_rlz_by_task,
+                **table_kwargs,
+            )
+        ),
+        SECTION_TITLES[10]: _normalize_section(
+            _m3_status_table(
+                "DET E KRYERA SOT (AM/PM)",
+                done_today,
+                names,
+                with_status=True,
+                include_type=True,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
+                daily_rlz_by_task=daily_rlz_by_task,
+                **table_kwargs,
+            )
+        ),
+        SECTION_TITLES[10]: _normalize_section(
+            _m3_status_table(
+                "DET E KRYERA SOT (AM/PM)",
+                done_today,
+                names,
+                with_status=True,
+                include_type=True,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
                 **table_kwargs,
             )
         ),
@@ -2003,7 +2045,7 @@ h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 .report-table{{width:100%;border-collapse:collapse;table-layout:auto;font:12px/1.3 Arial,sans-serif}}
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700;border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table td{{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
-.report-table .n{{white-space:nowrap}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
+.report-table .n{{white-space:nowrap}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
 @media only screen and (max-width:600px){{
 body{{padding:8px!important}}
 h1{{font-size:18px!important;line-height:1.2!important}}
@@ -2099,7 +2141,7 @@ def _table_tone_from_label(label: str) -> str:
         return "in-progress"
     if normalized in {"WAITING CONFIRMATION", "WAITING_CONFIRMATION"}:
         return "waiting"
-    if normalized == "DONE":
+    if normalized in {"DONE", "DET E KRYERA NE AM"}:
         return "done"
     if normalized == "LATE":
         return "late"
@@ -2112,6 +2154,41 @@ def _table_tone_from_label(label: str) -> str:
 
 def _table_tone_from_status(status: str) -> str:
     return _table_tone_from_label(status.replace("_", " "))
+
+
+def _table_tone_from_type(task_type: str) -> str:
+    normalized = task_type.strip().upper()
+    if "08:00" in normalized:
+        return "eight-am"
+    if "DEADLINE" in normalized:
+        return "deadline"
+    return ""
+
+
+def _priority_task_type_rank(task_type: str) -> int:
+    normalized = task_type.strip().upper()
+    if normalized == "08:00":
+        return 0
+    if "08:00" in normalized:
+        return 1
+    if "DEADLINE" in normalized:
+        return 2
+    return 3
+
+
+def _sort_priority_task_rows(header: list[str], rows: list[list[str]]) -> list[list[str]]:
+    type_index = next(
+        (index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TYPE"),
+        None,
+    )
+    if type_index is None or not any(
+        len(row) > type_index and _priority_task_type_rank(row[type_index]) < 3 for row in rows
+    ):
+        return rows
+    return sorted(
+        rows,
+        key=lambda row: _priority_task_type_rank(row[type_index]) if len(row) > type_index else 3,
+    )
 
 
 def _table_tone_styles(tone: str) -> tuple[str, str]:
@@ -2139,7 +2216,9 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     header, body_rows = table_rows[0], table_rows[1:]
     header, body_rows = _normalize_meeting_status_table(header, body_rows)
     body_rows = _merge_ascii_continuation_rows(header, body_rows)
+    body_rows = _sort_priority_task_rows(header, body_rows)
     status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "STATUS"), None)
+    type_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TYPE"), None)
     title_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TITLE"), None)
     row_tones: list[str] = []
     highlighted_meeting_rows: list[bool] = []
@@ -2149,6 +2228,8 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         row_tone = tone
         if status_index is not None and len(row) > status_index:
             row_tone = _table_tone_from_status(row[status_index]) or row_tone
+        if type_index is not None and len(row) > type_index:
+            row_tone = _table_tone_from_type(row[type_index]) or row_tone
         if title_index is not None and len(row) > title_index:
             cleaned_title, marker_status = _split_status_marker(row[title_index])
             cleaned_title, is_highlighted_meeting = _split_meeting_highlight_marker(cleaned_title)
@@ -2550,7 +2631,8 @@ def _section_report_table_rows(lines: list[str]) -> tuple[list[str], list[list[s
     if not rows:
         return [], []
     header, body_rows = _normalize_meeting_status_table(rows[0], rows[1:])
-    return header, _merge_ascii_continuation_rows(header, body_rows)
+    body_rows = _merge_ascii_continuation_rows(header, body_rows)
+    return header, _sort_priority_task_rows(header, body_rows)
 
 
 def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[str], list[list[str]], list[str], list[bool]]:
@@ -2559,6 +2641,7 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
     if not header:
         return [], [], [], []
     status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "STATUS"), None)
+    type_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TYPE"), None)
     title_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TITLE"), None)
     cleaned_rows: list[list[str]] = []
     row_tones: list[str] = []
@@ -2568,6 +2651,8 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
         row_tone = tone
         if status_index is not None and row[status_index]:
             row_tone = _table_tone_from_status(row[status_index]) or row_tone
+        if type_index is not None and row[type_index]:
+            row_tone = _table_tone_from_type(row[type_index]) or row_tone
         highlighted = False
         if title_index is not None:
             title, marker_status = _split_status_marker(row[title_index])
@@ -2956,7 +3041,8 @@ def render_section_report_docx(
                     cell_color, cell_bold = "#2563EB", True
                 cell = row.cells[column]
                 cell.text = value
-                cell_style(cell, cell_fill, color=cell_color, bold=cell_bold, size=8, outline="#2563EB" if highlighted else "#CBD5E1")
+                outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
+                cell_style(cell, cell_fill, color=cell_color, bold=cell_bold, size=8, outline=outline)
                 set_width(cell, column_widths[column])
         document.add_paragraph().paragraph_format.space_after = Pt(1)
 
@@ -3134,7 +3220,9 @@ def render_section_report_png(
                     if highlighted and header_name == "TITLE":
                         cell_color, cell_font = "#2563EB", bold
                     right = x + column_widths[index]
-                    draw.rectangle((x, y, right, y + row_height), fill=cell_fill, outline="#2563EB" if highlighted else "#CBD5E1", width=3 if highlighted else 1)
+                    outlined = highlighted or tone == "eight-am"
+                    outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
+                    draw.rectangle((x, y, right, y + row_height), fill=cell_fill, outline=outline, width=3 if outlined else 1)
                     for line_index, text in enumerate(cells[index]):
                         draw.text((x + 6, y + 5 + line_index * 22), text, fill=cell_color, font=cell_font)
                     x = right
