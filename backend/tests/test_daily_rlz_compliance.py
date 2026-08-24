@@ -1,10 +1,13 @@
+import asyncio
 from datetime import date, datetime
+import uuid
 from zoneinfo import ZoneInfo
 
 import pytest
 
 from app.services.daily_rlz_compliance import (
-    REASON_LABELS, is_editable_day, next_working_day, task_issue_codes,
+    REASON_LABELS, is_closable_day, is_editable_day, next_working_day, relevant_tasks,
+    task_issue_codes,
 )
 from app.services.daily_rlz_control_delivery import render_html, render_plain, subject_for
 
@@ -50,6 +53,42 @@ def test_edit_window_uses_tirana_and_closes_at_1700():
     tz = ZoneInfo("Europe/Tirane")
     assert is_editable_day(DAY, datetime(2026, 8, 12, 16, 59, tzinfo=tz))
     assert not is_editable_day(DAY, datetime(2026, 8, 12, 17, 0, tzinfo=tz))
+
+
+def test_close_window_opens_when_slots_roll_over_at_1530():
+    tz = ZoneInfo("Europe/Tirane")
+    assert not is_closable_day(DAY, datetime(2026, 8, 12, 15, 29, 59, tzinfo=tz))
+    assert is_closable_day(DAY, datetime(2026, 8, 12, 15, 30, tzinfo=tz))
+    assert is_closable_day(DAY, datetime(2026, 8, 12, 16, 59, 59, tzinfo=tz))
+    assert not is_closable_day(DAY, datetime(2026, 8, 12, 17, 0, tzinfo=tz))
+
+
+class _EmptyScalars:
+    def all(self):
+        return []
+
+
+class _CaptureResult:
+    def scalars(self):
+        return _EmptyScalars()
+
+
+class _CaptureDb:
+    statement = None
+
+    async def execute(self, statement):
+        self.statement = statement
+        return _CaptureResult()
+
+
+def test_question_generated_tasks_are_excluded_from_rlz_membership():
+    db = _CaptureDb()
+
+    asyncio.run(relevant_tasks(db, user_id=uuid.uuid4(), day=DAY))
+
+    sql = str(db.statement)
+    assert "tasks.question_origin_id IS NULL" in sql
+    assert "tasks.question_batch_date IS NULL" in sql
 
 
 def test_all_good_report_is_still_rendered():

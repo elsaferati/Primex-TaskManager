@@ -102,7 +102,7 @@ const orderCommonRowsForPrint = <T extends { id: CommonType }>(rows: readonly T[
     .sort((a, b) => getCommonPrintRowRank(a.row.id) - getCommonPrintRowRank(b.row.id) || a.index - b.index)
     .map(({ row }) => row)
 const getCommonPrintRowSubtext = (id: CommonType) => {
-  if (id === "blocked") return "14:30 - 15:30"
+  if (id === "blocked") return "14:30 - 15:30\nRAP 15:50"
   if (id === "personal") return "GA: (08:15 / 13:15)\nDV/LH: (10:15 / 14:30)"
   return ""
 }
@@ -1391,6 +1391,9 @@ export default function CommonViewPage() {
   const [externalMeetingPlatform, setExternalMeetingPlatform] = React.useState("")
   const [externalMeetingStartsAt, setExternalMeetingStartsAt] = React.useState("")
   const [externalMeetingStartTime, setExternalMeetingStartTime] = React.useState("")
+  const [externalMeetingInternalStartsAt, setExternalMeetingInternalStartsAt] = React.useState("")
+  const [externalMeetingInternalStartTime, setExternalMeetingInternalStartTime] = React.useState("")
+  const externalMeetingInternalStartsAtEditedRef = React.useRef(false)
   const [externalMeetingRecurrenceType, setExternalMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly" | "yearly">("none")
   const [externalMeetingRecurrenceDaysOfWeek, setExternalMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
   const [externalMeetingRecurrenceDaysOfMonth, setExternalMeetingRecurrenceDaysOfMonth] = React.useState<number[]>([])
@@ -2257,7 +2260,11 @@ export default function CommonViewPage() {
     }
   }, [externalMeetingsOpen])
 
-  const canCreateExternalMeeting = Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId)
+  const hasExternalMeetingTimes = externalMeetingRecurrenceType === "none"
+    ? Boolean(externalMeetingStartsAt) && Boolean(externalMeetingInternalStartsAt) && Boolean(externalMeetingInternalStartTime)
+    : Boolean(externalMeetingStartTime) && Boolean(externalMeetingInternalStartTime)
+  const canCreateExternalMeeting =
+    Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId) && hasExternalMeetingTimes
   const canSelectExternalMeetingAgentTestTask =
     externalMeetingRecurrenceType === "none" && Boolean(externalMeetingStartsAt)
 
@@ -5180,11 +5187,19 @@ export default function CommonViewPage() {
     setCreatingExternalMeeting(true)
     try {
       let startsAt: string | null = null
+      let internalStartsAt: string | null = null
       if (externalMeetingRecurrenceType === "none") {
-        startsAt = externalMeetingStartsAt ? new Date(externalMeetingStartsAt).toISOString() : null
+        if (!externalMeetingStartsAt || !externalMeetingInternalStartsAt || !externalMeetingInternalStartTime) {
+          toast.error("Add the date and time for both TAK EXT and TAK INT.")
+          return
+        }
+        startsAt = new Date(externalMeetingStartsAt).toISOString()
+        internalStartsAt = new Date(
+          `${externalMeetingInternalStartsAt}T${externalMeetingInternalStartTime}`
+        ).toISOString()
       } else {
-        if (!externalMeetingStartTime) {
-          toast.error("Time is required for recurring meetings.")
+        if (!externalMeetingStartTime || !externalMeetingInternalStartTime) {
+          toast.error("Time is required for both TAK EXT and TAK INT.")
           return
         }
         if (externalMeetingRecurrenceType === "weekly" && externalMeetingRecurrenceDaysOfWeek.length === 0) {
@@ -5219,11 +5234,30 @@ export default function CommonViewPage() {
           return
         }
         startsAt = next.toISOString()
+        const internalNext = computeNextOccurrenceDate({
+          recurrenceType: externalMeetingRecurrenceType,
+          daysOfWeek: externalMeetingRecurrenceDaysOfWeek,
+          daysOfMonth:
+            externalMeetingRecurrenceType === "yearly"
+              ? [Number(externalMeetingRecurrenceDay)]
+              : externalMeetingRecurrenceDaysOfMonth,
+          timeValue: externalMeetingInternalStartTime,
+          monthOfYear:
+            externalMeetingRecurrenceType === "yearly"
+              ? Math.max(0, Math.min(11, Number(externalMeetingRecurrenceMonth) - 1))
+              : undefined,
+        })
+        if (!internalNext) {
+          toast.error("Failed to compute the TAK INT occurrence.")
+          return
+        }
+        internalStartsAt = internalNext.toISOString()
       }
       const payload = {
         title: externalMeetingTitle.trim(),
         platform: externalMeetingPlatform.trim() || null,
         starts_at: startsAt,
+        internal_starts_at: internalStartsAt,
         meeting_type: "external",
         recurrence_type: externalMeetingRecurrenceType === "none" ? null : externalMeetingRecurrenceType,
         recurrence_days_of_week:
@@ -5249,6 +5283,11 @@ export default function CommonViewPage() {
         return
       }
       const created = (await res.json()) as Meeting
+      const pairedInternalMeeting = created.paired_internal_meeting || null
+      if (!pairedInternalMeeting) {
+        toast.error("The TAK EXT meeting was created, but TAK INT was not returned.")
+        return
+      }
       let meetingForList = created
       if (shouldCreateAgentTestTask) {
         const taskRes = await apiFetch(`/meetings/${created.id}/agent-test-task`, {
@@ -5266,25 +5305,34 @@ export default function CommonViewPage() {
         }
       }
       setExternalMeetings((prev) => [meetingForList, ...prev])
+      setInternalMeetings((prev) => [pairedInternalMeeting, ...prev])
       COMMON_VIEW_CACHE.clear()
       const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
-      const mapped = mapMeetingToCommonItem(meetingForList, "external", ownerName)
-      if (mapped) {
+      const mappedExternal = mapMeetingToCommonItem(meetingForList, "external", ownerName)
+      const mappedInternal = mapMeetingToCommonItem(pairedInternalMeeting, "internal", ownerName)
+      if (mappedExternal || mappedInternal) {
         setCommonData((prev) => ({
           ...prev,
-          external: [...prev.external, mapped],
+          external: mappedExternal ? [...prev.external, mappedExternal] : prev.external,
+          internal: mappedInternal ? [...prev.internal, mappedInternal] : prev.internal,
         }))
       }
       setExternalMeetingTitle("")
       setExternalMeetingPlatform("")
       setExternalMeetingStartsAt("")
       setExternalMeetingStartTime("")
+      setExternalMeetingInternalStartsAt("")
+      setExternalMeetingInternalStartTime("")
+      externalMeetingInternalStartsAtEditedRef.current = false
       setExternalMeetingRecurrenceType("none")
       setExternalMeetingRecurrenceDaysOfWeek([])
       setExternalMeetingRecurrenceDaysOfMonth([])
       setExternalMeetingRecurrenceMonth("1")
       setExternalMeetingRecurrenceDay("1")
       setExternalMeetingCreateAgentTestTask(false)
+      if (!shouldCreateAgentTestTask) {
+        toast.success("TAK EXT and TAK INT created.")
+      }
       // Reset checklist after successful creation
       if (externalMeetingChecklist?.items) {
         const resetMap = new Map<string, boolean>()
@@ -5302,6 +5350,8 @@ export default function CommonViewPage() {
     externalMeetingPlatform,
     externalMeetingStartsAt,
     externalMeetingStartTime,
+    externalMeetingInternalStartsAt,
+    externalMeetingInternalStartTime,
     externalMeetingRecurrenceType,
     externalMeetingRecurrenceDaysOfWeek,
     externalMeetingRecurrenceDaysOfMonth,
@@ -11051,7 +11101,7 @@ export default function CommonViewPage() {
           </div>
           <div className="external-meetings-grid">
             <div className="external-meeting-form">
-              <div className="external-meeting-form-title">Add meeting</div>
+              <div className="external-meeting-form-title">Add TAK EXT + TAK INT</div>
               <div className="external-meeting-fields">
                 <input
                   className="input"
@@ -11068,20 +11118,88 @@ export default function CommonViewPage() {
                     value={externalMeetingPlatform}
                     onChange={(e) => setExternalMeetingPlatform(e.target.value)}
                   />
+                </div>
+                <div className="external-meeting-row">
                   {externalMeetingRecurrenceType === "none" ? (
-                    <input
-                      className="input"
-                      type="datetime-local"
-                      value={externalMeetingStartsAt}
-                      onChange={(e) => setExternalMeetingStartsAt(e.target.value)}
-                    />
+                    <>
+                      <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
+                        TAK EXT date and time
+                        <input
+                          className="input"
+                          type="datetime-local"
+                          value={externalMeetingStartsAt}
+                          onChange={(e) => {
+                            const nextValue = e.target.value
+                            setExternalMeetingStartsAt(nextValue)
+                            if (!externalMeetingInternalStartsAtEditedRef.current) {
+                              setExternalMeetingInternalStartsAt(nextValue.split("T")[0] || "")
+                            }
+                          }}
+                        />
+                      </label>
+                      <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
+                        TAK INT date and time
+                        <span
+                          className="input"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            gap: "4px",
+                            overflow: "hidden",
+                            padding: "0 8px",
+                          }}
+                        >
+                          <input
+                            type="date"
+                            value={externalMeetingInternalStartsAt}
+                            onChange={(e) => {
+                              externalMeetingInternalStartsAtEditedRef.current = true
+                              setExternalMeetingInternalStartsAt(e.target.value)
+                            }}
+                            style={{
+                              minWidth: 0,
+                              flex: 1,
+                              border: 0,
+                              outline: 0,
+                              background: "transparent",
+                            }}
+                          />
+                          <span aria-hidden="true" style={{ height: "22px", width: "1px", backgroundColor: "#e2e8f0" }} />
+                          <input
+                            type="time"
+                            value={externalMeetingInternalStartTime}
+                            onChange={(e) => setExternalMeetingInternalStartTime(e.target.value)}
+                            style={{
+                              width: "105px",
+                              border: 0,
+                              outline: 0,
+                              background: "transparent",
+                            }}
+                          />
+                        </span>
+                      </label>
+                    </>
                   ) : (
-                    <input
-                      className="input"
-                      type="time"
-                      value={externalMeetingStartTime}
-                      onChange={(e) => setExternalMeetingStartTime(e.target.value)}
-                    />
+                    <>
+                      <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
+                        TAK EXT time
+                        <input
+                          className="input"
+                          type="time"
+                          value={externalMeetingStartTime}
+                          onChange={(e) => setExternalMeetingStartTime(e.target.value)}
+                        />
+                      </label>
+                      <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
+                        TAK INT time
+                        <input
+                          className="input"
+                          type="time"
+                          value={externalMeetingInternalStartTime}
+                          onChange={(e) => setExternalMeetingInternalStartTime(e.target.value)}
+                        />
+                      </label>
+                    </>
                   )}
                 </div>
                 <div className="external-meeting-row">

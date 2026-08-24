@@ -22,6 +22,7 @@ from app.models.realization import (
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
+from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_user_comment import TaskUserComment
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
@@ -38,6 +39,21 @@ def _local_date(value: datetime | None) -> date | None:
     zone = ZoneInfo(settings.REALIZATION_TIMEZONE)
     localized = value.replace(tzinfo=zone) if value.tzinfo is None else value.astimezone(zone)
     return localized.date()
+
+
+def _effective_task_comment_map(
+    general_rows: list[TaskUserComment],
+    daily_rows: list[TaskDailyRlzState],
+) -> dict[tuple[uuid.UUID, uuid.UUID], str]:
+    """Prefer the day-scoped RLZ comment over the task's general comment."""
+    comments = {
+        (row.task_id, row.user_id): (row.comment or "").strip()
+        for row in general_rows
+    }
+    for row in daily_rows:
+        if row.comment is not None:
+            comments[(row.task_id, row.user_id)] = row.comment.strip()
+    return comments
 
 
 def _system_task_operational_day(task: Task) -> date | None:
@@ -65,6 +81,28 @@ def _include_nonplanned_weekly_task(
     return created_at >= planned_snapshot_at or bool(
         completed_day is not None and week_start <= completed_day <= as_of_day
     )
+
+
+def _include_task_in_daily_facts(
+    *,
+    task: Task | None,
+    classification: str,
+    day: date,
+) -> bool:
+    """Keep future, untouched work out of today's Realization facts.
+
+    A pinned weekly snapshot can still contain an occurrence for today after the
+    live task has been moved to a later start date.  That historical occurrence
+    remains useful for weekly-plan accounting, but it must not become a Pink
+    no-progress blocker for a day on which the task has not started yet.
+
+    Actual progress or completion is still reported even when the live dates are
+    inconsistent, so this guard only excludes ``no_progress`` facts.
+    """
+    if task is None or classification != "no_progress":
+        return True
+    start_day = _local_date(task.start_date)
+    return start_day is None or start_day <= day
 
 
 def _daily_classification(
@@ -147,6 +185,26 @@ async def calculate_daily_period(
     day = period.start_date
     planned = _snapshot_tasks(planned_snapshot)
     planned_ids = {row["task_id"] for row in planned.values() if row.get("task_id")}
+    question_task_ids = set(
+        (
+            await db.execute(
+                select(Task.id).where(
+                    Task.id.in_(planned_ids),
+                    or_(
+                        Task.question_origin_id.is_not(None),
+                        Task.question_batch_date.is_not(None),
+                    ),
+                )
+            )
+        ).scalars().all()
+    ) if planned_ids else set()
+    if question_task_ids:
+        planned = {
+            key: row
+            for key, row in planned.items()
+            if row.get("task_id") not in question_task_ids
+        }
+        planned_ids -= question_task_ids
 
     department_users, common_leave = await load_active_users_and_common_leave(
         db,
@@ -172,6 +230,8 @@ async def calculate_daily_period(
             ),
         ),
         Task.created_at <= day_end_utc,
+        Task.question_origin_id.is_(None),
+        Task.question_batch_date.is_(None),
         # System work belongs in Realization only when its template was
         # explicitly opted into the Weekly Planner.
         or_(
@@ -357,6 +417,12 @@ async def calculate_daily_period(
                 day=day,
                 attribution="planned_today",
             )
+            if not _include_task_in_daily_facts(
+                task=task,
+                classification=fact["classification"],
+                day=day,
+            ):
+                continue
             people[user_id]["tasks"].append(fact)
             people[user_id]["counters"]["planned_count"] += 1
             people[user_id]["counters"][f"{fact['classification']}_count"] += 1
@@ -463,6 +529,12 @@ async def calculate_daily_period(
                     "system_schedule" if is_system_task else "added_after_weekly_plan"
                 ),
             )
+            if not _include_task_in_daily_facts(
+                task=task,
+                classification=fact["classification"],
+                day=day,
+            ):
+                continue
             people[user_id]["tasks"].append(fact)
             if is_system_task:
                 people[user_id]["counters"]["system_task_count"] += 1
@@ -516,7 +588,20 @@ async def calculate_daily_period(
         if relevant_task_ids and people
         else []
     )
-    comments = {(row.task_id, row.user_id): (row.comment or "").strip() for row in comment_rows}
+    daily_comment_rows = (
+        (
+            await db.execute(
+                select(TaskDailyRlzState).where(
+                    TaskDailyRlzState.task_id.in_(relevant_task_ids),
+                    TaskDailyRlzState.user_id.in_(list(people)),
+                    TaskDailyRlzState.day_date == period.start_date,
+                )
+            )
+        ).scalars().all()
+        if relevant_task_ids and people
+        else []
+    )
+    comments = _effective_task_comment_map(comment_rows, daily_comment_rows)
 
     observation_rows = (
         await db.execute(

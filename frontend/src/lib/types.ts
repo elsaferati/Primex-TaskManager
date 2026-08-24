@@ -389,6 +389,7 @@ export interface DailyReportResponse {
     stale: boolean
     saved_at?: string | null
     is_editable: boolean
+    closable_from?: string | null
     editable_until?: string | null
   } | null
 }
@@ -642,6 +643,7 @@ export interface Meeting {
   created_at: string
   updated_at: string
   participant_ids?: string[]
+  paired_internal_meeting?: Meeting | null
 }
 
 export interface MeetingOccurrenceStatus {
@@ -736,6 +738,9 @@ export interface RealizationTaskFact {
   meeting_origin_id?: string | null
   status_progress_inconsistent?: boolean
   user_comment?: string | null
+  daily_report_comment?: string | null
+  reason_code?: string | null
+  reason_label?: string | null
   comment_required_before_close?: boolean
   rlz_impact?: string
 }

@@ -365,6 +365,13 @@ function systemTaskDisplayDate(task: SystemTaskOut): string | null {
 }
 
 function getTaskDateIso(task: Task): string {
+  const isSystemTask = Boolean(task.system_template_origin_id || task.task_type === "system")
+  const isDone = (task.status || "").toUpperCase() === "DONE" || Boolean(task.completed_at)
+  if (isSystemTask && isDone) {
+    return toDateOnlyIso(
+      task.original_due_date || task.origin_run_at || task.start_date || task.due_date || null
+    )
+  }
   return toDateOnlyIso(task.due_date || task.start_date || null)
 }
 
@@ -700,27 +707,436 @@ const DEFAULT_GA_TIME_ENTRY_FORMAT: GaTimeEntryFormat = {
 }
 
 const GA_TIME_BACKGROUND_COLORS = [
-  "#FFFFFF",
-  "#FEF3C7",
-  "#FFEDD5",
-  "#DCFCE7",
-  "#DBEAFE",
-  "#EDE9FE",
-  "#FCE7F3",
-  "#E2E8F0",
+  "#FACC15",
+  "#F472B6",
+  "#EF4444",
+  "#22C55E",
+  "#3B82F6",
 ] as const
+
+const GA_TIME_STRONG_BACKGROUND_COLORS: Record<string, string> = {
+  "#FEF3C7": "#FACC15",
+  "#FCE7F3": "#F472B6",
+  "#FEE2E2": "#EF4444",
+  "#DCFCE7": "#22C55E",
+  "#DBEAFE": "#3B82F6",
+}
+
+const normalizeGaTimeBackgroundColor = (color: string) =>
+  GA_TIME_STRONG_BACKGROUND_COLORS[color.toUpperCase()] || color
+
+const GA_TIME_TEXT_COLORS = [
+  { label: "Black", value: "#000000" },
+  { label: "Red", value: "#FF0000" },
+  { label: "White", value: "#FFFFFF" },
+] as const
+
+const GA_TIME_RICH_TEXT_TAG_PATTERN = /<(strong|b|em|i|br|span|font)(\s|>|\/)/i
+
+function normalizeGaTimeInlineColor(value: string) {
+  const normalized = value.trim().replace(/\s+/g, "").toUpperCase()
+  const aliases: Record<string, string> = {
+    BLACK: "#000000",
+    "RGB(0,0,0)": "#000000",
+    "#000000": "#000000",
+    RED: "#FF0000",
+    "RGB(255,0,0)": "#FF0000",
+    "#FF0000": "#FF0000",
+    WHITE: "#FFFFFF",
+    "RGB(255,255,255)": "#FFFFFF",
+    "#FFFFFF": "#FFFFFF",
+  }
+  return aliases[normalized] || ""
+}
+
+function sanitizeGaTimeRichTextHtml(raw: string) {
+  if (!raw || typeof document === "undefined") return ""
+
+  const source = document.createElement("div")
+  source.innerHTML = raw
+  const clean = document.createElement("div")
+
+  const sanitizeNode = (node: Node): Node[] => {
+    if (node.nodeType === Node.TEXT_NODE) {
+      const text = node.textContent || ""
+      return text ? [document.createTextNode(text)] : []
+    }
+    if (node.nodeType !== Node.ELEMENT_NODE) return []
+
+    const element = node as HTMLElement
+    const tag = element.tagName.toUpperCase()
+    if (tag === "BR") return [document.createElement("br")]
+
+    const children = Array.from(element.childNodes).flatMap(sanitizeNode)
+    if (tag === "STRONG" || tag === "B") {
+      const strong = document.createElement("strong")
+      children.forEach((child) => strong.appendChild(child))
+      return [strong]
+    }
+    if (tag === "EM" || tag === "I") {
+      const emphasis = document.createElement("em")
+      children.forEach((child) => emphasis.appendChild(child))
+      return [emphasis]
+    }
+
+    if (tag === "SPAN" || tag === "FONT") {
+      const color = normalizeGaTimeInlineColor(
+        element.getAttribute("data-ga-color") || element.getAttribute("color") || element.style.color || ""
+      )
+      const fontSize = element.style.fontSize.toLowerCase()
+      const legacySize = Number.parseInt(element.getAttribute("size") || "", 10)
+      const isLarge =
+        element.getAttribute("data-ga-size") === "large" ||
+        (!Number.isNaN(legacySize) && legacySize >= 4) ||
+        fontSize === "large" ||
+        fontSize === "larger" ||
+        fontSize === "1.25em" ||
+        Number.parseFloat(fontSize) >= 16
+
+      if (color || isLarge) {
+        const span = document.createElement("span")
+        if (color) {
+          span.setAttribute("data-ga-color", color)
+          span.style.color = color
+        }
+        if (isLarge) {
+          span.setAttribute("data-ga-size", "large")
+          span.style.fontSize = "1.25em"
+        }
+        children.forEach((child) => span.appendChild(child))
+        return [span]
+      }
+    }
+
+    if (tag === "DIV" || tag === "P") {
+      return [...children, document.createElement("br")]
+    }
+    return children
+  }
+
+  Array.from(source.childNodes).forEach((node) => {
+    sanitizeNode(node).forEach((child) => clean.appendChild(child))
+  })
+  clean.normalize()
+
+  while (clean.lastChild?.nodeName === "BR") clean.removeChild(clean.lastChild)
+  return (clean.textContent || "").trim() ? clean.innerHTML : ""
+}
+
+function normalizeGaTimeRichTextValue(value: string) {
+  if (!value) return ""
+  if (typeof document === "undefined") return ""
+  if (GA_TIME_RICH_TEXT_TAG_PATTERN.test(value)) return sanitizeGaTimeRichTextHtml(value)
+  return escapeHtml(value)
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n")
+    .replace(/\n/g, "<br>")
+}
+
+function getPlainGaTimeRichText(value: string) {
+  if (!value) return ""
+  if (typeof document === "undefined") {
+    return value.replace(/<br\s*\/?>/gi, "\n").replace(/<[^>]*>/g, "")
+  }
+  const container = document.createElement("div")
+  container.innerHTML = normalizeGaTimeRichTextValue(value)
+  return container.textContent || ""
+}
+
+function GaTimeRichTextContent({ value }: { value: string }) {
+  if (!value) return null
+  if (typeof document === "undefined") return <>{getPlainGaTimeRichText(value)}</>
+  return <span dangerouslySetInnerHTML={{ __html: normalizeGaTimeRichTextValue(value) }} />
+}
+
+function GaTimeRichTextEditor({
+  value,
+  onChange,
+  placeholder,
+  disabled,
+  multiline = false,
+  cellFormat,
+  onEditorBlur,
+}: {
+  value: string
+  onChange: (value: string) => void
+  placeholder: string
+  disabled: boolean
+  multiline?: boolean
+  cellFormat?: Partial<GaTimeEntryFormat>
+  onEditorBlur?: () => void
+}) {
+  const editorRef = React.useRef<HTMLDivElement | null>(null)
+  const lastEditorValueRef = React.useRef<string | null>(null)
+
+  React.useEffect(() => {
+    const editor = editorRef.current
+    if (!editor || value === lastEditorValueRef.current) return
+    const normalized = normalizeGaTimeRichTextValue(value)
+    if (editor.innerHTML !== normalized) editor.innerHTML = normalized
+    lastEditorValueRef.current = normalized
+  }, [value])
+
+  React.useEffect(() => {
+    const editor = editorRef.current
+    if (!editor) return
+    editor.focus()
+    const selection = window.getSelection()
+    if (!selection || !editor.textContent) return
+    const range = document.createRange()
+    range.selectNodeContents(editor)
+    range.collapse(false)
+    selection.removeAllRanges()
+    selection.addRange(range)
+  }, [])
+
+  const emitCurrentValue = React.useCallback((sanitize = false) => {
+    const editor = editorRef.current
+    if (!editor) return
+    const nextValue = sanitize ? sanitizeGaTimeRichTextHtml(editor.innerHTML) : editor.innerHTML
+    if (sanitize && editor.innerHTML !== nextValue) editor.innerHTML = nextValue
+    lastEditorValueRef.current = nextValue
+    onChange(nextValue)
+  }, [onChange])
+
+  const applyCommand = React.useCallback((command: string, commandValue?: string) => {
+    const editor = editorRef.current
+    if (!editor || disabled) return
+    editor.focus()
+    document.execCommand(command, false, commandValue)
+    // Keep the browser's active range intact so the same selected text can
+    // receive several formats (for example bold, red, and larger).
+    emitCurrentValue(false)
+  }, [disabled, emitCurrentValue])
+
+  return (
+    <div className="space-y-1.5">
+      <div
+        ref={editorRef}
+        contentEditable={!disabled}
+        role="textbox"
+        aria-multiline={multiline}
+        aria-label={placeholder}
+        data-placeholder={placeholder}
+        style={{
+          backgroundColor: normalizeGaTimeBackgroundColor(
+            cellFormat?.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color
+          ),
+          color: cellFormat?.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+          fontWeight: cellFormat?.is_bold ? 700 : 400,
+          fontStyle: cellFormat?.is_italic ? "italic" : "normal",
+        }}
+        className={cn(
+          "w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs leading-5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 empty:before:pointer-events-none empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)]",
+          multiline ? "min-h-[72px] whitespace-pre-wrap" : "min-h-8"
+        )}
+        onInput={() => emitCurrentValue(false)}
+        onBlur={() => {
+          emitCurrentValue(true)
+          onEditorBlur?.()
+        }}
+        onKeyDown={(event) => {
+          if (!multiline && event.key === "Enter") {
+            event.preventDefault()
+            return
+          }
+          if ((event.ctrlKey || event.metaKey) && ["b", "i"].includes(event.key.toLowerCase())) {
+            event.preventDefault()
+            applyCommand(event.key.toLowerCase() === "b" ? "bold" : "italic")
+          }
+        }}
+        onPaste={(event) => {
+          event.preventDefault()
+          const text = event.clipboardData.getData("text/plain")
+          if (!text) return
+          const html = escapeHtml(text)
+            .replace(/\r\n/g, "\n")
+            .replace(/\r/g, "\n")
+            .replace(/\n/g, multiline ? "<br>" : " ")
+          document.execCommand("insertHTML", false, html)
+          emitCurrentValue(true)
+        }}
+        suppressContentEditableWarning
+      />
+      <div className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-1 text-[10px] font-medium text-slate-500">Selected text</span>
+        {GA_TIME_TEXT_COLORS.map((color) => (
+          <button
+            key={color.value}
+            type="button"
+            className="h-5 w-5 rounded-full border border-slate-400"
+            style={{ backgroundColor: color.value }}
+            onMouseDown={(event) => event.preventDefault()}
+            onClick={() => applyCommand("foreColor", color.value)}
+            disabled={disabled}
+            aria-label={`${color.label} text`}
+            title={`${color.label} text`}
+          />
+        ))}
+        <button
+          type="button"
+          className="h-7 min-w-7 rounded border border-slate-300 bg-white px-2 text-xs font-bold text-slate-700"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => applyCommand("bold")}
+          disabled={disabled}
+          title="Bold selected text"
+          aria-label="Bold selected text"
+        >
+          B
+        </button>
+        <button
+          type="button"
+          className="h-7 min-w-7 rounded border border-slate-300 bg-white px-2 text-xs italic text-slate-700"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => applyCommand("italic")}
+          disabled={disabled}
+          title="Italic selected text"
+          aria-label="Italic selected text"
+        >
+          I
+        </button>
+        <button
+          type="button"
+          className="h-7 min-w-8 rounded border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-700"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => applyCommand("fontSize", "4")}
+          disabled={disabled}
+          title="Make selected text bigger"
+          aria-label="Make selected text bigger"
+        >
+          A+
+        </button>
+      </div>
+    </div>
+  )
+}
+
+type GaTimeAutoSaveStatus = "idle" | "pending" | "saving" | "saved" | "error"
+
+const gaTimeAutoSaveSignature = (content: string, format: GaTimeEntryFormat) => JSON.stringify([
+  content,
+  format.background_color,
+  format.text_color,
+  format.is_bold,
+  format.is_italic,
+])
+
+function useGaTimeAutoSave({
+  initialContent,
+  initialFormat,
+  content,
+  format,
+  onSave,
+}: {
+  initialContent: string
+  initialFormat: GaTimeEntryFormat
+  content: string
+  format: GaTimeEntryFormat
+  onSave: (content: string, format: GaTimeEntryFormat) => Promise<boolean>
+}) {
+  const initialSignatureRef = React.useRef(gaTimeAutoSaveSignature(initialContent, initialFormat))
+  const lastSavedSignatureRef = React.useRef(initialSignatureRef.current)
+  const latestValueRef = React.useRef({ content, format })
+  const onSaveRef = React.useRef(onSave)
+  const inFlightRef = React.useRef<Promise<boolean> | null>(null)
+  const mountedRef = React.useRef(true)
+  const [status, setStatus] = React.useState<GaTimeAutoSaveStatus>("saved")
+
+  latestValueRef.current = { content, format }
+  onSaveRef.current = onSave
+
+  React.useEffect(() => {
+    mountedRef.current = true
+    return () => {
+      mountedRef.current = false
+    }
+  }, [])
+
+  const saveLatest = React.useCallback(async () => {
+    if (inFlightRef.current) return inFlightRef.current
+
+    const run = async () => {
+      while (true) {
+        const snapshot = latestValueRef.current
+        const signature = gaTimeAutoSaveSignature(snapshot.content, snapshot.format)
+        if (signature === lastSavedSignatureRef.current) {
+          if (mountedRef.current) setStatus("saved")
+          return true
+        }
+
+        const sanitizedContent = sanitizeGaTimeRichTextHtml(normalizeGaTimeRichTextValue(snapshot.content))
+        if (!getPlainGaTimeRichText(sanitizedContent).trim()) {
+          if (mountedRef.current) setStatus("idle")
+          return false
+        }
+
+        if (mountedRef.current) setStatus("saving")
+        const saved = await onSaveRef.current(sanitizedContent, snapshot.format)
+        if (!saved) {
+          if (mountedRef.current) setStatus("error")
+          return false
+        }
+        lastSavedSignatureRef.current = signature
+
+        if (gaTimeAutoSaveSignature(latestValueRef.current.content, latestValueRef.current.format) === signature) {
+          if (mountedRef.current) setStatus("saved")
+          return true
+        }
+      }
+    }
+
+    const request = run()
+    inFlightRef.current = request
+    try {
+      return await request
+    } finally {
+      inFlightRef.current = null
+    }
+  }, [])
+
+  const currentSignature = gaTimeAutoSaveSignature(content, format)
+  const hasChanges = currentSignature !== lastSavedSignatureRef.current
+
+  React.useEffect(() => () => {
+    const snapshot = latestValueRef.current
+    const signature = gaTimeAutoSaveSignature(snapshot.content, snapshot.format)
+    if (
+      signature !== lastSavedSignatureRef.current &&
+      getPlainGaTimeRichText(snapshot.content).trim()
+    ) {
+      void saveLatest()
+    }
+  }, [saveLatest])
+
+  React.useEffect(() => {
+    if (!hasChanges) return
+    if (!getPlainGaTimeRichText(content).trim()) {
+      setStatus("idle")
+      return
+    }
+    setStatus("pending")
+    const timeoutId = window.setTimeout(() => void saveLatest(), 700)
+    return () => window.clearTimeout(timeoutId)
+  }, [content, format, hasChanges, saveLatest])
+
+  return { status, hasChanges, saveLatest }
+}
 
 const normalizeGaTimeEntryFormat = (
   entry?: Partial<GaTimeEntryFormat> | null
 ): GaTimeEntryFormat => ({
-  background_color: entry?.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+  background_color: normalizeGaTimeBackgroundColor(
+    entry?.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color
+  ),
   text_color: entry?.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
   is_bold: Boolean(entry?.is_bold),
   is_italic: Boolean(entry?.is_italic),
 })
 
 const gaTimeEntryStyle = (entry: Partial<GaTimeEntryFormat>): React.CSSProperties => ({
-  backgroundColor: entry.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+  backgroundColor: normalizeGaTimeBackgroundColor(
+    entry.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color
+  ),
   color: entry.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
   fontWeight: entry.is_bold ? 700 : 400,
   fontStyle: entry.is_italic ? "italic" : "normal",
@@ -740,112 +1156,63 @@ function GaTimeEntryEditor({
   onCancel: () => void
 }) {
   const [content, setContent] = React.useState(initialContent)
-  const [format, setFormat] = React.useState<GaTimeEntryFormat>(() =>
-    normalizeGaTimeEntryFormat(initialFormat)
-  )
-  const [submitting, setSubmitting] = React.useState(false)
-  const isSaving = saving || submitting
+  const [normalizedInitialFormat] = React.useState<GaTimeEntryFormat>(() => normalizeGaTimeEntryFormat(initialFormat))
+  const [format, setFormat] = React.useState<GaTimeEntryFormat>(normalizedInitialFormat)
+  const { status, hasChanges, saveLatest } = useGaTimeAutoSave({
+    initialContent,
+    initialFormat: normalizedInitialFormat,
+    content,
+    format,
+    onSave,
+  })
+  const isSaving = saving || status === "saving"
 
-  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
-    event.preventDefault()
-    if (!content.trim() || isSaving) return
-    setSubmitting(true)
-    try {
-      await onSave(content.trim(), format)
-    } finally {
-      setSubmitting(false)
+  const closeEditor = async () => {
+    if (!getPlainGaTimeRichText(content).trim()) {
+      onCancel()
+      return
     }
+    if (!hasChanges || await saveLatest()) onCancel()
   }
 
   return (
-    <form className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2" onSubmit={submit}>
-      <Input
-        className="h-8 text-xs"
+    <div className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
+      <GaTimeRichTextEditor
         value={content}
-        onChange={(event) => setContent(event.target.value)}
+        onChange={setContent}
         placeholder="Write task..."
-        disabled={isSaving}
-        autoFocus
+        disabled={false}
+        cellFormat={format}
+        onEditorBlur={() => void saveLatest()}
       />
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mr-1 text-[10px] font-medium text-slate-500">Cell</span>
-        {GA_TIME_BACKGROUND_COLORS.map((color) => (
-          <button
-            key={color}
-            type="button"
-            className={cn(
-              "h-5 w-5 rounded-full border border-slate-300",
-              format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
-            )}
-            style={{ backgroundColor: color }}
-            onClick={() => setFormat((current) => ({ ...current, background_color: color }))}
-            disabled={isSaving}
-            aria-label={`Cell color ${color}`}
-            title={`Cell color ${color}`}
-          />
-        ))}
-        <label className="ml-1 flex items-center gap-1 text-[10px] font-medium text-slate-500" title="Custom cell color">
-          More
-          <input
-            type="color"
-            className="h-6 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
-            value={format.background_color}
-            onChange={(event) =>
-              setFormat((current) => ({ ...current, background_color: event.target.value.toUpperCase() }))
-            }
-            disabled={isSaving}
-            aria-label="Custom cell color"
-          />
-        </label>
-        <label className="ml-1 flex items-center gap-1 text-[10px] font-medium text-slate-500" title="Text color">
-          Text
-          <input
-            type="color"
-            className="h-6 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
-            value={format.text_color}
-            onChange={(event) =>
-              setFormat((current) => ({ ...current, text_color: event.target.value.toUpperCase() }))
-            }
-            disabled={isSaving}
-            aria-label="Text color"
-          />
-        </label>
-        <button
-          type="button"
-          className={cn(
-            "ml-1 h-7 min-w-7 rounded border px-2 text-xs font-bold",
-            format.is_bold ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"
-          )}
-          onClick={() => setFormat((current) => ({ ...current, is_bold: !current.is_bold }))}
-          disabled={isSaving}
-          aria-pressed={format.is_bold}
-          title="Bold"
-        >
-          B
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "h-7 min-w-7 rounded border px-2 text-xs italic",
-            format.is_italic ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"
-          )}
-          onClick={() => setFormat((current) => ({ ...current, is_italic: !current.is_italic }))}
-          disabled={isSaving}
-          aria-pressed={format.is_italic}
-          title="Italic"
-        >
-          I
-        </button>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1 whitespace-nowrap">
+          <span className="mr-1 shrink-0 text-[10px] font-medium text-slate-500">Cell</span>
+          {GA_TIME_BACKGROUND_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={cn(
+                "h-5 w-5 shrink-0 rounded-full border border-slate-300",
+                format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
+              )}
+              style={{ backgroundColor: color }}
+              onClick={() => setFormat((current) => ({ ...current, background_color: color }))}
+              aria-label={`Cell color ${color}`}
+              title={`Cell color ${color}`}
+            />
+          ))}
+        </div>
       </div>
-      <div className="flex justify-end gap-1.5">
-        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={onCancel} disabled={isSaving}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm" className="h-7 px-3 text-xs" disabled={!content.trim() || isSaving}>
-          {isSaving ? "Saving..." : "Save"}
+      <div className="flex items-center justify-between gap-2">
+        <span className={cn("text-[10px]", status === "error" ? "text-red-600" : "text-slate-500")} aria-live="polite">
+          {isSaving ? "Saving..." : status === "error" ? "Save failed" : status === "idle" ? "Type something..." : hasChanges ? "Autosave pending..." : "Saved"}
+        </span>
+        <Button type="button" size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => void closeEditor()}>
+          Close
         </Button>
       </div>
-    </form>
+    </div>
   )
 }
 
@@ -863,109 +1230,79 @@ function GaTimeRowCommentEditor({
   onCancel: () => void
 }) {
   const [comment, setComment] = React.useState(initialComment)
-  const [format, setFormat] = React.useState<GaTimeEntryFormat>(() => normalizeGaTimeEntryFormat(initialFormat))
-  const [submitting, setSubmitting] = React.useState(false)
-  const isSaving = saving || submitting
+  const [normalizedInitialFormat] = React.useState<GaTimeEntryFormat>(() => normalizeGaTimeEntryFormat(initialFormat))
+  const [format, setFormat] = React.useState<GaTimeEntryFormat>(normalizedInitialFormat)
+  const { status, hasChanges, saveLatest } = useGaTimeAutoSave({
+    initialContent: initialComment,
+    initialFormat: normalizedInitialFormat,
+    content: comment,
+    format,
+    onSave,
+  })
+  const isSaving = saving || status === "saving"
+
+  const closeEditor = async () => {
+    if (!getPlainGaTimeRichText(comment).trim()) {
+      onCancel()
+      return
+    }
+    if (!hasChanges || await saveLatest()) onCancel()
+  }
 
   return (
-    <form
+    <div
       className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2"
-      onSubmit={async (event) => {
-        event.preventDefault()
-        if (isSaving) return
-        setSubmitting(true)
-        try {
-          await onSave(comment.trim(), format)
-        } finally {
-          setSubmitting(false)
-        }
-      }}
     >
-      <Textarea
-        className="min-h-[72px] w-full resize-y text-sm leading-5"
+      <GaTimeRichTextEditor
         value={comment}
-        onChange={(event) => setComment(event.target.value)}
+        onChange={setComment}
         placeholder="Add comment..."
-        disabled={isSaving}
-        autoFocus
+        disabled={false}
+        multiline
+        cellFormat={format}
+        onEditorBlur={() => void saveLatest()}
       />
-      <div className="flex flex-wrap items-center gap-1.5">
-        <span className="mr-1 text-[10px] font-medium text-slate-500">Cell</span>
-        {GA_TIME_BACKGROUND_COLORS.map((color) => (
-          <button
-            key={color}
-            type="button"
-            className={cn(
-              "h-5 w-5 rounded-full border border-slate-300",
-              format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
-            )}
-            style={{ backgroundColor: color }}
-            onClick={() => setFormat((current) => ({ ...current, background_color: color }))}
-            disabled={isSaving}
-            aria-label={`Comment cell color ${color}`}
-            title={`Comment cell color ${color}`}
-          />
-        ))}
-        <label className="flex items-center gap-1 text-[10px] font-medium text-slate-500" title="Custom cell color">
-          More
-          <input
-            type="color"
-            className="h-6 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
-            value={format.background_color}
-            onChange={(event) => setFormat((current) => ({ ...current, background_color: event.target.value.toUpperCase() }))}
-            disabled={isSaving}
-            aria-label="Custom comment cell color"
-          />
-        </label>
-        <label className="flex items-center gap-1 text-[10px] font-medium text-slate-500" title="Text color">
-          Text
-          <input
-            type="color"
-            className="h-6 w-7 cursor-pointer rounded border border-slate-300 bg-white p-0.5"
-            value={format.text_color}
-            onChange={(event) => setFormat((current) => ({ ...current, text_color: event.target.value.toUpperCase() }))}
-            disabled={isSaving}
-            aria-label="Comment text color"
-          />
-        </label>
-        <button
-          type="button"
-          className={cn(
-            "h-7 min-w-7 rounded border px-2 text-xs font-bold",
-            format.is_bold ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"
-          )}
-          onClick={() => setFormat((current) => ({ ...current, is_bold: !current.is_bold }))}
-          disabled={isSaving}
-          aria-pressed={format.is_bold}
-          title="Bold"
-        >
-          B
-        </button>
-        <button
-          type="button"
-          className={cn(
-            "h-7 min-w-7 rounded border px-2 text-xs italic",
-            format.is_italic ? "border-blue-600 bg-blue-600 text-white" : "border-slate-300 bg-white text-slate-700"
-          )}
-          onClick={() => setFormat((current) => ({ ...current, is_italic: !current.is_italic }))}
-          disabled={isSaving}
-          aria-pressed={format.is_italic}
-          title="Italic"
-        >
-          I
-        </button>
+      <div className="space-y-1.5">
+        <div className="flex items-center gap-1 whitespace-nowrap">
+          <span className="mr-1 shrink-0 text-[10px] font-medium text-slate-500">Cell</span>
+          {GA_TIME_BACKGROUND_COLORS.map((color) => (
+            <button
+              key={color}
+              type="button"
+              className={cn(
+                "h-5 w-5 shrink-0 rounded-full border border-slate-300",
+                format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
+              )}
+              style={{ backgroundColor: color }}
+              onClick={() => setFormat((current) => ({ ...current, background_color: color }))}
+              aria-label={`Comment cell color ${color}`}
+              title={`Comment cell color ${color}`}
+            />
+          ))}
+        </div>
       </div>
-      <div className="flex justify-end gap-1.5">
-        <Button type="button" size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={onCancel} disabled={isSaving}>
-          Cancel
-        </Button>
-        <Button type="submit" size="sm" className="h-8 px-3 text-xs" disabled={isSaving}>
-          {isSaving ? "Saving..." : "Save"}
+      <div className="flex items-center justify-between gap-2">
+        <span className={cn("text-[10px]", status === "error" ? "text-red-600" : "text-slate-500")} aria-live="polite">
+          {isSaving ? "Saving..." : status === "error" ? "Save failed" : status === "idle" ? "Type something..." : hasChanges ? "Autosave pending..." : "Saved"}
+        </span>
+        <Button type="button" size="sm" variant="ghost" className="h-8 px-3 text-xs" onClick={() => void closeEditor()}>
+          Close
         </Button>
       </div>
-    </form>
+    </div>
   )
 }
+
+type GaTimeRowComment = {
+  id: string
+  content: string
+  backgroundColor: string
+  textColor: string
+  isBold: boolean
+  isItalic: boolean
+}
+
+type GaTimeCommentColumn = "start" | "end"
 
 type GaTimeRow = {
   id?: string | null
@@ -980,6 +1317,17 @@ type GaTimeRow = {
   commentTextColor?: string
   commentIsBold?: boolean
   commentIsItalic?: boolean
+  comments?: GaTimeRowComment[]
+  endComments?: GaTimeRowComment[]
+}
+
+type GaTimeTableRowCommentResponse = {
+  id: string
+  content: string
+  comment_background_color?: string | null
+  comment_text_color?: string | null
+  comment_is_bold?: boolean
+  comment_is_italic?: boolean
 }
 
 type GaTimeTableRowResponse = {
@@ -995,6 +1343,8 @@ type GaTimeTableRowResponse = {
   comment_text_color?: string | null
   comment_is_bold?: boolean
   comment_is_italic?: boolean
+  comments?: GaTimeTableRowCommentResponse[]
+  end_comments?: GaTimeTableRowCommentResponse[]
 }
 
 type CommonBucket =
@@ -1077,12 +1427,48 @@ const formatGaTimeRowLabel = (start: string, end: string) => `${start} - ${end}`
 
 const normalizeGaTimeValue = (value: string) => (value ? value.slice(0, 5) : "")
 
+const gaTimeCommentsForRow = (row: GaTimeRow, column: GaTimeCommentColumn = "start"): GaTimeRowComment[] => {
+  if (column === "end") return row.endComments || []
+  if (row.comments?.length) return row.comments
+  if (!row.comment) return []
+  return [{
+    id: `legacy-${row.id || `${row.start}-${row.end}`}`,
+    content: row.comment,
+    backgroundColor: row.commentBackgroundColor || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+    textColor: row.commentTextColor || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+    isBold: Boolean(row.commentIsBold),
+    isItalic: Boolean(row.commentIsItalic),
+  }]
+}
+
+const gaTimeCommentEditorKey = (
+  row: GaTimeRow,
+  commentId: string,
+  column: GaTimeCommentColumn = "start"
+) => `${row.start}|${row.end}|${column}|${commentId}`
+
 const normalizeGaTimeRows = (rows: GaTimeTableRowResponse[]): GaTimeRow[] =>
   rows
     .map((row) => {
       const start = normalizeGaTimeValue(row.start_time)
       const end = normalizeGaTimeValue(row.end_time)
       const isSpecial = Boolean(row.is_special)
+      const comments = (row.comments || []).map((comment) => ({
+        id: comment.id,
+        content: comment.content,
+        backgroundColor: comment.comment_background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+        textColor: comment.comment_text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+        isBold: Boolean(comment.comment_is_bold),
+        isItalic: Boolean(comment.comment_is_italic),
+      }))
+      const endComments = (row.end_comments || []).map((comment) => ({
+        id: comment.id,
+        content: comment.content,
+        backgroundColor: comment.comment_background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+        textColor: comment.comment_text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+        isBold: Boolean(comment.comment_is_bold),
+        isItalic: Boolean(comment.comment_is_italic),
+      }))
       return {
         id: row.id,
         sortOrder: row.sort_order,
@@ -1096,6 +1482,8 @@ const normalizeGaTimeRows = (rows: GaTimeTableRowResponse[]): GaTimeRow[] =>
         commentTextColor: row.comment_text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
         commentIsBold: Boolean(row.comment_is_bold),
         commentIsItalic: Boolean(row.comment_is_italic),
+        comments,
+        endComments,
       }
     })
     .sort((a, b) => (a.sortOrder ?? 0) - (b.sortOrder ?? 0) || a.start.localeCompare(b.start))
@@ -1392,6 +1780,14 @@ export default function AdminTasksPage() {
   const todayIso = React.useMemo(() => todayDate.toISOString().slice(0, 10), [todayDate])
   const [allTasksDateFrom, setAllTasksDateFrom] = React.useState(() => todayIso)
   const [allTasksDateTo, setAllTasksDateTo] = React.useState(() => todayIso)
+  const allTasksThisWeekFrom = toISODate(getMonday(todayDate))
+  const allTasksThisWeekTo = toISODate(addDays(getMonday(todayDate), 4))
+  const allTasksNextWeekFrom = toISODate(addDays(getMonday(todayDate), 7))
+  const allTasksNextWeekTo = toISODate(addDays(getMonday(todayDate), 11))
+  const setAllTasksQuickRange = (from: string, to: string) => {
+    setAllTasksDateFrom(from)
+    setAllTasksDateTo(to)
+  }
   const [taskStatusUpdating, setTaskStatusUpdating] = React.useState<Record<string, boolean>>({})
   const [systemStatusOverrides, setSystemStatusOverrides] = React.useState<Record<string, string>>({})
   const [fastEditOpen, setFastEditOpen] = React.useState(false)
@@ -2090,14 +2486,26 @@ export default function AdminTasksPage() {
         pushId(assignee.id)
       }
 
+      // A generated system-task occurrence can contain only the copy assigned to GA.
+      // Include the source template's complete assignee list so the other executors
+      // still appear in ALL TASKS (for example, HS on a template assigned to HS + GA).
+      const systemTemplate = task.system_template_origin_id
+        ? systemTaskByTemplateId.get(task.system_template_origin_id)
+        : undefined
+      if (systemTemplate) {
+        pushId(systemTemplate.default_assignee_id)
+        for (const assignee of systemTemplate.assignees || []) {
+          pushId(assignee.id)
+        }
+      }
+
       // ALL TASKS "BZ ME" column: show task executors only, never alignment / "BZ me" managers (e.g. GA).
       const alignmentExclude = new Set<string>()
       for (const id of task.alignment_user_ids || []) {
         if (id) alignmentExclude.add(id)
       }
-      if (task.system_template_origin_id) {
-        const tmpl = systemTaskByTemplateId.get(task.system_template_origin_id)
-        for (const id of tmpl?.alignment_user_ids || []) {
+      if (systemTemplate) {
+        for (const id of systemTemplate.alignment_user_ids || []) {
           if (id) alignmentExclude.add(id)
         }
       }
@@ -2112,6 +2520,8 @@ export default function AdminTasksPage() {
             (userFromMap ? userFromMap.full_name || userFromMap.username : "") ||
             task.assignees?.find((a) => a.id === userId)?.full_name ||
             task.assignees?.find((a) => a.id === userId)?.username ||
+            systemTemplate?.assignees?.find((a) => a.id === userId)?.full_name ||
+            systemTemplate?.assignees?.find((a) => a.id === userId)?.username ||
             ""
           const trimmed = label.trim()
           if (!trimmed) return null
@@ -2245,7 +2655,6 @@ export default function AdminTasksPage() {
       isFastTask?: boolean
       isTemplateAlignedSystem?: boolean
       needsGaneConfirmation?: boolean
-      showInSystemTasksSection?: boolean
       isLateSystemTask?: boolean
       lateDays?: number
       isGaneAssigned?: boolean
@@ -2280,10 +2689,15 @@ export default function AdminTasksPage() {
       const statusValue = task.status || (task.completed_at ? "DONE" : "TODO")
       const systemFrequency = isSystemTask ? systemTemplate?.frequency || "" : ""
       const hasGaneBzToday = (hasTaskAlignment || hasTemplateAlignment) && dateIso === todayIso
+      const completedDateIso = toDateOnlyIso(task.completed_at || null)
       const computedLateDays =
-        statusValue !== "DONE" && dueDateIso && dueDateIso < todayIso
-          ? Math.max(task.late_days ?? 0, dayDiffInclusive(dueDateIso, todayIso))
-          : 0
+        statusValue === "DONE"
+          ? dueDateIso && completedDateIso && dueDateIso < completedDateIso
+            ? Math.max(task.late_days ?? 0, dayDiffInclusive(dueDateIso, completedDateIso))
+            : 0
+          : dueDateIso && dueDateIso < todayIso
+            ? Math.max(task.late_days ?? 0, dayDiffInclusive(dueDateIso, todayIso))
+            : 0
       const isLateSystemTask = Boolean(isSystemTask && (isAssigned || hasTemplateAlignment) && computedLateDays > 0)
       // Keep system tasks on the list when due on/before today if Gane is alignment-only — otherwise overdue
       // rows disappear after the due day (hasGaneBzToday only matched dateIso === today).
@@ -2316,7 +2730,6 @@ export default function AdminTasksPage() {
         isFastTask: !task.project_id && !isSystemTask,
         isTemplateAlignedSystem: hasTemplateAlignment,
         needsGaneConfirmation,
-        showInSystemTasksSection: hasTemplateAlignment || isLateSystemTask,
         isLateSystemTask,
         lateDays: computedLateDays,
         isGaneAssigned: isAssigned,
@@ -2349,7 +2762,6 @@ export default function AdminTasksPage() {
         systemFrequencyDisplayLabel: existing.systemFrequencyDisplayLabel || row.systemFrequencyDisplayLabel,
         systemTemplateOriginId: existing.systemTemplateOriginId || row.systemTemplateOriginId,
         needsGaneConfirmation: Boolean(existing.needsGaneConfirmation || row.needsGaneConfirmation),
-        showInSystemTasksSection: Boolean(existing.showInSystemTasksSection || row.showInSystemTasksSection),
         isLateSystemTask: Boolean(existing.isLateSystemTask || row.isLateSystemTask),
         lateDays: Math.max(existing.lateDays ?? 0, row.lateDays ?? 0) || undefined,
         isGaneAssigned: Boolean(existing.isGaneAssigned || row.isGaneAssigned),
@@ -2413,31 +2825,6 @@ export default function AdminTasksPage() {
       return isIsoWithinInclusiveRange(row.dateIso, allTasksDateFrom, allTasksDateTo)
     })
   }, [allTasksDateFrom, allTasksDateTo, allTasksTableRows, todayIso])
-
-  const highlightedAllTasksRows = React.useMemo(
-    () => filteredAllTasksRows.filter((row) => row.showInSystemTasksSection),
-    [filteredAllTasksRows]
-  )
-
-  const regularAllTasksRows = React.useMemo(
-    () => filteredAllTasksRows.filter((row) => !row.showInSystemTasksSection),
-    [filteredAllTasksRows]
-  )
-  const waitingConfirmationRows = React.useMemo(
-    () => filteredAllTasksRows.filter((row) => row.needsGaneConfirmation && !row.showInSystemTasksSection),
-    [filteredAllTasksRows]
-  )
-  const regularNonConfirmationRows = React.useMemo(
-    () => regularAllTasksRows.filter((row) => !row.needsGaneConfirmation),
-    [regularAllTasksRows]
-  )
-  const combinedNonConfirmationRows = React.useMemo(
-    () =>
-      [...highlightedAllTasksRows, ...regularNonConfirmationRows].sort((a, b) =>
-        compareSystemFrequency(a.systemFrequency, b.systemFrequency)
-      ),
-    [highlightedAllTasksRows, regularNonConfirmationRows]
-  )
 
   const dailyUserReportRows = React.useMemo(() => {
     const rows: Array<{
@@ -4454,21 +4841,62 @@ export default function AdminTasksPage() {
     }
   }, [apiFetch, readGaTimeRowsDraft])
 
-  const saveGaTimeRowComment = React.useCallback(async (row: GaTimeRow, comment: string, format: GaTimeEntryFormat) => {
+  const saveGaTimeRowComment = React.useCallback(async (
+    row: GaTimeRow,
+    commentId: string | null,
+    comment: string,
+    format: GaTimeEntryFormat,
+    column: GaTimeCommentColumn = "start"
+  ) => {
     const key = `${row.start}|${row.end}`
+    const trimmedComment = comment.trim()
+    const currentComments = gaTimeCommentsForRow(row, column)
+    const targetCommentId = commentId || crypto.randomUUID()
+    const comments = commentId
+      ? currentComments.flatMap((item) => (
+          item.id !== commentId
+            ? [item]
+            : trimmedComment
+              ? [{
+                  ...item,
+                  content: trimmedComment,
+                  backgroundColor: format.background_color,
+                  textColor: format.text_color,
+                  isBold: format.is_bold,
+                  isItalic: format.is_italic,
+                }]
+              : []
+        ))
+      : trimmedComment
+        ? [
+            ...currentComments,
+            {
+              id: targetCommentId,
+              content: trimmedComment,
+              backgroundColor: format.background_color,
+              textColor: format.text_color,
+              isBold: format.is_bold,
+              isItalic: format.is_italic,
+            },
+          ]
+        : currentComments
     setGaTimeCommentSavingKey(key)
     try {
-      const res = await apiFetch("/ga-time-slots/rows/comment", {
-        method: "PATCH",
+      const res = await apiFetch("/ga-time-slots/rows/comments", {
+        method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           start_time: row.start,
           end_time: row.end,
-          comment,
-          comment_background_color: format.background_color,
-          comment_text_color: format.text_color,
-          comment_is_bold: format.is_bold,
-          comment_is_italic: format.is_italic,
+          column,
+          comments: comments.map((item) => ({
+            id: item.id,
+            content: item.content,
+            comment_background_color: item.backgroundColor,
+            comment_text_color: item.textColor,
+            comment_is_bold: item.isBold,
+            comment_is_italic: item.isItalic,
+          })),
         }),
       })
       if (!res.ok) {
@@ -4476,21 +4904,21 @@ export default function AdminTasksPage() {
         throw new Error(apiErrorMessage(data, "Failed to save row comment"))
       }
       const updated = (await res.json()) as GaTimeTableRowResponse
+      const normalized = normalizeGaTimeRows([updated])[0]
       setGaTimeRows((current) => current.map((item) => (
         item.start === row.start && item.end === row.end
-          ? {
-              ...item,
-              id: updated.id,
-              comment: updated.comment || "",
-              commentBackgroundColor: updated.comment_background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
-              commentTextColor: updated.comment_text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
-              commentIsBold: Boolean(updated.comment_is_bold),
-              commentIsItalic: Boolean(updated.comment_is_italic),
-            }
+          ? normalized
           : item
       )))
-      setGaTimeCommentEditingKey(null)
-      toast.success(comment ? "Comment saved." : "Comment cleared.")
+      if (!commentId && trimmedComment) {
+        const newEditorKey = gaTimeCommentEditorKey(row, "new", column)
+        setGaTimeCommentEditingKey((current) => (
+          current === newEditorKey
+            ? gaTimeCommentEditorKey(row, targetCommentId, column)
+            : current
+        ))
+      }
+      if (!trimmedComment) toast.success("Comment removed.")
       return true
     } catch (error) {
       console.error("Failed to save GA timetable row comment", error)
@@ -4557,7 +4985,7 @@ export default function AdminTasksPage() {
       format: GaTimeEntryFormat
     ) => {
       const trimmed = content.trim()
-      if (!trimmed) return false
+      if (!trimmed) return null
       const key = `${dayOfWeek}|${startTime}`
       setGaTimeSaving((prev) => ({ ...prev, [key]: true }))
       try {
@@ -4577,11 +5005,11 @@ export default function AdminTasksPage() {
         }
         const created = (await res.json()) as GaTimeSlotEntry
         setGaTimeEntries((prev) => [...prev, created])
-        return true
+        return created
       } catch (err) {
         console.error("Failed to create GA time slot entry", err)
         toast.error("Failed to save time slot entry.")
-        return false
+        return null
       } finally {
         setGaTimeSaving((prev) => ({ ...prev, [key]: false }))
       }
@@ -5121,6 +5549,64 @@ export default function AdminTasksPage() {
         "KOMENT",
         "ACTIONS",
       ]
+      const sortByTimeThenUser = (groupRows: typeof rows) => {
+        const userOrder = new Map<string, number>()
+        let nextUserOrder = 0
+
+        // Preserve the section's existing user order while bringing every task
+        // for that user together. Multi-user tasks join the first matching group.
+        for (const row of groupRows) {
+          for (const assignee of row.assigned) {
+            if (userOrder.has(assignee.userId)) continue
+            userOrder.set(assignee.userId, nextUserOrder)
+            nextUserOrder += 1
+          }
+        }
+
+        return groupRows
+          .map((row, originalIndex) => ({ row, originalIndex }))
+          .sort((a, b) => {
+            const aMinutes = parseTimeToMinutes(a.row.kohaBz) ?? Number.MAX_SAFE_INTEGER
+            const bMinutes = parseTimeToMinutes(b.row.kohaBz) ?? Number.MAX_SAFE_INTEGER
+            if (aMinutes !== bMinutes) return aMinutes - bMinutes
+
+            const aUserOrder = a.row.assigned.reduce(
+              (lowest, assignee) => Math.min(lowest, userOrder.get(assignee.userId) ?? Number.MAX_SAFE_INTEGER),
+              Number.MAX_SAFE_INTEGER
+            )
+            const bUserOrder = b.row.assigned.reduce(
+              (lowest, assignee) => Math.min(lowest, userOrder.get(assignee.userId) ?? Number.MAX_SAFE_INTEGER),
+              Number.MAX_SAFE_INTEGER
+            )
+            if (aUserOrder !== bUserOrder) return aUserOrder - bUserOrder
+
+            return a.originalIndex - b.originalIndex
+          })
+          .map(({ row }) => row)
+      }
+      let nextRowNumber = 1
+      const rowGroups = [
+        {
+          key: "gane",
+          label: "Gane Arifaj Tasks",
+          rows: sortByTimeThenUser(
+            rows.filter((row) => row.isGaneRealAssignee || row.needsGaneConfirmation)
+          ),
+        },
+        {
+          key: "bz-me",
+          label: "BZ ME Tasks",
+          rows: sortByTimeThenUser(
+            rows.filter((row) => !row.isGaneRealAssignee && !row.needsGaneConfirmation)
+          ),
+        },
+      ]
+        .filter((group) => group.rows.length > 0)
+        .map((group) => {
+          const startNumber = nextRowNumber
+          nextRowNumber += group.rows.length
+          return { ...group, startNumber }
+        })
       return (
           <Table
         containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
@@ -5166,7 +5652,18 @@ export default function AdminTasksPage() {
         </TableHeader>
         <TableBody>
           {rows.length ? (
-            rows.map((row, index) => {
+            rowGroups.map((group, groupIndex) => (
+              <React.Fragment key={group.key}>
+                <TableRow className={`bg-slate-100/80 hover:bg-slate-100 ${groupIndex > 0 ? "border-t-2 border-t-slate-300" : ""}`}>
+                  <TableCell
+                    colSpan={headers.length}
+                    className="h-7 px-2 py-1 text-[10px] font-bold uppercase tracking-wide text-slate-700"
+                  >
+                    <span>{group.label}</span>
+                    <span className="ml-1.5 font-medium text-slate-500">({group.rows.length})</span>
+                  </TableCell>
+                </TableRow>
+                {group.rows.map((row, index) => {
               const statusValue = TASK_STATUS_OPTIONS.includes(row.status as (typeof TASK_STATUS_OPTIONS)[number])
                 ? row.status
                 : "TODO"
@@ -5187,7 +5684,7 @@ export default function AdminTasksPage() {
               const rowTask = tasks.find((task) => task.id === row.taskId) || null
               return (
                 <TableRow key={row.id}>
-                  <TableCell className="w-[26px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold text-slate-700 last:border-r-0">{index + 1}</TableCell>
+                  <TableCell className="w-[26px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold text-slate-700 last:border-r-0">{group.startNumber + index}</TableCell>
                   <TableCell className="w-[30px] border-r border-slate-200 px-1 py-1 text-center align-middle font-semibold last:border-r-0">{row.ll}</TableCell>
                   <TableCell className="w-[42px] max-w-[42px] border-r border-slate-200 px-0.5 py-1 align-middle last:border-r-0 sm:w-[74px] sm:max-w-none sm:px-1">
                     <div className="flex flex-col items-start gap-0.5 leading-none">
@@ -5301,7 +5798,9 @@ export default function AdminTasksPage() {
                   </TableCell>
                 </TableRow>
               )
-            })
+                })}
+              </React.Fragment>
+            ))
           ) : (
             <TableRow>
               <TableCell colSpan={headers.length} className="py-8 text-center text-sm text-muted-foreground">
@@ -5344,19 +5843,44 @@ export default function AdminTasksPage() {
           <div className="flex flex-col gap-2 text-xs text-slate-500 sm:flex-row sm:flex-wrap sm:items-center sm:justify-between">
             <div>Total: {filteredAllTasksRows.length}</div>
             <div className="grid w-full grid-cols-[auto_minmax(0,1fr)] items-center gap-x-3 gap-y-2 sm:hidden">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className={`h-8 w-fit px-3 ${allTasksDateFrom || allTasksDateTo ? "" : "border-blue-500 bg-blue-50 text-blue-700"}`}
-                onClick={() => {
-                  setAllTasksDateFrom("")
-                  setAllTasksDateTo("")
-                }}
-              >
-                All dates
-              </Button>
-              <span />
+              <div className="col-span-2 flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  variant={allTasksDateFrom === todayIso && allTasksDateTo === todayIso ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 px-3"
+                  onClick={() => setAllTasksQuickRange(todayIso, todayIso)}
+                >
+                  Sot
+                </Button>
+                <Button
+                  type="button"
+                  variant={allTasksDateFrom === allTasksThisWeekFrom && allTasksDateTo === allTasksThisWeekTo ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 px-3"
+                  onClick={() => setAllTasksQuickRange(allTasksThisWeekFrom, allTasksThisWeekTo)}
+                >
+                  This Week
+                </Button>
+                <Button
+                  type="button"
+                  variant={allTasksDateFrom === allTasksNextWeekFrom && allTasksDateTo === allTasksNextWeekTo ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 px-3"
+                  onClick={() => setAllTasksQuickRange(allTasksNextWeekFrom, allTasksNextWeekTo)}
+                >
+                  Next Week
+                </Button>
+                <Button
+                  type="button"
+                  variant={!allTasksDateFrom && !allTasksDateTo ? "default" : "outline"}
+                  size="sm"
+                  className="h-8 px-3"
+                  onClick={() => setAllTasksQuickRange("", "")}
+                >
+                  All dates
+                </Button>
+              </div>
               <span>From</span>
               <Input
                 type="date"
@@ -5376,13 +5900,37 @@ export default function AdminTasksPage() {
               <span>Date</span>
               <Button
                 type="button"
-                variant="outline"
+                variant={allTasksDateFrom === todayIso && allTasksDateTo === todayIso ? "default" : "outline"}
                 size="sm"
-                className={`h-8 px-3 ${allTasksDateFrom || allTasksDateTo ? "" : "border-blue-500 bg-blue-50 text-blue-700"}`}
-                onClick={() => {
-                  setAllTasksDateFrom("")
-                  setAllTasksDateTo("")
-                }}
+                className="h-8 px-3"
+                onClick={() => setAllTasksQuickRange(todayIso, todayIso)}
+              >
+                Sot
+              </Button>
+              <Button
+                type="button"
+                variant={allTasksDateFrom === allTasksThisWeekFrom && allTasksDateTo === allTasksThisWeekTo ? "default" : "outline"}
+                size="sm"
+                className="h-8 px-3"
+                onClick={() => setAllTasksQuickRange(allTasksThisWeekFrom, allTasksThisWeekTo)}
+              >
+                This Week
+              </Button>
+              <Button
+                type="button"
+                variant={allTasksDateFrom === allTasksNextWeekFrom && allTasksDateTo === allTasksNextWeekTo ? "default" : "outline"}
+                size="sm"
+                className="h-8 px-3"
+                onClick={() => setAllTasksQuickRange(allTasksNextWeekFrom, allTasksNextWeekTo)}
+              >
+                Next Week
+              </Button>
+              <Button
+                type="button"
+                variant={!allTasksDateFrom && !allTasksDateTo ? "default" : "outline"}
+                size="sm"
+                className="h-8 px-3"
+                onClick={() => setAllTasksQuickRange("", "")}
               >
                 All
               </Button>
@@ -5403,23 +5951,10 @@ export default function AdminTasksPage() {
             </div>
           </div>
           <div className="mt-4">
-            {renderAllTasksTable(combinedNonConfirmationRows, {
+            {renderAllTasksTable(filteredAllTasksRows, {
               emptyLabel: "No tasks available.",
             })}
           </div>
-          {waitingConfirmationRows.length ? (
-            <div className="mt-5">
-              <div className="text-sm font-semibold uppercase tracking-wide text-slate-800">
-                Waiting Confirmation For Gane
-              </div>
-              <div className="mt-1 text-xs text-slate-500">
-                
-              </div>
-              {renderAllTasksTable(waitingConfirmationRows, {
-                emptyLabel: "No waiting confirmation tasks.",
-              })}
-            </div>
-          ) : null}
           </AdminTasksSection>
         </div>
         <div className="print-section order-3" data-print-section="common">
@@ -5593,11 +6128,12 @@ export default function AdminTasksPage() {
                     <col className="ga-time-time-column" />
                     <col className="ga-time-comment-column" />
                     {commonWeekISOs.map((iso) => <col key={`ga-print-col-${iso}`} className="ga-time-day-column" />)}
+                    <col className="ga-time-comment-column" />
                   </colgroup>
                   <thead>
                     <tr>
                       <th className="ga-time-header ga-time-nr">NR</th>
-                      <th className="ga-time-header">Time</th>
+                      <th className="ga-time-header ga-time-time">Time</th>
                       <th className="ga-time-header ga-time-comment">Koment</th>
                       {commonWeekISOs.map((iso) => {
                         const d = fromISODate(iso)
@@ -5608,6 +6144,7 @@ export default function AdminTasksPage() {
                           </th>
                         )
                       })}
+                      <th className="ga-time-header ga-time-comment">Koment</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -5625,17 +6162,36 @@ export default function AdminTasksPage() {
                         }
                       >
                         <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
-                        <td className="ga-time-slot-label">{slot.label || "\u00A0"}</td>
+                        {!slot.isSpecial ? (
+                          <td className="ga-time-slot-label ga-time-time">
+                            {slot.label ? (
+                              <span className="ga-time-range">
+                                <span>{slot.start}</span>
+                                <span>{slot.end}</span>
+                              </span>
+                            ) : "\u00A0"}
+                          </td>
+                        ) : null}
                         <td
-                          className="ga-time-cell ga-time-comment"
-                          style={gaTimeEntryStyle({
-                            background_color: slot.commentBackgroundColor,
-                            text_color: slot.commentTextColor,
-                            is_bold: slot.commentIsBold,
-                            is_italic: slot.commentIsItalic,
-                          })}
+                          className={`ga-time-cell ga-time-comment${slot.isSpecial ? " ga-time-special-comment" : ""}`}
+                          colSpan={slot.isSpecial ? 2 : undefined}
                         >
-                          {slot.comment || null}
+                          <div className="ga-time-comment-list">
+                            {gaTimeCommentsForRow(slot).map((comment) => (
+                              <div
+                                key={`ga-print-comment-${slot.start}-${comment.id}`}
+                                className="ga-time-comment-text"
+                                style={gaTimeEntryStyle({
+                                  background_color: comment.backgroundColor,
+                                  text_color: comment.textColor,
+                                  is_bold: comment.isBold,
+                                  is_italic: comment.isItalic,
+                                })}
+                              >
+                                <GaTimeRichTextContent value={comment.content} />
+                              </div>
+                            ))}
+                          </div>
                         </td>
                         {commonWeekISOs.map((iso) => {
                           const dayOfWeek = toDayOfWeek(iso)
@@ -5668,7 +6224,7 @@ export default function AdminTasksPage() {
                                       className="ga-time-entry"
                                       style={gaTimeEntryStyle(entry)}
                                     >
-                                      <span>{entry.content}</span>
+                                      <GaTimeRichTextContent value={entry.content} />
                                     </div>
                                   ))}
                                 {!entries.length && !internalMeetings.length && !externalMeetings.length && !slot.isSpecial ? (
@@ -5678,6 +6234,24 @@ export default function AdminTasksPage() {
                             </td>
                           )
                         })}
+                        <td className="ga-time-cell ga-time-comment">
+                          <div className="ga-time-comment-list">
+                            {gaTimeCommentsForRow(slot, "end").map((comment) => (
+                              <div
+                                key={`ga-print-end-comment-${slot.start}-${comment.id}`}
+                                className="ga-time-comment-text"
+                                style={gaTimeEntryStyle({
+                                  background_color: comment.backgroundColor,
+                                  text_color: comment.textColor,
+                                  is_bold: comment.isBold,
+                                  is_italic: comment.isItalic,
+                                })}
+                              >
+                                <GaTimeRichTextContent value={comment.content} />
+                              </div>
+                            ))}
+                          </div>
+                        </td>
                       </tr>
                     ))}
                   </tbody>
@@ -5695,7 +6269,21 @@ export default function AdminTasksPage() {
             title={`GA TIME TABLE${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
             description=""
             actions={
-              <div className="flex items-center gap-2 print:hidden">
+              <div className="flex flex-wrap items-center gap-2 print:hidden">
+                <Button
+                  variant={toISODate(commonWeekStart) === thisCommonWeekIso ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setCommonWeekStart(getMonday(new Date()))}
+                >
+                  This Week
+                </Button>
+                <Button
+                  variant={toISODate(commonWeekStart) === nextCommonWeekIso ? "default" : "outline"}
+                  size="sm"
+                  onClick={() => setCommonWeekStart(addDays(getMonday(new Date()), 7))}
+                >
+                  Next Week
+                </Button>
                 {canEditGaTimeSlots ? (
                   <Button variant="outline" size="sm" onClick={openGaTimeRowsDialog}>
                     <Pencil className="mr-2 h-4 w-4" />
@@ -5721,17 +6309,18 @@ export default function AdminTasksPage() {
             {gaTimeError ? <span className="text-red-600">{gaTimeError}</span> : null}
           </div>
           <div className="mt-3 overflow-x-auto ga-time-table">
-            <table className="ga-time-table-table">
+            <table className="ga-time-table-table ga-time-table-live">
               <colgroup>
                 <col className="ga-time-nr-column" />
                 <col className="ga-time-time-column" />
                 <col className="ga-time-comment-column" />
                 {commonWeekISOs.map((iso) => <col key={`ga-col-${iso}`} className="ga-time-day-column" />)}
+                <col className="ga-time-comment-column" />
               </colgroup>
               <thead>
                 <tr>
                   <th className="ga-time-header ga-time-nr">NR</th>
-                  <th className="ga-time-header">Time</th>
+                  <th className="ga-time-header ga-time-time">Time</th>
                   <th className="ga-time-header ga-time-comment">Koment</th>
                   {commonWeekISOs.map((iso) => {
                     const d = fromISODate(iso)
@@ -5742,59 +6331,112 @@ export default function AdminTasksPage() {
                       </th>
                     )
                   })}
+                  <th className="ga-time-header ga-time-comment">Koment</th>
                 </tr>
               </thead>
               <tbody>
                 {gaTimeRows.map((slot) => (
                   <tr key={slot.start} className={slot.isSpecial ? "ga-time-row-custom" : undefined}>
                     <td className="ga-time-slot-label ga-time-nr">{slot.nrLabel}</td>
-                    <td className="ga-time-slot-label">{slot.label || "\u00A0"}</td>
-                    <td className="ga-time-cell ga-time-comment">
-                      {gaTimeCommentEditingKey === `${slot.start}|${slot.end}` ? (
-                        <GaTimeRowCommentEditor
-                          initialComment={slot.comment}
-                          initialFormat={{
-                            background_color: slot.commentBackgroundColor,
-                            text_color: slot.commentTextColor,
-                            is_bold: slot.commentIsBold,
-                            is_italic: slot.commentIsItalic,
-                          }}
-                          saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
-                          onSave={(comment, format) => saveGaTimeRowComment(slot, comment, format)}
-                          onCancel={() => setGaTimeCommentEditingKey(null)}
-                        />
-                      ) : slot.comment ? (
-                        <button
-                          type="button"
-                          className="ga-time-comment-text"
-                          style={gaTimeEntryStyle({
-                            background_color: slot.commentBackgroundColor,
-                            text_color: slot.commentTextColor,
-                            is_bold: slot.commentIsBold,
-                            is_italic: slot.commentIsItalic,
-                          })}
-                          onClick={() => {
-                            if (!canEditGaTimeSlots) return
-                            setGaTimeAddingCell(null)
-                            setGaTimeEditingId(null)
-                            setGaTimeCommentEditingKey(`${slot.start}|${slot.end}`)
-                          }}
-                        >
-                          {slot.comment}
-                        </button>
-                      ) : canEditGaTimeSlots ? (
-                        <button
-                          type="button"
-                          className="ga-time-add"
-                          onClick={() => {
-                            setGaTimeAddingCell(null)
-                            setGaTimeEditingId(null)
-                            setGaTimeCommentEditingKey(`${slot.start}|${slot.end}`)
-                          }}
-                        >
-                          Add
-                        </button>
-                      ) : null}
+                    {!slot.isSpecial ? (
+                      <td className="ga-time-slot-label ga-time-time">
+                        {slot.label ? (
+                          <span className="ga-time-range">
+                            <span>{slot.start}</span>
+                            <span>{slot.end}</span>
+                          </span>
+                        ) : "\u00A0"}
+                      </td>
+                    ) : null}
+                    <td
+                      className={`ga-time-cell ga-time-comment${slot.isSpecial ? " ga-time-special-comment" : ""}`}
+                      colSpan={slot.isSpecial ? 2 : undefined}
+                    >
+                      <div className="ga-time-comment-list">
+                        {gaTimeCommentsForRow(slot).map((comment) => {
+                          const editorKey = gaTimeCommentEditorKey(slot, comment.id)
+                          return gaTimeCommentEditingKey === editorKey ? (
+                            <GaTimeRowCommentEditor
+                              key={comment.id}
+                              initialComment={comment.content}
+                              initialFormat={{
+                                background_color: comment.backgroundColor,
+                                text_color: comment.textColor,
+                                is_bold: comment.isBold,
+                                is_italic: comment.isItalic,
+                              }}
+                              saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
+                              onSave={(content, format) => saveGaTimeRowComment(slot, comment.id, content, format)}
+                              onCancel={() => setGaTimeCommentEditingKey(null)}
+                            />
+                          ) : (
+                            <div
+                              key={comment.id}
+                              className="ga-time-comment-entry"
+                              style={gaTimeEntryStyle({
+                                background_color: comment.backgroundColor,
+                                text_color: comment.textColor,
+                                is_bold: comment.isBold,
+                                is_italic: comment.isItalic,
+                              })}
+                            >
+                              <button
+                                type="button"
+                                className="ga-time-comment-text"
+                                onClick={() => {
+                                  if (!canEditGaTimeSlots) return
+                                  setGaTimeAddingCell(null)
+                                  setGaTimeEditingId(null)
+                                  setGaTimeCommentEditingKey(editorKey)
+                                }}
+                              >
+                                <GaTimeRichTextContent value={comment.content} />
+                              </button>
+                              {canEditGaTimeSlots ? (
+                                <button
+                                  type="button"
+                                  className="ga-time-delete"
+                                  disabled={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
+                                  onClick={() => void saveGaTimeRowComment(slot, comment.id, "", {
+                                    background_color: comment.backgroundColor,
+                                    text_color: comment.textColor,
+                                    is_bold: comment.isBold,
+                                    is_italic: comment.isItalic,
+                                  })}
+                                  title="Delete comment"
+                                  aria-label="Delete comment"
+                                >
+                                  {gaTimeCommentSavingKey === `${slot.start}|${slot.end}` ? "..." : "\u00d7"}
+                                </button>
+                              ) : null}
+                            </div>
+                          )
+                        })}
+                        {canEditGaTimeSlots ? (
+                          gaTimeCommentEditingKey === gaTimeCommentEditorKey(slot, "new") ? (
+                            <GaTimeRowCommentEditor
+                              initialComment=""
+                              saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
+                              onSave={(content, format) => saveGaTimeRowComment(slot, null, content, format)}
+                              onCancel={() => setGaTimeCommentEditingKey(null)}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="ga-time-add ga-time-comment-add"
+                              title="Add another comment"
+                              aria-label={`Add comment for ${slot.label || slot.start}`}
+                              onClick={() => {
+                                setGaTimeAddingCell(null)
+                                setGaTimeEditingId(null)
+                                setGaTimeCommentEditingKey(gaTimeCommentEditorKey(slot, "new"))
+                              }}
+                            >
+                              +
+                            </button>
+                          )
+                        ) : null}
+                      </div>
                     </td>
                     {commonWeekISOs.map((iso) => {
                       const dayOfWeek = toDayOfWeek(iso)
@@ -5832,11 +6474,7 @@ export default function AdminTasksPage() {
                                     initialContent={entry.content}
                                     initialFormat={entry}
                                     saving={Boolean(gaTimeSaving[entry.id])}
-                                    onSave={async (content, format) => {
-                                      const saved = await updateGaTimeEntry(entry.id, content, format)
-                                      if (saved) setGaTimeEditingId(null)
-                                      return saved
-                                    }}
+                                    onSave={(content, format) => updateGaTimeEntry(entry.id, content, format)}
                                     onCancel={() => setGaTimeEditingId(null)}
                                   />
                                 )
@@ -5850,10 +6488,11 @@ export default function AdminTasksPage() {
                                     onClick={() => {
                                       if (!canEditGaTimeSlots) return
                                       setGaTimeAddingCell(null)
+                                      setGaTimeCommentEditingKey(null)
                                       setGaTimeEditingId(entry.id)
                                     }}
                                   >
-                                    {entry.content}
+                                    <GaTimeRichTextContent value={entry.content} />
                                   </button>
                                   {canEditGaTimeSlots ? (
                                     <button
@@ -5874,15 +6513,20 @@ export default function AdminTasksPage() {
                                 <GaTimeEntryEditor
                                   saving={Boolean(gaTimeSaving[cellKey])}
                                   onSave={async (content, format) => {
-                                    const saved = await createGaTimeEntry(
+                                    const created = await createGaTimeEntry(
                                       String(dayOfWeek),
                                       slot.start,
                                       slot.end,
                                       content,
                                       format
                                     )
-                                    if (saved) setGaTimeAddingCell(null)
-                                    return saved
+                                    if (created) {
+                                      setGaTimeAddingCell((current) => {
+                                        if (current === cellKey) setGaTimeEditingId(created.id)
+                                        return current === cellKey ? null : current
+                                      })
+                                    }
+                                    return Boolean(created)
                                   }}
                                   onCancel={() => setGaTimeAddingCell(null)}
                                 />
@@ -5892,6 +6536,7 @@ export default function AdminTasksPage() {
                                   className="ga-time-add"
                                   onClick={() => {
                                     setGaTimeEditingId(null)
+                                    setGaTimeCommentEditingKey(null)
                                     setGaTimeAddingCell(cellKey)
                                   }}
                                 >
@@ -5903,6 +6548,93 @@ export default function AdminTasksPage() {
                         </td>
                       )
                     })}
+                    <td className="ga-time-cell ga-time-comment">
+                      <div className="ga-time-comment-list">
+                        {gaTimeCommentsForRow(slot, "end").map((comment) => {
+                          const editorKey = gaTimeCommentEditorKey(slot, comment.id, "end")
+                          return gaTimeCommentEditingKey === editorKey ? (
+                            <GaTimeRowCommentEditor
+                              key={comment.id}
+                              initialComment={comment.content}
+                              initialFormat={{
+                                background_color: comment.backgroundColor,
+                                text_color: comment.textColor,
+                                is_bold: comment.isBold,
+                                is_italic: comment.isItalic,
+                              }}
+                              saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
+                              onSave={(content, format) => saveGaTimeRowComment(slot, comment.id, content, format, "end")}
+                              onCancel={() => setGaTimeCommentEditingKey(null)}
+                            />
+                          ) : (
+                            <div
+                              key={comment.id}
+                              className="ga-time-comment-entry"
+                              style={gaTimeEntryStyle({
+                                background_color: comment.backgroundColor,
+                                text_color: comment.textColor,
+                                is_bold: comment.isBold,
+                                is_italic: comment.isItalic,
+                              })}
+                            >
+                              <button
+                                type="button"
+                                className="ga-time-comment-text"
+                                onClick={() => {
+                                  if (!canEditGaTimeSlots) return
+                                  setGaTimeAddingCell(null)
+                                  setGaTimeEditingId(null)
+                                  setGaTimeCommentEditingKey(editorKey)
+                                }}
+                              >
+                                <GaTimeRichTextContent value={comment.content} />
+                              </button>
+                              {canEditGaTimeSlots ? (
+                                <button
+                                  type="button"
+                                  className="ga-time-delete"
+                                  disabled={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
+                                  onClick={() => void saveGaTimeRowComment(slot, comment.id, "", {
+                                    background_color: comment.backgroundColor,
+                                    text_color: comment.textColor,
+                                    is_bold: comment.isBold,
+                                    is_italic: comment.isItalic,
+                                  }, "end")}
+                                  title="Delete comment"
+                                  aria-label="Delete comment"
+                                >
+                                  {gaTimeCommentSavingKey === `${slot.start}|${slot.end}` ? "..." : "\u00d7"}
+                                </button>
+                              ) : null}
+                            </div>
+                          )
+                        })}
+                        {canEditGaTimeSlots ? (
+                          gaTimeCommentEditingKey === gaTimeCommentEditorKey(slot, "new", "end") ? (
+                            <GaTimeRowCommentEditor
+                              initialComment=""
+                              saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
+                              onSave={(content, format) => saveGaTimeRowComment(slot, null, content, format, "end")}
+                              onCancel={() => setGaTimeCommentEditingKey(null)}
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className="ga-time-add ga-time-comment-add"
+                              title="Add another comment"
+                              aria-label={`Add end comment for ${slot.label || slot.start}`}
+                              onClick={() => {
+                                setGaTimeAddingCell(null)
+                                setGaTimeEditingId(null)
+                                setGaTimeCommentEditingKey(gaTimeCommentEditorKey(slot, "new", "end"))
+                              }}
+                            >
+                              +
+                            </button>
+                          )
+                        ) : null}
+                      </div>
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -6677,8 +7409,8 @@ export default function AdminTasksPage() {
           --blocked-bg: #ffe7ea;
           --oneh-bg: #e0f2fe;
           --personal-bg: #f3e8ff;
-          --external-bg: #e0f2fe;
-          --internal-bg: #f1f5f9;
+          --external-bg: #ffc7ce;
+          --internal-bg: #ffe699;
           --bz-bg: #e6fffb;
           --r1-bg: #dcfce7;
           --problem-bg: #ecfeff;
@@ -6767,9 +7499,11 @@ export default function AdminTasksPage() {
         }
         .admin-week-table .week-table-row.external .week-table-label {
           background: var(--external-bg);
+          color: #c00000;
         }
         .admin-week-table .week-table-row.internal .week-table-label {
           background: var(--internal-bg);
+          color: #806000;
         }
         .admin-week-table .week-table-row.bz .week-table-label {
           background: var(--bz-bg);
@@ -6883,13 +7617,13 @@ export default function AdminTasksPage() {
           width: 30px;
         }
         .admin-week-table .ga-time-time-column {
-          width: 100px;
+          width: 46px;
         }
         .admin-week-table .ga-time-comment-column {
           width: 180px;
         }
         .admin-week-table .ga-time-day-column {
-          width: calc((100% - 310px) / 5);
+          width: calc((100% - 436px) / 5);
         }
         .admin-week-table .ga-time-header {
           border: 1px solid #e2e8f0;
@@ -6907,9 +7641,43 @@ export default function AdminTasksPage() {
           width: 30px;
           text-align: center;
         }
+        .admin-week-table .ga-time-time {
+          width: 46px;
+        }
+        .admin-week-table .ga-time-range {
+          display: flex;
+          flex-direction: column;
+          gap: 2px;
+          line-height: 1.15;
+        }
         .admin-week-table .ga-time-comment {
           min-width: 180px;
           width: 180px;
+        }
+        .admin-week-table .ga-time-special-comment {
+          min-width: 0;
+          width: auto;
+        }
+        .admin-week-table .ga-time-comment-list {
+          display: flex;
+          min-height: 100%;
+          flex-direction: column;
+          justify-content: flex-end;
+          gap: 6px;
+        }
+        .admin-week-table .ga-time-comment-entry {
+          display: flex;
+          width: 100%;
+          min-height: 36px;
+          align-items: center;
+          gap: 6px;
+          border: 1px solid #e2e8f0;
+          border-radius: 6px;
+          background: #ffffff;
+          padding: 4px 6px;
+          color: #0f172a;
+          font-size: 13px;
+          line-height: 18px;
         }
         .admin-week-table .ga-time-comment-text {
           width: 100%;
@@ -6925,6 +7693,25 @@ export default function AdminTasksPage() {
           white-space: pre-wrap;
           overflow-wrap: anywhere;
           cursor: pointer;
+        }
+        .admin-week-table .ga-time-comment-entry .ga-time-comment-text {
+          min-width: 0;
+          min-height: 0;
+          flex: 1;
+          border: 0;
+          border-radius: 0;
+          background: transparent;
+          padding: 3px 2px;
+          color: inherit;
+          font-weight: inherit;
+          font-style: inherit;
+        }
+        .admin-week-table .ga-time-comment-add {
+          width: 26px;
+          height: 26px;
+          padding: 0;
+          align-items: center;
+          justify-content: center;
         }
         .admin-week-table .ga-time-slot-label {
           border: 1px solid #e2e8f0;
@@ -6968,15 +7755,15 @@ export default function AdminTasksPage() {
           overflow-wrap: anywhere;
         }
         .admin-week-table .ga-time-internal-meeting {
-          border-color: #93c5fd;
-          background: #dbeafe;
-          color: #1e3a8a;
+          border-color: #e6c45c;
+          background: #ffe699;
+          color: #806000;
           line-height: 1.35;
         }
         .admin-week-table .ga-time-external-meeting {
-          border-color: #fdba74;
-          background: #ffedd5;
-          color: #9a3412;
+          border-color: #f29aa5;
+          background: #ffc7ce;
+          color: #c00000;
           line-height: 1.35;
         }
         .admin-week-table .ga-time-entry-text {
@@ -7025,6 +7812,18 @@ export default function AdminTasksPage() {
           padding: 4px 8px;
           border-radius: 6px;
           cursor: pointer;
+        }
+        .admin-week-table .ga-time-table-live .ga-time-cell-content:has(> .ga-time-add),
+        .admin-week-table .ga-time-table-live .ga-time-comment-list:has(> .ga-time-add) {
+          position: relative;
+          padding-top: 32px;
+        }
+        .admin-week-table .ga-time-table-live .ga-time-cell-content > .ga-time-add,
+        .admin-week-table .ga-time-table-live .ga-time-comment-list > .ga-time-add {
+          position: absolute;
+          top: 0;
+          left: 0;
+          z-index: 1;
         }
         .print-header,
         .print-footer {
@@ -7214,20 +8013,25 @@ export default function AdminTasksPage() {
           .admin-week-table .ga-time-nr-column {
             width: 26px !important;
           }
-          .admin-week-table .ga-time-time-column,
+          .admin-week-table .ga-time-time-column {
+            width: 42px !important;
+          }
           .admin-week-table .ga-time-comment-column {
             width: 78px !important;
           }
           .admin-week-table .ga-time-day-column {
-            width: calc((100% - 182px) / 5) !important;
+            width: calc((100% - 224px) / 5) !important;
           }
           .admin-week-table .ga-time-comment {
             min-width: 78px !important;
             width: 78px !important;
           }
-          .admin-week-table .ga-time-header:nth-child(2),
-          .admin-week-table .ga-time-slot-label:nth-child(2) {
-            width: 78px !important;
+          .admin-week-table .ga-time-special-comment {
+            min-width: 0 !important;
+            width: auto !important;
+          }
+          .admin-week-table .ga-time-time {
+            width: 42px !important;
           }
           .admin-week-table .ga-time-slot-label {
             background: #f3f4f6 !important;

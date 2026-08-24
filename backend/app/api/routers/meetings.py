@@ -16,6 +16,7 @@ from app.models.project import Project
 from app.models.user import User
 from app.schemas.meeting import (
     MeetingCreate,
+    MeetingCreateOut,
     MeetingOccurrenceStatusOut,
     MeetingOccurrenceStatusUpdate,
     MeetingOut,
@@ -157,12 +158,12 @@ async def update_meeting_occurrence_status(
     return _occurrence_status_out(row)
 
 
-@router.post("", response_model=MeetingOut, status_code=status.HTTP_201_CREATED)
+@router.post("", response_model=MeetingCreateOut, status_code=status.HTTP_201_CREATED)
 async def create_meeting(
     payload: MeetingCreate,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
-) -> MeetingOut:
+) -> MeetingCreateOut:
     ensure_department_access(user, payload.department_id)
     if payload.project_id is not None:
         project = (await db.execute(select(Project).where(Project.id == payload.project_id))).scalar_one_or_none()
@@ -199,22 +200,66 @@ async def create_meeting(
     )
     db.add(meeting)
     await db.flush()  # Flush to get the meeting ID
+
+    paired_internal_meeting: Meeting | None = None
+    if meeting.meeting_type == "external" and payload.internal_starts_at is not None:
+        paired_internal_meeting = Meeting(
+            title=payload.title,
+            platform=payload.platform,
+            starts_at=payload.internal_starts_at,
+            meeting_url=payload.meeting_url,
+            meeting_type="internal",
+            recurrence_type=payload.recurrence_type,
+            recurrence_days_of_week=payload.recurrence_days_of_week,
+            recurrence_days_of_month=payload.recurrence_days_of_month,
+            department_id=payload.department_id,
+            project_id=payload.project_id,
+            paired_external_meeting_id=meeting.id,
+            created_by=user.id,
+        )
+        db.add(paired_internal_meeting)
+        await db.flush()
     
     # Create participants
     for user_id in participant_ids:
         participant = MeetingParticipant(meeting_id=meeting.id, user_id=user_id)
         db.add(participant)
+        if paired_internal_meeting is not None:
+            db.add(MeetingParticipant(meeting_id=paired_internal_meeting.id, user_id=user_id))
 
     await db.flush()
     await db.commit()
     await db.refresh(meeting)
+    if paired_internal_meeting is not None:
+        await db.refresh(paired_internal_meeting)
     
     # Load participants for response
     participants_stmt = select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
     participants = (await db.execute(participants_stmt)).scalars().all()
     participant_ids_list = [p.user_id for p in participants]
     
-    return MeetingOut(
+    paired_internal_out = None
+    if paired_internal_meeting is not None:
+        paired_internal_out = MeetingOut(
+            id=paired_internal_meeting.id,
+            title=paired_internal_meeting.title,
+            platform=paired_internal_meeting.platform,
+            starts_at=paired_internal_meeting.starts_at,
+            meeting_url=paired_internal_meeting.meeting_url,
+            meeting_type=paired_internal_meeting.meeting_type,
+            recurrence_type=paired_internal_meeting.recurrence_type,
+            recurrence_days_of_week=paired_internal_meeting.recurrence_days_of_week,
+            recurrence_days_of_month=paired_internal_meeting.recurrence_days_of_month,
+            external_agent_test_task_requested=paired_internal_meeting.external_agent_test_task_requested,
+            department_id=paired_internal_meeting.department_id,
+            project_id=paired_internal_meeting.project_id,
+            created_by=paired_internal_meeting.created_by,
+            created_at=paired_internal_meeting.created_at,
+            updated_at=paired_internal_meeting.updated_at,
+            participant_ids=participant_ids_list,
+        )
+
+    return MeetingCreateOut(
         id=meeting.id,
         title=meeting.title,
         platform=meeting.platform,
@@ -231,6 +276,7 @@ async def create_meeting(
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
+        paired_internal_meeting=paired_internal_out,
     )
 
 

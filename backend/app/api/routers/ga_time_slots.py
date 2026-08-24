@@ -15,7 +15,9 @@ from app.schemas.ga_time_slot import (
     GaTimeSlotEntryIn,
     GaTimeSlotEntryOut,
     GaTimeSlotEntryUpdate,
+    GaTimeTableRowComment,
     GaTimeTableRowCommentUpdate,
+    GaTimeTableRowCommentsUpdate,
     GaTimeTableRowIn,
     GaTimeTableRowOut,
     GaTimeTableRowsUpdate,
@@ -54,6 +56,30 @@ def _ensure_can_edit(current_user: User) -> None:
 
 
 def _row_out(row: GaTimeTableRow | GaTimeTableRowData) -> GaTimeTableRowOut:
+    comments: list[GaTimeTableRowComment] = []
+    end_comments: list[GaTimeTableRowComment] = []
+    for raw_comment in getattr(row, "comments", None) or []:
+        try:
+            parsed_comment = GaTimeTableRowComment.model_validate(raw_comment)
+            if parsed_comment.column == "end":
+                end_comments.append(parsed_comment)
+            else:
+                comments.append(parsed_comment)
+        except (TypeError, ValueError):
+            continue
+    legacy_comment = (getattr(row, "comment", "") or "").strip()
+    if not comments and legacy_comment:
+        legacy_key = getattr(row, "id", None) or f"{row.start_time}-{row.end_time}"
+        comments.append(
+            GaTimeTableRowComment(
+                id=f"legacy-{legacy_key}",
+                content=legacy_comment,
+                comment_background_color=getattr(row, "comment_background_color", "#FFFFFF") or "#FFFFFF",
+                comment_text_color=getattr(row, "comment_text_color", "#0F172A") or "#0F172A",
+                comment_is_bold=bool(getattr(row, "comment_is_bold", False)),
+                comment_is_italic=bool(getattr(row, "comment_is_italic", False)),
+            )
+        )
     return GaTimeTableRowOut(
         id=getattr(row, "id", None),
         sort_order=row.sort_order,
@@ -67,6 +93,8 @@ def _row_out(row: GaTimeTableRow | GaTimeTableRowData) -> GaTimeTableRowOut:
         comment_text_color=getattr(row, "comment_text_color", "#0F172A") or "#0F172A",
         comment_is_bold=bool(getattr(row, "comment_is_bold", False)),
         comment_is_italic=bool(getattr(row, "comment_is_italic", False)),
+        comments=comments,
+        end_comments=end_comments,
     )
 
 
@@ -122,6 +150,7 @@ async def update_ga_time_table_rows(
             "comment_text_color": row.comment_text_color or "#0F172A",
             "comment_is_bold": bool(row.comment_is_bold),
             "comment_is_italic": bool(row.comment_is_italic),
+            "comments": list(row.comments or []),
         }
         for row in existing_rows
     }
@@ -361,6 +390,101 @@ async def update_ga_time_table_row_comment(
     target.comment_text_color = payload.comment_text_color
     target.comment_is_bold = payload.comment_is_bold
     target.comment_is_italic = payload.comment_is_italic
+    end_comments = [
+        raw_comment
+        for raw_comment in (target.comments or [])
+        if isinstance(raw_comment, dict) and raw_comment.get("column") == "end"
+    ]
+    start_comments = (
+        [
+            {
+                "id": f"legacy-{target.id}",
+                "content": target.comment,
+                "column": "start",
+                "comment_background_color": target.comment_background_color,
+                "comment_text_color": target.comment_text_color,
+                "comment_is_bold": target.comment_is_bold,
+                "comment_is_italic": target.comment_is_italic,
+            }
+        ]
+        if target.comment
+        else []
+    )
+    target.comments = [*end_comments, *start_comments]
+    await db.commit()
+    await db.refresh(target)
+    return _row_out(target)
+
+
+@router.put("/rows/comments", response_model=GaTimeTableRowOut)
+async def update_ga_time_table_row_comments(
+    payload: GaTimeTableRowCommentsUpdate,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GaTimeTableRowOut:
+    _ensure_can_edit(current_user)
+    rows = (
+        await db.execute(
+            select(GaTimeTableRow)
+            .order_by(GaTimeTableRow.sort_order, GaTimeTableRow.start_time)
+            .with_for_update()
+        )
+    ).scalars().all()
+    if not rows:
+        rows = [
+            GaTimeTableRow(
+                sort_order=row.sort_order,
+                nr_label=row.nr_label,
+                label=row.label,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                is_special=row.is_special,
+                comment=row.comment,
+                comment_background_color=row.comment_background_color,
+                comment_text_color=row.comment_text_color,
+                comment_is_bold=row.comment_is_bold,
+                comment_is_italic=row.comment_is_italic,
+            )
+            for row in DEFAULT_GA_TIME_TABLE_ROWS
+        ]
+        db.add_all(rows)
+        await db.flush()
+
+    target = next(
+        (
+            row for row in rows
+            if row.start_time == payload.start_time and row.end_time == payload.end_time
+        ),
+        None,
+    )
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time row not found")
+
+    existing_other_column_comments = [
+        raw_comment
+        for raw_comment in (target.comments or [])
+        if isinstance(raw_comment, dict)
+        and raw_comment.get("column", "start") != payload.column
+    ]
+    serialized_comments = [
+        {**comment.model_dump(mode="json"), "column": payload.column}
+        for comment in payload.comments
+    ]
+    target.comments = [*existing_other_column_comments, *serialized_comments]
+    if payload.column == "start":
+        target.comment = "\n".join(comment.content.strip() for comment in payload.comments)
+        if payload.comments:
+            first = payload.comments[0]
+            target.comment_background_color = first.comment_background_color
+            target.comment_text_color = first.comment_text_color
+            target.comment_is_bold = first.comment_is_bold
+            target.comment_is_italic = first.comment_is_italic
+        else:
+            target.comment_background_color = "#FFFFFF"
+            target.comment_text_color = "#0F172A"
+            target.comment_is_bold = False
+            target.comment_is_italic = False
+
     await db.commit()
     await db.refresh(target)
     return _row_out(target)

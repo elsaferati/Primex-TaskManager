@@ -228,6 +228,11 @@ function DayTaskCard({
           ) : null}
         </div>
       </div>
+      {task.reason_label ? (
+        <div className="mt-2 rounded-md border border-current/15 bg-white/55 px-2 py-1.5 text-[11px] font-medium leading-4">
+          <span className="font-bold">Arsyeja:</span> {task.reason_label}
+        </div>
+      ) : null}
       {task.user_comment ? (
         <div className="mt-2 flex items-start gap-1.5 rounded-md border border-current/15 bg-white/55 px-2 py-1.5 text-[11px] font-medium leading-4">
           <MessageSquare className="mt-0.5 h-3 w-3 shrink-0" />

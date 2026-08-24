@@ -208,6 +208,17 @@ function isOpenStatus(status: string) {
   return status === "TODO" || status === "IN_PROGRESS" || status === "WAITING_CONFIRMATION"
 }
 
+function apiErrorMessage(payload: unknown, fallback: string) {
+  if (!payload || typeof payload !== "object") return fallback
+  const detail = (payload as { detail?: unknown }).detail
+  if (typeof detail === "string" && detail.trim()) return detail
+  if (detail && typeof detail === "object") {
+    const message = (detail as { message?: unknown }).message
+    if (typeof message === "string" && message.trim()) return message
+  }
+  return fallback
+}
+
 function rowPriorityRank(row: RowView) {
   const isLate = (row.lateDays ?? 0) > 0
   const isMoved = (row.movedDays ?? 0) !== 0
@@ -610,34 +621,54 @@ export default function SystemTaskInstancesPage() {
 
   const handleMarkDone = React.useCallback(
     async (taskId: string) => {
-      const resultComment = window.prompt("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")?.trim()
-      if (!resultComment) {
-        toast.error("Para mbylljes, shto komentin për rezultatin e kësaj detyre.")
+      const task = tasks.find((candidate) => candidate.id === taskId)
+      if (!task) {
+        toast.error("Task not found. Refresh the report and try again.")
+        return
+      }
+
+      const actorIsAssignee = Boolean(
+        user?.id &&
+          (task.assigned_to === user.id || task.assignees?.some((assignee) => assignee.id === user.id))
+      )
+      const usesPrivilegedOverride = Boolean(
+        !actorIsAssignee && (user?.role === "ADMIN" || user?.role === "MANAGER")
+      )
+      const promptMessage = usesPrivilegedOverride
+        ? "Enter the reason for closing this task on behalf of the assignee."
+        : "Before closing, add a comment describing the result of this task."
+      const completionNote = window.prompt(promptMessage)?.trim()
+      if (!completionNote) {
+        toast.error(promptMessage)
         return
       }
       setUpdatingTaskIds((prev) => ({ ...prev, [taskId]: true }))
       try {
-        const commentRes = await apiFetch(`/tasks/${taskId}/comment`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ comment: resultComment }),
-        })
-        if (!commentRes.ok) throw new Error("Komenti i rezultatit nuk u ruajt.")
+        if (!usesPrivilegedOverride) {
+          const commentRes = await apiFetch(`/tasks/${taskId}/comment`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ comment: completionNote }),
+          })
+          if (!commentRes.ok) {
+            const payload = await commentRes.json().catch(() => null)
+            throw new Error(apiErrorMessage(payload, "The result comment could not be saved."))
+          }
+        }
+
+        const updatePayload: Record<string, string> = { status: "DONE" }
+        if (usesPrivilegedOverride) {
+          updatePayload.completion_override_reason = completionNote
+        }
         const res = await apiFetch(`/tasks/${taskId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ status: "DONE" }),
+          body: JSON.stringify(updatePayload),
         })
 
         if (!res.ok) {
-          let detail = "Failed to mark task as done."
-          try {
-            const payload = (await res.json()) as { detail?: string }
-            if (payload?.detail) detail = payload.detail
-          } catch {
-            // ignore parse errors
-          }
-          throw new Error(detail)
+          const payload = await res.json().catch(() => null)
+          throw new Error(apiErrorMessage(payload, "Failed to mark task as done."))
         }
 
         const updatedTask = (await res.json()) as Task
@@ -654,7 +685,7 @@ export default function SystemTaskInstancesPage() {
         })
       }
     },
-    [apiFetch]
+    [apiFetch, tasks, user]
   )
 
   const handleExportExcel = React.useCallback(async () => {

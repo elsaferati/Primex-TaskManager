@@ -494,7 +494,7 @@ async def update_ga_note_task_bundle(
             project = (await db.execute(select(Project).where(Project.id == payload.project_id))).scalar_one_or_none()
             if project is None:
                 raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
-            if project.department_id is not None:
+            if payload.project_id != old_project_id and project.department_id is not None:
                 ensure_department_access(user, project.department_id)
         note.project_id = payload.project_id
         if project is not None:
