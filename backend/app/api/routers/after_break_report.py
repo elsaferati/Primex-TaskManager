@@ -165,6 +165,7 @@ async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) ->
         for section in (row.sections or [])
         if str(section.get("title") or "").strip()
     ]
+    sections = normalize_after_break_report_sections(sections)
     sections = await apply_1h_confirmation_questions(db, sections)
     sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
     return _draft(row, sections)

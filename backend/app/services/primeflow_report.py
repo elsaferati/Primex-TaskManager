@@ -472,7 +472,12 @@ def render_plain_text(document: ReportDocument) -> str:
     return "\n\n".join(blocks)
 
 
-def render_html(document: ReportDocument) -> str:
+def render_html(
+    document: ReportDocument,
+    *,
+    pre_sections_html: str = "",
+    content_width: int = 600,
+) -> str:
     """Outlook-safe 1H HTML: nested tables, inline styles, bgcolor (Word engine)."""
 
     def marked_html(value: str, marked_source: str) -> str:
@@ -602,42 +607,33 @@ def render_html(document: ReportDocument) -> str:
         )
 
     def reminder_column(title: str, questions: list[ReportReminderQuestion]) -> str:
-        chunks = [section_title_block(title)]
+        question_parts = []
         for index, question in enumerate(questions, 1):
             guidance = (
-                detail_row(html.escape(question.guidance).replace(chr(10), "<br>"))
+                f' <span style="color:#64748b;font-weight:400;">'
+                f'({html.escape(question.guidance).replace(chr(10), " / ")})</span>'
                 if question.guidance else ""
             )
-            chunks.append(
-                task_card(
-                    "#f8fafc",
-                    "#64748b",
-                    f"{index}. {html.escape(question.text)}",
-                    guidance,
-                )
+            question_parts.append(
+                f'<span style="white-space:normal;"><strong>{index}.</strong> '
+                f'{html.escape(question.text)}{guidance}</span>'
             )
-        return "".join(chunks)
+        return (
+            section_title_block(title)
+            + '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-compact-reminder-row="true" style="width:100%;border-collapse:collapse;margin:0;">'
+            '<tr><td bgcolor="#f8fafc" style="background-color:#f8fafc;border:1px solid #94a3b8;'
+            'border-left:6px solid #64748b;padding:9px 10px;font-family:Arial,sans-serif;'
+            'font-size:13px;line-height:1.45;color:#0f172a;">'
+            + ' <strong style="color:#64748b;">/</strong> '.join(question_parts)
+            + '</td></tr></table>'
+        )
 
     def board_reminder_column(questions: list[ReportReminderQuestion]) -> str:
-        split_at = (len(questions) + 1) // 2
-        columns = []
-        for start_index, column_questions in ((0, questions[:split_at]), (split_at, questions[split_at:])):
-            cards = []
-            for index, question in enumerate(column_questions, start_index + 1):
-                guidance = (
-                    detail_row(html.escape(question.guidance).replace(chr(10), "<br>"))
-                    if question.guidance else ""
-                )
-                cards.append(task_card("#f8fafc", "#64748b", f"{index}. {html.escape(question.text)}", guidance))
-            columns.append("".join(cards))
         return (
-            f"{section_title_block(BOARD_REMINDER_SECTION_TITLE)}"
-            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
-            'data-board-reminder-columns="true" style="width:100%;border-collapse:collapse;">'
-            '<tr>'
-            f'<td width="50%" valign="top" style="width:50%;padding:0 4px 0 0;vertical-align:top;">{columns[0]}</td>'
-            f'<td width="50%" valign="top" style="width:50%;padding:0 0 0 4px;vertical-align:top;">{columns[1]}</td>'
-            '</tr></table>'
+            '<div data-board-reminder-columns="true">'
+            + reminder_column(BOARD_REMINDER_SECTION_TITLE, questions)
+            + '</div>'
         )
 
     body_chunks: list[str] = []
@@ -658,6 +654,9 @@ def render_html(document: ReportDocument) -> str:
         body_chunks.append(board_reminder_column(document.board_reminders))
     elif document.reminders:
         body_chunks.append(reminder_column(REMINDER_SECTION_TITLE, document.reminders))
+
+    if pre_sections_html:
+        body_chunks.append(pre_sections_html)
 
     for section_index, section in enumerate(document.sections):
         if section_index:
@@ -714,9 +713,9 @@ table, td {{ font-family: Arial, sans-serif !important; }}
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;background:#f8fafc;border-collapse:collapse;">
 <tr><td align="center" style="padding:16px 8px;">
 <!--[if mso]>
-<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0"><tr><td>
+<table role="presentation" width="{content_width}" cellspacing="0" cellpadding="0" border="0"><tr><td>
 <![endif]-->
-<table role="presentation" width="600" cellspacing="0" cellpadding="0" border="0" style="width:600px;max-width:100%;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
+<table role="presentation" width="{content_width}" cellspacing="0" cellpadding="0" border="0" style="width:{content_width}px;max-width:100%;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
 <tr><td bgcolor="#8799b2" style="background-color:#8799b2;padding:18px 20px;font-family:Arial,sans-serif;">
 <div style="font-family:Arial,sans-serif;font-size:22px;line-height:1.25;font-weight:700;color:#ffffff;margin:0 0 4px;">{html.escape(document.subject)}</div>
 <div style="font-family:Arial,sans-serif;font-size:13px;line-height:1.35;color:#ffffff;">{meta}</div>

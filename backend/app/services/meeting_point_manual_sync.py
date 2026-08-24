@@ -55,10 +55,10 @@ def _report_title_sets(kind: ReportKind) -> tuple[list[str], set[str], set[str]]
         manuals = set(MANUAL_SECTION_TITLES)
         return list(SECTION_TITLES), manuals, manuals
     if kind == "after_break":
-        from app.services.after_break_report import MANUAL_SECTION_TITLES, SECTION_TITLES
+        from app.services.after_break_report import DISPLAY_SECTION_TITLES, MANUAL_SECTION_TITLES
 
         manuals = set(MANUAL_SECTION_TITLES)
-        return list(SECTION_TITLES), manuals, manuals
+        return list(DISPLAY_SECTION_TITLES), manuals, manuals
     from app.services.meetings_report import DISPLAY_SECTION_TITLES, MANUAL_SECTION_TITLES
 
     manuals = set(MANUAL_SECTION_TITLES)
