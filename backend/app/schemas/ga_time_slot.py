@@ -1,6 +1,7 @@
 import uuid
 import re
 from datetime import datetime, time
+from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -84,6 +85,19 @@ class GaTimeTableRowCommentUpdate(GaTimeTableRowCommentFormatting):
     comment: str = Field(default="", max_length=2000)
 
 
+class GaTimeTableRowComment(GaTimeTableRowCommentFormatting):
+    id: str = Field(min_length=1, max_length=100)
+    content: str = Field(min_length=1, max_length=2000)
+    column: Literal["start", "end"] = "start"
+
+
+class GaTimeTableRowCommentsUpdate(BaseModel):
+    start_time: time
+    end_time: time
+    column: Literal["start", "end"] = "start"
+    comments: list[GaTimeTableRowComment] = Field(default_factory=list, max_length=50)
+
+
 class GaTimeTableRowsUpdate(BaseModel):
     rows: list[GaTimeTableRowIn]
 
@@ -97,3 +111,5 @@ class GaTimeTableRowOut(GaTimeTableRowCommentFormatting):
     end_time: time
     is_special: bool = False
     comment: str = ""
+    comments: list[GaTimeTableRowComment] = Field(default_factory=list)
+    end_comments: list[GaTimeTableRowComment] = Field(default_factory=list)

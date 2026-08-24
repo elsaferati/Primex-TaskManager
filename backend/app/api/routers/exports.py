@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import csv
+import html
 import io
 import re
 import textwrap
@@ -1484,6 +1485,14 @@ async def export_tasks_xlsx(
         headers={"Content-Disposition": f'attachment; filename=\"{filename}\"'},
     )
 
+def _ga_time_plain_text(value: str | None) -> str:
+    if not value:
+        return ""
+    with_line_breaks = re.sub(r"<br\s*/?>", "\n", value, flags=re.IGNORECASE)
+    without_tags = re.sub(r"<[^>]+>", "", with_line_breaks)
+    return html.unescape(without_tags).strip()
+
+
 @router.get("/ga-time.xlsx")
 async def export_ga_time_xlsx(
     week_start: date,
@@ -1529,13 +1538,13 @@ async def export_ga_time_xlsx(
         day_value = int(entry.day_of_week or 0)
         start_label = resolve_row_start(entry.start_time)
         key = (day_value, start_label)
-        entry_map.setdefault(key, []).append(entry.content or "")
+        entry_map.setdefault(key, []).append(_ga_time_plain_text(entry.content))
 
     wb = Workbook()
     ws = wb.active
     ws.title = "GA Time Table"[:31]
 
-    last_col = 3 + len(week_dates)
+    last_col = 4 + len(week_dates)
 
     title_text = f"GA TIME TABLE ({_format_date_dot(week_dates[0])} - {_format_date_dot(week_dates[-1])})"
     ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=last_col)
@@ -1576,11 +1585,16 @@ async def export_ga_time_xlsx(
     ws.column_dimensions["A"].width = 5
     ws.column_dimensions["B"].width = 16
     ws.column_dimensions["C"].width = 22
-    for idx in range(4, last_col + 1):
+    for idx in range(4, last_col):
         ws.column_dimensions[get_column_letter(idx)].width = 40
+    ws.column_dimensions[get_column_letter(last_col)].width = 22
 
     header_fill = PatternFill(start_color="D9D9D9", end_color="D9D9D9", fill_type="solid")
-    headers = ["NR", "TIME", "KOMENT"] + [f"{_day_code(d)} = {_format_date_dot(d)}" for d in week_dates]
+    headers = (
+        ["NR", "TIME", "KOMENT"]
+        + [f"{_day_code(d)} = {_format_date_dot(d)}" for d in week_dates]
+        + ["KOMENT"]
+    )
     for col_idx, header in enumerate(headers, start=1):
         cell = ws.cell(row=header_row, column=col_idx, value=header)
         cell.font = Font(bold=True)
@@ -1597,7 +1611,7 @@ async def export_ga_time_xlsx(
         nr_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         time_cell = ws.cell(row=row_idx, column=2, value=time_label or None)
         time_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
-        comment_cell = ws.cell(row=row_idx, column=3, value=(row.comment or None))
+        comment_cell = ws.cell(row=row_idx, column=3, value=(_ga_time_plain_text(row.comment) or None))
         comment_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         comment_bg = (getattr(row, "comment_background_color", "#FFFFFF") or "#FFFFFF").lstrip("#").upper()
         comment_fg = (getattr(row, "comment_text_color", "#0F172A") or "#0F172A").lstrip("#").upper()
@@ -1613,6 +1627,28 @@ async def export_ga_time_xlsx(
             value = "\n".join(v for v in cell_values if v)
             cell = ws.cell(row=row_idx, column=4 + day_offset, value=value)
             cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        end_comments = [
+            comment
+            for comment in (getattr(row, "comments", None) or [])
+            if isinstance(comment, dict) and comment.get("column") == "end"
+        ]
+        end_value = "\n".join(
+            _ga_time_plain_text(str(comment.get("content", "")))
+            for comment in end_comments
+            if isinstance(comment, dict) and _ga_time_plain_text(str(comment.get("content", "")))
+        )
+        end_comment_cell = ws.cell(row=row_idx, column=last_col, value=end_value or None)
+        end_comment_cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
+        if end_comments and isinstance(end_comments[0], dict):
+            first_end_comment = end_comments[0]
+            end_bg = str(first_end_comment.get("comment_background_color", "#FFFFFF")).lstrip("#").upper()
+            end_fg = str(first_end_comment.get("comment_text_color", "#0F172A")).lstrip("#").upper()
+            end_comment_cell.fill = PatternFill(start_color=f"FF{end_bg}", end_color=f"FF{end_bg}", fill_type="solid")
+            end_comment_cell.font = Font(
+                color=f"FF{end_fg}",
+                bold=bool(first_end_comment.get("comment_is_bold", False)),
+                italic=bool(first_end_comment.get("comment_is_italic", False)),
+            )
         row_idx += 1
 
     last_row = row_idx - 1

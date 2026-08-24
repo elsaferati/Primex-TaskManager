@@ -1,8 +1,8 @@
 import uuid
 from datetime import datetime, time
 
-from sqlalchemy import Boolean, DateTime, Integer, String, Text, Time, func
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy import Boolean, DateTime, Integer, String, Text, Time, func, text as sql_text
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -23,6 +23,12 @@ class GaTimeTableRow(Base):
     comment_text_color: Mapped[str] = mapped_column(String(7), nullable=False, server_default="#0F172A")
     comment_is_bold: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     comment_is_italic: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    comments: Mapped[list[dict[str, object]]] = mapped_column(
+        JSONB,
+        nullable=False,
+        default=list,
+        server_default=sql_text("'[]'::jsonb"),
+    )
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

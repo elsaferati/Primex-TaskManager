@@ -25,6 +25,10 @@ class MeetingOut(BaseModel):
     participant_ids: list[uuid.UUID] = []
 
 
+class MeetingCreateOut(MeetingOut):
+    paired_internal_meeting: MeetingOut | None = None
+
+
 class MeetingCreate(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     platform: str | None = None
@@ -37,6 +41,7 @@ class MeetingCreate(BaseModel):
     department_id: uuid.UUID
     project_id: uuid.UUID | None = None
     participant_ids: list[uuid.UUID] = []
+    internal_starts_at: datetime | None = None
 
 
 class MeetingUpdate(BaseModel):

@@ -642,6 +642,7 @@ export interface Meeting {
   created_at: string
   updated_at: string
   participant_ids?: string[]
+  paired_internal_meeting?: Meeting | null
 }
 
 export interface MeetingOccurrenceStatus {
