@@ -24,6 +24,7 @@ class DailyRlzCloseStateOut(BaseModel):
     stale: bool = False
     saved_at: datetime | None = None
     is_editable: bool = False
+    closable_from: datetime | None = None
     editable_until: datetime | None = None
 
 
