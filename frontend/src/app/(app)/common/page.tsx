@@ -1402,6 +1402,7 @@ export default function CommonViewPage() {
   const [externalMeetingDepartmentId, setExternalMeetingDepartmentId] = React.useState("")
   const [internalMeetingsOpen, setInternalMeetingsOpen] = React.useState(false)
   const [internalMeetings, setInternalMeetings] = React.useState<Meeting[]>([])
+  const [internalMeetingListFilter, setInternalMeetingListFilter] = React.useState<"next" | "past" | "all">("next")
   const [internalMeetingTitle, setInternalMeetingTitle] = React.useState("")
   const [internalMeetingPlatform, setInternalMeetingPlatform] = React.useState("")
   const [internalMeetingStartsAt, setInternalMeetingStartsAt] = React.useState("")
@@ -1975,6 +1976,18 @@ export default function CommonViewPage() {
       return a.title.localeCompare(b.title)
     })
   }, [internalMeetings])
+  const internalMeetingsVisible = React.useMemo(() => {
+    if (internalMeetingListFilter === "all") return internalMeetingsSorted
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    return internalMeetingsSorted.filter((meeting) => {
+      const meetingDate = getExternalMeetingListDate(meeting)
+      if (!meetingDate) return false
+      return internalMeetingListFilter === "past"
+        ? meetingDate.getTime() < today.getTime()
+        : meetingDate.getTime() >= today.getTime()
+    })
+  }, [getExternalMeetingListDate, internalMeetingListFilter, internalMeetingsSorted])
 
   const meetingStatusDate = React.useMemo(() => {
     if (selectedDates.size === 1) return Array.from(selectedDates)[0]!
@@ -12129,10 +12142,28 @@ export default function CommonViewPage() {
               </div>
             </div>
             <div className="external-meeting-list">
-              <div className="external-meeting-form-title">All internal meetings</div>
-              {internalMeetingsSorted.length ? (
+              <div className="external-meeting-list-header">
+                <div className="external-meeting-form-title">All internal meetings</div>
+                <div className="external-meeting-filter" aria-label="Internal meetings filter">
+                  {([
+                    ["next", "Next"],
+                    ["past", "Past"],
+                    ["all", "All"],
+                  ] as const).map(([value, label]) => (
+                    <button
+                      key={value}
+                      type="button"
+                      className={internalMeetingListFilter === value ? "active" : ""}
+                      onClick={() => setInternalMeetingListFilter(value)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              {internalMeetingsVisible.length ? (
                 <div className="external-meeting-cards">
-                  {internalMeetingsSorted.map((meeting) => {
+                  {internalMeetingsVisible.map((meeting) => {
                     const department = departments.find((d) => d.id === meeting.department_id) || null
                     const owner = meeting.created_by ? userById.get(meeting.created_by) : null
                     const ownerName = owner?.full_name || owner?.username || "Unknown"
@@ -12388,7 +12419,13 @@ export default function CommonViewPage() {
                   })}
                 </div>
               ) : (
-                <div className="external-meeting-empty">No internal meetings yet.</div>
+                <div className="external-meeting-empty">
+                  {internalMeetingListFilter === "past"
+                    ? "No past internal meetings."
+                    : internalMeetingListFilter === "next"
+                      ? "No upcoming internal meetings."
+                      : "No internal meetings yet."}
+                </div>
               )}
             </div>
           </div>
