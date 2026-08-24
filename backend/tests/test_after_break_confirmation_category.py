@@ -4,6 +4,7 @@ from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 from app.services.after_break_report import (
+    DISPLAY_SECTION_TITLES,
     SECTION_TITLES,
     _blue_note_rows,
     _format_confirmation_questions,
@@ -17,17 +18,17 @@ from app.services.meetings_report import _render_ascii_table_html, _table_tone_f
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
-    def test_closing_sections_follow_blue_notes(self) -> None:
+    def test_undiscussed_notes_are_first_in_the_auto_filled_group(self) -> None:
         sections = normalize_after_break_report_sections([])
 
         self.assertEqual(
             [section["title"] for section in sections],
-            SECTION_TITLES,
+            DISPLAY_SECTION_TITLES,
         )
-        self.assertEqual(sections[4]["title"], "DET TE PAKRYERA, 08:00/DEADLINE")
-        self.assertEqual(sections[5]["title"], "DET E KRYERA NE AM")
-        self.assertEqual(sections[6]["title"], "TAK INT/EXT TE PAMBAJTURA")
-        self.assertEqual(sections[9]["title"], "NOTES TE REJA ( NOT DISSCUSED)")
+        self.assertEqual(sections[4]["title"], "NOTES TE REJA ( NOT DISSCUSED)")
+        self.assertEqual(sections[5]["title"], "TAK INT/EXT TE PAMBAJTURA")
+        self.assertEqual(sections[6]["title"], "DET TE PAKRYERA, 08:00/DEADLINE")
+        self.assertEqual(sections[7]["title"], "DET E KRYERA NE AM")
         self.assertEqual(sections[10]["title"], "GA MBYLLJA E DET")
         self.assertEqual(sections[11]["title"], "HV MBYLLJA E DET")
 

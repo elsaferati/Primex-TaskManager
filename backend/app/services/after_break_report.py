@@ -68,6 +68,16 @@ SECTION_TITLES = [
     "HV MBYLLJA E DET",
 ]
 MANUAL_SECTION_TITLES = set(SECTION_TITLES[:4])
+DISPLAY_SECTION_TITLES = [
+    *SECTION_TITLES[:4],
+    SECTION_TITLES[9],  # Undiscussed notes first among auto-filled sections.
+    SECTION_TITLES[6],  # Unheld internal/external meetings immediately after notes.
+    SECTION_TITLES[4],
+    SECTION_TITLES[5],
+    SECTION_TITLES[7],
+    SECTION_TITLES[8],
+    *SECTION_TITLES[10:],
+]
 SECTION_TITLE_ALIASES = {
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[9],
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED?": SECTION_TITLES[9],
@@ -499,7 +509,7 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             extras.append({"title": title, "body": body})
 
     normalized: list[dict[str, str]] = []
-    for title in SECTION_TITLES:
+    for title in DISPLAY_SECTION_TITLES:
         if title in by_title:
             body = by_title[title]
         elif title in MANUAL_SECTION_TITLES:
@@ -755,6 +765,8 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         {"title": SECTION_TITLES[10], "body": ga_section},
         {"title": SECTION_TITLES[11], "body": hv_section},
     ]
+    sections_by_title = {section["title"]: section for section in sections}
+    sections = [sections_by_title[title] for title in DISPLAY_SECTION_TITLES]
     snapshot = {
         "report_day": report_day.isoformat(),
         "counts": {
