@@ -27,11 +27,15 @@ from app.services.primeflow_report import (
     ReportDocument, ReportReminderQuestion, ReportUndiscussedNote, clean_description, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
-from app.services.one_h_ga_attachments import GA_EMAIL, build_ga_only_1h_attachments
+from app.services.one_h_ga_attachments import build_ga_only_1h_attachments
 from app.services.task_strike_events import render_text_for_interval
 
 logger = logging.getLogger(__name__)
 TERMINAL = {"SENT", "ALREADY_SENT"}
+GA_ATTACHMENT_RECIPIENT = os.getenv(
+    "PRIMEFLOW_GA_ATTACHMENT_RECIPIENT",
+    "130primex.eu@gmail.com",
+).strip()
 STRIKE_INTERVAL_STARTS = {
     "10:00": time(8, 0),
     "11:00": time(9, 0),
@@ -53,9 +57,8 @@ STRIKE_INTERVAL_ENDS = {
 def split_ga_recipient_map(
     recipients: dict[str, list[str]],
 ) -> tuple[dict[str, list[str]], dict[str, list[str]] | None]:
-    """Separate GA so recipient-specific attachments cannot leak to others."""
+    """Separate the configured PNG target so attachments cannot leak to others."""
     regular = {key: [] for key in ("to", "cc", "bcc")}
-    ga_found = False
     seen: set[str] = set()
     for key in ("to", "cc", "bcc"):
         for raw in recipients.get(key, []):
@@ -64,10 +67,9 @@ def split_ga_recipient_map(
             if not email or normalized in seen:
                 continue
             seen.add(normalized)
-            if normalized == GA_EMAIL.casefold():
-                ga_found = True
-            else:
-                regular[key].append(email)
+            if normalized == GA_ATTACHMENT_RECIPIENT.casefold():
+                continue
+            regular[key].append(email)
 
     # SMTP requires a To header. This preserves the recipient set if GA was
     # the only To address and the regular message has only CC/BCC recipients.
@@ -76,7 +78,11 @@ def split_ga_recipient_map(
             if regular[key]:
                 regular["to"].append(regular[key].pop(0))
                 break
-    ga = {"to": [GA_EMAIL], "cc": [], "bcc": []} if ga_found else None
+    ga = (
+        {"to": [GA_ATTACHMENT_RECIPIENT], "cc": [], "bcc": []}
+        if GA_ATTACHMENT_RECIPIENT
+        else None
+    )
     return regular, ga
 
 

@@ -23,11 +23,11 @@ def _result(rows):
 
 
 class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
-    def test_ga_is_removed_from_every_regular_recipient_header(self) -> None:
+    def test_temporary_png_recipient_is_removed_from_every_regular_header(self) -> None:
         regular, ga = split_ga_recipient_map({
             "to": ["staff@primexeu.com"],
-            "cc": ["GA@PRIMEXEU.COM", "manager@primexeu.com"],
-            "bcc": ["ga@primexeu.com", "audit@primexeu.com"],
+            "cc": ["130PRIMEX.EU@GMAIL.COM", "manager@primexeu.com"],
+            "bcc": ["130primex.eu@gmail.com", "audit@primexeu.com"],
         })
 
         self.assertEqual(regular, {
@@ -35,11 +35,11 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
             "cc": ["manager@primexeu.com"],
             "bcc": ["audit@primexeu.com"],
         })
-        self.assertEqual(ga, {"to": ["ga@primexeu.com"], "cc": [], "bcc": []})
+        self.assertEqual(ga, {"to": ["130primex.eu@gmail.com"], "cc": [], "bcc": []})
 
-    def test_regular_cc_is_promoted_when_ga_was_the_only_to_recipient(self) -> None:
+    def test_regular_cc_is_promoted_when_png_recipient_was_the_only_to_recipient(self) -> None:
         regular, ga = split_ga_recipient_map({
-            "to": ["ga@primexeu.com"],
+            "to": ["130primex.eu@gmail.com"],
             "cc": ["manager@primexeu.com"],
             "bcc": [],
         })
@@ -47,6 +47,16 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(regular["to"], ["manager@primexeu.com"])
         self.assertEqual(regular["cc"], [])
         self.assertIsNotNone(ga)
+
+    def test_temporary_png_recipient_is_added_even_when_not_in_regular_configuration(self) -> None:
+        regular, ga = split_ga_recipient_map({
+            "to": ["ga@primexeu.com"],
+            "cc": [],
+            "bcc": [],
+        })
+
+        self.assertEqual(regular["to"], ["ga@primexeu.com"])
+        self.assertEqual(ga, {"to": ["130primex.eu@gmail.com"], "cc": [], "bcc": []})
 
     async def test_empty_timetable_still_renders_a_valid_week_png(self) -> None:
         db = SimpleNamespace(execute=AsyncMock(side_effect=[
