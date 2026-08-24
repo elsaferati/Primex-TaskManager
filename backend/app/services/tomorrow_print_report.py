@@ -359,6 +359,8 @@ def _excel_table_attachment(
     task_rows: list[tuple[str, list[dict[str, Any]], bool]],
     meeting_rows: list[tuple[str, list[dict[str, Any]], bool]],
     target_date: date,
+    *,
+    include_meetings: bool = True,
 ) -> tuple[str, bytes, str]:
     """Create the same printable grid as an XLSX attachment for email recipients."""
     workbook = Workbook()
@@ -512,7 +514,8 @@ def _excel_table_attachment(
 
     task_header_row = write_checklists(3)
     next_row = write_section(task_rows, meeting=False, row_number=task_header_row)
-    write_section(meeting_rows, meeting=True, row_number=next_row + 1)
+    if include_meetings:
+        write_section(meeting_rows, meeting=True, row_number=next_row + 1)
     widths = [6, 22, 29, 29, 29, 29, 29, 29]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
@@ -527,10 +530,9 @@ def _excel_table_attachment(
     )
 
 
-async def build_tomorrow_print_report(
-    delivery_date: date, *, include_attachment: bool = False
+async def _build_print_report(
+    target_date: date, *, include_attachment: bool = False, include_meetings: bool = True
 ) -> dict[str, Any]:
-    target_date = next_working_day(delivery_date)
     base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
     if not base_url:
         raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to generate 1H SHTYPI")
@@ -540,11 +542,14 @@ async def build_tomorrow_print_report(
     payload = await client.common_view(target_date)
     items = payload.get("items") or {}
     task_rows = _task_rows(items, target_date)
-    meeting_rows = [(label, values, False) for label, values in _meeting_rows(items, target_date)]
+    meeting_rows = (
+        [(label, values, False) for label, values in _meeting_rows(items, target_date)]
+        if include_meetings else []
+    )
     report_date = target_date.strftime("%d.%m.%Y")
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">1H SHTYPI — {report_date}</div>
-{_one_h_checklists_html()}{_html_table(task_rows, report_date=target_date)}{_html_table(meeting_rows, meeting=True, report_date=target_date)}</body></html>"""
+{_one_h_checklists_html()}{_html_table(task_rows, report_date=target_date)}{_html_table(meeting_rows, meeting=True, report_date=target_date) if include_meetings else ''}</body></html>"""
     plain_rows = [
         f"1H SHTYPI - {report_date}",
         "",
@@ -564,15 +569,16 @@ async def build_tomorrow_print_report(
     ]
     for label, values, personal in task_rows:
         plain_rows.append(f"{label}: " + "; ".join(_task_title(item, personal=personal) for item in values))
-    plain_rows.append("")
-    plain_rows.append("MEETINGS")
-    for label, values, _ in meeting_rows:
-        plain_rows.append(
-            f"{label}: " + "; ".join(
-                f"{_report_text(_first_line(item.get('title')))} {item.get('time') or ''}".strip()
-                for item in values
+    if include_meetings:
+        plain_rows.append("")
+        plain_rows.append("MEETINGS")
+        for label, values, _ in meeting_rows:
+            plain_rows.append(
+                f"{label}: " + "; ".join(
+                    f"{_report_text(_first_line(item.get('title')))} {item.get('time') or ''}".strip()
+                    for item in values
+                )
             )
-        )
     report: dict[str, Any] = {
         "subject": subject_for(target_date),
         "target_date": target_date.isoformat(),
@@ -580,8 +586,29 @@ async def build_tomorrow_print_report(
         "plain_text": "\n".join(plain_rows),
     }
     if include_attachment:
-        report["attachments"] = [_excel_table_attachment(task_rows, meeting_rows, target_date)]
+        report["attachments"] = [
+            _excel_table_attachment(
+                task_rows, meeting_rows, target_date, include_meetings=include_meetings
+            )
+        ]
     return report
+
+
+async def build_tomorrow_print_report(
+    delivery_date: date, *, include_attachment: bool = False
+) -> dict[str, Any]:
+    return await _build_print_report(
+        next_working_day(delivery_date), include_attachment=include_attachment, include_meetings=True
+    )
+
+
+async def build_today_print_report(
+    report_date: date, *, include_attachment: bool = False
+) -> dict[str, Any]:
+    """Build the Common View print template using only today's task rows."""
+    return await _build_print_report(
+        report_date, include_attachment=include_attachment, include_meetings=False
+    )
 
 
 async def send_tomorrow_print_report(report: dict[str, Any], recipients: dict[str, list[str]]) -> dict[str, Any]:

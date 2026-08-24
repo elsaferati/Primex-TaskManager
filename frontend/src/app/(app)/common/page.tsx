@@ -313,6 +313,19 @@ type DiamondItem = {
   date: string
   review: TaskReview
 }
+type PvTaskShiftPreview = {
+  task: Task
+  startDateInLeave: boolean
+  dueDateInLeave: boolean
+}
+type PendingPvTaskShift = {
+  assigneeId: string
+  person: string
+  startDate: string
+  endDate: string
+  moveToDate: string
+  tasks: PvTaskShiftPreview[]
+}
 
 type CommonBucket =
   | "late"
@@ -1359,6 +1372,8 @@ export default function CommonViewPage() {
   const [formTitle, setFormTitle] = React.useState("")
   const [formNote, setFormNote] = React.useState("")
   const [formError, setFormError] = React.useState("")
+  const [pendingPvTaskShift, setPendingPvTaskShift] = React.useState<PendingPvTaskShift | null>(null)
+  const [loadingPvTaskShift, setLoadingPvTaskShift] = React.useState(false)
   const [openInfoId, setOpenInfoId] = React.useState<CommonType | null>(null)
   const [openSwimlaneNoteId, setOpenSwimlaneNoteId] = React.useState<string | null>(null)
   const [openSwimlaneTitleRows, setOpenSwimlaneTitleRows] = React.useState<Set<CommonType>>(
@@ -4962,10 +4977,84 @@ export default function CommonViewPage() {
     setFormTitle("")
     setFormNote("")
     setFormError("")
+    setPendingPvTaskShift(null)
   }
 
-  const submitForm = async (e: React.FormEvent) => {
-    e.preventDefault()
+  const nextWeekdayAfter = (isoDate: string) => {
+    let next = addDays(fromISODate(isoDate), 1)
+    while (next.getDay() === 0 || next.getDay() === 6) {
+      next = addDays(next, 1)
+    }
+    return toISODate(next)
+  }
+
+  const nextWeekdayOptionsAfter = (isoDate: string, count = 5) => {
+    const options: string[] = []
+    let cursor = addDays(fromISODate(isoDate), 1)
+    while (options.length < count) {
+      if (cursor.getDay() !== 0 && cursor.getDay() !== 6) {
+        options.push(toISODate(cursor))
+      }
+      cursor = addDays(cursor, 1)
+    }
+    return options
+  }
+
+  const taskDateInRange = (value: string | null | undefined, startDate: string, endDate: string) => {
+    const parsed = parseDateOnly(value)
+    if (!parsed) return false
+    const iso = toISODate(parsed)
+    return iso >= startDate && iso <= endDate
+  }
+
+  const loadPvAffectedTasks = async (assigneeId: string, startDate: string, endDate: string) => {
+    const params = new URLSearchParams({
+      include_done: "false",
+      assigned_to: assigneeId,
+      include_all_departments: "true",
+    })
+    const res = await apiFetch(`/tasks?${params.toString()}`)
+    if (!res?.ok) throw new Error("failed_to_load_tasks")
+    const taskList = (await res.json()) as Task[]
+    return taskList
+      .map((task) => ({
+        task,
+        startDateInLeave: taskDateInRange(task.start_date, startDate, endDate),
+        dueDateInLeave: taskDateInRange(task.due_date, startDate, endDate),
+      }))
+      .filter((item) => item.startDateInLeave || item.dueDateInLeave)
+  }
+
+  const movePvAffectedTasks = async (pending: PendingPvTaskShift) => {
+    const moveToIso = new Date(`${pending.moveToDate}T00:00:00`).toISOString()
+    const moveToDate = fromISODate(pending.moveToDate)
+    const results = await Promise.all(
+      pending.tasks.map(({ task, startDateInLeave, dueDateInLeave }) => {
+        const dueDate = parseDateOnly(task.due_date)
+        const payload: { start_date?: string; due_date?: string } = {}
+        if (startDateInLeave) payload.start_date = moveToIso
+        if (dueDateInLeave || (startDateInLeave && dueDate && dueDate < moveToDate)) {
+          payload.due_date = moveToIso
+        }
+        if (!payload.start_date && !payload.due_date) return Promise.resolve({ ok: true })
+        return apiFetch(`/tasks/${task.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        })
+      })
+    )
+    return {
+      moved: results.filter((result) => result.ok).length,
+      failed: results.filter((result) => !result.ok).length,
+    }
+  }
+
+  const submitForm = async (
+    e?: React.FormEvent,
+    options: { skipPvTaskPrompt?: boolean; movePvTasks?: boolean } = {}
+  ) => {
+    e?.preventDefault()
     if (isSavingEntry) return
     setIsSavingEntry(true)
 
@@ -5030,6 +5119,33 @@ export default function CommonViewPage() {
         description = description ? `${description}\n${FEEDBACK_DAILY_MARKER}` : FEEDBACK_DAILY_MARKER
       }
 
+      if (
+        formType === "leave" &&
+        formFullDay &&
+        assignedUserId &&
+        formDate &&
+        !options.skipPvTaskPrompt
+      ) {
+        const endDate = formEndDate || formDate
+        setLoadingPvTaskShift(true)
+        try {
+          const affectedTasks = await loadPvAffectedTasks(assignedUserId, formDate, endDate)
+          if (affectedTasks.length > 0) {
+            setPendingPvTaskShift({
+              assigneeId: assignedUserId,
+              person: formPerson || "Selected person",
+              startDate: formDate,
+              endDate,
+              moveToDate: nextWeekdayAfter(endDate),
+              tasks: affectedTasks,
+            })
+            return
+          }
+        } finally {
+          setLoadingPvTaskShift(false)
+        }
+      }
+
       if (isAllUsersLeave) {
         const activeUsers = users.filter((u) => u.is_active)
         const descriptionWithMarker = description
@@ -5072,6 +5188,14 @@ export default function CommonViewPage() {
         })
 
         if (res.ok) {
+          if (options.movePvTasks && pendingPvTaskShift) {
+            const result = await movePvAffectedTasks(pendingPvTaskShift)
+            if (result.failed > 0) {
+              toast.error(`${result.failed} task${result.failed === 1 ? "" : "s"} could not be moved.`)
+            } else if (result.moved > 0) {
+              toast.success(`${result.moved} task${result.moved === 1 ? "" : "s"} moved to ${formatDateHuman(pendingPvTaskShift.moveToDate)}.`)
+            }
+          }
           // Trigger a reload
           window.location.reload()
         }
@@ -10311,6 +10435,22 @@ export default function CommonViewPage() {
           margin: 0;
           font-weight: 700;
         }
+        .modal-header .btn-outline {
+          background: #ffffff;
+          color: #0f172a;
+          border-color: #cbd5e1;
+          box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+        }
+        .modal-header .btn-outline:hover:not(:disabled) {
+          background: #f8fafc;
+          border-color: #94a3b8;
+        }
+        .modal-header .btn-outline:disabled {
+          color: #94a3b8;
+          background: #f8fafc;
+          border-color: #e2e8f0;
+          opacity: 1;
+        }
         .modal-body { 
           padding: 28px; 
         }
@@ -14340,7 +14480,7 @@ export default function CommonViewPage() {
                     Cancel
                   </button>
                   <button className="btn-primary" type="submit" disabled={isSavingEntry}>
-                    {isSavingEntry ? "Saving..." : "Save"}
+                    {isSavingEntry ? (loadingPvTaskShift ? "Checking tasks..." : "Saving...") : "Save"}
                   </button>
                 </div>
               </form>
@@ -14348,6 +14488,105 @@ export default function CommonViewPage() {
           </div>
         </div>
       )}
+      {pendingPvTaskShift ? (
+        <div className="modal">
+          <div className="modal-backdrop" />
+          <div className="modal-card">
+            <div className="modal-header">
+              <h4>Move tasks for PV/FESTE</h4>
+              <button
+                className="btn-outline"
+                type="button"
+                disabled={isSavingEntry}
+                onClick={() => setPendingPvTaskShift(null)}
+              >
+                Close
+              </button>
+            </div>
+            <div className="modal-body">
+              <div className="space-y-3">
+                <p className="text-sm text-slate-700">
+                  {pendingPvTaskShift.person} has full-day PV/FESTE from{" "}
+                  <strong>{formatDateHuman(pendingPvTaskShift.startDate)}</strong> to{" "}
+                  <strong>{formatDateHuman(pendingPvTaskShift.endDate)}</strong>. These open tasks have start or due dates in that range.
+                </p>
+                <div className="form-row">
+                  <label htmlFor="pv-move-date">Move to weekday</label>
+                  <select
+                    id="pv-move-date"
+                    className="input"
+                    value={pendingPvTaskShift.moveToDate}
+                    onChange={(event) =>
+                      setPendingPvTaskShift((current) =>
+                        current ? { ...current, moveToDate: event.target.value } : current
+                      )
+                    }
+                    disabled={isSavingEntry}
+                  >
+                    {nextWeekdayOptionsAfter(pendingPvTaskShift.endDate).map((iso) => (
+                      <option key={iso} value={iso}>
+                        {formatDateHuman(iso)}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="max-h-[320px] overflow-auto rounded-md border">
+                  <table className="w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-100 text-left">
+                        <th className="px-3 py-2">Task</th>
+                        <th className="px-3 py-2">Start</th>
+                        <th className="px-3 py-2">Due</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {pendingPvTaskShift.tasks.map(({ task, startDateInLeave, dueDateInLeave }) => (
+                        <tr key={task.id} className="border-t">
+                          <td className="px-3 py-2">
+                            <div className="font-medium">{task.title}</div>
+                            {task.assignees?.length ? (
+                              <div className="text-xs text-slate-500">
+                                {task.assignees.map((assignee) => assignee.full_name || assignee.username || assignee.email || "Unknown").join(", ")}
+                              </div>
+                            ) : null}
+                          </td>
+                          <td className={["px-3 py-2", startDateInLeave ? "font-semibold text-red-700" : ""].filter(Boolean).join(" ")}>
+                            {task.start_date ? formatDateHuman(toISODate(parseDateOnly(task.start_date) || new Date(task.start_date))) : "-"}
+                          </td>
+                          <td className={["px-3 py-2", dueDateInLeave ? "font-semibold text-red-700" : ""].filter(Boolean).join(" ")}>
+                            {task.due_date ? formatDateHuman(toISODate(parseDateOnly(task.due_date) || new Date(task.due_date))) : "-"}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <div className="modal-footer">
+                  <button
+                    className="btn-outline"
+                    type="button"
+                    disabled={isSavingEntry}
+                    onClick={() => {
+                      setPendingPvTaskShift(null)
+                      void submitForm(undefined, { skipPvTaskPrompt: true })
+                    }}
+                  >
+                    Save PV only
+                  </button>
+                  <button
+                    className="btn-primary"
+                    type="button"
+                    disabled={isSavingEntry}
+                    onClick={() => void submitForm(undefined, { skipPvTaskPrompt: true, movePvTasks: true })}
+                  >
+                    {isSavingEntry ? "Saving..." : "Yes, move tasks"}
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      ) : null}
       <TaskReviewDialog
         row={commonReviewRow}
         open={commonReviewOpen}

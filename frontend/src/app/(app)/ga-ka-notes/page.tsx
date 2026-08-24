@@ -115,9 +115,52 @@ type NoteTaskInfo = {
   taskUpdatedAt?: string | null
   assigneeStates: Record<string, GaAssigneeTaskState>
 }
+type CommonLeaveItem = {
+  entryId?: string
+  person: string
+  startDate: string
+  endDate: string
+  fullDay: boolean
+  isAllUsers?: boolean
+  userId?: string | null
+}
+type CommonViewLeavePayload = {
+  items?: {
+    leave?: CommonLeaveItem[]
+  }
+}
 
 const pad2 = (value: number) => String(value).padStart(2, "0")
 const toISODate = (value: Date) => `${value.getFullYear()}-${pad2(value.getMonth() + 1)}-${pad2(value.getDate())}`
+
+const getMonday = (value: Date) => {
+  const date = new Date(value.getFullYear(), value.getMonth(), value.getDate())
+  const day = date.getDay()
+  date.setDate(date.getDate() - (day === 0 ? 6 : day - 1))
+  return date
+}
+
+const addDays = (isoDate: string, days: number) => {
+  const date = new Date(`${isoDate}T12:00:00`)
+  date.setDate(date.getDate() + days)
+  return toISODate(date)
+}
+
+const dateRangeKey = (startIso: string, endIso: string) => {
+  const dates: string[] = []
+  for (let date = startIso; date <= endIso; date = addDays(date, 1)) {
+    dates.push(date)
+  }
+  return dates.join("|")
+}
+
+const formatISODateDMY = (value?: string | null) => {
+  if (!value) return ""
+  const iso = value.slice(0, 10)
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso)
+  if (!match) return value
+  return `${match[3]}/${match[2]}/${match[1]}`
+}
 
 function taskDateKey(value?: string | null) {
   if (!value) return null
@@ -1055,6 +1098,7 @@ export default function GaKaNotesPage() {
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
+  const [taskDateLeaveItems, setTaskDateLeaveItems] = React.useState<CommonLeaveItem[]>([])
   const [noteTaskInfo, setNoteTaskInfo] = React.useState<Map<string, NoteTaskInfo>>(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
   const [editContent, setEditContent] = React.useState("")
@@ -2233,6 +2277,22 @@ export default function GaKaNotesPage() {
       toast.error("Select at least one assignee before creating the task")
       return
     }
+    const selectedPvAssignees = taskAssigneeIds
+      .map((assigneeId) => {
+        const leave = taskPvByAssigneeId.get(assigneeId)
+        if (!leave) return null
+        const person = taskAssigneeOptions.find((item) => item.id === assigneeId)
+        const label = taskAssigneeLabel(person, assigneeId)
+        const until = formatISODateDMY(leave.endDate)
+        return until ? `${label} is in PV until ${until}` : `${label} is in PV`
+      })
+      .filter((item): item is string => Boolean(item))
+    if (selectedPvAssignees.length > 0) {
+      toast.warning("Selected assignee is in PV", {
+        description: selectedPvAssignees.join("; "),
+        duration: 8000,
+      })
+    }
     const effectiveDepartments =
       taskDepartmentIds.length > 0
         ? taskDepartmentIds
@@ -2443,6 +2503,123 @@ export default function GaKaNotesPage() {
     return []
   }, [taskDepartmentIds, taskDialogNote?.department_id])
   const taskAssigneeOptions = users
+  const taskSelectedDateRange = React.useMemo(() => {
+    const dates = [taskStartDate, taskDueDate].filter(Boolean).sort()
+    if (dates.length === 0) return null
+    return {
+      start: dates[0],
+      end: dates[dates.length - 1],
+      key: dateRangeKey(dates[0], dates[dates.length - 1]),
+    }
+  }, [taskDueDate, taskStartDate])
+  const taskSelectedWeekStartISOs = React.useMemo(() => {
+    if (!taskSelectedDateRange) return null
+    const weekStarts = new Set<string>()
+    for (const iso of taskSelectedDateRange.key.split("|").filter(Boolean)) {
+      weekStarts.add(toISODate(getMonday(new Date(`${iso}T12:00:00`))))
+    }
+    return Array.from(weekStarts)
+  }, [taskSelectedDateRange])
+  const taskPvAssigneeIds = React.useMemo(() => {
+    if (!taskSelectedDateRange) return new Set<string>()
+    const result = new Set<string>()
+    const selectedDates = taskSelectedDateRange.key.split("|").filter(Boolean)
+    const allUsersOnLeave = taskDateLeaveItems.some((item) =>
+      item.fullDay &&
+      item.isAllUsers &&
+      selectedDates.some((iso) => iso >= item.startDate && iso <= item.endDate)
+    )
+    if (allUsersOnLeave) {
+      taskAssigneeOptions.forEach((person) => {
+        if (person.id) result.add(person.id)
+      })
+    }
+    for (const item of taskDateLeaveItems) {
+      if (!item.fullDay || !item.userId) continue
+      if (selectedDates.some((iso) => iso >= item.startDate && iso <= item.endDate)) {
+        result.add(item.userId)
+      }
+    }
+    return result
+  }, [taskAssigneeOptions, taskDateLeaveItems, taskSelectedDateRange])
+  const taskPvByAssigneeId = React.useMemo(() => {
+    if (!taskSelectedDateRange) return new Map<string, CommonLeaveItem>()
+    const selectedDates = taskSelectedDateRange.key.split("|").filter(Boolean)
+    const result = new Map<string, CommonLeaveItem>()
+    const allUsersLeave = taskDateLeaveItems
+      .filter((item) =>
+        item.fullDay &&
+        item.isAllUsers &&
+        selectedDates.some((iso) => iso >= item.startDate && iso <= item.endDate)
+      )
+      .sort((a, b) => b.endDate.localeCompare(a.endDate))[0]
+    if (allUsersLeave) {
+      taskAssigneeOptions.forEach((person) => {
+        if (person.id) result.set(person.id, allUsersLeave)
+      })
+    }
+    for (const item of taskDateLeaveItems) {
+      if (!item.fullDay || !item.userId) continue
+      if (!selectedDates.some((iso) => iso >= item.startDate && iso <= item.endDate)) continue
+      const existing = result.get(item.userId)
+      if (!existing || item.endDate > existing.endDate) {
+        result.set(item.userId, item)
+      }
+    }
+    return result
+  }, [taskAssigneeOptions, taskDateLeaveItems, taskSelectedDateRange])
+  const taskAssigneeLabel = React.useCallback(
+    (person?: Pick<UserLookup, "id" | "full_name" | "username"> | null, fallbackId?: string) => {
+      const id = person?.id || fallbackId || ""
+      return person?.full_name || person?.username || fallbackId || id
+    },
+    []
+  )
+  const taskAssigneePvBadge = React.useCallback(
+    (userId?: string | null) =>
+      userId && taskPvAssigneeIds.has(userId) ? (
+        <span
+          className="ml-1 inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-red-600 text-[9px] font-bold leading-none text-white"
+          title={`PV until ${formatISODateDMY(taskPvByAssigneeId.get(userId)?.endDate)}`}
+        >
+          PV
+        </span>
+      ) : null,
+    [taskPvAssigneeIds, taskPvByAssigneeId]
+  )
+
+  React.useEffect(() => {
+    if (!taskDialogNoteId || !taskSelectedWeekStartISOs?.length) {
+      setTaskDateLeaveItems([])
+      return
+    }
+
+    let cancelled = false
+    const loadTaskDateLeave = async () => {
+      const responses = await Promise.all(
+        taskSelectedWeekStartISOs.map((weekStartIso) => {
+          const params = new URLSearchParams({
+            week_start: weekStartIso,
+            include: "entries",
+            include_all_departments: "true",
+          })
+          return apiFetch(`/common-view?${params.toString()}`)
+        })
+      )
+      if (responses.some((res) => !res?.ok)) {
+        if (!cancelled) setTaskDateLeaveItems([])
+        return
+      }
+      const payloads = await Promise.all(responses.map(async (res) => (await res.json()) as CommonViewLeavePayload))
+      const leaveItems = payloads.flatMap((payload) => payload.items?.leave ?? [])
+      if (!cancelled) setTaskDateLeaveItems(leaveItems)
+    }
+
+    void loadTaskDateLeave()
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, taskDialogNoteId, taskSelectedWeekStartISOs])
 
   // Projects filtered by the department chosen in the task dialog
   const primaryDepartmentId = effectiveTaskDepartmentIds[0] || null
@@ -4241,7 +4418,7 @@ export default function GaKaNotesPage() {
                     ) : (
                       taskAssigneeIds.map((id) => {
                         const person = taskAssigneeOptions.find((p) => p.id === id)
-                        const label = person?.full_name || person?.username || id
+                        const label = taskAssigneeLabel(person, id)
                         return (
                           <button
                             key={id}
@@ -4251,7 +4428,8 @@ export default function GaKaNotesPage() {
                               setTaskAssigneeIds((prev) => prev.filter((item) => item !== id))
                             }
                           >
-                            {label}
+                            <span>{label}</span>
+                            {taskAssigneePvBadge(id)}
                             <span className="text-slate-500">×</span>
                           </button>
                         )
@@ -4285,7 +4463,10 @@ export default function GaKaNotesPage() {
                         .filter((person) => person.id && !taskAssigneeIds.includes(person.id))
                         .map((person) => (
                           <SelectItem key={person.id} value={person.id}>
-                            {person.full_name || person.username || person.id}
+                            <span className="flex items-center gap-1">
+                              <span>{taskAssigneeLabel(person, person.id)}</span>
+                              {taskAssigneePvBadge(person.id)}
+                            </span>
                           </SelectItem>
                         ))}
                     </SelectContent>
