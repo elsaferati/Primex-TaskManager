@@ -6,6 +6,8 @@ import uuid
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+from fastapi import HTTPException
+
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://postgres:postgres@localhost/primex_test")
 os.environ.setdefault("JWT_SECRET", "test-secret")
 
@@ -128,6 +130,42 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(meetings), 1)
         self.assertEqual(meetings[0].meeting_type, "internal")
         self.assertIsNone(result.paired_internal_meeting)
+
+    async def test_external_meeting_can_skip_internal_meeting(self) -> None:
+        department_id = uuid.uuid4()
+        external_starts_at = datetime(2026, 8, 25, 14, 0, tzinfo=timezone.utc)
+        payload = MeetingCreate(
+            title="Customer review",
+            starts_at=external_starts_at,
+            internal_starts_at=datetime(2026, 8, 25, 12, 30, tzinfo=timezone.utc),
+            create_internal_meeting=False,
+            meeting_type="external",
+            department_id=department_id,
+        )
+        user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
+        db = _FakeDb()
+
+        result = await create_meeting(payload=payload, db=db, user=user)
+
+        meetings = [value for value in db.added if isinstance(value, Meeting)]
+        self.assertEqual(len(meetings), 1)
+        self.assertEqual(meetings[0].meeting_type, "external")
+        self.assertIsNone(result.paired_internal_meeting)
+
+    async def test_external_meeting_requires_internal_time_when_pair_is_enabled(self) -> None:
+        payload = MeetingCreate(
+            title="Customer review",
+            starts_at=datetime(2026, 8, 25, 14, 0, tzinfo=timezone.utc),
+            create_internal_meeting=True,
+            meeting_type="external",
+            department_id=uuid.uuid4(),
+        )
+        user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
+
+        with self.assertRaises(HTTPException) as raised:
+            await create_meeting(payload=payload, db=_FakeDb(), user=user)
+
+        self.assertEqual(raised.exception.status_code, 400)
 
 
 if __name__ == "__main__":

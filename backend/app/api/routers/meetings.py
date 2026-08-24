@@ -165,6 +165,21 @@ async def create_meeting(
     user=Depends(get_current_user),
 ) -> MeetingCreateOut:
     ensure_department_access(user, payload.department_id)
+    requested_meeting_type = payload.meeting_type or "external"
+    should_create_internal_meeting = (
+        payload.create_internal_meeting
+        if payload.create_internal_meeting is not None
+        else payload.internal_starts_at is not None
+    )
+    if (
+        requested_meeting_type == "external"
+        and should_create_internal_meeting
+        and payload.internal_starts_at is None
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Internal meeting date and time are required when creating TAK INT",
+        )
     if payload.project_id is not None:
         project = (await db.execute(select(Project).where(Project.id == payload.project_id))).scalar_one_or_none()
         if project is None:
@@ -190,7 +205,7 @@ async def create_meeting(
         platform=payload.platform,
         starts_at=payload.starts_at,
         meeting_url=payload.meeting_url,
-        meeting_type=payload.meeting_type or "external",
+        meeting_type=requested_meeting_type,
         recurrence_type=payload.recurrence_type,
         recurrence_days_of_week=payload.recurrence_days_of_week,
         recurrence_days_of_month=payload.recurrence_days_of_month,
@@ -202,7 +217,11 @@ async def create_meeting(
     await db.flush()  # Flush to get the meeting ID
 
     paired_internal_meeting: Meeting | None = None
-    if meeting.meeting_type == "external" and payload.internal_starts_at is not None:
+    if (
+        meeting.meeting_type == "external"
+        and should_create_internal_meeting
+        and payload.internal_starts_at is not None
+    ):
         paired_internal_meeting = Meeting(
             title=payload.title,
             platform=payload.platform,

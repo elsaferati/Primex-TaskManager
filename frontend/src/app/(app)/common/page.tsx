@@ -1393,6 +1393,11 @@ export default function CommonViewPage() {
   const [externalMeetingStartTime, setExternalMeetingStartTime] = React.useState("")
   const [externalMeetingInternalStartsAt, setExternalMeetingInternalStartsAt] = React.useState("")
   const [externalMeetingInternalStartTime, setExternalMeetingInternalStartTime] = React.useState("")
+  const [externalMeetingCreateInternal, setExternalMeetingCreateInternal] = React.useState(true)
+  const [externalMeetingParticipantIds, setExternalMeetingParticipantIds] = React.useState<string[]>([])
+  const [externalMeetingPersonsOpen, setExternalMeetingPersonsOpen] = React.useState(false)
+  const [externalMeetingPersonSearch, setExternalMeetingPersonSearch] = React.useState("")
+  const externalMeetingPersonsRef = React.useRef<HTMLDivElement | null>(null)
   const externalMeetingInternalStartsAtEditedRef = React.useRef(false)
   const [externalMeetingRecurrenceType, setExternalMeetingRecurrenceType] = React.useState<"none" | "weekly" | "monthly" | "yearly">("none")
   const [externalMeetingRecurrenceDaysOfWeek, setExternalMeetingRecurrenceDaysOfWeek] = React.useState<number[]>([])
@@ -1413,6 +1418,10 @@ export default function CommonViewPage() {
   const [internalMeetingRecurrenceMonth, setInternalMeetingRecurrenceMonth] = React.useState("1")
   const [internalMeetingRecurrenceDay, setInternalMeetingRecurrenceDay] = React.useState("1")
   const [internalMeetingDepartmentId, setInternalMeetingDepartmentId] = React.useState("")
+  const [internalMeetingParticipantIds, setInternalMeetingParticipantIds] = React.useState<string[]>([])
+  const [internalMeetingPersonsOpen, setInternalMeetingPersonsOpen] = React.useState(false)
+  const [internalMeetingPersonSearch, setInternalMeetingPersonSearch] = React.useState("")
+  const internalMeetingPersonsRef = React.useRef<HTMLDivElement | null>(null)
   const [meetingOccurrenceStatuses, setMeetingOccurrenceStatuses] = React.useState<Map<string, MeetingOccurrenceStatus>>(new Map())
   const [savingMeetingStatusKey, setSavingMeetingStatusKey] = React.useState<string | null>(null)
   const syncCommonMeetingBucket = React.useCallback(
@@ -2274,8 +2283,10 @@ export default function CommonViewPage() {
   }, [externalMeetingsOpen])
 
   const hasExternalMeetingTimes = externalMeetingRecurrenceType === "none"
-    ? Boolean(externalMeetingStartsAt) && Boolean(externalMeetingInternalStartsAt) && Boolean(externalMeetingInternalStartTime)
-    : Boolean(externalMeetingStartTime) && Boolean(externalMeetingInternalStartTime)
+    ? Boolean(externalMeetingStartsAt)
+      && (!externalMeetingCreateInternal || (Boolean(externalMeetingInternalStartsAt) && Boolean(externalMeetingInternalStartTime)))
+    : Boolean(externalMeetingStartTime)
+      && (!externalMeetingCreateInternal || Boolean(externalMeetingInternalStartTime))
   const canCreateExternalMeeting =
     Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId) && hasExternalMeetingTimes
   const canSelectExternalMeetingAgentTestTask =
@@ -5202,17 +5213,27 @@ export default function CommonViewPage() {
       let startsAt: string | null = null
       let internalStartsAt: string | null = null
       if (externalMeetingRecurrenceType === "none") {
-        if (!externalMeetingStartsAt || !externalMeetingInternalStartsAt || !externalMeetingInternalStartTime) {
-          toast.error("Add the date and time for both TAK EXT and TAK INT.")
+        if (!externalMeetingStartsAt) {
+          toast.error("Add the date and time for TAK EXT.")
+          return
+        }
+        if (externalMeetingCreateInternal && (!externalMeetingInternalStartsAt || !externalMeetingInternalStartTime)) {
+          toast.error("Add the date and time for TAK INT.")
           return
         }
         startsAt = new Date(externalMeetingStartsAt).toISOString()
-        internalStartsAt = new Date(
-          `${externalMeetingInternalStartsAt}T${externalMeetingInternalStartTime}`
-        ).toISOString()
+        if (externalMeetingCreateInternal) {
+          internalStartsAt = new Date(
+            `${externalMeetingInternalStartsAt}T${externalMeetingInternalStartTime}`
+          ).toISOString()
+        }
       } else {
-        if (!externalMeetingStartTime || !externalMeetingInternalStartTime) {
-          toast.error("Time is required for both TAK EXT and TAK INT.")
+        if (!externalMeetingStartTime) {
+          toast.error("Time is required for TAK EXT.")
+          return
+        }
+        if (externalMeetingCreateInternal && !externalMeetingInternalStartTime) {
+          toast.error("Time is required for TAK INT.")
           return
         }
         if (externalMeetingRecurrenceType === "weekly" && externalMeetingRecurrenceDaysOfWeek.length === 0) {
@@ -5247,30 +5268,33 @@ export default function CommonViewPage() {
           return
         }
         startsAt = next.toISOString()
-        const internalNext = computeNextOccurrenceDate({
-          recurrenceType: externalMeetingRecurrenceType,
-          daysOfWeek: externalMeetingRecurrenceDaysOfWeek,
-          daysOfMonth:
-            externalMeetingRecurrenceType === "yearly"
-              ? [Number(externalMeetingRecurrenceDay)]
-              : externalMeetingRecurrenceDaysOfMonth,
-          timeValue: externalMeetingInternalStartTime,
-          monthOfYear:
-            externalMeetingRecurrenceType === "yearly"
-              ? Math.max(0, Math.min(11, Number(externalMeetingRecurrenceMonth) - 1))
-              : undefined,
-        })
-        if (!internalNext) {
-          toast.error("Failed to compute the TAK INT occurrence.")
-          return
+        if (externalMeetingCreateInternal) {
+          const internalNext = computeNextOccurrenceDate({
+            recurrenceType: externalMeetingRecurrenceType,
+            daysOfWeek: externalMeetingRecurrenceDaysOfWeek,
+            daysOfMonth:
+              externalMeetingRecurrenceType === "yearly"
+                ? [Number(externalMeetingRecurrenceDay)]
+                : externalMeetingRecurrenceDaysOfMonth,
+            timeValue: externalMeetingInternalStartTime,
+            monthOfYear:
+              externalMeetingRecurrenceType === "yearly"
+                ? Math.max(0, Math.min(11, Number(externalMeetingRecurrenceMonth) - 1))
+                : undefined,
+          })
+          if (!internalNext) {
+            toast.error("Failed to compute the TAK INT occurrence.")
+            return
+          }
+          internalStartsAt = internalNext.toISOString()
         }
-        internalStartsAt = internalNext.toISOString()
       }
       const payload = {
         title: externalMeetingTitle.trim(),
         platform: externalMeetingPlatform.trim() || null,
         starts_at: startsAt,
         internal_starts_at: internalStartsAt,
+        create_internal_meeting: externalMeetingCreateInternal,
         meeting_type: "external",
         recurrence_type: externalMeetingRecurrenceType === "none" ? null : externalMeetingRecurrenceType,
         recurrence_days_of_week:
@@ -5285,6 +5309,7 @@ export default function CommonViewPage() {
               : null,
         department_id: departmentId,
         project_id: null,
+        participant_ids: externalMeetingParticipantIds,
       }
       const res = await apiFetch("/meetings", {
         method: "POST",
@@ -5297,7 +5322,7 @@ export default function CommonViewPage() {
       }
       const created = (await res.json()) as Meeting
       const pairedInternalMeeting = created.paired_internal_meeting || null
-      if (!pairedInternalMeeting) {
+      if (externalMeetingCreateInternal && !pairedInternalMeeting) {
         toast.error("The TAK EXT meeting was created, but TAK INT was not returned.")
         return
       }
@@ -5318,11 +5343,15 @@ export default function CommonViewPage() {
         }
       }
       setExternalMeetings((prev) => [meetingForList, ...prev])
-      setInternalMeetings((prev) => [pairedInternalMeeting, ...prev])
+      if (pairedInternalMeeting) {
+        setInternalMeetings((prev) => [pairedInternalMeeting, ...prev])
+      }
       COMMON_VIEW_CACHE.clear()
       const ownerName = user?.full_name || user?.username || user?.email || "Unknown"
       const mappedExternal = mapMeetingToCommonItem(meetingForList, "external", ownerName)
-      const mappedInternal = mapMeetingToCommonItem(pairedInternalMeeting, "internal", ownerName)
+      const mappedInternal = pairedInternalMeeting
+        ? mapMeetingToCommonItem(pairedInternalMeeting, "internal", ownerName)
+        : null
       if (mappedExternal || mappedInternal) {
         setCommonData((prev) => ({
           ...prev,
@@ -5336,6 +5365,10 @@ export default function CommonViewPage() {
       setExternalMeetingStartTime("")
       setExternalMeetingInternalStartsAt("")
       setExternalMeetingInternalStartTime("")
+      setExternalMeetingCreateInternal(true)
+      setExternalMeetingParticipantIds([])
+      setExternalMeetingPersonsOpen(false)
+      setExternalMeetingPersonSearch("")
       externalMeetingInternalStartsAtEditedRef.current = false
       setExternalMeetingRecurrenceType("none")
       setExternalMeetingRecurrenceDaysOfWeek([])
@@ -5344,7 +5377,7 @@ export default function CommonViewPage() {
       setExternalMeetingRecurrenceDay("1")
       setExternalMeetingCreateAgentTestTask(false)
       if (!shouldCreateAgentTestTask) {
-        toast.success("TAK EXT and TAK INT created.")
+        toast.success(externalMeetingCreateInternal ? "TAK EXT and TAK INT created." : "TAK EXT created.")
       }
       // Reset checklist after successful creation
       if (externalMeetingChecklist?.items) {
@@ -5365,6 +5398,8 @@ export default function CommonViewPage() {
     externalMeetingStartTime,
     externalMeetingInternalStartsAt,
     externalMeetingInternalStartTime,
+    externalMeetingCreateInternal,
+    externalMeetingParticipantIds,
     externalMeetingRecurrenceType,
     externalMeetingRecurrenceDaysOfWeek,
     externalMeetingRecurrenceDaysOfMonth,
@@ -5698,6 +5733,7 @@ export default function CommonViewPage() {
               : null,
         department_id: departmentId,
         project_id: null,
+        participant_ids: internalMeetingParticipantIds,
       }
       const res = await apiFetch("/meetings", {
         method: "POST",
@@ -5728,6 +5764,9 @@ export default function CommonViewPage() {
       setInternalMeetingRecurrenceDaysOfMonth([])
       setInternalMeetingRecurrenceMonth("1")
       setInternalMeetingRecurrenceDay("1")
+      setInternalMeetingParticipantIds([])
+      setInternalMeetingPersonsOpen(false)
+      setInternalMeetingPersonSearch("")
     } finally {
       setCreatingInternalMeeting(false)
     }
@@ -5743,6 +5782,7 @@ export default function CommonViewPage() {
     internalMeetingRecurrenceMonth,
     internalMeetingRecurrenceDay,
     internalMeetingDepartmentId,
+    internalMeetingParticipantIds,
     user?.department_id,
     user?.email,
     user?.full_name,
@@ -6105,6 +6145,50 @@ export default function CommonViewPage() {
       document.removeEventListener("keydown", handleKeyDown)
     }
   }, [commonUserMenuOpen])
+
+  React.useEffect(() => {
+    if (!externalMeetingPersonsOpen) return
+    const closePersonsMenu = () => {
+      setExternalMeetingPersonsOpen(false)
+      setExternalMeetingPersonSearch("")
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const picker = externalMeetingPersonsRef.current
+      if (!picker || picker.contains(event.target as Node)) return
+      closePersonsMenu()
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closePersonsMenu()
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [externalMeetingPersonsOpen])
+
+  React.useEffect(() => {
+    if (!internalMeetingPersonsOpen) return
+    const closePersonsMenu = () => {
+      setInternalMeetingPersonsOpen(false)
+      setInternalMeetingPersonSearch("")
+    }
+    const handlePointerDown = (event: MouseEvent) => {
+      const picker = internalMeetingPersonsRef.current
+      if (!picker || picker.contains(event.target as Node)) return
+      closePersonsMenu()
+    }
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") closePersonsMenu()
+    }
+    document.addEventListener("mousedown", handlePointerDown)
+    document.addEventListener("keydown", handleKeyDown)
+    return () => {
+      document.removeEventListener("mousedown", handlePointerDown)
+      document.removeEventListener("keydown", handleKeyDown)
+    }
+  }, [internalMeetingPersonsOpen])
 
 
   const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
@@ -7851,16 +7935,22 @@ export default function CommonViewPage() {
         }
         .external-meetings-grid {
           display: grid;
-          /* Make the left panel wider so checklist titles have room */
           grid-template-columns: minmax(360px, 640px) minmax(0, 1fr);
-          gap: 16px;
+          gap: 18px;
           margin-top: 14px;
+        }
+        .external-meeting-form {
+          align-self: start;
+          padding: 14px;
+          border: 1px solid #e2e8f0;
+          border-radius: 12px;
+          background: #f8fafc;
         }
         .external-meeting-form-title {
           font-size: 13px;
           font-weight: 700;
           color: #0f172a;
-          margin-bottom: 8px;
+          margin-bottom: 12px;
         }
         .external-meeting-list-header {
           display: flex;
@@ -7905,10 +7995,226 @@ export default function CommonViewPage() {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 10px;
+          align-items: start;
+        }
+        .external-meeting-field-stack {
+          min-width: 0;
+          display: grid;
+          gap: 5px;
+        }
+        .external-create-internal-option {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          padding: 9px 11px;
+          border: 1px solid #dbe4f0;
+          border-radius: 9px;
+          background: #ffffff;
+          color: #334155;
+          cursor: pointer;
+        }
+        .external-create-internal-option input {
+          width: 16px;
+          height: 16px;
+          margin: 0;
+          accent-color: #2563eb;
+        }
+        .external-create-internal-copy {
+          min-width: 0;
+          display: grid;
+          gap: 1px;
+          flex: 1;
+        }
+        .external-create-internal-copy strong {
+          color: #0f172a;
+          font-size: 12px;
+        }
+        .external-create-internal-copy small {
+          color: #64748b;
+          font-size: 11px;
+        }
+        .external-create-internal-status {
+          flex: 0 0 auto;
+          padding: 3px 8px;
+          border-radius: 999px;
+          background: #e0ecff;
+          color: #1d4ed8;
+          font-size: 11px;
+          font-weight: 700;
+        }
+        .external-create-internal-status.off {
+          background: #f1f5f9;
+          color: #64748b;
         }
         .external-meeting-hint {
           font-size: 12px;
           color: #64748b;
+        }
+        .external-person-picker {
+          position: relative;
+        }
+        .external-person-picker-trigger {
+          width: 100%;
+          min-height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          padding: 7px 11px;
+          border: 1px solid #cbd5e1;
+          border-radius: 8px;
+          background: #ffffff;
+          color: #0f172a;
+          cursor: pointer;
+          font-size: 12px;
+          font-weight: 600;
+        }
+        .external-person-picker-trigger:hover,
+        .external-person-picker-trigger.active {
+          border-color: #3b82f6;
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        }
+        .external-person-picker-count {
+          min-width: 22px;
+          height: 20px;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          border-radius: 999px;
+          background: #eff6ff;
+          color: #2563eb;
+          font-size: 11px;
+          font-weight: 700;
+        }
+        .external-person-picker-menu {
+          position: absolute;
+          top: calc(100% + 6px);
+          left: 0;
+          right: 0;
+          z-index: 250;
+          padding: 10px;
+          border: 1px solid #cbd5e1;
+          border-radius: 10px;
+          background: #ffffff;
+          box-shadow: 0 14px 32px rgba(15, 23, 42, 0.18);
+        }
+        .external-person-picker-search {
+          width: 100%;
+          height: 34px;
+          padding: 7px 10px;
+          border: 1px solid #dbe4f0;
+          border-radius: 7px;
+          background: #f8fafc;
+          color: #0f172a;
+          font-size: 12px;
+          outline: none;
+        }
+        .external-person-picker-search:focus {
+          border-color: #3b82f6;
+          background: #ffffff;
+          box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.1);
+        }
+        .external-person-picker-list {
+          max-height: 180px;
+          overflow-y: auto;
+          margin-top: 7px;
+          padding-right: 3px;
+        }
+        .external-person-picker-option {
+          display: flex;
+          align-items: center;
+          gap: 9px;
+          padding: 7px 8px;
+          border-radius: 7px;
+          color: #334155;
+          cursor: pointer;
+          font-size: 12px;
+        }
+        .external-person-picker-option:hover {
+          background: #f1f5f9;
+        }
+        .external-person-picker-option input {
+          width: 15px;
+          height: 15px;
+          margin: 0;
+          accent-color: #2563eb;
+        }
+        .external-person-picker-empty {
+          padding: 16px 8px;
+          color: #94a3b8;
+          text-align: center;
+          font-size: 12px;
+        }
+        .external-person-picker-footer {
+          display: flex;
+          justify-content: flex-end;
+          margin-top: 8px;
+          padding-top: 8px;
+          border-top: 1px solid #e2e8f0;
+        }
+        .external-person-picker-done {
+          border: 0;
+          border-radius: 7px;
+          background: #2563eb;
+          color: #ffffff;
+          cursor: pointer;
+          padding: 7px 14px;
+          font-size: 12px;
+          font-weight: 700;
+        }
+        .external-person-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 6px;
+          margin-top: 7px;
+        }
+        .external-person-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          max-width: 100%;
+          padding: 3px 8px;
+          border: 1px solid #dbe4f0;
+          border-radius: 999px;
+          background: #ffffff;
+          color: #334155;
+          font-size: 11px;
+          font-weight: 600;
+        }
+        button.external-person-chip {
+          cursor: pointer;
+        }
+        button.external-person-chip:hover {
+          border-color: #bfdbfe;
+          background: #eff6ff;
+        }
+        .external-person-chip-remove {
+          color: #64748b;
+          font-size: 13px;
+          line-height: 1;
+        }
+        .external-meeting-person-summary {
+          min-width: 0;
+          display: flex;
+          align-items: center;
+          gap: 7px;
+          margin-top: 6px;
+          color: #64748b;
+          font-size: 11px;
+        }
+        .external-meeting-person-count {
+          flex: 0 0 auto;
+          padding: 2px 7px;
+          border-radius: 999px;
+          background: #f1f5f9;
+          color: #475569;
+          font-weight: 700;
+        }
+        .external-meeting-person-names {
+          min-width: 0;
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
         }
         .external-meeting-cards {
           display: grid;
@@ -11114,7 +11420,9 @@ export default function CommonViewPage() {
           </div>
           <div className="external-meetings-grid">
             <div className="external-meeting-form">
-              <div className="external-meeting-form-title">Add TAK EXT + TAK INT</div>
+              <div className="external-meeting-form-title">
+                {externalMeetingCreateInternal ? "Add TAK EXT + TAK INT" : "Add TAK EXT"}
+              </div>
               <div className="external-meeting-fields">
                 <input
                   className="input"
@@ -11131,8 +11439,35 @@ export default function CommonViewPage() {
                     value={externalMeetingPlatform}
                     onChange={(e) => setExternalMeetingPlatform(e.target.value)}
                   />
+                  <select
+                    className="input"
+                    value={externalMeetingRecurrenceType}
+                    onChange={(e) => setExternalMeetingRecurrenceType(e.target.value as "none" | "weekly" | "monthly" | "yearly")}
+                  >
+                    <option value="none">One time</option>
+                    <option value="weekly">Every week</option>
+                    <option value="monthly">Every month</option>
+                    <option value="yearly">Every year</option>
+                  </select>
                 </div>
-                <div className="external-meeting-row">
+                <label className="external-create-internal-option">
+                  <input
+                    type="checkbox"
+                    checked={externalMeetingCreateInternal}
+                    onChange={(event) => setExternalMeetingCreateInternal(event.target.checked)}
+                  />
+                  <span className="external-create-internal-copy">
+                    <strong>Create TAK INT</strong>
+                    <small>Create a linked internal meeting with this TAK EXT.</small>
+                  </span>
+                  <span className={`external-create-internal-status ${externalMeetingCreateInternal ? "" : "off"}`}>
+                    {externalMeetingCreateInternal ? "Yes" : "No"}
+                  </span>
+                </label>
+                <div
+                  className="external-meeting-row"
+                  style={{ gridTemplateColumns: externalMeetingCreateInternal ? "repeat(2, minmax(0, 1fr))" : "1fr" }}
+                >
                   {externalMeetingRecurrenceType === "none" ? (
                     <>
                       <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
@@ -11150,47 +11485,49 @@ export default function CommonViewPage() {
                           }}
                         />
                       </label>
-                      <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
-                        TAK INT date and time
-                        <span
-                          className="input"
-                          style={{
-                            display: "flex",
-                            alignItems: "center",
-                            gap: "4px",
-                            overflow: "hidden",
-                            padding: "0 8px",
-                          }}
-                        >
-                          <input
-                            type="date"
-                            value={externalMeetingInternalStartsAt}
-                            onChange={(e) => {
-                              externalMeetingInternalStartsAtEditedRef.current = true
-                              setExternalMeetingInternalStartsAt(e.target.value)
-                            }}
+                      {externalMeetingCreateInternal ? (
+                        <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
+                          TAK INT date and time
+                          <span
+                            className="input"
                             style={{
-                              minWidth: 0,
-                              flex: 1,
-                              border: 0,
-                              outline: 0,
-                              background: "transparent",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "4px",
+                              overflow: "hidden",
+                              padding: "0 8px",
                             }}
-                          />
-                          <span aria-hidden="true" style={{ height: "22px", width: "1px", backgroundColor: "#e2e8f0" }} />
-                          <input
-                            type="time"
-                            value={externalMeetingInternalStartTime}
-                            onChange={(e) => setExternalMeetingInternalStartTime(e.target.value)}
-                            style={{
-                              width: "105px",
-                              border: 0,
-                              outline: 0,
-                              background: "transparent",
-                            }}
-                          />
-                        </span>
-                      </label>
+                          >
+                            <input
+                              type="date"
+                              value={externalMeetingInternalStartsAt}
+                              onChange={(e) => {
+                                externalMeetingInternalStartsAtEditedRef.current = true
+                                setExternalMeetingInternalStartsAt(e.target.value)
+                              }}
+                              style={{
+                                minWidth: 0,
+                                flex: 1,
+                                border: 0,
+                                outline: 0,
+                                background: "transparent",
+                              }}
+                            />
+                            <span aria-hidden="true" style={{ height: "22px", width: "1px", backgroundColor: "#e2e8f0" }} />
+                            <input
+                              type="time"
+                              value={externalMeetingInternalStartTime}
+                              onChange={(e) => setExternalMeetingInternalStartTime(e.target.value)}
+                              style={{
+                                width: "105px",
+                                border: 0,
+                                outline: 0,
+                                background: "transparent",
+                              }}
+                            />
+                          </span>
+                        </label>
+                      ) : null}
                     </>
                   ) : (
                     <>
@@ -11203,29 +11540,19 @@ export default function CommonViewPage() {
                           onChange={(e) => setExternalMeetingStartTime(e.target.value)}
                         />
                       </label>
-                      <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
-                        TAK INT time
-                        <input
-                          className="input"
-                          type="time"
-                          value={externalMeetingInternalStartTime}
-                          onChange={(e) => setExternalMeetingInternalStartTime(e.target.value)}
-                        />
-                      </label>
+                      {externalMeetingCreateInternal ? (
+                        <label style={{ flex: 1, display: "grid", gap: "6px", fontSize: "12px", color: "#475569" }}>
+                          TAK INT time
+                          <input
+                            className="input"
+                            type="time"
+                            value={externalMeetingInternalStartTime}
+                            onChange={(e) => setExternalMeetingInternalStartTime(e.target.value)}
+                          />
+                        </label>
+                      ) : null}
                     </>
                   )}
-                </div>
-                <div className="external-meeting-row">
-                  <select
-                    className="input"
-                    value={externalMeetingRecurrenceType}
-                    onChange={(e) => setExternalMeetingRecurrenceType(e.target.value as "none" | "weekly" | "monthly" | "yearly")}
-                  >
-                    <option value="none">One time</option>
-                    <option value="weekly">Every week</option>
-                    <option value="monthly">Every month</option>
-                    <option value="yearly">Every year</option>
-                  </select>
                 </div>
                 {externalMeetingRecurrenceType === "weekly" ? (
                   <>
@@ -11348,28 +11675,135 @@ export default function CommonViewPage() {
                   </div>
                 ) : null}
                 <div className="external-meeting-row">
-                  <select
-                    className="input"
-                    value={externalMeetingDepartmentId}
-                    onChange={(e) => setExternalMeetingDepartmentId(e.target.value)}
-                    disabled={!canSelectExternalDepartment}
-                  >
-                    <option value="">
-                      {canSelectExternalDepartment ? "Select department" : "Department"}
-                    </option>
-                    {departments.map((dep) => (
-                      <option key={dep.id} value={dep.id}>
-                        {dep.name === "Project Content Manager" ? "Product Content" : dep.name}
+                  <div className="external-meeting-field-stack">
+                    <select
+                      className="input"
+                      value={externalMeetingDepartmentId}
+                      onChange={(e) => setExternalMeetingDepartmentId(e.target.value)}
+                      disabled={!canSelectExternalDepartment}
+                    >
+                      <option value="">
+                        {canSelectExternalDepartment ? "Select department" : "Department"}
                       </option>
-                    ))}
-                  </select>
-                </div>
-                {!canSelectExternalDepartment && externalMeetingDepartment ? (
-                  <div className="external-meeting-hint">
-                    Department: {externalMeetingDepartment.name === "Project Content Manager" ? "Product Content" : externalMeetingDepartment.name}
+                      {departments.map((dep) => (
+                        <option key={dep.id} value={dep.id}>
+                          {dep.name === "Project Content Manager" ? "Product Content" : dep.name}
+                        </option>
+                      ))}
+                    </select>
+                    {!canSelectExternalDepartment && externalMeetingDepartment ? (
+                      <div className="external-meeting-hint">
+                        {externalMeetingDepartment.name === "Project Content Manager" ? "Product Content" : externalMeetingDepartment.name}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-                <div style={{ marginTop: "16px" }}>
+                  <div className="external-person-picker" ref={externalMeetingPersonsRef}>
+                    <button
+                      className={`external-person-picker-trigger ${externalMeetingPersonsOpen ? "active" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        setExternalMeetingPersonsOpen((current) => {
+                          if (current) setExternalMeetingPersonSearch("")
+                          return !current
+                        })
+                      }}
+                      aria-haspopup="dialog"
+                      aria-expanded={externalMeetingPersonsOpen}
+                    >
+                      <span>{externalMeetingParticipantIds.length ? "Persons selected" : "Add persons (optional)"}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                        {externalMeetingParticipantIds.length ? (
+                          <span className="external-person-picker-count">{externalMeetingParticipantIds.length}</span>
+                        ) : null}
+                        <span aria-hidden="true">{externalMeetingPersonsOpen ? "^" : "v"}</span>
+                      </span>
+                    </button>
+                    {externalMeetingPersonsOpen ? (
+                      <div
+                        className="external-person-picker-menu"
+                        role="dialog"
+                        aria-label="External meeting persons"
+                      >
+                        <input
+                          className="external-person-picker-search"
+                          type="search"
+                          value={externalMeetingPersonSearch}
+                          onChange={(event) => setExternalMeetingPersonSearch(event.target.value)}
+                          placeholder="Search persons..."
+                          aria-label="Search external meeting persons"
+                          autoFocus
+                        />
+                        <div className="external-person-picker-list" role="group">
+                          {commonUserFilterOptions
+                            .filter(
+                              (option) =>
+                                option.isActive
+                                && option.label.toLowerCase().includes(externalMeetingPersonSearch.trim().toLowerCase())
+                            )
+                            .map((option) => (
+                              <label key={option.id} className="external-person-picker-option">
+                                <input
+                                  type="checkbox"
+                                  checked={externalMeetingParticipantIds.includes(option.id)}
+                                  onChange={(event) => {
+                                    setExternalMeetingParticipantIds((current) =>
+                                      event.target.checked
+                                        ? [...current, option.id]
+                                        : current.filter((id) => id !== option.id)
+                                    )
+                                  }}
+                                />
+                                <span>{option.label}</span>
+                              </label>
+                            ))}
+                          {!commonUserFilterOptions.some(
+                            (option) =>
+                              option.isActive
+                              && option.label.toLowerCase().includes(externalMeetingPersonSearch.trim().toLowerCase())
+                          ) ? (
+                            <div className="external-person-picker-empty">No persons found</div>
+                          ) : null}
+                        </div>
+                        <div className="external-person-picker-footer">
+                          <button
+                            className="external-person-picker-done"
+                            type="button"
+                            onClick={() => {
+                              setExternalMeetingPersonsOpen(false)
+                              setExternalMeetingPersonSearch("")
+                            }}
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {externalMeetingParticipantIds.length ? (
+                      <div className="external-person-chips" aria-label="Selected persons">
+                        {externalMeetingParticipantIds.slice(0, 3).map((id) => {
+                          const person = commonUserFilterOptions.find((option) => option.id === id)
+                          if (!person) return null
+                          return (
+                            <button
+                              key={person.id}
+                              className="external-person-chip"
+                              type="button"
+                              title={`Remove ${person.label}`}
+                              onClick={() => setExternalMeetingParticipantIds((current) => current.filter((itemId) => itemId !== person.id))}
+                            >
+                              <span>{person.label}</span>
+                              <span className="external-person-chip-remove" aria-hidden="true">&times;</span>
+                            </button>
+                          )
+                        })}
+                        {externalMeetingParticipantIds.length > 3 ? (
+                          <span className="external-person-chip">+{externalMeetingParticipantIds.length - 3}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                <div style={{ marginTop: "2px" }}>
                   <button
                     className="btn-surface"
                     type="button"
@@ -11637,6 +12071,12 @@ export default function CommonViewPage() {
                     const department = departments.find((d) => d.id === meeting.department_id) || null
                     const owner = meeting.created_by ? userById.get(meeting.created_by) : null
                     const ownerName = owner?.full_name || owner?.username || "Unknown"
+                    const participantNames = (meeting.participant_ids || [])
+                      .map((participantId) => {
+                        const participant = userById.get(participantId)
+                        return participant?.full_name || participant?.username || participant?.email || ""
+                      })
+                      .filter(Boolean)
                     const isEditing = editingExternalMeetingId === meeting.id
                     return (
                       <div key={meeting.id} className="external-meeting-card">
@@ -11852,6 +12292,16 @@ export default function CommonViewPage() {
                                   <span>{department?.name || "Department TBD"}</span>
                                   <span>Owner: {ownerName}</span>
                                 </div>
+                                {participantNames.length ? (
+                                  <div className="external-meeting-person-summary" aria-label="Meeting persons">
+                                    <span className="external-meeting-person-count">
+                                      {participantNames.length} {participantNames.length === 1 ? "person" : "persons"}
+                                    </span>
+                                    <span className="external-meeting-person-names" title={participantNames.join(", ")}>
+                                      {participantNames.join(", ")}
+                                    </span>
+                                  </div>
+                                ) : null}
                                 <div className="external-meeting-meta" style={{ marginTop: "8px" }}>
                                   <span>Status: {renderMeetingStatusControl(meeting)}</span>
                                 </div>
@@ -11961,6 +12411,19 @@ export default function CommonViewPage() {
                     value={internalMeetingPlatform}
                     onChange={(e) => setInternalMeetingPlatform(e.target.value)}
                   />
+                  <select
+                    className="input"
+                    value={internalMeetingRecurrenceType}
+                    onChange={(e) => setInternalMeetingRecurrenceType(e.target.value as "none" | "weekly" | "monthly" | "yearly")}
+                  >
+                    <option value="none">One time</option>
+                    <option value="weekly">Every week</option>
+                    <option value="monthly">Every month</option>
+                    <option value="yearly">Every year</option>
+                  </select>
+                </div>
+                <label className="external-meeting-field-stack" style={{ fontSize: "12px", color: "#475569" }}>
+                  {internalMeetingRecurrenceType === "none" ? "Date and time" : "Time"}
                   {internalMeetingRecurrenceType === "none" ? (
                     <input
                       className="input"
@@ -11976,19 +12439,7 @@ export default function CommonViewPage() {
                       onChange={(e) => setInternalMeetingStartTime(e.target.value)}
                     />
                   )}
-                </div>
-                <div className="external-meeting-row">
-                  <select
-                    className="input"
-                    value={internalMeetingRecurrenceType}
-                    onChange={(e) => setInternalMeetingRecurrenceType(e.target.value as "none" | "weekly" | "monthly" | "yearly")}
-                  >
-                    <option value="none">One time</option>
-                    <option value="weekly">Every week</option>
-                    <option value="monthly">Every month</option>
-                    <option value="yearly">Every year</option>
-                  </select>
-                </div>
+                </label>
                 {internalMeetingRecurrenceType === "weekly" ? (
                   <>
                     <div className="external-meeting-row" style={{ justifyContent: "flex-start" }}>
@@ -12110,30 +12561,137 @@ export default function CommonViewPage() {
                   </div>
                 ) : null}
                 <div className="external-meeting-row">
-                  <select
-                    className="input"
-                    value={internalMeetingDepartmentId}
-                    onChange={(e) => setInternalMeetingDepartmentId(e.target.value)}
-                    disabled={!canSelectExternalDepartment}
-                  >
-                    {canSelectExternalDepartment ? (
-                      <option value="">Select department</option>
-                    ) : (
-                      <option value="">Department</option>
-                    )}
-                    {departments.map((dep) => (
-                      <option key={dep.id} value={dep.id}>
-                        {dep.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                {!canSelectExternalDepartment && internalMeetingDepartment ? (
-                  <div className="external-meeting-hint">
-                    Department: {internalMeetingDepartment.name === "Project Content Manager" ? "Product Content" : internalMeetingDepartment.name}
+                  <div className="external-meeting-field-stack">
+                    <select
+                      className="input"
+                      value={internalMeetingDepartmentId}
+                      onChange={(e) => setInternalMeetingDepartmentId(e.target.value)}
+                      disabled={!canSelectExternalDepartment}
+                    >
+                      {canSelectExternalDepartment ? (
+                        <option value="">Select department</option>
+                      ) : (
+                        <option value="">Department</option>
+                      )}
+                      {departments.map((dep) => (
+                        <option key={dep.id} value={dep.id}>
+                          {dep.name === "Project Content Manager" ? "Product Content" : dep.name}
+                        </option>
+                      ))}
+                    </select>
+                    {!canSelectExternalDepartment && internalMeetingDepartment ? (
+                      <div className="external-meeting-hint">
+                        {internalMeetingDepartment.name === "Project Content Manager" ? "Product Content" : internalMeetingDepartment.name}
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-                <div className="external-meeting-row" style={{ marginTop: "16px" }}>
+                  <div className="external-person-picker" ref={internalMeetingPersonsRef}>
+                    <button
+                      className={`external-person-picker-trigger ${internalMeetingPersonsOpen ? "active" : ""}`}
+                      type="button"
+                      onClick={() => {
+                        setInternalMeetingPersonsOpen((current) => {
+                          if (current) setInternalMeetingPersonSearch("")
+                          return !current
+                        })
+                      }}
+                      aria-haspopup="dialog"
+                      aria-expanded={internalMeetingPersonsOpen}
+                    >
+                      <span>{internalMeetingParticipantIds.length ? "Persons selected" : "Add persons (optional)"}</span>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
+                        {internalMeetingParticipantIds.length ? (
+                          <span className="external-person-picker-count">{internalMeetingParticipantIds.length}</span>
+                        ) : null}
+                        <span aria-hidden="true">{internalMeetingPersonsOpen ? "^" : "v"}</span>
+                      </span>
+                    </button>
+                    {internalMeetingPersonsOpen ? (
+                      <div
+                        className="external-person-picker-menu"
+                        role="dialog"
+                        aria-label="Internal meeting persons"
+                      >
+                        <input
+                          className="external-person-picker-search"
+                          type="search"
+                          value={internalMeetingPersonSearch}
+                          onChange={(event) => setInternalMeetingPersonSearch(event.target.value)}
+                          placeholder="Search persons..."
+                          aria-label="Search internal meeting persons"
+                          autoFocus
+                        />
+                        <div className="external-person-picker-list" role="group">
+                          {commonUserFilterOptions
+                            .filter(
+                              (option) =>
+                                option.isActive
+                                && option.label.toLowerCase().includes(internalMeetingPersonSearch.trim().toLowerCase())
+                            )
+                            .map((option) => (
+                              <label key={option.id} className="external-person-picker-option">
+                                <input
+                                  type="checkbox"
+                                  checked={internalMeetingParticipantIds.includes(option.id)}
+                                  onChange={(event) => {
+                                    setInternalMeetingParticipantIds((current) =>
+                                      event.target.checked
+                                        ? [...current, option.id]
+                                        : current.filter((id) => id !== option.id)
+                                    )
+                                  }}
+                                />
+                                <span>{option.label}</span>
+                              </label>
+                            ))}
+                          {!commonUserFilterOptions.some(
+                            (option) =>
+                              option.isActive
+                              && option.label.toLowerCase().includes(internalMeetingPersonSearch.trim().toLowerCase())
+                          ) ? (
+                            <div className="external-person-picker-empty">No persons found</div>
+                          ) : null}
+                        </div>
+                        <div className="external-person-picker-footer">
+                          <button
+                            className="external-person-picker-done"
+                            type="button"
+                            onClick={() => {
+                              setInternalMeetingPersonsOpen(false)
+                              setInternalMeetingPersonSearch("")
+                            }}
+                          >
+                            Done
+                          </button>
+                        </div>
+                      </div>
+                    ) : null}
+                    {internalMeetingParticipantIds.length ? (
+                      <div className="external-person-chips" aria-label="Selected internal meeting persons">
+                        {internalMeetingParticipantIds.slice(0, 3).map((id) => {
+                          const person = commonUserFilterOptions.find((option) => option.id === id)
+                          if (!person) return null
+                          return (
+                            <button
+                              key={person.id}
+                              className="external-person-chip"
+                              type="button"
+                              title={`Remove ${person.label}`}
+                              onClick={() => setInternalMeetingParticipantIds((current) => current.filter((itemId) => itemId !== person.id))}
+                            >
+                              <span>{person.label}</span>
+                              <span className="external-person-chip-remove" aria-hidden="true">&times;</span>
+                            </button>
+                          )
+                        })}
+                        {internalMeetingParticipantIds.length > 3 ? (
+                          <span className="external-person-chip">+{internalMeetingParticipantIds.length - 3}</span>
+                        ) : null}
+                      </div>
+                    ) : null}
+                  </div>
+                </div>
+                <div style={{ marginTop: "2px" }}>
                   <button
                     className="btn-primary"
                     type="button"
@@ -12181,6 +12739,12 @@ export default function CommonViewPage() {
                     const department = departments.find((d) => d.id === meeting.department_id) || null
                     const owner = meeting.created_by ? userById.get(meeting.created_by) : null
                     const ownerName = owner?.full_name || owner?.username || "Unknown"
+                    const participantNames = (meeting.participant_ids || [])
+                      .map((participantId) => {
+                        const participant = userById.get(participantId)
+                        return participant?.full_name || participant?.username || participant?.email || ""
+                      })
+                      .filter(Boolean)
                     const isEditing = editingInternalMeetingId === meeting.id
                     return (
                       <div key={meeting.id} className="external-meeting-card">
@@ -12396,6 +12960,16 @@ export default function CommonViewPage() {
                                   <span>{department?.name || "Department TBD"}</span>
                                   <span>Owner: {ownerName}</span>
                                 </div>
+                                {participantNames.length ? (
+                                  <div className="external-meeting-person-summary" aria-label="Meeting persons">
+                                    <span className="external-meeting-person-count">
+                                      {participantNames.length} {participantNames.length === 1 ? "person" : "persons"}
+                                    </span>
+                                    <span className="external-meeting-person-names" title={participantNames.join(", ")}>
+                                      {participantNames.join(", ")}
+                                    </span>
+                                  </div>
+                                ) : null}
                                 <div className="external-meeting-meta" style={{ marginTop: "8px" }}>
                                   <span>Status: {renderMeetingStatusControl(meeting)}</span>
                                 </div>
