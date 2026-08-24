@@ -5,7 +5,8 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import insert, select
+from sqlalchemy import Date as SQLDate
+from sqlalchemy import cast, delete, func, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -88,13 +89,6 @@ def _parse_annual_leave_entry(
     return start_date, end_date, full_day, start_time, end_time, cleaned_note, is_all_users
 
 
-def _template_assignee_ids(template: SystemTaskTemplate) -> list[uuid.UUID]:
-    assignee_ids = list(getattr(template, "assignee_ids", None) or [])
-    if not assignee_ids and template.default_assignee_id:
-        assignee_ids = [template.default_assignee_id]
-    return assignee_ids
-
-
 def _date_in_ranges(day: date, ranges: list[tuple[date, date]]) -> bool:
     return any(start <= day <= end for start, end in ranges)
 
@@ -120,31 +114,53 @@ def _build_annual_leave_snapshot(
     return by_user, all_users_ranges
 
 
-def _all_template_assignees_on_leave(
-    assignee_ids: list[uuid.UUID],
+def _assignee_on_full_day_leave(
+    assignee_id: uuid.UUID,
     occurrence_day: date,
     leave_by_user: dict[uuid.UUID, list[tuple[date, date]]],
     all_users_ranges: list[tuple[date, date]],
 ) -> bool:
     if _date_in_ranges(occurrence_day, all_users_ranges):
         return True
-    if not assignee_ids:
-        return False
-    return all(_date_in_ranges(occurrence_day, leave_by_user.get(user_id, [])) for user_id in assignee_ids)
+    return _date_in_ranges(occurrence_day, leave_by_user.get(assignee_id, []))
 
 
-def _resolve_shifted_occurrence_local_dt(
-    occurrence_local_dt: datetime,
-    assignee_ids: list[uuid.UUID],
-    leave_by_user: dict[uuid.UUID, list[tuple[date, date]]],
-    all_users_ranges: list[tuple[date, date]],
-) -> datetime:
-    candidate = occurrence_local_dt
-    while _all_template_assignees_on_leave(assignee_ids, candidate.date(), leave_by_user, all_users_ranges):
-        candidate = candidate - timedelta(days=1)
-        while candidate.weekday() > 4:
-            candidate = candidate - timedelta(days=1)
-    return candidate
+async def remove_open_system_task_instances_for_leave(
+    db: AsyncSession,
+    entry: CommonEntry,
+) -> int:
+    """Remove pre-generated open instances covered by a newly saved full-day PV."""
+    start_date, end_date, full_day, _, _, _, is_all_users = _parse_annual_leave_entry(entry)
+    if not full_day:
+        return 0
+
+    task_local_date = cast(
+        func.timezone(
+            func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE),
+            Task.origin_run_at,
+        ),
+        SQLDate,
+    )
+    task_ids_stmt = (
+        select(Task.id)
+        .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+        .where(Task.origin_run_at.is_not(None))
+        .where(task_local_date >= start_date, task_local_date <= end_date)
+        .where(Task.is_active.is_(True))
+        .where(Task.completed_at.is_(None), Task.status != TaskStatus.DONE.value)
+    )
+    if not is_all_users:
+        user_id = entry.assigned_to_user_id or entry.created_by_user_id
+        if user_id is None:
+            return 0
+        task_ids_stmt = task_ids_stmt.where(Task.assigned_to == user_id)
+
+    task_ids = list((await db.execute(task_ids_stmt)).scalars().all())
+    if not task_ids:
+        return 0
+
+    result = await db.execute(delete(Task).where(Task.id.in_(task_ids)))
+    return result.rowcount or 0
 
 
 def _adjust_due_datetime_local(
@@ -284,9 +300,6 @@ async def generate_system_task_instances(
         )
         range_start = start
         next_run = slot.next_run_at or first_run_at(template, now_utc)
-        can_shift_next_occurrence = True
-        template_assignee_ids = _template_assignee_ids(template)
-
         while True:
             occurrence_local = next_run.astimezone(tz)
             occurrence_day = occurrence_local.date()
@@ -296,22 +309,19 @@ async def generate_system_task_instances(
                 next_run = next_occurrence(template, next_run)
                 continue
 
-            effective_origin_run_at = next_run
-            if can_shift_next_occurrence:
-                shifted_occurrence_local = _resolve_shifted_occurrence_local_dt(
-                    occurrence_local,
-                    template_assignee_ids,
-                    leave_by_user,
-                    all_users_ranges,
-                )
-                if range_start is None or shifted_occurrence_local.date() >= range_start:
-                    effective_origin_run_at = shifted_occurrence_local.astimezone(timezone.utc)
-                can_shift_next_occurrence = False
+            if _assignee_on_full_day_leave(
+                slot.primary_user_id,
+                occurrence_day,
+                leave_by_user,
+                all_users_ranges,
+            ):
+                next_run = next_occurrence(template, next_run)
+                continue
 
             due_local = _adjust_due_datetime_local(
                 tz=tz,
                 due_time=due_time,
-                start_local_dt=effective_origin_run_at.astimezone(tz),
+                start_local_dt=next_run.astimezone(tz),
                 duration_days=int(getattr(template, "duration_days", 1) or 1),
             )
             inserted = await _insert_system_task_instance(
@@ -319,7 +329,7 @@ async def generate_system_task_instances(
                 slot=slot,
                 template=template,
                 department_id=department_map.get(slot.primary_user_id) or template.department_id,
-                origin_run_at=effective_origin_run_at,
+                origin_run_at=next_run,
                 start_at=next_run,
                 due_utc=due_local.astimezone(timezone.utc),
                 now_utc=now_utc,
