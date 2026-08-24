@@ -438,18 +438,57 @@ jobs:
           }
 
           function Wait-PrimeFlowFrontend {
-            $uri = "http://127.0.0.1:3000/dashboard"
+            param([string]$ExpectedDeploymentId = "")
+
+            $uri = "http://127.0.0.1:3000/admin-tasks?deploy-check=$ExpectedDeploymentId"
             for ($i = 0; $i -lt 20; $i++) {
               try {
-                $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+                $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers @{ "Cache-Control" = "no-cache" } -TimeoutSec 3
                 Write-Host "Frontend readiness attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
-                if ($resp.StatusCode -eq 200) { return $true }
+                if ($resp.StatusCode -eq 200) {
+                  if ([string]::IsNullOrWhiteSpace($ExpectedDeploymentId)) { return $true }
+
+                  $deploymentMarker = "?dpl=$ExpectedDeploymentId"
+                  if ($resp.Content.Contains($deploymentMarker)) {
+                    Write-Host "Frontend is serving deployment $ExpectedDeploymentId."
+                    return $true
+                  }
+                  Write-Host "Port 3000 answered, but it is not serving deployment $ExpectedDeploymentId."
+                }
               } catch {
                 Write-Host "Frontend readiness attempt $($i + 1)/20: no response yet"
               }
               Start-Sleep -Seconds 2
             }
             return $false
+          }
+
+          function Stop-StalePrimeFlowFrontendListener {
+            $listeners = @(Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue)
+            foreach ($listener in $listeners) {
+              $listenerPid = $listener.OwningProcess
+              $listenerProcess = Get-CimInstance Win32_Process -Filter "ProcessId=$listenerPid" -ErrorAction SilentlyContinue
+              $commandLine = if ($listenerProcess) { [string]$listenerProcess.CommandLine } else { "" }
+              $isPrimeFlowFrontend =
+                $commandLine.IndexOf($CurrentPath, [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+                $commandLine.IndexOf("next", [System.StringComparison]::OrdinalIgnoreCase) -ge 0 -and
+                $commandLine.IndexOf("start", [System.StringComparison]::OrdinalIgnoreCase) -ge 0
+
+              if (-not $isPrimeFlowFrontend) {
+                throw "Port 3000 is held by unrelated PID $listenerPid. Command: $commandLine"
+              }
+
+              Write-Host "Stopping stale PrimeFlow frontend listener PID $listenerPid."
+              Stop-Process -Id $listenerPid -Force -ErrorAction Stop
+            }
+
+            for ($i = 0; $i -lt 20; $i++) {
+              if (-not (Get-NetTCPConnection -LocalPort 3000 -State Listen -ErrorAction SilentlyContinue)) {
+                return
+              }
+              Start-Sleep -Milliseconds 250
+            }
+            throw "Port 3000 did not become free after stopping the stale PrimeFlow frontend."
           }
 
           Write-Host "3. Replacing Existing Frontend Process..."
@@ -460,6 +499,11 @@ jobs:
           } else {
             Write-Host "PM2 frontend process did not exist yet. Continuing with clean start."
           }
+
+          # A frontend started outside PM2 can survive `pm2 delete`, keep the old
+          # build in memory, and make a plain HTTP readiness check pass. Stop only
+          # a listener whose command belongs to this exact PrimeFlow checkout.
+          Stop-StalePrimeFlowFrontendListener
  
           if (Test-Path .next-previous) {
             Remove-Item .next-previous -Recurse -Force
@@ -471,8 +515,8 @@ jobs:
           try {
             Move-Item .next-deploy .next
             Start-PrimeFlowFrontend
-            if (-not (Wait-PrimeFlowFrontend)) {
-              throw "The candidate frontend did not become ready on port 3000."
+            if (-not (Wait-PrimeFlowFrontend -ExpectedDeploymentId "${{ github.sha }}")) {
+              throw "The candidate frontend did not serve deployment ${{ github.sha }} on port 3000."
             }
             Write-Host "Candidate frontend is healthy. Previous build retained in .next-previous for rollback."
           } catch {
@@ -502,25 +546,27 @@ jobs:
         shell: powershell
         run: |
           $ok = $false
-          $uri = "http://127.0.0.1:3000/dashboard"
+          $expectedDeploymentId = "${{ github.sha }}"
+          $uri = "http://127.0.0.1:3000/admin-tasks?deploy-check=$expectedDeploymentId"
           for ($i = 0; $i -lt 20; $i++) {
             try {
-              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -TimeoutSec 3
+              $resp = Invoke-WebRequest -Uri $uri -UseBasicParsing -Headers @{ "Cache-Control" = "no-cache" } -TimeoutSec 3
               Write-Host "Frontend readiness attempt $($i + 1)/20: HTTP $($resp.StatusCode)"
-              if ($resp.StatusCode -eq 200) {
+              if ($resp.StatusCode -eq 200 -and $resp.Content.Contains("?dpl=$expectedDeploymentId")) {
                 $ok = $true
                 break
               }
+              Write-Host "Port 3000 answered, but it is not serving deployment $expectedDeploymentId."
             } catch {
               Write-Host "Frontend readiness attempt $($i + 1)/20: no response yet"
               Start-Sleep -Seconds 2
             }
           }
           if (-not $ok) {
-            Write-Error "Frontend did not become ready on port 3000."
+            Write-Error "Frontend did not serve deployment $expectedDeploymentId on port 3000."
             exit 1
           }
-          Write-Host "Frontend readiness check: OK ($uri)"
+          Write-Host "Frontend readiness check: OK ($expectedDeploymentId)"
  
       - name: Save PM2 Process List
         if: ${{ steps.changes.outputs.backend_changed == 'true' || steps.changes.outputs.frontend_changed == 'true' }}

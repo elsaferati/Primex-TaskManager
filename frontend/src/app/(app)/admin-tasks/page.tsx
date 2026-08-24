@@ -41,6 +41,7 @@ const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
 const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
 const SYSTEM_STATUS_OPTIONS = ["OPEN", "DONE"] as const
+type AdminTasksSectionId = "all-tasks" | "common" | "ga-time"
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
   { id: "personal", label: "Personal", description: "Personal tasks tracked only in this view." },
@@ -1809,8 +1810,13 @@ export default function AdminTasksPage() {
   const [pendingCompletionComment, setPendingCompletionComment] = React.useState("")
   const [pendingCompletionCommentSaving, setPendingCompletionCommentSaving] = React.useState(false)
 
-  const [printTarget, setPrintTarget] = React.useState<"common" | "ga-time" | "all-tasks" | null>(null)
+  const [printTarget, setPrintTarget] = React.useState<AdminTasksSectionId | null>(null)
   const [printTotalPages, setPrintTotalPages] = React.useState(1)
+  const [collapsedAdminSections, setCollapsedAdminSections] = React.useState<Record<AdminTasksSectionId, boolean>>({
+    "all-tasks": false,
+    common: false,
+    "ga-time": false,
+  })
 
   const [dailyReport, setDailyReport] = React.useState<DailyReportResponse | null>(null)
   const [loadingDailyReport, setLoadingDailyReport] = React.useState(false)
@@ -1894,7 +1900,8 @@ export default function AdminTasksPage() {
     }
   }, [])
 
-  const handleSectionPrint = React.useCallback((target: "common" | "ga-time" | "all-tasks") => {
+  const handleSectionPrint = React.useCallback((target: AdminTasksSectionId) => {
+    setCollapsedAdminSections((current) => ({ ...current, [target]: false }))
     setPrintTarget(target)
     window.setTimeout(() => window.print(), 80)
   }, [])
@@ -4110,6 +4117,7 @@ export default function AdminTasksPage() {
   const sectionHeaderClass = "flex flex-wrap items-center justify-center gap-3"
 
   const AdminTasksSection = ({
+    sectionId,
     title,
     description,
     actions,
@@ -4117,24 +4125,44 @@ export default function AdminTasksPage() {
     headerClassName,
     contentClassName,
   }: {
+    sectionId: AdminTasksSectionId
     title: string
     description?: string
     actions?: React.ReactNode
     children?: React.ReactNode
     headerClassName?: string
     contentClassName?: string
-  }) => (
-    <Card className={sectionCardClass}>
-      <CardHeader className={cn(sectionHeaderClass, headerClassName)}>
-        <div>
-          <CardTitle className="text-base font-semibold text-slate-900">{title}</CardTitle>
-          {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
-        </div>
-        {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
-      </CardHeader>
-      {children ? <CardContent className={cn("px-2", contentClassName)}>{children}</CardContent> : null}
-    </Card>
-  )
+  }) => {
+    const isCollapsed = collapsedAdminSections[sectionId]
+    return (
+      <Card className={sectionCardClass}>
+        <CardHeader className={cn(sectionHeaderClass, "relative pr-14", headerClassName)}>
+          <div>
+            <CardTitle className="text-base font-semibold text-slate-900">{title}</CardTitle>
+            {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
+          </div>
+          {actions ? <div className="flex flex-wrap items-center gap-2">{actions}</div> : null}
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="absolute right-3 top-3 h-8 w-8 p-0 text-lg font-semibold leading-none print:hidden"
+            aria-label={isCollapsed ? `Open ${title}` : `Close ${title}`}
+            aria-expanded={!isCollapsed}
+            onClick={() => {
+              setCollapsedAdminSections((current) => ({
+                ...current,
+                [sectionId]: !current[sectionId],
+              }))
+            }}
+          >
+            {isCollapsed ? "+" : "-"}
+          </Button>
+        </CardHeader>
+        {!isCollapsed && children ? <CardContent className={cn("px-2", contentClassName)}>{children}</CardContent> : null}
+      </Card>
+    )
+  }
 
   const commonFiltered = React.useMemo(() => {
     const datesToUse = commonWeekISOs
@@ -5566,6 +5594,10 @@ export default function AdminTasksPage() {
         return groupRows
           .map((row, originalIndex) => ({ row, originalIndex }))
           .sort((a, b) => {
+            const aDone = (a.row.status || "").toUpperCase() === "DONE" ? 1 : 0
+            const bDone = (b.row.status || "").toUpperCase() === "DONE" ? 1 : 0
+            if (aDone !== bDone) return aDone - bDone
+
             const aMinutes = parseTimeToMinutes(a.row.kohaBz) ?? Number.MAX_SAFE_INTEGER
             const bMinutes = parseTimeToMinutes(b.row.kohaBz) ?? Number.MAX_SAFE_INTEGER
             if (aMinutes !== bMinutes) return aMinutes - bMinutes
@@ -5588,14 +5620,14 @@ export default function AdminTasksPage() {
       const rowGroups = [
         {
           key: "gane",
-          label: "Gane Arifaj Tasks",
+          label: "GA Tasks",
           rows: sortByTimeThenUser(
             rows.filter((row) => row.isGaneRealAssignee || row.needsGaneConfirmation)
           ),
         },
         {
           key: "bz-me",
-          label: "BZ ME Tasks",
+          label: "BZ ME GA Tasks",
           rows: sortByTimeThenUser(
             rows.filter((row) => !row.isGaneRealAssignee && !row.needsGaneConfirmation)
           ),
@@ -5817,6 +5849,7 @@ export default function AdminTasksPage() {
       <div className="admin-week-table flex flex-col">
         <div className="print-section order-1" data-print-section="all-tasks">
           <AdminTasksSection
+            sectionId="all-tasks"
             title="ALL TASKS"
             description=""
             headerClassName="px-3 sm:px-6"
@@ -6022,6 +6055,7 @@ export default function AdminTasksPage() {
           </div>
           <div className="print:hidden">
             <AdminTasksSection
+              sectionId="common"
               title={`COMMON VIEW - GANE TASKS${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
               description=""
               actions={
@@ -6266,6 +6300,7 @@ export default function AdminTasksPage() {
           </div>
           <div className="print:hidden">
           <AdminTasksSection
+            sectionId="ga-time"
             title={`GA TIME TABLE${weekTitleRange ? ` (${weekTitleRange})` : ""}`}
             description=""
             actions={
