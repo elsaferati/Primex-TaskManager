@@ -30,7 +30,6 @@ type Delivery = {
 }
 type Preview = { subject: string; target_date: string; html: string }
 
-const API = "/tomorrow-print-report"
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 function toRecipientText(values?: string[]) {
@@ -51,7 +50,9 @@ function formatDateTime(value?: string | null) {
   return value ? new Intl.DateTimeFormat("en-GB", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value)) : "-"
 }
 
-export default function TomorrowPrintReportPage() {
+export function PrintReportPage({ today = false }: { today?: boolean }) {
+  const API = today ? "/today-print-report" : "/tomorrow-print-report"
+  const reportName = today ? "1H SHTYPI Today" : "1H SHTYPI Tomorrow"
   const { apiFetch, user } = useAuth()
   const [settings, setSettings] = React.useState<SettingsState | null>(null)
   const [recipientInputs, setRecipientInputs] = React.useState({ to: "", cc: "", bcc: "" })
@@ -77,15 +78,15 @@ export default function TomorrowPrintReportPage() {
     setLoading(true)
     try {
       const [settingsResponse, historyResponse] = await Promise.all([apiFetch(`${API}/settings`), apiFetch(`${API}/history`)])
-      if (!settingsResponse?.ok || !historyResponse?.ok) throw new Error("Could not load 1H SHTYPI settings")
+      if (!settingsResponse?.ok || !historyResponse?.ok) throw new Error(`Could not load ${reportName} settings`)
       applySettings(await settingsResponse.json())
       setHistory(await historyResponse.json())
     } catch (error) {
-      toast.error("Could not load 1H SHTYPI", { description: String(error) })
+      toast.error(`Could not load ${reportName}`, { description: String(error) })
     } finally {
       setLoading(false)
     }
-  }, [apiFetch, applySettings, canManage])
+  }, [API, apiFetch, applySettings, canManage, reportName])
 
   React.useEffect(() => { void load() }, [load])
 
@@ -113,7 +114,7 @@ export default function TomorrowPrintReportPage() {
       })
       if (!response?.ok) throw new Error(await response?.text())
       applySettings(await response.json())
-      toast.success("1H SHTYPI settings saved")
+      toast.success(`${reportName} settings saved`)
     } catch (error) {
       toast.error("Settings save failed", { description: String(error) })
     } finally {
@@ -126,7 +127,7 @@ export default function TomorrowPrintReportPage() {
       const response = await apiFetch(`${API}/preview`)
       if (!response?.ok) throw new Error(await response?.text())
       setPreview(await response.json())
-      toast.success(forPreview ? "Email preview ready" : "1H SHTYPI generated")
+      toast.success(forPreview ? "Email preview ready" : `${reportName} generated`)
       window.setTimeout(() => previewRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 0)
     } catch (error) {
       toast.error("Report could not be generated", { description: String(error) })
@@ -138,7 +139,7 @@ export default function TomorrowPrintReportPage() {
     try {
       const response = await apiFetch(`${API}/send`, { method: "POST" })
       if (!response?.ok) throw new Error(await response?.text())
-      toast.success("1H SHTYPI email sent")
+      toast.success(`${reportName} email sent`)
       await load()
     } catch (error) {
       toast.error("Email could not be sent", { description: String(error) })
@@ -147,14 +148,14 @@ export default function TomorrowPrintReportPage() {
     }
   }
 
-  if (!canManage) return <div className="rounded-lg border bg-white p-8">Administrator access is required for 1H SHTYPI.</div>
+  if (!canManage) return <div className="rounded-lg border bg-white p-8">Administrator access is required for {reportName}.</div>
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
-          <h1 className="text-2xl font-semibold">1H SHTYPI</h1>
-          <p className="text-sm text-muted-foreground">Next-working-day tasks and meetings, sent as an HTML email.</p>
+          <h1 className="text-2xl font-semibold">{reportName}</h1>
+          <p className="text-sm text-muted-foreground">{today ? "Today's Common View task rows, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => void generateReport(true)}><Eye /> Preview email</Button>
@@ -168,7 +169,7 @@ export default function TomorrowPrintReportPage() {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic email</div>
-              <div className="text-sm text-muted-foreground">Friday’s delivery contains Monday’s report.</div>
+              <div className="text-sm text-muted-foreground">{today ? "Each delivery contains the task rows for that same day." : "Friday’s delivery contains Monday’s report."}</div>
             </div>
             <button
               type="button"
@@ -192,7 +193,7 @@ export default function TomorrowPrintReportPage() {
       ) : <div className="rounded-lg border bg-white p-8 text-sm text-muted-foreground">{loading ? "Loading settings..." : "No settings available."}</div>}
 
       {preview ? (
-        <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4"><div><h2 className="font-semibold">Generated email</h2><p className="text-sm text-muted-foreground">{preview.subject}</p></div><iframe title="1H SHTYPI generated email" srcDoc={preview.html} className="h-[620px] w-full rounded border bg-white" /></div>
+        <div ref={previewRef} className="space-y-3 rounded-lg border bg-white p-4"><div><h2 className="font-semibold">Generated email</h2><p className="text-sm text-muted-foreground">{preview.subject}</p></div><iframe title={`${reportName} generated email`} srcDoc={preview.html} className="h-[620px] w-full rounded border bg-white" /></div>
       ) : null}
 
       <div className="rounded-lg border bg-white p-4">
@@ -201,4 +202,8 @@ export default function TomorrowPrintReportPage() {
       </div>
     </div>
   )
+}
+
+export default function TomorrowPrintReportPage() {
+  return <PrintReportPage />
 }

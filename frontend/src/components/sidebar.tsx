@@ -173,7 +173,8 @@ const navGroups: NavGroup[] = [
       { href: "/reviews", label: "Reviews", icon: Gem },
       { href: "/reports", label: "Reports & Exports", icon: BarChart3, exact: true },
       { href: "/reports/rlz-daily-control", label: "Kontrolli ditor RLZ", icon: Activity, roles: ["ADMIN", "MANAGER"] },
-      { href: "/tomorrow-print-report", label: "1H SHTYPI", icon: MailCheck, roles: ["ADMIN"] },
+      { href: "/today-print-report", label: "1H SHTYPI Today", icon: MailCheck, roles: ["ADMIN"] },
+      { href: "/tomorrow-print-report", label: "1H SHTYPI Tomorrow", icon: MailCheck, roles: ["ADMIN"] },
       {
         href: "/reports/weekly-planning-audit",
         label: "Weekly Planning Check",

@@ -3,7 +3,13 @@ from datetime import date
 
 from openpyxl import load_workbook
 
-from app.services.tomorrow_print_report import _excel_table_attachment, _html_table, _one_h_checklists_html, _task_rows
+from app.services.tomorrow_print_report import (
+    _excel_table_attachment,
+    _html_table,
+    _one_h_checklists_html,
+    _task_rows,
+    build_today_print_report,
+)
 
 
 def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
@@ -202,3 +208,36 @@ def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> N
     sheet = load_workbook(BytesIO(content)).active
     assert sheet["C13"].border.left.color.rgb.endswith("2563EB")
     assert sheet["D13"].border.left.style == "thin"
+
+
+def test_today_report_uses_same_day_task_rows_and_omits_meetings(monkeypatch) -> None:
+    class FakeClient:
+        def __init__(self, *args, **kwargs) -> None:
+            pass
+
+        async def common_view(self, target_date: date) -> dict:
+            return {
+                "items": {
+                    "oneH": [
+                        {"title": "GA: Today task", "date": target_date.isoformat(), "oneHReportSlot": "10:00"},
+                        {"title": "GA: Tomorrow task", "date": "2026-08-25", "oneHReportSlot": "10:00"},
+                    ],
+                    "external": [{"title": "Today meeting", "date": target_date.isoformat(), "time": "10:00"}],
+                }
+            }
+
+    monkeypatch.setenv("PRIMEFLOW_API_BASE_URL", "http://primeflow.test")
+    monkeypatch.setattr("app.services.tomorrow_print_report.PrimeFlowClient", FakeClient)
+
+    import asyncio
+
+    report = asyncio.run(build_today_print_report(date(2026, 8, 24), include_attachment=True))
+
+    assert report["target_date"] == "2026-08-24"
+    assert "Today task" in report["html"]
+    assert "Tomorrow task" not in report["html"]
+    assert "Today meeting" not in report["html"]
+    assert ">Meeting<" not in report["html"]
+    workbook = load_workbook(BytesIO(report["attachments"][0][1]))
+    values = [str(cell.value or "") for row in workbook.active.iter_rows() for cell in row]
+    assert not any(value.startswith("Meeting ") for value in values)

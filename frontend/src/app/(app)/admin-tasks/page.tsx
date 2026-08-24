@@ -2779,11 +2779,11 @@ export default function AdminTasksPage() {
 
     const orderedRows = Array.from(dedupedRows.values())
     orderedRows.sort((a, b) => {
-      const frequencyComparison = compareSystemFrequency(a.systemFrequency, b.systemFrequency)
-      if (frequencyComparison) return frequencyComparison
       const aFast = Boolean(a.isFastTask)
       const bFast = Boolean(b.isFastTask)
-      if (aFast !== bFast) return aFast ? 1 : -1
+      if (aFast !== bFast) return aFast ? -1 : 1
+      const frequencyComparison = compareSystemFrequency(a.systemFrequency, b.systemFrequency)
+      if (frequencyComparison) return frequencyComparison
       const aMinutes = parseTimeToMinutes(a.kohaBz)
       const bMinutes = parseTimeToMinutes(b.kohaBz)
       if (aMinutes !== null && bMinutes !== null && aMinutes !== bMinutes) return aMinutes - bMinutes
@@ -5594,6 +5594,10 @@ export default function AdminTasksPage() {
         return groupRows
           .map((row, originalIndex) => ({ row, originalIndex }))
           .sort((a, b) => {
+            const aFast = Boolean(a.row.isFastTask)
+            const bFast = Boolean(b.row.isFastTask)
+            if (aFast !== bFast) return aFast ? -1 : 1
+
             const aDone = (a.row.status || "").toUpperCase() === "DONE" ? 1 : 0
             const bDone = (b.row.status || "").toUpperCase() === "DONE" ? 1 : 0
             if (aDone !== bDone) return aDone - bDone
