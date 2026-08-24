@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-import os
 import re
 from io import BytesIO
 from datetime import date
@@ -10,6 +9,7 @@ from typing import Any
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
+from app.config import settings
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient
 
@@ -481,11 +481,12 @@ def _excel_table_attachment(
 async def _build_print_report(
     target_date: date, *, include_attachment: bool = False, include_meetings: bool = True
 ) -> dict[str, Any]:
-    base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
-    if not base_url:
-        raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to generate 1H SHTYPI")
+    base_url = settings.PRIMEFLOW_API_BASE_URL
     client = PrimeFlowClient(
-        base_url.rstrip("/"), os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
+        base_url.rstrip("/"),
+        settings.PRIMEFLOW_EMAIL or settings.ADMIN_EMAIL,
+        settings.PRIMEFLOW_PASSWORD or settings.ADMIN_PASSWORD,
+        settings.PRIMEFLOW_ACCESS_TOKEN,
     )
     payload = await client.common_view(target_date)
     items = payload.get("items") or {}
@@ -547,9 +548,9 @@ async def build_tomorrow_print_report(
 async def build_today_print_report(
     report_date: date, *, include_attachment: bool = False
 ) -> dict[str, Any]:
-    """Build the Common View print template using only today's task rows."""
+    """Build today's Common View print template, including TAK INT and TAK EXT."""
     return await _build_print_report(
-        report_date, include_attachment=include_attachment, include_meetings=False
+        report_date, include_attachment=include_attachment, include_meetings=True
     )
 
 

@@ -12,6 +12,7 @@ from app.models.ga_time_table_row import GaTimeTableRow
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.user import User
 from app.schemas.ga_time_slot import (
+    GaTimeSlotEntriesReorder,
     GaTimeSlotEntryIn,
     GaTimeSlotEntryOut,
     GaTimeSlotEntryUpdate,
@@ -106,6 +107,7 @@ def _entry_out(entry: GaTimeSlotTemplate) -> GaTimeSlotEntryOut:
         start_time=entry.start_time,
         end_time=entry.end_time,
         content=entry.content,
+        sort_order=entry.sort_order,
         background_color=entry.background_color,
         text_color=entry.text_color,
         is_bold=entry.is_bold,
@@ -503,7 +505,12 @@ async def list_ga_time_slots(
         await db.execute(
             select(GaTimeSlotTemplate)
             .where(GaTimeSlotTemplate.user_id == ga_user.id)
-            .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.created_at)
+            .order_by(
+                GaTimeSlotTemplate.day_of_week,
+                GaTimeSlotTemplate.start_time,
+                GaTimeSlotTemplate.sort_order,
+                GaTimeSlotTemplate.created_at,
+            )
         )
     ).scalars().all()
     return [_entry_out(row) for row in rows]
@@ -529,6 +536,7 @@ async def create_ga_time_slot(
         day_of_week=payload.day_of_week,
         start_time=payload.start_time,
         end_time=payload.end_time,
+        sort_order=payload.sort_order,
         content=content,
         background_color=payload.background_color,
         text_color=payload.text_color,
@@ -539,6 +547,46 @@ async def create_ga_time_slot(
     await db.commit()
     await db.refresh(entry)
     return _entry_out(entry)
+
+
+@router.put("/reorder", response_model=list[GaTimeSlotEntryOut])
+async def reorder_ga_time_slots(
+    payload: GaTimeSlotEntriesReorder,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[GaTimeSlotEntryOut]:
+    _ensure_can_edit(current_user)
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
+
+    entry_ids = [item.id for item in payload.entries]
+    if len(entry_ids) != len(set(entry_ids)):
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Duplicate entry ids")
+
+    entries = (
+        await db.execute(
+            select(GaTimeSlotTemplate).where(
+                GaTimeSlotTemplate.id.in_(entry_ids),
+                GaTimeSlotTemplate.user_id == ga_user.id,
+            )
+        )
+    ).scalars().all()
+    entries_by_id = {entry.id: entry for entry in entries}
+    if len(entries_by_id) != len(entry_ids):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="One or more entries were not found")
+
+    for item in payload.entries:
+        entry = entries_by_id[item.id]
+        entry.day_of_week = item.day_of_week
+        entry.start_time = item.start_time
+        entry.end_time = item.end_time
+        entry.sort_order = item.sort_order
+
+    await db.commit()
+    for entry in entries:
+        await db.refresh(entry)
+    return [_entry_out(entries_by_id[item.id]) for item in payload.entries]
 
 
 @router.patch("/{entry_id}", response_model=GaTimeSlotEntryOut)

@@ -91,7 +91,12 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
             await db.execute(
                 select(GaTimeSlotTemplate)
                 .where(GaTimeSlotTemplate.user_id == ga_user.id)
-                .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.created_at)
+                .order_by(
+                    GaTimeSlotTemplate.day_of_week,
+                    GaTimeSlotTemplate.start_time,
+                    GaTimeSlotTemplate.sort_order,
+                    GaTimeSlotTemplate.created_at,
+                )
             )
         ).scalars().all()
 
@@ -285,7 +290,12 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
             await db.execute(
                 select(GaTimeSlotTemplate)
                 .where(GaTimeSlotTemplate.user_id == ga_user.id)
-                .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.created_at)
+                .order_by(
+                    GaTimeSlotTemplate.day_of_week,
+                    GaTimeSlotTemplate.start_time,
+                    GaTimeSlotTemplate.sort_order,
+                    GaTimeSlotTemplate.created_at,
+                )
             )
         ).scalars().all()
 

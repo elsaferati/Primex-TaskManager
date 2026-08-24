@@ -210,7 +210,7 @@ def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> N
     assert sheet["D13"].border.left.style == "thin"
 
 
-def test_today_report_uses_same_day_task_rows_and_omits_meetings(monkeypatch) -> None:
+def test_today_report_uses_same_day_task_rows_and_meetings(monkeypatch) -> None:
     class FakeClient:
         def __init__(self, *args, **kwargs) -> None:
             pass
@@ -236,8 +236,8 @@ def test_today_report_uses_same_day_task_rows_and_omits_meetings(monkeypatch) ->
     assert report["target_date"] == "2026-08-24"
     assert "Today task" in report["html"]
     assert "Tomorrow task" not in report["html"]
-    assert "Today meeting" not in report["html"]
-    assert ">Meeting<" not in report["html"]
+    assert "Today meeting" in report["html"]
+    assert ">Meeting<" in report["html"]
     workbook = load_workbook(BytesIO(report["attachments"][0][1]))
     values = [str(cell.value or "") for row in workbook.active.iter_rows() for cell in row]
-    assert not any(value.startswith("Meeting ") for value in values)
+    assert any("Today meeting" in value for value in values)
