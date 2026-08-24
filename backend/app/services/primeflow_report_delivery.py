@@ -27,6 +27,7 @@ from app.services.primeflow_report import (
     ReportDocument, ReportReminderQuestion, ReportUndiscussedNote, clean_description, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
+from app.services.one_h_ga_attachments import GA_EMAIL, build_ga_only_1h_attachments
 from app.services.task_strike_events import render_text_for_interval
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,36 @@ STRIKE_INTERVAL_ENDS = {
     "14:20": time(14, 20),
     "15:50": time(15, 50),
 }
+
+
+def split_ga_recipient_map(
+    recipients: dict[str, list[str]],
+) -> tuple[dict[str, list[str]], dict[str, list[str]] | None]:
+    """Separate GA so recipient-specific attachments cannot leak to others."""
+    regular = {key: [] for key in ("to", "cc", "bcc")}
+    ga_found = False
+    seen: set[str] = set()
+    for key in ("to", "cc", "bcc"):
+        for raw in recipients.get(key, []):
+            email = str(raw).strip()
+            normalized = email.casefold()
+            if not email or normalized in seen:
+                continue
+            seen.add(normalized)
+            if normalized == GA_EMAIL.casefold():
+                ga_found = True
+            else:
+                regular[key].append(email)
+
+    # SMTP requires a To header. This preserves the recipient set if GA was
+    # the only To address and the regular message has only CC/BCC recipients.
+    if not regular["to"]:
+        for key in ("cc", "bcc"):
+            if regular[key]:
+                regular["to"].append(regular[key].pop(0))
+                break
+    ga = {"to": [GA_EMAIL], "cc": [], "bcc": []} if ga_found else None
+    return regular, ga
 
 
 def _environment_recipients() -> list[str]:
@@ -323,9 +354,35 @@ async def deliver_report(
                 ),
                 (f"{filename_stem}.png", render_png(document), "image/png"),
             ]
-            message = await gmail.send_verified(
-                subject, recipient_map, body, html_body, attachments=attachments,
-            )
+            regular_recipients, ga_recipients = split_ga_recipient_map(recipient_map)
+            ga_attachments = None
+            if ga_recipients is not None:
+                # Finish all data/image generation before the first SMTP send,
+                # so a rendering error cannot leave only the regular group sent.
+                ga_attachments = attachments + await build_ga_only_1h_attachments(db, day)
+            messages: list[dict] = []
+            if any(regular_recipients.values()):
+                messages.append(await gmail.send_verified(
+                    subject,
+                    regular_recipients,
+                    body,
+                    html_body,
+                    attachments=attachments,
+                    message_id=f"primeflow-1h-{run.id}-regular@primexeu.com",
+                ))
+            if ga_recipients is not None:
+                assert ga_attachments is not None
+                messages.append(await gmail.send_verified(
+                    subject,
+                    ga_recipients,
+                    body,
+                    html_body,
+                    attachments=ga_attachments,
+                    message_id=f"primeflow-1h-{run.id}-ga@primexeu.com",
+                ))
+            if not messages:
+                raise ValueError("At least one recipient is required")
+            message = messages[-1]
             run.status = "SENT"
             run.gmail_message_id, run.gmail_thread_id = message.get("id"), message.get("threadId")
         except ValueError as exc:
