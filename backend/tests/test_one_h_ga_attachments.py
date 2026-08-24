@@ -11,9 +11,12 @@ from PIL import Image
 from app.services.ga_time_table import DEFAULT_GA_TIME_TABLE_ROWS
 from app.services.one_h_ga_attachments import (
     build_ga_only_1h_attachments,
+    render_ga_tables_html,
+    render_ga_time_table_html,
     render_ga_time_table_png,
 )
 from app.services.primeflow_report_delivery import split_ga_recipient_map
+from app.services.primeflow_report import build_report_document, render_html
 
 
 def _result(rows):
@@ -93,6 +96,49 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 ("GA-HV-Tasks-2026-08-26.png", "image/png"),
             ],
         )
+
+    async def test_timetable_email_version_is_a_native_html_table(self) -> None:
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            _result(list(DEFAULT_GA_TIME_TABLE_ROWS)),
+            _result([SimpleNamespace(id="ga-user")]),
+            _result([]),
+            _result([]),
+        ]))
+
+        rendered = await render_ga_time_table_html(db, date(2026, 8, 24))
+
+        self.assertIn('data-ga-time-table="true"', rendered)
+        self.assertIn("24.08.2026", rendered)
+        self.assertIn("28.08.2026", rendered)
+        self.assertNotIn("<img", rendered)
+
+    async def test_inline_tables_are_inserted_before_the_first_slot(self) -> None:
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {}},
+            date(2026, 8, 24),
+            "10:00",
+        )
+
+        with (
+            patch(
+                "app.services.one_h_ga_attachments.render_ga_time_table_html",
+                new=AsyncMock(return_value='<table data-ga-time-table="true"></table>'),
+            ),
+            patch(
+                "app.services.one_h_ga_attachments.render_ga_hv_tasks_html",
+                new=AsyncMock(return_value='<table data-ga-hv-tasks="true"></table>'),
+            ),
+        ):
+            tables = await render_ga_tables_html(SimpleNamespace(), date(2026, 8, 24))
+        rendered = render_html(document, pre_sections_html=tables, content_width=1200)
+
+        inline_position = rendered.index('data-ga-inline-tables="true"')
+        first_slot_position = rendered.index("10:00 SLOTI 24.08.2026")
+        self.assertLess(inline_position, first_slot_position)
+        self.assertIn('data-ga-time-table="true"', rendered)
+        self.assertIn('data-ga-hv-tasks="true"', rendered)
+        self.assertNotIn("cid:primeflow-ga", rendered)
+        self.assertIn('width="1200"', rendered)
 
 
 if __name__ == "__main__":

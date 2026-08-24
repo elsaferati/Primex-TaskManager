@@ -27,7 +27,7 @@ from app.services.primeflow_report import (
     ReportDocument, ReportReminderQuestion, ReportUndiscussedNote, clean_description, build_report_document,
     predecessor, render_docx, render_html, render_plain_text, render_png, report_subject, report_timezone,
 )
-from app.services.one_h_ga_attachments import build_ga_only_1h_attachments
+from app.services.one_h_ga_attachments import build_ga_only_1h_attachments, render_ga_tables_html
 from app.services.task_strike_events import render_text_for_interval
 
 logger = logging.getLogger(__name__)
@@ -362,10 +362,17 @@ async def deliver_report(
             ]
             regular_recipients, ga_recipients = split_ga_recipient_map(recipient_map)
             ga_attachments = None
+            ga_html_body = html_body
             if ga_recipients is not None:
                 # Finish all data/image generation before the first SMTP send,
                 # so a rendering error cannot leave only the regular group sent.
-                ga_attachments = attachments + await build_ga_only_1h_attachments(db, day)
+                ga_only_attachments = await build_ga_only_1h_attachments(db, day)
+                ga_attachments = attachments + ga_only_attachments
+                ga_html_body = render_html(
+                    document,
+                    pre_sections_html=await render_ga_tables_html(db, day),
+                    content_width=1200,
+                )
             messages: list[dict] = []
             if any(regular_recipients.values()):
                 messages.append(await gmail.send_verified(
@@ -382,7 +389,7 @@ async def deliver_report(
                     subject,
                     ga_recipients,
                     body,
-                    html_body,
+                    ga_html_body,
                     attachments=ga_attachments,
                     message_id=f"primeflow-1h-{run.id}-ga@primexeu.com",
                 ))

@@ -22,6 +22,7 @@ from app.services.meetings_report import (
     _effective_task_assignee_ids,
     _m3_finance_ga_sections,
     _meeting_occurs_on_date,
+    _render_section_body_html,
     apply_weekly_planner_task_order,
     render_section_report_png,
 )
@@ -232,7 +233,7 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
     return output.getvalue()
 
 
-async def render_ga_hv_tasks_png(db: AsyncSession, report_day: date) -> bytes:
+async def _ga_hv_bodies(db: AsyncSession, report_day: date) -> tuple[str, str]:
     tasks = (
         await db.execute(
             select(Task)
@@ -247,12 +248,153 @@ async def render_ga_hv_tasks_png(db: AsyncSession, report_day: date) -> bytes:
         for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
     }
     await apply_weekly_planner_task_order(db, tasks, assignee_ids, department_codes)
-    ga_body, hv_body = await _m3_finance_ga_sections(db, tasks, names, report_day)
+    return await _m3_finance_ga_sections(db, tasks, names, report_day)
+
+
+async def render_ga_hv_tasks_png(db: AsyncSession, report_day: date) -> bytes:
+    ga_body, hv_body = await _ga_hv_bodies(db, report_day)
     return render_section_report_png(
         "GA / HV TASKS",
         "GA-HV",
         report_day,
         [{"title": "GA TASKS", "body": ga_body}, {"title": "HV TASKS", "body": hv_body}],
+    )
+
+
+def _email_section_title(title: str) -> str:
+    return (
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+        'style="width:100%;border-collapse:collapse;margin:18px 0 10px;">'
+        '<tr><td width="6" bgcolor="#2563eb" style="width:6px;background-color:#2563eb;'
+        'font-size:0;line-height:0;">&nbsp;</td>'
+        '<td bgcolor="#eef2ff" style="background-color:#eef2ff;padding:11px 14px;'
+        'font-family:Arial,sans-serif;font-size:16px;font-weight:800;color:#0f172a;">'
+        f'{html.escape(title)}</td></tr></table>'
+    )
+
+
+async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
+    """Native email-table version of the GA timetable."""
+    week_start = _week_start(report_day)
+    week_dates = [week_start + timedelta(days=index) for index in range(5)]
+    rows = list(await get_ga_time_table_rows(db))
+    ga_user = await _ga_user(db)
+    entries = []
+    if ga_user is not None:
+        entries = (
+            await db.execute(
+                select(GaTimeSlotTemplate)
+                .where(GaTimeSlotTemplate.user_id == ga_user.id)
+                .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.created_at)
+            )
+        ).scalars().all()
+
+    cell_items: dict[tuple[int, time], list[dict[str, Any]]] = {}
+    for entry in entries:
+        cell_items.setdefault((entry.day_of_week, _row_start(rows, entry.start_time)), []).append({
+            "text": _plain_text(entry.content),
+            "fill": _color(entry.background_color, "#FFFFFF"),
+            "color": _color(entry.text_color, "#0F172A"),
+            "bold": bool(entry.is_bold),
+            "italic": bool(entry.is_italic),
+        })
+    meetings = (await db.execute(select(Meeting))).scalars().all()
+    for meeting in meetings:
+        meeting_time = _meeting_time(meeting)
+        if meeting_time is None:
+            continue
+        for day_index, day in enumerate(week_dates):
+            if not _meeting_occurs_on_date(meeting, day):
+                continue
+            label = "TAK EXT" if (meeting.meeting_type or "").lower() == "external" else "TAK INT"
+            cell_items.setdefault((day_index, _row_start(rows, meeting_time)), []).append({
+                "text": f"{label}: {meeting.title or '-'}",
+                "fill": "#E0F2FE" if label == "TAK EXT" else "#DBEAFE",
+                "color": "#0F3B8F",
+                "bold": label == "TAK INT",
+                "italic": False,
+            })
+
+    def comments_for(row: Any, column: str) -> list[dict[str, Any]]:
+        values = [
+            item for item in (getattr(row, "comments", None) or [])
+            if isinstance(item, dict) and str(item.get("column") or "start") == column
+        ]
+        if column == "start" and not values and _plain_text(getattr(row, "comment", "")):
+            values = [{
+                "content": row.comment,
+                "comment_background_color": getattr(row, "comment_background_color", "#FFFFFF"),
+                "comment_text_color": getattr(row, "comment_text_color", "#0F172A"),
+                "comment_is_bold": getattr(row, "comment_is_bold", False),
+                "comment_is_italic": getattr(row, "comment_is_italic", False),
+            }]
+        return values
+
+    def rich_blocks(items: list[dict[str, Any]], *, comment: bool = False) -> str:
+        blocks = []
+        for item in items:
+            text = _plain_text(str(item.get("content") or "")) if comment else str(item.get("text") or "")
+            fill = _color(item.get("comment_background_color") if comment else item.get("fill"), "#FFFFFF")
+            color = _color(item.get("comment_text_color") if comment else item.get("color"), "#0F172A")
+            bold = bool(item.get("comment_is_bold") if comment else item.get("bold"))
+            italic = bool(item.get("comment_is_italic") if comment else item.get("italic"))
+            blocks.append(
+                f'<div bgcolor="{fill}" style="background-color:{fill};color:{color};padding:5px 6px;'
+                f'margin:0 0 4px;font-weight:{"700" if bold else "400"};'
+                f'font-style:{"italic" if italic else "normal"};">'
+                f'{html.escape(text).replace(chr(10), "<br>")}</div>'
+            )
+        return "".join(blocks) or "&nbsp;"
+
+    headers = ["NR", "TIME", "KOMENT", *[f"{day.strftime('%a').upper()} = {day:%d.%m.%Y}" for day in week_dates], "KOMENT"]
+    header_html = "".join(
+        f'<th bgcolor="#e2e8f0" style="background-color:#e2e8f0;border:1px solid #94a3b8;'
+        f'padding:7px 5px;font-family:Arial,sans-serif;font-size:11px;text-align:left;">{html.escape(label)}</th>'
+        for label in headers
+    )
+    body_rows = []
+    for row in rows:
+        cells = [
+            f'<td bgcolor="#f8fafc" style="border:1px solid #cbd5e1;padding:6px;font-weight:700;vertical-align:top;">{html.escape(row.nr_label or "")}</td>',
+            f'<td bgcolor="#f8fafc" style="border:1px solid #cbd5e1;padding:6px;vertical-align:top;white-space:nowrap;">{html.escape(row.label or "")}</td>',
+            f'<td style="border:1px solid #cbd5e1;padding:3px;vertical-align:top;">{rich_blocks(comments_for(row, "start"), comment=True)}</td>',
+        ]
+        cells.extend(
+            f'<td style="border:1px solid #cbd5e1;padding:3px;vertical-align:top;">{rich_blocks(cell_items.get((day_index, row.start_time), []))}</td>'
+            for day_index in range(5)
+        )
+        cells.append(
+            f'<td style="border:1px solid #cbd5e1;padding:3px;vertical-align:top;">{rich_blocks(comments_for(row, "end"), comment=True)}</td>'
+        )
+        body_rows.append(f'<tr>{"".join(cells)}</tr>')
+    title = f"GA TIME TABLE ({week_dates[0]:%d.%m.%Y} - {week_dates[-1]:%d.%m.%Y})"
+    return (
+        _email_section_title(title)
+        + '<table role="table" width="100%" cellspacing="0" cellpadding="0" border="0" '
+        'data-ga-time-table="true" style="width:100%;border-collapse:collapse;table-layout:fixed;'
+        'font-family:Arial,sans-serif;font-size:11px;line-height:1.3;">'
+        f'<thead><tr>{header_html}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>'
+    )
+
+
+async def render_ga_hv_tasks_html(db: AsyncSession, report_day: date) -> str:
+    ga_body, hv_body = await _ga_hv_bodies(db, report_day)
+    return (
+        '<div data-ga-hv-tasks="true">'
+        + _email_section_title("GA TASKS")
+        + _render_section_body_html(ga_body)
+        + _email_section_title("HV TASKS")
+        + _render_section_body_html(hv_body)
+        + '</div>'
+    )
+
+
+async def render_ga_tables_html(db: AsyncSession, report_day: date) -> str:
+    return (
+        '<div data-ga-inline-tables="true">'
+        + await render_ga_time_table_html(db, report_day)
+        + await render_ga_hv_tasks_html(db, report_day)
+        + '</div>'
     )
 
 
