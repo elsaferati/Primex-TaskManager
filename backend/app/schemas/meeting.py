@@ -41,6 +41,7 @@ class MeetingCreate(BaseModel):
     department_id: uuid.UUID
     project_id: uuid.UUID | None = None
     participant_ids: list[uuid.UUID] = []
+    create_internal_meeting: bool | None = None
     internal_starts_at: datetime | None = None
 
 
