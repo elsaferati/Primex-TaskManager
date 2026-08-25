@@ -24,7 +24,9 @@ from app.schemas.meeting import (
 )
 from app.services.meeting_system_tasks import (
     deactivate_external_meeting_system_tasks,
+    reconcile_agent_test_task_for_meeting,
     reconcile_external_meeting_system_tasks_for_meeting,
+    reconcile_pim_image_test_task_for_meeting,
 )
 
 
@@ -100,6 +102,7 @@ async def list_meetings(
             recurrence_days_of_week=m.recurrence_days_of_week,
             recurrence_days_of_month=m.recurrence_days_of_month,
             external_agent_test_task_requested=m.external_agent_test_task_requested,
+            external_pim_image_test_task_requested=m.external_pim_image_test_task_requested,
             department_id=m.department_id,
             project_id=m.project_id,
             created_by=m.created_by,
@@ -270,6 +273,7 @@ async def create_meeting(
             recurrence_days_of_week=paired_internal_meeting.recurrence_days_of_week,
             recurrence_days_of_month=paired_internal_meeting.recurrence_days_of_month,
             external_agent_test_task_requested=paired_internal_meeting.external_agent_test_task_requested,
+            external_pim_image_test_task_requested=paired_internal_meeting.external_pim_image_test_task_requested,
             department_id=paired_internal_meeting.department_id,
             project_id=paired_internal_meeting.project_id,
             created_by=paired_internal_meeting.created_by,
@@ -289,6 +293,7 @@ async def create_meeting(
         recurrence_days_of_week=meeting.recurrence_days_of_week,
         recurrence_days_of_month=meeting.recurrence_days_of_month,
         external_agent_test_task_requested=meeting.external_agent_test_task_requested,
+        external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
         department_id=meeting.department_id,
         project_id=meeting.project_id,
         created_by=meeting.created_by,
@@ -394,6 +399,7 @@ async def update_meeting(
         recurrence_days_of_week=meeting.recurrence_days_of_week,
         recurrence_days_of_month=meeting.recurrence_days_of_month,
         external_agent_test_task_requested=meeting.external_agent_test_task_requested,
+        external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
         department_id=meeting.department_id,
         project_id=meeting.project_id,
         created_by=meeting.created_by,
@@ -419,7 +425,7 @@ async def create_agent_test_task_for_meeting(
 
     meeting.external_agent_test_task_requested = True
     await db.flush()
-    created = await reconcile_external_meeting_system_tasks_for_meeting(db, meeting)
+    created = await reconcile_agent_test_task_for_meeting(db, meeting)
     if created == 0 and meeting.starts_at is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting start date is required")
     if created == 0 and (meeting.recurrence_type or "").strip().lower() not in ("", "none"):
@@ -443,6 +449,56 @@ async def create_agent_test_task_for_meeting(
         recurrence_days_of_week=meeting.recurrence_days_of_week,
         recurrence_days_of_month=meeting.recurrence_days_of_month,
         external_agent_test_task_requested=meeting.external_agent_test_task_requested,
+        external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
+        department_id=meeting.department_id,
+        project_id=meeting.project_id,
+        created_by=meeting.created_by,
+        created_at=meeting.created_at,
+        updated_at=meeting.updated_at,
+        participant_ids=participant_ids_list,
+    )
+
+
+@router.post("/{meeting_id}/pim-image-test-task", response_model=MeetingOut)
+async def create_pim_image_test_task_for_meeting(
+    meeting_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> MeetingOut:
+    meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
+    if meeting is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    ensure_manager_or_admin(user)
+    ensure_department_access(user, meeting.department_id)
+    if meeting.meeting_type != "external":
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PIM image test task is only available for external meetings")
+    if meeting.starts_at is None:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Meeting start date is required")
+    if (meeting.recurrence_type or "").strip().lower() not in ("", "none"):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="PIM image test task is only available for one-time meetings")
+
+    meeting.external_pim_image_test_task_requested = True
+    await db.flush()
+    await reconcile_pim_image_test_task_for_meeting(db, meeting)
+    await db.commit()
+    await db.refresh(meeting)
+
+    participants_stmt = select(MeetingParticipant).where(MeetingParticipant.meeting_id == meeting.id)
+    participants = (await db.execute(participants_stmt)).scalars().all()
+    participant_ids_list = [p.user_id for p in participants]
+
+    return MeetingOut(
+        id=meeting.id,
+        title=meeting.title,
+        platform=meeting.platform,
+        starts_at=meeting.starts_at,
+        meeting_url=meeting.meeting_url,
+        meeting_type=meeting.meeting_type,
+        recurrence_type=meeting.recurrence_type,
+        recurrence_days_of_week=meeting.recurrence_days_of_week,
+        recurrence_days_of_month=meeting.recurrence_days_of_month,
+        external_agent_test_task_requested=meeting.external_agent_test_task_requested,
+        external_pim_image_test_task_requested=meeting.external_pim_image_test_task_requested,
         department_id=meeting.department_id,
         project_id=meeting.project_id,
         created_by=meeting.created_by,

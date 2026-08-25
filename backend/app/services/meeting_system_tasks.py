@@ -4,13 +4,14 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.enums import FrequencyType, SystemTaskScope, TaskFinishPeriod, TaskPriority, TaskStatus
 from app.models.meeting import Meeting
+from app.models.department import Department
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_assignee_slot import SystemTaskTemplateAssigneeSlot
 from app.models.task import Task
@@ -38,6 +39,15 @@ EXTERNAL_MEETING_ASSIGNEE_NAMES = (
     "Rinesa Ahmedi",
 )
 
+PIM_IMAGE_MEETING_TASK_KIND = "external_meeting_pim_image_test"
+PIM_IMAGE_MEETING_TRIGGER_TYPE = "EXTERNAL_MEETING_PIM_IMAGE_ONCE"
+PIM_IMAGE_MEETING_TASK_TITLE = "TESTIMI I PIM IMAGE PARA TAK"
+PIM_IMAGE_MEETING_TASK_DESCRIPTION = (
+    "Para takimit ekstern, kontrollohen PIM images që do të prezantohen.\n"
+    "Verifikohet përmbajtja, cilësia, dimensionet, emërtimi dhe përputhja me produktin.\n"
+    "Rezultati i testimit dokumentohet dhe çdo problem i raportohet ekipit para fillimit të takimit."
+)
+
 
 def _app_tz() -> ZoneInfo:
     try:
@@ -51,6 +61,16 @@ def is_one_time_external_meeting(meeting: Meeting | object) -> bool:
     return (
         (getattr(meeting, "meeting_type", None) or "external") == "external"
         and bool(getattr(meeting, "external_agent_test_task_requested", False))
+        and recurrence_type in ("", "none")
+        and getattr(meeting, "starts_at", None) is not None
+    )
+
+
+def is_one_time_external_pim_image_meeting(meeting: Meeting | object) -> bool:
+    recurrence_type = (getattr(meeting, "recurrence_type", None) or "").strip().lower()
+    return (
+        (getattr(meeting, "meeting_type", None) or "external") == "external"
+        and bool(getattr(meeting, "external_pim_image_test_task_requested", False))
         and recurrence_type in ("", "none")
         and getattr(meeting, "starts_at", None) is not None
     )
@@ -71,6 +91,14 @@ def meeting_task_start_at(occurrence_date: date) -> datetime:
 
 
 def external_meeting_task_title(meeting: Meeting | object) -> str:
+    return _meeting_task_title(meeting, EXTERNAL_MEETING_TASK_TITLE)
+
+
+def pim_image_meeting_task_title(meeting: Meeting | object) -> str:
+    return _meeting_task_title(meeting, PIM_IMAGE_MEETING_TASK_TITLE)
+
+
+def _meeting_task_title(meeting: Meeting | object, base_title: str) -> str:
     meeting_title = (getattr(meeting, "title", None) or "").strip()
     starts_at = getattr(meeting, "starts_at", None)
     time_label = ""
@@ -80,7 +108,7 @@ def external_meeting_task_title(meeting: Meeting | object) -> str:
         time_label = starts_at.astimezone(_app_tz()).strftime("%H:%M")
 
     details = " ".join(part for part in (meeting_title, time_label) if part)
-    return f"{EXTERNAL_MEETING_TASK_TITLE} - {details}" if details else EXTERNAL_MEETING_TASK_TITLE
+    return f"{base_title} - {details}" if details else base_title
 
 
 def _local_day_bounds_utc(day: date) -> tuple[datetime, datetime]:
@@ -90,17 +118,41 @@ def _local_day_bounds_utc(day: date) -> tuple[datetime, datetime]:
 
 
 async def ensure_external_meeting_trigger_template(db: AsyncSession) -> SystemTaskTemplate:
+    return await _ensure_external_meeting_trigger_template(
+        db,
+        trigger_type=EXTERNAL_MEETING_TRIGGER_TYPE,
+        title=EXTERNAL_MEETING_TASK_TITLE,
+        description=EXTERNAL_MEETING_TASK_DESCRIPTION,
+    )
+
+
+async def ensure_pim_image_meeting_trigger_template(db: AsyncSession) -> SystemTaskTemplate:
+    return await _ensure_external_meeting_trigger_template(
+        db,
+        trigger_type=PIM_IMAGE_MEETING_TRIGGER_TYPE,
+        title=PIM_IMAGE_MEETING_TASK_TITLE,
+        description=PIM_IMAGE_MEETING_TASK_DESCRIPTION,
+    )
+
+
+async def _ensure_external_meeting_trigger_template(
+    db: AsyncSession,
+    *,
+    trigger_type: str,
+    title: str,
+    description: str,
+) -> SystemTaskTemplate:
     template = (
         await db.execute(
-            select(SystemTaskTemplate).where(SystemTaskTemplate.trigger_type == EXTERNAL_MEETING_TRIGGER_TYPE)
+            select(SystemTaskTemplate).where(SystemTaskTemplate.trigger_type == trigger_type)
         )
     ).scalar_one_or_none()
     if template is not None:
         return template
 
     template = SystemTaskTemplate(
-        title=EXTERNAL_MEETING_TASK_TITLE,
-        description=EXTERNAL_MEETING_TASK_DESCRIPTION,
+        title=title,
+        description=description,
         internal_notes=None,
         department_id=None,
         default_assignee_id=None,
@@ -117,7 +169,7 @@ async def ensure_external_meeting_trigger_template(db: AsyncSession) -> SystemTa
         interval=1,
         apply_from=None,
         duration_days=1,
-        trigger_type=EXTERNAL_MEETING_TRIGGER_TYPE,
+        trigger_type=trigger_type,
         priority=TaskPriority.NORMAL.value,
         finish_period=TaskFinishPeriod.AM.value,
         requires_alignment=False,
@@ -174,6 +226,24 @@ async def _fixed_assignee_ids(db: AsyncSession) -> list[uuid.UUID]:
     ]
 
 
+async def _graphic_design_assignee_ids(db: AsyncSession) -> list[uuid.UUID]:
+    rows = (
+        await db.execute(
+            select(User.id)
+            .join(Department, Department.id == User.department_id)
+            .where(User.is_active.is_(True))
+            .where(
+                or_(
+                    func.upper(func.trim(Department.name)) == "GRAPHIC DESIGN",
+                    func.upper(func.trim(Department.code)).in_(("GD", "GDS")),
+                )
+            )
+            .order_by(User.full_name.asc())
+        )
+    ).scalars().all()
+    return list(rows)
+
+
 async def _user_department_map(db: AsyncSession, user_ids: list[uuid.UUID]) -> dict[uuid.UUID, uuid.UUID | None]:
     if not user_ids:
         return {}
@@ -189,10 +259,16 @@ def _can_repurpose_existing_task(task: Task, occurrence_date: date, participant_
     return task.meeting_occurrence_date != occurrence_date
 
 
-async def reconcile_external_meeting_system_tasks_for_meeting(
+async def _reconcile_external_meeting_task_kind(
     db: AsyncSession,
     meeting: Meeting,
     *,
+    task_kind: str,
+    description: str,
+    qualifies: bool,
+    participant_ids: list[uuid.UUID],
+    task_title: str,
+    template: SystemTaskTemplate | None,
     now_utc: datetime | None = None,
 ) -> int:
     now_utc = now_utc or datetime.now(timezone.utc)
@@ -200,14 +276,12 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
         await db.execute(
             select(Task)
             .where(Task.meeting_origin_id == meeting.id)
-            .where(Task.meeting_system_task_kind == EXTERNAL_MEETING_TASK_KIND)
+            .where(Task.meeting_system_task_kind == task_kind)
             .order_by(Task.created_at.asc())
         )
     ).scalars().all()
 
-    qualifies = is_one_time_external_meeting(meeting)
     occurrence_date = meeting_occurrence_date(meeting) if qualifies else None
-    participant_ids = await _fixed_assignee_ids(db) if qualifies else []
     participant_id_set = set(participant_ids)
 
     if not qualifies or occurrence_date is None or not participant_ids:
@@ -217,8 +291,8 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
         return 0
 
     task_start_at = meeting_task_start_at(occurrence_date)
-    task_title = external_meeting_task_title(meeting)
-    template = await ensure_external_meeting_trigger_template(db)
+    if template is None:
+        return 0
     department_map = await _user_department_map(db, participant_ids)
     created_or_reactivated = 0
 
@@ -253,7 +327,7 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
                 or existing.origin_run_at != task_start_at
             )
             existing.title = task_title
-            existing.description = EXTERNAL_MEETING_TASK_DESCRIPTION
+            existing.description = description
             existing.department_id = department_map.get(user_id) or meeting.department_id
             existing.assigned_to = user_id
             existing.created_by = meeting.created_by or user_id
@@ -281,7 +355,7 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
             {
                 "id": task_id,
                 "title": task_title,
-                "description": EXTERNAL_MEETING_TASK_DESCRIPTION,
+                "description": description,
                 "internal_notes": None,
                 "department_id": department_map.get(user_id) or meeting.department_id,
                 "assigned_to": user_id,
@@ -293,7 +367,7 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
                 "due_date": task_start_at,
                 "meeting_origin_id": meeting.id,
                 "meeting_occurrence_date": occurrence_date,
-                "meeting_system_task_kind": EXTERNAL_MEETING_TASK_KIND,
+                "meeting_system_task_kind": task_kind,
                 "status": TaskStatus.TODO.value,
                 "priority": TaskPriority.NORMAL.value,
                 "finish_period": TaskFinishPeriod.AM.value,
@@ -327,6 +401,61 @@ async def reconcile_external_meeting_system_tasks_for_meeting(
     return created_or_reactivated
 
 
+async def reconcile_external_meeting_system_tasks_for_meeting(
+    db: AsyncSession,
+    meeting: Meeting,
+    *,
+    now_utc: datetime | None = None,
+) -> int:
+    changed = await reconcile_agent_test_task_for_meeting(db, meeting, now_utc=now_utc)
+    changed += await reconcile_pim_image_test_task_for_meeting(db, meeting, now_utc=now_utc)
+    return changed
+
+
+async def reconcile_agent_test_task_for_meeting(
+    db: AsyncSession,
+    meeting: Meeting,
+    *,
+    now_utc: datetime | None = None,
+) -> int:
+    agent_qualifies = is_one_time_external_meeting(meeting)
+    agent_ids = await _fixed_assignee_ids(db) if agent_qualifies else []
+    agent_template = await ensure_external_meeting_trigger_template(db) if agent_qualifies and agent_ids else None
+    return await _reconcile_external_meeting_task_kind(
+        db,
+        meeting,
+        task_kind=EXTERNAL_MEETING_TASK_KIND,
+        description=EXTERNAL_MEETING_TASK_DESCRIPTION,
+        qualifies=agent_qualifies,
+        participant_ids=agent_ids,
+        task_title=external_meeting_task_title(meeting),
+        template=agent_template,
+        now_utc=now_utc,
+    )
+
+
+async def reconcile_pim_image_test_task_for_meeting(
+    db: AsyncSession,
+    meeting: Meeting,
+    *,
+    now_utc: datetime | None = None,
+) -> int:
+    pim_qualifies = is_one_time_external_pim_image_meeting(meeting)
+    pim_ids = await _graphic_design_assignee_ids(db) if pim_qualifies else []
+    pim_template = await ensure_pim_image_meeting_trigger_template(db) if pim_qualifies and pim_ids else None
+    return await _reconcile_external_meeting_task_kind(
+        db,
+        meeting,
+        task_kind=PIM_IMAGE_MEETING_TASK_KIND,
+        description=PIM_IMAGE_MEETING_TASK_DESCRIPTION,
+        qualifies=pim_qualifies,
+        participant_ids=pim_ids,
+        task_title=pim_image_meeting_task_title(meeting),
+        template=pim_template,
+        now_utc=now_utc,
+    )
+
+
 async def deactivate_external_meeting_system_tasks(
     db: AsyncSession,
     meeting_id: uuid.UUID,
@@ -335,7 +464,7 @@ async def deactivate_external_meeting_system_tasks(
         await db.execute(
             select(Task)
             .where(Task.meeting_origin_id == meeting_id)
-            .where(Task.meeting_system_task_kind == EXTERNAL_MEETING_TASK_KIND)
+            .where(Task.meeting_system_task_kind.in_((EXTERNAL_MEETING_TASK_KIND, PIM_IMAGE_MEETING_TASK_KIND)))
         )
     ).scalars().all()
     changed = 0
@@ -370,7 +499,12 @@ async def reconcile_external_meeting_system_tasks(
             .where(Meeting.starts_at >= start_utc)
             .where(Meeting.starts_at < end_utc)
             .where(Meeting.meeting_type == "external")
-            .where(Meeting.external_agent_test_task_requested.is_(True))
+            .where(
+                or_(
+                    Meeting.external_agent_test_task_requested.is_(True),
+                    Meeting.external_pim_image_test_task_requested.is_(True),
+                )
+            )
             .where(or_(Meeting.recurrence_type.is_(None), Meeting.recurrence_type == "", Meeting.recurrence_type == "none"))
         )
     ).scalars().all()

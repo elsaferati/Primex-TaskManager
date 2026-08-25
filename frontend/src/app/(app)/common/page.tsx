@@ -32,6 +32,13 @@ function canCreateAgentTestTaskForMeeting(meeting: Meeting): boolean {
   return isOneTime && Boolean(meeting.starts_at)
 }
 
+function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
+  if (meeting.external_pim_image_test_task_requested) return false
+  const recurrence = (meeting.recurrence_type || "").trim().toLowerCase()
+  const isOneTime = !recurrence || recurrence === "none"
+  return isOneTime && Boolean(meeting.starts_at)
+}
+
 type CommonType =
   | "late"
   | "absent"
@@ -313,6 +320,7 @@ type DiamondItem = {
   date: string
   review: TaskReview
 }
+
 type PvTaskShiftPreview = {
   task: Task
   startDateInLeave: boolean
@@ -1702,7 +1710,9 @@ export default function CommonViewPage() {
   const [updatingExternalMeeting, setUpdatingExternalMeeting] = React.useState(false)
   const [deletingExternalMeetingId, setDeletingExternalMeetingId] = React.useState<string | null>(null)
   const [creatingAgentTestTaskMeetingId, setCreatingAgentTestTaskMeetingId] = React.useState<string | null>(null)
+  const [creatingPimImageTestTaskMeetingId, setCreatingPimImageTestTaskMeetingId] = React.useState<string | null>(null)
   const [externalMeetingCreateAgentTestTask, setExternalMeetingCreateAgentTestTask] = React.useState(false)
+  const [externalMeetingCreatePimImageTestTask, setExternalMeetingCreatePimImageTestTask] = React.useState(false)
   const [showInternalWeekendDays, setShowInternalWeekendDays] = React.useState(false)
   const [creatingInternalMeeting, setCreatingInternalMeeting] = React.useState(false)
   const [editingInternalMeetingId, setEditingInternalMeetingId] = React.useState<string | null>(null)
@@ -2313,6 +2323,7 @@ export default function CommonViewPage() {
   React.useEffect(() => {
     if (!canSelectExternalMeetingAgentTestTask) {
       setExternalMeetingCreateAgentTestTask(false)
+      setExternalMeetingCreatePimImageTestTask(false)
     }
   }, [canSelectExternalMeetingAgentTestTask])
   const canCreateInternalMeeting = Boolean(internalMeetingTitle.trim()) && Boolean(internalMeetingDepartmentId)
@@ -5423,8 +5434,9 @@ export default function CommonViewPage() {
       return
     }
     const shouldCreateAgentTestTask = externalMeetingCreateAgentTestTask
-    if (shouldCreateAgentTestTask && (externalMeetingRecurrenceType !== "none" || !externalMeetingStartsAt)) {
-      toast.error("Testimi i agentave task is available only for one-time meetings with a start date.")
+    const shouldCreatePimImageTestTask = externalMeetingCreatePimImageTestTask
+    if ((shouldCreateAgentTestTask || shouldCreatePimImageTestTask) && (externalMeetingRecurrenceType !== "none" || !externalMeetingStartsAt)) {
+      toast.error("Test tasks are available only for one-time meetings with a start date.")
       return
     }
     setCreatingExternalMeeting(true)
@@ -5561,6 +5573,21 @@ export default function CommonViewPage() {
           toast.success("Meeting and Testimi i agentave task created.")
         }
       }
+      if (shouldCreatePimImageTestTask) {
+        const taskRes = await apiFetch(`/meetings/${created.id}/pim-image-test-task`, {
+          method: "POST",
+        })
+        if (!taskRes?.ok) {
+          const detail = await taskRes
+            .json()
+            .then((body) => (typeof body?.detail === "string" ? body.detail : null))
+            .catch(() => null)
+          toast.error(detail || "Meeting created, but failed to create Testimi i PIM image task.")
+        } else {
+          meetingForList = (await taskRes.json()) as Meeting
+          toast.success("Meeting and Testimi i PIM image task created.")
+        }
+      }
       setExternalMeetings((prev) => [meetingForList, ...prev])
       if (pairedInternalMeeting) {
         setInternalMeetings((prev) => [pairedInternalMeeting, ...prev])
@@ -5595,7 +5622,8 @@ export default function CommonViewPage() {
       setExternalMeetingRecurrenceMonth("1")
       setExternalMeetingRecurrenceDay("1")
       setExternalMeetingCreateAgentTestTask(false)
-      if (!shouldCreateAgentTestTask) {
+      setExternalMeetingCreatePimImageTestTask(false)
+      if (!shouldCreateAgentTestTask && !shouldCreatePimImageTestTask) {
         toast.success(externalMeetingCreateInternal ? "TAK EXT and TAK INT created." : "TAK EXT created.")
       }
       // Reset checklist after successful creation
@@ -5625,6 +5653,7 @@ export default function CommonViewPage() {
     externalMeetingRecurrenceMonth,
     externalMeetingRecurrenceDay,
     externalMeetingCreateAgentTestTask,
+    externalMeetingCreatePimImageTestTask,
     externalMeetingDepartmentId,
     user?.department_id,
     user?.email,
@@ -5878,6 +5907,40 @@ export default function CommonViewPage() {
         toast.error("Failed to create Testimi i agentave task.")
       } finally {
         setCreatingAgentTestTaskMeetingId(null)
+      }
+    },
+    [apiFetch, isAdmin, isManager, syncCommonMeetingBucket]
+  )
+
+  const createPimImageTestTaskForExternalMeeting = React.useCallback(
+    async (meetingId: string) => {
+      if (!isAdmin && !isManager) return
+      setCreatingPimImageTestTaskMeetingId(meetingId)
+      try {
+        const res = await apiFetch(`/meetings/${meetingId}/pim-image-test-task`, {
+          method: "POST",
+        })
+        if (!res?.ok) {
+          const detail = await res
+            .json()
+            .then((body) => (typeof body?.detail === "string" ? body.detail : null))
+            .catch(() => null)
+          toast.error(detail || "Failed to create Testimi i PIM image task.")
+          return
+        }
+        const updated = (await res.json()) as Meeting
+        COMMON_VIEW_CACHE.clear()
+        setExternalMeetings((prev) => {
+          const next = prev.map((meeting) => (meeting.id === updated.id ? updated : meeting))
+          syncCommonMeetingBucket("external", next)
+          return next
+        })
+        toast.success("Testimi i PIM image task created for Graphic Design.")
+      } catch (err) {
+        console.error("Error creating PIM image test task:", err)
+        toast.error("Failed to create Testimi i PIM image task.")
+      } finally {
+        setCreatingPimImageTestTaskMeetingId(null)
       }
     },
     [apiFetch, isAdmin, isManager, syncCommonMeetingBucket]
@@ -12268,6 +12331,31 @@ export default function CommonViewPage() {
                 >
                   {externalMeetingCreateAgentTestTask ? "Test task will be created" : "A duhet te krijohet detyra 'Testimi i agentave'?"}
                 </button>
+                <button
+                  className="btn-surface"
+                  type="button"
+                  disabled={!canSelectExternalMeetingAgentTestTask || creatingExternalMeeting}
+                  onClick={() => setExternalMeetingCreatePimImageTestTask((prev) => !prev)}
+                  title={
+                    canSelectExternalMeetingAgentTestTask
+                      ? "Toggle Testimi i PIM image task creation for Graphic Design"
+                      : "Available only for one-time meetings with a start date"
+                  }
+                  style={{
+                    width: "100%",
+                    marginTop: "8px",
+                    fontWeight: 600,
+                    fontSize: "13px",
+                    padding: "8px 12px",
+                    backgroundColor: externalMeetingCreatePimImageTestTask ? "#dcfce7" : "#ffffff",
+                    borderColor: externalMeetingCreatePimImageTestTask ? "#16a34a" : "#cbd5e1",
+                    color: externalMeetingCreatePimImageTestTask ? "#166534" : "#334155",
+                  }}
+                >
+                  {externalMeetingCreatePimImageTestTask
+                    ? "PIM image test task will be created"
+                    : "A duhet te krijohet detyra 'Testimi i PIM image'?"}
+                </button>
                 <div className="external-meeting-row" style={{ marginTop: "16px" }}>
                   <button
                     className="btn-primary"
@@ -12551,7 +12639,9 @@ export default function CommonViewPage() {
                                   <span>Status: {renderMeetingStatusControl(meeting)}</span>
                                 </div>
                               </div>
-                              {((isAdmin || isManager) && canCreateAgentTestTaskForMeeting(meeting))
+                              {((isAdmin || isManager) && (
+                                canCreateAgentTestTaskForMeeting(meeting) || canCreatePimImageTestTaskForMeeting(meeting)
+                              ))
                               || canEditExternalMeeting(meeting) ? (
                                 <div style={{ display: "flex", gap: "6px", marginLeft: "12px", flexWrap: "wrap", justifyContent: "flex-end" }}>
                                   {(isAdmin || isManager) && canCreateAgentTestTaskForMeeting(meeting) ? (
@@ -12576,6 +12666,30 @@ export default function CommonViewPage() {
                                       {creatingAgentTestTaskMeetingId === meeting.id
                                         ? "Creating..."
                                         : "Krijo detyrën 'Testimi i agentave'"}
+                                    </button>
+                                  ) : null}
+                                  {(isAdmin || isManager) && canCreatePimImageTestTaskForMeeting(meeting) ? (
+                                    <button
+                                      className="btn-surface"
+                                      type="button"
+                                      onClick={() => void createPimImageTestTaskForExternalMeeting(meeting.id)}
+                                      disabled={
+                                        creatingPimImageTestTaskMeetingId === meeting.id
+                                        || deletingExternalMeetingId === meeting.id
+                                        || updatingExternalMeeting
+                                      }
+                                      title="Create Testimi i PIM image task for Graphic Design"
+                                      style={{
+                                        fontSize: "12px",
+                                        padding: "4px 8px",
+                                        backgroundColor: "#ffffff",
+                                        borderColor: "#cbd5e1",
+                                        color: "#334155",
+                                      }}
+                                    >
+                                      {creatingPimImageTestTaskMeetingId === meeting.id
+                                        ? "Creating..."
+                                        : "Krijo detyrën 'Testimi i PIM image'"}
                                     </button>
                                   ) : null}
                                   {canEditExternalMeeting(meeting) ? (
