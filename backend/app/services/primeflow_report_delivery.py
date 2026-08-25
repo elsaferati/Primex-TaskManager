@@ -90,6 +90,14 @@ def split_ga_recipient_map(
     return regular, ga
 
 
+def _regular_recipient_document(document: ReportDocument) -> ReportDocument:
+    """Remove the two 1H question blocks from the non-GA report variant."""
+    return document.model_copy(
+        update={"board_reminders": [], "reminders": []},
+        deep=True,
+    )
+
+
 def _environment_recipients() -> list[str]:
     raw = os.getenv("PRIMEFLOW_REPORT_RECIPIENTS", "130primex.eu@gmail.com,ga@primexeu.com")
     return [value.strip() for value in raw.split(",") if value.strip()]
@@ -354,9 +362,12 @@ async def deliver_report(
                 include_attachment=True,
                 payload=source_data,
             )
-            body = render_plain_text(document)
-            html_body = render_html(document)
-            run.body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
+            ga_body = render_plain_text(document)
+            ga_base_html = render_html(document)
+            regular_document = _regular_recipient_document(document)
+            regular_body = render_plain_text(regular_document)
+            regular_html_body = render_html(regular_document)
+            run.body_hash = hashlib.sha256(ga_body.encode("utf-8")).hexdigest()
             run.data_generated_at = document.source_generated_at
             snapshot = (await db.execute(
                 select(PrimeFlowReportSnapshot).where(PrimeFlowReportSnapshot.delivery_run_id == run.id)
@@ -365,28 +376,28 @@ async def deliver_report(
                 snapshot = PrimeFlowReportSnapshot(
                     delivery_run_id=run.id,
                     normalized_report_json=document.model_dump(mode="json"),
-                    plain_text_body=body,
-                    html_body=html_body,
+                    plain_text_body=ga_body,
+                    html_body=ga_base_html,
                     content_version=1,
                 )
                 db.add(snapshot)
             if not send:
                 run.status, run.finished_at = "PENDING", datetime.now(report_timezone())
                 await db.commit()
-                setattr(run, "dry_run_body", body)
+                setattr(run, "dry_run_body", ga_body)
                 return run
             filename_stem = f"PrimeFlow-1H-{day:%Y-%m-%d}-{slot.replace(':', '')}"
-            attachments = [
+            regular_attachments = [
                 (
                     f"{filename_stem}.docx",
-                    render_docx(document),
+                    render_docx(regular_document),
                     "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
                 ),
-                (f"{filename_stem}.png", render_png(document), "image/png"),
+                (f"{filename_stem}.png", render_png(regular_document), "image/png"),
             ]
             regular_recipients, ga_recipients = split_ga_recipient_map(recipient_map)
             ga_attachments = None
-            ga_html_body = html_body
+            ga_html_body = ga_base_html
             if ga_recipients is not None:
                 # Finish all data/image generation before the first SMTP send,
                 # so a rendering error cannot leave only the regular group sent.
@@ -400,7 +411,15 @@ async def deliver_report(
                     day,
                     today_print_png=today_print_png,
                 )
-                ga_attachments = attachments + ga_only_attachments
+                ga_attachments = [
+                    (
+                        f"{filename_stem}.docx",
+                        render_docx(document),
+                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    ),
+                    (f"{filename_stem}.png", render_png(document), "image/png"),
+                    *ga_only_attachments,
+                ]
                 ga_html_body = render_html(
                     document,
                     pre_sections_html=await render_ga_tables_html(
@@ -415,9 +434,9 @@ async def deliver_report(
                 messages.append(await gmail.send_verified(
                     subject,
                     regular_recipients,
-                    body,
-                    html_body,
-                    attachments=attachments,
+                    regular_body,
+                    regular_html_body,
+                    attachments=regular_attachments,
                     message_id=f"primeflow-1h-{run.id}-regular@primexeu.com",
                 ))
             if ga_recipients is not None:
@@ -425,7 +444,7 @@ async def deliver_report(
                 messages.append(await gmail.send_verified(
                     subject,
                     ga_recipients,
-                    body,
+                    ga_body,
                     ga_html_body,
                     attachments=ga_attachments,
                     message_id=f"primeflow-1h-{run.id}-ga@primexeu.com",

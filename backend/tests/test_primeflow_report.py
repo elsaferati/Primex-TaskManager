@@ -36,7 +36,7 @@ from app.services.primeflow_report_delivery import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
-    def test_color_legend_explains_task_and_strike_colors_in_every_format(self) -> None:
+    def test_color_legend_only_explains_strike_colors_in_every_format(self) -> None:
         document = build_report_document(
             {
                 "generated_at": "2026-08-25T09:00:00+02:00",
@@ -51,13 +51,16 @@ class PrimeFlowReportTests(unittest.TestCase):
         word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode("utf-8")
         png = render_png(document)
 
-        for label in ("TODO", "IN PROGRESS", "DONE", "Blue strike", "Green strike", "Grey strike"):
+        for label in ("Blue strike", "Green strike", "Grey strike"):
             self.assertIn(label, report_html)
             self.assertIn(label, word_xml)
+        for label in ("TODO", "IN PROGRESS", "DONE"):
+            self.assertNotIn(label, report_html)
+            self.assertNotIn(label, word_xml)
         self.assertIn('data-report-color-legend="true"', report_html)
-        self.assertIn("Completed in current interval", report_html)
-        self.assertIn("Completed earlier today", report_html)
-        self.assertIn("Earlier day or unknown time", report_html)
+        self.assertIn("Kryer ne intervalin e caktuar", report_html)
+        self.assertIn("Kryer me heret", report_html)
+        self.assertIn("Kryer dje", report_html)
         self.assertTrue(png.startswith(b"\x89PNG"))
 
     def test_fixed_staff_reminders_include_ga_staff_bz_step(self) -> None:

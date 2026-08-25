@@ -17,8 +17,13 @@ from app.services.one_h_ga_attachments import (
     render_ga_time_table_html,
     render_ga_time_table_png,
 )
-from app.services.primeflow_report_delivery import split_ga_recipient_map
-from app.services.primeflow_report import build_report_document, render_html
+from app.services.primeflow_report_delivery import _regular_recipient_document, split_ga_recipient_map
+from app.services.primeflow_report import (
+    ReportReminderQuestion,
+    build_report_document,
+    render_html,
+    render_plain_text,
+)
 
 
 def _result(rows):
@@ -28,6 +33,30 @@ def _result(rows):
 
 
 class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
+    def test_question_blocks_are_kept_for_ga_and_removed_for_regular_recipients(self) -> None:
+        ga_document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {}},
+            date(2026, 8, 24),
+            "10:00",
+            reminders=[ReportReminderQuestion(text="Hap doc dhe det")],
+        )
+
+        regular_document = _regular_recipient_document(ga_document)
+        ga_html = render_html(ga_document)
+        regular_html = render_html(regular_document)
+        regular_text = render_plain_text(regular_document)
+
+        self.assertIn("PYETJET PER 1H - BORD", ga_html)
+        self.assertIn("STAFF - HAPAT PER 1H", ga_html)
+        self.assertNotIn("PYETJET PER 1H - BORD", regular_html)
+        self.assertNotIn("STAFF - HAPAT PER 1H", regular_html)
+        self.assertNotIn("PYETJET PER 1H - BORD", regular_text)
+        self.assertNotIn("STAFF - HAPAT PER 1H", regular_text)
+        self.assertTrue(ga_document.board_reminders)
+        self.assertTrue(ga_document.reminders)
+        self.assertEqual(regular_document.board_reminders, [])
+        self.assertEqual(regular_document.reminders, [])
+
     def test_ga_hv_email_uses_native_colored_tables_for_every_status(self) -> None:
         body = """TODO:
 +----+-------+---------+------------------+

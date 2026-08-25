@@ -75,6 +75,8 @@ STATUS_COLORS = {
     "DONE": "#C4FDC4",
 }
 COMMENT_FIXED_INITIALS = ("AT", "RA", "EF", "EH", "LH", "FG")
+COMMENT_ITEMS_PER_LINE = 4
+COMMENT_WRITE_IN_LINE = "_" * 20
 REQUIRED_SHTYPI_RECIPIENT = "130primex.eu@gmail.com"
 
 
@@ -146,6 +148,12 @@ def _task_status(item: dict[str, Any]) -> str:
     return normalized if normalized in STATUS_COLORS else "TODO"
 
 
+def _task_period_label(item: dict[str, Any]) -> str:
+    """Match the AM/PM indicator used by Common View task cards."""
+    raw = str(item.get("finishPeriod") or item.get("finish_period") or "").strip().upper()
+    return raw if raw in {"AM", "PM"} else "AM/PM"
+
+
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
@@ -199,27 +207,37 @@ def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
     return result
 
 
+def _comment_write_in_lines(initials: list[str]) -> list[str]:
+    values = initials or list(COMMENT_FIXED_INITIALS)
+    entries = [f"{value}: {COMMENT_WRITE_IN_LINE}" for value in values]
+    return [
+        ",    ".join(entries[index:index + COMMENT_ITEMS_PER_LINE])
+        for index in range(0, len(entries), COMMENT_ITEMS_PER_LINE)
+    ]
+
+
 def _comments_table_html(initials: list[str]) -> str:
-    columns = initials or list(COMMENT_FIXED_INITIALS)
-    width = 100 / (len(columns) + 1)
-    headers = "".join(
-        f'<th width="{width:.2f}%" bgcolor="#EAF0FF" style="{HEADER_STYLE};font-size:14px;">'
-        f"{html.escape(value)}</th>"
-        for value in columns
-    )
-    comments = "".join(
-        f'<td data-user-comment="{html.escape(value)}" style="{CELL_STYLE};height:64px;">&nbsp;</td>'
-        for value in columns
-    )
+    """Render compact handwritten comment lines without table cells."""
+    values = initials or list(COMMENT_FIXED_INITIALS)
+    rows = []
+    for index in range(0, len(values), COMMENT_ITEMS_PER_LINE):
+        chunk = values[index:index + COMMENT_ITEMS_PER_LINE]
+        entries = "".join(
+            '<span data-user-comment="{initials}" style="display:inline-block;margin:0 20px 8px 0;'
+            'font-family:Arial,sans-serif;font-size:13px;white-space:nowrap;">'
+            '<strong>{initials}:</strong> {line}{suffix}</span>'.format(
+                initials=html.escape(value),
+                line=COMMENT_WRITE_IN_LINE,
+                suffix="," if position < len(chunk) - 1 else "",
+            )
+            for position, value in enumerate(chunk)
+        )
+        rows.append(f'<div data-user-comment-line="true" style="white-space:nowrap;">{entries}</div>')
     return (
-        '<div data-user-comments-table="true" style="margin-top:18px;">'
+        '<div data-user-comments-lines="true" style="margin-top:18px;">'
         '<div style="font-family:Arial,sans-serif;font-size:16px;font-weight:800;margin:0 0 6px;">'
         "KOMENTE PER STAF</div>"
-        f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{TABLE_STYLE}">'
-        f'<thead><tr><th width="{width:.2f}%" bgcolor="#EAF0FF" '
-        f'style="{HEADER_STYLE};font-size:14px;">INC</th>{headers}</tr></thead>'
-        f'<tbody><tr><td data-user-comment="INC" style="{CELL_STYLE};height:64px;'
-        f'font-weight:800;text-align:center;">KOM</td>{comments}</tr></tbody></table></div>'
+        f"{''.join(rows)}</div>"
     )
 
 
@@ -279,6 +297,10 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
         "display:inline-block;float:right;margin:0 0 3px 4px;padding:2px 5px;border:2px solid #111827;"
         "background-color:#fff;color:#111827;font-family:Arial,sans-serif;font-size:10px;"
         "font-weight:800;line-height:1.1;white-space:nowrap;"
+    )
+    period = _task_period_label(item)
+    badges.append(
+        f'<span data-task-badge="finish-period" style="{base_style}">{period}</span>'
     )
     if _is_eight_am_task(item):
         top_badges.append(f'<span data-task-badge="08:00" style="{base_style}">08:00</span>')
@@ -464,16 +486,67 @@ def _html_table(
 def _dated_meetings_html(
     sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]],
 ) -> str:
-    result: list[str] = []
-    for meeting_date, relative, rows in sections:
-        result.append(
-            '<div data-meeting-date-section="true" style="margin:18px 0 6px;'
-            'background-color:#EEF2FF;border-left:5px solid #2563EB;padding:9px 12px;'
-            'font-family:Arial,sans-serif;font-size:15px;font-weight:800;">'
-            f"TAKIMET - {relative} - {meeting_date:%d.%m.%Y}</div>"
-        )
-        result.append(_html_table(rows, meeting=True, report_date=meeting_date))
-    return "".join(result)
+    if not sections:
+        return ""
+
+    visible_sections = sections[:2]
+    while len(visible_sections) < 2:
+        visible_sections.append((visible_sections[0][0], "", []))
+    left, right = visible_sections
+    divider_style = "border-left:4px solid #2563EB"
+
+    def meeting_items(values: list[dict[str, Any]]) -> str:
+        rendered: list[str] = []
+        for index, item in enumerate(values, 1):
+            value = (
+                f"{_report_text(_first_line(item.get('title')))} "
+                f"{str(item.get('time') or '').strip()}"
+            ).strip()
+            highlight = (
+                f"border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR};padding:3px 5px;"
+                if _is_non_routine_meeting(item)
+                else "padding:3px 1px;"
+            )
+            rendered.append(
+                f'<div data-meeting-card="true" style="{highlight}'
+                'margin:0 0 3px;overflow-wrap:anywhere;word-break:break-word;">'
+                f"{index}. {html.escape(value)}</div>"
+            )
+        return "".join(rendered) or "&nbsp;"
+
+    left_rows = {label: values for label, values, *_ in left[2]}
+    right_rows = {label: values for label, values, *_ in right[2]}
+    labels = list(left_rows)
+    labels.extend(label for label in right_rows if label not in left_rows)
+    body = "".join(
+        "<tr>"
+        f'<th style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE}">{html.escape(label)}</th>'
+        f'<td style="{CELL_STYLE};{SLOT_DIVIDER_STYLE}">{meeting_items(left_rows.get(label, []))}</td>'
+        f'<th style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE};{divider_style}">{html.escape(label)}</th>'
+        f'<td style="{CELL_STYLE};{SLOT_DIVIDER_STYLE}">{meeting_items(right_rows.get(label, []))}</td>'
+        "</tr>"
+        for label in labels
+    )
+
+    def day_header(section: tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]) -> str:
+        meeting_date, relative, _ = section
+        return f"{html.escape(relative)} - {meeting_date:%d.%m.%Y}" if relative else "&nbsp;"
+
+    return (
+        '<table data-side-by-side-meetings="true" role="presentation" width="100%" border="1" '
+        f'cellpadding="0" cellspacing="0" style="{TABLE_STYLE};margin-top:18px">'
+        '<colgroup><col width="9%"><col width="41%"><col width="9%"><col width="41%"></colgroup>'
+        '<thead><tr>'
+        f'<th colspan="2" style="{HEADER_STYLE};background-color:#EEF2FF;border-left:5px solid #2563EB;'
+        f'font-size:15px;">{day_header(left)}</th>'
+        f'<th colspan="2" style="{HEADER_STYLE};background-color:#EEF2FF;{divider_style};font-size:15px;">'
+        f'{day_header(right)}</th></tr>'
+        '<tr>'
+        f'<th style="{HEADER_STYLE}">LLOJI</th><th style="{HEADER_STYLE}">TAKIMET</th>'
+        f'<th style="{HEADER_STYLE};{divider_style}">LLOJI</th>'
+        f'<th style="{HEADER_STYLE}">TAKIMET</th>'
+        f"</tr></thead><tbody>{body}</tbody></table>"
+    )
 
 
 def _excel_table_attachment(
@@ -592,7 +665,7 @@ def _excel_table_attachment(
                         if meeting else _task_title(item, personal=personal)
                     )
                     if not meeting:
-                        labels: list[str] = []
+                        labels: list[str] = [f"[{_task_period_label(item)}]"]
                         if _is_eight_am_task(item):
                             labels.append("[08:00]")
                         if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
@@ -656,45 +729,21 @@ def _excel_table_attachment(
         start_row=comment_start_row,
         start_column=1,
         end_row=comment_start_row,
-        end_column=len(comment_columns) + 1,
+        end_column=8,
     )
     comment_title = sheet.cell(comment_start_row, 1, "KOMENTE PER STAF")
     comment_title.font = Font(bold=True, size=12)
-    comment_title.fill = PatternFill("solid", fgColor="EEF2FF")
     comment_title.alignment = Alignment(horizontal="left", vertical="center")
-    inc_header = sheet.cell(comment_start_row + 1, 1, "INC")
-    inc_header.font = Font(bold=True, size=12)
-    inc_header.fill = header_fill
-    inc_header.border = border
-    inc_header.alignment = Alignment(horizontal="center", vertical="center")
-    inc_comment = sheet.cell(comment_start_row + 2, 1, "KOM")
-    inc_comment.font = Font(bold=True)
-    inc_comment.border = border
-    inc_comment.alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
-    for column, initials in enumerate(comment_columns, 2):
-        header = sheet.cell(comment_start_row + 1, column, initials)
-        header.font = Font(bold=True, size=12)
-        header.fill = header_fill
-        header.border = border
-        header.alignment = Alignment(horizontal="center", vertical="center")
-        comment = sheet.cell(comment_start_row + 2, column, "")
-        comment.border = border
-        comment.alignment = Alignment(vertical="top", wrap_text=True)
-        column_letter = get_column_letter(column)
-        sheet.column_dimensions[column_letter].width = max(
-            sheet.column_dimensions[column_letter].width or 0,
-            14,
-        )
-    sheet.row_dimensions[comment_start_row + 2].height = 55
+    for offset, line in enumerate(_comment_write_in_lines(comment_columns), 1):
+        row = comment_start_row + offset
+        sheet.merge_cells(start_row=row, start_column=1, end_row=row, end_column=8)
+        line_cell = sheet.cell(row, 1, line)
+        line_cell.font = Font(size=11)
+        line_cell.alignment = Alignment(horizontal="left", vertical="center")
+        sheet.row_dimensions[row].height = 22
     widths = [6, 22, 29, 29, 29, 29, 29, 29]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
-    for column in range(1, len(comment_columns) + 2):
-        column_letter = get_column_letter(column)
-        sheet.column_dimensions[column_letter].width = max(
-            sheet.column_dimensions[column_letter].width or 0,
-            14,
-        )
     sheet.freeze_panes = f"C{task_header_row + 1}"
 
     output = BytesIO()
@@ -744,7 +793,9 @@ def _png_table_attachment(
         for chunk_index, chunk in enumerate(chunks):
             line_counts = [len(wrap(label, bold, column_widths[1] - 12))]
             for item in chunk:
-                badges = int(_is_eight_am_task(item)) + int(
+                # AM/PM and 08:00 share the top badge row. A deadline date
+                # uses its own row at the bottom of the task card.
+                badges = 1 + int(
                     bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
                     and _task_due_day(item) is not None
                 )
@@ -755,12 +806,46 @@ def _png_table_attachment(
 
     header_top, header_height = 92, 40
     comment_columns = comment_initials or list(COMMENT_FIXED_INITIALS)
-    comment_title_height, comment_header_height, comment_row_height = 38, 38, 72
-    comment_block_height = 20 + comment_title_height + comment_header_height + comment_row_height
-    meeting_block_height = 0
-    for _, _, rows in meeting_sections or []:
-        meeting_block_height += 20 + 38 + 38
-        meeting_block_height += sum(50 * max(1, (len(values) + 5) // 6) for _, values, _ in rows)
+    comment_lines = _comment_write_in_lines(comment_columns)
+    comment_title_height, comment_line_height = 30, 28
+    comment_block_height = 20 + comment_title_height + len(comment_lines) * comment_line_height
+    meeting_pair = list((meeting_sections or [])[:2])
+    if meeting_pair:
+        while len(meeting_pair) < 2:
+            meeting_pair.append((meeting_pair[0][0], "", []))
+    meeting_half_width = (width - (margin * 2)) // 2
+    meeting_label_width = 150
+    meeting_content_width = meeting_half_width - meeting_label_width
+    meeting_layout: list[tuple[str, list[dict[str, Any]], list[dict[str, Any]], int]] = []
+    if meeting_pair:
+        left_rows = {label: values for label, values, *_ in meeting_pair[0][2]}
+        right_rows = {label: values for label, values, *_ in meeting_pair[1][2]}
+        meeting_labels = list(left_rows)
+        meeting_labels.extend(label for label in right_rows if label not in left_rows)
+
+        def meeting_values_height(values: list[dict[str, Any]]) -> int:
+            height = 0
+            for index, item in enumerate(values, 1):
+                value = (
+                    f"{index}. {_report_text(_first_line(item.get('title')))} "
+                    f"{str(item.get('time') or '').strip()}"
+                ).strip()
+                height += max(26, len(wrap(value, regular, meeting_content_width - 18)) * 20 + 8)
+            return height
+
+        for label in meeting_labels:
+            left_values = left_rows.get(label, [])
+            right_values = right_rows.get(label, [])
+            row_height = max(
+                44,
+                meeting_values_height(left_values) + 10,
+                meeting_values_height(right_values) + 10,
+            )
+            meeting_layout.append((label, left_values, right_values, row_height))
+    meeting_block_height = (
+        20 + 42 + 38 + sum(row[3] for row in meeting_layout)
+        if meeting_pair else 0
+    )
     height = (
         header_top + header_height + sum(row[4] for row in layout)
         + meeting_block_height + comment_block_height + margin
@@ -847,7 +932,18 @@ def _png_table_attachment(
                         width=2,
                     )
                     draw.text((badge_left + 6, text_y + 3), "08:00", fill="#111827", font=small_bold)
-                    text_y += 28
+                    badge_right = badge_left - 5
+                period_label = _task_period_label(item)
+                badge_width = int(measure.textlength(period_label, font=small_bold)) + 12
+                badge_left = badge_right - badge_width
+                draw.rectangle(
+                    (badge_left, text_y, badge_right, text_y + 23),
+                    fill="#FFFFFF",
+                    outline="#111827",
+                    width=2,
+                )
+                draw.text((badge_left + 6, text_y + 3), period_label, fill="#111827", font=small_bold)
+                text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 task_font = bold if deadline else regular
                 for line_index, line in enumerate(wrap(value, task_font, column_widths[2 + item_index] - 12)):
@@ -855,84 +951,92 @@ def _png_table_attachment(
             x = right
         y += row_height
 
-    for meeting_date, relative, rows in meeting_sections or []:
+    if meeting_pair:
         y += 20
-        draw.rectangle((margin, y, width - margin, y + 38), fill="#EEF2FF", outline="#2563EB")
+        table_right = width - margin
+        center = margin + meeting_half_width
+        left_date, left_relative, _ = meeting_pair[0]
+        right_date, right_relative, _ = meeting_pair[1]
+        group_bottom = y + 42
+        draw.rectangle((margin, y, center, group_bottom), fill="#EEF2FF", outline="#111827")
+        draw.rectangle((center, y, table_right, group_bottom), fill="#EEF2FF", outline="#111827")
+        left_header = f"{left_relative} - {left_date:%d.%m.%Y}"
+        left_bounds = draw.textbbox((0, 0), left_header, font=bold)
+        left_text_width = left_bounds[2] - left_bounds[0]
         draw.text(
-            (margin + 8, y + 8),
-            f"TAKIMET - {relative} - {meeting_date:%d.%m.%Y}",
+            (margin + (meeting_half_width - left_text_width) / 2, y + 10),
+            left_header,
             fill="#111827",
             font=bold,
         )
-        y += 38
+        right_header = f"{right_relative} - {right_date:%d.%m.%Y}" if right_relative else ""
+        right_bounds = draw.textbbox((0, 0), right_header, font=bold)
+        right_text_width = right_bounds[2] - right_bounds[0]
+        draw.text(
+            (center + (meeting_half_width - right_text_width) / 2, y + 10),
+            right_header,
+            fill="#111827",
+            font=bold,
+        )
+        draw.line((center, y, center, group_bottom), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
+        y = group_bottom
+
         x = margin
-        for column, label in enumerate(["NR", "LLOJI", *[f"MEETING {index}" for index in range(1, 7)]]):
-            right = x + column_widths[column]
+        meeting_column_widths = [
+            meeting_label_width,
+            meeting_content_width,
+            meeting_label_width,
+            meeting_content_width,
+        ]
+        for column, label in enumerate(["LLOJI", "TAKIMET", "LLOJI", "TAKIMET"]):
+            right = x + meeting_column_widths[column]
             draw.rectangle((x, y, right, y + 38), fill="#F8FAFC", outline="#111827")
             draw.text((x + 6, y + 9), label, fill="#111827", font=bold)
             x = right
+        draw.line((center, y, center, y + 38), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
         y += 38
-        for number, (label, values, _) in enumerate(rows, 1):
-            chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
-            for chunk_index, chunk in enumerate(chunks):
-                x = margin
-                for column, value in (
-                    (0, str(number) if chunk_index == 0 else ""),
-                    (1, label if chunk_index == 0 else ""),
-                ):
-                    right = x + column_widths[column]
-                    draw.rectangle((x, y, right, y + 50), fill="#FFFFFF", outline="#111827")
-                    draw.text((x + 6, y + 7), value, fill="#111827", font=bold)
-                    x = right
-                for item_index in range(6):
-                    right = x + column_widths[2 + item_index]
-                    item = chunk[item_index] if item_index < len(chunk) else None
-                    is_highlighted = bool(item and _is_non_routine_meeting(item))
-                    draw.rectangle(
-                        (x, y, right, y + 50),
-                        fill="#FFFFFF",
-                        outline=NON_ROUTINE_MEETING_BORDER_COLOR if is_highlighted else "#111827",
-                        width=3 if is_highlighted else 1,
-                    )
-                    if item:
-                        value = (
-                            f"{item_index + 1 + chunk_index * 6}. "
-                            f"{_report_text(_first_line(item.get('title')))} {str(item.get('time') or '').strip()}"
-                        ).strip()
-                        for line_index, line in enumerate(wrap(value, regular, column_widths[2 + item_index] - 12)):
-                            draw.text((x + 6, y + 6 + line_index * 20), line, fill="#111827", font=regular)
-                    x = right
-                y += 50
+        for label, left_values, right_values, row_height in meeting_layout:
+            x = margin
+            row_bottom = y + row_height
+            for side_values in (left_values, right_values):
+                label_right = x + meeting_label_width
+                draw.rectangle((x, y, label_right, row_bottom), fill="#FFFFFF", outline="#111827")
+                draw.text((x + 6, y + 8), label, fill="#111827", font=bold)
+                content_right = label_right + meeting_content_width
+                draw.rectangle((label_right, y, content_right, row_bottom), fill="#FFFFFF", outline="#111827")
+                item_y = y + 5
+                for index, item in enumerate(side_values, 1):
+                    value = (
+                        f"{index}. {_report_text(_first_line(item.get('title')))} "
+                        f"{str(item.get('time') or '').strip()}"
+                    ).strip()
+                    lines = wrap(value, regular, meeting_content_width - 18)
+                    item_height = max(26, len(lines) * 20 + 8)
+                    if _is_non_routine_meeting(item):
+                        draw.rectangle(
+                            (label_right + 4, item_y, content_right - 4, item_y + item_height - 3),
+                            fill="#FFFFFF",
+                            outline=NON_ROUTINE_MEETING_BORDER_COLOR,
+                            width=3,
+                        )
+                    for line_index, line in enumerate(lines):
+                        draw.text(
+                            (label_right + 9, item_y + 4 + line_index * 20),
+                            line,
+                            fill="#111827",
+                            font=regular,
+                        )
+                    item_y += item_height
+                x = content_right
+            draw.line((center, y, center, row_bottom), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
+            y = row_bottom
 
     y += 20
-    table_left, table_right = margin, width - margin
-    draw.rectangle((table_left, y, table_right, y + comment_title_height), fill="#EEF2FF", outline="#111827")
-    draw.text((table_left + 8, y + 8), "KOMENTE PER STAF", fill="#111827", font=bold)
+    draw.text((margin, y + 3), "KOMENTE PER STAF", fill="#111827", font=bold)
     y += comment_title_height
-    rendered_comment_columns = [("INC", "KOM"), *[(initials, "") for initials in comment_columns]]
-    comment_width = (table_right - table_left) / len(rendered_comment_columns)
-    for index, (initials, comment_text) in enumerate(rendered_comment_columns):
-        left = round(table_left + index * comment_width)
-        right = round(table_left + (index + 1) * comment_width)
-        draw.rectangle((left, y, right, y + comment_header_height), fill="#EAF0FF", outline="#111827")
-        bounds = draw.textbbox((0, 0), initials, font=bold)
-        text_width = bounds[2] - bounds[0]
-        draw.text((left + (right - left - text_width) / 2, y + 9), initials, fill="#111827", font=bold)
-        draw.rectangle(
-            (left, y + comment_header_height, right, y + comment_header_height + comment_row_height),
-            fill="#FFFFFF",
-            outline="#111827",
-        )
-        if comment_text:
-            bounds = draw.textbbox((0, 0), comment_text, font=bold)
-            text_width = bounds[2] - bounds[0]
-            draw.text(
-                (left + (right - left - text_width) / 2, y + comment_header_height + 9),
-                comment_text,
-                fill="#111827",
-                font=bold,
-            )
-    y += comment_header_height + comment_row_height
+    for line in comment_lines:
+        draw.text((margin, y + 3), line, fill="#111827", font=regular)
+        y += comment_line_height
 
     output = BytesIO()
     image.crop((0, 0, width, y + margin)).save(output, format="PNG", optimize=True)
@@ -1021,7 +1125,13 @@ async def _build_print_report(
         "TASKS",
     ]
     for label, values, personal in task_rows:
-        plain_rows.append(f"{label}: " + "; ".join(_task_title(item, personal=personal) for item in values))
+        plain_rows.append(
+            f"{label}: "
+            + "; ".join(
+                f"[{_task_period_label(item)}] {_task_title(item, personal=personal)}"
+                for item in values
+            )
+        )
     if include_meetings:
         for meeting_date, relative, dated_rows in meeting_sections:
             plain_rows.append("")
@@ -1036,8 +1146,7 @@ async def _build_print_report(
     plain_rows.extend([
         "",
         "KOMENTE PER STAF",
-        " | ".join(comment_initials),
-        "COMMENT: " + " | ".join("" for _ in comment_initials),
+        *_comment_write_in_lines(comment_initials),
     ])
     report: dict[str, Any] = {
         "subject": subject_for(target_date),

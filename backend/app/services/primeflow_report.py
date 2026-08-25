@@ -50,15 +50,10 @@ STATUS_COLORS = {
     "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
     "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
 }
-REPORT_STATUS_LEGEND = (
-    ("TODO", "Task waiting to start", STATUS_COLORS["TODO"][0]),
-    ("IN PROGRESS", "Task currently being worked on", STATUS_COLORS["IN_PROGRESS"][0]),
-    ("DONE", "Task completed", STATUS_COLORS["DONE"][0]),
-)
 REPORT_STRIKE_LEGEND = (
-    ("Blue strike", "Completed in current interval", STRIKE_COLORS["blue"]),
-    ("Green strike", "Completed earlier today", STRIKE_COLORS["green"]),
-    ("Grey strike", "Earlier day or unknown time", STRIKE_COLORS["grey"]),
+    ("Blue strike", "Kryer ne intervalin e caktuar", STRIKE_COLORS["blue"]),
+    ("Green strike", "Kryer me heret", STRIKE_COLORS["green"]),
+    ("Grey strike", "Kryer dje", STRIKE_COLORS["grey"]),
 )
 BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-15:30"
 
@@ -650,16 +645,6 @@ def render_html(
         )
 
     def report_legend_html() -> str:
-        def status_item(label: str, description: str, color: str) -> str:
-            return (
-                '<td width="33.33%" style="width:33.33%;padding:6px 8px;border:1px solid #cbd5e1;'
-                'font-family:Arial,sans-serif;font-size:11px;line-height:1.3;vertical-align:middle;">'
-                f'<span style="display:inline-block;width:13px;height:13px;background-color:{color};'
-                'border:1px solid #94a3b8;vertical-align:-2px;margin-right:5px;">&nbsp;</span>'
-                f'<strong>{html.escape(label)}</strong><br>'
-                f'<span style="color:#64748b;">{html.escape(description)}</span></td>'
-            )
-
         def strike_item(label: str, description: str, color: str) -> str:
             return (
                 '<td width="33.33%" style="width:33.33%;padding:6px 8px;border:1px solid #cbd5e1;'
@@ -675,8 +660,6 @@ def render_html(
             '<tr><th colspan="3" bgcolor="#f1f5f9" style="background-color:#f1f5f9;'
             'border:1px solid #cbd5e1;padding:7px 9px;font-family:Arial,sans-serif;'
             'font-size:12px;text-align:left;color:#0f172a;">COLOR LEGEND</th></tr><tr>'
-            + "".join(status_item(*item) for item in REPORT_STATUS_LEGEND)
-            + '</tr><tr>'
             + "".join(strike_item(*item) for item in REPORT_STRIKE_LEGEND)
             + '</tr></table>'
         )
@@ -817,17 +800,9 @@ def render_docx(document: ReportDocument) -> bytes:
     legend_title = legend_header.paragraphs[0].add_run("COLOR LEGEND")
     legend_title.bold = True
     legend_title.font.size = Pt(10)
-    legend_table = doc.add_table(rows=2, cols=3)
+    legend_table = doc.add_table(rows=1, cols=3)
     legend_table.style = "Table Grid"
-    for cell, (label, description, color) in zip(legend_table.rows[0].cells, REPORT_STATUS_LEGEND):
-        shade(cell, color)
-        label_run = cell.paragraphs[0].add_run(label)
-        label_run.bold = True
-        label_run.font.size = Pt(8.5)
-        description_run = cell.add_paragraph().add_run(description)
-        description_run.font.size = Pt(7.5)
-        description_run.font.color.rgb = RGBColor.from_string("475569")
-    for cell, (label, description, color) in zip(legend_table.rows[1].cells, REPORT_STRIKE_LEGEND):
+    for cell, (label, description, color) in zip(legend_table.rows[0].cells, REPORT_STRIKE_LEGEND):
         label_run = cell.paragraphs[0].add_run(label)
         label_run.bold = True
         label_run.font.strike = True
@@ -973,7 +948,7 @@ def render_png(document: ReportDocument) -> bytes:
     draw.text((margin + 24, 55), document.subject, fill="white", font=heading)
     draw.text((margin + 24, 99), f"Generated {document.generated_at.isoformat()} · {document.task_count} tasks", fill="white", font=font)
     y = 160
-    legend_height = 122
+    legend_height = 76
     draw.rounded_rectangle(
         (margin, y, width - margin, y + legend_height),
         radius=8,
@@ -983,25 +958,17 @@ def render_png(document: ReportDocument) -> bytes:
     )
     draw.rectangle((margin, y, width - margin, y + 30), fill="#f1f5f9", outline="#cbd5e1")
     draw.text((margin + 10, y + 5), "COLOR LEGEND", fill="#0f172a", font=bold)
-    legend_items = [*REPORT_STATUS_LEGEND, *REPORT_STRIKE_LEGEND]
     legend_column_width = (width - (2 * margin)) // 3
-    for index, (label, description, color) in enumerate(legend_items):
-        column = index % 3
-        row = index // 3
+    for column, (label, description, color) in enumerate(REPORT_STRIKE_LEGEND):
         left = margin + (column * legend_column_width)
-        top = y + 30 + (row * 46)
+        top = y + 30
         if column:
             draw.line((left, top, left, top + 46), fill="#cbd5e1", width=1)
-        if row == 0:
-            draw.rectangle((left + 10, top + 9, left + 26, top + 25), fill=color, outline="#94a3b8")
-            text_left = left + 34
-        else:
-            text_left = left + 10
-        draw.text((text_left, top + 5), label, fill=color if row else "#0f172a", font=bold)
-        if row:
-            bounds = draw.textbbox((text_left, top + 5), label, font=bold)
-            strike_y = (bounds[1] + bounds[3]) // 2
-            draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
+        text_left = left + 10
+        draw.text((text_left, top + 5), label, fill=color, font=bold)
+        bounds = draw.textbbox((text_left, top + 5), label, font=bold)
+        strike_y = (bounds[1] + bounds[3]) // 2
+        draw.line((bounds[0], strike_y, bounds[2], strike_y), fill=color, width=2)
         draw.text((text_left, top + 26), description, fill="#64748b", font=font)
     y += legend_height + 18
     for reminder_title, questions in (

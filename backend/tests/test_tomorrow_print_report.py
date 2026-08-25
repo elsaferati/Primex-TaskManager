@@ -6,6 +6,7 @@ from openpyxl import load_workbook
 from app.services.tomorrow_print_report import (
     _comment_user_initials,
     _comments_table_html,
+    _dated_meetings_html,
     _excel_table_attachment,
     _html_table,
     _one_h_checklists_html,
@@ -57,15 +58,17 @@ def test_staff_comment_users_keep_fixed_order_then_pcm_weekly_plan_order() -> No
     assert _comment_user_initials(payload) == ["AT", "RA", "EF", "EH", "LH", "FG", "BK", "ZM"]
 
 
-def test_staff_comment_table_is_last_ready_for_handwritten_comments_in_all_formats() -> None:
+def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     initials = ["AT", "RA", "EF", "EH", "LH", "FG", "BK"]
     html = _comments_table_html(initials)
-    assert 'data-user-comments-table="true"' in html
-    assert ">INC</th>" in html
-    assert ">KOM</td>" in html
-    assert html.index(">INC</th>") < html.index(">AT</th>")
-    assert html.index(">AT</th>") < html.index(">BK</th>")
-    assert html.count("data-user-comment=") == len(initials) + 1
+    assert 'data-user-comments-lines="true"' in html
+    assert html.count('data-user-comment-line="true"') == 2
+    assert html.index("<strong>AT:</strong>") < html.index("<strong>BK:</strong>")
+    assert html.count("data-user-comment=") == len(initials)
+    assert "____________________" in html
+    assert "<table" not in html
+    assert ">INC<" not in html
+    assert ">KOM<" not in html
 
     _, workbook_bytes, _ = _excel_table_attachment(
         [], [], date(2026, 8, 14), include_meetings=False, comment_initials=initials
@@ -74,15 +77,12 @@ def test_staff_comment_table_is_last_ready_for_handwritten_comments_in_all_forma
     title_cells = [cell for row in sheet.iter_rows() for cell in row if cell.value == "KOMENTE PER STAF"]
     assert len(title_cells) == 1
     title_row = title_cells[0].row
-    assert [
-        sheet.cell(title_row + 1, column).value
-        for column in range(1, len(initials) + 2)
-    ] == ["INC", *initials]
-    assert sheet.cell(title_row + 2, 1).value == "KOM"
-    assert all(
-        sheet.cell(title_row + 2, column).value is None
-        for column in range(2, len(initials) + 2)
-    )
+    assert sheet.cell(title_row + 1, 1).value.startswith("AT: ____________________")
+    assert "EH: ____________________" in sheet.cell(title_row + 1, 1).value
+    assert sheet.cell(title_row + 2, 1).value.startswith("LH: ____________________")
+    values = [str(cell.value or "") for row in sheet.iter_rows() for cell in row]
+    assert "INC" not in values
+    assert "KOM" not in values
 
     _, png, _ = _png_table_attachment([], date(2026, 8, 14), initials)
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
@@ -199,6 +199,35 @@ def test_task_status_colours_apply_to_email_cells_but_ga_personal_stays_purple()
     assert 'bgcolor="#FFEDD5"' in report_html
     assert 'bgcolor="#C4FDC4"' in report_html
     assert 'bgcolor="#D8B4FE"' in report_html
+
+
+def test_task_cards_show_their_am_pm_period_in_email_and_excel() -> None:
+    tasks = [
+        {"title": "Morning task", "finishPeriod": "AM"},
+        {"title": "Afternoon task", "finish_period": "pm"},
+        {"title": "Unscheduled period"},
+    ]
+
+    report_html = _html_table([("1H 10:00", tasks, False)])
+
+    assert report_html.count('data-task-badge="finish-period"') == 3
+    assert 'data-task-badge="finish-period" style=' in report_html
+    assert '>AM</span>' in report_html
+    assert '>PM</span>' in report_html
+    assert '>AM/PM</span>' in report_html
+
+    _, content, _ = _excel_table_attachment(
+        [("1H 10:00", tasks, False)], [], date(2026, 8, 14)
+    )
+    sheet = load_workbook(BytesIO(content)).active
+    assert "[AM]\n" in sheet["C6"].value
+    assert "[PM]\n" in sheet["D6"].value
+    assert "[AM/PM]\n" in sheet["E6"].value
+
+    _, png, _ = _png_table_attachment(
+        [("1H 10:00", tasks, False)], date(2026, 8, 14)
+    )
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
@@ -356,6 +385,35 @@ def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> N
     assert sheet["D8"].border.left.style == "thin"
 
 
+def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
+    sections = [
+        (
+            date(2026, 8, 25),
+            "SOT",
+            [("TAK EXT", [{"title": "Today one-off", "time": "10:00", "recurrence_type": "none"}], False)],
+        ),
+        (
+            date(2026, 8, 26),
+            "NESER",
+            [("TAK EXT", [{"title": "Tomorrow weekly", "time": "11:00", "recurrence_type": "weekly"}], False)],
+        ),
+    ]
+
+    report_html = _dated_meetings_html(sections)
+
+    assert 'data-side-by-side-meetings="true"' in report_html
+    assert "SOT - 25.08.2026" in report_html
+    assert "NESER - 26.08.2026" in report_html
+    assert report_html.count(">LLOJI</th>") == 2
+    assert report_html.count(">TAKIMET</th>") == 2
+    assert "border-left:4px solid #2563EB" in report_html
+    assert report_html.count("border:2px solid #2563EB") == 1
+    assert report_html.index("Today one-off") < report_html.index("Tomorrow weekly")
+
+    _, png, _ = _png_table_attachment([], date(2026, 8, 25), meeting_sections=sections)
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -> None:
     class FakeClient:
         def __init__(self, *args, **kwargs) -> None:
@@ -389,8 +447,9 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     assert "Today meeting" in report["html"]
     assert "Tomorrow meeting" in report["html"]
     assert "Following meeting" not in report["html"]
-    assert "TAKIMET - SOT - 24.08.2026" in report["html"]
-    assert "TAKIMET - NESER - 25.08.2026" in report["html"]
+    assert "SOT - 24.08.2026" in report["html"]
+    assert "NESER - 25.08.2026" in report["html"]
+    assert 'data-side-by-side-meetings="true"' in report["html"]
     assert report["html"].index("Today meeting") < report["html"].index("Tomorrow meeting")
     assert 'data-today-print-report="true"' in report["content_html"]
     assert [attachment[2] for attachment in report["attachments"]] == [
@@ -410,5 +469,5 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     assert "Today meeting" not in tomorrow["html"]
     assert "Tomorrow meeting" in tomorrow["html"]
     assert "Following meeting" in tomorrow["html"]
-    assert "TAKIMET - NESER - 25.08.2026" in tomorrow["html"]
-    assert "TAKIMET - DITA PAS NESER - 26.08.2026" in tomorrow["html"]
+    assert "NESER - 25.08.2026" in tomorrow["html"]
+    assert "DITA PAS NESER - 26.08.2026" in tomorrow["html"]
