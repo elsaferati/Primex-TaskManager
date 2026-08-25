@@ -27,6 +27,7 @@ class GaTimeSlotEntryIn(GaTimeSlotFormatting):
     end_time: time
     content: str
     user_id: uuid.UUID | None = None
+    sort_order: int = Field(default=0, ge=0)
 
 
 class GaTimeSlotEntryUpdate(BaseModel):
@@ -54,8 +55,21 @@ class GaTimeSlotEntryOut(GaTimeSlotFormatting):
     start_time: time
     end_time: time
     content: str
+    sort_order: int
     created_at: datetime
     updated_at: datetime
+
+
+class GaTimeSlotEntryPosition(BaseModel):
+    id: uuid.UUID
+    day_of_week: int = Field(ge=0, le=6)
+    start_time: time
+    end_time: time
+    sort_order: int = Field(ge=0)
+
+
+class GaTimeSlotEntriesReorder(BaseModel):
+    entries: list[GaTimeSlotEntryPosition] = Field(min_length=1, max_length=500)
 
 
 class GaTimeTableRowCommentFormatting(BaseModel):

@@ -12,6 +12,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from PIL import Image, ImageDraw, ImageFont
 
+from app.config import settings
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient
 
@@ -870,11 +871,14 @@ async def _build_print_report(
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if payload is None:
-        base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
+        base_url = settings.PRIMEFLOW_API_BASE_URL
         if not base_url:
             raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to generate 1H SHTYPI")
         client = PrimeFlowClient(
-            base_url.rstrip("/"), os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
+            base_url.rstrip("/"),
+            settings.PRIMEFLOW_EMAIL or settings.ADMIN_EMAIL,
+            settings.PRIMEFLOW_PASSWORD or settings.ADMIN_PASSWORD,
+            settings.PRIMEFLOW_ACCESS_TOKEN,
         )
         payload = await client.common_view(target_date)
     items = payload.get("items") or {}
@@ -888,12 +892,14 @@ async def _build_print_report(
         except ValueError:
             payload_week_end = meeting_dates[-1]
         if meeting_dates[-1] > payload_week_end:
-            base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
+            base_url = settings.PRIMEFLOW_API_BASE_URL
             if not base_url:
                 raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to load next-day meetings")
             next_meeting_payload = await PrimeFlowClient(
-                base_url.rstrip("/"), os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"),
-                os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
+                base_url.rstrip("/"),
+                settings.PRIMEFLOW_EMAIL or settings.ADMIN_EMAIL,
+                settings.PRIMEFLOW_PASSWORD or settings.ADMIN_PASSWORD,
+                settings.PRIMEFLOW_ACCESS_TOKEN,
             ).common_view(meeting_dates[-1])
     meeting_sections = [
         (

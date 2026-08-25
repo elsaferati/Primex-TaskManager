@@ -155,7 +155,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
       <div className="flex flex-wrap items-start justify-between gap-4">
         <div>
           <h1 className="text-2xl font-semibold">{reportName}</h1>
-          <p className="text-sm text-muted-foreground">{today ? "Today's Common View task rows, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
+          <p className="text-sm text-muted-foreground">{today ? "Today's Common View tasks and meetings, sent at 09:00 Monday-Friday." : "Next-working-day tasks and meetings, sent as an HTML email."}</p>
         </div>
         <div className="flex gap-2">
           <Button variant="outline" onClick={() => void generateReport(true)}><Eye /> Preview email</Button>
@@ -169,7 +169,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
           <div className="flex flex-wrap items-center justify-between gap-3">
             <div>
               <div className="flex items-center gap-2 font-semibold"><Settings size={16} /> Automatic email</div>
-              <div className="text-sm text-muted-foreground">{today ? "Each delivery contains the task rows for that same day." : "Friday’s delivery contains Monday’s report."}</div>
+              <div className="text-sm text-muted-foreground">{today ? "Each delivery contains that day's task rows, TAK INT, and TAK EXT meetings." : "Friday’s delivery contains Monday’s report."}</div>
             </div>
             <button
               type="button"

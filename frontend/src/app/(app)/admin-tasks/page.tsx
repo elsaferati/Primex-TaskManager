@@ -662,6 +662,7 @@ type GaTimeSlotEntry = {
   start_time: string
   end_time: string
   content: string
+  sort_order: number
   background_color: string
   text_color: string
   is_bold: boolean
@@ -730,6 +731,7 @@ const GA_TIME_TEXT_COLORS = [
   { label: "Black", value: "#000000" },
   { label: "Red", value: "#FF0000" },
   { label: "White", value: "#FFFFFF" },
+  { label: "Blue", value: "#0000FF" },
 ] as const
 
 const GA_TIME_RICH_TEXT_TAG_PATTERN = /<(strong|b|em|i|br|span|font)(\s|>|\/)/i
@@ -746,6 +748,9 @@ function normalizeGaTimeInlineColor(value: string) {
     WHITE: "#FFFFFF",
     "RGB(255,255,255)": "#FFFFFF",
     "#FFFFFF": "#FFFFFF",
+    BLUE: "#0000FF",
+    "RGB(0,0,255)": "#0000FF",
+    "#0000FF": "#0000FF",
   }
   return aliases[normalized] || ""
 }
@@ -1868,6 +1873,19 @@ export default function AdminTasksPage() {
   const [gaTimeDeleting, setGaTimeDeleting] = React.useState<Record<string, boolean>>({})
   const [gaTimeEditingId, setGaTimeEditingId] = React.useState<string | null>(null)
   const [gaTimeAddingCell, setGaTimeAddingCell] = React.useState<string | null>(null)
+  const [gaTimeDraggingId, setGaTimeDraggingId] = React.useState<string | null>(null)
+  const [gaTimeDropTarget, setGaTimeDropTarget] = React.useState<{
+    cellKey: string
+    beforeEntryId: string | null
+  } | null>(null)
+  const gaTimeDraggingIdRef = React.useRef<string | null>(null)
+  const gaTimeDropTargetRef = React.useRef<{
+    dayOfWeek: number
+    startTime: string
+    endTime: string
+    beforeEntryId: string | null
+  } | null>(null)
+  const gaTimeDropHandledRef = React.useRef(false)
   const [gaTimeCommentEditingKey, setGaTimeCommentEditingKey] = React.useState<string | null>(null)
   const [gaTimeCommentSavingKey, setGaTimeCommentSavingKey] = React.useState<string | null>(null)
   const [gaTimeRowsDialogOpen, setGaTimeRowsDialogOpen] = React.useState(false)
@@ -4967,6 +4985,13 @@ export default function AdminTasksPage() {
       list.push(entry)
       map.set(key, list)
     }
+    for (const list of map.values()) {
+      list.sort((a, b) => {
+        const orderDifference = (a.sort_order ?? 0) - (b.sort_order ?? 0)
+        if (orderDifference) return orderDifference
+        return a.created_at.localeCompare(b.created_at)
+      })
+    }
     return map
   }, [gaTimeEntries, gaTimeRows])
 
@@ -5015,6 +5040,7 @@ export default function AdminTasksPage() {
       const trimmed = content.trim()
       if (!trimmed) return null
       const key = `${dayOfWeek}|${startTime}`
+      const sortOrder = gaTimeEntriesByCell.get(key)?.length ?? 0
       setGaTimeSaving((prev) => ({ ...prev, [key]: true }))
       try {
         const res = await apiFetch("/ga-time-slots", {
@@ -5025,6 +5051,7 @@ export default function AdminTasksPage() {
             start_time: startTime,
             end_time: endTime,
             content: trimmed,
+            sort_order: sortOrder,
             ...format,
           }),
         })
@@ -5042,7 +5069,7 @@ export default function AdminTasksPage() {
         setGaTimeSaving((prev) => ({ ...prev, [key]: false }))
       }
     },
-    [apiFetch]
+    [apiFetch, gaTimeEntriesByCell]
   )
 
   const updateGaTimeEntry = React.useCallback(
@@ -5071,6 +5098,99 @@ export default function AdminTasksPage() {
       }
     },
     [apiFetch]
+  )
+
+  const moveGaTimeEntry = React.useCallback(
+    async (
+      entryId: string,
+      targetDayOfWeek: number,
+      targetStartTime: string,
+      targetEndTime: string,
+      beforeEntryId: string | null
+    ) => {
+      const draggedEntry = gaTimeEntries.find((entry) => entry.id === entryId)
+      if (!draggedEntry || gaTimeSaving[entryId]) return
+
+      const cellKeyForEntry = (entry: GaTimeSlotEntry) => {
+        const rowStart = resolveGaTimeRowStart(normalizeSlotTime(entry.start_time), gaTimeRows)
+        return `${entry.day_of_week}|${rowStart}`
+      }
+      const sourceCellKey = cellKeyForEntry(draggedEntry)
+      const targetCellKey = `${targetDayOfWeek}|${targetStartTime}`
+      if (sourceCellKey === targetCellKey && beforeEntryId === entryId) {
+        setGaTimeDraggingId(null)
+        setGaTimeDropTarget(null)
+        return
+      }
+      const originalTargetEntries = gaTimeEntries.filter((entry) => cellKeyForEntry(entry) === targetCellKey)
+      const targetEntries = originalTargetEntries.filter((entry) => entry.id !== entryId)
+      const beforeEntryIndex = beforeEntryId
+        ? targetEntries.findIndex((entry) => entry.id === beforeEntryId)
+        : -1
+      const insertionIndex = beforeEntryIndex >= 0 ? beforeEntryIndex : targetEntries.length
+      targetEntries.splice(insertionIndex, 0, draggedEntry)
+
+      if (
+        sourceCellKey === targetCellKey &&
+        originalTargetEntries.length === targetEntries.length &&
+        originalTargetEntries.every((entry, index) => entry.id === targetEntries[index]?.id)
+      ) {
+        setGaTimeDraggingId(null)
+        setGaTimeDropTarget(null)
+        return
+      }
+
+      const sourceEntries = sourceCellKey === targetCellKey
+        ? []
+        : gaTimeEntries.filter(
+            (entry) => entry.id !== entryId && cellKeyForEntry(entry) === sourceCellKey
+          )
+      const positionedEntries = [
+        ...sourceEntries.map((entry, sortOrder) => ({ ...entry, sort_order: sortOrder })),
+        ...targetEntries.map((entry, sortOrder) => ({
+          ...entry,
+          day_of_week: targetDayOfWeek,
+          start_time: targetStartTime,
+          end_time: targetEndTime,
+          sort_order: sortOrder,
+        })),
+      ]
+      const positionedById = new Map(positionedEntries.map((entry) => [entry.id, entry]))
+      const previousEntries = gaTimeEntries
+
+      setGaTimeEditingId(null)
+      setGaTimeAddingCell(null)
+      setGaTimeSaving((prev) => ({ ...prev, [entryId]: true }))
+      setGaTimeEntries((prev) => prev.map((entry) => positionedById.get(entry.id) || entry))
+      try {
+        const res = await apiFetch("/ga-time-slots/reorder", {
+          method: "PUT",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            entries: positionedEntries.map((entry) => ({
+              id: entry.id,
+              day_of_week: entry.day_of_week,
+              start_time: normalizeSlotTime(entry.start_time),
+              end_time: normalizeSlotTime(entry.end_time),
+              sort_order: entry.sort_order,
+            })),
+          }),
+        })
+        if (!res.ok) throw new Error(`ga_time_slot_reorder_failed_${res.status}`)
+        const savedEntries = (await res.json()) as GaTimeSlotEntry[]
+        const savedById = new Map(savedEntries.map((entry) => [entry.id, entry]))
+        setGaTimeEntries((prev) => prev.map((entry) => savedById.get(entry.id) || entry))
+      } catch (error) {
+        console.error("Failed to move GA timetable entry", error)
+        setGaTimeEntries(previousEntries)
+        toast.error("Failed to move timetable entry.")
+      } finally {
+        setGaTimeSaving((prev) => ({ ...prev, [entryId]: false }))
+        setGaTimeDraggingId(null)
+        setGaTimeDropTarget(null)
+      }
+    },
+    [apiFetch, gaTimeEntries, gaTimeRows, gaTimeSaving]
   )
 
   const deleteGaTimeEntry = React.useCallback(
@@ -6485,7 +6605,37 @@ export default function AdminTasksPage() {
                       const externalMeetings = gaExternalMeetingsByCell.get(cellKey) || []
                       return (
                         <td key={`${cellKey}`} className="ga-time-cell">
-                          <div className="ga-time-cell-content">
+                          <div
+                            className={`ga-time-cell-content ${
+                              gaTimeDropTarget?.cellKey === cellKey && gaTimeDropTarget.beforeEntryId === null
+                                ? "ga-time-drop-cell"
+                                : ""
+                            }`}
+                            onDragOver={(event) => {
+                              if (!canEditGaTimeSlots) return
+                              event.preventDefault()
+                              event.dataTransfer.dropEffect = "move"
+                              gaTimeDropTargetRef.current = {
+                                dayOfWeek,
+                                startTime: slot.start,
+                                endTime: slot.end,
+                                beforeEntryId: null,
+                              }
+                              setGaTimeDropTarget({ cellKey, beforeEntryId: null })
+                            }}
+                            onDrop={(event) => {
+                              if (!canEditGaTimeSlots) return
+                              event.preventDefault()
+                              const entryId =
+                                event.dataTransfer.getData("application/x-ga-time-entry") ||
+                                event.dataTransfer.getData("text/plain") ||
+                                gaTimeDraggingIdRef.current ||
+                                gaTimeDraggingId
+                              if (!entryId) return
+                              gaTimeDropHandledRef.current = true
+                              void moveGaTimeEntry(entryId, dayOfWeek, slot.start, slot.end, null)
+                            }}
+                          >
                             {internalMeetings.map((meeting, index) => (
                               <div
                                 key={`ga-internal-${meeting.id || `${meeting.date}-${meeting.time}-${index}`}`}
@@ -6504,7 +6654,7 @@ export default function AdminTasksPage() {
                                 <span><strong>TAK EXT:</strong> {meeting.title}</span>
                               </div>
                             ))}
-                            {entries.map((entry) => {
+                            {entries.map((entry, entryIndex) => {
                               const isEditing = gaTimeEditingId === entry.id
                               if (isEditing) {
                                 return (
@@ -6519,7 +6669,87 @@ export default function AdminTasksPage() {
                                 )
                               }
                               return (
-                                <div key={entry.id} className="ga-time-entry" style={gaTimeEntryStyle(entry)}>
+                                <div
+                                  key={entry.id}
+                                  className={`ga-time-entry ga-time-draggable ${
+                                    gaTimeDraggingId === entry.id ? "ga-time-dragging" : ""
+                                  } ${
+                                    gaTimeDropTarget?.cellKey === cellKey &&
+                                    gaTimeDropTarget.beforeEntryId === entry.id
+                                      ? "ga-time-drop-before"
+                                      : ""
+                                  }`}
+                                  style={gaTimeEntryStyle(entry)}
+                                  draggable={canEditGaTimeSlots && !gaTimeSaving[entry.id]}
+                                  onDragStart={(event) => {
+                                    if (!canEditGaTimeSlots) return
+                                    event.dataTransfer.effectAllowed = "move"
+                                    event.dataTransfer.setData("application/x-ga-time-entry", entry.id)
+                                    event.dataTransfer.setData("text/plain", entry.id)
+                                    gaTimeDraggingIdRef.current = entry.id
+                                    gaTimeDropTargetRef.current = null
+                                    gaTimeDropHandledRef.current = false
+                                    setGaTimeDraggingId(entry.id)
+                                    setGaTimeEditingId(null)
+                                    setGaTimeAddingCell(null)
+                                  }}
+                                  onDragOver={(event) => {
+                                    if (!canEditGaTimeSlots) return
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    event.dataTransfer.dropEffect = "move"
+                                    const bounds = event.currentTarget.getBoundingClientRect()
+                                    const isAfter = event.clientY >= bounds.top + bounds.height / 2
+                                    const beforeEntryId = isAfter
+                                      ? entries[entryIndex + 1]?.id ?? null
+                                      : entry.id
+                                    gaTimeDropTargetRef.current = {
+                                      dayOfWeek,
+                                      startTime: slot.start,
+                                      endTime: slot.end,
+                                      beforeEntryId,
+                                    }
+                                    setGaTimeDropTarget({ cellKey, beforeEntryId })
+                                  }}
+                                  onDrop={(event) => {
+                                    if (!canEditGaTimeSlots) return
+                                    event.preventDefault()
+                                    event.stopPropagation()
+                                    const entryId =
+                                      event.dataTransfer.getData("application/x-ga-time-entry") ||
+                                      event.dataTransfer.getData("text/plain") ||
+                                      gaTimeDraggingIdRef.current ||
+                                      gaTimeDraggingId
+                                    if (!entryId || entryId === entry.id) return
+                                    const bounds = event.currentTarget.getBoundingClientRect()
+                                    const isAfter = event.clientY >= bounds.top + bounds.height / 2
+                                    const beforeEntryId = isAfter
+                                      ? entries[entryIndex + 1]?.id ?? null
+                                      : entry.id
+                                    gaTimeDropHandledRef.current = true
+                                    void moveGaTimeEntry(entryId, dayOfWeek, slot.start, slot.end, beforeEntryId)
+                                  }}
+                                  onDragEnd={() => {
+                                    const entryId = gaTimeDraggingIdRef.current
+                                    const target = gaTimeDropTargetRef.current
+                                    const dropWasHandled = gaTimeDropHandledRef.current
+                                    gaTimeDraggingIdRef.current = null
+                                    gaTimeDropTargetRef.current = null
+                                    gaTimeDropHandledRef.current = false
+                                    setGaTimeDraggingId(null)
+                                    setGaTimeDropTarget(null)
+                                    if (!dropWasHandled && entryId && target) {
+                                      void moveGaTimeEntry(
+                                        entryId,
+                                        target.dayOfWeek,
+                                        target.startTime,
+                                        target.endTime,
+                                        target.beforeEntryId
+                                      )
+                                    }
+                                  }}
+                                  title="Drag to move or click to edit"
+                                >
                                   <button
                                     type="button"
                                     className="ga-time-entry-text"
@@ -7701,7 +7931,7 @@ export default function AdminTasksPage() {
           display: flex;
           min-height: 100%;
           flex-direction: column;
-          justify-content: flex-end;
+          justify-content: flex-start;
           gap: 6px;
         }
         .admin-week-table .ga-time-comment-entry {
@@ -7761,7 +7991,7 @@ export default function AdminTasksPage() {
           padding: 6px;
           white-space: nowrap;
           direction: ltr;
-          vertical-align: bottom;
+          vertical-align: top;
         }
         .admin-week-table .ga-time-row-custom .ga-time-slot-label {
           background: #f8fafc;
@@ -7769,13 +7999,13 @@ export default function AdminTasksPage() {
         .admin-week-table .ga-time-cell {
           border: 1px solid #e2e8f0;
           padding: 6px;
-          vertical-align: bottom;
+          vertical-align: top;
           min-width: 0;
         }
         .admin-week-table .ga-time-cell-content {
           display: flex;
           flex-direction: column;
-          justify-content: flex-end;
+          justify-content: flex-start;
           gap: 6px;
           min-height: 100%;
         }
@@ -7792,6 +8022,26 @@ export default function AdminTasksPage() {
         .admin-week-table .ga-time-entry > span {
           min-width: 0;
           overflow-wrap: anywhere;
+        }
+        .admin-week-table .ga-time-draggable {
+          cursor: grab;
+          transition: opacity 120ms ease, transform 120ms ease, box-shadow 120ms ease;
+        }
+        .admin-week-table .ga-time-draggable:active {
+          cursor: grabbing;
+        }
+        .admin-week-table .ga-time-dragging {
+          opacity: 1;
+        }
+        .admin-week-table .ga-time-drop-before {
+          box-shadow: 0 0 0 1px #cbd5e1;
+          transform: none;
+        }
+        .admin-week-table .ga-time-drop-cell {
+          border-radius: 6px;
+          outline: 1px dashed #cbd5e1;
+          outline-offset: -1px;
+          background: transparent;
         }
         .admin-week-table .ga-time-internal-meeting {
           border-color: #e6c45c;
@@ -7852,16 +8102,14 @@ export default function AdminTasksPage() {
           border-radius: 6px;
           cursor: pointer;
         }
-        .admin-week-table .ga-time-table-live .ga-time-cell-content:has(> .ga-time-add),
-        .admin-week-table .ga-time-table-live .ga-time-comment-list:has(> .ga-time-add) {
+        .admin-week-table .ga-time-table-live .ga-time-cell:has(.ga-time-add) {
           position: relative;
-          padding-top: 32px;
+          padding-bottom: 38px;
         }
-        .admin-week-table .ga-time-table-live .ga-time-cell-content > .ga-time-add,
-        .admin-week-table .ga-time-table-live .ga-time-comment-list > .ga-time-add {
+        .admin-week-table .ga-time-table-live .ga-time-cell .ga-time-add {
           position: absolute;
-          top: 0;
-          left: 0;
+          bottom: 6px;
+          left: 6px;
           z-index: 1;
         }
         .print-header,
@@ -8076,16 +8324,16 @@ export default function AdminTasksPage() {
             background: #f3f4f6 !important;
             text-align: left !important;
             direction: ltr;
-            vertical-align: bottom !important;
+            vertical-align: top !important;
           }
           .print-section[data-print-section="ga-time"] .ga-time-slot-label,
           .print-section[data-print-section="ga-time"] .ga-time-cell {
             height: inherit;
-            vertical-align: bottom;
+            vertical-align: top;
           }
           .print-section[data-print-section="ga-time"] .ga-time-cell-content {
             min-height: 100%;
-            justify-content: flex-end;
+            justify-content: flex-start;
           }
           .print-section[data-print-section="ga-time"] .ga-time-table-table tbody {
             height: 100%;

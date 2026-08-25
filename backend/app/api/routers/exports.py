@@ -1512,7 +1512,12 @@ async def export_ga_time_xlsx(
         await db.execute(
             select(GaTimeSlotTemplate)
             .where(GaTimeSlotTemplate.user_id == ga_user.id)
-            .order_by(GaTimeSlotTemplate.day_of_week, GaTimeSlotTemplate.start_time, GaTimeSlotTemplate.created_at)
+            .order_by(
+                GaTimeSlotTemplate.day_of_week,
+                GaTimeSlotTemplate.start_time,
+                GaTimeSlotTemplate.sort_order,
+                GaTimeSlotTemplate.created_at,
+            )
         )
     ).scalars().all()
     table_rows = await get_ga_time_table_rows(db)

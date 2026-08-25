@@ -27,6 +27,7 @@ class GaTimeSlotTemplate(Base):
     day_of_week: Mapped[int] = mapped_column(Integer, index=True, nullable=False)
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
+    sort_order: Mapped[int] = mapped_column(Integer, nullable=False, server_default="0")
     content: Mapped[str] = mapped_column(String(8000), nullable=False, server_default="")
     background_color: Mapped[str] = mapped_column(String(7), nullable=False, server_default="#FFFFFF")
     text_color: Mapped[str] = mapped_column(String(7), nullable=False, server_default="#0F172A")
