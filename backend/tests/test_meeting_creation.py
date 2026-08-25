@@ -45,6 +45,8 @@ class _FakeDb:
             if isinstance(value, Meeting):
                 if getattr(value, "external_agent_test_task_requested", None) is None:
                     value.external_agent_test_task_requested = False
+                if getattr(value, "external_pim_image_test_task_requested", None) is None:
+                    value.external_pim_image_test_task_requested = False
                 if getattr(value, "created_at", None) is None:
                     value.created_at = now
                 if getattr(value, "updated_at", None) is None:

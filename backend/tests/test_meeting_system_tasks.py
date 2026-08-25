@@ -11,10 +11,14 @@ from app.services.meeting_system_tasks import (
     EXTERNAL_MEETING_TASK_DESCRIPTION,
     EXTERNAL_MEETING_TASK_KIND,
     EXTERNAL_MEETING_TASK_TITLE,
+    PIM_IMAGE_MEETING_TASK_KIND,
+    PIM_IMAGE_MEETING_TASK_TITLE,
     external_meeting_task_title,
     is_one_time_external_meeting,
+    is_one_time_external_pim_image_meeting,
     meeting_occurrence_date,
     meeting_task_start_at,
+    pim_image_meeting_task_title,
 )
 
 
@@ -38,6 +42,16 @@ class TestMeetingSystemTasks(unittest.TestCase):
         )
 
         self.assertFalse(is_one_time_external_meeting(meeting))
+
+    def test_one_time_external_meeting_qualifies_for_pim_image_test(self) -> None:
+        meeting = SimpleNamespace(
+            meeting_type="external",
+            external_pim_image_test_task_requested=True,
+            recurrence_type=None,
+            starts_at=datetime(2026, 6, 3, 12, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(is_one_time_external_pim_image_meeting(meeting))
 
     def test_recurring_external_meetings_do_not_qualify(self) -> None:
         for recurrence_type in ("weekly", "monthly", "yearly"):
@@ -98,6 +112,21 @@ class TestMeetingSystemTasks(unittest.TestCase):
         self.assertIn("Testimi i Agent", EXTERNAL_MEETING_TASK_DESCRIPTION)
         self.assertIn("Development Department", EXTERNAL_MEETING_TASK_DESCRIPTION)
         self.assertIn("\n2. Testimi bëhet", EXTERNAL_MEETING_TASK_DESCRIPTION)
+
+
+    def test_pim_image_task_title_includes_meeting_title_and_time(self) -> None:
+        with patch("app.services.meeting_system_tasks.settings.APP_TIMEZONE", "Europe/Budapest"):
+            meeting = SimpleNamespace(
+                title="Client demo",
+                starts_at=datetime(2026, 6, 3, 12, 30, tzinfo=timezone.utc),
+            )
+
+            self.assertEqual(
+                pim_image_meeting_task_title(meeting),
+                "TESTIMI I PIM IMAGE PARA TAK - Client demo 14:30",
+            )
+        self.assertEqual(PIM_IMAGE_MEETING_TASK_KIND, "external_meeting_pim_image_test")
+        self.assertEqual(PIM_IMAGE_MEETING_TASK_TITLE, "TESTIMI I PIM IMAGE PARA TAK")
 
 
 if __name__ == "__main__":
