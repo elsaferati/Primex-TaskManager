@@ -33,9 +33,9 @@ class PrimeFlowReportScheduleConfigTests(TestCase):
             [(row.report_slot, row.execution_time) for row in DEFAULT_1H_SCHEDULES],
             [
                 ("10:00", time(9, 0)),
-                ("11:00", time(10, 50)),
-                ("11:50", time(11, 40)),
-                ("14:10", time(14, 10)),
+                ("11:00", time(11, 0)),
+                ("11:50", time(11, 50)),
+                ("14:10", time(14, 20)),
                 ("14:20", time(14, 20)),
                 ("15:50", time(15, 50)),
             ],

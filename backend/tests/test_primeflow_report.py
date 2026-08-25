@@ -36,6 +36,30 @@ from app.services.primeflow_report_delivery import (
 
 
 class PrimeFlowReportTests(unittest.TestCase):
+    def test_color_legend_explains_task_and_strike_colors_in_every_format(self) -> None:
+        document = build_report_document(
+            {
+                "generated_at": "2026-08-25T09:00:00+02:00",
+                "guardrails": {"truncated": {}},
+                "items": {},
+            },
+            date(2026, 8, 25),
+            "10:00",
+        )
+
+        report_html = render_html(document)
+        word_xml = zipfile.ZipFile(io.BytesIO(render_docx(document))).read("word/document.xml").decode("utf-8")
+        png = render_png(document)
+
+        for label in ("TODO", "IN PROGRESS", "DONE", "Blue strike", "Green strike", "Grey strike"):
+            self.assertIn(label, report_html)
+            self.assertIn(label, word_xml)
+        self.assertIn('data-report-color-legend="true"', report_html)
+        self.assertIn("Completed in current interval", report_html)
+        self.assertIn("Completed earlier today", report_html)
+        self.assertIn("Earlier day or unknown time", report_html)
+        self.assertTrue(png.startswith(b"\x89PNG"))
+
     def test_fixed_staff_reminders_include_ga_staff_bz_step(self) -> None:
         reminders = asyncio.run(load_1h_reminder_questions())
 
@@ -192,7 +216,7 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("Finished item", html)
         self.assertNotIn("Përshkrimi:", html)
         self.assertNotIn("Pa përshkrim", html)
-        self.assertNotIn("TODO", html)
+        self.assertNotIn(STATUS_MARKERS["TODO"], html)
 
     def test_multiline_title_details_render_grey(self) -> None:
         data = {
@@ -737,10 +761,12 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(strike_interval_start(report_day, "10:00").strftime("%H:%M"), "08:00")
         self.assertEqual(strike_interval_end(report_day, "10:00").strftime("%H:%M"), "09:00")
         self.assertEqual(strike_interval_start(report_day, "11:00").strftime("%H:%M"), "09:00")
-        self.assertEqual(strike_interval_end(report_day, "11:00").strftime("%H:%M"), "10:50")
-        self.assertEqual(strike_interval_start(report_day, "14:10").strftime("%H:%M"), "11:40")
-        self.assertEqual(strike_interval_end(report_day, "14:10").strftime("%H:%M"), "14:10")
-        self.assertEqual(strike_interval_start(report_day, "14:20").strftime("%H:%M"), "14:10")
+        self.assertEqual(strike_interval_end(report_day, "11:00").strftime("%H:%M"), "11:00")
+        self.assertEqual(strike_interval_start(report_day, "11:50").strftime("%H:%M"), "11:00")
+        self.assertEqual(strike_interval_end(report_day, "11:50").strftime("%H:%M"), "11:50")
+        self.assertEqual(strike_interval_start(report_day, "14:10").strftime("%H:%M"), "11:50")
+        self.assertEqual(strike_interval_end(report_day, "14:10").strftime("%H:%M"), "14:20")
+        self.assertEqual(strike_interval_start(report_day, "14:20").strftime("%H:%M"), "11:50")
         self.assertEqual(strike_interval_end(report_day, "14:20").strftime("%H:%M"), "14:20")
         self.assertEqual(strike_interval_start(report_day, "15:50").strftime("%H:%M"), "14:20")
         self.assertEqual(strike_interval_end(report_day, "15:50").strftime("%H:%M"), "15:50")
