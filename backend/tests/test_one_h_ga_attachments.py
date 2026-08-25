@@ -9,14 +9,21 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from PIL import Image
 
 from app.services.ga_time_table import DEFAULT_GA_TIME_TABLE_ROWS
+from app.services.meetings_report import _section_report_blocks
 from app.services.one_h_ga_attachments import (
+    _render_ga_hv_status_tables_html,
     build_ga_only_1h_attachments,
     render_ga_tables_html,
     render_ga_time_table_html,
     render_ga_time_table_png,
 )
-from app.services.primeflow_report_delivery import split_ga_recipient_map
-from app.services.primeflow_report import build_report_document, render_html
+from app.services.primeflow_report_delivery import _regular_recipient_document, split_ga_recipient_map
+from app.services.primeflow_report import (
+    ReportReminderQuestion,
+    build_report_document,
+    render_html,
+    render_plain_text,
+)
 
 
 def _result(rows):
@@ -26,6 +33,76 @@ def _result(rows):
 
 
 class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
+    def test_question_blocks_are_kept_for_ga_and_removed_for_regular_recipients(self) -> None:
+        ga_document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {}},
+            date(2026, 8, 24),
+            "10:00",
+            reminders=[ReportReminderQuestion(text="Hap doc dhe det")],
+        )
+
+        regular_document = _regular_recipient_document(ga_document)
+        ga_html = render_html(ga_document)
+        regular_html = render_html(regular_document)
+        regular_text = render_plain_text(regular_document)
+
+        self.assertIn("PYETJET PER 1H - BORD", ga_html)
+        self.assertIn("STAFF - HAPAT PER 1H", ga_html)
+        self.assertNotIn("PYETJET PER 1H - BORD", regular_html)
+        self.assertNotIn("STAFF - HAPAT PER 1H", regular_html)
+        self.assertNotIn("PYETJET PER 1H - BORD", regular_text)
+        self.assertNotIn("STAFF - HAPAT PER 1H", regular_text)
+        self.assertTrue(ga_document.board_reminders)
+        self.assertTrue(ga_document.reminders)
+        self.assertEqual(regular_document.board_reminders, [])
+        self.assertEqual(regular_document.reminders, [])
+
+    def test_ga_hv_email_uses_native_colored_tables_for_every_status(self) -> None:
+        body = """TODO:
++----+-------+---------+------------------+
+| NR | KUSH  | LLOJI  | TITULLI          |
++----+-------+---------+------------------+
+| 1  | GA    | SYS     | Todo task        |
++----+-------+---------+------------------+
+
+IN PROGRESS:
++----+-------+---------+------------------+
+| NR | KUSH  | LLOJI  | TITULLI          |
++----+-------+---------+------------------+
+| -  | -     | -       | (Asnje detyre)   |
++----+-------+---------+------------------+
+
+DONE:
++----+-------+---------+------------------+
+| NR | KUSH  | LLOJI  | TITULLI          |
++----+-------+---------+------------------+
+| 1  | GA    | SYS     | Done task        |
++----+-------+---------+------------------+
+
+LATE:
++----+-------+---------+------------------+--------------+
+| NR | KUSH  | LLOJI  | TITULLI          | LATE         |
++----+-------+---------+------------------+--------------+
+| 1  | GA    | SYS     | Late task        | 2 days       |
++----+-------+---------+------------------+--------------+"""
+
+        rendered = _render_ga_hv_status_tables_html(body)
+
+        self.assertEqual(rendered.count('data-ga-hv-status-table="true"'), 4)
+        self.assertIn('background-color:#FBCFE8', rendered)
+        self.assertIn('background-color:#FEF3C7', rendered)
+        self.assertIn('background-color:#D4FFE1', rendered)
+        self.assertIn('background-color:#FEE2E2', rendered)
+        self.assertIn("(Asnje detyre)", rendered)
+        self.assertIn("<th", rendered)
+        self.assertNotIn("<pre", rendered)
+
+        png_blocks = _section_report_blocks(body, preserve_empty_tables=True)
+        png_tables = [block for block in png_blocks if block["kind"] == "table"]
+        self.assertEqual(len(png_tables), 4)
+        self.assertEqual(png_tables[1]["rows"][0][-1], "(Asnje detyre)")
+        self.assertEqual(png_tables[1]["tone"], "in-progress")
+
     def test_temporary_png_recipient_is_removed_from_every_regular_header(self) -> None:
         regular, ga = split_ga_recipient_map({
             "to": ["staff@primexeu.com"],
@@ -123,6 +200,13 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertIn('data-ga-time-table="true"', rendered)
         self.assertIn("24.08.2026", rendered)
         self.assertIn("28.08.2026", rendered)
+        self.assertIn('<col width="30" style="width:30px;">', rendered)
+        self.assertIn('<col width="46" style="width:46px;">', rendered)
+        self.assertEqual(rendered.count('<col width="180" style="width:180px;">'), 2)
+        self.assertIn("H = 24.08.2026", rendered)
+        self.assertIn("P = 28.08.2026", rendered)
+        self.assertIn('<td colspan="2"', rendered)
+        self.assertIn("07:30<br>08:00", rendered)
         self.assertNotIn("<img", rendered)
 
     async def test_inline_tables_are_inserted_before_the_first_slot(self) -> None:

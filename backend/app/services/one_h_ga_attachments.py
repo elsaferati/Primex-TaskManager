@@ -18,11 +18,13 @@ from app.models.task import Task
 from app.models.user import User
 from app.services.ga_time_table import get_ga_time_table_rows
 from app.services.meetings_report import (
+    _ascii_table_block,
     _assignee_names,
     _effective_task_assignee_ids,
     _m3_finance_ga_sections,
     _meeting_occurs_on_date,
-    _render_section_body_html,
+    _section_report_table_model,
+    _table_tone_from_label,
     apply_weekly_planner_task_order,
     render_section_report_png,
 )
@@ -263,6 +265,7 @@ async def render_ga_hv_tasks_png(db: AsyncSession, report_day: date) -> bytes:
         "GA-HV",
         report_day,
         [{"title": "GA TASKS", "body": ga_body}, {"title": "HV TASKS", "body": hv_body}],
+        preserve_empty_tables=True,
     )
 
 
@@ -349,32 +352,56 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
             bold = bool(item.get("comment_is_bold") if comment else item.get("bold"))
             italic = bool(item.get("comment_is_italic") if comment else item.get("italic"))
             blocks.append(
-                f'<div bgcolor="{fill}" style="background-color:{fill};color:{color};padding:5px 6px;'
-                f'margin:0 0 4px;font-weight:{"700" if bold else "400"};'
+                f'<div bgcolor="{fill}" style="background-color:{fill};color:{color};border:1px solid #e2e8f0;'
+                f'border-radius:6px;padding:4px 6px;margin:0 0 4px;font-weight:{"700" if bold else "400"};'
                 f'font-style:{"italic" if italic else "normal"};">'
                 f'{html.escape(text).replace(chr(10), "<br>")}</div>'
             )
         return "".join(blocks) or "&nbsp;"
 
-    headers = ["NR", "TIME", "KOMENT", *[f"{day.strftime('%a').upper()} = {day:%d.%m.%Y}" for day in week_dates], "KOMENT"]
+    day_codes = ("H", "M", "MR", "E", "P")
+    headers = ["NR", "Time", "Koment", *[f"{day_codes[index]} = {day:%d.%m.%Y}" for index, day in enumerate(week_dates)], "Koment"]
+    column_widths = (30, 46, 180, 153, 153, 153, 153, 152, 180)
+    colgroup = "<colgroup>" + "".join(
+        f'<col width="{width}" style="width:{width}px;">' for width in column_widths
+    ) + "</colgroup>"
     header_html = "".join(
-        f'<th bgcolor="#e2e8f0" style="background-color:#e2e8f0;border:1px solid #94a3b8;'
-        f'padding:7px 5px;font-family:Arial,sans-serif;font-size:11px;text-align:left;">{html.escape(label)}</th>'
-        for label in headers
+        f'<th width="{column_widths[index]}" bgcolor="#f8fafc" '
+        f'style="width:{column_widths[index]}px;background-color:#f8fafc;border:1px solid #e2e8f0;'
+        f'padding:8px 6px;font-family:Arial,sans-serif;font-size:10px;font-weight:700;'
+        f'text-align:{"center" if index == 0 else "left"};vertical-align:bottom;">{html.escape(label)}</th>'
+        for index, label in enumerate(headers)
     )
     body_rows = []
     for row in rows:
         cells = [
-            f'<td bgcolor="#f8fafc" style="border:1px solid #cbd5e1;padding:6px;font-weight:700;vertical-align:top;">{html.escape(row.nr_label or "")}</td>',
-            f'<td bgcolor="#f8fafc" style="border:1px solid #cbd5e1;padding:6px;vertical-align:top;white-space:nowrap;">{html.escape(row.label or "")}</td>',
-            f'<td style="border:1px solid #cbd5e1;padding:3px;vertical-align:top;">{rich_blocks(comments_for(row, "start"), comment=True)}</td>',
+            f'<td width="30" bgcolor="#f1f5f9" style="width:30px;background-color:#f1f5f9;'
+            f'border:1px solid #e2e8f0;padding:6px 2px;font-size:10px;font-weight:700;'
+            f'text-align:center;vertical-align:top;">{html.escape(row.nr_label or "")}</td>',
         ]
+        if row.is_special:
+            cells.append(
+                '<td colspan="2" bgcolor="#ffffff" style="border:1px solid #e2e8f0;'
+                f'padding:6px;vertical-align:top;">{rich_blocks(comments_for(row, "start"), comment=True)}</td>'
+            )
+        else:
+            time_range = f"{row.start_time:%H:%M}<br>{row.end_time:%H:%M}" if row.label else "&nbsp;"
+            cells.extend([
+                f'<td width="46" bgcolor="#f1f5f9" style="width:46px;background-color:#f1f5f9;'
+                f'border:1px solid #e2e8f0;padding:6px 3px;font-size:10px;font-weight:700;'
+                f'line-height:1.15;vertical-align:top;white-space:nowrap;">{time_range}</td>',
+                '<td width="180" style="width:180px;border:1px solid #e2e8f0;padding:6px;'
+                f'vertical-align:top;">{rich_blocks(comments_for(row, "start"), comment=True)}</td>',
+            ])
         cells.extend(
-            f'<td style="border:1px solid #cbd5e1;padding:3px;vertical-align:top;">{rich_blocks(cell_items.get((day_index, row.start_time), []))}</td>'
+            f'<td width="{column_widths[3 + day_index]}" style="width:{column_widths[3 + day_index]}px;'
+            f'border:1px solid #e2e8f0;padding:6px;vertical-align:top;">'
+            f'{rich_blocks(cell_items.get((day_index, row.start_time), []))}</td>'
             for day_index in range(5)
         )
         cells.append(
-            f'<td style="border:1px solid #cbd5e1;padding:3px;vertical-align:top;">{rich_blocks(comments_for(row, "end"), comment=True)}</td>'
+            '<td width="180" style="width:180px;border:1px solid #e2e8f0;padding:6px;'
+            f'vertical-align:top;">{rich_blocks(comments_for(row, "end"), comment=True)}</td>'
         )
         body_rows.append(f'<tr>{"".join(cells)}</tr>')
     title = f"GA TIME TABLE ({week_dates[0]:%d.%m.%Y} - {week_dates[-1]:%d.%m.%Y})"
@@ -383,7 +410,7 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
         + '<table role="table" width="100%" cellspacing="0" cellpadding="0" border="0" '
         'data-ga-time-table="true" style="width:100%;border-collapse:collapse;table-layout:fixed;'
         'font-family:Arial,sans-serif;font-size:11px;line-height:1.3;">'
-        f'<thead><tr>{header_html}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>'
+        f'{colgroup}<thead><tr>{header_html}</tr></thead><tbody>{"".join(body_rows)}</tbody></table>'
     )
 
 
@@ -392,11 +419,76 @@ async def render_ga_hv_tasks_html(db: AsyncSession, report_day: date) -> str:
     return (
         '<div data-ga-hv-tasks="true">'
         + _email_section_title("GA TASKS")
-        + _render_section_body_html(ga_body)
+        + _render_ga_hv_status_tables_html(ga_body)
         + _email_section_title("HV TASKS")
-        + _render_section_body_html(hv_body)
+        + _render_ga_hv_status_tables_html(hv_body)
         + '</div>'
     )
+
+
+def _render_ga_hv_status_tables_html(body: str) -> str:
+    """Render GA/HV task groups as fully inline Outlook-safe colored tables."""
+    tone_colors = {
+        "todo": "#FBCFE8",
+        "in-progress": "#FEF3C7",
+        "done": "#D4FFE1",
+        "late": "#FEE2E2",
+    }
+    lines = body.splitlines()
+    chunks: list[str] = []
+    caption = ""
+    position = 0
+    while position < len(lines):
+        stripped = lines[position].strip()
+        if stripped and not stripped.startswith(("+", "|")):
+            caption = stripped.rstrip(":")
+            position += 1
+            continue
+        table_block = _ascii_table_block(lines, position)
+        if table_block is None:
+            position += 1
+            continue
+        table_lines, position = table_block
+        tone = _table_tone_from_label(caption)
+        header, rows, row_tones, _ = _section_report_table_model(table_lines, tone)
+        if not header:
+            continue
+        widths = {
+            "NR": "5%",
+            "KUSH": "9%",
+            "LLOJI": "10%",
+            "LATE": "9%",
+        }
+        header_cells = "".join(
+            f'<th width="{widths.get(value.upper(), "auto")}" bgcolor="#E2E8F0" '
+            'style="background-color:#E2E8F0;border:1px solid #94A3B8;padding:7px 8px;'
+            'font-family:Arial,sans-serif;font-size:12px;font-weight:800;color:#0F172A;'
+            f'text-align:left;vertical-align:top;">{html.escape(value)}</th>'
+            for value in header
+        )
+        body_rows: list[str] = []
+        for row_index, row in enumerate(rows):
+            row_tone = row_tones[row_index] if row_index < len(row_tones) else tone
+            fill = tone_colors.get(row_tone, tone_colors.get(tone, "#FFFFFF"))
+            cells = "".join(
+                f'<td bgcolor="{fill}" style="background-color:{fill};border:1px solid #CBD5E1;'
+                'padding:7px 8px;font-family:Arial,sans-serif;font-size:12px;line-height:1.3;'
+                f'color:#111827;text-align:left;vertical-align:top;">'
+                f'{html.escape(str(value)).replace(chr(10), "<br>")}</td>'
+                for value in row
+            )
+            body_rows.append(f'<tr data-task-tone="{html.escape(row_tone or tone)}">{cells}</tr>')
+        chunks.append(
+            '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
+            'data-ga-hv-status-table="true" style="width:100%;border-collapse:collapse;'
+            'table-layout:auto;margin:0 0 12px;">'
+            f'<tr><td colspan="{len(header)}" bgcolor="#F8FAFC" style="background-color:#F8FAFC;'
+            'border:1px solid #CBD5E1;padding:8px 10px;font-family:Arial,sans-serif;'
+            f'font-size:13px;font-weight:800;color:#0F172A;">{html.escape(caption)}:</td></tr>'
+            f'<tr>{header_cells}</tr>{"".join(body_rows)}</table>'
+        )
+        caption = ""
+    return "".join(chunks)
 
 
 async def render_ga_tables_html(
