@@ -146,6 +146,12 @@ def _task_status(item: dict[str, Any]) -> str:
     return normalized if normalized in STATUS_COLORS else "TODO"
 
 
+def _task_period_label(item: dict[str, Any]) -> str:
+    """Match the AM/PM indicator used by Common View task cards."""
+    raw = str(item.get("finishPeriod") or item.get("finish_period") or "").strip().upper()
+    return raw if raw in {"AM", "PM"} else "AM/PM"
+
+
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
@@ -275,6 +281,10 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> str:
         "display:inline-block;float:right;margin:0 0 3px 4px;padding:2px 5px;border:2px solid #111827;"
         "background-color:#fff;color:#111827;font-family:Arial,sans-serif;font-size:10px;"
         "font-weight:800;line-height:1.1;white-space:nowrap;"
+    )
+    period = _task_period_label(item)
+    badges.append(
+        f'<span data-task-badge="finish-period" style="{base_style}">{period}</span>'
     )
     if _is_eight_am_task(item):
         badges.append(f'<span data-task-badge="08:00" style="{base_style}">08:00</span>')
@@ -571,7 +581,7 @@ def _excel_table_attachment(
                         if meeting else _task_title(item, personal=personal)
                     )
                     if not meeting:
-                        labels: list[str] = []
+                        labels: list[str] = [f"[{_task_period_label(item)}]"]
                         if _is_eight_am_task(item):
                             labels.append("[08:00]")
                         if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
@@ -713,10 +723,7 @@ def _png_table_attachment(
         for chunk_index, chunk in enumerate(chunks):
             line_counts = [len(wrap(label, bold, column_widths[1] - 12))]
             for item in chunk:
-                badges = int(_is_eight_am_task(item) or (
-                    bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                    and _task_due_day(item) is not None
-                ))
+                badges = 1
                 line_counts.append(
                     len(wrap(_task_title(item, personal=personal), regular, column_widths[2] - 12)) + badges
                 )
@@ -806,6 +813,17 @@ def _png_table_attachment(
                     )
                     draw.text((badge_left + 6, text_y + 3), "08:00", fill="#111827", font=small_bold)
                     has_badge = True
+                period_label = _task_period_label(item)
+                badge_width = int(measure.textlength(period_label, font=small_bold)) + 12
+                badge_left = badge_right - badge_width
+                draw.rectangle(
+                    (badge_left, text_y, badge_right, text_y + 23),
+                    fill="#FFFFFF",
+                    outline="#111827",
+                    width=2,
+                )
+                draw.text((badge_left + 6, text_y + 3), period_label, fill="#111827", font=small_bold)
+                has_badge = True
                 if has_badge:
                     text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
@@ -971,7 +989,13 @@ async def _build_print_report(
         "TASKS",
     ]
     for label, values, personal in task_rows:
-        plain_rows.append(f"{label}: " + "; ".join(_task_title(item, personal=personal) for item in values))
+        plain_rows.append(
+            f"{label}: "
+            + "; ".join(
+                f"[{_task_period_label(item)}] {_task_title(item, personal=personal)}"
+                for item in values
+            )
+        )
     if include_meetings:
         for meeting_date, relative, dated_rows in meeting_sections:
             plain_rows.append("")

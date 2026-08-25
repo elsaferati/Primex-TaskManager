@@ -189,6 +189,35 @@ def test_task_status_colours_apply_to_email_cells_but_ga_personal_stays_purple()
     assert 'bgcolor="#D8B4FE"' in report_html
 
 
+def test_task_cards_show_their_am_pm_period_in_email_and_excel() -> None:
+    tasks = [
+        {"title": "Morning task", "finishPeriod": "AM"},
+        {"title": "Afternoon task", "finish_period": "pm"},
+        {"title": "Unscheduled period"},
+    ]
+
+    report_html = _html_table([("1H 10:00", tasks, False)])
+
+    assert report_html.count('data-task-badge="finish-period"') == 3
+    assert 'data-task-badge="finish-period" style=' in report_html
+    assert '>AM</span>' in report_html
+    assert '>PM</span>' in report_html
+    assert '>AM/PM</span>' in report_html
+
+    _, content, _ = _excel_table_attachment(
+        [("1H 10:00", tasks, False)], [], date(2026, 8, 14)
+    )
+    sheet = load_workbook(BytesIO(content)).active
+    assert "[AM]\n" in sheet["C6"].value
+    assert "[PM]\n" in sheet["D6"].value
+    assert "[AM/PM]\n" in sheet["E6"].value
+
+    _, png, _ = _png_table_attachment(
+        [("1H 10:00", tasks, False)], date(2026, 8, 14)
+    )
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+
+
 def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     tasks = [
         {
