@@ -146,18 +146,11 @@ def _task_status(item: dict[str, Any]) -> str:
     return normalized if normalized in STATUS_COLORS else "TODO"
 
 
-def _deadline_is_overdue(item: dict[str, Any], report_date: date | None) -> bool:
-    if not bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
-        return False
-    due_day = _task_due_day(item)
-    return due_day is None or (report_date is not None and due_day < report_date)
-
-
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
-    """Only overdue deadlines are red; current/future dates match Common View."""
-    if _deadline_is_overdue(item, report_date):
+    """All deadline tasks stay red; only the compact date label varies by day."""
+    if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
         color = DEADLINE_COLOR
     elif personal and _is_personal_task_for_ga(item):
         color = PERSONAL_GA_COLOR
@@ -288,13 +281,13 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> str:
     if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
         due_day = _task_due_day(item)
         if due_day:
-            overdue = report_date is not None and due_day < report_date
+            due_today = report_date is not None and due_day == report_date
             style = (
-                "display:inline-block;float:right;margin:0 0 3px 4px;color:#fff;"
-                "font-family:Arial,sans-serif;font-size:10px;font-weight:800;line-height:1.1;white-space:nowrap;"
-                if overdue else
                 "display:inline-block;float:right;margin:0 0 3px 4px;padding:2px 5px;"
-                "border:2px solid #2563EB;border-radius:3px;background-color:#EFF6FF;color:#1D4ED8;"
+                "border:2px solid #111827;border-radius:3px;background-color:#FFFFFF;color:#111827;"
+                "font-family:Arial,sans-serif;font-size:11px;font-weight:900;line-height:1.1;white-space:nowrap;"
+                if due_today else
+                "display:inline-block;float:right;margin:0 0 3px 4px;color:#fff;"
                 "font-family:Arial,sans-serif;font-size:10px;font-weight:800;line-height:1.1;white-space:nowrap;"
             )
             badges.append(
@@ -589,7 +582,7 @@ def _excel_table_attachment(
                             value = f"{' '.join(labels)}\n{value}"
                     cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
                     if not meeting:
-                        if _deadline_is_overdue(item, target_date):
+                        if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
                             cell.fill = deadline_fill
                             cell.font = Font(color="FFFFFF", bold=True)
                         else:
@@ -770,7 +763,7 @@ def _png_table_attachment(
             item = chunk[item_index] if item_index < len(chunk) else None
             fill, text_color, outline, outline_width = "#FFFFFF", "#111827", "#111827", 1
             if item is not None:
-                if _deadline_is_overdue(item, target_date):
+                if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
                     fill, text_color = DEADLINE_COLOR, "#FFFFFF"
                 elif personal and _is_personal_task_for_ga(item):
                     fill = PERSONAL_GA_COLOR
@@ -789,17 +782,17 @@ def _png_table_attachment(
                     date_label = due_day.strftime("%d.%m.%Y")
                     badge_width = int(measure.textlength(date_label, font=small_bold)) + 12
                     badge_left = badge_right - badge_width
-                    if due_day < target_date:
-                        draw.text((badge_left + 6, text_y + 3), date_label, fill="#FFFFFF", font=small_bold)
-                    else:
+                    if due_day == target_date:
                         draw.rounded_rectangle(
                             (badge_left, text_y, badge_right, text_y + 23),
                             radius=3,
-                            fill="#EFF6FF",
-                            outline="#2563EB",
+                            fill="#FFFFFF",
+                            outline="#111827",
                             width=2,
                         )
-                        draw.text((badge_left + 6, text_y + 3), date_label, fill="#1D4ED8", font=small_bold)
+                        draw.text((badge_left + 6, text_y + 3), date_label, fill="#111827", font=small_bold)
+                    else:
+                        draw.text((badge_left + 6, text_y + 3), date_label, fill="#FFFFFF", font=small_bold)
                     badge_right = badge_left - 5
                     has_badge = True
                 if _is_eight_am_task(item):
