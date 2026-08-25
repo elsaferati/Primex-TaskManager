@@ -18,6 +18,7 @@ from app.models.task import Task
 from app.models.user import User
 from app.services.ga_time_table import get_ga_time_table_rows
 from app.services.meetings_report import (
+    _ascii_table_is_empty,
     _ascii_table_block,
     _assignee_names,
     _effective_task_assignee_ids,
@@ -265,7 +266,7 @@ async def render_ga_hv_tasks_png(db: AsyncSession, report_day: date) -> bytes:
         "GA-HV",
         report_day,
         [{"title": "GA TASKS", "body": ga_body}, {"title": "HV TASKS", "body": hv_body}],
-        preserve_empty_tables=True,
+        preserve_empty_tables=False,
     )
 
 
@@ -449,6 +450,14 @@ def _render_ga_hv_status_tables_html(body: str) -> str:
             position += 1
             continue
         table_lines, position = table_block
+        if _ascii_table_is_empty(table_lines):
+            chunks.append(
+                '<div data-ga-hv-empty-status="true" style="margin:0 0 12px;padding:8px 10px;'
+                'font-family:Arial,sans-serif;font-size:13px;font-weight:800;color:#0F172A;">'
+                f'{html.escape(caption)}: 0</div>'
+            )
+            caption = ""
+            continue
         tone = _table_tone_from_label(caption)
         header, rows, row_tones, _ = _section_report_table_model(table_lines, tone)
         if not header:

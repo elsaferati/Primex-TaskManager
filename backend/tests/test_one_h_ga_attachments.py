@@ -57,7 +57,7 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(regular_document.board_reminders, [])
         self.assertEqual(regular_document.reminders, [])
 
-    def test_ga_hv_email_uses_native_colored_tables_for_every_status(self) -> None:
+    def test_ga_hv_email_hides_tables_for_empty_statuses(self) -> None:
         body = """TODO:
 +----+-------+---------+------------------+
 | NR | KUSH  | LLOJI  | TITULLI          |
@@ -88,20 +88,26 @@ LATE:
 
         rendered = _render_ga_hv_status_tables_html(body)
 
-        self.assertEqual(rendered.count('data-ga-hv-status-table="true"'), 4)
+        self.assertEqual(rendered.count('data-ga-hv-status-table="true"'), 3)
+        self.assertEqual(rendered.count('data-ga-hv-empty-status="true"'), 1)
+        self.assertIn("IN PROGRESS: 0", rendered)
         self.assertIn('background-color:#FBCFE8', rendered)
-        self.assertIn('background-color:#FEF3C7', rendered)
         self.assertIn('background-color:#D4FFE1', rendered)
         self.assertIn('background-color:#FEE2E2', rendered)
-        self.assertIn("(Asnje detyre)", rendered)
+        self.assertNotIn("(Asnje detyre)", rendered)
         self.assertIn("<th", rendered)
         self.assertNotIn("<pre", rendered)
 
-        png_blocks = _section_report_blocks(body, preserve_empty_tables=True)
+        png_blocks = _section_report_blocks(body)
         png_tables = [block for block in png_blocks if block["kind"] == "table"]
-        self.assertEqual(len(png_tables), 4)
-        self.assertEqual(png_tables[1]["rows"][0][-1], "(Asnje detyre)")
-        self.assertEqual(png_tables[1]["tone"], "in-progress")
+        png_text = "\n".join(
+            line
+            for block in png_blocks
+            if block["kind"] == "text"
+            for line in block["lines"]
+        )
+        self.assertEqual(len(png_tables), 3)
+        self.assertIn("IN PROGRESS: 0", png_text)
 
     def test_temporary_png_recipient_is_removed_from_every_regular_header(self) -> None:
         regular, ga = split_ga_recipient_map({

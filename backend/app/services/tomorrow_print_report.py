@@ -157,8 +157,10 @@ def _task_period_label(item: dict[str, Any]) -> str:
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
-    """All deadline tasks stay red; only the compact date label varies by day."""
-    if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
+    """Use red cards for deadlines outside the report day; today's keep status color."""
+    deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
+    due_day = _task_due_day(item) if deadline else None
+    if deadline and (report_date is None or due_day is None or due_day != report_date):
         color = DEADLINE_COLOR
     elif personal and _is_personal_task_for_ga(item):
         color = PERSONAL_GA_COLOR
@@ -293,29 +295,35 @@ def _task_due_day(item: dict[str, Any]) -> date | None:
 def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[str, str]:
     top_badges: list[str] = []
     due_badge = ""
-    base_style = (
-        "display:inline-block;float:right;margin:0 0 3px 4px;padding:2px 5px;border:2px solid #111827;"
-        "background-color:#fff;color:#111827;font-family:Arial,sans-serif;font-size:10px;"
-        "font-weight:800;line-height:1.1;white-space:nowrap;"
+    badge_base = (
+        "display:inline-block;float:right;margin:0 0 3px 4px;padding:3px 7px;border-radius:999px;"
+        "font-family:Arial,sans-serif;font-size:10px;font-weight:800;line-height:1;white-space:nowrap;"
     )
     period = _task_period_label(item)
-    badges.append(
-        f'<span data-task-badge="finish-period" style="{base_style}">{period}</span>'
+    period_style = (
+        f"{badge_base}background-color:#E0F2FE;border:1px solid #BAE6FD;color:#0369A1;"
+    )
+    top_badges.append(
+        f'<span data-task-badge="finish-period" style="{period_style}">{period}</span>'
     )
     if _is_eight_am_task(item):
-        top_badges.append(f'<span data-task-badge="08:00" style="{base_style}">08:00</span>')
+        eight_am_style = (
+            f"{badge_base}background-color:#DC2626;border:1px solid #B91C1C;color:#FFFFFF;"
+        )
+        top_badges.append(
+            f'<span data-task-badge="08:00" style="{eight_am_style}">08:00</span>'
+        )
     if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
         due_day = _task_due_day(item)
         if due_day:
             due_today = report_date is not None and due_day == report_date
             style = (
-                "display:inline-block;padding:2px 5px;"
-                "border:2px solid #111827;border-radius:3px;background-color:#FFFFFF;color:#111827;"
-                "font-family:Arial,sans-serif;font-size:11px;font-weight:900;line-height:1.1;white-space:nowrap;"
+                "display:inline-block;padding:2px 5px;border:1px solid #93C5FD;border-radius:3px;"
+                "background-color:#EFF6FF;color:#1D4ED8;font-family:Arial,sans-serif;"
+                "font-size:11px;font-weight:900;line-height:1.1;white-space:nowrap;"
                 if due_today else
-                "display:inline-block;padding:1px 4px;"
-                "border:1px solid #FCA5A5;border-radius:3px;background-color:#DC2626;color:#FECACA;"
-                "font-family:Arial,sans-serif;font-size:10px;font-weight:800;line-height:1.1;white-space:nowrap;"
+                "display:inline-block;padding:1px 0;border:0;background-color:transparent;color:#FFFFFF;"
+                "font-family:Arial,sans-serif;font-size:10px;font-weight:900;line-height:1.1;white-space:nowrap;"
             )
             due_badge = (
                 f'<span data-task-badge="due-date" data-badge-position="bottom-right" '
@@ -676,7 +684,9 @@ def _excel_table_attachment(
                             value = f"{' '.join(labels)}\n{value}"
                     cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
                     if not meeting:
-                        if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
+                        deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
+                        due_day = _task_due_day(item) if deadline else None
+                        if deadline and (due_day is None or due_day != target_date):
                             cell.fill = deadline_fill
                             cell.font = Font(color="FFFFFF", bold=True)
                         else:
@@ -884,7 +894,9 @@ def _png_table_attachment(
             item = chunk[item_index] if item_index < len(chunk) else None
             fill, text_color, outline, outline_width = "#FFFFFF", "#111827", "#111827", 1
             if item is not None:
-                if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
+                deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
+                due_day = _task_due_day(item) if deadline else None
+                if deadline and (due_day is None or due_day != target_date):
                     fill, text_color = DEADLINE_COLOR, "#FFFFFF"
                 elif personal and _is_personal_task_for_ga(item):
                     fill = PERSONAL_GA_COLOR
@@ -908,44 +920,39 @@ def _png_table_attachment(
                         draw.rounded_rectangle(
                             (badge_left, badge_top, badge_right, badge_bottom),
                             radius=3,
-                            fill="#FFFFFF",
-                            outline="#111827",
-                            width=2,
-                        )
-                        draw.text((badge_left + 6, badge_top + 3), date_label, fill="#111827", font=small_bold)
-                    else:
-                        draw.rounded_rectangle(
-                            (badge_left, badge_top, badge_right, badge_bottom),
-                            radius=3,
-                            fill=DEADLINE_COLOR,
-                            outline="#FCA5A5",
+                            fill="#EFF6FF",
+                            outline="#93C5FD",
                             width=1,
                         )
-                        draw.text((badge_left + 6, badge_top + 3), date_label, fill="#FECACA", font=small_bold)
+                        draw.text((badge_left + 6, badge_top + 3), date_label, fill="#1D4ED8", font=small_bold)
+                    else:
+                        draw.text((badge_left + 6, badge_top + 3), date_label, fill="#FFFFFF", font=small_bold)
                 if _is_eight_am_task(item):
                     badge_width = int(measure.textlength("08:00", font=small_bold)) + 12
                     badge_left = badge_right - badge_width
-                    draw.rectangle(
+                    draw.rounded_rectangle(
                         (badge_left, text_y, badge_right, text_y + 23),
-                        fill="#FFFFFF",
-                        outline="#111827",
-                        width=2,
+                        radius=10,
+                        fill="#DC2626",
+                        outline="#B91C1C",
+                        width=1,
                     )
-                    draw.text((badge_left + 6, text_y + 3), "08:00", fill="#111827", font=small_bold)
+                    draw.text((badge_left + 6, text_y + 3), "08:00", fill="#FFFFFF", font=small_bold)
                     badge_right = badge_left - 5
                 period_label = _task_period_label(item)
                 badge_width = int(measure.textlength(period_label, font=small_bold)) + 12
                 badge_left = badge_right - badge_width
-                draw.rectangle(
+                draw.rounded_rectangle(
                     (badge_left, text_y, badge_right, text_y + 23),
-                    fill="#FFFFFF",
-                    outline="#111827",
-                    width=2,
+                    radius=10,
+                    fill="#E0F2FE",
+                    outline="#BAE6FD",
+                    width=1,
                 )
-                draw.text((badge_left + 6, text_y + 3), period_label, fill="#111827", font=small_bold)
+                draw.text((badge_left + 6, text_y + 3), period_label, fill="#0369A1", font=small_bold)
                 text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
-                task_font = bold if deadline else regular
+                task_font = bold if fill == DEADLINE_COLOR else regular
                 for line_index, line in enumerate(wrap(value, task_font, column_widths[2 + item_index] - 12)):
                     draw.text((x + 6, text_y + line_index * 20), line, fill=text_color, font=task_font)
             x = right
