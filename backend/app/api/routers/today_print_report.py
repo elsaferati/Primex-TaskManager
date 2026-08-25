@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_db, require_admin
+from app.api.deps import get_current_user, get_db, require_admin
 from app.models.today_print_report_delivery import TodayPrintReportDelivery
 from app.models.today_print_report_settings import TodayPrintReportSettings
 from app.models.user import User
@@ -116,6 +116,15 @@ async def update_settings(
 
 @router.get("/preview")
 async def preview(report_date: date | None = None, _: User = Depends(require_admin)) -> dict:
+    target_date = report_date or datetime.now(report_timezone()).date()
+    return await build_today_print_report(target_date)
+
+
+@router.get("/print-preview")
+async def print_preview(
+    report_date: date | None = None, _: User = Depends(get_current_user)
+) -> dict:
+    """Return the canonical Today report for printing from Common View."""
     target_date = report_date or datetime.now(report_timezone()).date()
     return await build_today_print_report(target_date)
 

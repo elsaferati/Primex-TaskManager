@@ -111,21 +111,23 @@ const ONE_H_PRINT_CHECKLISTS = [
   {
     title: "STAFF - HAPAT PER 1H",
     questions: [
-      "Hap doc dhe det",
-      "Share screen side by side DET/REZULTATIN",
-      "Sqaro slotin paraprak pastaj aktual",
+      { question: "Hap doc dhe det", description: "" },
+      { question: "Share screen side by side DET/REZULTATIN", description: "" },
+      { question: "Sqaro slotin paraprak pastaj aktual", description: "" },
+      { question: "BZ Det nga Stafi per GA", description: "Komunikimi GA temas Det nga Stafi/ KA email" },
     ],
   },
   {
     title: "PYETJET PER 1H - BORD",
     questions: [
-      "Slotin paraprak/aktual",
-      "A ke filluar me slotin aktual?",
-      "Nese jo, kur?",
-      "A kryhet sot?",
-      "A kryhet kete jave?",
-      "A arrihet RLZ javor?",
-      "Done? / Strikes? / Notes te reja?",
+      { question: "Slotin paraprak/aktual", description: "" },
+      { question: "A ke filluar me slotin aktual?", description: "" },
+      { question: "Nese jo, kur?", description: "" },
+      { question: "A kryhet sot?", description: "" },
+      { question: "A kryhet kete jave?", description: "" },
+      { question: "A arrihet RLZ javor?", description: "" },
+      { question: "Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?", description: "" },
+      { question: "BZ Notes", description: "Secili i lexon vet para BZ me GA" },
     ],
   },
 ] as const
@@ -145,14 +147,14 @@ const escapePrintHtml = (value: string) =>
 const oneHPrintChecklistsHtml = () =>
   `<section class="one-h-print-checklists">${ONE_H_PRINT_CHECKLISTS.map(
     ({ title, questions }) => {
-      const items = (values: readonly string[], startIndex = 0) => values
-        .map((question, index) => `<div class="one-h-print-checklist-item">${startIndex + index + 1}. ${escapePrintHtml(question)}</div>`)
-        .join("")
-      const splitAt = Math.ceil(questions.length / 2)
-      const questionContent = title === "PYETJET PER 1H - BORD"
-        ? `<div class="one-h-print-board-columns"><div>${items(questions.slice(0, splitAt))}</div><div>${items(questions.slice(splitAt), splitAt)}</div></div>`
-        : items(questions)
-      return `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div>${questionContent}</div>`
+      const questionContent = questions
+        .map(({ question, description }, index) =>
+          `<span class="one-h-print-checklist-item"><strong>${index + 1}. ${escapePrintHtml(question)}</strong>${
+            description ? ` <span class="one-h-print-checklist-description">(${escapePrintHtml(description)})</span>` : ""
+          }</span>`
+        )
+        .join('<span class="one-h-print-checklist-separator"> / </span>')
+      return `<div class="one-h-print-checklist"><div class="one-h-print-checklist-title">${escapePrintHtml(title)}</div><div class="one-h-print-checklist-items">${questionContent}</div></div>`
     }
   ).join("")}</section>`
 
@@ -162,19 +164,17 @@ function OneHPrintChecklists() {
       {ONE_H_PRINT_CHECKLISTS.map(({ title, questions }) => (
         <div key={title} className="one-h-print-checklist">
           <div className="one-h-print-checklist-title">{title}</div>
-          {title === "PYETJET PER 1H - BORD" ? (
-            <div className="one-h-print-board-columns">
-              {[questions.slice(0, Math.ceil(questions.length / 2)), questions.slice(Math.ceil(questions.length / 2))].map((column, columnIndex) => (
-                <div key={columnIndex}>
-                  {column.map((question, index) => (
-                    <div key={question} className="one-h-print-checklist-item">{columnIndex * Math.ceil(questions.length / 2) + index + 1}. {question}</div>
-                  ))}
-                </div>
-              ))}
-            </div>
-          ) : questions.map((question, index) => (
-            <div key={question} className="one-h-print-checklist-item">{index + 1}. {question}</div>
-          ))}
+          <div className="one-h-print-checklist-items">
+            {questions.map(({ question, description }, index) => (
+              <React.Fragment key={question}>
+                {index > 0 ? <span className="one-h-print-checklist-separator"> / </span> : null}
+                <span className="one-h-print-checklist-item">
+                  <strong>{index + 1}. {question}</strong>
+                  {description ? <span className="one-h-print-checklist-description"> ({description})</span> : null}
+                </span>
+              </React.Fragment>
+            ))}
+          </div>
         </div>
       ))}
     </section>
@@ -1350,9 +1350,12 @@ export default function CommonViewPage() {
   const [commonUserMenuOpen, setCommonUserMenuOpen] = React.useState(false)
   const [printTotalPages, setPrintTotalPages] = React.useState<number>(1)
   const [printOrientationHint, setPrintOrientationHint] = React.useState<"portrait" | "landscape">("landscape")
+  const [printingToday, setPrintingToday] = React.useState(false)
   const [printingTomorrow, setPrintingTomorrow] = React.useState(false)
   const weekTablePrintRef = React.useRef<HTMLDivElement | null>(null)
   const weekTablePrintContentRef = React.useRef<HTMLDivElement | null>(null)
+  const singleDayPrintRef = React.useRef<HTMLDivElement | null>(null)
+  const singleDayPrintContentRef = React.useRef<HTMLDivElement | null>(null)
   const commonUserFilterRef = React.useRef<HTMLDivElement | null>(null)
   const [exportingMeetingExcel, setExportingMeetingExcel] = React.useState(false)
 
@@ -4274,6 +4277,10 @@ export default function CommonViewPage() {
     root.style.removeProperty("--week-table-print-scale")
   }, [])
 
+  const resetSingleDayPrintFit = React.useCallback(() => {
+    singleDayPrintRef.current?.style.removeProperty("--single-day-print-scale")
+  }, [])
+
   const getPrintOrientation = React.useCallback((): "portrait" | "landscape" => {
     const isPortrait =
       window.matchMedia("(orientation: portrait)").matches || window.innerHeight > window.innerWidth
@@ -4344,6 +4351,23 @@ export default function CommonViewPage() {
 
     root.style.setProperty("--week-table-print-scale", safeScale.toString())
   }, [allDaysSelected, computePrintMetrics, getPrintOrientation, resetWeekTablePrintFit])
+
+  const applySingleDayPrintFit = React.useCallback(() => {
+    const root = singleDayPrintRef.current
+    const content = singleDayPrintContentRef.current
+    if (!root || !content) return
+
+    root.style.setProperty("--single-day-print-scale", "1")
+    const { printableWidthPx, printableHeightPx, footerReservePx } = computePrintMetrics("landscape")
+    const availableHeightPx = Math.max(1, printableHeightPx - footerReservePx)
+    const naturalWidth = content.scrollWidth
+    const naturalHeight = content.scrollHeight
+    if (!naturalWidth || !naturalHeight) return
+
+    const fitScale = Math.min(1, printableWidthPx / naturalWidth, availableHeightPx / naturalHeight)
+    const safeScale = Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1
+    root.style.setProperty("--single-day-print-scale", safeScale.toString())
+  }, [computePrintMetrics])
 
   React.useEffect(() => {
     const syncPrintHintOrientation = () => {
@@ -4524,9 +4548,10 @@ export default function CommonViewPage() {
   .print-title { font-size: 16px; font-weight: 700; text-align: center; }
   .print-date { text-align: right; font-size: 10px; }
   .one-h-print-checklists { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:12px; margin:0 0 12px; }
-  .one-h-print-board-columns { display:grid; grid-template-columns:repeat(2, minmax(0, 1fr)); gap:6px; }
   .one-h-print-checklist-title { background:#eef2ff; border-left:5px solid #2563eb; padding:8px 10px; font-size:11px; font-weight:700; }
-  .one-h-print-checklist-item { border:1px solid #64748b; margin-top:5px; padding:6px 8px; font-size:9px; font-weight:700; }
+  .one-h-print-checklist-items { border:1px solid #64748b; padding:6px 8px; font-size:8px; line-height:1.35; }
+  .one-h-print-checklist-separator { font-size:13px; font-weight:900; line-height:8px; }
+  .one-h-print-checklist-description { color:#475569; }
   table { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 9px; line-height: 1.2; }
   table + table { margin-top: 12px; }
   th, td { border: 1px solid #000; padding: 4px 5px; vertical-align: top; overflow-wrap: anywhere; text-align: left; font-weight: 400; }
@@ -4560,7 +4585,7 @@ export default function CommonViewPage() {
     }
   }
 
-  const handlePrint = () => {
+  const handlePrint = async () => {
     if (allDaysSelected) {
       const orientation = getPrintOrientation()
       if (orientation === "landscape") {
@@ -4570,8 +4595,78 @@ export default function CommonViewPage() {
         resetWeekTablePrintFit()
         setPrintTotalPages(calculateAllDaysPortraitPages())
       }
+      window.print()
+      return
     }
-    window.print()
+    if (printingToday) return
+
+    const reportDate = Array.from(selectedDates)[0] || toISODate(new Date())
+    const printWindow = window.open("", "_blank")
+    if (!printWindow) {
+      toast.error("The browser blocked the print window. Please allow popups and try again.")
+      setPrintTotalPages(1)
+      applySingleDayPrintFit()
+      window.print()
+      return
+    }
+
+    printWindow.document.write("<!doctype html><title>Loading report...</title><p>Loading 1H SHTYPI Today...</p>")
+    printWindow.document.close()
+    setPrintingToday(true)
+    try {
+      const response = await apiFetch(`/today-print-report/print-preview?report_date=${encodeURIComponent(reportDate)}`)
+      if (!response?.ok) {
+        throw new Error(`Could not load the 1H SHTYPI Today report (${response?.status || "network error"}).`)
+      }
+      const report = (await response.json()) as { html?: string; subject?: string }
+      if (!report.html) throw new Error("The 1H SHTYPI Today report was empty.")
+
+      printWindow.document.open()
+      printWindow.document.write(report.html)
+      printWindow.document.close()
+      printWindow.document.title = report.subject || `1H SHTYPI - ${reportDate}`
+
+      const style = printWindow.document.createElement("style")
+      style.textContent = `
+        @page { size: landscape; margin: 0.25in; }
+        html, body { margin: 0 !important; padding: 0 !important; background: #fff !important; }
+        *, *::before, *::after {
+          box-sizing: border-box;
+          -webkit-print-color-adjust: exact !important;
+          print-color-adjust: exact !important;
+        }
+        .common-view-today-print-fit { width: 100%; transform-origin: top left; }
+      `
+      printWindow.document.head.appendChild(style)
+
+      const wrapper = printWindow.document.createElement("div")
+      wrapper.className = "common-view-today-print-fit"
+      while (printWindow.document.body.firstChild) {
+        wrapper.appendChild(printWindow.document.body.firstChild)
+      }
+      printWindow.document.body.appendChild(wrapper)
+      printWindow.focus()
+      await printWindow.document.fonts?.ready
+      await new Promise<void>((resolve) => printWindow.setTimeout(resolve, 100))
+
+      const dpi = 96
+      const printableWidthPx = (11 - 0.5) * dpi
+      const printableHeightPx = (8.27 - 0.5) * dpi
+      const naturalWidth = Math.max(1, wrapper.scrollWidth)
+      const naturalHeight = Math.max(1, wrapper.scrollHeight)
+      const fitScale = Math.min(1, printableWidthPx / naturalWidth, printableHeightPx / naturalHeight)
+      wrapper.style.setProperty("zoom", String(Number.isFinite(fitScale) && fitScale > 0 ? fitScale : 1))
+      printWindow.print()
+    } catch (error) {
+      console.error("Failed to print the canonical Today report", error)
+      printWindow.close()
+      toast.error(error instanceof Error ? error.message : "Failed to load the 1H SHTYPI Today report.")
+      setPrintTotalPages(1)
+      applySingleDayPrintFit()
+      window.print()
+    } finally {
+      setPrintingToday(false)
+    }
   }
 
   // Calculate total pages for print footer
@@ -4592,19 +4687,17 @@ export default function CommonViewPage() {
         })
         return
       }
-      const dpi = 96
-      const pageHeightPx = 11 * dpi - (0.36 + 0.51) * dpi
-      const bodyHeight = Math.max(
-        document.body.scrollHeight,
-        document.documentElement.scrollHeight,
-        document.body.offsetHeight
-      )
-      const totalPages = Math.max(1, Math.ceil(bodyHeight / pageHeightPx))
-      setPrintTotalPages(totalPages)
+      window.requestAnimationFrame(() => {
+        window.requestAnimationFrame(() => {
+          setPrintTotalPages(1)
+          applySingleDayPrintFit()
+        })
+      })
     }
     const handleAfterPrint = () => {
       setPrintTotalPages(1)
       resetWeekTablePrintFit()
+      resetSingleDayPrintFit()
     }
     window.addEventListener("beforeprint", handleBeforePrint)
     window.addEventListener("afterprint", handleAfterPrint)
@@ -4614,9 +4707,11 @@ export default function CommonViewPage() {
     }
   }, [
     allDaysSelected,
+    applySingleDayPrintFit,
     applyWeekTablePrintFit,
     calculateAllDaysPortraitPages,
     getPrintOrientation,
+    resetSingleDayPrintFit,
     resetWeekTablePrintFit,
   ])
 
@@ -7509,6 +7604,14 @@ export default function CommonViewPage() {
           .single-day-print .swimlane-board {
             display: none !important;
           }
+          .single-day-print {
+            --single-day-print-scale: 1;
+            padding-bottom: 28px;
+          }
+          .single-day-print-content {
+            width: 100%;
+            zoom: var(--single-day-print-scale);
+          }
           .one-h-print-checklists {
             display: grid !important;
             grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -7516,28 +7619,30 @@ export default function CommonViewPage() {
             margin: 0 0 12px;
             page-break-inside: avoid;
           }
-          .one-h-print-board-columns {
-            display: grid;
-            grid-template-columns: repeat(2, minmax(0, 1fr));
-            gap: 6px;
-          }
           .one-h-print-checklist-title {
             background: #eef2ff !important;
             border-left: 5px solid #2563eb !important;
-            padding: 8px 10px;
+            padding: 5px 7px;
             color: #0f172a !important;
-            font-size: 11px;
+            font-size: 9px;
             font-weight: 700;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          .one-h-print-checklist-item {
+          .one-h-print-checklist-items {
             border: 1px solid #64748b !important;
-            margin-top: 5px;
-            padding: 6px 8px;
+            padding: 4px 6px;
             color: #000 !important;
-            font-size: 9px;
-            font-weight: 700;
+            font-size: 7px;
+            line-height: 1.3;
+          }
+          .one-h-print-checklist-separator {
+            font-size: 12px;
+            font-weight: 900;
+            line-height: 7px;
+          }
+          .one-h-print-checklist-description {
+            color: #475569 !important;
           }
           .single-day-print-table tbody tr.print-slot-start > th,
           .single-day-print-table tbody tr.print-slot-start > td {
@@ -10580,8 +10685,8 @@ export default function CommonViewPage() {
             >
               {exportingExcel ? "Exporting..." : "Export Excel"}
             </button>
-            <button className="btn-primary no-print" type="button" onClick={handlePrint}>
-              Print
+            <button className="btn-primary no-print" type="button" onClick={() => void handlePrint()} disabled={printingToday}>
+              {printingToday ? "Preparing print..." : "Print"}
             </button>
             <button
               className="btn-outline no-print"
@@ -13748,47 +13853,52 @@ export default function CommonViewPage() {
             </div>
           </div>
         ) : null}
-        <div className={`print-page single-day-print ${allDaysSelected ? "hide-when-all-days" : ""}`}>
-          <div className="print-header">
-            <div />
-            <div className="print-title">1H SHTYPI</div>
-            <div className="print-datetime">
-              {formatDateTimeDMY(printedAt)}
+        <div
+          ref={singleDayPrintRef}
+          className={`print-page single-day-print ${allDaysSelected ? "hide-when-all-days" : ""}`}
+        >
+          <div ref={singleDayPrintContentRef} className="single-day-print-content">
+            <div className="print-header">
+              <div />
+              <div className="print-title">1H SHTYPI</div>
+              <div className="print-datetime">
+                {formatDateTimeDMY(printedAt)}
+              </div>
             </div>
+            <OneHPrintChecklists />
+            <table className="single-day-print-table">
+              <colgroup>
+                <col className="single-day-print-number-column" />
+                <col className="single-day-print-label-column" />
+                <col span={6} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">NR</th>
+                  <th scope="col">LLoji dhe sloti</th>
+                  <th scope="col" colSpan={6}>Tasks</th>
+                </tr>
+              </thead>
+              <tbody>
+                {renderSingleDayPrintRows(COMMON_FAST_PRINT_ROW_IDS)}
+              </tbody>
+            </table>
+            <table className="single-day-print-table single-day-print-meetings-table">
+              <colgroup>
+                <col className="single-day-print-number-column" />
+                <col className="single-day-print-label-column" />
+                <col span={6} />
+              </colgroup>
+              <thead>
+                <tr>
+                  <th scope="col">NR</th>
+                  <th scope="col">LLoji</th>
+                  <th scope="col" colSpan={6}>Meeting</th>
+                </tr>
+              </thead>
+              <tbody>{renderSingleDayPrintRows(COMMON_MEETING_PRINT_ROW_IDS)}</tbody>
+            </table>
           </div>
-          <OneHPrintChecklists />
-          <table className="single-day-print-table">
-            <colgroup>
-              <col className="single-day-print-number-column" />
-              <col className="single-day-print-label-column" />
-              <col span={6} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th scope="col">NR</th>
-                <th scope="col">LLoji dhe sloti</th>
-                <th scope="col" colSpan={6}>Tasks</th>
-              </tr>
-            </thead>
-            <tbody>
-              {renderSingleDayPrintRows(COMMON_FAST_PRINT_ROW_IDS)}
-            </tbody>
-          </table>
-          <table className="single-day-print-table single-day-print-meetings-table">
-            <colgroup>
-              <col className="single-day-print-number-column" />
-              <col className="single-day-print-label-column" />
-              <col span={6} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th scope="col">NR</th>
-                <th scope="col">LLoji</th>
-                <th scope="col" colSpan={6}>Meeting</th>
-              </tr>
-            </thead>
-            <tbody>{renderSingleDayPrintRows(COMMON_MEETING_PRINT_ROW_IDS)}</tbody>
-          </table>
           <div className={`swimlane-board ${allDaysSelected ? "hide-when-all-days" : ""}`}>
             {swimlaneRows
               .filter((row) => showCard(row.id))
