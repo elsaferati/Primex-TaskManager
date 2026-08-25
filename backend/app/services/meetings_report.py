@@ -2669,7 +2669,11 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
     return header, cleaned_rows, row_tones, highlights
 
 
-def _section_report_blocks(body: str) -> list[dict[str, Any]]:
+def _section_report_blocks(
+    body: str,
+    *,
+    preserve_empty_tables: bool = False,
+) -> list[dict[str, Any]]:
     """Parse a section once so native attachments keep the email's structure."""
     blocks: list[dict[str, Any]] = []
     text_buffer: list[str] = []
@@ -2709,7 +2713,7 @@ def _section_report_blocks(body: str) -> list[dict[str, Any]]:
         table_block = _ascii_table_block(lines, position)
         if table_block:
             table_lines, position = table_block
-            if _ascii_table_is_empty(table_lines):
+            if _ascii_table_is_empty(table_lines) and not preserve_empty_tables:
                 mark_current_label_empty()
                 continue
             tone = current_table_tone()
@@ -3093,6 +3097,7 @@ def render_section_report_png(
     sections: list[dict[str, str]],
     *,
     tomorrow: date | None = None,
+    preserve_empty_tables: bool = False,
 ) -> bytes:
     """Bitmap equivalent of the email report; tables remain real cell grids."""
     from PIL import Image, ImageDraw, ImageFont
@@ -3138,7 +3143,12 @@ def render_section_report_png(
             layout.append({"kind": "group", "value": group})
             current_group = group
         layout.append({"kind": "section", "value": f"{index}. {report_section.get('title') or 'Untitled'}"})
-        layout.extend(_section_report_blocks(str(report_section.get("body") or "")))
+        layout.extend(
+            _section_report_blocks(
+                str(report_section.get("body") or ""),
+                preserve_empty_tables=preserve_empty_tables,
+            )
+        )
 
     def block_height(block: dict[str, Any]) -> int:
         if block["kind"] == "group":

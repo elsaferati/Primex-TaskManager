@@ -158,7 +158,8 @@ def _task_cell_style(
         color = STATUS_COLORS[_task_status(item)]
     border = f";border:2px solid {EIGHT_AM_BORDER_COLOR}" if _is_eight_am_task(item) else ""
     text_color = ";color:#fff;font-weight:700" if color == DEADLINE_COLOR else ""
-    return f"{CELL_STYLE};background-color:{color}{border}{text_color}", color
+    deadline_layout = ";position:relative;padding-bottom:27px" if color == DEADLINE_COLOR else ""
+    return f"{CELL_STYLE};background-color:{color}{border}{text_color}{deadline_layout}", color
 
 
 def _initials(value: str) -> str:
@@ -201,7 +202,7 @@ def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
 
 def _comments_table_html(initials: list[str]) -> str:
     columns = initials or list(COMMENT_FIXED_INITIALS)
-    width = 100 / len(columns)
+    width = 100 / (len(columns) + 1)
     headers = "".join(
         f'<th width="{width:.2f}%" bgcolor="#EAF0FF" style="{HEADER_STYLE};font-size:14px;">'
         f"{html.escape(value)}</th>"
@@ -216,7 +217,10 @@ def _comments_table_html(initials: list[str]) -> str:
         '<div style="font-family:Arial,sans-serif;font-size:16px;font-weight:800;margin:0 0 6px;">'
         "KOMENTE PER STAF</div>"
         f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{TABLE_STYLE}">'
-        f"<thead><tr>{headers}</tr></thead><tbody><tr>{comments}</tr></tbody></table></div>"
+        f'<thead><tr><th width="{width:.2f}%" bgcolor="#EAF0FF" '
+        f'style="{HEADER_STYLE};font-size:14px;">INC</th>{headers}</tr></thead>'
+        f'<tbody><tr><td data-user-comment="INC" style="{CELL_STYLE};height:64px;'
+        f'font-weight:800;text-align:center;">KOM</td>{comments}</tr></tbody></table></div>'
     )
 
 
@@ -283,15 +287,17 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> str:
         if due_day:
             due_today = report_date is not None and due_day == report_date
             style = (
-                "display:inline-block;float:right;margin:0 0 3px 4px;padding:2px 5px;"
+                "display:inline-block;position:absolute;right:5px;bottom:4px;padding:2px 5px;"
                 "border:2px solid #111827;border-radius:3px;background-color:#FFFFFF;color:#111827;"
                 "font-family:Arial,sans-serif;font-size:11px;font-weight:900;line-height:1.1;white-space:nowrap;"
                 if due_today else
-                "display:inline-block;float:right;margin:0 0 3px 4px;color:#fff;"
+                "display:inline-block;position:absolute;right:5px;bottom:4px;padding:1px 4px;"
+                "border:1px solid #FCA5A5;border-radius:3px;background-color:#DC2626;color:#FECACA;"
                 "font-family:Arial,sans-serif;font-size:10px;font-weight:800;line-height:1.1;white-space:nowrap;"
             )
             badges.append(
-                f'<span data-task-badge="due-date" data-due-today="{str(due_day == report_date).lower()}" '
+                f'<span data-task-badge="due-date" data-badge-position="bottom-right" '
+                f'data-due-today="{str(due_day == report_date).lower()}" '
                 f'style="{style}">{due_day:%d.%m.%Y}</span>'
             )
     return "".join(badges)
@@ -437,7 +443,10 @@ def _html_table(
         f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{TABLE_STYLE}">'
         '<colgroup><col width="4%"><col width="9%"><col width="14.5%" span="6"></colgroup>'
         f'<thead><tr><th style="{HEADER_STYLE}">NR</th><th style="{HEADER_STYLE}">{label_header}</th>'
-        + "".join(f'<th style="{HEADER_STYLE}">{header} {index}</th>' for index in range(1, 7))
+        + (
+            "".join(f'<th style="{HEADER_STYLE}">{header} {index}</th>' for index in range(1, 7))
+            if meeting else f'<th colspan="6" style="{HEADER_STYLE}">TASKS</th>'
+        )
         + '</tr></thead>'
         f"<tbody>{''.join(body)}</tbody></table>"
     )
@@ -508,8 +517,6 @@ def _excel_table_attachment(
         top=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
         bottom=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
     )
-    headers = ["NR", "LLOJI DHE SLOTI", "TASK 1", "TASK 2", "TASK 3", "TASK 4", "TASK 5", "TASK 6"]
-
     def write_checklists(row_number: int) -> int:
         """Write each preparation list as a title row plus one compact content row."""
         checklist_fill = PatternFill("solid", fgColor="EEF2FF")
@@ -546,13 +553,18 @@ def _excel_table_attachment(
     def write_section(
         rows: list[tuple[str, list[dict[str, Any]], bool]], *, meeting: bool, row_number: int
     ) -> int:
-        section_headers = ["NR", "LLOJI", "MEETING 1", "MEETING 2", "MEETING 3", "MEETING 4", "MEETING 5", "MEETING 6"] if meeting else headers
+        section_headers = (
+            ["NR", "LLOJI", "MEETING 1", "MEETING 2", "MEETING 3", "MEETING 4", "MEETING 5", "MEETING 6"]
+            if meeting else ["NR", "LLOJI DHE SLOTI", "TASKS", None, None, None, None, None]
+        )
         for column, value in enumerate(section_headers, 1):
             cell = sheet.cell(row_number, column, value)
             cell.font = Font(bold=True)
             cell.fill = header_fill
             cell.border = border
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        if not meeting:
+            sheet.merge_cells(start_row=row_number, start_column=3, end_row=row_number, end_column=8)
         row_number += 1
         for number, (label, values, personal) in enumerate(rows, 1):
             chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
@@ -635,13 +647,22 @@ def _excel_table_attachment(
         start_row=comment_start_row,
         start_column=1,
         end_row=comment_start_row,
-        end_column=len(comment_columns),
+        end_column=len(comment_columns) + 1,
     )
     comment_title = sheet.cell(comment_start_row, 1, "KOMENTE PER STAF")
     comment_title.font = Font(bold=True, size=12)
     comment_title.fill = PatternFill("solid", fgColor="EEF2FF")
     comment_title.alignment = Alignment(horizontal="left", vertical="center")
-    for column, initials in enumerate(comment_columns, 1):
+    inc_header = sheet.cell(comment_start_row + 1, 1, "INC")
+    inc_header.font = Font(bold=True, size=12)
+    inc_header.fill = header_fill
+    inc_header.border = border
+    inc_header.alignment = Alignment(horizontal="center", vertical="center")
+    inc_comment = sheet.cell(comment_start_row + 2, 1, "KOM")
+    inc_comment.font = Font(bold=True)
+    inc_comment.border = border
+    inc_comment.alignment = Alignment(horizontal="center", vertical="top", wrap_text=True)
+    for column, initials in enumerate(comment_columns, 2):
         header = sheet.cell(comment_start_row + 1, column, initials)
         header.font = Font(bold=True, size=12)
         header.fill = header_fill
@@ -659,7 +680,7 @@ def _excel_table_attachment(
     widths = [6, 22, 29, 29, 29, 29, 29, 29]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
-    for column in range(1, len(comment_columns) + 1):
+    for column in range(1, len(comment_columns) + 2):
         column_letter = get_column_letter(column)
         sheet.column_dimensions[column_letter].width = max(
             sheet.column_dimensions[column_letter].width or 0,
@@ -682,8 +703,9 @@ def _png_table_attachment(
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Render the Today SHTYPI task grid with the same task-state colours."""
-    margin, width = 28, 1900
+    margin = 28
     column_widths = [58, 210, *([267] * 6)]
+    width = sum(column_widths) + (margin * 2)
     try:
         regular = ImageFont.truetype(os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\segoeui.ttf"), 16)
         bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 16)
@@ -713,10 +735,10 @@ def _png_table_attachment(
         for chunk_index, chunk in enumerate(chunks):
             line_counts = [len(wrap(label, bold, column_widths[1] - 12))]
             for item in chunk:
-                badges = int(_is_eight_am_task(item) or (
+                badges = int(_is_eight_am_task(item)) + int(
                     bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
                     and _task_due_day(item) is not None
-                ))
+                )
                 line_counts.append(
                     len(wrap(_task_title(item, personal=personal), regular, column_widths[2] - 12)) + badges
                 )
@@ -740,11 +762,16 @@ def _png_table_attachment(
     draw.text((margin, 59), "Current Common View state used by the 1H report", fill="#475569", font=regular)
 
     y, x = header_top, margin
-    for column, label in enumerate(["NR", "LLOJI DHE SLOTI", *[f"TASK {index}" for index in range(1, 7)]]):
+    for column, label in enumerate(["NR", "LLOJI DHE SLOTI"]):
         right = x + column_widths[column]
         draw.rectangle((x, y, right, y + header_height), fill="#F8FAFC", outline="#111827")
         draw.text((x + 6, y + 10), label, fill="#111827", font=bold)
         x = right
+    tasks_right = width - margin
+    draw.rectangle((x, y, tasks_right, y + header_height), fill="#F8FAFC", outline="#111827")
+    tasks_bounds = draw.textbbox((0, 0), "TASKS", font=bold)
+    tasks_width = tasks_bounds[2] - tasks_bounds[0]
+    draw.text((x + (tasks_right - x - tasks_width) / 2, y + 10), "TASKS", fill="#111827", font=bold)
     y += header_height
 
     number = 0
@@ -777,24 +804,30 @@ def _png_table_attachment(
                 deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
                 due_day = _task_due_day(item) if deadline else None
                 badge_right = right - 5
-                has_badge = False
                 if due_day:
                     date_label = due_day.strftime("%d.%m.%Y")
                     badge_width = int(measure.textlength(date_label, font=small_bold)) + 12
                     badge_left = badge_right - badge_width
+                    badge_bottom = y + row_height - 5
+                    badge_top = badge_bottom - 23
                     if due_day == target_date:
                         draw.rounded_rectangle(
-                            (badge_left, text_y, badge_right, text_y + 23),
+                            (badge_left, badge_top, badge_right, badge_bottom),
                             radius=3,
                             fill="#FFFFFF",
                             outline="#111827",
                             width=2,
                         )
-                        draw.text((badge_left + 6, text_y + 3), date_label, fill="#111827", font=small_bold)
+                        draw.text((badge_left + 6, badge_top + 3), date_label, fill="#111827", font=small_bold)
                     else:
-                        draw.text((badge_left + 6, text_y + 3), date_label, fill="#FFFFFF", font=small_bold)
-                    badge_right = badge_left - 5
-                    has_badge = True
+                        draw.rounded_rectangle(
+                            (badge_left, badge_top, badge_right, badge_bottom),
+                            radius=3,
+                            fill=DEADLINE_COLOR,
+                            outline="#FCA5A5",
+                            width=1,
+                        )
+                        draw.text((badge_left + 6, badge_top + 3), date_label, fill="#FECACA", font=small_bold)
                 if _is_eight_am_task(item):
                     badge_width = int(measure.textlength("08:00", font=small_bold)) + 12
                     badge_left = badge_right - badge_width
@@ -805,8 +838,6 @@ def _png_table_attachment(
                         width=2,
                     )
                     draw.text((badge_left + 6, text_y + 3), "08:00", fill="#111827", font=small_bold)
-                    has_badge = True
-                if has_badge:
                     text_y += 28
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 task_font = bold if deadline else regular
@@ -869,8 +900,9 @@ def _png_table_attachment(
     draw.rectangle((table_left, y, table_right, y + comment_title_height), fill="#EEF2FF", outline="#111827")
     draw.text((table_left + 8, y + 8), "KOMENTE PER STAF", fill="#111827", font=bold)
     y += comment_title_height
-    comment_width = (table_right - table_left) / len(comment_columns)
-    for index, initials in enumerate(comment_columns):
+    rendered_comment_columns = [("INC", "KOM"), *[(initials, "") for initials in comment_columns]]
+    comment_width = (table_right - table_left) / len(rendered_comment_columns)
+    for index, (initials, comment_text) in enumerate(rendered_comment_columns):
         left = round(table_left + index * comment_width)
         right = round(table_left + (index + 1) * comment_width)
         draw.rectangle((left, y, right, y + comment_header_height), fill="#EAF0FF", outline="#111827")
@@ -882,6 +914,15 @@ def _png_table_attachment(
             fill="#FFFFFF",
             outline="#111827",
         )
+        if comment_text:
+            bounds = draw.textbbox((0, 0), comment_text, font=bold)
+            text_width = bounds[2] - bounds[0]
+            draw.text(
+                (left + (right - left - text_width) / 2, y + comment_header_height + 9),
+                comment_text,
+                fill="#111827",
+                font=bold,
+            )
     y += comment_header_height + comment_row_height
 
     output = BytesIO()
