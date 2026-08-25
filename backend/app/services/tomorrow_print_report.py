@@ -158,8 +158,7 @@ def _task_cell_style(
         color = STATUS_COLORS[_task_status(item)]
     border = f";border:2px solid {EIGHT_AM_BORDER_COLOR}" if _is_eight_am_task(item) else ""
     text_color = ";color:#fff;font-weight:700" if color == DEADLINE_COLOR else ""
-    deadline_layout = ";position:relative;padding-bottom:27px" if color == DEADLINE_COLOR else ""
-    return f"{CELL_STYLE};background-color:{color}{border}{text_color}{deadline_layout}", color
+    return f"{CELL_STYLE};background-color:{color}{border}{text_color}", color
 
 
 def _initials(value: str) -> str:
@@ -273,34 +272,35 @@ def _task_due_day(item: dict[str, Any]) -> date | None:
         return None
 
 
-def _task_badges_html(item: dict[str, Any], report_date: date | None) -> str:
-    badges: list[str] = []
+def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[str, str]:
+    top_badges: list[str] = []
+    due_badge = ""
     base_style = (
         "display:inline-block;float:right;margin:0 0 3px 4px;padding:2px 5px;border:2px solid #111827;"
         "background-color:#fff;color:#111827;font-family:Arial,sans-serif;font-size:10px;"
         "font-weight:800;line-height:1.1;white-space:nowrap;"
     )
     if _is_eight_am_task(item):
-        badges.append(f'<span data-task-badge="08:00" style="{base_style}">08:00</span>')
+        top_badges.append(f'<span data-task-badge="08:00" style="{base_style}">08:00</span>')
     if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
         due_day = _task_due_day(item)
         if due_day:
             due_today = report_date is not None and due_day == report_date
             style = (
-                "display:inline-block;position:absolute;right:5px;bottom:4px;padding:2px 5px;"
+                "display:inline-block;padding:2px 5px;"
                 "border:2px solid #111827;border-radius:3px;background-color:#FFFFFF;color:#111827;"
                 "font-family:Arial,sans-serif;font-size:11px;font-weight:900;line-height:1.1;white-space:nowrap;"
                 if due_today else
-                "display:inline-block;position:absolute;right:5px;bottom:4px;padding:1px 4px;"
+                "display:inline-block;padding:1px 4px;"
                 "border:1px solid #FCA5A5;border-radius:3px;background-color:#DC2626;color:#FECACA;"
                 "font-family:Arial,sans-serif;font-size:10px;font-weight:800;line-height:1.1;white-space:nowrap;"
             )
-            badges.append(
+            due_badge = (
                 f'<span data-task-badge="due-date" data-badge-position="bottom-right" '
                 f'data-due-today="{str(due_day == report_date).lower()}" '
                 f'style="{style}">{due_day:%d.%m.%Y}</span>'
             )
-    return "".join(badges)
+    return "".join(top_badges), due_badge
 
 
 def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
@@ -427,10 +427,19 @@ def _html_table(
                     )
                 cell_style = f"{cell_style};{row_divider_style}"
                 background = f' bgcolor="{color}"' if color else ""
-                badges = "" if meeting else _task_badges_html(item, report_date)
+                badges, due_badge = ("", "") if meeting else _task_badges_html(item, report_date)
+                task_content = f'{badges}{item_index + (chunk_index * 6) + 1}. {html.escape(value)}'
+                if due_badge:
+                    task_content = (
+                        '<table role="presentation" width="100%" height="100%" border="0" cellpadding="0" '
+                        'cellspacing="0" style="width:100%;height:100%;border-collapse:collapse;">'
+                        f'<tr><td valign="top" style="padding:0;vertical-align:top;">{task_content}</td></tr>'
+                        '<tr><td valign="bottom" align="right" '
+                        'style="padding:6px 0 0;text-align:right;vertical-align:bottom;">'
+                        f'{due_badge}</td></tr></table>'
+                    )
                 cells.append(
-                    f'<td{background} style="{cell_style}">{badges}'
-                    f'{item_index + (chunk_index * 6) + 1}. {html.escape(value)}</td>'
+                    f'<td{background} style="{cell_style}">{task_content}</td>'
                 )
             cells.extend(f'<td style="{CELL_STYLE};{row_divider_style}"></td>' for _ in range(6 - len(cells)))
             row_header = (

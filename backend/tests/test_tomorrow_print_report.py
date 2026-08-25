@@ -223,8 +223,9 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert "DUE TODAY" not in report_html
     assert "border:2px solid #111827" in report_html
     assert "font-weight:900" in report_html
-    assert "position:relative;padding-bottom:27px" in report_html
-    assert "position:absolute;right:5px;bottom:4px" in report_html
+    assert 'height="100%"' in report_html
+    assert 'valign="bottom" align="right"' in report_html
+    assert "position:absolute" not in report_html
 
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
