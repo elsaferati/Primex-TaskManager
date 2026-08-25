@@ -134,8 +134,6 @@ async def send(
             select(TodayPrintReportDelivery).where(TodayPrintReportDelivery.delivery_date == delivery_date)
         )
     ).scalar_one_or_none()
-    if existing is not None and existing.status == "SENT":
-        return _history(existing)
     report = await build_today_print_report(delivery_date, include_attachment=True)
     if existing is None:
         existing = TodayPrintReportDelivery(
@@ -145,6 +143,12 @@ async def send(
             recipients=recipients,
         )
         db.add(existing)
+    else:
+        # "Send now" is an explicit resend. Automatic delivery remains
+        # idempotent in the scheduler, but the manual action must not silently
+        # return an older SENT history row without sending a new message.
+        existing.status = "PENDING"
+        existing.last_error = None
     try:
         message = await send_tomorrow_print_report(report, recipients)
     except Exception as exc:

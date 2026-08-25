@@ -129,8 +129,6 @@ async def send(report_date: date | None = None, db: AsyncSession = Depends(get_d
     existing = (
         await db.execute(select(TomorrowPrintReportDelivery).where(TomorrowPrintReportDelivery.delivery_date == delivery_date))
     ).scalar_one_or_none()
-    if existing is not None and existing.status == "SENT":
-        return _history(existing)
     report = await build_tomorrow_print_report(delivery_date, include_attachment=True)
     if existing is None:
         existing = TomorrowPrintReportDelivery(
@@ -140,6 +138,11 @@ async def send(report_date: date | None = None, db: AsyncSession = Depends(get_d
             recipients=recipients,
         )
         db.add(existing)
+    else:
+        # Manual "Send now" deliberately resends even if today's scheduled
+        # delivery already succeeded. Scheduler duplicate protection is kept.
+        existing.status = "PENDING"
+        existing.last_error = None
     try:
         message = await send_tomorrow_print_report(report, recipients)
     except Exception as exc:
