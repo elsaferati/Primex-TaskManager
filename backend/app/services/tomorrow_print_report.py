@@ -23,14 +23,14 @@ TASK_ROWS = (
     ("oneH", "1H 11:50", "11:50"),
     ("oneH", "1H 14:20", "14:20"),
     ("blocked", "BLL\n14:30 - 15:30\nRAP 15:50", None),
-    ("oneH", "1H 15:50", "15:50"),
+    ("oneH", "1H 16:00", "16:00"),
     ("oneH", "1H NO SLOT", ""),
     ("important", "DEADLINE / 08:00", None),
     ("r1", "R1=1H", None),
     ("personal", "P:\nGA 08:15 / 13:15\n\nDV/LH 10:15 / 14:30", None),
 )
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
-VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "15:50"}
+VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
 ONE_H_BOARD_CHECKLIST = (
     ("Slotin paraprak/aktual", ""),
     ("A ke filluar me slotin aktual?", ""),
@@ -38,7 +38,8 @@ ONE_H_BOARD_CHECKLIST = (
     ("A kryhet sot?", ""),
     ("A kryhet kete jave?", ""),
     ("A arrihet RLZ javor?", ""),
-    ("Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?", ""),
+    ("Done? / Strikes?", ""),
+    ("Notes te reja? Data? AM/PM? Kujt?", ""),
     ("BZ Notes", "Secili i lexon vet para BZ me GA"),
 )
 ONE_H_STAFF_CHECKLIST = (
@@ -75,7 +76,7 @@ STATUS_COLORS = {
     "DONE": "#C4FDC4",
 }
 COMMENT_FIXED_INITIALS = ("AT", "RA", "EF", "EH", "LH", "FG")
-COMMENT_ITEMS_PER_LINE = 4
+COMMENT_ROW_COUNT = 3
 COMMENT_WRITE_IN_LINE = "_" * 20
 REQUIRED_SHTYPI_RECIPIENT = "130primex.eu@gmail.com"
 
@@ -157,10 +158,9 @@ def _task_period_label(item: dict[str, Any]) -> str:
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
-    """Use red cards for deadlines outside the report day; today's keep status color."""
+    """All deadline tasks stay red; only deadline tasks display a due date."""
     deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-    due_day = _task_due_day(item) if deadline else None
-    if deadline and (report_date is None or due_day is None or due_day != report_date):
+    if deadline:
         color = DEADLINE_COLOR
     elif personal and _is_personal_task_for_ga(item):
         color = PERSONAL_GA_COLOR
@@ -209,32 +209,45 @@ def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
     return result
 
 
-def _comment_write_in_lines(initials: list[str]) -> list[str]:
+def _comment_rows(initials: list[str]) -> list[list[str]]:
     values = initials or list(COMMENT_FIXED_INITIALS)
-    entries = [f"{value}: {COMMENT_WRITE_IN_LINE}" for value in values]
+    base_size, extra = divmod(len(values), COMMENT_ROW_COUNT)
+    rows: list[list[str]] = []
+    start = 0
+    for row_index in range(COMMENT_ROW_COUNT):
+        size = base_size + int(row_index < extra)
+        rows.append(values[start:start + size])
+        start += size
+    return rows
+
+
+def _comment_write_in_lines(initials: list[str]) -> list[str]:
     return [
-        ",    ".join(entries[index:index + COMMENT_ITEMS_PER_LINE])
-        for index in range(0, len(entries), COMMENT_ITEMS_PER_LINE)
+        ",    ".join(f"{value}: {COMMENT_WRITE_IN_LINE}" for value in row)
+        for row in _comment_rows(initials)
     ]
 
 
 def _comments_table_html(initials: list[str]) -> str:
-    """Render compact handwritten comment lines without table cells."""
-    values = initials or list(COMMENT_FIXED_INITIALS)
-    rows = []
-    for index in range(0, len(values), COMMENT_ITEMS_PER_LINE):
-        chunk = values[index:index + COMMENT_ITEMS_PER_LINE]
+    """Render all staff comment fields across exactly three full-width rows."""
+    rows: list[str] = []
+    for chunk in _comment_rows(initials):
+        cell_width = 100 / max(len(chunk), 1)
         entries = "".join(
-            '<span data-user-comment="{initials}" style="display:inline-block;margin:0 20px 8px 0;'
-            'font-family:Arial,sans-serif;font-size:13px;white-space:nowrap;">'
-            '<strong>{initials}:</strong> {line}{suffix}</span>'.format(
-                initials=html.escape(value),
-                line=COMMENT_WRITE_IN_LINE,
-                suffix="," if position < len(chunk) - 1 else "",
-            )
-            for position, value in enumerate(chunk)
+            '<td data-user-comment="{initials}" width="{width:.2f}%" valign="bottom" '
+            'style="width:{width:.2f}%;padding:0 14px 8px 0;vertical-align:bottom;">'
+            '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" '
+            'style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;">'
+            '<tr><td width="1%" style="width:1%;padding:0 5px 1px 0;white-space:nowrap;">'
+            '<strong>{initials}:</strong></td><td style="width:99%;border-bottom:1px solid #111827;">&nbsp;</td>'
+            '</tr></table></td>'.format(initials=html.escape(value), width=cell_width)
+            for value in chunk
+        ) or '<td style="height:22px;">&nbsp;</td>'
+        rows.append(
+            '<table data-user-comment-line="true" role="presentation" width="100%" border="0" '
+            'cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;table-layout:fixed;">'
+            f'<tr>{entries}</tr></table>'
         )
-        rows.append(f'<div data-user-comment-line="true" style="white-space:nowrap;">{entries}</div>')
     return (
         '<div data-user-comments-lines="true" style="margin-top:18px;">'
         '<div style="font-family:Arial,sans-serif;font-size:16px;font-weight:800;margin:0 0 6px;">'
@@ -503,42 +516,57 @@ def _dated_meetings_html(
     left, right = visible_sections
     divider_style = "border-left:4px solid #2563EB"
 
-    def meeting_items(values: list[dict[str, Any]]) -> str:
-        rendered: list[str] = []
-        for index, item in enumerate(values, 1):
-            value = (
-                f"{_report_text(_first_line(item.get('title')))} "
-                f"{str(item.get('time') or '').strip()}"
-            ).strip()
-            highlight = (
-                f"border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR};padding:3px 5px;"
-                if _is_non_routine_meeting(item)
-                else "padding:3px 1px;"
-            )
-            rendered.append(
-                f'<div data-meeting-card="true" style="{highlight}'
-                'margin:0 0 3px;overflow-wrap:anywhere;word-break:break-word;">'
-                f"{index}. {html.escape(value)}</div>"
-            )
-        return "".join(rendered) or "&nbsp;"
+    def meeting_cell(item: dict[str, Any] | None, index: int, divider: str) -> str:
+        if item is None:
+            return f'<td data-meeting-cell="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
+        value = (
+            f"{_report_text(_first_line(item.get('title')))} "
+            f"{str(item.get('time') or '').strip()}"
+        ).strip()
+        highlight = (
+            f";border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR}"
+            if _is_non_routine_meeting(item)
+            else ""
+        )
+        return (
+            f'<td data-meeting-cell="true" style="{CELL_STYLE};{divider}{highlight}">'
+            f"{index}. {html.escape(value)}</td>"
+        )
 
     left_rows = {label: values for label, values, *_ in left[2]}
     right_rows = {label: values for label, values, *_ in right[2]}
     labels = list(left_rows)
     labels.extend(label for label in right_rows if label not in left_rows)
-    body = "".join(
-        "<tr>"
-        f'<th style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE}">{html.escape(label)}</th>'
-        f'<td style="{CELL_STYLE};{SLOT_DIVIDER_STYLE}">{meeting_items(left_rows.get(label, []))}</td>'
-        f'<th style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE};{divider_style}">{html.escape(label)}</th>'
-        f'<td style="{CELL_STYLE};{SLOT_DIVIDER_STYLE}">{meeting_items(right_rows.get(label, []))}</td>'
-        "</tr>"
-        for label in labels
-    )
+    body_rows: list[str] = []
+    for label in labels:
+        left_items = left_rows.get(label, [])
+        right_items = right_rows.get(label, [])
+        meeting_count = max(len(left_items), len(right_items), 1)
+        for index in range(meeting_count):
+            row_divider = SLOT_DIVIDER_STYLE if index == 0 else INTRA_SLOT_DIVIDER_STYLE
+            label_cells = ""
+            if index == 0:
+                label_cells = (
+                    f'<th rowspan="{meeting_count}" style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE}">'
+                    f'{html.escape(label)}</th>'
+                )
+            right_label = ""
+            if index == 0:
+                right_label = (
+                    f'<th rowspan="{meeting_count}" style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE};'
+                    f'{divider_style}">{html.escape(label)}</th>'
+                )
+            body_rows.append(
+                '<tr data-meeting-row="true">'
+                f'{label_cells}{meeting_cell(left_items[index] if index < len(left_items) else None, index + 1, row_divider)}'
+                f'{right_label}{meeting_cell(right_items[index] if index < len(right_items) else None, index + 1, row_divider)}'
+                '</tr>'
+            )
+    body = "".join(body_rows)
 
     def day_header(section: tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]) -> str:
         meeting_date, relative, _ = section
-        return f"{html.escape(relative)} - {meeting_date:%d.%m.%Y}" if relative else "&nbsp;"
+        return f"TAKIMET {html.escape(relative)} - {meeting_date:%d.%m.%Y}" if relative else "&nbsp;"
 
     return (
         '<table data-side-by-side-meetings="true" role="presentation" width="100%" border="1" '
@@ -685,8 +713,7 @@ def _excel_table_attachment(
                     cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
                     if not meeting:
                         deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                        due_day = _task_due_day(item) if deadline else None
-                        if deadline and (due_day is None or due_day != target_date):
+                        if deadline:
                             cell.fill = deadline_fill
                             cell.font = Font(color="FFFFFF", bold=True)
                         else:
@@ -895,8 +922,7 @@ def _png_table_attachment(
             fill, text_color, outline, outline_width = "#FFFFFF", "#111827", "#111827", 1
             if item is not None:
                 deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                due_day = _task_due_day(item) if deadline else None
-                if deadline and (due_day is None or due_day != target_date):
+                if deadline:
                     fill, text_color = DEADLINE_COLOR, "#FFFFFF"
                 elif personal and _is_personal_task_for_ga(item):
                     fill = PERSONAL_GA_COLOR

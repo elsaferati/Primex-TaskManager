@@ -49,7 +49,7 @@ STRIKE_INTERVAL_STARTS = {
     "11:50": time(11, 0),
     "14:10": time(11, 50),
     "14:20": time(11, 50),
-    "15:50": time(14, 20),
+    "16:00": time(14, 20),
 }
 STRIKE_INTERVAL_ENDS = {
     "10:00": time(9, 0),
@@ -57,7 +57,7 @@ STRIKE_INTERVAL_ENDS = {
     "11:50": time(11, 50),
     "14:10": time(14, 20),
     "14:20": time(14, 20),
-    "15:50": time(15, 50),
+    "16:00": time(16, 0),
 }
 
 

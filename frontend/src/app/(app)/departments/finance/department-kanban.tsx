@@ -24,7 +24,7 @@ const VIEW_TODAY = "today"
 const VIEW_OVERDUE = "overdue"
 const VIEW_TODAY_OVERDUE = "today_overdue"
 const ONE_H_REPORT_SLOT_NONE_VALUE = "__none__"
-const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "15:50"] as const
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "16:00"] as const
 
 type ViewFilter = typeof VIEW_ALL | typeof VIEW_TODAY | typeof VIEW_OVERDUE | typeof VIEW_TODAY_OVERDUE
 

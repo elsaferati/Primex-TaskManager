@@ -680,7 +680,7 @@ const ALL_USERS_INITIALS = "ALL"
 const ALL_USERS_MARKER = "[ALL_USERS]"
 const FEEDBACK_DAILY_MARKER = "[EVERYDAY]"
 const MEETING_CHECK_STATUS_RE = /\[MEETING_CHECK_STATUS:(CHECK|X|O)\]/i
-const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "15:50"] as const
+const ONE_H_REPORT_SLOT_OPTIONS = ["10:00", "11:00", "11:50", "14:20", "16:00"] as const
 type OneHReportSlot = typeof ONE_H_REPORT_SLOT_OPTIONS[number]
 const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS)
 const ONE_H_SLOT_ROWS: Array<{ id: OneHSlotRowId; slot: OneHReportSlot | null; label: string }> = [
@@ -688,7 +688,7 @@ const ONE_H_SLOT_ROWS: Array<{ id: OneHSlotRowId; slot: OneHReportSlot | null; l
   { id: "oneH11", slot: "11:00", label: "1H 11:00" },
   { id: "oneH1150", slot: "11:50", label: "1H 11:50" },
   { id: "oneH1420", slot: "14:20", label: "1H 14:20" },
-  { id: "oneH1550", slot: "15:50", label: "1H 15:50" },
+  { id: "oneH1550", slot: "16:00", label: "1H 16:00" },
   { id: "oneHNoSlot", slot: null, label: "1H NO SLOT" },
 ]
 
@@ -6297,7 +6297,7 @@ export default function CommonViewPage() {
     oneH11: "11:00",
     oneH1150: "11:50",
     oneH1420: "14:20",
-    oneH1550: "15:50",
+    oneH1550: "16:00",
     oneHNoSlot: "PA SLOT",
     r1:"AM: 08:50/10:00/11:00-11:50)\nPM: 14:30/16:00",
     blocked: "NUK PENGOHET.",

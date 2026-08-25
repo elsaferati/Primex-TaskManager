@@ -15,24 +15,24 @@ def at(day: date, hour: int, minute: int = 0) -> datetime:
     return datetime(day.year, day.month, day.day, hour, minute)
 
 
-def test_today_before_1530_stays_today():
-    assert effective_slot_date(MON, at(MON, 15, 29)) == MON
+def test_today_before_1559_stays_today():
+    assert effective_slot_date(MON, at(MON, 15, 58)) == MON
 
 
-def test_today_at_1530_rolls_to_next_working_day():
-    assert effective_slot_date(MON, at(MON, 15, 30)) == TUE
+def test_today_at_1559_rolls_to_next_working_day():
+    assert effective_slot_date(MON, at(MON, 15, 59)) == TUE
 
 
-def test_today_after_1530_rolls_to_next_working_day():
-    assert effective_slot_date(MON, at(MON, 18, 30)) == TUE
+def test_today_after_1559_rolls_to_next_working_day():
+    assert effective_slot_date(MON, at(MON, 16, 0)) == TUE
 
 
-def test_friday_after_1530_rolls_to_monday():
-    assert effective_slot_date(FRI, at(FRI, 15, 30)) == date(2026, 7, 13)
+def test_friday_at_1559_rolls_to_monday():
+    assert effective_slot_date(FRI, at(FRI, 15, 59)) == date(2026, 7, 13)
 
 
-def test_saturday_after_1530_rolls_to_monday():
-    assert effective_slot_date(SAT, at(SAT, 15, 30)) == date(2026, 7, 13)
+def test_saturday_at_1559_rolls_to_monday():
+    assert effective_slot_date(SAT, at(SAT, 15, 59)) == date(2026, 7, 13)
 
 
 def test_sunday_after_1530_rolls_to_monday():

@@ -19,12 +19,12 @@ class PrimeFlowReportScheduleDefault:
 
 
 DEFAULT_1H_SCHEDULES = (
-    PrimeFlowReportScheduleDefault("1H 10:00", "10:00", time(9, 0), 10, None),
+    PrimeFlowReportScheduleDefault("1H 10:00", "10:00", time(10, 0), 10, None),
     PrimeFlowReportScheduleDefault("1H 11:00", "11:00", time(11, 0), 20, "1H 10:00"),
     PrimeFlowReportScheduleDefault("1H 11:50", "11:50", time(11, 50), 30, "1H 11:00"),
     PrimeFlowReportScheduleDefault("1H 14:10", "14:10", time(14, 20), 40, "1H 11:50"),
     PrimeFlowReportScheduleDefault("1H Today 14:20", "14:20", time(14, 20), 50, "1H 14:10"),
-    PrimeFlowReportScheduleDefault("1H 15:50", "15:50", time(15, 50), 60, "1H Today 14:20"),
+    PrimeFlowReportScheduleDefault("1H 16:00", "16:00", time(16, 0), 60, "1H Today 14:20"),
 )
 
 

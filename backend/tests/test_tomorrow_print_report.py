@@ -62,11 +62,11 @@ def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     initials = ["AT", "RA", "EF", "EH", "LH", "FG", "BK"]
     html = _comments_table_html(initials)
     assert 'data-user-comments-lines="true"' in html
-    assert html.count('data-user-comment-line="true"') == 2
+    assert html.count('data-user-comment-line="true"') == 3
     assert html.index("<strong>AT:</strong>") < html.index("<strong>BK:</strong>")
     assert html.count("data-user-comment=") == len(initials)
-    assert "____________________" in html
-    assert "<table" not in html
+    assert html.count('width="100%"') >= 3
+    assert "border-bottom:1px solid #111827" in html
     assert ">INC<" not in html
     assert ">KOM<" not in html
 
@@ -78,8 +78,9 @@ def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     assert len(title_cells) == 1
     title_row = title_cells[0].row
     assert sheet.cell(title_row + 1, 1).value.startswith("AT: ____________________")
-    assert "EH: ____________________" in sheet.cell(title_row + 1, 1).value
-    assert sheet.cell(title_row + 2, 1).value.startswith("LH: ____________________")
+    assert "EF: ____________________" in sheet.cell(title_row + 1, 1).value
+    assert sheet.cell(title_row + 2, 1).value.startswith("EH: ____________________")
+    assert sheet.cell(title_row + 3, 1).value.startswith("FG: ____________________")
     values = [str(cell.value or "") for row in sheet.iter_rows() for cell in row]
     assert "INC" not in values
     assert "KOM" not in values
@@ -126,8 +127,9 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     assert "STAFF - HAPAT PER 1H" in checklists_html
     assert "Slotin paraprak/aktual" in checklists_html
     assert 'data-board-checklist-columns="true"' in checklists_html
-    assert "7. Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?" in checklists_html
-    assert "8. BZ Notes" in checklists_html
+    assert "7. Done? / Strikes?" in checklists_html
+    assert "8. Notes te reja? Data? AM/PM? Kujt?" in checklists_html
+    assert "9. BZ Notes" in checklists_html
     assert "Secili i lexon vet para BZ me GA" in checklists_html
     assert "Share screen side by side DET/REZULTATIN" in checklists_html
     assert "4. BZ Det nga Stafi per GA" in checklists_html
@@ -142,8 +144,9 @@ def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
     assert sheet["A4"].value.startswith("1. Hap doc dhe det / 2. Share screen")
     assert "4. BZ Det nga Stafi per GA (Komunikimi GA temas Det nga Stafi/ KA email)" in sheet["A4"].value
     assert sheet["E4"].value.startswith("1. Slotin paraprak/aktual / 2. A ke filluar")
-    assert "7. Done? / Strikes? / Notes te reja? Data? AM/PM? Kujt?" in sheet["E4"].value
-    assert "8. BZ Notes (Secili i lexon vet para BZ me GA)" in sheet["E4"].value
+    assert "7. Done? / Strikes?" in sheet["E4"].value
+    assert "8. Notes te reja? Data? AM/PM? Kujt?" in sheet["E4"].value
+    assert "9. BZ Notes (Secili i lexon vet para BZ me GA)" in sheet["E4"].value
     assert sheet["B5"].value == "LLOJI DHE SLOTI"
     assert sheet["C5"].value == "TASKS"
     assert "C5:H5" in {str(cell_range) for cell_range in sheet.merged_cells.ranges}
@@ -262,10 +265,11 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     ]
     report_html = _html_table([("DEADLINE / 08:00", tasks, False)], report_date=date(2026, 8, 14))
 
+    assert 'bgcolor="#DC2626"' in report_html
     assert 'bgcolor="#FFC4ED"' in report_html
     assert "border:2px solid #DC2626" in report_html
     assert 'data-task-badge="08:00"' in report_html
-    assert 'data-task-badge="due-date"' in report_html
+    assert report_html.count('data-task-badge="due-date"') == 1
     assert 'data-badge-position="bottom-right"' in report_html
     assert 'data-due-today="true"' in report_html
     assert ">14.08.2026</span>" in report_html
@@ -283,7 +287,7 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
 
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C6"].fill.fgColor.rgb.endswith("FFC4ED")
+    assert sheet["C6"].fill.fgColor.rgb.endswith("DC2626")
     assert "[14.08.2026]" in sheet["C6"].value
     assert "DUE" not in sheet["C6"].value
     assert "[08:00]" in sheet["D6"].value
@@ -416,20 +420,26 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
         (
             date(2026, 8, 26),
             "NESER",
-            [("TAK EXT", [{"title": "Tomorrow weekly", "time": "11:00", "recurrence_type": "weekly"}], False)],
+            [("TAK EXT", [
+                {"title": "Tomorrow weekly", "time": "11:00", "recurrence_type": "weekly"},
+                {"title": "Tomorrow second", "time": "13:00", "recurrence_type": "weekly"},
+            ], False)],
         ),
     ]
 
     report_html = _dated_meetings_html(sections)
 
     assert 'data-side-by-side-meetings="true"' in report_html
-    assert "SOT - 25.08.2026" in report_html
-    assert "NESER - 26.08.2026" in report_html
+    assert "TAKIMET SOT - 25.08.2026" in report_html
+    assert "TAKIMET NESER - 26.08.2026" in report_html
     assert report_html.count(">LLOJI</th>") == 2
     assert report_html.count(">TAKIMET</th>") == 2
     assert "border-left:4px solid #2563EB" in report_html
     assert report_html.count("border:2px solid #2563EB") == 1
+    assert report_html.count('data-meeting-row="true"') == 2
+    assert report_html.count('rowspan="2"') == 2
     assert report_html.index("Today one-off") < report_html.index("Tomorrow weekly")
+    assert report_html.index("Tomorrow weekly") < report_html.index("Tomorrow second")
 
     _, png, _ = _png_table_attachment([], date(2026, 8, 25), meeting_sections=sections)
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
