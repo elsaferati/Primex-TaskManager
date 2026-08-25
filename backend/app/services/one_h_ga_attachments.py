@@ -389,18 +389,29 @@ async def render_ga_hv_tasks_html(db: AsyncSession, report_day: date) -> str:
     )
 
 
-async def render_ga_tables_html(db: AsyncSession, report_day: date) -> str:
+async def render_ga_tables_html(
+    db: AsyncSession, report_day: date, *, today_print_html: str = ""
+) -> str:
     return (
         '<div data-ga-inline-tables="true">'
         + await render_ga_time_table_html(db, report_day)
         + await render_ga_hv_tasks_html(db, report_day)
+        + today_print_html
         + '</div>'
     )
 
 
-async def build_ga_only_1h_attachments(db: AsyncSession, report_day: date) -> list[tuple[str, bytes, str]]:
+async def build_ga_only_1h_attachments(
+    db: AsyncSession,
+    report_day: date,
+    *,
+    today_print_png: tuple[str, bytes, str] | None = None,
+) -> list[tuple[str, bytes, str]]:
     week_start = _week_start(report_day)
-    return [
+    attachments = [
         (f"GA-Time-Table-{week_start:%Y-%m-%d}.png", await render_ga_time_table_png(db, report_day), "image/png"),
         (f"GA-HV-Tasks-{report_day:%Y-%m-%d}.png", await render_ga_hv_tasks_png(db, report_day), "image/png"),
     ]
+    if today_print_png is not None:
+        attachments.append(today_print_png)
+    return attachments

@@ -4,12 +4,78 @@ from datetime import date
 from openpyxl import load_workbook
 
 from app.services.tomorrow_print_report import (
+    _comment_user_initials,
+    _comments_table_html,
     _excel_table_attachment,
     _html_table,
     _one_h_checklists_html,
+    _png_table_attachment,
     _task_rows,
     build_today_print_report,
+    build_tomorrow_print_report,
+    ensure_required_shtypi_recipient,
 )
+
+
+def test_required_shtypi_recipient_is_always_in_to_without_duplicates() -> None:
+    assert ensure_required_shtypi_recipient({
+        "to": ["ga@primexeu.com"], "cc": ["info@primexeu.com"], "bcc": []
+    }) == {
+        "to": ["ga@primexeu.com", "130primex.eu@gmail.com"],
+        "cc": ["info@primexeu.com"],
+        "bcc": [],
+    }
+    assert ensure_required_shtypi_recipient({
+        "to": ["ga@primexeu.com"], "cc": ["130PRIMEX.EU@GMAIL.COM"], "bcc": []
+    }) == {
+        "to": ["ga@primexeu.com", "130primex.eu@gmail.com"],
+        "cc": [],
+        "bcc": [],
+    }
+
+
+def test_staff_comment_users_keep_fixed_order_then_pcm_weekly_plan_order() -> None:
+    payload = {
+        "departments": [
+            {"id": "pcm", "code": "PCM", "name": "Project Content Manager"},
+            {"id": "dev", "code": "DEV", "name": "Development"},
+        ],
+        "users": [
+            {"full_name": "Zana Meta", "department_id": "pcm", "is_active": True,
+             "weekly_planner_sort_order": 2},
+            {"full_name": "Bora Kola", "department_id": "pcm", "is_active": True,
+             "weekly_planner_sort_order": 0},
+            {"full_name": "Inactive User", "department_id": "pcm", "is_active": False,
+             "weekly_planner_sort_order": 1},
+            {"full_name": "Dev User", "department_id": "dev", "is_active": True,
+             "weekly_planner_sort_order": 0},
+            {"full_name": "Elsa Hoxha", "department_id": "pcm", "is_active": True,
+             "weekly_planner_sort_order": 1},
+        ],
+    }
+
+    assert _comment_user_initials(payload) == ["AT", "RA", "EF", "EH", "LH", "FG", "BK", "ZM"]
+
+
+def test_staff_comment_table_is_last_ready_for_handwritten_comments_in_all_formats() -> None:
+    initials = ["AT", "RA", "EF", "EH", "LH", "FG", "BK"]
+    html = _comments_table_html(initials)
+    assert 'data-user-comments-table="true"' in html
+    assert html.index(">AT</th>") < html.index(">BK</th>")
+    assert html.count("data-user-comment=") == len(initials)
+
+    _, workbook_bytes, _ = _excel_table_attachment(
+        [], [], date(2026, 8, 14), include_meetings=False, comment_initials=initials
+    )
+    sheet = load_workbook(BytesIO(workbook_bytes)).active
+    title_cells = [cell for row in sheet.iter_rows() for cell in row if cell.value == "KOMENTE PER STAF"]
+    assert len(title_cells) == 1
+    title_row = title_cells[0].row
+    assert [sheet.cell(title_row + 1, column).value for column in range(1, len(initials) + 1)] == initials
+    assert all(sheet.cell(title_row + 2, column).value is None for column in range(1, len(initials) + 1))
+
+    _, png, _ = _png_table_attachment([], date(2026, 8, 14), initials)
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
 
 
 def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
@@ -252,7 +318,7 @@ def test_non_daily_or_weekly_meetings_get_blue_borders_in_email_and_excel() -> N
     assert sheet["D8"].border.left.style == "thin"
 
 
-def test_today_report_uses_same_day_task_rows_and_omits_meetings(monkeypatch) -> None:
+def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -> None:
     class FakeClient:
         def __init__(self, *args, **kwargs) -> None:
             pass
@@ -264,7 +330,11 @@ def test_today_report_uses_same_day_task_rows_and_omits_meetings(monkeypatch) ->
                         {"title": "GA: Today task", "date": target_date.isoformat(), "oneHReportSlot": "10:00"},
                         {"title": "GA: Tomorrow task", "date": "2026-08-25", "oneHReportSlot": "10:00"},
                     ],
-                    "external": [{"title": "Today meeting", "date": target_date.isoformat(), "time": "10:00"}],
+                    "external": [
+                        {"title": "Today meeting", "date": "2026-08-24", "time": "10:00"},
+                        {"title": "Tomorrow meeting", "date": "2026-08-25", "time": "11:00"},
+                        {"title": "Following meeting", "date": "2026-08-26", "time": "12:00"},
+                    ],
                 }
             }
 
@@ -278,8 +348,29 @@ def test_today_report_uses_same_day_task_rows_and_omits_meetings(monkeypatch) ->
     assert report["target_date"] == "2026-08-24"
     assert "Today task" in report["html"]
     assert "Tomorrow task" not in report["html"]
-    assert "Today meeting" not in report["html"]
-    assert ">Meeting<" not in report["html"]
+    assert "Today meeting" in report["html"]
+    assert "Tomorrow meeting" in report["html"]
+    assert "Following meeting" not in report["html"]
+    assert "TAKIMET - SOT - 24.08.2026" in report["html"]
+    assert "TAKIMET - NESER - 25.08.2026" in report["html"]
+    assert report["html"].index("Today meeting") < report["html"].index("Tomorrow meeting")
+    assert 'data-today-print-report="true"' in report["content_html"]
+    assert [attachment[2] for attachment in report["attachments"]] == [
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "image/png",
+    ]
+    assert report["attachments"][1][1].startswith(b"\x89PNG\r\n\x1a\n")
     workbook = load_workbook(BytesIO(report["attachments"][0][1]))
     values = [str(cell.value or "") for row in workbook.active.iter_rows() for cell in row]
-    assert not any(value.startswith("Meeting ") for value in values)
+    assert "TAKIMET - SOT - 24.08.2026" in values
+    assert "TAKIMET - NESER - 25.08.2026" in values
+    assert any("Today meeting" in value for value in values)
+    assert any("Tomorrow meeting" in value for value in values)
+
+    tomorrow = asyncio.run(build_tomorrow_print_report(date(2026, 8, 24), include_attachment=True))
+    assert tomorrow["target_date"] == "2026-08-25"
+    assert "Today meeting" not in tomorrow["html"]
+    assert "Tomorrow meeting" in tomorrow["html"]
+    assert "Following meeting" in tomorrow["html"]
+    assert "TAKIMET - NESER - 25.08.2026" in tomorrow["html"]
+    assert "TAKIMET - DITA PAS NESER - 26.08.2026" in tomorrow["html"]

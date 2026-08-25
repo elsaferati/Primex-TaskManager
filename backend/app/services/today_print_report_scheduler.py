@@ -11,7 +11,11 @@ from app.db import SessionLocal
 from app.models.today_print_report_delivery import TodayPrintReportDelivery
 from app.models.today_print_report_settings import TodayPrintReportSettings
 from app.services.meetings_report_scheduler import normalize_recipients
-from app.services.tomorrow_print_report import build_today_print_report, send_tomorrow_print_report
+from app.services.tomorrow_print_report import (
+    build_today_print_report,
+    ensure_required_shtypi_recipient,
+    send_tomorrow_print_report,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -40,7 +44,7 @@ async def run_today_print_report_scheduler_once(now: datetime | None = None) -> 
         if row is not None and row.status == "SENT":
             return False
 
-        recipients = normalize_recipients(settings.recipients)
+        recipients = ensure_required_shtypi_recipient(normalize_recipients(settings.recipients))
         if not recipients["to"]:
             logger.warning("today_print_report_scheduler_skipped reason=no_to_recipients")
             return False

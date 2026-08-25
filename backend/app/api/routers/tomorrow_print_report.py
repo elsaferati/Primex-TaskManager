@@ -14,11 +14,20 @@ from app.models.tomorrow_print_report_settings import TomorrowPrintReportSetting
 from app.models.user import User
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
-from app.services.tomorrow_print_report import build_tomorrow_print_report, send_tomorrow_print_report
+from app.services.tomorrow_print_report import (
+    REQUIRED_SHTYPI_RECIPIENT,
+    build_tomorrow_print_report,
+    ensure_required_shtypi_recipient,
+    send_tomorrow_print_report,
+)
 
 router = APIRouter()
 
-DEFAULT_RECIPIENTS = {"to": ["ga@primexeu.com"], "cc": ["info@primexeu.com"], "bcc": []}
+DEFAULT_RECIPIENTS = {
+    "to": ["ga@primexeu.com", REQUIRED_SHTYPI_RECIPIENT],
+    "cc": ["info@primexeu.com"],
+    "bcc": [],
+}
 
 
 class RecipientsPayload(BaseModel):
@@ -41,7 +50,7 @@ def _settings(row: TomorrowPrintReportSettings) -> dict:
         "send_time": row.send_time.strftime("%H:%M"),
         "timezone": row.timezone,
         "weekdays": row.weekdays or [],
-        "recipients": normalize_recipients(row.recipients),
+        "recipients": ensure_required_shtypi_recipient(normalize_recipients(row.recipients)),
         "last_run_date": row.last_run_date.isoformat() if row.last_run_date else None,
     }
 
@@ -96,7 +105,9 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
     row.send_time = _parse_time(payload.send_time)
     row.timezone = payload.timezone
     row.weekdays = sorted(set(payload.weekdays))
-    row.recipients = normalize_recipients(payload.recipients.model_dump())
+    row.recipients = ensure_required_shtypi_recipient(
+        normalize_recipients(payload.recipients.model_dump())
+    )
     await db.commit()
     await db.refresh(row)
     return _settings(row)
@@ -112,7 +123,7 @@ async def preview(report_date: date | None = None, _: User = Depends(require_adm
 async def send(report_date: date | None = None, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> dict:
     delivery_date = report_date or datetime.now(report_timezone()).date()
     settings = await _settings_row(db)
-    recipients = normalize_recipients(settings.recipients)
+    recipients = ensure_required_shtypi_recipient(normalize_recipients(settings.recipients))
     if not recipients["to"]:
         raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
     existing = (

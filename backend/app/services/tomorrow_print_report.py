@@ -9,6 +9,8 @@ from typing import Any
 
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
+from PIL import Image, ImageDraw, ImageFont
 
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient
@@ -71,6 +73,34 @@ STATUS_COLORS = {
     "WAITING_CONFIRMATION": "#FFEDD5",
     "DONE": "#C4FDC4",
 }
+COMMENT_FIXED_INITIALS = ("AT", "RA", "EF", "EH", "LH", "FG")
+REQUIRED_SHTYPI_RECIPIENT = "130primex.eu@gmail.com"
+
+
+def ensure_required_shtypi_recipient(
+    recipients: dict[str, list[str]],
+) -> dict[str, list[str]]:
+    """Always include the required archive/print mailbox as a To recipient."""
+    result = {key: [] for key in ("to", "cc", "bcc")}
+    seen: set[str] = set()
+    for key in ("to", "cc", "bcc"):
+        for raw in recipients.get(key, []):
+            email = str(raw or "").strip()
+            normalized = email.casefold()
+            if not email or normalized in seen:
+                continue
+            seen.add(normalized)
+            result[key].append(email)
+    required_key = REQUIRED_SHTYPI_RECIPIENT.casefold()
+    if required_key not in seen:
+        result["to"].append(REQUIRED_SHTYPI_RECIPIENT)
+    elif all(
+        email.casefold() != required_key for email in result["to"]
+    ):
+        for key in ("cc", "bcc"):
+            result[key] = [email for email in result[key] if email.casefold() != required_key]
+        result["to"].append(REQUIRED_SHTYPI_RECIPIENT)
+    return result
 
 
 def subject_for(target_date: date) -> str:
@@ -134,7 +164,57 @@ def _initials(value: str) -> str:
         return ""
     if re.fullmatch(r"[A-Za-z]{1,4}", cleaned):
         return cleaned.upper()
-    return "".join(part[0] for part in re.split(r"\s+", cleaned) if part).upper()
+    parts = re.findall(r"[^\W\d_]+", cleaned, flags=re.UNICODE)
+    return "".join(part[0] for part in parts).upper()
+
+
+def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
+    """Fixed report users followed by PCM users in Weekly Planner order."""
+    departments = {
+        str(row.get("id")): str(row.get("code") or row.get("name") or "").strip().upper()
+        for row in (payload.get("departments") or [])
+        if isinstance(row, dict) and row.get("id") is not None
+    }
+    pcm_aliases = {"PCM", "PRODUCT CONTENT", "PROJECT CONTENT", "PROJECT CONTENT MANAGER"}
+    pcm_users: list[tuple[int, int, str, str]] = []
+    for row in payload.get("users") or []:
+        if not isinstance(row, dict) or row.get("is_active") is False:
+            continue
+        if departments.get(str(row.get("department_id"))) not in pcm_aliases:
+            continue
+        label = str(row.get("full_name") or row.get("username") or "").strip()
+        initials = _initials(label)
+        if not initials:
+            continue
+        order = row.get("weekly_planner_sort_order")
+        pcm_users.append((1 if order is None else 0, int(order or 0), label.casefold(), initials))
+
+    result = list(COMMENT_FIXED_INITIALS)
+    for *_, initials in sorted(pcm_users):
+        if initials not in result:
+            result.append(initials)
+    return result
+
+
+def _comments_table_html(initials: list[str]) -> str:
+    columns = initials or list(COMMENT_FIXED_INITIALS)
+    width = 100 / len(columns)
+    headers = "".join(
+        f'<th width="{width:.2f}%" bgcolor="#EAF0FF" style="{HEADER_STYLE};font-size:14px;">'
+        f"{html.escape(value)}</th>"
+        for value in columns
+    )
+    comments = "".join(
+        f'<td data-user-comment="{html.escape(value)}" style="{CELL_STYLE};height:64px;">&nbsp;</td>'
+        for value in columns
+    )
+    return (
+        '<div data-user-comments-table="true" style="margin-top:18px;">'
+        '<div style="font-family:Arial,sans-serif;font-size:16px;font-weight:800;margin:0 0 6px;">'
+        "KOMENTE PER STAF</div>"
+        f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{TABLE_STYLE}">'
+        f"<thead><tr>{headers}</tr></thead><tbody><tr>{comments}</tr></tbody></table></div>"
+    )
 
 
 def _assignees(item: dict[str, Any]) -> list[str]:
@@ -355,12 +435,29 @@ def _html_table(
     )
 
 
+def _dated_meetings_html(
+    sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]],
+) -> str:
+    result: list[str] = []
+    for meeting_date, relative, rows in sections:
+        result.append(
+            '<div data-meeting-date-section="true" style="margin:18px 0 6px;'
+            'background-color:#EEF2FF;border-left:5px solid #2563EB;padding:9px 12px;'
+            'font-family:Arial,sans-serif;font-size:15px;font-weight:800;">'
+            f"TAKIMET - {relative} - {meeting_date:%d.%m.%Y}</div>"
+        )
+        result.append(_html_table(rows, meeting=True, report_date=meeting_date))
+    return "".join(result)
+
+
 def _excel_table_attachment(
     task_rows: list[tuple[str, list[dict[str, Any]], bool]],
     meeting_rows: list[tuple[str, list[dict[str, Any]], bool]],
     target_date: date,
     *,
     include_meetings: bool = True,
+    comment_initials: list[str] | None = None,
+    meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
 ) -> tuple[str, bytes, str]:
     """Create the same printable grid as an XLSX attachment for email recipients."""
     workbook = Workbook()
@@ -515,10 +612,54 @@ def _excel_table_attachment(
     task_header_row = write_checklists(3)
     next_row = write_section(task_rows, meeting=False, row_number=task_header_row)
     if include_meetings:
-        write_section(meeting_rows, meeting=True, row_number=next_row + 1)
+        if meeting_sections:
+            for meeting_date, relative, dated_rows in meeting_sections:
+                section_row = next_row + 1
+                sheet.merge_cells(start_row=section_row, start_column=1, end_row=section_row, end_column=8)
+                section_cell = sheet.cell(section_row, 1, f"TAKIMET - {relative} - {meeting_date:%d.%m.%Y}")
+                section_cell.font = Font(bold=True, size=12)
+                section_cell.fill = PatternFill("solid", fgColor="EEF2FF")
+                section_cell.alignment = Alignment(horizontal="left", vertical="center")
+                next_row = write_section(dated_rows, meeting=True, row_number=section_row + 1)
+        else:
+            next_row = write_section(meeting_rows, meeting=True, row_number=next_row + 1)
+
+    comment_columns = comment_initials or list(COMMENT_FIXED_INITIALS)
+    comment_start_row = next_row + 1
+    sheet.merge_cells(
+        start_row=comment_start_row,
+        start_column=1,
+        end_row=comment_start_row,
+        end_column=len(comment_columns),
+    )
+    comment_title = sheet.cell(comment_start_row, 1, "KOMENTE PER STAF")
+    comment_title.font = Font(bold=True, size=12)
+    comment_title.fill = PatternFill("solid", fgColor="EEF2FF")
+    comment_title.alignment = Alignment(horizontal="left", vertical="center")
+    for column, initials in enumerate(comment_columns, 1):
+        header = sheet.cell(comment_start_row + 1, column, initials)
+        header.font = Font(bold=True, size=12)
+        header.fill = header_fill
+        header.border = border
+        header.alignment = Alignment(horizontal="center", vertical="center")
+        comment = sheet.cell(comment_start_row + 2, column, "")
+        comment.border = border
+        comment.alignment = Alignment(vertical="top", wrap_text=True)
+        column_letter = get_column_letter(column)
+        sheet.column_dimensions[column_letter].width = max(
+            sheet.column_dimensions[column_letter].width or 0,
+            14,
+        )
+    sheet.row_dimensions[comment_start_row + 2].height = 55
     widths = [6, 22, 29, 29, 29, 29, 29, 29]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
+    for column in range(1, len(comment_columns) + 1):
+        column_letter = get_column_letter(column)
+        sheet.column_dimensions[column_letter].width = max(
+            sheet.column_dimensions[column_letter].width or 0,
+            14,
+        )
     sheet.freeze_panes = f"C{task_header_row + 1}"
 
     output = BytesIO()
@@ -530,26 +671,258 @@ def _excel_table_attachment(
     )
 
 
+def _png_table_attachment(
+    task_rows: list[tuple[str, list[dict[str, Any]], bool]], target_date: date,
+    comment_initials: list[str] | None = None,
+    meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
+) -> tuple[str, bytes, str]:
+    """Render the Today SHTYPI task grid with the same task-state colours."""
+    margin, width = 28, 1900
+    column_widths = [58, 210, *([267] * 6)]
+    try:
+        regular = ImageFont.truetype(os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\segoeui.ttf"), 16)
+        bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 16)
+        small_bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 14)
+        heading = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 27)
+    except OSError:
+        regular = bold = small_bold = heading = ImageFont.load_default()
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1), "white"))
+
+    def wrap(value: str, font: Any, max_width: int) -> list[str]:
+        result: list[str] = []
+        for source in str(value or "").splitlines() or [""]:
+            words, current = source.split() or [""], ""
+            for word in words:
+                candidate = word if not current else f"{current} {word}"
+                if current and measure.textlength(candidate, font=font) > max_width:
+                    result.append(current)
+                    current = word
+                else:
+                    current = candidate
+            result.append(current)
+        return result or [""]
+
+    layout: list[tuple[str, list[dict[str, Any]], bool, int, int]] = []
+    for label, values, personal in task_rows:
+        chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
+        for chunk_index, chunk in enumerate(chunks):
+            line_counts = [len(wrap(label, bold, column_widths[1] - 12))]
+            for item in chunk:
+                badges = int(_is_eight_am_task(item) or (
+                    bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
+                    and _task_due_day(item) is not None
+                ))
+                line_counts.append(
+                    len(wrap(_task_title(item, personal=personal), regular, column_widths[2] - 12)) + badges
+                )
+            layout.append((label, chunk, personal, chunk_index, max(44, 12 + max(line_counts) * 21)))
+
+    header_top, header_height = 92, 40
+    comment_columns = comment_initials or list(COMMENT_FIXED_INITIALS)
+    comment_title_height, comment_header_height, comment_row_height = 38, 38, 72
+    comment_block_height = 20 + comment_title_height + comment_header_height + comment_row_height
+    meeting_block_height = 0
+    for _, _, rows in meeting_sections or []:
+        meeting_block_height += 20 + 38 + 38
+        meeting_block_height += sum(50 * max(1, (len(values) + 5) // 6) for _, values, _ in rows)
+    height = (
+        header_top + header_height + sum(row[4] for row in layout)
+        + meeting_block_height + comment_block_height + margin
+    )
+    image = Image.new("RGB", (width, height), "white")
+    draw = ImageDraw.Draw(image)
+    draw.text((margin, 22), f"1H SHTYPI TODAY - {target_date:%d.%m.%Y}", fill="#111827", font=heading)
+    draw.text((margin, 59), "Current Common View state used by the 1H report", fill="#475569", font=regular)
+
+    y, x = header_top, margin
+    for column, label in enumerate(["NR", "LLOJI DHE SLOTI", *[f"TASK {index}" for index in range(1, 7)]]):
+        right = x + column_widths[column]
+        draw.rectangle((x, y, right, y + header_height), fill="#F8FAFC", outline="#111827")
+        draw.text((x + 6, y + 10), label, fill="#111827", font=bold)
+        x = right
+    y += header_height
+
+    number = 0
+    for label, chunk, personal, chunk_index, row_height in layout:
+        if chunk_index == 0:
+            number += 1
+        x = margin
+        for column, value in ((0, str(number) if chunk_index == 0 else ""), (1, label if chunk_index == 0 else "")):
+            right = x + column_widths[column]
+            draw.rectangle((x, y, right, y + row_height), fill="#FFFFFF", outline="#111827", width=2 if chunk_index == 0 else 1)
+            for line_index, line in enumerate(wrap(value, bold, column_widths[column] - 12)):
+                draw.text((x + 6, y + 6 + line_index * 20), line, fill="#111827", font=bold)
+            x = right
+        for item_index in range(6):
+            right = x + column_widths[2 + item_index]
+            item = chunk[item_index] if item_index < len(chunk) else None
+            fill, text_color, outline, outline_width = "#FFFFFF", "#111827", "#111827", 1
+            if item is not None:
+                if bool(item.get("is_deadline_important") or item.get("isDeadlineImportant")):
+                    fill, text_color = DEADLINE_COLOR, "#FFFFFF"
+                elif personal and _is_personal_task_for_ga(item):
+                    fill = PERSONAL_GA_COLOR
+                else:
+                    fill = STATUS_COLORS[_task_status(item)]
+                if _is_eight_am_task(item):
+                    outline, outline_width = EIGHT_AM_BORDER_COLOR, 4
+            draw.rectangle((x, y, right, y + row_height), fill=fill, outline=outline, width=outline_width)
+            if item is not None:
+                text_y = y + 6
+                badges: list[str] = []
+                if _is_eight_am_task(item):
+                    badges.append("08:00")
+                deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
+                due_day = _task_due_day(item) if deadline else None
+                if due_day:
+                    badges.append(("DUE TODAY " if due_day == target_date else "DUE ") + due_day.strftime("%d.%m.%Y"))
+                if badges:
+                    badge = " | ".join(badges)
+                    badge_font = bold if due_day == target_date else small_bold
+                    badge_width = int(measure.textlength(badge, font=badge_font)) + 12
+                    draw.rectangle((right - badge_width - 5, text_y, right - 5, text_y + 23), fill="#FFFFFF", outline="#111827", width=2)
+                    draw.text((right - badge_width + 1, text_y + 3), badge, fill="#111827", font=badge_font)
+                    text_y += 28
+                value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
+                task_font = bold if deadline else regular
+                for line_index, line in enumerate(wrap(value, task_font, column_widths[2 + item_index] - 12)):
+                    draw.text((x + 6, text_y + line_index * 20), line, fill=text_color, font=task_font)
+            x = right
+        y += row_height
+
+    for meeting_date, relative, rows in meeting_sections or []:
+        y += 20
+        draw.rectangle((margin, y, width - margin, y + 38), fill="#EEF2FF", outline="#2563EB")
+        draw.text(
+            (margin + 8, y + 8),
+            f"TAKIMET - {relative} - {meeting_date:%d.%m.%Y}",
+            fill="#111827",
+            font=bold,
+        )
+        y += 38
+        x = margin
+        for column, label in enumerate(["NR", "LLOJI", *[f"MEETING {index}" for index in range(1, 7)]]):
+            right = x + column_widths[column]
+            draw.rectangle((x, y, right, y + 38), fill="#F8FAFC", outline="#111827")
+            draw.text((x + 6, y + 9), label, fill="#111827", font=bold)
+            x = right
+        y += 38
+        for number, (label, values, _) in enumerate(rows, 1):
+            chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
+            for chunk_index, chunk in enumerate(chunks):
+                x = margin
+                for column, value in (
+                    (0, str(number) if chunk_index == 0 else ""),
+                    (1, label if chunk_index == 0 else ""),
+                ):
+                    right = x + column_widths[column]
+                    draw.rectangle((x, y, right, y + 50), fill="#FFFFFF", outline="#111827")
+                    draw.text((x + 6, y + 7), value, fill="#111827", font=bold)
+                    x = right
+                for item_index in range(6):
+                    right = x + column_widths[2 + item_index]
+                    item = chunk[item_index] if item_index < len(chunk) else None
+                    is_highlighted = bool(item and _is_non_routine_meeting(item))
+                    draw.rectangle(
+                        (x, y, right, y + 50),
+                        fill="#FFFFFF",
+                        outline=NON_ROUTINE_MEETING_BORDER_COLOR if is_highlighted else "#111827",
+                        width=3 if is_highlighted else 1,
+                    )
+                    if item:
+                        value = (
+                            f"{item_index + 1 + chunk_index * 6}. "
+                            f"{_report_text(_first_line(item.get('title')))} {str(item.get('time') or '').strip()}"
+                        ).strip()
+                        for line_index, line in enumerate(wrap(value, regular, column_widths[2 + item_index] - 12)):
+                            draw.text((x + 6, y + 6 + line_index * 20), line, fill="#111827", font=regular)
+                    x = right
+                y += 50
+
+    y += 20
+    table_left, table_right = margin, width - margin
+    draw.rectangle((table_left, y, table_right, y + comment_title_height), fill="#EEF2FF", outline="#111827")
+    draw.text((table_left + 8, y + 8), "KOMENTE PER STAF", fill="#111827", font=bold)
+    y += comment_title_height
+    comment_width = (table_right - table_left) / len(comment_columns)
+    for index, initials in enumerate(comment_columns):
+        left = round(table_left + index * comment_width)
+        right = round(table_left + (index + 1) * comment_width)
+        draw.rectangle((left, y, right, y + comment_header_height), fill="#EAF0FF", outline="#111827")
+        bounds = draw.textbbox((0, 0), initials, font=bold)
+        text_width = bounds[2] - bounds[0]
+        draw.text((left + (right - left - text_width) / 2, y + 9), initials, fill="#111827", font=bold)
+        draw.rectangle(
+            (left, y + comment_header_height, right, y + comment_header_height + comment_row_height),
+            fill="#FFFFFF",
+            outline="#111827",
+        )
+    y += comment_header_height + comment_row_height
+
+    output = BytesIO()
+    image.crop((0, 0, width, y + margin)).save(output, format="PNG", optimize=True)
+    return f"1H-SHTYPI-Today-{target_date:%Y-%m-%d}.png", output.getvalue(), "image/png"
+
+
 async def _build_print_report(
-    target_date: date, *, include_attachment: bool = False, include_meetings: bool = True
+    target_date: date, *, include_attachment: bool = False, include_meetings: bool = True,
+    include_png: bool = False, first_meeting_day_label: str = "NESER",
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
-    if not base_url:
-        raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to generate 1H SHTYPI")
-    client = PrimeFlowClient(
-        base_url.rstrip("/"), os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
-    )
-    payload = await client.common_view(target_date)
+    if payload is None:
+        base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
+        if not base_url:
+            raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to generate 1H SHTYPI")
+        client = PrimeFlowClient(
+            base_url.rstrip("/"), os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
+        )
+        payload = await client.common_view(target_date)
     items = payload.get("items") or {}
+    comment_initials = _comment_user_initials(payload)
     task_rows = _task_rows(items, target_date)
-    meeting_rows = (
-        [(label, values, False) for label, values in _meeting_rows(items, target_date)]
-        if include_meetings else []
-    )
+    meeting_dates = [target_date, next_working_day(target_date)] if include_meetings else []
+    next_meeting_payload = payload
+    if len(meeting_dates) > 1 and payload.get("week_end"):
+        try:
+            payload_week_end = date.fromisoformat(str(payload["week_end"])[:10])
+        except ValueError:
+            payload_week_end = meeting_dates[-1]
+        if meeting_dates[-1] > payload_week_end:
+            base_url = os.getenv("PRIMEFLOW_API_BASE_URL")
+            if not base_url:
+                raise RuntimeError("PRIMEFLOW_API_BASE_URL is required to load next-day meetings")
+            next_meeting_payload = await PrimeFlowClient(
+                base_url.rstrip("/"), os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"),
+                os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
+            ).common_view(meeting_dates[-1])
+    meeting_sections = [
+        (
+            meeting_date,
+            (
+                first_meeting_day_label
+                if index == 0
+                else ("NESER" if first_meeting_day_label == "SOT" else "DITA PAS NESER")
+            ),
+            [
+                (label, values, False)
+                for label, values in _meeting_rows(
+                    (payload if meeting_date == target_date else next_meeting_payload).get("items") or {},
+                    meeting_date,
+                )
+            ],
+        )
+        for index, meeting_date in enumerate(meeting_dates)
+    ]
+    meeting_rows = meeting_sections[0][2] if meeting_sections else []
     report_date = target_date.strftime("%d.%m.%Y")
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">1H SHTYPI — {report_date}</div>
-{_one_h_checklists_html()}{_html_table(task_rows, report_date=target_date)}{_html_table(meeting_rows, meeting=True, report_date=target_date) if include_meetings else ''}</body></html>"""
+{_one_h_checklists_html()}{_html_table(task_rows, report_date=target_date)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+    content_html = (
+        '<div data-today-print-report="true" style="margin:18px 0 14px">'
+        + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
+        + "</div>"
+    )
     plain_rows = [
         f"1H SHTYPI - {report_date}",
         "",
@@ -570,27 +943,41 @@ async def _build_print_report(
     for label, values, personal in task_rows:
         plain_rows.append(f"{label}: " + "; ".join(_task_title(item, personal=personal) for item in values))
     if include_meetings:
-        plain_rows.append("")
-        plain_rows.append("MEETINGS")
-        for label, values, _ in meeting_rows:
-            plain_rows.append(
-                f"{label}: " + "; ".join(
-                    f"{_report_text(_first_line(item.get('title')))} {item.get('time') or ''}".strip()
-                    for item in values
+        for meeting_date, relative, dated_rows in meeting_sections:
+            plain_rows.append("")
+            plain_rows.append(f"MEETINGS - {relative} - {meeting_date:%d.%m.%Y}")
+            for label, values, _ in dated_rows:
+                plain_rows.append(
+                    f"{label}: " + "; ".join(
+                        f"{_report_text(_first_line(item.get('title')))} {item.get('time') or ''}".strip()
+                        for item in values
+                    )
                 )
-            )
+    plain_rows.extend([
+        "",
+        "KOMENTE PER STAF",
+        " | ".join(comment_initials),
+        "COMMENT: " + " | ".join("" for _ in comment_initials),
+    ])
     report: dict[str, Any] = {
         "subject": subject_for(target_date),
         "target_date": target_date.isoformat(),
         "html": html_body,
+        "content_html": content_html,
         "plain_text": "\n".join(plain_rows),
     }
     if include_attachment:
-        report["attachments"] = [
+        attachments = [
             _excel_table_attachment(
-                task_rows, meeting_rows, target_date, include_meetings=include_meetings
+                task_rows, meeting_rows, target_date, include_meetings=include_meetings,
+                comment_initials=comment_initials, meeting_sections=meeting_sections,
             )
         ]
+        if include_png:
+            attachments.append(
+                _png_table_attachment(task_rows, target_date, comment_initials, meeting_sections)
+            )
+        report["attachments"] = attachments
     return report
 
 
@@ -603,15 +990,17 @@ async def build_tomorrow_print_report(
 
 
 async def build_today_print_report(
-    report_date: date, *, include_attachment: bool = False
+    report_date: date, *, include_attachment: bool = False, payload: dict[str, Any] | None = None
 ) -> dict[str, Any]:
-    """Build the Common View print template using only today's task rows."""
+    """Build today's task grid plus today/next-working-day meeting sections."""
     return await _build_print_report(
-        report_date, include_attachment=include_attachment, include_meetings=False
+        report_date, include_attachment=include_attachment, include_meetings=True,
+        include_png=True, first_meeting_day_label="SOT", payload=payload
     )
 
 
 async def send_tomorrow_print_report(report: dict[str, Any], recipients: dict[str, list[str]]) -> dict[str, Any]:
+    recipients = ensure_required_shtypi_recipient(recipients)
     return await GmailService().send_verified(
         report["subject"], recipients, report["plain_text"], report["html"], attachments=report.get("attachments")
     )

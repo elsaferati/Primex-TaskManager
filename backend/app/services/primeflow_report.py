@@ -639,6 +639,9 @@ def render_html(
         )
 
     body_chunks: list[str] = []
+    if pre_sections_html:
+        body_chunks.append(pre_sections_html)
+
     if document.board_reminders and document.reminders:
         body_chunks.append(
             '<table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" '
@@ -656,9 +659,6 @@ def render_html(
         body_chunks.append(board_reminder_column(document.board_reminders))
     elif document.reminders:
         body_chunks.append(reminder_column(REMINDER_SECTION_TITLE, document.reminders))
-
-    if pre_sections_html:
-        body_chunks.append(pre_sections_html)
 
     for section_index, section in enumerate(document.sections):
         if section_index:

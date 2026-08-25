@@ -29,13 +29,20 @@ from app.services.primeflow_report import (
 )
 from app.services.one_h_ga_attachments import build_ga_only_1h_attachments, render_ga_tables_html
 from app.services.task_strike_events import render_text_for_interval
+from app.services.tomorrow_print_report import build_today_print_report
 
 logger = logging.getLogger(__name__)
 TERMINAL = {"SENT", "ALREADY_SENT"}
-GA_ATTACHMENT_RECIPIENT = os.getenv(
-    "PRIMEFLOW_GA_ATTACHMENT_RECIPIENT",
-    "130primex.eu@gmail.com",
-).strip()
+_configured_extra_recipients = os.getenv("PRIMEFLOW_GA_EXTRA_RECIPIENTS", "").strip()
+if _configured_extra_recipients:
+    GA_ATTACHMENT_RECIPIENTS = tuple(
+        value.strip() for value in _configured_extra_recipients.split(",") if value.strip()
+    )
+else:
+    legacy_recipient = os.getenv("PRIMEFLOW_GA_ATTACHMENT_RECIPIENT", "").strip()
+    GA_ATTACHMENT_RECIPIENTS = tuple(
+        dict.fromkeys(filter(None, ("ga@primexeu.com", legacy_recipient or "130primex.eu@gmail.com")))
+    )
 STRIKE_INTERVAL_STARTS = {
     "10:00": time(8, 0),
     "11:00": time(9, 0),
@@ -57,9 +64,10 @@ STRIKE_INTERVAL_ENDS = {
 def split_ga_recipient_map(
     recipients: dict[str, list[str]],
 ) -> tuple[dict[str, list[str]], dict[str, list[str]] | None]:
-    """Separate the configured PNG target so attachments cannot leak to others."""
+    """Separate GA/test targets so the extra tables and PNGs cannot leak."""
     regular = {key: [] for key in ("to", "cc", "bcc")}
     seen: set[str] = set()
+    extra_targets = {email.casefold() for email in GA_ATTACHMENT_RECIPIENTS}
     for key in ("to", "cc", "bcc"):
         for raw in recipients.get(key, []):
             email = str(raw).strip()
@@ -67,7 +75,7 @@ def split_ga_recipient_map(
             if not email or normalized in seen:
                 continue
             seen.add(normalized)
-            if normalized == GA_ATTACHMENT_RECIPIENT.casefold():
+            if normalized in extra_targets:
                 continue
             regular[key].append(email)
 
@@ -78,11 +86,7 @@ def split_ga_recipient_map(
             if regular[key]:
                 regular["to"].append(regular[key].pop(0))
                 break
-    ga = (
-        {"to": [GA_ATTACHMENT_RECIPIENT], "cc": [], "bcc": []}
-        if GA_ATTACHMENT_RECIPIENT
-        else None
-    )
+    ga = {"to": list(GA_ATTACHMENT_RECIPIENTS), "cc": [], "bcc": []} if GA_ATTACHMENT_RECIPIENTS else None
     return regular, ga
 
 
@@ -256,12 +260,22 @@ async def _text_overrides_for_1h_interval(
     return title_overrides, description_overrides
 
 
-async def generate_fresh(day: date, slot: str, recipients: dict[str, list[str]] | None = None) -> ReportDocument:
+async def _load_common_view(day: date) -> dict:
     client = PrimeFlowClient(
         os.environ["PRIMEFLOW_API_BASE_URL"].rstrip("/"),
         os.getenv("PRIMEFLOW_EMAIL"), os.getenv("PRIMEFLOW_PASSWORD"), os.getenv("PRIMEFLOW_ACCESS_TOKEN"),
     )
-    data = await client.common_view(day)
+    return await client.common_view(day)
+
+
+async def generate_fresh(
+    day: date,
+    slot: str,
+    recipients: dict[str, list[str]] | None = None,
+    *,
+    data: dict | None = None,
+) -> ReportDocument:
+    data = data or await _load_common_view(day)
     reminders = await load_1h_reminder_questions()
     undiscussed_notes = await load_undiscussed_notes()
     title_overrides, description_overrides = await _text_overrides_for_1h_interval(
@@ -333,7 +347,13 @@ async def deliver_report(
                     run.finished_at = datetime.now(report_timezone())
                     await db.commit()
                     return run
-            document = await generate_fresh(day, slot, recipient_map)
+            source_data = await _load_common_view(day)
+            document = await generate_fresh(day, slot, recipient_map, data=source_data)
+            today_print_report = await build_today_print_report(
+                day,
+                include_attachment=True,
+                payload=source_data,
+            )
             body = render_plain_text(document)
             html_body = render_html(document)
             run.body_hash = hashlib.sha256(body.encode("utf-8")).hexdigest()
@@ -370,11 +390,24 @@ async def deliver_report(
             if ga_recipients is not None:
                 # Finish all data/image generation before the first SMTP send,
                 # so a rendering error cannot leave only the regular group sent.
-                ga_only_attachments = await build_ga_only_1h_attachments(db, day)
+                today_print_png = next(
+                    attachment
+                    for attachment in today_print_report["attachments"]
+                    if attachment[2] == "image/png"
+                )
+                ga_only_attachments = await build_ga_only_1h_attachments(
+                    db,
+                    day,
+                    today_print_png=today_print_png,
+                )
                 ga_attachments = attachments + ga_only_attachments
                 ga_html_body = render_html(
                     document,
-                    pre_sections_html=await render_ga_tables_html(db, day),
+                    pre_sections_html=await render_ga_tables_html(
+                        db,
+                        day,
+                        today_print_html=today_print_report["content_html"],
+                    ),
                     content_width=1200,
                 )
             messages: list[dict] = []

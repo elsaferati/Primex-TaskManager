@@ -38,7 +38,11 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
             "cc": ["manager@primexeu.com"],
             "bcc": ["audit@primexeu.com"],
         })
-        self.assertEqual(ga, {"to": ["130primex.eu@gmail.com"], "cc": [], "bcc": []})
+        self.assertEqual(ga, {
+            "to": ["ga@primexeu.com", "130primex.eu@gmail.com"],
+            "cc": [],
+            "bcc": [],
+        })
 
     def test_regular_cc_is_promoted_when_png_recipient_was_the_only_to_recipient(self) -> None:
         regular, ga = split_ga_recipient_map({
@@ -51,15 +55,19 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(regular["cc"], [])
         self.assertIsNotNone(ga)
 
-    def test_temporary_png_recipient_is_added_even_when_not_in_regular_configuration(self) -> None:
+    def test_ga_and_temporary_recipients_are_both_isolated_for_extra_content(self) -> None:
         regular, ga = split_ga_recipient_map({
             "to": ["ga@primexeu.com"],
             "cc": [],
             "bcc": [],
         })
 
-        self.assertEqual(regular["to"], ["ga@primexeu.com"])
-        self.assertEqual(ga, {"to": ["130primex.eu@gmail.com"], "cc": [], "bcc": []})
+        self.assertEqual(regular["to"], [])
+        self.assertEqual(ga, {
+            "to": ["ga@primexeu.com", "130primex.eu@gmail.com"],
+            "cc": [],
+            "bcc": [],
+        })
 
     async def test_empty_timetable_still_renders_a_valid_week_png(self) -> None:
         db = SimpleNamespace(execute=AsyncMock(side_effect=[
@@ -87,13 +95,18 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=b"\x89PNG-tasks"),
             ),
         ):
-            attachments = await build_ga_only_1h_attachments(SimpleNamespace(), date(2026, 8, 26))
+            attachments = await build_ga_only_1h_attachments(
+                SimpleNamespace(),
+                date(2026, 8, 26),
+                today_print_png=("1H-SHTYPI-Today-2026-08-26.png", b"\x89PNG-shtypi", "image/png"),
+            )
 
         self.assertEqual(
             [(name, mime) for name, _, mime in attachments],
             [
                 ("GA-Time-Table-2026-08-24.png", "image/png"),
                 ("GA-HV-Tasks-2026-08-26.png", "image/png"),
+                ("1H-SHTYPI-Today-2026-08-26.png", "image/png"),
             ],
         )
 
@@ -129,11 +142,22 @@ class GaOnlyOneHAttachmentTests(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value='<table data-ga-hv-tasks="true"></table>'),
             ),
         ):
-            tables = await render_ga_tables_html(SimpleNamespace(), date(2026, 8, 24))
+            tables = await render_ga_tables_html(
+                SimpleNamespace(),
+                date(2026, 8, 24),
+                today_print_html='<div data-today-print-report="true">SHTYPI</div>',
+            )
         rendered = render_html(document, pre_sections_html=tables, content_width=1200)
 
         inline_position = rendered.index('data-ga-inline-tables="true"')
+        timetable_position = rendered.index('data-ga-time-table="true"')
+        ga_hv_position = rendered.index('data-ga-hv-tasks="true"')
+        today_print_position = rendered.index('data-today-print-report="true"')
+        reminders_position = rendered.index('data-board-reminder-columns="true"')
         first_slot_position = rendered.index("10:00 SLOTI 24.08.2026")
+        self.assertLess(timetable_position, ga_hv_position)
+        self.assertLess(ga_hv_position, today_print_position)
+        self.assertLess(today_print_position, reminders_position)
         self.assertLess(inline_position, first_slot_position)
         self.assertIn('data-ga-time-table="true"', rendered)
         self.assertIn('data-ga-hv-tasks="true"', rendered)
