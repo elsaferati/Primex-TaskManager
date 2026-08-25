@@ -201,26 +201,25 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     ]
     report_html = _html_table([("DEADLINE / 08:00", tasks, False)], report_date=date(2026, 8, 14))
 
-    assert 'bgcolor="#DC2626"' in report_html
+    assert 'bgcolor="#FFC4ED"' in report_html
     assert "border:2px solid #DC2626" in report_html
     assert 'data-task-badge="08:00"' in report_html
     assert 'data-task-badge="due-date"' in report_html
     assert 'data-due-today="true"' in report_html
-    assert "DUE TODAY 14.08.2026" in report_html
-    assert "font-size:13px;font-weight:900" in report_html
+    assert ">14.08.2026</span>" in report_html
+    assert "DUE TODAY" not in report_html
+    assert "border:2px solid #2563EB" in report_html
 
     _, content, _ = _excel_table_attachment([("DEADLINE / 08:00", tasks, False)], [], date(2026, 8, 14))
     sheet = load_workbook(BytesIO(content)).active
-    assert sheet["C6"].fill.fgColor.rgb.endswith("DC2626")
-    assert sheet["C6"].font.color.type == "rgb"
-    assert sheet["C6"].font.color.rgb.endswith("FFFFFF")
-    assert sheet["C6"].font.sz == 12
-    assert "[DUE TODAY 14.08.2026]" in sheet["C6"].value
+    assert sheet["C6"].fill.fgColor.rgb.endswith("FFC4ED")
+    assert "[14.08.2026]" in sheet["C6"].value
+    assert "DUE" not in sheet["C6"].value
     assert "[08:00]" in sheet["D6"].value
     assert sheet["D6"].border.left.color.rgb.endswith("DC2626")
 
 
-def test_future_deadline_badge_is_smaller_than_due_today_badge() -> None:
+def test_future_deadline_badge_uses_only_the_date_in_a_small_blue_box() -> None:
     report_html = _html_table(
         [
             (
@@ -233,8 +232,26 @@ def test_future_deadline_badge_is_smaller_than_due_today_badge() -> None:
     )
 
     assert 'data-due-today="false"' in report_html
-    assert "DUE 15.08.2026" in report_html
-    assert "DUE TODAY" not in report_html
+    assert ">15.08.2026</span>" in report_html
+    assert "DUE" not in report_html
+    assert "border:2px solid #2563EB" in report_html
+    assert 'bgcolor="#FFC4ED"' in report_html
+
+
+def test_overdue_deadline_uses_white_date_text_on_the_red_cell() -> None:
+    report_html = _html_table(
+        [(
+            "1H 10:00",
+            [{"title": "Overdue", "is_deadline_important": True, "due_date": "2026-08-13"}],
+            False,
+        )],
+        report_date=date(2026, 8, 14),
+    )
+
+    assert 'bgcolor="#DC2626"' in report_html
+    assert ">13.08.2026</span>" in report_html
+    assert "color:#fff" in report_html
+    assert "DUE" not in report_html
 
 
 def test_deadline_and_0800_tasks_have_a_dedicated_printed_row() -> None:
