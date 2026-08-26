@@ -16,6 +16,7 @@ from app.models.user import User
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.schemas.weekly_planner_snapshot import WeeklySnapshotType
 from app.services.realization_calculator import calculate_weekly_period
+from app.services.daily_realization_baseline import ensure_daily_baseline
 from app.services.realization_daily import calculate_daily_period
 from app.services.realization_periods import (
     ensure_daily_period,
@@ -27,6 +28,39 @@ from app.services.system_task_schedule import _is_working_day
 
 
 logger = logging.getLogger(__name__)
+
+
+async def capture_daily_realization_baselines() -> dict[str, int]:
+    """Idempotently capture every department's planner plan at workday start."""
+    day = datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
+    if not settings.REALIZATION_DAILY_ENABLED or not _is_working_day(day):
+        return {"captured": 0, "skipped": 0, "failed": 0}
+    captured = skipped = failed = 0
+    async with SessionLocal() as db:
+        department_ids = (await db.execute(select(Department.id))).scalars().all()
+        admin = (await db.execute(select(User).where(
+            User.role == UserRole.ADMIN, User.is_active.is_(True)
+        ).limit(1))).scalar_one_or_none()
+        for department_id in department_ids:
+            actor = (await db.execute(select(User).where(
+                User.department_id == department_id,
+                User.role == UserRole.MANAGER,
+                User.is_active.is_(True),
+            ).limit(1))).scalar_one_or_none() or admin
+            if actor is None:
+                skipped += 1
+                continue
+            try:
+                await ensure_daily_baseline(
+                    db, department_id=department_id, day=day, actor=actor
+                )
+                await db.commit()
+                captured += 1
+            except Exception:
+                await db.rollback()
+                failed += 1
+                logger.exception("Daily baseline capture failed for department %s", department_id)
+    return {"captured": captured, "skipped": skipped, "failed": failed}
 
 
 async def _capture_automatic_snapshot(

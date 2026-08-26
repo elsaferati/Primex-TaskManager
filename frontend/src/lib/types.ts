@@ -351,6 +351,14 @@ export interface DailyReportTaskItem {
     updated_at?: string | null
     is_editable: boolean
     editable_until: string
+    requires_explanation?: boolean
+    reason_required?: boolean
+    comment_required?: boolean
+    reason_missing?: boolean
+    comment_missing?: boolean
+    deadline_was_today?: boolean
+    deadline_is_overdue?: boolean
+    postponed_today?: boolean
   } | null
 }
 
@@ -374,6 +382,14 @@ export interface DailyReportSystemOccurrence {
     updated_at?: string | null
     is_editable: boolean
     editable_until: string
+    requires_explanation?: boolean
+    reason_required?: boolean
+    comment_required?: boolean
+    reason_missing?: boolean
+    comment_missing?: boolean
+    deadline_was_today?: boolean
+    deadline_is_overdue?: boolean
+    postponed_today?: boolean
   } | null
 }
 
@@ -744,6 +760,105 @@ export interface RealizationTaskFact {
   reason_label?: string | null
   comment_required_before_close?: boolean
   rlz_impact?: string
+}
+
+export interface DailyRealizationMetrics {
+  original_planned_count: number
+  planned_completed_today_count: number
+  in_progress_count: number
+  no_progress_count: number
+  postponed_count: number
+  approved_postponement_count: number
+  unapproved_postponement_count: number
+  waiting_confirmation_count: number
+  blocked_count: number
+  additional_completed_count: number
+  completed_late_count: number
+  completed_early_count: number
+  reopened_count: number
+  reassigned_out_count: number
+  reassigned_in_count: number
+  total_completed_today_count: number
+  adjusted_exclusion_count: number
+  adjusted_denominator: number
+  raw_plan_realization: number | null
+  adjusted_plan_realization: number | null
+  deadlines_today_count: number
+  deadlines_completed_count: number
+  deadlines_postponed_count: number
+  deadlines_open_count: number
+  overdue_open_count: number
+  deadline_compliance_percentage: number | null
+  critical_deadlines_today_count: number
+  critical_deadlines_completed_count: number
+  critical_deadlines_open_count: number
+  daily_control_state: "CLEAN_DAY" | "ACTION_REQUIRED"
+}
+
+export interface DailyRealizationTimelineEvent {
+  id: string
+  type: string
+  timestamp?: string | null
+  actor_user_id?: string | null
+  actor_name?: string | null
+  old_value?: unknown
+  new_value?: unknown
+  metadata?: { reason?: string | null; time_slot?: string | null }
+}
+
+export interface DailyRealizationTask {
+  task_id: string
+  match_key: string
+  title: string
+  project_id?: string | null
+  project_title?: string | null
+  source_type: string
+  original_daily_plan?: string | null
+  current_due_date?: string | null
+  current_status: string
+  classification: string
+  in_original_plan: boolean
+  progress_today: number
+  completed_delta: number
+  reason_code?: string | null
+  comment?: string | null
+  last_change?: string | null
+  postponement_count: number
+  adjustment_status?: string | null
+  issues: string[]
+  timeline: DailyRealizationTimelineEvent[]
+  requires_explanation: boolean
+  reason_required: boolean
+  comment_required: boolean
+  reason_missing: boolean
+  comment_missing: boolean
+  deadline_was_today: boolean
+  deadline_is_overdue: boolean
+  postponed_today: boolean
+  action_required: boolean
+}
+
+export interface DailyRealizationPerson {
+  user_id: string
+  user_name: string
+  department_id: string
+  tasks: DailyRealizationTask[]
+  metrics: DailyRealizationMetrics
+  close_state: "OPEN" | "CLOSED" | "STALE" | "REOPENED"
+}
+
+export interface DailyRealizationLive {
+  day: string
+  department_id: string
+  timezone: string
+  baseline_id?: string | null
+  baseline_captured_at?: string | null
+  baseline_available: boolean
+  historical_estimate: boolean
+  live: boolean
+  last_updated: string
+  metrics: DailyRealizationMetrics
+  people: DailyRealizationPerson[]
 }
 
 export interface RealizationObservationFact {

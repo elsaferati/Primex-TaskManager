@@ -619,6 +619,18 @@ async def daily_report(
     tasks_overdue.sort(key=_daily_task_sort_key)
 
     compliance = await build_daily_rlz_compliance(db, user_id=user_id, day=day)
+    requirement_by_task = {item["task_id"]: item for item in compliance.get("tasks", [])}
+    for collection in (tasks_today, tasks_overdue, system_today, system_overdue):
+        for item in collection:
+            state = item.rlz_daily_state
+            requirement = requirement_by_task.get(str(item.task.id))
+            if state is not None and requirement is not None:
+                for field in (
+                    "requires_explanation", "reason_required", "comment_required",
+                    "reason_missing", "comment_missing", "deadline_was_today",
+                    "deadline_is_overdue", "postponed_today",
+                ):
+                    setattr(state, field, bool(requirement.get(field)))
     return DailyReportResponse(
         day=day,
         tasks_today=tasks_today,
@@ -635,7 +647,7 @@ def _daily_rlz_state_out(
     return DailyRlzTaskStateOut(
         reason_code=row.reason_code if row else None,
         reason_label=REASON_LABELS.get(row.reason_code) if row else None,
-        comment=row.comment if row and row.comment is not None else fallback_comment,
+        comment=row.comment if row else None,
         updated_at=row.updated_at if row else None,
         is_editable=is_editable_day(day),
         editable_until=editable_until(day),

@@ -9,6 +9,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { useAuth } from "@/lib/auth"
 import type { DailyReportResponse } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 export const DAILY_RLZ_REASONS = [
   ["TOOK_LONGER", "Mori më shumë kohë"],
@@ -66,6 +67,7 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
   const { apiFetch } = useAuth()
   const [saving, setSaving] = React.useState(false)
   if (!taskId) return <span>—</span>
+  if (!state?.reason_required) return <span className="text-slate-400">{state?.reason_label || "—"}</span>
   return <Select value={state?.reason_code || ""} disabled={!state?.is_editable || saving}
     onValueChange={async reasonCode => {
       setSaving(true)
@@ -88,7 +90,7 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
       } catch (error) { toast.error(error instanceof Error ? error.message : "Arsyeja nuk u ruajt") }
       finally { setSaving(false) }
     }}>
-    <SelectTrigger className="h-7 min-w-[150px] bg-white text-[11px]"><SelectValue placeholder="Zgjidh arsyen"/></SelectTrigger>
+    <SelectTrigger title={state.reason_missing ? "Kërkon sqarim" : undefined} className={cn("h-7 min-w-[150px] bg-white text-[11px]", state.reason_missing && "border-amber-500 bg-amber-50")}><SelectValue placeholder="Zgjidh arsyen"/></SelectTrigger>
     <SelectContent>
       <SelectItem value={DAILY_RLZ_EMPTY_REASON}>Empty</SelectItem>
       {DAILY_RLZ_REASONS.map(([code,label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}
@@ -110,7 +112,7 @@ export function DailyRlzCommentField({ taskId, day, state, onSaved }: {
   const [value, setValue] = React.useState(state?.comment ?? "")
   const [saving, setSaving] = React.useState(false)
 
-  React.useEffect(() => { setValue(state?.comment ?? "") }, [state?.comment, taskId])
+  React.useEffect(() => { queueMicrotask(() => setValue(state?.comment ?? "")) }, [state?.comment, taskId])
 
   if (!taskId) return <span>—</span>
 
@@ -138,7 +140,9 @@ export function DailyRlzCommentField({ taskId, day, state, onSaved }: {
     } finally { setSaving(false) }
   }
 
-  return <div className="flex items-center gap-2">
+  if (!state?.comment_required) return <span className="text-slate-400">{state?.comment || "—"}</span>
+  return <div className={cn("flex items-center gap-2 rounded px-1", state.comment_missing && "bg-amber-50")}>
+    {state.comment_missing ? <span className="text-[10px] text-amber-700" title="Kërkon sqarim">!</span> : null}
     <input type="text" aria-label="Koment" className="h-4 w-full border-b border-slate-300 bg-transparent"
       value={value} disabled={!state?.is_editable || saving}
       onChange={e => setValue(e.target.value)}

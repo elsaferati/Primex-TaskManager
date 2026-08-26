@@ -17,6 +17,7 @@ def add_audit_log(
     after: dict | None = None,
 ) -> AuditLog:
     entry = AuditLog(
+        id=uuid.uuid4(),
         actor_user_id=actor_user_id,
         entity_type=entity_type,
         entity_id=entity_id,

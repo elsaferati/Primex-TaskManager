@@ -62,6 +62,8 @@ from app.services.meeting_system_tasks import (
     EXTERNAL_MEETING_TASK_KIND,
     EXTERNAL_MEETING_TRIGGER_TYPE,
 )
+from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
+from app.services.daily_realization_events import record_task_semantic_events
 
 
 router = APIRouter()
@@ -1094,6 +1096,12 @@ async def set_system_task_occurrence_status(
             detail="Task instance not available for this user/date. Please refresh and try again.",
         )
 
+    await ensure_daily_baselines_for_departments(
+        db=db, department_ids={task.department_id, user.department_id},
+        day=payload.occurrence_date, actor=user,
+    )
+    status_before = _enum_value(task.status)
+
     now = datetime.now(timezone.utc)
     if payload.status == "DONE":
         if not (payload.comment and payload.comment.strip()):
@@ -1127,6 +1135,13 @@ async def set_system_task_occurrence_status(
             db.add(TaskUserComment(task_id=task.id, user_id=user.id, comment=payload.comment))
         else:
             user_comment.comment = payload.comment
+
+    record_task_semantic_events(
+        db=db, task_id=task.id, actor_user_id=user.id,
+        before={"status": status_before}, after={"status": _enum_value(task.status)},
+        old_assignee_ids={task.assigned_to} if task.assigned_to else set(),
+        new_assignee_ids={task.assigned_to} if task.assigned_to else set(),
+    )
 
     await db.commit()
     return {"ok": True}
@@ -1195,6 +1210,11 @@ async def override_system_task_occurrence_date(
     old_due_date = task.due_date or task.origin_run_at or task.start_date
     if old_due_date is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Task does not have a date to move")
+    await ensure_daily_baselines_for_departments(
+        db=db, department_ids={task.department_id},
+        day=payload.source_occurrence_date, actor=user,
+    )
+    status_before = _enum_value(task.status)
     day_shift = (payload.target_occurrence_date - payload.source_occurrence_date).days
     new_due_date = old_due_date + timedelta(days=day_shift)
     if task.due_date is not None and new_due_date != task.due_date and task.original_due_date is None:
@@ -1202,6 +1222,14 @@ async def override_system_task_occurrence_date(
     task.due_date = new_due_date
     task.status = TaskStatus.TODO
     task.completed_at = None
+
+    record_task_semantic_events(
+        db=db, task_id=task.id, actor_user_id=user.id,
+        before={"due_date": old_due_date.isoformat(), "status": status_before},
+        after={"due_date": new_due_date.isoformat(), "status": _enum_value(task.status)},
+        old_assignee_ids={task.assigned_to} if task.assigned_to else set(),
+        new_assignee_ids={task.assigned_to} if task.assigned_to else set(),
+    )
 
     await db.commit()
     await db.refresh(task)

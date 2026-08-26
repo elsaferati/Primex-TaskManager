@@ -5,6 +5,8 @@ from app.models.checklist import Checklist
 from app.models.checklist_item import ChecklistItem, ChecklistItemAssignee
 from app.models.common_entry import CommonEntry
 from app.models.daily_report_ga_entry import DailyReportGaEntry
+from app.models.daily_planner_snapshot import DailyPlannerSnapshot
+from app.models.daily_plan_adjustment import DailyPlanAdjustment
 from app.models.department import Department
 from app.models.external_platform_link import ExternalPlatformLink
 from app.models.file_access_request import FileAccessRequest
@@ -99,6 +101,8 @@ __all__ = [
     "ChecklistItemAssignee",
     "CommonEntry",
     "DailyReportGaEntry",
+    "DailyPlannerSnapshot",
+    "DailyPlanAdjustment",
     "Department",
     "ExternalPlatformLink",
     "FileAccessRequest",

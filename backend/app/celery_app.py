@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
 from celery import Celery
 from celery.schedules import crontab
 
@@ -20,6 +23,15 @@ celery_app.conf.result_serializer = "json"
 celery_app.conf.accept_content = ["json"]
 
 celery_app.conf.beat_schedule = {
+    "capture-daily-realization-baselines": {
+        "task": "app.celery_tasks.capture_daily_realization_baselines",
+        "schedule": crontab(
+            day_of_week="mon-fri",
+            hour=settings.REALIZATION_BASELINE_HOUR,
+            minute=settings.REALIZATION_BASELINE_MINUTE,
+            nowfun=lambda: datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)),
+        ),
+    },
     "generate-system-tasks-daily": {
         "task": "app.celery_tasks.generate_system_tasks",
         "schedule": crontab(

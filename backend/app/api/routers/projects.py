@@ -35,6 +35,8 @@ from app.services.workflow_service import (
     dependency_item_ids_from_info,
 )
 from app.services.project_display_title import build_project_display_title_map
+from app.services.audit import add_audit_log
+from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.project_classification import (
     has_mst_identity,
     is_vs_or_vl_project,
@@ -833,6 +835,10 @@ async def remove_project_from_day(
     if existing is not None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    await ensure_daily_baselines_for_departments(
+        db=db, department_ids={project.department_id}, day=payload.day_date, actor=user,
+    )
+
     exclusion = ProjectPlannerExclusion(
         project_id=project.id,
         user_id=payload.user_id,
@@ -841,6 +847,19 @@ async def remove_project_from_day(
         created_by=user.id,
     )
     db.add(exclusion)
+    affected_task_ids = (await db.execute(
+        select(Task.id).outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id).where(
+            Task.project_id == project.id,
+            or_(Task.assigned_to == payload.user_id, TaskAssignee.user_id == payload.user_id),
+        ).distinct()
+    )).scalars().all()
+    for task_id in affected_task_ids:
+        add_audit_log(
+            db=db, actor_user_id=user.id, entity_type="task", entity_id=task_id,
+            action="task.removed_from_day",
+            before={"excluded": False, "day": payload.day_date.isoformat(), "user_id": str(payload.user_id), "time_slot": slot, "project_id": str(project.id)},
+            after={"excluded": True, "day": payload.day_date.isoformat(), "user_id": str(payload.user_id), "time_slot": slot, "project_id": str(project.id)},
+        )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
