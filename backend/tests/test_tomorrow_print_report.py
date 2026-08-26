@@ -78,10 +78,11 @@ def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     html = _comments_table_html(initials)
     assert 'data-user-comments-lines="true"' in html
     assert html.count('data-user-comment-line="true"') == 2
-    assert html.count('data-comment-department=') == 3
+    assert html.count('data-comment-department=') == 2
     assert '<strong>DEV:</strong>' in html
-    assert '<strong>GD:</strong>' in html
-    assert '<strong>PCM:</strong>' in html
+    assert '<strong>PX:</strong>' in html
+    assert '<strong>GD:</strong>' not in html
+    assert '<strong>PCM:</strong>' not in html
     assert html.index("<strong>AT:</strong>") < html.index("<strong>EF:</strong>")
     assert html.index("<strong>EF:</strong>") < html.index("<strong>RA:</strong>")
     assert html.index("<strong>AT:</strong>") < html.index("<strong>BK:</strong>")
@@ -101,8 +102,10 @@ def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     assert sheet.cell(title_row + 1, 1).value.startswith("DEV: AT: ____________________")
     assert "EF: ____________________" in sheet.cell(title_row + 1, 1).value
     assert "LH: ____________________" in sheet.cell(title_row + 1, 1).value
-    assert sheet.cell(title_row + 2, 1).value.startswith("GD: FG: ____________________")
-    assert "PCM: BK: ____________________" in sheet.cell(title_row + 2, 1).value
+    assert sheet.cell(title_row + 2, 1).value.startswith("PX: FG: ____________________")
+    assert "BK: ____________________" in sheet.cell(title_row + 2, 1).value
+    assert "GD:" not in sheet.cell(title_row + 2, 1).value
+    assert "PCM:" not in sheet.cell(title_row + 2, 1).value
     values = [str(cell.value or "") for row in sheet.iter_rows() for cell in row]
     assert "INC" not in values
     assert "KOM" not in values
@@ -500,7 +503,7 @@ def test_blocked_row_label_uses_full_afternoon_interval_and_keeps_report_time() 
     rows = _task_rows({}, date(2026, 8, 14))
     blocked_row = next(row for row in rows if row[0].startswith("BLL"))
 
-    assert blocked_row[0] == "BLL\n14:30 - 16:00\nRAP 15:50"
+    assert blocked_row[0] == "BLL\n14:30 - 16:00\nRAP 16:10"
 
 
 def test_excel_status_colours_match_email_and_ga_personal_overrides_status() -> None:
@@ -572,6 +575,8 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     report_html = _dated_meetings_html(sections)
 
     assert 'data-side-by-side-meetings="true"' in report_html
+    assert "border:4px solid #111827" in report_html
+    assert report_html.count("border:3px solid #111827") >= 6
     assert "TAKIMET SOT - 25.08.2026" in report_html
     assert "TAKIMET NESER - 26.08.2026" in report_html
     assert report_html.count(">LLOJI</th>") == 2
@@ -634,8 +639,8 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     assert report["attachments"][1][1].startswith(b"\x89PNG\r\n\x1a\n")
     workbook = load_workbook(BytesIO(report["attachments"][0][1]))
     values = [str(cell.value or "") for row in workbook.active.iter_rows() for cell in row]
-    assert "TAKIMET - SOT - 24.08.2026" in values
-    assert "TAKIMET - NESER - 25.08.2026" in values
+    assert "TAKIMET SOT - 24.08.2026" in values
+    assert "TAKIMET NESER - 25.08.2026" in values
     assert any("Today meeting" in value for value in values)
     assert any("Tomorrow meeting" in value for value in values)
 
@@ -647,4 +652,5 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     assert "Tomorrow meeting" in tomorrow["html"]
     assert "Following meeting" in tomorrow["html"]
     assert "NESER - 25.08.2026" in tomorrow["html"]
-    assert "DITA PAS NESER - 26.08.2026" in tomorrow["html"]
+    assert "PAS NESER - 26.08.2026" in tomorrow["html"]
+    assert "DITA PAS NESER" not in tomorrow["html"]

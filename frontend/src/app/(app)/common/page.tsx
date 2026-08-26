@@ -119,7 +119,7 @@ const orderCommonRowsForPrint = <T extends { id: CommonType }>(rows: readonly T[
     .sort((a, b) => getCommonPrintRowRank(a.row.id) - getCommonPrintRowRank(b.row.id) || a.index - b.index)
     .map(({ row }) => row)
 const getCommonPrintRowSubtext = (id: CommonType) => {
-  if (id === "blocked") return "14:30 - 16:00\nRAP 15:50"
+  if (id === "blocked") return "14:30 - 16:00\nRAP 16:10"
   if (id === "personalGA" || id === "personalKA" || id === "personalPX") {
     return PERSONAL_ROW_SCHEDULES[id]
   }

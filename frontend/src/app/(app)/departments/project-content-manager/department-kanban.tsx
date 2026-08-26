@@ -3768,8 +3768,7 @@ export default function DepartmentKanban() {
       rows.push(...doneLast(projectRows.sort(sortByTyo)))
       rows.push(...doneLast(systemPmRows.sort(sortByTyo)))
 
-      return orderOneHReportRowsBySlot(
-        rows
+      return rows
           .map((row, index) => ({ row, index }))
           .sort((a, b) => {
           const doneDiff = Number(isRowDone(a.row)) - Number(isRowDone(b.row))
@@ -3792,10 +3791,13 @@ export default function DepartmentKanban() {
           const statusDiff =
             statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
           if (statusDiff !== 0) return statusDiff
+          if (isOneHReportRow(a.row) && isOneHReportRow(b.row)) {
+            const slotDiff = oneHReportSlotRank(a.row) - oneHReportSlotRank(b.row)
+            if (slotDiff !== 0) return slotDiff
+          }
           return a.index - b.index
         })
           .map((entry) => entry.row)
-      )
     },
     [dailyReportOneHSlots, deadlineImportantTaskIds, projects, selectedAllReportDate, systemTemplateById, userMap]
   )

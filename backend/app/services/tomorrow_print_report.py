@@ -24,7 +24,7 @@ TASK_ROWS = (
     ("oneH", "1H 11:00", "11:00"),
     ("oneH", "1H 11:50", "11:50"),
     ("oneH", "1H 14:20", "14:20"),
-    ("blocked", "BLL\n14:30 - 16:00\nRAP 15:50", None),
+    ("blocked", "BLL\n14:30 - 16:00\nRAP 16:10", None),
     ("oneH", "1H 16:00", "16:00"),
     ("oneH", "1H NO SLOT", ""),
     ("important", "DEADLINE / 08:00", None),
@@ -63,6 +63,8 @@ INTRA_SLOT_DIVIDER_STYLE = "border-top:1px solid #cbd5e1"
 SLOT_END_DIVIDER_STYLE = "border-bottom:2px solid #111827"
 TASK_TABLE_FRAME_STYLE = "border:3px solid #111827"
 TASK_HEADER_FRAME_STYLE = "border-top:3px solid #111827;border-bottom:3px solid #111827"
+MEETING_TABLE_FRAME_STYLE = "border:4px solid #111827"
+MEETING_HEADER_FRAME_STYLE = "border:3px solid #111827"
 SLOT_LABEL_STYLE = f"{CELL_STYLE};font-weight:700"
 PERSONAL_GA_COLOR = "#D8B4FE"
 PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:{PERSONAL_GA_COLOR}"
@@ -229,7 +231,7 @@ def _comment_department_rows(initials: list[str]) -> list[list[tuple[str, list[s
     dev = [value for value in COMMENT_DEV_INITIALS if value in values]
     gd = [value for value in COMMENT_GD_INITIALS if value in values]
     pcm = [value for value in values if value not in COMMENT_FIXED_INITIALS]
-    return [[("DEV", dev)], [("GD", gd), ("PCM", pcm)]]
+    return [[("DEV", dev)], [("PX", [*gd, *pcm])]]
 
 
 def _comment_write_in_lines(initials: list[str]) -> list[str]:
@@ -654,17 +656,18 @@ def _dated_meetings_html(
 
     return (
         '<table data-side-by-side-meetings="true" role="presentation" width="100%" border="1" '
-        f'cellpadding="0" cellspacing="0" style="{TABLE_STYLE};margin-top:18px">'
+        f'cellpadding="0" cellspacing="0" style="{TABLE_STYLE};margin-top:18px;{MEETING_TABLE_FRAME_STYLE}">'
         '<colgroup><col width="9%"><col width="41%"><col width="9%"><col width="41%"></colgroup>'
         '<thead><tr>'
-        f'<th colspan="2" style="{HEADER_STYLE};background-color:#EEF2FF;border-left:5px solid #2563EB;'
+        f'<th colspan="2" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};border-left:5px solid #2563EB;'
         f'font-size:15px;">{day_header(left)}</th>'
-        f'<th colspan="2" style="{HEADER_STYLE};background-color:#EEF2FF;{divider_style};font-size:15px;">'
+        f'<th colspan="2" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};{divider_style};font-size:15px;">'
         f'{day_header(right)}</th></tr>'
         '<tr>'
-        f'<th style="{HEADER_STYLE}">LLOJI</th><th style="{HEADER_STYLE}">TAKIMET</th>'
-        f'<th style="{HEADER_STYLE};{divider_style}">LLOJI</th>'
-        f'<th style="{HEADER_STYLE}">TAKIMET</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">LLOJI</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">TAKIMET</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE};{divider_style}">LLOJI</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">TAKIMET</th>'
         f"</tr></thead><tbody>{body}</tbody></table>"
     )
 
@@ -788,6 +791,14 @@ def _excel_table_attachment(
                     # the visible right edge of the merged TASKS heading.
                     outer_right=column in (3, 8),
                 )
+            else:
+                cell.border = task_grid_border(
+                    cell.border,
+                    category_start=True,
+                    category_end=True,
+                    outer_left=column == 1,
+                    outer_right=column == 8,
+                )
         if not meeting:
             sheet.merge_cells(start_row=row_number, start_column=3, end_row=row_number, end_column=8)
             # Reapply the perimeter after merging C:H; openpyxl rebuilds merged-cell
@@ -875,6 +886,13 @@ def _excel_table_attachment(
                             outer_left=column == 1,
                             outer_right=column == 8,
                         )
+                    else:
+                        cell.border = task_grid_border(
+                            cell.border,
+                            category_end=number == len(rows) and category_end,
+                            outer_left=column == 1,
+                            outer_right=column == 8,
+                        )
                     cell.alignment = Alignment(vertical="top", wrap_text=True)
                 row_number += 1
             if len(chunks) > 1:
@@ -889,10 +907,19 @@ def _excel_table_attachment(
             for meeting_date, relative, dated_rows in meeting_sections:
                 section_row = next_row + 1
                 sheet.merge_cells(start_row=section_row, start_column=1, end_row=section_row, end_column=8)
-                section_cell = sheet.cell(section_row, 1, f"TAKIMET - {relative} - {meeting_date:%d.%m.%Y}")
+                section_cell = sheet.cell(section_row, 1, f"TAKIMET {relative} - {meeting_date:%d.%m.%Y}")
                 section_cell.font = Font(bold=True, size=12)
                 section_cell.fill = PatternFill("solid", fgColor="EEF2FF")
                 section_cell.alignment = Alignment(horizontal="left", vertical="center")
+                for column in range(1, 9):
+                    cell = sheet.cell(section_row, column)
+                    cell.border = task_grid_border(
+                        cell.border,
+                        category_start=True,
+                        category_end=True,
+                        outer_left=column == 1,
+                        outer_right=column in (1, 8),
+                    )
                 next_row = write_section(dated_rows, meeting=True, row_number=section_row + 1)
         else:
             next_row = write_section(meeting_rows, meeting=True, row_number=next_row + 1)
@@ -1165,14 +1192,15 @@ def _png_table_attachment(
 
     if meeting_pair:
         y += 20
+        meeting_table_top = y
         table_right = width - margin
         center = margin + meeting_half_width
         left_date, left_relative, _ = meeting_pair[0]
         right_date, right_relative, _ = meeting_pair[1]
         group_bottom = y + 42
-        draw.rectangle((margin, y, center, group_bottom), fill="#EEF2FF", outline="#111827")
-        draw.rectangle((center, y, table_right, group_bottom), fill="#EEF2FF", outline="#111827")
-        left_header = f"{left_relative} - {left_date:%d.%m.%Y}"
+        draw.rectangle((margin, y, center, group_bottom), fill="#EEF2FF", outline="#111827", width=4)
+        draw.rectangle((center, y, table_right, group_bottom), fill="#EEF2FF", outline="#111827", width=4)
+        left_header = f"TAKIMET {left_relative} - {left_date:%d.%m.%Y}"
         left_bounds = draw.textbbox((0, 0), left_header, font=bold)
         left_text_width = left_bounds[2] - left_bounds[0]
         draw.text(
@@ -1181,7 +1209,7 @@ def _png_table_attachment(
             fill="#111827",
             font=bold,
         )
-        right_header = f"{right_relative} - {right_date:%d.%m.%Y}" if right_relative else ""
+        right_header = f"TAKIMET {right_relative} - {right_date:%d.%m.%Y}" if right_relative else ""
         right_bounds = draw.textbbox((0, 0), right_header, font=bold)
         right_text_width = right_bounds[2] - right_bounds[0]
         draw.text(
@@ -1202,7 +1230,7 @@ def _png_table_attachment(
         ]
         for column, label in enumerate(["LLOJI", "TAKIMET", "LLOJI", "TAKIMET"]):
             right = x + meeting_column_widths[column]
-            draw.rectangle((x, y, right, y + 38), fill="#F8FAFC", outline="#111827")
+            draw.rectangle((x, y, right, y + 38), fill="#F8FAFC", outline="#111827", width=3)
             draw.text((x + 6, y + 9), label, fill="#111827", font=bold)
             x = right
         draw.line((center, y, center, y + 38), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
@@ -1242,6 +1270,7 @@ def _png_table_attachment(
                 x = content_right
             draw.line((center, y, center, row_bottom), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
             y = row_bottom
+        draw.rectangle((margin, meeting_table_top, table_right, y), outline="#111827", width=4)
 
     y += 20
     draw.text((margin, y + 3), "KOMENTE PER STAF", fill="#111827", font=bold)
@@ -1298,7 +1327,7 @@ async def _build_print_report(
             (
                 first_meeting_day_label
                 if index == 0
-                else ("NESER" if first_meeting_day_label == "SOT" else "DITA PAS NESER")
+                else ("NESER" if first_meeting_day_label == "SOT" else "PAS NESER")
             ),
             [
                 (label, values, False)
