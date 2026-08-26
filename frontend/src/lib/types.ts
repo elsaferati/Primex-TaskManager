@@ -746,6 +746,86 @@ export interface RealizationTaskFact {
   rlz_impact?: string
 }
 
+export interface DailyRealizationMetrics {
+  original_planned_count: number
+  planned_completed_today_count: number
+  in_progress_count: number
+  no_progress_count: number
+  postponed_count: number
+  approved_postponement_count: number
+  unapproved_postponement_count: number
+  waiting_confirmation_count: number
+  blocked_count: number
+  additional_completed_count: number
+  completed_late_count: number
+  completed_early_count: number
+  reopened_count: number
+  reassigned_out_count: number
+  reassigned_in_count: number
+  total_completed_today_count: number
+  adjusted_exclusion_count: number
+  adjusted_denominator: number
+  raw_plan_realization: number | null
+  adjusted_plan_realization: number | null
+}
+
+export interface DailyRealizationTimelineEvent {
+  id: string
+  type: string
+  timestamp?: string | null
+  actor_user_id?: string | null
+  actor_name?: string | null
+  old_value?: unknown
+  new_value?: unknown
+  metadata?: { reason?: string | null; time_slot?: string | null }
+}
+
+export interface DailyRealizationTask {
+  task_id: string
+  match_key: string
+  title: string
+  project_id?: string | null
+  project_title?: string | null
+  source_type: string
+  original_daily_plan?: string | null
+  current_due_date?: string | null
+  current_status: string
+  classification: string
+  in_original_plan: boolean
+  progress_today: number
+  completed_delta: number
+  reason_code?: string | null
+  comment?: string | null
+  last_change?: string | null
+  postponement_count: number
+  adjustment_status?: string | null
+  issues: string[]
+  timeline: DailyRealizationTimelineEvent[]
+}
+
+export interface DailyRealizationPerson {
+  user_id: string
+  user_name: string
+  department_id: string
+  tasks: DailyRealizationTask[]
+  metrics: DailyRealizationMetrics
+  close_state: "OPEN" | "CLOSED" | "STALE" | "REOPENED"
+}
+
+export interface DailyRealizationLive {
+  day: string
+  department_id: string
+  timezone: string
+  baseline_id?: string | null
+  baseline_captured_at?: string | null
+  baseline_available: boolean
+  historical_estimate: boolean
+  live: boolean
+  last_updated: string
+  metrics: DailyRealizationMetrics
+  people: DailyRealizationPerson[]
+}
+
 export interface RealizationObservationFact {
   id: string
   marker: "POSITIVE" | "NEUTRAL" | "NEGATIVE" | "DIAMOND"

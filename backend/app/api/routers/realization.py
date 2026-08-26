@@ -12,6 +12,7 @@ from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
 from app.models.department import Department
+from app.models.daily_plan_adjustment import DailyPlanAdjustment
 from app.models.enums import (
     RealizationDailyCloseAction,
     RealizationLevel,
@@ -54,6 +55,7 @@ from app.schemas.realization import (
     RealizationDailyCloseEventOut,
     RealizationDailyCloseRequest,
     RealizationDailyReopenRequest,
+    DailyPlanAdjustmentDecision,
     RealizationObservationCreate,
     RealizationObservationOut,
     RealizationObservationVerify,
@@ -75,6 +77,8 @@ from app.services.daily_realization_approval import (
     latest_daily_approval,
     latest_daily_close,
 )
+from app.services.daily_realization_baseline import ensure_daily_baseline
+from app.services.daily_realization_live import build_live_daily_realization
 from app.services.realization_access import (
     can_approve_realization,
     can_lock_realization,
@@ -1719,6 +1723,8 @@ async def _daily_response(
 async def get_daily_realization(
     department_id: uuid.UUID,
     day: date,
+    user_id: uuid.UUID | None = None,
+    exceptions_only: bool = False,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> RealizationDailyOut:
@@ -1728,17 +1734,105 @@ async def get_daily_realization(
     ).scalar_one_or_none()
     if department is None:
         raise HTTPException(status_code=404, detail="Department not found")
+    if user.role == UserRole.STAFF:
+        user_id = user.id
+    elif user_id is not None and not can_view_person_result(
+        user, subject_user_id=user_id, subject_department_id=department_id
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
     try:
         period, _ = await ensure_daily_period(
             db, department_id=department_id, day=day, created_by=user.id
         )
+        local_today = datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
+        if day == local_today:
+            await ensure_daily_baseline(
+                db, department_id=department_id, day=day, actor=user
+            )
         await db.commit()
         await db.refresh(period)
     except RealizationWorkflowError as exc:
         raise _error(exc)
-    return await _daily_response(
+    response = await _daily_response(
         db, period=period, department_name=department.name, user=user
     )
+    response.live = await build_live_daily_realization(
+        db, department_id=department_id, day=day,
+        user_id=user_id, exceptions_only=exceptions_only,
+    )
+    return response
+
+
+@router.get("/daily/tasks/{task_id}/timeline")
+async def get_daily_task_timeline(
+    task_id: uuid.UUID,
+    day: date,
+    user_id: uuid.UUID,
+    department_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    _ensure_department_scope(user, department_id)
+    if not can_view_person_result(
+        user, subject_user_id=user_id, subject_department_id=department_id
+    ):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    live = await build_live_daily_realization(
+        db, department_id=department_id, day=day, user_id=user_id
+    )
+    for person in live["people"]:
+        for task in person["tasks"]:
+            if task["task_id"] == str(task_id):
+                actor_ids = {
+                    uuid.UUID(item["actor_user_id"])
+                    for item in task["timeline"] if item.get("actor_user_id")
+                }
+                names = {
+                    row.id: row.full_name
+                    for row in (await db.execute(select(User).where(User.id.in_(actor_ids)))).scalars().all()
+                } if actor_ids else {}
+                for item in task["timeline"]:
+                    actor = item.get("actor_user_id")
+                    item["actor_name"] = names.get(uuid.UUID(actor)) if actor else None
+                return {"day": day.isoformat(), "user_id": str(user_id), "task": task}
+    raise HTTPException(status_code=404, detail="Task is not part of this person's Daily Realization")
+
+
+@router.post("/daily/tasks/{task_id}/adjustment")
+async def decide_daily_plan_adjustment(
+    task_id: uuid.UUID,
+    payload: DailyPlanAdjustmentDecision,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> dict:
+    if user.role not in {UserRole.ADMIN, UserRole.MANAGER}:
+        raise HTTPException(status_code=403, detail="Only manager/admin can decide plan adjustments")
+    normalized = payload.status.strip().upper()
+    if normalized not in {"APPROVED", "REJECTED"}:
+        raise HTTPException(status_code=422, detail="status must be APPROVED or REJECTED")
+    adjustment = (await db.execute(select(DailyPlanAdjustment).where(
+        DailyPlanAdjustment.task_id == task_id,
+        DailyPlanAdjustment.audit_event_id == payload.audit_event_id,
+        DailyPlanAdjustment.user_id == payload.user_id,
+    ).with_for_update())).scalar_one_or_none()
+    if adjustment is None:
+        raise HTTPException(status_code=404, detail="Daily plan adjustment not found")
+    subject = await db.get(User, payload.user_id)
+    if subject is None or (user.role == UserRole.MANAGER and subject.department_id != user.department_id):
+        raise HTTPException(status_code=403, detail="Forbidden")
+    before = {"status": adjustment.status}
+    adjustment.status = normalized
+    adjustment.reason = payload.reason.strip()
+    adjustment.decision_comment = (payload.comment or "").strip() or None
+    adjustment.decided_by = user.id
+    adjustment.decided_at = datetime.now(timezone.utc)
+    add_audit_log(
+        db=db, actor_user_id=user.id, entity_type="daily_plan_adjustment",
+        entity_id=adjustment.id, action=normalized.lower(), before=before,
+        after={"status": normalized, "reason": adjustment.reason, "comment": adjustment.decision_comment},
+    )
+    await db.commit()
+    return {"id": str(adjustment.id), "status": adjustment.status, "decided_at": adjustment.decided_at.isoformat()}
 
 
 @router.post("/daily/calculate", response_model=RealizationDailyOut)
@@ -1995,6 +2089,12 @@ async def close_realization_day(
                 "saved_at": datetime.now(ZoneInfo(settings.APP_TIMEZONE)).isoformat(),
                 "tasks": daily_report_state["tasks"],
             },
+            "daily_realization": (
+                (await build_live_daily_realization(
+                    db, department_id=period.department_id,
+                    day=period.start_date, user_id=result.user_id,
+                ))["people"] or [None]
+            )[0],
         },
         supersedes_event_id=latest.id if latest else None,
         actor_user_id=user.id,

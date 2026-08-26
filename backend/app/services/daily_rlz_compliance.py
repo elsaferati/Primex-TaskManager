@@ -8,6 +8,7 @@ from sqlalchemy import Date as SQLDate, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.realization import RealizationDailyCloseEvent, RealizationPeriod
+from app.models.audit_log import AuditLog
 from app.models.task import Task
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.task_assignee import TaskAssignee
@@ -19,6 +20,7 @@ from app.models.department import Department
 from app.models.enums import UserRole
 from app.services.one_h_slots import effective_slot_date
 from app.services.daily_realization_approval import daily_approval_state
+from app.services.daily_realization_live import day_bounds
 
 TIMEZONE_NAME = "Europe/Tirane"
 EDIT_CUTOFF = time(17, 0)
@@ -195,6 +197,20 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
             RealizationPeriod.start_date == day,
         ).order_by(RealizationDailyCloseEvent.created_at.desc(), RealizationDailyCloseEvent.id.desc()).limit(1)
     )).scalar_one_or_none()
+    audit_start, audit_end = day_bounds(day)
+    semantic_events = (await db.execute(select(AuditLog).where(
+        AuditLog.entity_type == "task",
+        AuditLog.action.like("task.%"),
+        AuditLog.created_at >= audit_start,
+        AuditLog.created_at <= audit_end,
+    ))).scalars().all()
+    user_key = str(user_id)
+    for event in semantic_events:
+        before_ids = (event.before or {}).get("assignee_ids", [])
+        after_ids = (event.after or {}).get("assignee_ids", [])
+        if event.entity_id in task_ids or user_key in before_ids or user_key in after_ids:
+            if latest_change is None or event.created_at > latest_change:
+                latest_change = event.created_at
     saved = bool(latest_close and latest_close.action in {"CLOSE", "CORRECT"})
     stale = bool(saved and latest_change and latest_close and latest_change > latest_close.created_at)
     close_status = "STALE" if stale else "SAVED" if saved else "CLOSED_EDIT_WINDOW" if not is_editable_day(day, now) else "NOT_SAVED"

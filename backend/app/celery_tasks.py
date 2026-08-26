@@ -16,6 +16,7 @@ from app.jobs.internal_meeting_sessions import (
 )
 from app.jobs.overdue import process_overdue as _process_overdue
 from app.jobs.realization import (
+    capture_daily_realization_baselines as _capture_daily_realization_baselines,
     generate_daily_realization_snapshots as _generate_daily_realization_snapshots,
     generate_weekly_realization_results as _generate_weekly_realization_results,
 )
@@ -96,6 +97,11 @@ def cleanup_old_done_internal_notes() -> int:
 @celery_app.task(name="app.celery_tasks.reset_expired_internal_meeting_sessions")
 def reset_expired_internal_meeting_sessions() -> int:
     return _run_async(_reset_expired_internal_meeting_sessions())
+
+
+@celery_app.task(name="app.celery_tasks.capture_daily_realization_baselines")
+def capture_daily_realization_baselines() -> dict[str, int]:
+    return _run_async(_capture_daily_realization_baselines())
 
 
 @celery_app.task(name="app.celery_tasks.generate_daily_realization_snapshots")

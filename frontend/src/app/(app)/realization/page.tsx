@@ -1,6 +1,8 @@
 "use client"
 
 import * as React from "react"
+import { DailyRealizationView } from "./components/DailyRealizationView"
+import { MonthlyRealizationView } from "./components/MonthlyRealizationView"
 import {
   Activity,
   AlertTriangle,
@@ -64,8 +66,6 @@ const MANUAL_BOOLEAN_KEYS = new Set([
   "respected_meetings", "closed_tasks", "frequent_delays", "unexpected_absences",
   "affected_other_plan", "repeated_after_clarification",
 ])
-const MANUAL_TEXT_KEYS = new Set(["week_positive", "week_problems"])
-
 const EVIDENCE_OPTIONS = [
   ["DIAMOND", "♦ Kontribut i jashtëzakonshëm / DIAMOND"],
   ["QUALITY", "Cilësi e jashtëzakonshme"],
@@ -494,7 +494,7 @@ function QuestionRow({
   )
 }
 
-export default function RealizationPage() {
+function WeeklyRealizationView() {
   const { apiFetch, loading: authLoading, user } = useAuth()
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [departmentId, setDepartmentId] = React.useState("")
@@ -540,11 +540,11 @@ export default function RealizationPage() {
 
   React.useEffect(() => {
     const questions = selected?.facts_json.questions || []
-    setManualDrafts(Object.fromEntries(questions.filter((question) => question.source_status.startsWith("MANUAL")).map((question) => {
-      const value = question.final_value
-      const display = value === true ? "YES" : value === false ? "NO" : question.source_status === "MANUAL_ANSWERED" ? "NA" : typeof value === "string" ? value : ""
-      return [question.key, { value: display, comment: question.manager_comment || "", evidenceIds: question.linked_evidence_ids || [] }]
-    })))
+    queueMicrotask(() => setManualDrafts(Object.fromEntries(questions.filter((question) => question.source_status.startsWith("MANUAL")).map((question) => {
+        const value = question.final_value
+        const display = value === true ? "YES" : value === false ? "NO" : question.source_status === "MANUAL_ANSWERED" ? "NA" : typeof value === "string" ? value : ""
+        return [question.key, { value: display, comment: question.manager_comment || "", evidenceIds: question.linked_evidence_ids || [] }]
+      }))))
   }, [selected])
 
   const loadDepartments = React.useCallback(async () => {
@@ -621,16 +621,16 @@ export default function RealizationPage() {
     } finally {
       if (requestId === reportRequestRef.current) setLoading(false)
     }
-  }, [apiFetch, departmentId, weekStart, user?.role])
+  }, [apiFetch, departmentId, weekStart, user])
 
   React.useEffect(() => {
     // Data loading is asynchronous; state updates happen only after the request resolves.
-    if (!authLoading && user && ["ADMIN", "MANAGER", "STAFF"].includes(user.role)) void loadDepartments()
+    if (!authLoading && user && ["ADMIN", "MANAGER", "STAFF"].includes(user.role)) queueMicrotask(() => void loadDepartments())
   }, [authLoading, loadDepartments, user])
 
   React.useEffect(() => {
     // Data loading is asynchronous; state updates happen only after the request resolves.
-    if (departmentId) void loadReport()
+    if (departmentId) queueMicrotask(() => void loadReport())
   }, [departmentId, loadReport])
 
   React.useEffect(() => {
@@ -1688,6 +1688,20 @@ export default function RealizationPage() {
           <DialogFooter><Button variant="outline" onClick={() => setEvidenceOpen(false)}>Anulo</Button><Button onClick={() => void addEvidence()} disabled={action === "evidence"}>{action === "evidence" && <Loader2 className="h-4 w-4 animate-spin" />} Ruaj & rikalkulo</Button></DialogFooter>
         </DialogContent>
       </Dialog>
+    </div>
+  )
+}
+
+export default function RealizationPage() {
+  const [mode, setMode] = React.useState<"daily" | "weekly" | "monthly">("daily")
+  return (
+    <div className="mx-auto w-full max-w-[1720px] space-y-5 pb-12">
+      <div className="inline-flex rounded-xl border border-slate-200 bg-white p-1 shadow-sm" aria-label="Periudha e Realizimit">
+        <Button size="sm" variant={mode === "daily" ? "default" : "ghost"} onClick={() => setMode("daily")}>Ditor</Button>
+        <Button size="sm" variant={mode === "weekly" ? "default" : "ghost"} onClick={() => setMode("weekly")}>Javor</Button>
+        <Button size="sm" variant={mode === "monthly" ? "default" : "ghost"} onClick={() => setMode("monthly")}>Mujor</Button>
+      </div>
+      {mode === "daily" ? <DailyRealizationView /> : mode === "weekly" ? <WeeklyRealizationView /> : <MonthlyRealizationView />}
     </div>
   )
 }

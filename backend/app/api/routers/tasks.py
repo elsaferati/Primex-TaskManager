@@ -16,6 +16,7 @@ from sqlalchemy.orm import load_only
 
 from app.api.access import ensure_department_access, ensure_manager_or_admin, ensure_task_editor
 from app.api.deps import get_current_user
+from app.config import settings
 from app.db import get_db
 from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
 from app.models.department import Department
@@ -50,6 +51,8 @@ from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_explicit_task_daily_status, upsert_task_daily_progress
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
 from app.services.daily_report_logic import business_days_between
+from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
+from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
 from app.services.project_classification import (
     is_mst_or_tt_project as _is_mst_or_tt_project,
     is_mst_project,
@@ -65,6 +68,10 @@ router = APIRouter()
 MENTION_RE = re.compile(r"@([A-Za-z0-9_\\-\\.]{3,64})")
 TOTAL_PRODUCTS_RE = re.compile(r"total_products[:=]\s*(\d+)", re.IGNORECASE)
 COMPLETED_PRODUCTS_RE = re.compile(r"completed_products[:=]\s*(\d+)", re.IGNORECASE)
+
+
+def _realization_today() -> date:
+    return datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
 
 async def _ensure_system_task_instance_integrity(db: AsyncSession, task: Task) -> None:
     """
@@ -1861,6 +1868,12 @@ async def create_task(
     assignee_dept_map: dict[uuid.UUID, uuid.UUID | None] = {
         user.id: user.department_id for user in assignee_users
     }
+    await ensure_daily_baselines_for_departments(
+        db=db,
+        department_ids={department_id, *assignee_dept_map.values()},
+        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
+        actor=user,
+    )
 
     status_value = payload.status or TaskStatus.TODO
     if payload.ga_note_origin_id is not None or payload.plan_note_origin_id is not None:
@@ -2427,7 +2440,7 @@ async def create_task(
     if _should_auto_status_from_product_counts(project, phase_value):
         total, completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
         if total is not None and total > 0 and completed > 0:
-            today = datetime.now(timezone.utc).date()
+            today = _realization_today()
             await upsert_task_daily_progress(
                 db,
                 task_id=task.id,
@@ -2649,8 +2662,31 @@ async def update_task(
         "confirmation_assignee_id": str(task.confirmation_assignee_id) if task.confirmation_assignee_id else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
+        "start_date": task.start_date.isoformat() if task.start_date else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "is_active": task.is_active,
         "is_deadline_important": task.is_deadline_important,
     }
+    old_assignee_ids = set((await db.execute(
+        select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
+    )).scalars().all())
+    if task.assigned_to:
+        old_assignee_ids.add(task.assigned_to)
+    requested_assignee_ids = set(payload.assignees or [])
+    if _payload_has_field(payload, "assigned_to") and payload.assigned_to:
+        requested_assignee_ids.add(payload.assigned_to)
+    affected_user_ids = old_assignee_ids | requested_assignee_ids
+    affected_departments = {task.department_id}
+    if affected_user_ids:
+        affected_departments.update((await db.execute(
+            select(User.department_id).where(User.id.in_(affected_user_ids))
+        )).scalars().all())
+    await ensure_daily_baselines_for_departments(
+        db=db,
+        department_ids=affected_departments,
+        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
+        actor=user,
+    )
 
     # Snapshot completion values before update for MST/TT daily progress logging.
     old_total, old_completed = _extract_total_and_completed(task.daily_products, task.internal_notes)
@@ -2713,6 +2749,21 @@ async def update_task(
         task.fast_task_group_id = task.id
     is_fast_group_task = _uses_fast_task_group(task)
     fast_group_desired_assignee_ids: list[uuid.UUID] | None = None
+    fast_group_semantic_tasks: list[Task] = []
+    fast_group_semantic_before: dict[uuid.UUID, dict] = {}
+    if is_fast_group_task and task.fast_task_group_id is not None:
+        fast_group_semantic_tasks = (
+            await db.execute(
+                select(Task)
+                .where(Task.fast_task_group_id == task.fast_task_group_id)
+                .where(Task.is_active.is_(True))
+                .with_for_update()
+            )
+        ).scalars().all()
+        fast_group_semantic_before = {
+            group_task.id: task_semantic_state(group_task)
+            for group_task in fast_group_semantic_tasks
+        }
 
     if payload.title is not None:
         task.title = payload.title
@@ -2926,7 +2977,7 @@ async def update_task(
 
         # Record explicit per-day status change for all tasks (not just MST/TT).
         # This powers weekly planner day-by-day colors.
-        today = datetime.now(timezone.utc).date()
+        today = _realization_today()
         await upsert_explicit_task_daily_status(
             db,
             task_id=task.id,
@@ -3019,7 +3070,7 @@ async def update_task(
             old_end=old_due_day,
             new_start=new_start_day,
             progress_days=progress_days,
-            today=datetime.now(timezone.utc).date(),
+            today=_realization_today(),
         )
         if days_to_hide:
             planner_user_ids = await _task_assignee_ids_for_planner(db, task)
@@ -3127,7 +3178,7 @@ async def update_task(
             values_changed = completed != old_completed or total != old_total
             # Update if there's progress, just became done, is already done, or values changed (to keep status accurate).
             if made_progress or became_done_today or is_already_done or values_changed:
-                today = datetime.now(timezone.utc).date()
+                today = _realization_today()
                 progress_day: date | None = today
                 if task.due_date is not None:
                     due_dt = task.due_date
@@ -3326,6 +3377,7 @@ async def update_task(
                     )
                     db.add(new_task)
                     await db.flush()
+                    fast_group_semantic_tasks.append(new_task)
                     await _replace_task_assignees(db, new_task, [au.id])
                     await ensure_ko_user_is_task_assignee(db, task=new_task)
 
@@ -3377,9 +3429,39 @@ async def update_task(
         "confirmation_assignee_id": str(task.confirmation_assignee_id) if task.confirmation_assignee_id else None,
         "progress_percentage": task.progress_percentage,
         "due_date": task.due_date.isoformat() if task.due_date else None,
+        "start_date": task.start_date.isoformat() if task.start_date else None,
+        "completed_at": task.completed_at.isoformat() if task.completed_at else None,
+        "is_active": task.is_active,
         "is_deadline_important": task.is_deadline_important,
         "one_h_report_slot": task.one_h_report_slot,
     }
+
+    new_assignee_ids = set((await db.execute(
+        select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
+    )).scalars().all())
+    if task.assigned_to:
+        new_assignee_ids.add(task.assigned_to)
+    record_task_semantic_events(
+        db=db, task_id=task.id, actor_user_id=user.id,
+        before=before, after=after,
+        old_assignee_ids=old_assignee_ids, new_assignee_ids=new_assignee_ids,
+    )
+    for group_task in fast_group_semantic_tasks:
+        if group_task.id == task.id:
+            continue
+        after_group = task_semantic_state(group_task)
+        before_group = fast_group_semantic_before.get(
+            group_task.id,
+            {**after_group, "is_active": False, "assigned_to": None},
+        )
+        old_group_owner = before_group.get("assigned_to") if before_group.get("is_active") else None
+        new_group_owner = after_group.get("assigned_to") if after_group.get("is_active") else None
+        record_task_semantic_events(
+            db=db, task_id=group_task.id, actor_user_id=user.id,
+            before=before_group, after=after_group,
+            old_assignee_ids=[old_group_owner] if old_group_owner else [],
+            new_assignee_ids=[new_group_owner] if new_group_owner else [],
+        )
 
     add_audit_log(
           db=db,
@@ -3456,7 +3538,16 @@ async def deactivate_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     ensure_department_access(user, task.department_id)
+    await ensure_daily_baselines_for_departments(
+        db=db, department_ids={task.department_id},
+        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(), actor=user,
+    )
+    before_active = task.is_active
     task.is_active = False
+    record_task_semantic_events(
+        db=db, task_id=task.id, actor_user_id=user.id,
+        before={"is_active": before_active}, after={"is_active": False},
+    )
     await db.commit()
     await db.refresh(task)
     assignee_map = await _assignees_for_tasks(db, [task.id])
@@ -3634,6 +3725,10 @@ async def remove_task_from_day(
     if existing is not None:
         return Response(status_code=status.HTTP_204_NO_CONTENT)
 
+    await ensure_daily_baselines_for_departments(
+        db=db, department_ids={task.department_id}, day=payload.day_date, actor=current_user,
+    )
+
     exclusion = TaskPlannerExclusion(
         task_id=task.id,
         user_id=payload.user_id,
@@ -3642,6 +3737,12 @@ async def remove_task_from_day(
         created_by=current_user.id,
     )
     db.add(exclusion)
+    add_audit_log(
+        db=db, actor_user_id=current_user.id, entity_type="task", entity_id=task.id,
+        action="task.removed_from_day",
+        before={"excluded": False, "day": payload.day_date.isoformat(), "user_id": str(payload.user_id), "time_slot": slot},
+        after={"excluded": True, "day": payload.day_date.isoformat(), "user_id": str(payload.user_id), "time_slot": slot},
+    )
     await db.commit()
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
@@ -3660,6 +3761,11 @@ async def delete_task(
     # Only managers and admins can delete tasks
     if user.role not in (UserRole.ADMIN, UserRole.MANAGER):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Only managers and admins can delete tasks")
+
+    await ensure_daily_baselines_for_departments(
+        db=db, department_ids={task.department_id},
+        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(), actor=user,
+    )
 
     add_audit_log(
         db=db,

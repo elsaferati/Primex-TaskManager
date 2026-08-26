@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, status
 from pydantic import BaseModel
@@ -19,6 +20,7 @@ from app.models.plan_note import PlanNote
 from app.models.plan_note_attachment import PlanNoteAttachment
 from app.models.project import Project
 from app.models.task import Task
+from app.models.user import User
 from app.models.task_user_comment import TaskUserComment
 from app.schemas.plan_note import (
     PlanNoteAttachmentOut,
@@ -30,6 +32,8 @@ from app.schemas.plan_note import (
     PlanNoteUpdate,
 )
 from app.services.audit import add_audit_log
+from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
+from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
 from app.services.ga_note_task_instances import (
     GaNoteAssigneeExecutionState,
     apply_ga_note_assignee_execution_states,
@@ -131,6 +135,24 @@ async def _save_plan_note_attachments(
     user,
 ) -> list[PlanNoteAttachmentOut]:
     await _ensure_note_access(note, user, db)
+
+    existing_tasks = (
+        await db.execute(select(Task).where(Task.plan_note_origin_id == note.id).with_for_update())
+    ).scalars().all()
+    semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
+    affected_department_ids = {task.department_id for task in existing_tasks if task.department_id}
+    if note.department_id:
+        affected_department_ids.add(note.department_id)
+    if payload.assignee_ids:
+        affected_department_ids.update(
+            department_id for department_id in (
+                await db.execute(select(User.department_id).where(User.id.in_(payload.assignee_ids)))
+            ).scalars().all() if department_id
+        )
+    await ensure_daily_baselines_for_departments(
+        db, department_ids=affected_department_ids, actor=user,
+        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
+    )
 
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files uploaded")
@@ -495,7 +517,7 @@ async def update_plan_note_task_bundle(
                 for task in active_tasks
                 if task.is_active and task.assigned_to is not None
             }
-            today = datetime.now(timezone.utc).date()
+            today = datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date()
             for item in payload.assignee_states:
                 matching_task = tasks_by_assignee.get(item.assignee_id)
                 if matching_task is None:
@@ -552,6 +574,22 @@ async def update_plan_note_task_bundle(
                 task=task,
                 user_ids=[task.assigned_to],
             )
+
+    semantic_tasks = {task.id: task for task in existing_tasks}
+    semantic_tasks.update({task.id: task for task in active_tasks})
+    if reconcile_result is not None:
+        semantic_tasks.update({task.id: task for task in reconcile_result.deactivated_tasks})
+    for task in semantic_tasks.values():
+        after_state = task_semantic_state(task)
+        before_state = semantic_before.get(task.id, {**after_state, "is_active": False, "assigned_to": None})
+        old_owner = before_state.get("assigned_to") if before_state.get("is_active") else None
+        new_owner = after_state.get("assigned_to") if after_state.get("is_active") else None
+        record_task_semantic_events(
+            db=db, task_id=task.id, actor_user_id=user.id,
+            before=before_state, after=after_state,
+            old_assignee_ids=[old_owner] if old_owner else [],
+            new_assignee_ids=[new_owner] if new_owner else [],
+        )
 
     add_audit_log(
         db=db,

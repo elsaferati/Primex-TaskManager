@@ -372,6 +372,15 @@ class RealizationDailyOut(RealizationSchema):
     message: str | None = None
     people: list[RealizationPersonWorkflowOut] = Field(default_factory=list)
     department_result: RealizationDepartmentResultOut | None = None
+    live: dict | None = None
+
+
+class DailyPlanAdjustmentDecision(RealizationSchema):
+    audit_event_id: uuid.UUID
+    user_id: uuid.UUID
+    status: str
+    reason: str = Field(min_length=1, max_length=4000)
+    comment: str | None = Field(default=None, max_length=4000)
 
 
 class RealizationAIAnalysisOut(RealizationSchema):
