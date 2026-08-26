@@ -6291,8 +6291,8 @@ export default function AdminTasksPage() {
                   <thead>
                     <tr>
                       <th className="ga-time-header ga-time-nr">NR</th>
-                      <th className="ga-time-header ga-time-time">Time</th>
-                      <th className="ga-time-header ga-time-comment">Koment</th>
+                      <th className="ga-time-header ga-time-time">TIME</th>
+                      <th className="ga-time-header ga-time-comment">KOMENT</th>
                       {commonWeekISOs.map((iso) => {
                         const d = fromISODate(iso)
                         const dayCode = getDayCode(d)
@@ -6302,7 +6302,7 @@ export default function AdminTasksPage() {
                           </th>
                         )
                       })}
-                      <th className="ga-time-header ga-time-comment">Koment</th>
+                      <th className="ga-time-header ga-time-comment">KOMENT</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -6467,7 +6467,7 @@ export default function AdminTasksPage() {
             {gaTimeLoading ? <span>Loading GA time slots...</span> : null}
             {gaTimeError ? <span className="text-red-600">{gaTimeError}</span> : null}
           </div>
-          <div className="mt-3 overflow-x-auto ga-time-table">
+          <div className="mt-3 ga-time-table ga-time-table-scroll">
             <table className="ga-time-table-table ga-time-table-live">
               <colgroup>
                 <col className="ga-time-nr-column" />
@@ -6479,8 +6479,8 @@ export default function AdminTasksPage() {
               <thead>
                 <tr>
                   <th className="ga-time-header ga-time-nr">NR</th>
-                  <th className="ga-time-header ga-time-time">Time</th>
-                  <th className="ga-time-header ga-time-comment">Koment</th>
+                  <th className="ga-time-header ga-time-time">TIME</th>
+                  <th className="ga-time-header ga-time-comment">KOMENT</th>
                   {commonWeekISOs.map((iso) => {
                     const d = fromISODate(iso)
                     const dayCode = getDayCode(d)
@@ -6490,7 +6490,7 @@ export default function AdminTasksPage() {
                       </th>
                     )
                   })}
-                  <th className="ga-time-header ga-time-comment">Koment</th>
+                  <th className="ga-time-header ga-time-comment">KOMENT</th>
                 </tr>
               </thead>
               <tbody>
@@ -7879,8 +7879,17 @@ export default function AdminTasksPage() {
           width: 100%;
           table-layout: fixed;
           border-collapse: collapse;
-          border: 1px solid #e2e8f0;
+          border: 2px solid #020617;
           font-size: 11px;
+        }
+        .admin-week-table .ga-time-table-scroll {
+          overflow: visible;
+        }
+        @media (max-width: 1023px) {
+          .admin-week-table .ga-time-table-scroll {
+            max-height: calc(100vh - 16px);
+            overflow: auto;
+          }
         }
         .admin-week-table .ga-time-nr-column {
           width: 30px;
@@ -7895,16 +7904,39 @@ export default function AdminTasksPage() {
           width: calc((100% - 436px) / 5);
         }
         .admin-week-table .ga-time-header {
-          border: 1px solid #e2e8f0;
+          border: 1px solid #111827;
+          border-top: 2px solid #020617;
+          border-bottom: 0;
           background: #f8fafc;
           padding: 8px 6px;
           text-align: left;
+          text-transform: uppercase;
           font-weight: 700;
           font-size: 10px;
           vertical-align: bottom;
           position: sticky;
           top: 0;
-          z-index: 2;
+          z-index: 20;
+          box-shadow:
+            inset 0 -2px 0 #020617,
+            0 2px 3px rgba(15, 23, 42, 0.2);
+        }
+        .admin-week-table .ga-time-table-table thead th:first-child {
+          border-left: 2px solid #020617;
+          border-right: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-table thead th:last-child {
+          border-right: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-table tbody td:first-child {
+          border-left: 2px solid #020617;
+          border-right: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-table tbody td:last-child {
+          border-right: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-table tbody tr:last-child td {
+          border-bottom: 2px solid #020617;
         }
         .admin-week-table .ga-time-nr {
           width: 30px;
@@ -7983,7 +8015,7 @@ export default function AdminTasksPage() {
           justify-content: center;
         }
         .admin-week-table .ga-time-slot-label {
-          border: 1px solid #e2e8f0;
+          border: 1px solid #111827;
           background: #f1f5f9;
           font-weight: 700;
           font-size: 10px;
@@ -7997,7 +8029,7 @@ export default function AdminTasksPage() {
           background: #f8fafc;
         }
         .admin-week-table .ga-time-cell {
-          border: 1px solid #e2e8f0;
+          border: 1px solid #111827;
           padding: 6px;
           vertical-align: top;
           min-width: 0;
@@ -8290,9 +8322,26 @@ export default function AdminTasksPage() {
             overflow-wrap: anywhere;
             word-break: break-word;
           }
+          .admin-week-table .ga-time-table-table thead .ga-time-header {
+            border-top: 2px solid #111827 !important;
+            border-bottom: 2px solid #111827 !important;
+          }
+          .admin-week-table .ga-time-table-table thead th:first-child,
+          .admin-week-table .ga-time-table-table tbody td:first-child {
+            border-left: 2px solid #111827 !important;
+            border-right: 2px solid #111827 !important;
+          }
+          .admin-week-table .ga-time-table-table thead th:last-child,
+          .admin-week-table .ga-time-table-table tbody td:last-child {
+            border-right: 2px solid #111827 !important;
+          }
+          .admin-week-table .ga-time-table-table tbody tr:last-child td {
+            border-bottom: 2px solid #111827 !important;
+          }
           .admin-week-table .ga-time-header {
             background: #e5e7eb !important;
             color: #111827 !important;
+            box-shadow: none !important;
           }
           .admin-week-table .ga-time-nr {
             width: 26px !important;
