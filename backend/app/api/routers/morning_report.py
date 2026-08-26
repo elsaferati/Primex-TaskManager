@@ -14,7 +14,7 @@ from app.db import get_db
 from app.models.morning_report_draft import MorningReportDraft
 from app.models.morning_report_settings import MorningReportSettings
 from app.models.user import User
-from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
+from app.services.meeting_point_manual_sync import merge_common_view_manual_sections, with_section_keys
 from app.services.morning_report import (
     MANUAL_SECTION_TITLES,
     SECTION_TITLES,
@@ -35,6 +35,7 @@ router = APIRouter()
 
 
 class SectionPayload(BaseModel):
+    section_key: str | None = None
     title: str
     body: str = ""
 
@@ -135,14 +136,7 @@ def _draft(row: MorningReportDraft) -> dict:
         "report_date": row.report_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": [
-            {
-                "title": str(section.get("title") or "").strip(),
-                "body": str(section.get("body") or ""),
-            }
-            for section in (row.sections or [])
-            if str(section.get("title") or "").strip()
-        ],
+        "sections": with_section_keys("morning", row.sections),
         "generated_snapshot": row.generated_snapshot,
         "auto_sent_slots": list(row.auto_sent_slots or []),
         "status": row.status,
@@ -318,13 +312,14 @@ async def update_draft(
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
         # Keep user-edited question titles as saved (do not remap via normalize).
-        row.sections = [
+        row.sections = normalize_morning_report_sections(with_section_keys("morning", [
             {
+                "section_key": section.section_key,
                 "title": (section.title or "").strip() or "Untitled",
                 "body": section.body or "",
             }
             for section in payload.sections
-        ]
+        ]))
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()

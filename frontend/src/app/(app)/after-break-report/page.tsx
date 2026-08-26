@@ -18,10 +18,11 @@ import {
 } from "@/components/report-section-editor"
 import { useAuth } from "@/lib/auth"
 
-type Section = { title: string; body: string }
+type Section = { section_key?: string; title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
+const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -43,7 +44,7 @@ type Draft = {
   updated_at?: string | null
 }
 
-function sectionGroupLabel(title: string, index: number) {
+function sectionGroupLabel(section: Section, index: number) {
   if (index < 4) return "Manual questions"
   const knownAuto = [
     "DET TE PAKRYERA, 08:00/DEADLINE",
@@ -56,14 +57,14 @@ function sectionGroupLabel(title: string, index: number) {
     "HV MBYLLJA E DET",
   ]
   const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
-  const key = compact(title)
+  const key = compact(section.section_key || section.title)
   if (knownAuto.some((auto) => compact(auto) === key)) return "Auto-filled from PrimeFlow"
   return "Manual questions"
 }
 
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
-  return sectionGroupLabel(sections[index].title, index) !== sectionGroupLabel(sections[index - 1].title, index - 1)
+  return sectionGroupLabel(sections[index], index) !== sectionGroupLabel(sections[index - 1], index - 1)
 }
 type DeliveryHistory = {
   id: string
@@ -324,10 +325,11 @@ export default function AfterBreakReportPage() {
 
   const openSectionEditor = (index: number) => {
     if (!draft) return
+    const body = draft.sections[index]?.body || ""
     setEditingSection({
       index,
       title: draft.sections[index]?.title || "",
-      lines: reportSectionEditorLines(draft.sections[index]?.body || ""),
+      lines: body.trim() === MANUAL_PLACEHOLDER ? [""] : reportSectionEditorLines(body),
     })
   }
 
@@ -580,7 +582,7 @@ export default function AfterBreakReportPage() {
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
                     <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                      {sectionGroupLabel(section.title, index)}
+                      {sectionGroupLabel(section, index)}
                     </div>
                   ) : null}
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -620,6 +622,7 @@ export default function AfterBreakReportPage() {
                       <ReportSectionFieldEditor
                         key={`edit-${index}`}
                         lines={editingSection.lines}
+                        emptyPlaceholder={section.body.trim() === MANUAL_PLACEHOLDER ? MANUAL_PLACEHOLDER : undefined}
                         onCancel={() => setEditingSection(null)}
                         onSave={applySectionEditor}
                       />

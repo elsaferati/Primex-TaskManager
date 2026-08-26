@@ -19,10 +19,11 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useAuth } from "@/lib/auth"
 
-type Section = { title: string; body: string }
+type Section = { section_key?: string; title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
+const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -115,7 +116,7 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
   ]
   const manuals = new Set(["A JEMI BRENDA MESATARES ME PROJEKTE?"])
   const placeholder = "(Ploteso manualisht)"
-  const byTitle = new Map<string, string>()
+  const byTitle = new Map<string, Section>()
   const extras: Section[] = []
   const seenExtra = new Set<string>()
 
@@ -128,23 +129,28 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
   }
 
   for (const section of sections) {
-    const title = canonicalMeetingsSectionTitle(section.title.trim())
+    const title = canonicalMeetingsSectionTitle((section.section_key || section.title).trim())
     if (!title) continue
     if (displayOrder.includes(title)) {
       const existing = byTitle.get(title)
-      byTitle.set(title, existing == null ? section.body : preferBody(existing, section.body))
+      byTitle.set(title, {
+        section_key: title,
+        title: section.section_key ? section.title : title,
+        body: existing == null ? section.body : preferBody(existing.body, section.body),
+      })
       continue
     }
     const key = compactSectionTitle(title)
     if (!key || seenExtra.has(key)) continue
     seenExtra.add(key)
-    extras.push({ title, body: section.body })
+    extras.push({ ...section, section_key: section.section_key || `manual:${key}`, title: section.title || title })
   }
 
   const ordered: Section[] = []
   for (const title of displayOrder) {
-    if (byTitle.has(title)) ordered.push({ title, body: byTitle.get(title) || "" })
-    else if (manuals.has(title)) ordered.push({ title, body: placeholder })
+    const existing = byTitle.get(title)
+    if (existing) ordered.push(existing)
+    else if (manuals.has(title)) ordered.push({ section_key: title, title, body: placeholder })
   }
   let insertAt = 0
   for (let index = 0; index < ordered.length; index += 1) {
@@ -153,8 +159,8 @@ function collapseMeetingsSections(sections: Section[]): Section[] {
   return [...ordered.slice(0, insertAt), ...extras, ...ordered.slice(insertAt)]
 }
 
-function sectionGroupLabel(title: string) {
-  const key = compactSectionTitle(title)
+function sectionGroupLabel(section: Section) {
+  const key = compactSectionTitle(section.section_key || section.title)
   if (key.includes("TIKETATESTD")) {
     return "Auto-filled from PrimeFlow"
   }
@@ -176,7 +182,7 @@ function sectionGroupLabel(title: string) {
 
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
-  return sectionGroupLabel(sections[index].title) !== sectionGroupLabel(sections[index - 1].title)
+  return sectionGroupLabel(sections[index]) !== sectionGroupLabel(sections[index - 1])
 }
 type DeliveryHistory = {
   id: string
@@ -425,10 +431,11 @@ export default function MeetingsReportPage() {
 
   const openSectionEditor = (index: number) => {
     if (!draft) return
+    const body = draft.sections[index]?.body || ""
     setEditingSection({
       index,
       title: draft.sections[index]?.title || "",
-      lines: reportSectionEditorLines(draft.sections[index]?.body || ""),
+      lines: body.trim() === MANUAL_PLACEHOLDER ? [""] : reportSectionEditorLines(body),
     })
   }
 
@@ -559,7 +566,7 @@ export default function MeetingsReportPage() {
                     <React.Fragment key={`${section.title}-${index}`}>
                       {shouldShowSectionGroup(draft.sections, index) ? (
                         <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                          {sectionGroupLabel(section.title)}
+                          {sectionGroupLabel(section)}
                         </div>
                       ) : null}
                       <section className="rounded-md border bg-white p-4 shadow-sm">
@@ -590,6 +597,7 @@ export default function MeetingsReportPage() {
                           <ReportSectionFieldEditor
                             key={`edit-${index}`}
                             lines={editingSection.lines}
+                            emptyPlaceholder={section.body.trim() === MANUAL_PLACEHOLDER ? MANUAL_PLACEHOLDER : undefined}
                             onCancel={() => setEditingSection(null)}
                             onSave={applySectionEditor}
                           />

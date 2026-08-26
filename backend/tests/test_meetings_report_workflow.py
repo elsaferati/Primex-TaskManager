@@ -16,7 +16,9 @@ from app.api.routers.meetings_report import DraftUpdate, RecipientsPayload, Sect
 from app.models.enums import UserRole
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.services import meetings_report_scheduler
-from app.services.meeting_point_manual_sync import is_known_report_title, is_manual_section_title
+from app.services.meeting_point_manual_sync import (
+    is_known_report_title, is_manual_section_title, section_group_label, with_section_keys,
+)
 from app.services.meetings_report import (
     SECTION_TITLES,
     _completed_tasks_for_report_day,
@@ -102,6 +104,23 @@ def make_draft() -> MeetingsReportDraft:
 
 
 class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    def test_edited_auto_title_keeps_m3_identity_position_and_group(self) -> None:
+        sections = normalize_meetings_report_sections(
+            with_section_keys("meetings", [{"title": title, "body": str(i)} for i, title in enumerate(SECTION_TITLES)])
+        )
+        target_index = next(i for i, section in enumerate(sections) if section["section_key"] == SECTION_TITLES[1])
+        sections[target_index]["title"] = "CUSTOM STD TITLE"
+
+        normalized = normalize_meetings_report_sections(sections)
+        affected = normalized[target_index]
+
+        self.assertEqual(affected["title"], "CUSTOM STD TITLE")
+        self.assertEqual(affected["section_key"], SECTION_TITLES[1])
+        self.assertEqual(
+            section_group_label("meetings", affected["title"], affected["section_key"]),
+            "AUTO-FILLED FROM PRIMEFLOW",
+        )
+
     def test_settings_routes_require_admin(self) -> None:
         settings_routes = [route for route in router.routes if route.path == "/settings"]
         self.assertEqual(len(settings_routes), 2)

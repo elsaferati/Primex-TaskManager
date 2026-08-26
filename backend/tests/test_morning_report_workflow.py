@@ -17,6 +17,7 @@ from app.services import morning_report_scheduler
 from app.services.morning_report_scheduler import _due_m1_send_slot
 from app.services.after_break_report import _personal_section
 from app.services.meetings_report import PERSONAL_GA
+from app.services.meeting_point_manual_sync import section_group_label, with_section_keys
 from app.services.morning_report import (
     SECTION_TITLES,
     _attendance_section,
@@ -86,6 +87,21 @@ def make_draft() -> MorningReportDraft:
 
 
 class MorningReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
+    def test_edited_auto_title_keeps_m1_identity_position_and_group(self) -> None:
+        sections = normalize_morning_report_sections(
+            with_section_keys("morning", [{"title": title, "body": str(i)} for i, title in enumerate(SECTION_TITLES)])
+        )
+        sections[1]["title"] = "CUSTOM EMAIL TASKS TITLE"
+
+        normalized = normalize_morning_report_sections(sections)
+
+        self.assertEqual(normalized[1]["title"], "CUSTOM EMAIL TASKS TITLE")
+        self.assertEqual(normalized[1]["section_key"], SECTION_TITLES[1])
+        self.assertEqual(
+            section_group_label("morning", normalized[1]["title"], normalized[1]["section_key"]),
+            "AUTO-FILLED FROM PRIMEFLOW",
+        )
+
     def test_m1_auto_delivery_uses_only_the_0700_and_0900_slots(self) -> None:
         timezone = ZoneInfo("Europe/Tirane")
         self.assertIsNone(_due_m1_send_slot(datetime(2026, 8, 5, 6, 59, tzinfo=timezone), set()))

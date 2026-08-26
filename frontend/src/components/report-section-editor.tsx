@@ -863,10 +863,12 @@ export function ReportSectionPreview({
 
 export function ReportSectionFieldEditor({
   lines,
+  emptyPlaceholder,
   onCancel,
   onSave,
 }: {
   lines: string[]
+  emptyPlaceholder?: string
   onCancel: () => void
   onSave: (lines: string[]) => void
 }) {
@@ -929,7 +931,14 @@ export function ReportSectionFieldEditor({
         <Button type="button" variant="outline" size="sm" onClick={onCancel}>
           <X className="h-4 w-4" /> Cancel
         </Button>
-        <Button type="button" size="sm" onClick={() => onSave(draftLinesRef.current)}>
+        <Button
+          type="button"
+          size="sm"
+          onClick={() => {
+            const next = draftLinesRef.current
+            onSave(emptyPlaceholder && next.every((line) => !line.trim()) ? [emptyPlaceholder] : next)
+          }}
+        >
           <Save className="h-4 w-4" /> Apply
         </Button>
       </div>
@@ -946,7 +955,7 @@ export function ReportSectionFieldEditor({
                 value={line}
                 rows={3}
                 className="min-h-16 resize-y"
-                placeholder="Shkruaj pergjigjen..."
+                placeholder={emptyPlaceholder || "Shkruaj pergjigjen..."}
                 autoFocus={draftLines.length === 1}
                 onChange={(event) => updateLine(lineIndex, event.target.value)}
               />

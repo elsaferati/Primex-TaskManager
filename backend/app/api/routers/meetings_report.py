@@ -23,7 +23,7 @@ from app.services.meetings_report import (
     send_meetings_report,
     subject_for,
 )
-from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
+from app.services.meeting_point_manual_sync import merge_common_view_manual_sections, with_section_keys
 from app.services.report_section_merge import preserve_manual_sections
 from app.services.primeflow_report import report_timezone
 from app.services.primeflow_report_access import can_manage_reports
@@ -34,6 +34,7 @@ router = APIRouter()
 
 
 class SectionPayload(BaseModel):
+    section_key: str | None = None
     title: str
     body: str = ""
 
@@ -141,14 +142,7 @@ def _draft(row: MeetingsReportDraft) -> dict:
         "tomorrow_date": row.tomorrow_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": [
-            {
-                "title": str(section.get("title") or "").strip(),
-                "body": str(section.get("body") or ""),
-            }
-            for section in (row.sections or [])
-            if str(section.get("title") or "").strip()
-        ],
+        "sections": with_section_keys("meetings", row.sections),
         "generated_snapshot": row.generated_snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
@@ -163,14 +157,7 @@ def _draft(row: MeetingsReportDraft) -> dict:
 async def _normalize_saved_draft_sections(db: AsyncSession, row: MeetingsReportDraft) -> None:
     from sqlalchemy.orm.attributes import flag_modified
 
-    sections = [
-        {
-            "title": str(section.get("title") or "").strip(),
-            "body": str(section.get("body") or ""),
-        }
-        for section in (row.sections or [])
-        if str(section.get("title") or "").strip()
-    ]
+    sections = with_section_keys("meetings", row.sections)
     sections = await merge_common_view_manual_sections(db, sections, "meetings", row.sections)
     sections = normalize_meetings_report_sections(sections)
     if sections != (row.sections or []):
@@ -325,13 +312,14 @@ async def update_draft(
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
         # Keep user-edited question titles as saved (do not remap via normalize).
-        row.sections = [
+        row.sections = with_section_keys("meetings", [
             {
+                "section_key": section.section_key,
                 "title": (section.title or "").strip() or "Untitled",
                 "body": section.body or "",
             }
             for section in payload.sections
-        ]
+        ])
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id
     await db.commit()

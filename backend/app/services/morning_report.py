@@ -179,33 +179,46 @@ def _canonical_section_title(raw_title: str) -> str | None:
 
 
 def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
-    by_title: dict[str, str] = {}
+    by_title: dict[str, dict[str, str]] = {}
     extras: list[dict[str, str]] = []
     for section in sections or []:
         raw_title = str(section.get("title") or "").strip()
-        title = _canonical_section_title(raw_title)
+        section_key = str(section.get("section_key") or "").strip()
+        title = _canonical_section_title(section_key or raw_title)
         body = str(section.get("body") or "")
         if raw_title == LEGACY_NOTES_TITLE or (
             title == SECTION_TITLES[3] and any(_is_manual_email_line(line) for line in body.splitlines())
         ):
             notes_body, emails_body = _split_notes_and_emails(body)
             if SECTION_TITLES[3] not in by_title:
-                by_title[SECTION_TITLES[3]] = notes_body
+                by_title[SECTION_TITLES[3]] = {
+                    "section_key": SECTION_TITLES[3], "title": SECTION_TITLES[3], "body": notes_body,
+                }
             if SECTION_TITLES[1] not in by_title:
-                by_title[SECTION_TITLES[1]] = emails_body
+                by_title[SECTION_TITLES[1]] = {
+                    "section_key": SECTION_TITLES[1], "title": SECTION_TITLES[1], "body": emails_body,
+                }
             continue
         if title is None:
             if raw_title:
-                extras.append({"title": raw_title, "body": body})
+                extras.append({
+                    "section_key": section_key or f"manual:{_compact_section_title(raw_title)}",
+                    "title": raw_title,
+                    "body": body,
+                })
             continue
         if title == SECTION_TITLES[1]:
             body = _separate_keyed_prompt_lines(_without_retired_task_status_prompt(body)) or _emails_default_body()
         if title not in by_title:
-            by_title[title] = body
+            by_title[title] = {
+                "section_key": title,
+                "title": raw_title if section_key else title,
+                "body": body,
+            }
 
     # Keep Common View–synced manuals after built-in manuals and before auto sections.
     known = [
-        {"title": title, "body": by_title.get(title, _default_body(title))}
+        by_title.get(title, {"section_key": title, "title": title, "body": _default_body(title)})
         for title in SECTION_TITLES
     ]
     if not extras:
@@ -552,7 +565,7 @@ def render_plain_text(subject: str, report_day: date, sections: list[dict[str, s
     blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", ""]
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = section_group_label("morning", section["title"])
+        group = section_group_label("morning", section["title"], section.get("section_key"))
         if group != current_group:
             blocks.append(group)
             current_group = group
@@ -573,7 +586,7 @@ def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) 
     section_chunks: list[str] = []
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = section_group_label("morning", section["title"])
+        group = section_group_label("morning", section["title"], section.get("section_key"))
         if group != current_group:
             section_chunks.append(_render_group_label_html(group))
             current_group = group

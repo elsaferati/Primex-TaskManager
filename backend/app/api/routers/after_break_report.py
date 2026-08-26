@@ -24,7 +24,7 @@ from app.services.after_break_report import (
     send_after_break_report,
     subject_for,
 )
-from app.services.meeting_point_manual_sync import merge_common_view_manual_sections
+from app.services.meeting_point_manual_sync import merge_common_view_manual_sections, with_section_keys
 from app.services.report_section_merge import preserve_manual_sections
 from app.services.meetings_report_scheduler import DEFAULT_RECIPIENTS, normalize_recipients
 from app.services.primeflow_report import report_timezone
@@ -35,6 +35,7 @@ router = APIRouter()
 
 
 class SectionPayload(BaseModel):
+    section_key: str | None = None
     title: str
     body: str = ""
 
@@ -135,16 +136,7 @@ def _draft(row: AfterBreakReportDraft, sections: list[dict[str, str]] | None = N
         "report_date": row.report_date.isoformat(),
         "subject": row.subject,
         "recipients": normalize_recipients(row.recipients),
-        "sections": sections
-        if sections is not None
-        else [
-            {
-                "title": str(section.get("title") or "").strip(),
-                "body": str(section.get("body") or ""),
-            }
-            for section in (row.sections or [])
-            if str(section.get("title") or "").strip()
-        ],
+        "sections": with_section_keys("after_break", sections if sections is not None else row.sections),
         "generated_snapshot": row.generated_snapshot,
         "status": row.status,
         "sent_at": row.sent_at.isoformat() if row.sent_at else None,
@@ -157,14 +149,7 @@ def _draft(row: AfterBreakReportDraft, sections: list[dict[str, str]] | None = N
 
 
 async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) -> dict:
-    sections = [
-        {
-            "title": str(section.get("title") or "").strip(),
-            "body": str(section.get("body") or ""),
-        }
-        for section in (row.sections or [])
-        if str(section.get("title") or "").strip()
-    ]
+    sections = with_section_keys("after_break", row.sections)
     sections = normalize_after_break_report_sections(sections)
     sections = await apply_1h_confirmation_questions(db, sections)
     sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
@@ -244,14 +229,7 @@ async def get_draft(
     ).scalar_one_or_none()
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
-    sections = [
-        {
-            "title": str(section.get("title") or "").strip(),
-            "body": str(section.get("body") or ""),
-        }
-        for section in (row.sections or [])
-        if str(section.get("title") or "").strip()
-    ]
+    sections = with_section_keys("after_break", row.sections)
     sections = await apply_1h_confirmation_questions(db, sections)
     sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
     if sections != row.sections:
@@ -320,13 +298,14 @@ async def update_draft(
         row.recipients = _recipients_from_payload(payload.recipients)
     if payload.sections is not None:
         # Keep user-edited question titles as saved (do not remap via normalize).
-        saved = [
+        saved = with_section_keys("after_break", [
             {
+                "section_key": section.section_key,
                 "title": (section.title or "").strip() or "Untitled",
                 "body": section.body or "",
             }
             for section in payload.sections
-        ]
+        ])
         row.sections = await apply_1h_confirmation_questions(db, saved)
     row.status = "DRAFT" if row.status != "SENT" else row.status
     row.updated_by_user_id = user.id

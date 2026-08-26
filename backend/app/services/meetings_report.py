@@ -165,15 +165,21 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
     seen_unknown: set[str] = set()
     for section in existing_sections:
         raw_title = str(section.get("title") or "").strip()
-        if is_retired_meetings_section_title(raw_title):
+        section_key = str(section.get("section_key") or "").strip()
+        identity = section_key or raw_title
+        if is_retired_meetings_section_title(identity):
             continue
-        title = canonical_meetings_section_title(raw_title)
+        title = canonical_meetings_section_title(identity)
         if not title:
             continue
         body = str(section.get("body") or "")
         if title in DISPLAY_SECTION_TITLES:
             if title not in by_title:
-                by_title[title] = {"title": title, "body": body}
+                by_title[title] = {
+                    "section_key": title,
+                    "title": raw_title if section_key else title,
+                    "body": body,
+                }
             else:
                 by_title[title]["body"] = _prefer_section_body(by_title[title]["body"], body)
             continue
@@ -182,14 +188,18 @@ def normalize_meetings_report_sections(sections: list[dict[str, Any]] | None) ->
         if not compact or compact in seen_unknown:
             continue
         seen_unknown.add(compact)
-        unknown_sections.append({"title": title, "body": body})
+        unknown_sections.append({
+            "section_key": section_key or f"manual:{compact}",
+            "title": raw_title or title,
+            "body": body,
+        })
 
     ordered: list[dict[str, str]] = []
     for title in DISPLAY_SECTION_TITLES:
         if title in by_title:
             ordered.append(by_title[title])
         elif title in MANUAL_SECTION_TITLES:
-            ordered.append({"title": title, "body": DEFAULT_MANUAL_BODY})
+            ordered.append({"section_key": title, "title": title, "body": DEFAULT_MANUAL_BODY})
 
     # Keep Common View–synced manuals with the other manuals (after built-in manuals).
     if not unknown_sections:
@@ -1983,7 +1993,7 @@ def render_plain_text(subject: str, report_day: date, tomorrow: date, sections: 
     blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", f"Neser: {tomorrow:%d.%m.%Y}", ""]
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = _section_group_label(section["title"])
+        group = _section_group_label(section["title"], section.get("section_key"))
         if group != current_group:
             blocks.append(group)
             current_group = group
@@ -1993,10 +2003,10 @@ def render_plain_text(subject: str, report_day: date, tomorrow: date, sections: 
     return "\n\n".join(blocks)
 
 
-def _section_group_label(title: str) -> str:
+def _section_group_label(title: str, section_key: str | None = None) -> str:
     from app.services.meeting_point_manual_sync import section_group_label
 
-    return section_group_label("meetings", title)
+    return section_group_label("meetings", title, section_key)
 
 
 def _render_group_label_html(label: str) -> str:
@@ -2612,7 +2622,7 @@ def render_html(subject: str, report_day: date, tomorrow: date, sections: list[d
     section_chunks: list[str] = []
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = _section_group_label(section["title"])
+        group = _section_group_label(section["title"], section.get("section_key"))
         if group != current_group:
             section_chunks.append(_render_group_label_html(group))
             current_group = group
@@ -2729,11 +2739,13 @@ def _section_report_blocks(
     return blocks
 
 
-def _section_report_group_for_code(report_code: str, title: str | None) -> str:
+def _section_report_group_for_code(
+    report_code: str, title: str | None, section_key: str | None = None,
+) -> str:
     from app.services.meeting_point_manual_sync import section_group_label
 
     report_kind = {"M1": "morning", "M2": "after_break", "M3": "meetings"}.get(report_code.upper(), "meetings")
-    return section_group_label(report_kind, title)
+    return section_group_label(report_kind, title, section_key)
 
 
 def _legacy_render_section_report_docx(
@@ -3070,7 +3082,9 @@ def render_section_report_docx(
 
     current_group = ""
     for index, report_section in enumerate(sections, 1):
-        group = _section_report_group_for_code(report_code, report_section.get("title"))
+        group = _section_report_group_for_code(
+            report_code, report_section.get("title"), report_section.get("section_key")
+        )
         if group != current_group:
             group_cell = document.add_table(rows=1, cols=1).cell(0, 0)
             group_cell.text = group
@@ -3138,7 +3152,9 @@ def render_section_report_png(
     layout: list[dict[str, Any]] = []
     current_group = ""
     for index, report_section in enumerate(sections, 1):
-        group = _section_report_group_for_code(report_code, report_section.get("title"))
+        group = _section_report_group_for_code(
+            report_code, report_section.get("title"), report_section.get("section_key")
+        )
         if group != current_group:
             layout.append({"kind": "group", "value": group})
             current_group = group

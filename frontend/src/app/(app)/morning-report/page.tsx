@@ -18,10 +18,11 @@ import {
 } from "@/components/report-section-editor"
 import { useAuth } from "@/lib/auth"
 
-type Section = { title: string; body: string }
+type Section = { section_key?: string; title: string; body: string }
 type Recipients = { to: string[]; cc: string[]; bcc: string[] }
 type RecipientInputs = { to: string; cc: string; bcc: string }
 type EditingSection = { index: number; title: string; lines: string[] }
+const MANUAL_PLACEHOLDER = "(Ploteso manualisht)"
 type ReportSettings = {
   is_active: boolean
   send_time: string
@@ -53,7 +54,7 @@ type DeliveryHistory = {
   last_error?: string | null
 }
 
-function sectionGroupLabel(title: string) {
+function sectionGroupLabel(section: Section) {
   // Built-in manuals are first; Common View–synced extras sit after them and before autos.
   const knownAuto = [
     "(GA) DET NGA EMAILS TE REJA",
@@ -63,7 +64,7 @@ function sectionGroupLabel(title: string) {
     "(GA/KA) KUSH KA DET PERSONALISHT?",
   ]
   const compact = (value: string) => value.toUpperCase().replace(/[^A-Z0-9]+/g, "")
-  const key = compact(title)
+  const key = compact(section.section_key || section.title)
   const isEmailTasksSection = key.startsWith("GAEMINFO") || key.includes("DETNGEMAILS")
   if (isEmailTasksSection || knownAuto.some((auto) => compact(auto) === key)) {
     return "Auto-filled from PrimeFlow"
@@ -73,7 +74,7 @@ function sectionGroupLabel(title: string) {
 
 function shouldShowSectionGroup(sections: Section[], index: number) {
   if (index === 0) return true
-  return sectionGroupLabel(sections[index].title) !== sectionGroupLabel(sections[index - 1].title)
+  return sectionGroupLabel(sections[index]) !== sectionGroupLabel(sections[index - 1])
 }
 
 const API = "/morning-report"
@@ -326,10 +327,11 @@ export default function MorningReportPage() {
 
   const openSectionEditor = (index: number) => {
     if (!draft) return
+    const body = draft.sections[index]?.body || ""
     setEditingSection({
       index,
       title: draft.sections[index]?.title || "",
-      lines: reportSectionEditorLines(draft.sections[index]?.body || ""),
+      lines: body.trim() === MANUAL_PLACEHOLDER ? [""] : reportSectionEditorLines(body),
     })
   }
 
@@ -584,7 +586,7 @@ export default function MorningReportPage() {
                 <React.Fragment key={`${section.title}-${index}`}>
                   {shouldShowSectionGroup(draft.sections, index) ? (
                     <div className="rounded-md border bg-slate-100 px-3 py-2 text-xs font-bold uppercase tracking-wide text-slate-700">
-                      {sectionGroupLabel(section.title)}
+                      {sectionGroupLabel(section)}
                     </div>
                   ) : null}
                   <div className="rounded-lg border bg-white p-4 shadow-sm">
@@ -624,6 +626,7 @@ export default function MorningReportPage() {
                       <ReportSectionFieldEditor
                         key={`edit-${index}`}
                         lines={editingSection.lines}
+                        emptyPlaceholder={section.body.trim() === MANUAL_PLACEHOLDER ? MANUAL_PLACEHOLDER : undefined}
                         onCancel={() => setEditingSection(null)}
                         onSave={applySectionEditor}
                       />

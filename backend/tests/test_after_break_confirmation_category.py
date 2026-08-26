@@ -15,9 +15,24 @@ from app.services.after_break_report import (
     normalize_after_break_report_sections,
 )
 from app.services.meetings_report import _render_ascii_table_html, _table_tone_from_label
+from app.services.meeting_point_manual_sync import section_group_label, with_section_keys
 
 
 class AfterBreakConfirmationCategoryTests(unittest.TestCase):
+    def test_edited_auto_title_keeps_its_original_m2_identity_and_position(self) -> None:
+        saved = [{"title": title, "body": str(index)} for index, title in enumerate(SECTION_TITLES)]
+        saved[4]["title"] = "DET TE PAKRYERA AM, 08:00/DEADLINE"
+
+        sections = normalize_after_break_report_sections(with_section_keys("after_break", saved))
+        affected = next(section for section in sections if section["section_key"] == SECTION_TITLES[4])
+
+        self.assertEqual(affected["title"], "DET TE PAKRYERA AM, 08:00/DEADLINE")
+        self.assertEqual(sections.index(affected), DISPLAY_SECTION_TITLES.index(SECTION_TITLES[4]))
+        self.assertEqual(
+            section_group_label("after_break", affected["title"], affected["section_key"]),
+            "AUTO-FILLED FROM PRIMEFLOW",
+        )
+
     def test_undiscussed_notes_are_first_in_the_auto_filled_group(self) -> None:
         sections = normalize_after_break_report_sections([])
 

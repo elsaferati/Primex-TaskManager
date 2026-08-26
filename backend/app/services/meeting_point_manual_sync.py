@@ -27,6 +27,7 @@ CHECKLIST_TITLE_TO_REPORT: dict[str, ReportKind] = {
 }
 
 DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
+SECTION_KEY_FIELD = "section_key"
 
 
 def _compact(value: str | None) -> str:
@@ -65,22 +66,32 @@ def _report_title_sets(kind: ReportKind) -> tuple[list[str], set[str], set[str]]
     return list(DISPLAY_SECTION_TITLES), manuals, manuals
 
 
-def is_known_report_title(kind: ReportKind, title: str | None) -> bool:
+def canonical_report_section_key(kind: ReportKind, title: str | None) -> str | None:
+    """Return the stable built-in section key represented by a title/key."""
     raw = (title or "").strip()
     if not raw:
-        return False
+        return None
     known, _, _ = _report_title_sets(kind)
     compact = _compact(raw)
     if kind == "morning":
         from app.services.morning_report import SECTION_TITLE_ALIASES, _canonical_section_title
 
         aliased = SECTION_TITLE_ALIASES.get(raw, raw)
-        if _canonical_section_title(aliased) is not None:
-            return True
+        canonical = _canonical_section_title(aliased)
+        if canonical is not None:
+            return canonical
     elif kind == "after_break":
         from app.services.after_break_report import SECTION_TITLE_ALIASES
 
         raw = SECTION_TITLE_ALIASES.get(raw, raw)
+        raw = next(
+            (
+                canonical
+                for alias, canonical in SECTION_TITLE_ALIASES.items()
+                if _compact(alias) == _compact(raw)
+            ),
+            raw,
+        )
         compact = _compact(raw)
     else:
         from app.services.meetings_report import (
@@ -89,15 +100,38 @@ def is_known_report_title(kind: ReportKind, title: str | None) -> bool:
         )
 
         if is_retired_meetings_section_title(raw):
-            return True
+            return canonical_meetings_section_title(raw)
         raw = canonical_meetings_section_title(raw)
         compact = _compact(raw)
-    return any(_compact(known_title) == compact for known_title in known)
+    return next((known_title for known_title in known if _compact(known_title) == compact), None)
 
 
-def is_manual_section_title(kind: ReportKind, title: str | None) -> bool:
+def is_known_report_title(kind: ReportKind, title: str | None) -> bool:
+    return canonical_report_section_key(kind, title) is not None
+
+
+def with_section_keys(kind: ReportKind, sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
+    """Attach identity that survives edits to the visible section title."""
+    keyed: list[dict[str, str]] = []
+    for section in sections or []:
+        title = str(section.get("title") or "").strip()
+        if not title:
+            continue
+        existing_key = str(section.get(SECTION_KEY_FIELD) or "").strip()
+        key = existing_key or canonical_report_section_key(kind, title) or f"manual:{_compact(title)}"
+        keyed.append({
+            SECTION_KEY_FIELD: key,
+            "title": title,
+            "body": str(section.get("body") or ""),
+        })
+    return keyed
+
+
+def is_manual_section_title(
+    kind: ReportKind, title: str | None, section_key: str | None = None,
+) -> bool:
     """True for built-in manuals and Common View–synced extras."""
-    raw = (title or "").strip()
+    raw = (section_key or title or "").strip()
     if not raw:
         return False
     if kind == "morning":
@@ -130,8 +164,14 @@ def is_manual_section_title(kind: ReportKind, title: str | None) -> bool:
     return not any(_compact(known_title) == compact for known_title in known)
 
 
-def section_group_label(kind: ReportKind, title: str | None) -> str:
-    return "MANUAL QUESTIONS" if is_manual_section_title(kind, title) else "AUTO-FILLED FROM PRIMEFLOW"
+def section_group_label(
+    kind: ReportKind, title: str | None, section_key: str | None = None,
+) -> str:
+    return (
+        "MANUAL QUESTIONS"
+        if is_manual_section_title(kind, title, section_key)
+        else "AUTO-FILLED FROM PRIMEFLOW"
+    )
 
 
 def _bodies_by_title(sections: list[dict[str, Any]] | None) -> dict[str, str]:

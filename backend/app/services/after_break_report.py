@@ -81,6 +81,9 @@ DISPLAY_SECTION_TITLES = [
 SECTION_TITLE_ALIASES = {
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED": SECTION_TITLES[9],
     "NOTES TE REJA ME TE KALTER DHE DISSCUSED?": SECTION_TITLES[9],
+    # Preserve the user's edited display title while recovering this existing
+    # draft's stable auto-filled identity.
+    "DET TE PAKRYERA AM, 08:00/DEADLINE": SECTION_TITLES[4],
 }
 # Personal tasks count only when the title marks them as GA's: initials then a slash or a
 # colon, e.g. "DM/GA: BZ GA - P/P PARA PF" or "ER:GA DEVICES". "AT/KA:" and "ER/KA:" stay out.
@@ -503,21 +506,32 @@ def _replace_confirmation_questions_block(body: str, question_lines: list[str]) 
 
 
 def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None) -> list[dict[str, str]]:
-    by_title: dict[str, str] = {}
+    by_title: dict[str, dict[str, str]] = {}
     extras: list[dict[str, str]] = []
     for section in sections or []:
         raw_title = str(section.get("title") or "").strip()
-        title = SECTION_TITLE_ALIASES.get(raw_title, raw_title)
+        section_key = str(section.get("section_key") or "").strip()
+        identity = section_key or raw_title
+        title = SECTION_TITLE_ALIASES.get(identity, identity)
         body = str(section.get("body") or "")
         if title in SECTION_TITLES and title not in by_title:
-            by_title[title] = body
+            by_title[title] = {
+                "section_key": title,
+                "title": raw_title if section_key or raw_title in SECTION_TITLE_ALIASES else title,
+                "body": body,
+            }
         elif title:
-            extras.append({"title": title, "body": body})
+            extras.append({
+                "section_key": section_key or f"manual:{re.sub(r'[^A-Z0-9]+', '', title.upper())}",
+                "title": raw_title or title,
+                "body": body,
+            })
 
     normalized: list[dict[str, str]] = []
     for title in DISPLAY_SECTION_TITLES:
         if title in by_title:
-            body = by_title[title]
+            normalized.append(by_title[title])
+            continue
         elif title in MANUAL_SECTION_TITLES:
             body = "(Ploteso manualisht)"
         elif title == SECTION_TITLES[4]:
@@ -534,7 +548,7 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             body = "TODO: 0\n\nIN PROGRESS: 0\n\nDONE: 0\n\nLATE: 0"
         else:
             body = "NOTES: 0"
-        normalized.append({"title": title, "body": body})
+        normalized.append({"section_key": title, "title": title, "body": body})
     # Keep Common View–synced manuals with the other manuals (before auto sections).
     manual_count = len(MANUAL_SECTION_TITLES)
     if not extras:
@@ -549,9 +563,9 @@ async def apply_1h_confirmation_questions(
     question_lines = _format_confirmation_questions(await _load_1h_confirmation_questions(db))
     updated: list[dict[str, str]] = []
     for section in sections:
-        if section.get("title") == SECTION_TITLES[7]:
+        if section.get("section_key") == SECTION_TITLES[7] or section.get("title") == SECTION_TITLES[7]:
             updated.append({
-                "title": section["title"],
+                **section,
                 "body": _replace_confirmation_questions_block(section.get("body") or "", question_lines),
             })
         else:
@@ -797,7 +811,7 @@ def render_plain_text(subject: str, report_day: date, sections: list[dict[str, s
     blocks = [subject, f"Sot: {report_day:%d.%m.%Y}", ""]
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = _section_group_label(section["title"])
+        group = _section_group_label(section["title"], section.get("section_key"))
         if group != current_group:
             blocks.append(group)
             current_group = group
@@ -805,17 +819,17 @@ def render_plain_text(subject: str, report_day: date, sections: list[dict[str, s
     return "\n\n".join(blocks)
 
 
-def _section_group_label(title: str) -> str:
+def _section_group_label(title: str, section_key: str | None = None) -> str:
     from app.services.meeting_point_manual_sync import section_group_label
 
-    return section_group_label("after_break", title)
+    return section_group_label("after_break", title, section_key)
 
 
 def render_html(subject: str, report_day: date, sections: list[dict[str, str]]) -> str:
     section_chunks: list[str] = []
     current_group = ""
     for index, section in enumerate(sections, 1):
-        group = _section_group_label(section["title"])
+        group = _section_group_label(section["title"], section.get("section_key"))
         if group != current_group:
             section_chunks.append(_render_group_label_html(group))
             current_group = group
