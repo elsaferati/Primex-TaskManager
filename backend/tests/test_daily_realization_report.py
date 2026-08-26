@@ -117,6 +117,29 @@ def test_deadline_display_distinguishes_future_plan_and_move_back_history():
     ]}) == "2026-08-26 → 2026-08-27 → 2026-08-26"
 
 
+def test_final_manager_report_shows_overdue_task_causing_action_required():
+    report = _report()
+    overdue = {
+        **report["people"][0]["tasks"][0],
+        "task_id": "overdue-1", "title": "Detyrë e vonuar",
+        "status": "TODO", "current_status": "TODO", "classification": "NO_PROGRESS",
+        "in_original_plan": False, "planned_today": False,
+        "planned_due_date": None, "due_date": "2026-08-16",
+        "deadline_was_today": False, "deadline_is_overdue": True,
+        "deadline_completed": False, "action_required": True,
+    }
+    report["people"][0]["tasks"] = [overdue]
+    report["people"][0]["metrics"].update({
+        "original_planned_count": 0, "no_progress_count": 1,
+        "overdue_open_count": 1, "daily_control_state": "ACTION_REQUIRED",
+    })
+    report["summary"].update(report["people"][0]["metrics"])
+    plain, html = render_plain(report, "16:40"), render_html(report, "16:40")
+    assert "Detyrë e vonuar" in plain and "Detyrë e vonuar" in html
+    assert "ACTION_REQUIRED" in plain and "ACTION_REQUIRED" in html
+    assert "2026-08-16" in plain and "2026-08-16" in html
+
+
 def test_final_builder_consumes_live_metrics_and_day_scoped_compliance(monkeypatch):
     user_id, department_id = uuid.uuid4(), uuid.uuid4()
     user = SimpleNamespace(id=user_id, department_id=department_id, full_name="DV", username="dv", email="dv@example.com")

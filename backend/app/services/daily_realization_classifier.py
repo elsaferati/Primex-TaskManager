@@ -51,6 +51,12 @@ def classify_daily_task(value: DailyClassificationInput) -> str:
         if value.original_due_date and value.original_due_date > value.day:
             return "COMPLETED_EARLY"
         return "ADDITIONAL_COMPLETED"
+    if value.current_due_date and value.current_due_date < value.day:
+        if status == "WAITING_CONFIRMATION":
+            return "WAITING_CONFIRMATION"
+        if status == "IN_PROGRESS" or value.progress_delta > 0:
+            return "IN_PROGRESS"
+        return "NO_PROGRESS"
     return "ADDED_DURING_DAY"
 
 

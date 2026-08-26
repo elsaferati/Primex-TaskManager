@@ -12,7 +12,10 @@ from app.services.daily_realization_baseline import _daily_payload, ensure_daily
 from app.services.daily_realization_classifier import DailyClassificationInput, classify_daily_task
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
-from app.services.daily_realization_live import candidate_task_ids_for_person, day_bounds, local_day, timeline_from_events
+from app.services.daily_realization_live import (
+    candidate_task_ids_for_person, credited_completion_day, day_bounds, local_day,
+    timeline_from_events,
+)
 from app.services.daily_realization_metrics import calculate_daily_metrics
 from app.services.daily_realization_close_state import resolve_daily_close_state
 
@@ -210,6 +213,102 @@ def test_reassignment_a_to_b_to_c_keeps_intermediate_owner_candidate():
             owner, baseline_by_user={a_id: {task_id: {}}},
             current_assignees=current, tasks={}, events_by_task=events_by_task, day=DAY,
         )
+
+
+def test_current_overdue_todo_is_live_without_entering_original_plan():
+    task_id, person_id = uuid.uuid4(), uuid.uuid4()
+    task = SimpleNamespace(
+        id=task_id, is_active=True, status="TODO",
+        due_date=datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
+        created_at=datetime(2026, 8, 1, 8, tzinfo=timezone.utc),
+        completed_at=None,
+    )
+    candidates = candidate_task_ids_for_person(
+        person_id, baseline_by_user={}, current_assignees={task_id: {person_id}},
+        tasks={task_id: task}, events_by_task={}, day=DAY,
+    )
+    assert candidates == {task_id}
+    classification = classify_daily_task(case(
+        in_baseline=False, original_due_date=date(2026, 8, 25),
+        current_due_date=date(2026, 8, 25), status="TODO",
+    ))
+    metrics = calculate_daily_metrics([{
+        "classification": classification, "in_original_plan": False,
+        "deadline_is_overdue": True, "deadline_completed": False,
+        "action_required": True,
+    }])
+    assert classification == "NO_PROGRESS"
+    assert metrics["original_planned_count"] == 0
+    assert metrics["overdue_open_count"] == 1
+    assert metrics["daily_control_state"] == "ACTION_REQUIRED"
+
+
+def test_resolved_overdue_task_is_completed_late():
+    task_id, person_id = uuid.uuid4(), uuid.uuid4()
+    completed_at = datetime(2026, 8, 26, 15, tzinfo=timezone.utc)
+    task = SimpleNamespace(
+        id=task_id, is_active=True, status="DONE",
+        due_date=datetime(2026, 8, 25, 12, tzinfo=timezone.utc),
+        created_at=datetime(2026, 8, 1, 8, tzinfo=timezone.utc),
+        completed_at=completed_at,
+    )
+    assert candidate_task_ids_for_person(
+        person_id, baseline_by_user={}, current_assignees={task_id: {person_id}},
+        tasks={task_id: task}, events_by_task={}, day=DAY,
+    ) == {task_id}
+    assert classify_daily_task(case(
+        in_baseline=False, original_due_date=date(2026, 8, 25),
+        current_due_date=date(2026, 8, 25), completed_date=DAY, status="DONE",
+    )) == "COMPLETED_LATE"
+
+
+def test_a_to_b_to_c_completion_is_credited_only_to_owner_at_completion():
+    a_id, b_id, c_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    events = [
+        SimpleNamespace(id=uuid.uuid4(), action="task.assignee_changed", created_at=datetime(2026, 8, 26, 10, tzinfo=timezone.utc),
+                        before={"assignee_ids": [str(a_id)]}, after={"assignee_ids": [str(b_id)]}),
+        SimpleNamespace(id=uuid.uuid4(), action="task.assignee_changed", created_at=datetime(2026, 8, 26, 14, tzinfo=timezone.utc),
+                        before={"assignee_ids": [str(b_id)]}, after={"assignee_ids": [str(c_id)]}),
+    ]
+    completed_at = datetime(2026, 8, 26, 15, tzinfo=timezone.utc)
+    credited = {
+        owner: credited_completion_day(
+            person_id=owner, day=DAY, completion_at=completed_at,
+            current_assignees={c_id}, assignee_events=events,
+            baseline_owner=owner == a_id,
+        )
+        for owner in (a_id, b_id, c_id)
+    }
+    assert credited == {a_id: None, b_id: None, c_id: DAY}
+
+    rows = [
+        {"classification": "REASSIGNED_OUT", "in_original_plan": True},
+        {"classification": "REASSIGNED_IN", "in_original_plan": False},
+        {"classification": "ADDITIONAL_COMPLETED", "in_original_plan": False},
+    ]
+    metrics = calculate_daily_metrics(rows)
+    assert metrics["original_planned_count"] == 1
+    assert metrics["additional_completed_count"] == 1
+    assert metrics["total_completed_today_count"] == 1
+
+
+def test_a_to_b_completion_before_transfer_away_is_credited_to_b():
+    a_id, b_id, c_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    events = [
+        SimpleNamespace(id=uuid.uuid4(), action="task.assignee_changed", created_at=datetime(2026, 8, 26, 10, tzinfo=timezone.utc),
+                        before={"assignee_ids": [str(a_id)]}, after={"assignee_ids": [str(b_id)]}),
+        SimpleNamespace(id=uuid.uuid4(), action="task.assignee_changed", created_at=datetime(2026, 8, 26, 14, tzinfo=timezone.utc),
+                        before={"assignee_ids": [str(b_id)]}, after={"assignee_ids": [str(c_id)]}),
+    ]
+    completed_at = datetime(2026, 8, 26, 13, tzinfo=timezone.utc)
+    assert credited_completion_day(
+        person_id=b_id, day=DAY, completion_at=completed_at,
+        current_assignees={c_id}, assignee_events=events,
+    ) == DAY
+    assert credited_completion_day(
+        person_id=c_id, day=DAY, completion_at=completed_at,
+        current_assignees={c_id}, assignee_events=events,
+    ) is None
 
 
 def test_shared_close_state_resolver_agrees_on_stale_and_reopened():
