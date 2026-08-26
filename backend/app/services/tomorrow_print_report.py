@@ -29,9 +29,9 @@ TASK_ROWS = (
     ("oneH", "1H NO SLOT", ""),
     ("important", "DEADLINE / 08:00", None),
     ("r1", "R1=1H", None),
-    ("personal", "P: GA", "GA"),
-    ("personal", "P: KA", "KA"),
-    ("personal", "P: PX", "PX"),
+    ("personal", "P: GA\n08:15 / 13:15", "GA"),
+    ("personal", "P: KA\n08:30 / 13:15", "KA"),
+    ("personal", "P: PX\n08:45 / 14:00", "PX"),
 )
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
 VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
@@ -60,6 +60,9 @@ CELL_STYLE = "border:1px solid #000;padding:5px;vertical-align:top;text-align:le
 HEADER_STYLE = f"{CELL_STYLE};text-align:center;font-weight:700"
 SLOT_DIVIDER_STYLE = "border-top:2px solid #111827"
 INTRA_SLOT_DIVIDER_STYLE = "border-top:1px solid #cbd5e1"
+SLOT_END_DIVIDER_STYLE = "border-bottom:2px solid #111827"
+TASK_TABLE_FRAME_STYLE = "border:3px solid #111827"
+TASK_HEADER_FRAME_STYLE = "border-top:3px solid #111827;border-bottom:3px solid #111827"
 SLOT_LABEL_STYLE = f"{CELL_STYLE};font-weight:700"
 PERSONAL_GA_COLOR = "#D8B4FE"
 PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:{PERSONAL_GA_COLOR}"
@@ -519,6 +522,8 @@ def _html_table(
         chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
         for chunk_index, chunk in enumerate(chunks):
             row_divider_style = INTRA_SLOT_DIVIDER_STYLE if chunk_index else SLOT_DIVIDER_STYLE
+            if not meeting and chunk_index == len(chunks) - 1:
+                row_divider_style = f"{row_divider_style};{SLOT_END_DIVIDER_STYLE}"
             cells: list[str] = []
             for item_index, item in enumerate(chunk):
                 value = (
@@ -558,19 +563,25 @@ def _html_table(
                     f'<td{background} style="{cell_style}">{task_content}</td>'
                 )
             cells.extend(f'<td style="{CELL_STYLE};{row_divider_style}"></td>' for _ in range(6 - len(cells)))
+            label_divider_style = (
+                f"{SLOT_DIVIDER_STYLE};{SLOT_END_DIVIDER_STYLE}"
+                if not meeting else SLOT_DIVIDER_STYLE
+            )
             row_header = (
-                f'<th rowspan="{len(chunks)}" style="{SLOT_LABEL_STYLE};{row_divider_style}">{number}</th>'
-                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{row_divider_style}">{html.escape(label).replace(chr(10), "<br>")}</th>'
+                f'<th rowspan="{len(chunks)}" style="{SLOT_LABEL_STYLE};{label_divider_style}">{number}</th>'
+                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{label_divider_style}">{html.escape(label).replace(chr(10), "<br>")}</th>'
                 if chunk_index == 0 else ""
             )
             body.append(f"<tr>{row_header}{''.join(cells)}</tr>")
+    table_style = f"{TABLE_STYLE};{TASK_TABLE_FRAME_STYLE}" if not meeting else TABLE_STYLE
+    header_style = f"{HEADER_STYLE};{TASK_HEADER_FRAME_STYLE}" if not meeting else HEADER_STYLE
     return (
-        f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{TABLE_STYLE}">'
-        '<colgroup><col width="4%"><col width="9%"><col width="14.5%" span="6"></colgroup>'
-        f'<thead><tr><th style="{HEADER_STYLE}">NR</th><th style="{HEADER_STYLE}">{label_header}</th>'
+        f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{table_style}">'
+        '<colgroup><col width="2.5%"><col width="10.5%"><col width="14.5%" span="6"></colgroup>'
+        f'<thead><tr><th style="{header_style}">NR</th><th style="{header_style}">{label_header}</th>'
         + (
             "".join(f'<th style="{HEADER_STYLE}">{header} {index}</th>' for index in range(1, 7))
-            if meeting else f'<th colspan="6" style="{HEADER_STYLE}">TASKS</th>'
+            if meeting else f'<th colspan="6" style="{header_style}">TASKS</th>'
         )
         + '</tr></thead>'
         f"<tbody>{''.join(body)}</tbody></table>"
@@ -689,6 +700,19 @@ def _excel_table_attachment(
         left=Side(style="thin", color="000000"), right=Side(style="thin", color="000000"),
         top=Side(style="thin", color="CBD5E1"), bottom=Side(style="thin", color="000000"),
     )
+    medium_grid_side = Side(style="medium", color="111827")
+
+    def task_grid_border(
+        current: Border, *, category_start: bool = False, category_end: bool = False,
+        outer_left: bool = False, outer_right: bool = False,
+    ) -> Border:
+        """Add the task-grid hierarchy without changing fills, fonts, or task content."""
+        return Border(
+            left=medium_grid_side if outer_left else current.left,
+            right=medium_grid_side if outer_right else current.right,
+            top=medium_grid_side if category_start else current.top,
+            bottom=medium_grid_side if category_end else current.bottom,
+        )
     header_fill = PatternFill("solid", fgColor="EAF0FF")
     fills = {
         status: PatternFill("solid", fgColor=color.removeprefix("#"))
@@ -754,14 +778,37 @@ def _excel_table_attachment(
             cell.fill = header_fill
             cell.border = border
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            if not meeting:
+                cell.border = task_grid_border(
+                    cell.border,
+                    category_start=True,
+                    category_end=True,
+                    outer_left=column == 1,
+                    # C is the anchor of merged C:H; its right border becomes
+                    # the visible right edge of the merged TASKS heading.
+                    outer_right=column in (3, 8),
+                )
         if not meeting:
             sheet.merge_cells(start_row=row_number, start_column=3, end_row=row_number, end_column=8)
+            # Reapply the perimeter after merging C:H; openpyxl rebuilds merged-cell
+            # borders and otherwise drops the right edge from H.
+            for column in range(1, 9):
+                cell = sheet.cell(row_number, column)
+                cell.border = task_grid_border(
+                    cell.border,
+                    category_start=True,
+                    category_end=True,
+                    outer_left=column == 1,
+                    outer_right=column in (3, 8),
+                )
         row_number += 1
         for number, (label, values, personal) in enumerate(rows, 1):
             chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
             first_row = row_number
             for chunk_index, chunk in enumerate(chunks):
                 row_border = intra_slot_divider_border if chunk_index else slot_divider_border
+                category_start = chunk_index == 0
+                category_end = chunk_index == len(chunks) - 1
                 if chunk_index == 0:
                     sheet.cell(row_number, 1, number)
                     label_cell = sheet.cell(row_number, 2, label)
@@ -820,6 +867,14 @@ def _excel_table_attachment(
                     )
                     if not is_highlighted_meeting_cell and not is_eight_am_task_cell:
                         cell.border = row_border
+                    if not meeting:
+                        cell.border = task_grid_border(
+                            cell.border,
+                            category_start=category_start,
+                            category_end=category_end,
+                            outer_left=column == 1,
+                            outer_right=column == 8,
+                        )
                     cell.alignment = Alignment(vertical="top", wrap_text=True)
                 row_number += 1
             if len(chunks) > 1:
@@ -860,7 +915,7 @@ def _excel_table_attachment(
         line_cell.font = Font(size=11)
         line_cell.alignment = Alignment(horizontal="left", vertical="center")
         sheet.row_dimensions[row].height = 22
-    widths = [6, 22, 29, 29, 29, 29, 29, 29]
+    widths = [4, 24, 29, 29, 29, 29, 29, 29]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
     sheet.freeze_panes = f"C{task_header_row + 1}"
@@ -881,7 +936,7 @@ def _png_table_attachment(
 ) -> tuple[str, bytes, str]:
     """Render the Today SHTYPI task grid with the same task-state colours."""
     margin = 28
-    column_widths = [58, 210, *([267] * 6)]
+    column_widths = [40, 228, *([267] * 6)]
     width = sum(column_widths) + (margin * 2)
     try:
         regular = ImageFont.truetype(os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\segoeui.ttf"), 16)
@@ -1001,6 +1056,7 @@ def _png_table_attachment(
     draw.text((margin, 59), "Current Common View state used by the 1H report", fill="#475569", font=regular)
 
     y, x = header_top, margin
+    task_table_top = y
     for column, label in enumerate(["NR", "LLOJI DHE SLOTI"]):
         right = x + column_widths[column]
         draw.rectangle((x, y, right, y + header_height), fill="#F8FAFC", outline="#111827")
@@ -1014,7 +1070,8 @@ def _png_table_attachment(
     y += header_height
 
     number = 0
-    for label, chunk, personal, chunk_index, row_height in layout:
+    category_edges = [y]
+    for layout_index, (label, chunk, personal, chunk_index, row_height) in enumerate(layout):
         if chunk_index == 0:
             number += 1
         x = margin
@@ -1097,6 +1154,14 @@ def _png_table_attachment(
                     )
             x = right
         y += row_height
+        if layout_index == len(layout) - 1 or layout[layout_index + 1][3] == 0:
+            category_edges.append(y)
+
+    # Draw hierarchy lines last so task fills and special task outlines cannot hide them.
+    draw.rectangle((margin, task_table_top, tasks_right, y), outline="#111827", width=4)
+    draw.rectangle((margin, task_table_top, tasks_right, task_table_top + header_height), outline="#111827", width=4)
+    for edge_y in category_edges:
+        draw.line((margin, edge_y, tasks_right, edge_y), fill="#111827", width=3)
 
     if meeting_pair:
         y += 20

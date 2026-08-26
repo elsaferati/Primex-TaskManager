@@ -119,7 +119,7 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert '<table role="presentation" width="100%" border="1"' in report_html
     assert 'style="width:100%;border-collapse:collapse;table-layout:fixed' in report_html
     assert 'style="border:1px solid #000;padding:5px' in report_html
-    assert '<col width="4%"><col width="9%"><col width="14.5%" span="6">' in report_html
+    assert '<col width="2.5%"><col width="10.5%"><col width="14.5%" span="6">' in report_html
     assert ">LLOJI DHE SLOTI</th>" in report_html
     assert '<th colspan="6"' in report_html
     assert ">TASKS</th>" in report_html
@@ -137,7 +137,37 @@ def test_task_grid_uses_light_dividers_inside_a_slot_and_bold_slot_labels() -> N
 
     assert "border-top:2px solid #111827" in report_html
     assert "border-top:1px solid #cbd5e1" in report_html
-    assert 'style="border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word;font-weight:700;border-top:2px solid #111827">BLL</th>' in report_html
+    assert "border-bottom:2px solid #111827" in report_html
+    assert "border:3px solid #111827" in report_html
+    assert "border-top:3px solid #111827;border-bottom:3px solid #111827" in report_html
+    assert 'style="border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word;font-weight:700;border-top:2px solid #111827;border-bottom:2px solid #111827">BLL</th>' in report_html
+
+
+def test_excel_task_grid_has_thick_header_outer_frame_and_category_edges() -> None:
+    _, content, _ = _excel_table_attachment(
+        [
+            ("1H 10:00", [{"title": f"Task {index}"} for index in range(7)], False),
+            ("1H 11:00", [{"title": "Next task"}], False),
+        ],
+        [],
+        date(2026, 8, 14),
+        include_meetings=False,
+    )
+    sheet = load_workbook(BytesIO(content)).active
+
+    # Row 5 is the task header; rows 6-7 are one multi-line category; row 8 is the next category.
+    assert sheet["A5"].border.top.style == "medium"
+    assert sheet["A5"].border.bottom.style == "medium"
+    assert sheet["A5"].border.left.style == "medium"
+    assert sheet["H5"].border.right.style == "medium"
+    assert sheet["C6"].border.top.style == "medium"
+    assert sheet["C6"].border.bottom.style == "thin"
+    assert sheet["C7"].border.top.style == "thin"
+    assert sheet["C7"].border.bottom.style == "medium"
+    assert sheet["C8"].border.top.style == "medium"
+    assert sheet["C8"].border.bottom.style == "medium"
+    assert sheet["A8"].border.left.style == "medium"
+    assert sheet["H8"].border.right.style == "medium"
 
 
 def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
@@ -444,7 +474,11 @@ def test_personal_tasks_are_split_exclusively_into_ga_ka_and_px_rows() -> None:
     )
     personal_rows = [row for row in rows if row[2]]
 
-    assert [row[0] for row in personal_rows] == ["P: GA", "P: KA", "P: PX"]
+    assert [row[0] for row in personal_rows] == [
+        "P: GA\n08:15 / 13:15",
+        "P: KA\n08:30 / 13:15",
+        "P: PX\n08:45 / 14:00",
+    ]
     assert {item["title"] for item in personal_rows[0][1]} == {"EF/GA: WFC", "GA/KA: GA wins"}
     assert [item["title"] for item in personal_rows[1][1]] == ["ER: KA: Teams"]
     assert {item["title"] for item in personal_rows[2][1]} == {
@@ -457,6 +491,9 @@ def test_personal_tasks_are_split_exclusively_into_ga_ka_and_px_rows() -> None:
     assert "P: GA" in report_html
     assert "P: KA" in report_html
     assert "P: PX" in report_html
+    assert "P: GA<br>08:15 / 13:15" in report_html
+    assert "P: KA<br>08:30 / 13:15" in report_html
+    assert "P: PX<br>08:45 / 14:00" in report_html
 
 
 def test_blocked_row_label_uses_full_afternoon_interval_and_keeps_report_time() -> None:
