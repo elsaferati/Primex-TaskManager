@@ -37,7 +37,6 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, i
         "approved_postponement_count": outcomes["POSTPONED_APPROVED"],
         "unapproved_postponement_count": outcomes["POSTPONED_UNAPPROVED"],
         "waiting_confirmation_count": outcomes["WAITING_CONFIRMATION"],
-        "blocked_count": outcomes["BLOCKED"],
         "additional_completed_count": outcomes["ADDITIONAL_COMPLETED"],
         "completed_late_count": outcomes["COMPLETED_LATE"],
         "completed_early_count": outcomes["COMPLETED_EARLY"],

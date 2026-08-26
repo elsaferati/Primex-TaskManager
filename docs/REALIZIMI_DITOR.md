@@ -66,7 +66,7 @@ Timeline labels derive deterministically from these facts: `PLANNED_FOR_DAY`, `S
 | Baseline task active/progress delta | `IN_PROGRESS` |
 | Baseline task untouched | `NO_PROGRESS` |
 | Baseline task waiting | `WAITING_CONFIRMATION` |
-| Baseline task blocked | `BLOCKED` |
+| BLL/work-block task | normal status classification; `is_bllok` is not a blocked outcome |
 | Baseline task due moved later | `POSTPONED_APPROVED` or `POSTPONED_UNAPPROVED` |
 | Baseline owner removed | `REASSIGNED_OUT` |
 | New owner receives task | `REASSIGNED_IN` |
@@ -166,3 +166,13 @@ Pure tests cover classification precedence, the required 8/5/1/1/1/+2 scenario, 
 - **Wrong owner**: inspect every `task.assignee_changed` event, not only current `TaskAssignee`.
 - **Postponement pending**: decide its `DailyPlanAdjustment`; do not edit the baseline.
 - **Close stale**: inspect semantic task timeline, RLZ state, comments, and 1H slots after the latest close.
+### Manager FINAL report
+
+The scheduled `RLZ_DAILY_CONTROL` FINAL variant runs at 16:40 in
+`settings.REALIZATION_TIMEZONE` (PRECHECK remains 16:10 and CORRECTION 17:05).
+It uses the same baseline, event, progress, compliance, deadline and close
+facts as the Daily Realization view. Scheduled delivery always includes
+`ga@primexeu.com` and `130primex.eu@gmail.com`; delivery runs are idempotent.
+Plan Realization and Deadline Compliance are reported separately, with each
+employee's tasks, day-scoped reason/comment, postponement history, approval and
+CLEAN DAY/ACTION REQUIRED state.

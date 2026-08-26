@@ -24,7 +24,19 @@ from app.services.primeflow_report_delivery import configured_recipients
 REPORT_TYPE = "rlz_daily_control"
 SCHEDULE_TYPE = "RLZ_DAILY_CONTROL"
 REPORT_SLOT = "16:10"
-DEFAULT_VARIANT_TIMES = {"PRECHECK": "16:10", "FINAL": "16:30", "CORRECTION": "17:05"}
+DEFAULT_VARIANT_TIMES = {"PRECHECK": "16:10", "FINAL": "16:40", "CORRECTION": "17:05"}
+FINAL_REQUIRED_RECIPIENTS = ("ga@primexeu.com", "130primex.eu@gmail.com")
+
+
+def final_recipient_map(recipients: dict[str, list[str]]) -> dict[str, list[str]]:
+    """Ensure scheduled FINAL always reaches the mandated manager addresses."""
+    result = {key: list(recipients.get(key, [])) for key in ("to", "cc", "bcc")}
+    seen = {str(email).casefold() for values in result.values() for email in values}
+    for email in FINAL_REQUIRED_RECIPIENTS:
+        if email.casefold() not in seen:
+            result["to"].append(email)
+            seen.add(email.casefold())
+    return result
 TERMINAL = {"SENT", "ALREADY_SENT", "SKIPPED_NO_CHANGES"}
 
 
@@ -333,6 +345,8 @@ async def deliver_daily_rlz_control(
     if trigger_type == "MANUAL" and recipient_group == "default":
         recipient_group = f"manual-{uuid.uuid4().hex}"
     recipients_by_kind = recipient_map or await configured_recipients(SCHEDULE_TYPE)
+    if variant == "FINAL" and trigger_type == "SCHEDULED":
+        recipients_by_kind = final_recipient_map(recipients_by_kind)
     recipients = sum(recipients_by_kind.values(), [])
     report_time = report_time or (scheduled_for.strftime("%H:%M") if scheduled_for else REPORT_SLOT)
     subject = subject_for(day, report_time, variant)

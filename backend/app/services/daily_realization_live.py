@@ -249,11 +249,6 @@ async def build_live_daily_realization(
             adjustment_status = latest_due_adjustment.status if latest_due_adjustment else None
             approved = adjustment_status == "APPROVED"
             reopened = any(event.action == "task.reopened" for event in task_events)
-            removed = (
-                any(event.action == "task.removed_from_day" for event in task_events)
-                or task is None
-                or bool(task and not task.is_active)
-            )
             progress_delta = float(progress.get(task_id).completed_delta if progress.get(task_id) else 0)
             percentage_delta = sum(max(0, float((event.after or {}).get("value") or 0) - float((event.before or {}).get("value") or 0)) for event in task_events if event.action == "task.progress_changed")
             original_due = None
@@ -268,13 +263,14 @@ async def build_live_daily_realization(
                 if event.action == "task.status_changed" and str((event.after or {}).get("value")).upper() == "DONE":
                     completed_day = local_day(event.created_at)
             current_due = local_day(task.due_date) if task else None
-            postponed_today = any(
+            had_postponement_event = any(
                 event.action == "task.due_date_changed"
                 and semantic_local_day((event.before or {}).get("value")) == day
                 and semantic_local_day((event.after or {}).get("value"))
                 and semantic_local_day((event.after or {}).get("value")) > day
                 for event in due_events
             )
+            postponed_today = bool(had_postponement_event and current_due and current_due > day)
             deadline_was_today = bool(original_due == day or (original is None and current_due == day)) or any(
                 semantic_local_day((event.before or {}).get("value")) == day for event in due_events
             )
@@ -290,14 +286,13 @@ async def build_live_daily_realization(
                 current_due_date=current_due, created_date=local_day(task.created_at) if task else None,
                 completed_date=completed_day, status=task.status if task else "TODO",
                 progress_delta=max(progress_delta, percentage_delta),
-                postponed=postponed_today or bool(original and current_due and current_due > day),
+                postponed=bool(postponed_today and current_due and current_due > day),
                 postponement_approved=approved, reopened=reopened,
-                blocked=bool(task and task.is_bllok and (task.status or "").upper() != "DONE"),
-                removed=removed, reassigned_out=was_assigned_out, reassigned_in=was_assigned_in,
+                reassigned_out=was_assigned_out, reassigned_in=was_assigned_in,
             ))
             state = states.get((person_id, task_id))
             issues = []
-            if classification in {"NO_PROGRESS", "POSTPONED_UNAPPROVED", "BLOCKED"} and not (state and state.reason_code): issues.append("MISSING_REASON")
+            if classification in {"NO_PROGRESS", "POSTPONED_UNAPPROVED"} and not (state and state.reason_code): issues.append("MISSING_REASON")
             if state and state.reason_code == "OTHER" and not (state.comment or "").strip(): issues.append("MISSING_REQUIRED_COMMENT")
             reason_missing = requirement.reason_required and not (state and state.reason_code)
             comment_missing = requirement.comment_required and not (state and (state.comment or "").strip())
@@ -322,7 +317,13 @@ async def build_live_daily_realization(
                 "classification": classification, "in_original_plan": bool(original),
                 "progress_today": percentage_delta, "completed_delta": progress_delta,
                 "reason_code": state.reason_code if state else None, "comment": state.comment if state else None,
-                "last_change": task_events[-1].created_at.isoformat() if task_events else None,
+                "last_change": max(
+                    [event.created_at for event in task_events]
+                    + ([progress.get(task_id).updated_at] if progress.get(task_id) and progress.get(task_id).updated_at else [])
+                    + ([state.updated_at] if state and state.updated_at else [])
+                    + ([latest_due_adjustment.decided_at or latest_due_adjustment.created_at] if latest_due_adjustment else []),
+                    default=None,
+                ).isoformat() if (task_events or progress.get(task_id) or state or latest_due_adjustment) else None,
                 "postponement_count": sum(
                     1 for event in due_events
                     if semantic_local_day((event.after or {}).get("value"))
@@ -338,6 +339,7 @@ async def build_live_daily_realization(
                 "deadline_was_today": deadline_was_today,
                 "deadline_is_overdue": deadline_is_overdue,
                 "postponed_today": postponed_today,
+                "had_postponement_event": had_postponement_event,
                 "deadline_completed": bool(deadline_was_today and completed_today),
                 "deadline_critical": bool((original or {}).get("is_deadline_important") or (task and task.is_deadline_important)),
                 "action_required": action_required,
@@ -371,7 +373,7 @@ async def build_live_daily_realization(
     for person in people:
         close = close_by_user.get(person["user_id"])
         latest_change = max((datetime.fromisoformat(row["last_change"]) for row in person["tasks"] if row.get("last_change")), default=None)
-        person["close_state"] = "REOPENED" if close and close.action == "REOPEN" else "STALE" if close and latest_change and latest_change > close.created_at else "CLOSED" if close else "OPEN"
+        person["close_state"] = "REOPENED" if close and close.action == "REOPEN" else "STALE" if close and latest_change and latest_change > close.created_at else "SAVED" if close else "OPEN"
     return {
         "day": day.isoformat(), "department_id": str(department_id),
         "timezone": settings.REALIZATION_TIMEZONE,

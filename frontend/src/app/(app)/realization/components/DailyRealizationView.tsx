@@ -21,7 +21,7 @@ const pct = (value: number | null) => value == null ? "N/A" : `${value}%`
 const outcomeLabel: Record<string, string> = {
   REALIZED_AS_PLANNED: "Done sipas planit", IN_PROGRESS: "Në progres", NO_PROGRESS: "Pa progres",
   POSTPONED_APPROVED: "Shtyrë · aprovuar", POSTPONED_UNAPPROVED: "Shtyrë · pa aprovuar",
-  WAITING_CONFIRMATION: "Në konfirmim", BLOCKED: "Bllokuar", COMPLETED_LATE: "Kryer me vonesë",
+  WAITING_CONFIRMATION: "Në konfirmim", COMPLETED_LATE: "Kryer me vonesë",
   COMPLETED_EARLY: "Kryer më herët", ADDITIONAL_COMPLETED: "Extra done", ADDED_DURING_DAY: "Shtuar sot",
   REOPENED: "Rihapur", REASSIGNED_OUT: "Transferuar jashtë",
   REASSIGNED_IN: "Transferuar brenda",
@@ -146,7 +146,7 @@ export function DailyRealizationView() {
   const tasks = (selected?.tasks || []).filter(task =>
     (classification === "ALL" || task.classification === classification) &&
     (source === "ALL" || task.source_type === source) &&
-    (!exceptionsOnly || task.issues.length > 0 || ["NO_PROGRESS", "BLOCKED", "REOPENED", "REASSIGNED_OUT", "REASSIGNED_IN", "POSTPONED_UNAPPROVED", "POSTPONED_APPROVED"].includes(task.classification))
+    (!exceptionsOnly || task.issues.length > 0 || ["NO_PROGRESS", "REOPENED", "REASSIGNED_OUT", "REASSIGNED_IN", "POSTPONED_UNAPPROVED", "POSTPONED_APPROVED"].includes(task.classification))
   )
   const classifications = Array.from(new Set((data?.people || []).flatMap(person => person.tasks.map(task => task.classification)))).sort()
 

@@ -16,6 +16,7 @@ from app.models.system_task_template import SystemTaskTemplate
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.task_daily_progress import TaskDailyProgress
+from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.models.department import Department
@@ -138,13 +139,60 @@ async def relevant_tasks(db: AsyncSession, *, user_id: uuid.UUID, day: date) -> 
             func.date(func.coalesce(Task.start_date, Task.due_date)) <= day,
         ).distinct().order_by(Task.due_date, Task.created_at)
     )).scalars().all()
-    return list(rows)
+    result = {task.id: task for task in rows}
+    primary_statement = getattr(db, "statement", None)
+    # The immutable baseline and same-day semantic events keep a task in Daily
+    # RLZ even after a deadline/start-date mutation moves it out of the live
+    # membership predicate.
+    snapshots = (await db.execute(select(DailyPlannerSnapshot).where(DailyPlannerSnapshot.day_date == day))).scalars().all()
+    baseline_ids: set[uuid.UUID] = set()
+    for snapshot in snapshots:
+        for person in (snapshot.payload or {}).get("people", []):
+            if str(person.get("user_id")) != str(user_id):
+                continue
+            for item in person.get("tasks") or []:
+                try:
+                    baseline_ids.add(uuid.UUID(str(item.get("task_id"))))
+                except (TypeError, ValueError):
+                    pass
+    event_rows = (await db.execute(select(AuditLog).where(
+        AuditLog.entity_type == "task", AuditLog.action.in_(("task.due_date_changed", "task.assignee_changed")),
+        AuditLog.created_at >= day_bounds(day)[0], AuditLog.created_at <= day_bounds(day)[1],
+    ))).scalars().all()
+    event_ids: set[uuid.UUID] = set(baseline_ids)
+    for event in event_rows:
+        before, after = event.before or {}, event.after or {}
+        owners = set(before.get("assignee_ids", [])) | set(after.get("assignee_ids", []))
+        old_day = semantic_local_day(before.get("value")); new_day = semantic_local_day(after.get("value"))
+        if str(user_id) in owners or old_day == day or new_day == day:
+            event_ids.add(event.entity_id)
+    missing_ids = event_ids - set(result)
+    if missing_ids:
+        extra = (await db.execute(select(Task).outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id).where(
+            Task.id.in_(missing_ids), or_(Task.assigned_to == user_id, TaskAssignee.user_id == user_id, Task.id.in_(baseline_ids))
+        ).distinct())).scalars().all()
+        result.update({task.id: task for task in extra})
+    if primary_statement is not None and hasattr(db, "statement"):
+        db.statement = primary_statement
+    return sorted(result.values(), key=lambda task: (task.due_date or day, task.created_at))
 
 
 async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, day: date,
                                      now: datetime | None = None) -> dict:
     tasks = await relevant_tasks(db, user_id=user_id, day=day)
     task_ids = [task.id for task in tasks]
+    baseline_due: dict[uuid.UUID, date | None] = {}
+    for snapshot in (await db.execute(select(DailyPlannerSnapshot).where(DailyPlannerSnapshot.day_date == day))).scalars().all():
+        for person in (snapshot.payload or {}).get("people", []):
+            if str(person.get("user_id")) != str(user_id):
+                continue
+            for item in person.get("tasks") or []:
+                try:
+                    tid = uuid.UUID(str(item.get("task_id")))
+                except (TypeError, ValueError):
+                    continue
+                raw_due = item.get("planned_due_date")
+                baseline_due[tid] = date.fromisoformat(str(raw_due)[:10]) if raw_due else None
     states = {}
     slots = {}
     if task_ids:
@@ -188,15 +236,17 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
         comment = state.comment if state else None
         task_events = events_by_task.get(task.id, [])
         due_events = [event for event in task_events if event.action == "task.due_date_changed"]
-        deadline_was_today = bool(local_day(task.original_due_date) == day or (task.original_due_date is None and due == day)) or any(
+        baseline_deadline = baseline_due.get(task.id)
+        deadline_was_today = bool(baseline_deadline == day or (task.id not in baseline_due and due == day)) or any(
             semantic_local_day((event.before or {}).get("value")) == day for event in due_events
         )
-        postponed_today = any(
+        had_postponement_event = any(
             semantic_local_day((event.before or {}).get("value")) == day
             and semantic_local_day((event.after or {}).get("value"))
             and semantic_local_day((event.after or {}).get("value")) > day
             for event in due_events
         )
+        postponed_today = bool(had_postponement_event and due and due > day)
         issue_codes = task_issue_codes(status=status, due_date=due,
                                        requires_one_h_slot=bool(task.is_1h_report or task.is_r1),
                                        one_h_report_slot=slot, reason_code=reason, comment=comment, day=day,
@@ -213,7 +263,7 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
             "reason_code": reason, "reason_label": REASON_LABELS.get(reason),
             "comment": comment,
             "source_type": "system" if task.system_template_origin_id else "project" if task.project_id else "fast",
-            "planned_due_date": local_day(task.original_due_date).isoformat() if task.original_due_date else None,
+            "planned_due_date": baseline_deadline.isoformat() if baseline_deadline else None,
             "requires_explanation": requirement.requires_explanation,
             "reason_required": requirement.reason_required,
             "comment_required": requirement.comment_required,

@@ -80,18 +80,17 @@ def _task_row(
     planned_today = task.get("attribution") in {"planned_today", "system_schedule"}
     extra = task.get("attribution") == "added_after_weekly_plan"
     due_day = _local_day(source.due_date if source else task.get("effective_deadline"))
-    original_due_day = _local_day(source.original_due_date if source else task.get("planned_deadline"))
+    original_due_day = _local_day(task.get("planned_deadline")) if task.get("planned_deadline") else _local_day(source.original_due_date if source else None)
     tomorrow = next_working_day(day)
     unfinished = not completed and status in {"TODO", "IN_PROGRESS"}
     carryover = unfinished and due_day == tomorrow
-    postponed = unfinished and bool(
-        (original_due_day and due_day and due_day > original_due_day)
-        or (due_day and due_day > tomorrow)
+    postponed = bool((compliance or {}).get("postponed_today")) if compliance is not None else bool(
+        unfinished and due_day and original_due_day and due_day > original_due_day and original_due_day <= day
     )
     comment = (
         state.comment
         if state is not None and state.comment is not None
-        else task.get("user_comment")
+        else None
     )
     issues = list((compliance or {}).get("issues") or [])
     flags = [
@@ -118,6 +117,9 @@ def _task_row(
         "extra": extra,
         "carryover_next_day": carryover,
         "postponed": postponed,
+        "requires_explanation": bool((compliance or {}).get("requires_explanation")),
+        "compliance_deadline_was_today": bool((compliance or {}).get("deadline_was_today")),
+        "report_day": day.isoformat(),
         "planned_due_date": original_due_day.isoformat() if original_due_day else None,
         "due_date": due_day.isoformat() if due_day else None,
         "reason_code": state.reason_code if state else None,
@@ -133,6 +135,9 @@ def _task_row(
 
 def _summary(people: list[dict[str, Any]]) -> dict[str, int]:
     tasks = [task for person in people for task in person["tasks"]]
+    planned = sum(task["planned_today"] for task in tasks)
+    planned_done = sum(task["planned_today"] and task["completed_today"] for task in tasks)
+    deadline_today = sum(bool(task.get("compliance_deadline_was_today") or (task.get("planned_due_date") == task.get("report_day"))) for task in tasks)
     return {
         "departments_checked": len({person["department_id"] for person in people}),
         "employees_checked": len(people),
@@ -147,6 +152,9 @@ def _summary(people: list[dict[str, Any]]) -> dict[str, int]:
         "extras": sum(task["extra"] for task in tasks),
         "carryover_next_day": sum(task["carryover_next_day"] for task in tasks),
         "postponed": sum(task["postponed"] for task in tasks),
+        "planned_completed_today_count": planned_done,
+        "plan_realization_percentage": round(planned_done / planned * 100, 1) if planned else None,
+        "deadlines_today_count": deadline_today,
         "tasks_missing_reason": sum(any(issue.get("code") == "REASON_MISSING" for issue in task["issues"]) for task in tasks),
         "tasks_missing_comment": sum(any(issue.get("code") == "COMMENT_MISSING" for issue in task["issues"]) for task in tasks),
         "tasks_deadline_not_moved": sum(any(issue.get("code") == "DUE_DATE_NOT_MOVED" for issue in task["issues"]) for task in tasks),
@@ -208,7 +216,7 @@ async def build_daily_realization_report(
         raw_tasks_by_user[user.id] = list(merged.values())
 
     # Capture tasks added or completed after the official 16:20 snapshot. These
-    # rows make the 16:30 FINAL and 17:05 CORRECTION comparisons complete while
+    # rows make the 16:40 FINAL and 17:05 CORRECTION comparisons complete while
     # keeping the saved Weekly Planner snapshot as the deterministic baseline.
     user_ids = [user.id for user in users]
     current_tasks = (await db.execute(
@@ -476,5 +484,5 @@ def report_delta(final_report: dict[str, Any], current_report: dict[str, Any]) -
     delta = {**current_report, "variant": "CORRECTION", "people": changed_people}
     delta["summary"] = _summary(changed_people)
     delta["all_good"] = not changed_people
-    delta["narrative"] = "Ndryshimet pas raportit të orës 16:30."
+    delta["narrative"] = "Ndryshimet pas raportit të orës 16:40."
     return delta
