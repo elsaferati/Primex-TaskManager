@@ -67,7 +67,7 @@ Timeline labels derive deterministically from these facts: `PLANNED_FOR_DAY`, `S
 | Baseline task untouched | `NO_PROGRESS` |
 | Baseline task waiting | `WAITING_CONFIRMATION` |
 | BLL/work-block task | normal status classification; `is_bllok` is not a blocked outcome |
-| Baseline task due moved later | `POSTPONED_APPROVED` or `POSTPONED_UNAPPROVED` |
+| Baseline deadline actually moved later and remains later | `POSTPONED_APPROVED` or `POSTPONED_UNAPPROVED` |
 | Baseline owner removed | `REASSIGNED_OUT` |
 | New owner receives task | `REASSIGNED_IN` |
 | Baseline occurrence excluded/deactivated | classified from remaining facts; technical exclusion/deactivation event may remain in timeline |
@@ -102,7 +102,7 @@ The original baseline deadline defines the population. `deadlines_today_count` i
 
 ## 12. Approval semantics
 
-A due-date or assignee semantic change creates a PENDING `DailyPlanAdjustment` for each affected original employee. Manager/admin decisions are append-audited and store status, decision actor/time, reason, and comment. Approval never edits the baseline. Existing day-close approval remains a separate approval of the employee's closed day, not a substitute for a plan-change decision.
+An actual same-day postponement creates a PENDING `DailyPlanAdjustment` for each affected original employee. Reassignment and Planner exclusion never create adjustment approval rows. Manager/admin decisions are append-audited and store status, decision actor/time, reason, and comment. Approval never edits the baseline. Existing day-close approval remains a separate approval of the employee's closed day, not a substitute for a plan-change decision.
 
 ## 13. Assignee-change semantics
 
@@ -110,11 +110,18 @@ Baseline ownership is permanent for the day. If A is removed, A keeps the row as
 
 ## 14. Multiple-postponement semantics
 
+Historical postponement and final postponement are different facts. A
+26 → 27 → 26 chain retains `POSTPONED` and `MOVED_BACK_TO_TODAY` in the
+timeline, but the final classification and postponement KPI are based on the
+returned deadline and therefore are not postponed. The immutable baseline
+`planned_due_date` is the start-of-day deadline authority; planning day and
+deadline are separate concepts.
+
 Every `task.due_date_changed` row remains in `AuditLog`. Timeline ordering is `(created_at, id)`, so 26 → 27 → 29 → 30 is retained and the UI displays the postponement count. `original_due_date` is compatibility metadata only, never the history source.
 
 ## 15. Daily Close and stale behavior
 
-Close still recalculates existing Realization facts, enforces Daily RLZ compliance, and appends `RealizationDailyCloseEvent`. The close payload now also embeds the live employee Daily Realization. Later task semantic changes, task timestamps, RLZ state, comments, or 1H slot changes make the close `STALE`. Correction/reopen continues through superseding append-only events.
+Close still recalculates existing Realization facts, enforces Daily RLZ compliance, and appends `RealizationDailyCloseEvent`. The close payload also embeds the live employee Daily Realization. Daily Report and live Daily Realization call the same `resolve_daily_close_state` precedence rule. Later task semantic changes, task progress, RLZ Reason/Comment, 1H slot changes, or postponement decisions make the close `STALE`; unrelated employee facts do not. Correction/reopen continues through superseding append-only events.
 
 ## 16. API endpoints
 
@@ -170,9 +177,13 @@ Pure tests cover classification precedence, the required 8/5/1/1/1/+2 scenario, 
 
 The scheduled `RLZ_DAILY_CONTROL` FINAL variant runs at 16:40 in
 `settings.REALIZATION_TIMEZONE` (PRECHECK remains 16:10 and CORRECTION 17:05).
-It uses the same baseline, event, progress, compliance, deadline and close
-facts as the Daily Realization view. Scheduled delivery always includes
+Its FINAL adapter consumes `build_live_daily_realization`, the shared Daily
+metrics, and day-scoped compliance/close facts. It does not recalculate plan,
+postponement, deadline, BLL, or realization percentages. Scheduled delivery always includes
 `ga@primexeu.com` and `130primex.eu@gmail.com`; delivery runs are idempotent.
 Plan Realization and Deadline Compliance are reported separately, with each
 employee's tasks, day-scoped reason/comment, postponement history, approval and
-CLEAN DAY/ACTION REQUIRED state.
+CLEAN DAY/ACTION REQUIRED state. The HTML uses the PrimeFlow semantic palette:
+DONE `#C4FDC4`, IN_PROGRESS `#FFFF00`, TODO/NO_PROGRESS `#FFC4ED`,
+WAITING_CONFIRMATION `#FFEDD5`, critical warnings `#DC2626`, and header blue
+`#2563EB`. BLL is task-type metadata and never a BLOCKED result.

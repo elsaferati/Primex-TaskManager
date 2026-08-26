@@ -25,6 +25,7 @@ export const DAILY_RLZ_REASONS = [
 ] as const
 
 const DAILY_RLZ_EMPTY_REASON = "__EMPTY__"
+const DAILY_RLZ_VALIDATION_EVENT = "primeflow:daily-rlz-validation"
 const pendingDailyRlzSaves = new Set<Promise<void>>()
 
 function trackDailyRlzSave(operation: Promise<void>) {
@@ -47,6 +48,25 @@ function blockerTitle(title: string) {
   return title.split(/\r?\n/).map(line => line.trim()).find(Boolean) || title
 }
 
+function publishValidationErrors(blockers: Blocker[]) {
+  const errors = Object.fromEntries(blockers.map(blocker => [blocker.task_id, blocker.issues.map(issue => issue.code)]))
+  window.dispatchEvent(new CustomEvent(DAILY_RLZ_VALIDATION_EVENT, { detail: errors }))
+}
+
+function useFailedValidation(taskId: string | null | undefined, code: string, stillMissing: boolean) {
+  const [failed, setFailed] = React.useState(false)
+  React.useEffect(() => { if (!stillMissing) queueMicrotask(() => setFailed(false)) }, [stillMissing])
+  React.useEffect(() => {
+    const listener = (event: Event) => {
+      const errors = (event as CustomEvent<Record<string, string[]>>).detail || {}
+      setFailed(Boolean(taskId && errors[taskId]?.includes(code)))
+    }
+    window.addEventListener(DAILY_RLZ_VALIDATION_EVENT, listener)
+    return () => window.removeEventListener(DAILY_RLZ_VALIDATION_EVENT, listener)
+  }, [taskId, code])
+  return failed && stillMissing
+}
+
 export function dailyRlzStateByTask(report: DailyReportResponse | null) {
   const map = new Map<string, DailyRlzTaskState>()
   for (const item of [...(report?.tasks_today || []), ...(report?.tasks_overdue || [])]) {
@@ -66,6 +86,7 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
 }) {
   const { apiFetch } = useAuth()
   const [saving, setSaving] = React.useState(false)
+  const failed = useFailedValidation(taskId, "REASON_MISSING", Boolean(state?.reason_missing))
   if (!taskId) return <span>—</span>
   if (!state?.reason_required) return <span className="text-slate-400">{state?.reason_label || "—"}</span>
   return <Select value={state?.reason_code || ""} disabled={!state?.is_editable || saving}
@@ -90,7 +111,7 @@ export function DailyRlzReasonCell({ taskId, day, state, onSaved }: {
       } catch (error) { toast.error(error instanceof Error ? error.message : "Arsyeja nuk u ruajt") }
       finally { setSaving(false) }
     }}>
-    <SelectTrigger title={state.reason_missing ? "Kërkon sqarim" : undefined} className={cn("h-7 min-w-[150px] bg-white text-[11px]", state.reason_missing && "border-amber-500 bg-amber-50")}><SelectValue placeholder="Zgjidh arsyen"/></SelectTrigger>
+    <SelectTrigger title={state.reason_missing ? "Kërkon sqarim" : undefined} className={cn("h-7 min-w-[150px] bg-white text-[11px]", state.reason_missing && "border-amber-500 bg-amber-50", failed && "border-red-500 bg-red-50 ring-1 ring-red-300")}><SelectValue placeholder="Zgjidh arsyen"/></SelectTrigger>
     <SelectContent>
       <SelectItem value={DAILY_RLZ_EMPTY_REASON}>Empty</SelectItem>
       {DAILY_RLZ_REASONS.map(([code,label]) => <SelectItem key={code} value={code}>{label}</SelectItem>)}
@@ -111,6 +132,7 @@ export function DailyRlzCommentField({ taskId, day, state, onSaved }: {
   const { apiFetch } = useAuth()
   const [value, setValue] = React.useState(state?.comment ?? "")
   const [saving, setSaving] = React.useState(false)
+  const failed = useFailedValidation(taskId, "COMMENT_MISSING", Boolean(state?.comment_missing))
 
   React.useEffect(() => { queueMicrotask(() => setValue(state?.comment ?? "")) }, [state?.comment, taskId])
 
@@ -141,7 +163,7 @@ export function DailyRlzCommentField({ taskId, day, state, onSaved }: {
   }
 
   if (!state?.comment_required) return <span className="text-slate-400">{state?.comment || "—"}</span>
-  return <div className={cn("flex items-center gap-2 rounded px-1", state.comment_missing && "bg-amber-50")}>
+  return <div className={cn("flex items-center gap-2 rounded px-1", state.comment_missing && "bg-amber-50", failed && "border border-red-400 bg-red-50 ring-1 ring-red-200")}>
     {state.comment_missing ? <span className="text-[10px] text-amber-700" title="Kërkon sqarim">!</span> : null}
     <input type="text" aria-label="Koment" className="h-4 w-full border-b border-slate-300 bg-transparent"
       value={value} disabled={!state?.is_editable || saving}
@@ -173,7 +195,9 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
       const checkResponse = await apiFetch(`/reports/daily-rlz-compliance?day=${day}`)
       const check = await checkResponse.json().catch(() => ({}))
       if (!checkResponse.ok || check.blockers?.length) {
-        setBlockers(check.blockers || check.detail?.blockers || [])
+        const nextBlockers = check.blockers || check.detail?.blockers || []
+        setBlockers(nextBlockers)
+        publishValidationErrors(nextBlockers)
         return
       }
       const dailyResponse = await apiFetch(`/realization/daily/prepare?department_id=${user.department_id}&day=${day}`, {
@@ -193,7 +217,9 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) {
         if (payload?.detail?.code === "RLZ_DAILY_REPORT_VALIDATION_FAILED") {
-          setBlockers(payload.detail.blockers || [])
+          const nextBlockers = payload.detail.blockers || []
+          setBlockers(nextBlockers)
+          publishValidationErrors(nextBlockers)
           return
         }
         throw new Error(payload?.detail?.message || payload?.detail || "Gjendja nuk u ruajt")

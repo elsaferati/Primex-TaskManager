@@ -14,6 +14,7 @@ from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
 from app.services.daily_realization_live import candidate_task_ids_for_person, day_bounds, local_day, timeline_from_events
 from app.services.daily_realization_metrics import calculate_daily_metrics
+from app.services.daily_realization_close_state import resolve_daily_close_state
 
 
 DAY = date(2026, 8, 26)
@@ -209,3 +210,27 @@ def test_reassignment_a_to_b_to_c_keeps_intermediate_owner_candidate():
             owner, baseline_by_user={a_id: {task_id: {}}},
             current_assignees=current, tasks={}, events_by_task=events_by_task, day=DAY,
         )
+
+
+def test_shared_close_state_resolver_agrees_on_stale_and_reopened():
+    closed_at = datetime(2026, 8, 26, 16, 40, tzinfo=timezone.utc)
+    changed_at = datetime(2026, 8, 26, 16, 41, tzinfo=timezone.utc)
+    assert resolve_daily_close_state(
+        latest_action="CLOSE", close_created_at=closed_at,
+        latest_relevant_change=changed_at, editable=False,
+    ) == ("STALE", True, True)
+    assert resolve_daily_close_state(
+        latest_action="REOPEN", close_created_at=closed_at,
+        latest_relevant_change=changed_at, editable=False,
+    ) == ("REOPENED", False, False)
+
+
+def test_move_away_and_back_is_not_final_postponement_but_keeps_history():
+    events = [
+        audit("task.due_date_changed", datetime(2026, 8, 26, 12, tzinfo=timezone.utc), "2026-08-26", "2026-08-27"),
+        audit("task.due_date_changed", datetime(2026, 8, 26, 14, tzinfo=timezone.utc), "2026-08-27", "2026-08-26"),
+    ]
+    timeline = timeline_from_events(day=DAY, baseline_task=None, events=events)
+    assert [row["type"] for row in timeline] == ["POSTPONED", "MOVED_BACK_TO_TODAY"]
+    assert classify_daily_task(case(current_due_date=DAY, postponed=False, status="TODO")) == "NO_PROGRESS"
+    assert classify_daily_task(case(current_due_date=DAY, postponed=False, status="IN_PROGRESS")) == "IN_PROGRESS"
