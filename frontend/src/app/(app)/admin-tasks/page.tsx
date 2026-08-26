@@ -710,7 +710,7 @@ const DEFAULT_GA_TIME_ENTRY_FORMAT: GaTimeEntryFormat = {
 
 const GA_TIME_BACKGROUND_COLORS = [
   "#FACC15",
-  "#F472B6",
+  "#A855F7",
   "#EF4444",
   "#22C55E",
   "#3B82F6",
@@ -718,7 +718,8 @@ const GA_TIME_BACKGROUND_COLORS = [
 
 const GA_TIME_STRONG_BACKGROUND_COLORS: Record<string, string> = {
   "#FEF3C7": "#FACC15",
-  "#FCE7F3": "#F472B6",
+  "#FCE7F3": "#A855F7",
+  "#F472B6": "#A855F7",
   "#FEE2E2": "#EF4444",
   "#DCFCE7": "#22C55E",
   "#DBEAFE": "#3B82F6",
@@ -970,7 +971,7 @@ function GaTimeRichTextEditor({
           <button
             key={color.value}
             type="button"
-            className="h-5 w-5 rounded-full border border-slate-400"
+            className="h-4 w-4 rounded-full border border-slate-400"
             style={{ backgroundColor: color.value }}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => applyCommand("foreColor", color.value)}
@@ -1199,7 +1200,7 @@ function GaTimeEntryEditor({
               key={color}
               type="button"
               className={cn(
-                "h-5 w-5 shrink-0 rounded-full border border-slate-300",
+                "h-4 w-4 shrink-0 rounded-full border border-slate-300",
                 format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
               )}
               style={{ backgroundColor: color }}
@@ -1276,7 +1277,7 @@ function GaTimeRowCommentEditor({
               key={color}
               type="button"
               className={cn(
-                "h-5 w-5 shrink-0 rounded-full border border-slate-300",
+                "h-4 w-4 shrink-0 rounded-full border border-slate-300",
                 format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
               )}
               style={{ backgroundColor: color }}
@@ -4154,7 +4155,7 @@ export default function AdminTasksPage() {
     const isCollapsed = collapsedAdminSections[sectionId]
     return (
       <Card className={sectionCardClass}>
-        <CardHeader className={cn(sectionHeaderClass, "relative pr-14", headerClassName)}>
+        <CardHeader className={cn(sectionHeaderClass, "relative pl-14", headerClassName)}>
           <div>
             <CardTitle className="text-base font-semibold text-slate-900">{title}</CardTitle>
             {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
@@ -4164,7 +4165,7 @@ export default function AdminTasksPage() {
             type="button"
             variant="outline"
             size="sm"
-            className="absolute right-3 top-3 h-8 w-8 p-0 text-lg font-semibold leading-none print:hidden"
+            className="absolute left-3 top-3 h-8 w-8 p-0 text-lg font-semibold leading-none print:hidden"
             aria-label={isCollapsed ? `Open ${title}` : `Close ${title}`}
             aria-expanded={!isCollapsed}
             onClick={() => {
