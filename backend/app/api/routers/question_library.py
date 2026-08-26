@@ -3,7 +3,7 @@ from __future__ import annotations
 import io
 import re
 import uuid
-from datetime import date, datetime, time, timedelta, timezone
+from datetime import datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from fastapi import APIRouter, Depends, HTTPException, Response, status
@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.api.deps import get_current_user, require_admin, require_manager_or_admin
 from app.config import settings
 from app.db import get_db
-from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
+from app.models.enums import TaskStatus, UserRole
 from app.models.question_library import (
     QuestionCategory,
     QuestionDailySignoff,
@@ -43,11 +43,9 @@ from app.schemas.question_library import (
     QuestionStatusSummary,
     QuestionStatusUpdate,
 )
-from app.services.notifications import add_notification, publish_notification
 
 
 router = APIRouter()
-QUESTION_TASK_START_DATE = date(2026, 8, 3)
 
 
 def can_manage_question_library(role: UserRole) -> bool:
@@ -93,22 +91,6 @@ def _question_task_description(guidance: str | None) -> str:
     return guidance or "Përgjigju me ✓ ose X te faqja Pyetje për Barazim."
 
 
-def _question_task_due_date(created_at: datetime) -> datetime:
-    try:
-        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
-    except ZoneInfoNotFoundError:
-        app_timezone = timezone.utc
-    local_created_at = created_at.astimezone(app_timezone)
-    if local_created_at.hour >= 12:
-        return (local_created_at + timedelta(days=1)).astimezone(timezone.utc)
-    local_end_of_day = datetime.combine(
-        local_created_at.date(),
-        time.max,
-        tzinfo=app_timezone,
-    )
-    return local_end_of_day.astimezone(timezone.utc)
-
-
 def _daily_signoff_window() -> tuple[datetime, datetime]:
     try:
         app_timezone = ZoneInfo(settings.APP_TIMEZONE)
@@ -118,22 +100,6 @@ def _daily_signoff_window() -> tuple[datetime, datetime]:
     local_start = datetime.combine(local_now.date(), time.min, tzinfo=app_timezone)
     local_end = local_start + timedelta(days=1)
     return local_start.astimezone(timezone.utc), local_end.astimezone(timezone.utc)
-
-
-def _question_tasks_enabled_at(moment: datetime) -> bool:
-    try:
-        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
-    except ZoneInfoNotFoundError:
-        app_timezone = timezone.utc
-    return moment.astimezone(app_timezone).date() >= QUESTION_TASK_START_DATE
-
-
-def _question_task_batch_date(moment: datetime) -> date:
-    try:
-        app_timezone = ZoneInfo(settings.APP_TIMEZONE)
-    except ZoneInfoNotFoundError:
-        app_timezone = timezone.utc
-    return moment.astimezone(app_timezone).date()
 
 
 def _question_batch_content(
@@ -214,70 +180,6 @@ async def _refresh_question_task_status(
     )
     task.status = TaskStatus.DONE.value if all_users_responded else TaskStatus.TODO.value
     task.completed_at = datetime.now(timezone.utc) if all_users_responded else None
-
-
-async def _split_or_update_edited_question_task(
-    db: AsyncSession,
-    question: QuestionDefinition,
-) -> None:
-    task = await db.get(Task, question.task_id) if question.task_id is not None else None
-    if task is None:
-        task = await db.scalar(
-            select(Task).where(Task.question_origin_id == question.id)
-        )
-    if task is None:
-        return
-
-    members = await _question_task_members(db, task.id)
-    if not members:
-        members = [question]
-    other_members = [item for item in members if item.id != question.id]
-    if not other_members:
-        question.task_id = task.id
-        task.question_batch_date = None
-        _apply_question_task_content(task, [question])
-        task.status = TaskStatus.TODO.value
-        task.completed_at = None
-        return
-
-    assignee_ids = list(
-        (
-            await db.execute(
-                select(TaskAssignee.user_id).where(TaskAssignee.task_id == task.id)
-            )
-        ).scalars().all()
-    )
-    question.task_id = None
-    if task.question_origin_id == question.id:
-        task.question_origin_id = other_members[0].id
-        task.fast_task_group_id = other_members[0].id
-    _apply_question_task_content(task, other_members)
-    await db.flush()
-    await _refresh_question_task_status(db, task)
-
-    separate_task = Task(
-        title=_question_task_title(question.text),
-        description=_question_task_description(question.guidance),
-        assigned_to=None,
-        created_by=task.created_by,
-        question_origin_id=question.id,
-        question_batch_date=None,
-        fast_task_group_id=question.id,
-        status=TaskStatus.TODO.value,
-        priority=task.priority,
-        phase=task.phase,
-        progress_percentage=0,
-        start_date=datetime.now(timezone.utc),
-        due_date=task.due_date,
-        is_deadline_important=task.is_deadline_important,
-        is_r1=task.is_r1,
-        is_active=task.is_active,
-    )
-    db.add(separate_task)
-    await db.flush()
-    question.task_id = separate_task.id
-    for user_id in assignee_ids:
-        db.add(TaskAssignee(task_id=separate_task.id, user_id=user_id))
 
 
 async def _detach_question_from_shared_task(
@@ -804,70 +706,7 @@ async def create_question_definition(
     )
     db.add(question)
     await db.flush()
-
-    now = datetime.now(timezone.utc)
-    if not _question_tasks_enabled_at(now):
-        await db.commit()
-        await db.refresh(question)
-        return await _question_out(db, question, current_user)
-
-    notifications = []
-    batch_date = _question_task_batch_date(now)
-    task = await db.scalar(
-        select(Task).where(Task.question_batch_date == batch_date)
-    )
-    if task is None:
-        participant_users = (
-            await db.execute(select(User).where(User.is_active.is_(True)).order_by(User.created_at))
-        ).scalars().all()
-        participants = [user for user in participant_users if _is_question_participant(user)]
-        task = Task(
-            title=_question_task_title(question.text),
-            description=_question_task_description(question.guidance),
-            assigned_to=None,
-            created_by=current_user.id,
-            question_origin_id=question.id,
-            question_batch_date=batch_date,
-            fast_task_group_id=question.id,
-            status=TaskStatus.TODO.value,
-            priority=TaskPriority.NORMAL.value,
-            phase=ProjectPhaseStatus.MEETINGS.value,
-            progress_percentage=0,
-            start_date=now,
-            due_date=_question_task_due_date(now),
-            is_deadline_important=True,
-            is_r1=True,
-            is_active=True,
-        )
-        db.add(task)
-        await db.flush()
-        question.task_id = task.id
-        for participant in participants:
-            db.add(TaskAssignee(task_id=task.id, user_id=participant.id))
-            notifications.append(
-                add_notification(
-                    db=db,
-                    user_id=participant.id,
-                    type=NotificationType.assignment,
-                    title="Detyrë e re",
-                    body=question.text,
-                    data={"task_id": str(task.id), "question_id": str(question.id)},
-                )
-            )
-    else:
-        question.task_id = task.id
-        await db.flush()
-        members = await _question_task_members(db, task.id)
-        _apply_question_task_content(task, members)
-        task.status = TaskStatus.TODO.value
-        task.completed_at = None
-
     await db.commit()
-    for notification in notifications:
-        try:
-            await publish_notification(user_id=notification.user_id, notification=notification)
-        except Exception:
-            pass
     await db.refresh(question)
     return await _question_out(db, question, current_user)
 
@@ -914,7 +753,6 @@ async def update_question_definition(
         await db.execute(
             delete(QuestionDailySignoff).where(QuestionDailySignoff.question_id == question.id)
         )
-        await _split_or_update_edited_question_task(db, question)
     await db.commit()
     await db.refresh(question)
     return await _question_out(db, question, current_user)
