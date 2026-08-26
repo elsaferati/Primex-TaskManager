@@ -17,8 +17,6 @@ class DailyClassificationInput:
     postponed: bool = False
     postponement_approved: bool = False
     reopened: bool = False
-    blocked: bool = False
-    removed: bool = False
     reassigned_out: bool = False
     reassigned_in: bool = False
 
@@ -38,8 +36,6 @@ def classify_daily_task(value: DailyClassificationInput) -> str:
         return "POSTPONED_APPROVED" if value.postponement_approved else "POSTPONED_UNAPPROVED"
     if value.in_baseline and completed_today:
         return "REALIZED_AS_PLANNED"
-    if value.in_baseline and value.blocked:
-        return "BLOCKED"
     if value.in_baseline and status == "WAITING_CONFIRMATION":
         return "WAITING_CONFIRMATION"
     if value.in_baseline and (status == "IN_PROGRESS" or value.progress_delta > 0):
@@ -60,5 +56,5 @@ def classify_daily_task(value: DailyClassificationInput) -> str:
 
 EXCEPTION_CLASSIFICATIONS = {
     "POSTPONED", "POSTPONED_APPROVED", "POSTPONED_UNAPPROVED", "NO_PROGRESS",
-    "BLOCKED", "REOPENED", "REASSIGNED_OUT", "REASSIGNED_IN",
+    "REOPENED", "REASSIGNED_OUT", "REASSIGNED_IN",
 }

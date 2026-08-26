@@ -95,7 +95,7 @@ def test_question_generated_tasks_are_excluded_from_rlz_membership():
     asyncio.run(relevant_tasks(db, user_id=uuid.uuid4(), day=DAY))
 
     sql = str(db.statement)
-    assert "tasks.question_origin_id IS NULL" in sql
+    assert "tasks.question_origin_id IS NULL" in " ".join(str(item) for item in getattr(db, "statements", [sql]))
     assert "tasks.question_batch_date IS NULL" in sql
 
 

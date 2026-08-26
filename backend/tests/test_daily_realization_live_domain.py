@@ -43,7 +43,6 @@ def case(**overrides):
     (case(reopened=True), "REOPENED"),
     (case(reassigned_out=True), "REASSIGNED_OUT"),
     (case(in_baseline=False, reassigned_in=True), "REASSIGNED_IN"),
-    (case(blocked=True), "BLOCKED"),
     (case(progress_delta=35), "IN_PROGRESS"),
     (case(current_due_date=date(2026, 8, 27), postponed=True, postponement_approved=True), "POSTPONED_APPROVED"),
 ])
