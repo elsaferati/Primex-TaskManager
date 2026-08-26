@@ -230,24 +230,6 @@ async def _save_ga_note_attachments(
 ) -> list[GaNoteAttachmentOut]:
     await _ensure_note_access(note, user, db)
 
-    existing_tasks = (
-        await db.execute(select(Task).where(Task.ga_note_origin_id == note.id).with_for_update())
-    ).scalars().all()
-    semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
-    affected_department_ids = {task.department_id for task in existing_tasks if task.department_id}
-    if note.department_id:
-        affected_department_ids.add(note.department_id)
-    if payload.assignee_ids:
-        affected_department_ids.update(
-            department_id for department_id in (
-                await db.execute(select(User.department_id).where(User.id.in_(payload.assignee_ids)))
-            ).scalars().all() if department_id
-        )
-    await ensure_daily_baselines_for_departments(
-        db, department_ids=affected_department_ids, actor=user,
-        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
-    )
-
     if not files:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="No files uploaded")
     if len(files) > settings.GA_NOTES_MAX_FILES:
@@ -490,6 +472,24 @@ async def update_ga_note_task_bundle(
     if note is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA note not found")
     await _ensure_note_access(note, user, db)
+
+    existing_tasks = (
+        await db.execute(select(Task).where(Task.ga_note_origin_id == note.id).with_for_update())
+    ).scalars().all()
+    semantic_before = {task.id: task_semantic_state(task) for task in existing_tasks}
+    affected_department_ids = {task.department_id for task in existing_tasks if task.department_id}
+    if note.department_id:
+        affected_department_ids.add(note.department_id)
+    if payload.assignee_ids:
+        affected_department_ids.update(
+            department_id for department_id in (
+                await db.execute(select(User.department_id).where(User.id.in_(payload.assignee_ids)))
+            ).scalars().all() if department_id
+        )
+    await ensure_daily_baselines_for_departments(
+        db, department_ids=affected_department_ids, actor=user,
+        day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
+    )
 
     if (
         payload.expected_updated_at is not None

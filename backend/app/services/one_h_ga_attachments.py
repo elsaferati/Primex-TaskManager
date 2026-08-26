@@ -92,16 +92,17 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
     if ga_user is not None:
         entries = (
             await db.execute(
-                select(GaTimeSlotTemplate)
-                .where(GaTimeSlotTemplate.user_id == ga_user.id)
-                .order_by(
-                    GaTimeSlotTemplate.day_of_week,
-                    GaTimeSlotTemplate.start_time,
-                    GaTimeSlotTemplate.sort_order,
-                    GaTimeSlotTemplate.created_at,
-                )
+            select(GaTimeSlotTemplate)
+            .where(GaTimeSlotTemplate.user_id == ga_user.id)
+            .order_by(
+                GaTimeSlotTemplate.day_of_week,
+                GaTimeSlotTemplate.start_time,
+                GaTimeSlotTemplate.sort_order,
+                GaTimeSlotTemplate.created_at,
             )
-        ).scalars().all()
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().all()
 
     cell_items: dict[tuple[int, time], list[dict[str, Any]]] = {}
     for entry in entries:
@@ -112,7 +113,9 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
             "bold": bool(entry.is_bold),
         })
 
-    meetings = (await db.execute(select(Meeting))).scalars().all()
+    meetings = (
+        await db.execute(select(Meeting).execution_options(populate_existing=True))
+    ).scalars().all()
     for meeting in meetings:
         meeting_time = _meeting_time(meeting)
         if meeting_time is None:
@@ -292,16 +295,17 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
     if ga_user is not None:
         entries = (
             await db.execute(
-                select(GaTimeSlotTemplate)
-                .where(GaTimeSlotTemplate.user_id == ga_user.id)
-                .order_by(
-                    GaTimeSlotTemplate.day_of_week,
-                    GaTimeSlotTemplate.start_time,
-                    GaTimeSlotTemplate.sort_order,
-                    GaTimeSlotTemplate.created_at,
-                )
+            select(GaTimeSlotTemplate)
+            .where(GaTimeSlotTemplate.user_id == ga_user.id)
+            .order_by(
+                GaTimeSlotTemplate.day_of_week,
+                GaTimeSlotTemplate.start_time,
+                GaTimeSlotTemplate.sort_order,
+                GaTimeSlotTemplate.created_at,
             )
-        ).scalars().all()
+            .execution_options(populate_existing=True)
+        )
+    ).scalars().all()
 
     cell_items: dict[tuple[int, time], list[dict[str, Any]]] = {}
     for entry in entries:
@@ -312,7 +316,9 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
             "bold": bool(entry.is_bold),
             "italic": bool(entry.is_italic),
         })
-    meetings = (await db.execute(select(Meeting))).scalars().all()
+    meetings = (
+        await db.execute(select(Meeting).execution_options(populate_existing=True))
+    ).scalars().all()
     for meeting in meetings:
         meeting_time = _meeting_time(meeting)
         if meeting_time is None:

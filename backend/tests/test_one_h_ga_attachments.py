@@ -215,6 +215,39 @@ LATE:
         self.assertIn("07:30<br>08:00", rendered)
         self.assertNotIn("<img", rendered)
 
+    async def test_timetable_email_reloads_latest_saved_content_on_each_render(self) -> None:
+        def entry(content: str):
+            return SimpleNamespace(
+                day_of_week=0,
+                start_time=DEFAULT_GA_TIME_TABLE_ROWS[3].start_time,
+                content=content,
+                background_color="#FFFFFF",
+                text_color="#0F172A",
+                is_bold=False,
+                is_italic=False,
+            )
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[
+            _result(list(DEFAULT_GA_TIME_TABLE_ROWS)),
+            _result([SimpleNamespace(id="ga-user")]),
+            _result([entry("OLD TIMETABLE VALUE")]),
+            _result([]),
+            _result(list(DEFAULT_GA_TIME_TABLE_ROWS)),
+            _result([SimpleNamespace(id="ga-user")]),
+            _result([entry("LATEST TIMETABLE VALUE")]),
+            _result([]),
+        ]))
+
+        first = await render_ga_time_table_html(db, date(2026, 8, 24))
+        latest = await render_ga_time_table_html(db, date(2026, 8, 24))
+
+        self.assertIn("OLD TIMETABLE VALUE", first)
+        self.assertNotIn("OLD TIMETABLE VALUE", latest)
+        self.assertIn("LATEST TIMETABLE VALUE", latest)
+        for call_index in (0, 2, 3, 4, 6, 7):
+            statement = db.execute.await_args_list[call_index].args[0]
+            self.assertTrue(statement.get_execution_options().get("populate_existing"))
+
     async def test_inline_tables_are_inserted_before_the_first_slot(self) -> None:
         document = build_report_document(
             {"guardrails": {"truncated": {}}, "items": {}},

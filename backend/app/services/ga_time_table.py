@@ -57,6 +57,10 @@ def format_ga_time_label(start_time: time, end_time: time) -> str:
 
 async def get_ga_time_table_rows(db: AsyncSession) -> list[GaTimeTableRow | GaTimeTableRowData]:
     rows = (
-        await db.execute(select(GaTimeTableRow).order_by(GaTimeTableRow.sort_order, GaTimeTableRow.start_time))
+        await db.execute(
+            select(GaTimeTableRow)
+            .order_by(GaTimeTableRow.sort_order, GaTimeTableRow.start_time)
+            .execution_options(populate_existing=True)
+        )
     ).scalars().all()
     return list(rows) if rows else list(DEFAULT_GA_TIME_TABLE_ROWS)
