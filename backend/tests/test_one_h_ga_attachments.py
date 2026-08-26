@@ -109,7 +109,7 @@ LATE:
         self.assertEqual(len(png_tables), 3)
         self.assertIn("IN PROGRESS: 0", png_text)
 
-    def test_temporary_png_recipient_is_removed_from_every_regular_header(self) -> None:
+    def test_130_stays_with_regular_recipients_and_only_ga_gets_extra_content(self) -> None:
         regular, ga = split_ga_recipient_map({
             "to": ["staff@primexeu.com"],
             "cc": ["130PRIMEX.EU@GMAIL.COM", "manager@primexeu.com"],
@@ -118,27 +118,27 @@ LATE:
 
         self.assertEqual(regular, {
             "to": ["staff@primexeu.com"],
-            "cc": ["manager@primexeu.com"],
+            "cc": ["130PRIMEX.EU@GMAIL.COM", "manager@primexeu.com"],
             "bcc": ["audit@primexeu.com"],
         })
         self.assertEqual(ga, {
-            "to": ["ga@primexeu.com", "130primex.eu@gmail.com"],
+            "to": ["ga@primexeu.com"],
             "cc": [],
             "bcc": [],
         })
 
-    def test_regular_cc_is_promoted_when_png_recipient_was_the_only_to_recipient(self) -> None:
+    def test_130_remains_the_regular_to_recipient(self) -> None:
         regular, ga = split_ga_recipient_map({
             "to": ["130primex.eu@gmail.com"],
             "cc": ["manager@primexeu.com"],
             "bcc": [],
         })
 
-        self.assertEqual(regular["to"], ["manager@primexeu.com"])
-        self.assertEqual(regular["cc"], [])
+        self.assertEqual(regular["to"], ["130primex.eu@gmail.com"])
+        self.assertEqual(regular["cc"], ["manager@primexeu.com"])
         self.assertIsNotNone(ga)
 
-    def test_ga_and_temporary_recipients_are_both_isolated_for_extra_content(self) -> None:
+    def test_ga_is_the_only_recipient_isolated_for_extra_content(self) -> None:
         regular, ga = split_ga_recipient_map({
             "to": ["ga@primexeu.com"],
             "cc": [],
@@ -147,7 +147,7 @@ LATE:
 
         self.assertEqual(regular["to"], [])
         self.assertEqual(ga, {
-            "to": ["ga@primexeu.com", "130primex.eu@gmail.com"],
+            "to": ["ga@primexeu.com"],
             "cc": [],
             "bcc": [],
         })

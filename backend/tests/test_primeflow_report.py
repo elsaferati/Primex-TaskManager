@@ -397,7 +397,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             [
                 "14:10 SLOTI 28.07.2026",
                 "11:50 SLOTI PARAPRAK 28.07.2026",
-                "BLLOK 14:30-15:30 28.07.2026",
+                "BLLOK 14:30-16:00 28.07.2026",
             ],
         )
         self.assertEqual(document.task_count, 3)
@@ -432,7 +432,7 @@ class PrimeFlowReportTests(unittest.TestCase):
                     f"{previous} SLOTI PARAPRAK 28.07.2026",
                 ]
                 if current == "14:10":
-                    expected_titles.append("BLLOK 14:30-15:30 28.07.2026")
+                    expected_titles.append("BLLOK 14:30-16:00 28.07.2026")
                 self.assertEqual([section.title for section in document.sections], expected_titles)
                 self.assertEqual(document.task_count, 2)
 
@@ -533,7 +533,7 @@ class PrimeFlowReportTests(unittest.TestCase):
 
         document = build_report_document(data, date(2026, 7, 28), "14:10")
         blocked_section = document.sections[-1]
-        self.assertEqual(blocked_section.title, "BLLOK 14:30-15:30 28.07.2026")
+        self.assertEqual(blocked_section.title, "BLLOK 14:30-16:00 28.07.2026")
         self.assertEqual([employee.name for employee in blocked_section.employees], ["ZDF", "ADF", "BP"])
 
         html = render_html(document)
@@ -759,11 +759,11 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertIn("color:#16a34a;text-decoration:line-through", html)
         self.assertIn("color:#2563eb;text-decoration:line-through", html)
 
-    def test_strike_report_windows_end_before_the_final_email_delivery(self) -> None:
+    def test_strike_report_windows_match_the_1h_delivery_intervals(self) -> None:
         report_day = date(2026, 8, 10)
         self.assertEqual(strike_interval_start(report_day, "10:00").strftime("%H:%M"), "08:00")
-        self.assertEqual(strike_interval_end(report_day, "10:00").strftime("%H:%M"), "09:00")
-        self.assertEqual(strike_interval_start(report_day, "11:00").strftime("%H:%M"), "09:00")
+        self.assertEqual(strike_interval_end(report_day, "10:00").strftime("%H:%M"), "10:00")
+        self.assertEqual(strike_interval_start(report_day, "11:00").strftime("%H:%M"), "10:00")
         self.assertEqual(strike_interval_end(report_day, "11:00").strftime("%H:%M"), "11:00")
         self.assertEqual(strike_interval_start(report_day, "11:50").strftime("%H:%M"), "11:00")
         self.assertEqual(strike_interval_end(report_day, "11:50").strftime("%H:%M"), "11:50")
@@ -773,6 +773,37 @@ class PrimeFlowReportTests(unittest.TestCase):
         self.assertEqual(strike_interval_end(report_day, "14:20").strftime("%H:%M"), "14:20")
         self.assertEqual(strike_interval_start(report_day, "16:00").strftime("%H:%M"), "14:20")
         self.assertEqual(strike_interval_end(report_day, "16:00").strftime("%H:%M"), "16:00")
+
+    def test_0929_strike_is_blue_at_1000_then_green_at_1100(self) -> None:
+        report_day = date(2026, 8, 26)
+        description = "[[done]]1. Completed at 09:29[[/done]]"
+        ten_start = strike_interval_start(report_day, "10:00")
+        ten_end = strike_interval_end(report_day, "10:00")
+        eleven_start = strike_interval_start(report_day, "11:00")
+        eleven_end = strike_interval_end(report_day, "11:00")
+        event = SimpleNamespace(
+            id="strike-0929",
+            point_key=point_key("1. Completed at 09:29"),
+            point_text="1. Completed at 09:29",
+            action="STRUCK",
+            occurred_at=datetime(2026, 8, 26, 9, 29, tzinfo=ten_start.tzinfo),
+        )
+
+        _, at_ten = render_description_for_interval(
+            description,
+            [event],
+            interval_start=ten_start,
+            interval_end=ten_end,
+        )
+        _, at_eleven = render_description_for_interval(
+            description,
+            [event],
+            interval_start=eleven_start,
+            interval_end=eleven_end,
+        )
+
+        self.assertIn("[[done:blue]]", at_ten)
+        self.assertIn("[[done:green]]", at_eleven)
 
     def test_timestamp_does_not_change_a_struck_point_identity_or_colour(self) -> None:
         text = "[[done]]1. Test1[[/done]] 08:46 13.08\n2. Test2"

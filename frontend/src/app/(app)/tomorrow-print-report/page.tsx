@@ -124,7 +124,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
 
   const generateReport = async (forPreview = false) => {
     try {
-      const response = await apiFetch(`${API}/preview`)
+      const response = await apiFetch(`${API}/preview?generated_at=${Date.now()}`, { cache: "no-store" })
       if (!response?.ok) throw new Error(await response?.text())
       setPreview(await response.json())
       toast.success(forPreview ? "Email preview ready" : `${reportName} generated`)

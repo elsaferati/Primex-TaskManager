@@ -2,6 +2,7 @@ from io import BytesIO
 from datetime import date
 
 from openpyxl import load_workbook
+from openpyxl.cell.rich_text import CellRichText
 
 from app.services.tomorrow_print_report import (
     _comment_user_initials,
@@ -18,18 +19,32 @@ from app.services.tomorrow_print_report import (
 )
 
 
-def test_required_shtypi_recipient_is_always_in_to_without_duplicates() -> None:
+def test_required_shtypi_recipients_are_always_in_to_without_duplicates() -> None:
     assert ensure_required_shtypi_recipient({
         "to": ["ga@primexeu.com"], "cc": ["info@primexeu.com"], "bcc": []
     }) == {
-        "to": ["ga@primexeu.com", "130primex.eu@gmail.com"],
-        "cc": ["info@primexeu.com"],
+        "to": [
+            "ga@primexeu.com",
+            "130primex.eu@gmail.com",
+            "313primex.eu@gmail.com",
+            "131primex.eu@gmail.com",
+            "info@primexeu.com",
+        ],
+        "cc": [],
         "bcc": [],
     }
     assert ensure_required_shtypi_recipient({
-        "to": ["ga@primexeu.com"], "cc": ["130PRIMEX.EU@GMAIL.COM"], "bcc": []
+        "to": ["ga@primexeu.com", "313PRIMEX.EU@GMAIL.COM"],
+        "cc": ["130PRIMEX.EU@GMAIL.COM"],
+        "bcc": ["INFO@PRIMEXEU.COM"],
     }) == {
-        "to": ["ga@primexeu.com", "130primex.eu@gmail.com"],
+        "to": [
+            "ga@primexeu.com",
+            "313PRIMEX.EU@GMAIL.COM",
+            "130primex.eu@gmail.com",
+            "131primex.eu@gmail.com",
+            "info@primexeu.com",
+        ],
         "cc": [],
         "bcc": [],
     }
@@ -55,14 +70,20 @@ def test_staff_comment_users_keep_fixed_order_then_pcm_weekly_plan_order() -> No
         ],
     }
 
-    assert _comment_user_initials(payload) == ["AT", "RA", "EF", "EH", "LH", "FG", "BK", "ZM"]
+    assert _comment_user_initials(payload) == ["AT", "EF", "RA", "EH", "LH", "FG", "BK", "ZM"]
 
 
 def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     initials = ["AT", "RA", "EF", "EH", "LH", "FG", "BK"]
     html = _comments_table_html(initials)
     assert 'data-user-comments-lines="true"' in html
-    assert html.count('data-user-comment-line="true"') == 3
+    assert html.count('data-user-comment-line="true"') == 2
+    assert html.count('data-comment-department=') == 3
+    assert '<strong>DEV:</strong>' in html
+    assert '<strong>GD:</strong>' in html
+    assert '<strong>PCM:</strong>' in html
+    assert html.index("<strong>AT:</strong>") < html.index("<strong>EF:</strong>")
+    assert html.index("<strong>EF:</strong>") < html.index("<strong>RA:</strong>")
     assert html.index("<strong>AT:</strong>") < html.index("<strong>BK:</strong>")
     assert html.count("data-user-comment=") == len(initials)
     assert html.count('width="100%"') >= 3
@@ -77,10 +98,11 @@ def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     title_cells = [cell for row in sheet.iter_rows() for cell in row if cell.value == "KOMENTE PER STAF"]
     assert len(title_cells) == 1
     title_row = title_cells[0].row
-    assert sheet.cell(title_row + 1, 1).value.startswith("AT: ____________________")
+    assert sheet.cell(title_row + 1, 1).value.startswith("DEV: AT: ____________________")
     assert "EF: ____________________" in sheet.cell(title_row + 1, 1).value
-    assert sheet.cell(title_row + 2, 1).value.startswith("EH: ____________________")
-    assert sheet.cell(title_row + 3, 1).value.startswith("FG: ____________________")
+    assert "LH: ____________________" in sheet.cell(title_row + 1, 1).value
+    assert sheet.cell(title_row + 2, 1).value.startswith("GD: FG: ____________________")
+    assert "PCM: BK: ____________________" in sheet.cell(title_row + 2, 1).value
     values = [str(cell.value or "") for row in sheet.iter_rows() for cell in row]
     assert "INC" not in values
     assert "KOM" not in values
@@ -97,7 +119,7 @@ def test_html_table_keeps_grid_styles_inline_for_email_clients() -> None:
     assert '<table role="presentation" width="100%" border="1"' in report_html
     assert 'style="width:100%;border-collapse:collapse;table-layout:fixed' in report_html
     assert 'style="border:1px solid #000;padding:5px' in report_html
-    assert '<col width="4%"><col width="9%"><col width="14.5%" span="6">' in report_html
+    assert '<col width="2.5%"><col width="10.5%"><col width="14.5%" span="6">' in report_html
     assert ">LLOJI DHE SLOTI</th>" in report_html
     assert '<th colspan="6"' in report_html
     assert ">TASKS</th>" in report_html
@@ -115,7 +137,37 @@ def test_task_grid_uses_light_dividers_inside_a_slot_and_bold_slot_labels() -> N
 
     assert "border-top:2px solid #111827" in report_html
     assert "border-top:1px solid #cbd5e1" in report_html
-    assert 'style="border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word;font-weight:700;border-top:2px solid #111827">BLL</th>' in report_html
+    assert "border-bottom:2px solid #111827" in report_html
+    assert "border:3px solid #111827" in report_html
+    assert "border-top:3px solid #111827;border-bottom:3px solid #111827" in report_html
+    assert 'style="border:1px solid #000;padding:5px;vertical-align:top;text-align:left;overflow-wrap:anywhere;word-break:break-word;font-weight:700;border-top:2px solid #111827;border-bottom:2px solid #111827">BLL</th>' in report_html
+
+
+def test_excel_task_grid_has_thick_header_outer_frame_and_category_edges() -> None:
+    _, content, _ = _excel_table_attachment(
+        [
+            ("1H 10:00", [{"title": f"Task {index}"} for index in range(7)], False),
+            ("1H 11:00", [{"title": "Next task"}], False),
+        ],
+        [],
+        date(2026, 8, 14),
+        include_meetings=False,
+    )
+    sheet = load_workbook(BytesIO(content)).active
+
+    # Row 5 is the task header; rows 6-7 are one multi-line category; row 8 is the next category.
+    assert sheet["A5"].border.top.style == "medium"
+    assert sheet["A5"].border.bottom.style == "medium"
+    assert sheet["A5"].border.left.style == "medium"
+    assert sheet["H5"].border.right.style == "medium"
+    assert sheet["C6"].border.top.style == "medium"
+    assert sheet["C6"].border.bottom.style == "thin"
+    assert sheet["C7"].border.top.style == "thin"
+    assert sheet["C7"].border.bottom.style == "medium"
+    assert sheet["C8"].border.top.style == "medium"
+    assert sheet["C8"].border.bottom.style == "medium"
+    assert sheet["A8"].border.left.style == "medium"
+    assert sheet["H8"].border.right.style == "medium"
 
 
 def test_one_h_checklists_render_side_by_side_before_the_task_grid() -> None:
@@ -272,7 +324,8 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert report_html.count('data-task-badge="due-date"') == 1
     assert 'data-badge-position="bottom-right"' in report_html
     assert 'data-due-today="true"' in report_html
-    assert ">14.08.2026</span>" in report_html
+    assert ">SOT</span>" in report_html
+    assert ">14.08.2026</span>" not in report_html
     assert "DUE TODAY" not in report_html
     assert "background-color:#EFF6FF" in report_html
     assert "border:1px solid #93C5FD" in report_html
@@ -292,6 +345,68 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert "DUE" not in sheet["C6"].value
     assert "[08:00]" in sheet["D6"].value
     assert sheet["D6"].border.left.color.rgb.endswith("DC2626")
+
+
+def test_ga_personal_purple_overrides_deadline_red_in_email_and_excel() -> None:
+    ga_deadline = {
+        "title": "EF/GA: Personal deadline",
+        "status": "TODO",
+        "is_deadline_important": True,
+        "due_date": "2026-08-14",
+    }
+    other_deadline = {
+        "title": "ER/KA: Personal deadline",
+        "status": "TODO",
+        "is_deadline_important": True,
+        "due_date": "2026-08-14",
+    }
+    rows = [("P: GA", [ga_deadline], True), ("P: KA", [other_deadline], True)]
+
+    report_html = _html_table(rows, report_date=date(2026, 8, 14))
+    assert 'bgcolor="#D8B4FE"' in report_html
+    assert 'bgcolor="#DC2626"' in report_html
+    assert report_html.count('data-task-badge="due-date"') == 2
+    assert report_html.count(">SOT</span>") == 2
+
+    _, content, _ = _excel_table_attachment(rows, [], date(2026, 8, 14))
+    sheet = load_workbook(BytesIO(content)).active
+    assert sheet["C6"].fill.fgColor.rgb.endswith("D8B4FE")
+    assert sheet["C7"].fill.fgColor.rgb.endswith("DC2626")
+
+
+def test_wfc_title_token_is_red_and_uses_white_highlight_on_red_deadline_cards() -> None:
+    rows = [
+        ("1H 10:00", [{"title": "EF: PF: WFC TEST P", "status": "TODO"}], False),
+        (
+            "1H 11:00",
+            [{"title": "EF: PF: WFC DEADLINE", "is_deadline_important": True, "due_date": "2026-08-14"}],
+            False,
+        ),
+        (
+            "P: GA",
+            [{"title": "EF/GA: WFC PERSONAL", "is_deadline_important": True, "due_date": "2026-08-14"}],
+            True,
+        ),
+    ]
+
+    report_html = _html_table(rows, report_date=date(2026, 8, 14))
+    assert report_html.count('data-task-token="wfc"') == 3
+    assert report_html.count("color:#DC2626;font-weight:800;") == 3
+    assert report_html.count("background-color:#FFFFFF;border-radius:2px;padding:0 2px;") == 1
+    assert 'bgcolor="#DC2626"' in report_html
+    assert 'bgcolor="#D8B4FE"' in report_html
+
+    _, content, _ = _excel_table_attachment(rows, [], date(2026, 8, 14))
+    sheet = load_workbook(BytesIO(content), rich_text=True).active
+    assert isinstance(sheet["C6"].value, CellRichText)
+    assert isinstance(sheet["C7"].value, CellRichText)
+    assert isinstance(sheet["C8"].value, CellRichText)
+    normal_wfc = next(block for block in sheet["C6"].value if getattr(block, "text", "") == "WFC")
+    red_card_wfc = next(block for block in sheet["C7"].value if getattr(block, "text", "") == "WFC")
+    purple_card_wfc = next(block for block in sheet["C8"].value if getattr(block, "text", "") == "WFC")
+    assert normal_wfc.font.color.rgb == "FFDC2626"
+    assert red_card_wfc.font.color.rgb == "FFFFFF00"
+    assert purple_card_wfc.font.color.rgb == "FFDC2626"
 
 
 def test_future_deadline_uses_plain_white_date_text_on_the_red_cell() -> None:
@@ -344,21 +459,48 @@ def test_deadline_and_0800_tasks_have_a_dedicated_printed_row() -> None:
     assert [item["title"] for item in important_row[1]] == ["Deadline task", "08:00 task"]
 
 
-def test_personal_row_label_has_a_gap_and_uses_compact_single_line_schedules() -> None:
-    rows = _task_rows({}, date(2026, 8, 14))
-    personal_row = next(row for row in rows if row[2])
+def test_personal_tasks_are_split_exclusively_into_ga_ka_and_px_rows() -> None:
+    rows = _task_rows(
+        {
+            "personal": [
+                {"title": "EF/GA: WFC", "date": "2026-08-14"},
+                {"title": "GA/KA: GA wins", "date": "2026-08-14"},
+                {"title": "ER: KA: Teams", "date": "2026-08-14"},
+                {"title": "EP/ESH: Personal PX", "date": "2026-08-14"},
+                {"title": "Personal task without initials", "date": "2026-08-14"},
+            ]
+        },
+        date(2026, 8, 14),
+    )
+    personal_rows = [row for row in rows if row[2]]
 
-    assert personal_row[0] == "P:\nGA 08:15 / 13:15\n\nDV/LH 10:15 / 14:30"
-    report_html = _html_table([personal_row])
+    assert [row[0] for row in personal_rows] == [
+        "P: GA\n08:15 / 13:15",
+        "P: KA\n08:30 / 13:15",
+        "P: PX\n08:45 / 14:00",
+    ]
+    assert {item["title"] for item in personal_rows[0][1]} == {"EF/GA: WFC", "GA/KA: GA wins"}
+    assert [item["title"] for item in personal_rows[1][1]] == ["ER: KA: Teams"]
+    assert {item["title"] for item in personal_rows[2][1]} == {
+        "EP/ESH: Personal PX",
+        "Personal task without initials",
+    }
+    assert sum(len(row[1]) for row in personal_rows) == 5
+    report_html = _html_table(personal_rows)
     assert "font-size:10px" in report_html
-    assert "GA 08:15 / 13:15<br><br>DV/LH 10:15 / 14:30" in report_html
+    assert "P: GA" in report_html
+    assert "P: KA" in report_html
+    assert "P: PX" in report_html
+    assert "P: GA<br>08:15 / 13:15" in report_html
+    assert "P: KA<br>08:30 / 13:15" in report_html
+    assert "P: PX<br>08:45 / 14:00" in report_html
 
 
-def test_blocked_row_label_includes_the_1550_report_time() -> None:
+def test_blocked_row_label_uses_full_afternoon_interval_and_keeps_report_time() -> None:
     rows = _task_rows({}, date(2026, 8, 14))
     blocked_row = next(row for row in rows if row[0].startswith("BLL"))
 
-    assert blocked_row[0] == "BLL\n14:30 - 15:30\nRAP 15:50"
+    assert blocked_row[0] == "BLL\n14:30 - 16:00\nRAP 15:50"
 
 
 def test_excel_status_colours_match_email_and_ga_personal_overrides_status() -> None:
@@ -473,6 +615,8 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     report = asyncio.run(build_today_print_report(date(2026, 8, 24), include_attachment=True))
 
     assert report["target_date"] == "2026-08-24"
+    assert report["subject"] == "1H SHTYPI  SOT— 24.08.2026"
+    assert "1H SHTYPI  SOT— 24.08.2026" in report["html"]
     assert "Today task" in report["html"]
     assert "Tomorrow task" not in report["html"]
     assert "Today meeting" in report["html"]
@@ -497,6 +641,8 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
 
     tomorrow = asyncio.run(build_tomorrow_print_report(date(2026, 8, 24), include_attachment=True))
     assert tomorrow["target_date"] == "2026-08-25"
+    assert tomorrow["subject"] == "1H SHTYPI  NESER — 25.08.2026"
+    assert "1H SHTYPI  NESER — 25.08.2026" in tomorrow["html"]
     assert "Today meeting" not in tomorrow["html"]
     assert "Tomorrow meeting" in tomorrow["html"]
     assert "Following meeting" in tomorrow["html"]

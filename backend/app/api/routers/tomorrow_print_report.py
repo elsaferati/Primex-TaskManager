@@ -15,7 +15,7 @@ from app.models.user import User
 from app.services.meetings_report_scheduler import normalize_recipients
 from app.services.primeflow_report import report_timezone
 from app.services.tomorrow_print_report import (
-    REQUIRED_SHTYPI_RECIPIENT,
+    REQUIRED_SHTYPI_RECIPIENTS,
     build_tomorrow_print_report,
     ensure_required_shtypi_recipient,
     send_tomorrow_print_report,
@@ -24,8 +24,8 @@ from app.services.tomorrow_print_report import (
 router = APIRouter()
 
 DEFAULT_RECIPIENTS = {
-    "to": ["ga@primexeu.com", REQUIRED_SHTYPI_RECIPIENT],
-    "cc": ["info@primexeu.com"],
+    "to": ["ga@primexeu.com", *REQUIRED_SHTYPI_RECIPIENTS],
+    "cc": [],
     "bcc": [],
 }
 

@@ -169,15 +169,20 @@ const getReportRowOneHReportSlot = (row: unknown) => {
   if (!row || typeof row !== "object" || !("oneHReportSlot" in row)) return null
   return normalizeOneHReportSlot((row as { oneHReportSlot?: string | null }).oneHReportSlot)
 }
-const compareOneHReportSlots = (
-  a: { isOneHReportTask?: boolean; oneHReportSlot?: OneHReportSlot | null },
-  b: { isOneHReportTask?: boolean; oneHReportSlot?: OneHReportSlot | null }
-) => {
-  if (!a.isOneHReportTask || !b.isOneHReportTask) return 0
-  const aSlot = getReportRowOneHReportSlot(a)
-  const bSlot = getReportRowOneHReportSlot(b)
-  if (!aSlot || !bSlot) return 0
-  return ONE_H_REPORT_SLOT_OPTIONS.indexOf(aSlot) - ONE_H_REPORT_SLOT_OPTIONS.indexOf(bSlot)
+const isOneHReportRow = (row: unknown) =>
+  Boolean(row && typeof row === "object" && "isOneHReportTask" in row && row.isOneHReportTask)
+const oneHReportSlotRank = (row: unknown) => {
+  const slot = getReportRowOneHReportSlot(row)
+  return slot ? ONE_H_REPORT_SLOT_OPTIONS.indexOf(slot) : ONE_H_REPORT_SLOT_OPTIONS.length
+}
+const orderOneHReportRowsBySlot = <T,>(rows: T[]) => {
+  const orderedOneHRows = rows
+    .map((row, index) => ({ row, index }))
+    .filter((entry) => isOneHReportRow(entry.row))
+    .sort((a, b) => oneHReportSlotRank(a.row) - oneHReportSlotRank(b.row) || a.index - b.index)
+    .map((entry) => entry.row)
+  let oneHIndex = 0
+  return rows.map((row) => (isOneHReportRow(row) ? orderedOneHRows[oneHIndex++]! : row))
 }
 const buildDailyReportOneHSlotMap = (report: DailyReportResponse | null) => {
   const map: Record<string, OneHReportSlot | null> = {}
@@ -3544,9 +3549,10 @@ export default function DepartmentKanban() {
     rows.push(...doneLast(projectRows.sort(sortByTyo)))
     rows.push(...doneLast(systemPmRows))
 
-    return rows
-      .map((row, index) => ({ row, index }))
-      .sort((a, b) => {
+    return orderOneHReportRowsBySlot(
+      rows
+        .map((row, index) => ({ row, index }))
+        .sort((a, b) => {
         const doneDiff = Number(isRowDone(a.row)) - Number(isRowDone(b.row))
         if (doneDiff !== 0) return doneDiff
         const periodDiff = periodRank(a.row) - periodRank(b.row)
@@ -3567,10 +3573,10 @@ export default function DepartmentKanban() {
         const statusDiff =
           statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
         if (statusDiff !== 0) return statusDiff
-        const oneHSlotDiff = compareOneHReportSlots(a.row, b.row)
-        return oneHSlotDiff !== 0 ? oneHSlotDiff : a.index - b.index
+        return a.index - b.index
       })
-      .map((entry) => entry.row)
+        .map((entry) => entry.row)
+    )
   }, [
     dailyReport,
     dailyReportFastTasks,
@@ -3610,10 +3616,10 @@ export default function DepartmentKanban() {
       if (used.has(entry.id)) continue
       ordered.push(entry.row)
     }
-    return [
+    return orderOneHReportRowsBySlot([
       ...ordered.filter((row) => row.statusKey !== "DONE" && row.status?.toUpperCase() !== "DONE"),
       ...ordered.filter((row) => row.statusKey === "DONE" || row.status?.toUpperCase() === "DONE"),
-    ]
+    ])
   }, [dailyReportManualOrder, dailyUserReportRows])
 
   const dailyReportAvailableStatuses = React.useMemo(() => {
@@ -3970,9 +3976,10 @@ export default function DepartmentKanban() {
       rows.push(...doneLast(projectRows.sort(sortByTyo)))
       rows.push(...doneLast(systemPmRows.sort(sortByTyo)))
 
-      return rows
-        .map((row, index) => ({ row, index }))
-        .sort((a, b) => {
+      return orderOneHReportRowsBySlot(
+        rows
+          .map((row, index) => ({ row, index }))
+          .sort((a, b) => {
           const doneDiff = Number(isRowDone(a.row)) - Number(isRowDone(b.row))
           if (doneDiff !== 0) return doneDiff
           const periodDiff = periodRank(a.row) - periodRank(b.row)
@@ -3993,10 +4000,10 @@ export default function DepartmentKanban() {
           const statusDiff =
             statusOrder[a.row.statusKey ?? "TODO"] - statusOrder[b.row.statusKey ?? "TODO"]
           if (statusDiff !== 0) return statusDiff
-          const oneHSlotDiff = compareOneHReportSlots(a.row, b.row)
-          return oneHSlotDiff !== 0 ? oneHSlotDiff : a.index - b.index
+          return a.index - b.index
         })
-        .map((entry) => entry.row)
+          .map((entry) => entry.row)
+      )
     },
     [dailyReportOneHSlots, deadlineImportantTaskIds, departmentCode, projects, selectedAllReportDate, systemTemplateById, userMap]
   )

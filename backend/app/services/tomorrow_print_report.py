@@ -8,6 +8,8 @@ from datetime import date, datetime
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from PIL import Image, ImageDraw, ImageFont
@@ -22,12 +24,14 @@ TASK_ROWS = (
     ("oneH", "1H 11:00", "11:00"),
     ("oneH", "1H 11:50", "11:50"),
     ("oneH", "1H 14:20", "14:20"),
-    ("blocked", "BLL\n14:30 - 15:30\nRAP 15:50", None),
+    ("blocked", "BLL\n14:30 - 16:00\nRAP 15:50", None),
     ("oneH", "1H 16:00", "16:00"),
     ("oneH", "1H NO SLOT", ""),
     ("important", "DEADLINE / 08:00", None),
     ("r1", "R1=1H", None),
-    ("personal", "P:\nGA 08:15 / 13:15\n\nDV/LH 10:15 / 14:30", None),
+    ("personal", "P: GA\n08:15 / 13:15", "GA"),
+    ("personal", "P: KA\n08:30 / 13:15", "KA"),
+    ("personal", "P: PX\n08:45 / 14:00", "PX"),
 )
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
 VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
@@ -56,6 +60,9 @@ CELL_STYLE = "border:1px solid #000;padding:5px;vertical-align:top;text-align:le
 HEADER_STYLE = f"{CELL_STYLE};text-align:center;font-weight:700"
 SLOT_DIVIDER_STYLE = "border-top:2px solid #111827"
 INTRA_SLOT_DIVIDER_STYLE = "border-top:1px solid #cbd5e1"
+SLOT_END_DIVIDER_STYLE = "border-bottom:2px solid #111827"
+TASK_TABLE_FRAME_STYLE = "border:3px solid #111827"
+TASK_HEADER_FRAME_STYLE = "border-top:3px solid #111827;border-bottom:3px solid #111827"
 SLOT_LABEL_STYLE = f"{CELL_STYLE};font-weight:700"
 PERSONAL_GA_COLOR = "#D8B4FE"
 PERSONAL_GA_CELL_STYLE = f"{CELL_STYLE};background-color:{PERSONAL_GA_COLOR}"
@@ -69,22 +76,31 @@ NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
 PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|/|$)", re.I)
 NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 EIGHT_AM_MARKER_RE = re.compile(r"\b0?8:00\b")
+WFC_TOKEN_RE = re.compile(r"\bWFC\b", re.I)
 STATUS_COLORS = {
     "TODO": "#FFC4ED",
     "IN_PROGRESS": "#FFFF00",
     "WAITING_CONFIRMATION": "#FFEDD5",
     "DONE": "#C4FDC4",
 }
-COMMENT_FIXED_INITIALS = ("AT", "RA", "EF", "EH", "LH", "FG")
-COMMENT_ROW_COUNT = 3
+COMMENT_DEV_INITIALS = ("AT", "EF", "RA", "EH", "LH")
+COMMENT_GD_INITIALS = ("FG",)
+COMMENT_FIXED_INITIALS = COMMENT_DEV_INITIALS + COMMENT_GD_INITIALS
 COMMENT_WRITE_IN_LINE = "_" * 20
-REQUIRED_SHTYPI_RECIPIENT = "130primex.eu@gmail.com"
+REQUIRED_SHTYPI_RECIPIENTS = (
+    "130primex.eu@gmail.com",
+    "313primex.eu@gmail.com",
+    "131primex.eu@gmail.com",
+    "info@primexeu.com",
+)
+# Kept for callers that use the original archive mailbox constant.
+REQUIRED_SHTYPI_RECIPIENT = REQUIRED_SHTYPI_RECIPIENTS[0]
 
 
 def ensure_required_shtypi_recipient(
     recipients: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Always include the required archive/print mailbox as a To recipient."""
+    """Always include every required SHTYPI mailbox as a To recipient."""
     result = {key: [] for key in ("to", "cc", "bcc")}
     seen: set[str] = set()
     for key in ("to", "cc", "bcc"):
@@ -95,20 +111,19 @@ def ensure_required_shtypi_recipient(
                 continue
             seen.add(normalized)
             result[key].append(email)
-    required_key = REQUIRED_SHTYPI_RECIPIENT.casefold()
-    if required_key not in seen:
-        result["to"].append(REQUIRED_SHTYPI_RECIPIENT)
-    elif all(
-        email.casefold() != required_key for email in result["to"]
-    ):
+    for required_email in REQUIRED_SHTYPI_RECIPIENTS:
+        required_key = required_email.casefold()
         for key in ("cc", "bcc"):
             result[key] = [email for email in result[key] if email.casefold() != required_key]
-        result["to"].append(REQUIRED_SHTYPI_RECIPIENT)
+        if all(email.casefold() != required_key for email in result["to"]):
+            result["to"].append(required_email)
     return result
 
 
-def subject_for(target_date: date) -> str:
-    return f"1H SHTYPI - {target_date:%d.%m.%Y}"
+def subject_for(target_date: date, relative_day_label: str) -> str:
+    """Return the shared email subject and visible report title."""
+    separator = " — " if relative_day_label == "NESER" else "— "
+    return f"1H SHTYPI  {relative_day_label}{separator}{target_date:%d.%m.%Y}"
 
 
 def _item_date(item: dict[str, Any]) -> date | None:
@@ -158,12 +173,12 @@ def _task_period_label(item: dict[str, Any]) -> str:
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
-    """All deadline tasks stay red; only deadline tasks display a due date."""
+    """GA-personal purple wins over deadline red; other deadlines stay red."""
     deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-    if deadline:
-        color = DEADLINE_COLOR
-    elif personal and _is_personal_task_for_ga(item):
+    if personal and _is_personal_task_for_ga(item):
         color = PERSONAL_GA_COLOR
+    elif deadline:
+        color = DEADLINE_COLOR
     else:
         color = STATUS_COLORS[_task_status(item)]
     border = f";border:2px solid {EIGHT_AM_BORDER_COLOR}" if _is_eight_am_task(item) else ""
@@ -209,40 +224,48 @@ def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
     return result
 
 
-def _comment_rows(initials: list[str]) -> list[list[str]]:
+def _comment_department_rows(initials: list[str]) -> list[list[tuple[str, list[str]]]]:
     values = initials or list(COMMENT_FIXED_INITIALS)
-    base_size, extra = divmod(len(values), COMMENT_ROW_COUNT)
-    rows: list[list[str]] = []
-    start = 0
-    for row_index in range(COMMENT_ROW_COUNT):
-        size = base_size + int(row_index < extra)
-        rows.append(values[start:start + size])
-        start += size
-    return rows
+    dev = [value for value in COMMENT_DEV_INITIALS if value in values]
+    gd = [value for value in COMMENT_GD_INITIALS if value in values]
+    pcm = [value for value in values if value not in COMMENT_FIXED_INITIALS]
+    return [[("DEV", dev)], [("GD", gd), ("PCM", pcm)]]
 
 
 def _comment_write_in_lines(initials: list[str]) -> list[str]:
     return [
-        ",    ".join(f"{value}: {COMMENT_WRITE_IN_LINE}" for value in row)
-        for row in _comment_rows(initials)
+        "    ".join(
+            f"{department}: "
+            + ",    ".join(f"{value}: {COMMENT_WRITE_IN_LINE}" for value in members)
+            for department, members in row
+        )
+        for row in _comment_department_rows(initials)
     ]
 
 
 def _comments_table_html(initials: list[str]) -> str:
-    """Render all staff comment fields across exactly three full-width rows."""
+    """Render staff comment fields in two department-grouped rows."""
     rows: list[str] = []
-    for chunk in _comment_rows(initials):
-        cell_width = 100 / max(len(chunk), 1)
-        entries = "".join(
-            '<td data-user-comment="{initials}" width="{width:.2f}%" valign="bottom" '
-            'style="width:{width:.2f}%;padding:0 14px 8px 0;vertical-align:bottom;">'
-            '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" '
-            'style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;">'
-            '<tr><td width="1%" style="width:1%;padding:0 5px 1px 0;white-space:nowrap;">'
-            '<strong>{initials}:</strong></td><td style="width:99%;border-bottom:1px solid #111827;">&nbsp;</td>'
-            '</tr></table></td>'.format(initials=html.escape(value), width=cell_width)
-            for value in chunk
-        ) or '<td style="height:22px;">&nbsp;</td>'
+    for department_row in _comment_department_rows(initials):
+        member_count = sum(len(members) for _, members in department_row)
+        width_unit = 100 / max(member_count + len(department_row) * 0.5, 1)
+        entries = ""
+        for department, members in department_row:
+            entries += (
+                '<td data-comment-department="{department}" width="{width:.2f}%" '
+                'style="width:{width:.2f}%;padding:0 6px 8px 0;white-space:nowrap;vertical-align:bottom;">'
+                '<strong>{department}:</strong></td>'
+            ).format(department=html.escape(department), width=width_unit * 0.5)
+            entries += "".join(
+                '<td data-user-comment="{initials}" width="{width:.2f}%" valign="bottom" '
+                'style="width:{width:.2f}%;padding:0 14px 8px 0;vertical-align:bottom;">'
+                '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" '
+                'style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;">'
+                '<tr><td width="1%" style="width:1%;padding:0 5px 1px 0;white-space:nowrap;">'
+                '<strong>{initials}:</strong></td><td style="width:99%;border-bottom:1px solid #111827;">&nbsp;</td>'
+                '</tr></table></td>'.format(initials=html.escape(value), width=width_unit)
+                for value in members
+            )
         rows.append(
             '<table data-user-comment-line="true" role="presentation" width="100%" border="0" '
             'cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;table-layout:fixed;">'
@@ -275,6 +298,41 @@ def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)
     owners = _assignees(item)
     return f"{'/'.join(owners)}: {title}" if owners else title
+
+
+def _task_title_html(value: str, *, red_background: bool) -> str:
+    """Escape a task title and make standalone WFC tokens visually distinct."""
+    parts: list[str] = []
+    cursor = 0
+    for match in WFC_TOKEN_RE.finditer(value):
+        parts.append(html.escape(value[cursor:match.start()]))
+        style = "color:#DC2626;font-weight:800;"
+        if red_background:
+            style += "background-color:#FFFFFF;border-radius:2px;padding:0 2px;"
+        parts.append(
+            f'<span data-task-token="wfc" style="{style}">{html.escape(match.group(0))}</span>'
+        )
+        cursor = match.end()
+    parts.append(html.escape(value[cursor:]))
+    return "".join(parts)
+
+
+def _excel_task_title(value: str, *, red_background: bool) -> str | CellRichText:
+    """Use rich text for WFC; Excel uses yellow on red because inline fills are unsupported."""
+    if WFC_TOKEN_RE.search(value) is None:
+        return value
+    default_font = InlineFont(color="FFFFFFFF" if red_background else "FF000000")
+    wfc_font = InlineFont(color="FFFFFF00" if red_background else "FFDC2626", b=True)
+    parts: list[str | TextBlock] = []
+    cursor = 0
+    for match in WFC_TOKEN_RE.finditer(value):
+        if match.start() > cursor:
+            parts.append(TextBlock(default_font, value[cursor:match.start()]))
+        parts.append(TextBlock(wfc_font, match.group(0)))
+        cursor = match.end()
+    if cursor < len(value):
+        parts.append(TextBlock(default_font, value[cursor:]))
+    return CellRichText(parts)
 
 
 def _is_eight_am_task(item: dict[str, Any]) -> bool:
@@ -330,6 +388,7 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
         due_day = _task_due_day(item)
         if due_day:
             due_today = report_date is not None and due_day == report_date
+            due_label = "SOT" if due_today else due_day.strftime("%d.%m.%Y")
             style = (
                 "display:inline-block;padding:2px 5px;border:1px solid #93C5FD;border-radius:3px;"
                 "background-color:#EFF6FF;color:#1D4ED8;font-family:Arial,sans-serif;"
@@ -341,18 +400,28 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
             due_badge = (
                 f'<span data-task-badge="due-date" data-badge-position="bottom-right" '
                 f'data-due-today="{str(due_day == report_date).lower()}" '
-                f'style="{style}">{due_day:%d.%m.%Y}</span>'
+                f'style="{style}">{due_label}</span>'
             )
     return "".join(top_badges), due_badge
 
 
-def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
-    """Match the GA-assignee rule used by the P row in Common View printouts."""
+def _personal_task_group(item: dict[str, Any]) -> str:
+    """Assign each personal task to exactly one ownership row."""
     title = _report_text(_first_line(item.get("title")))
     match = PERSONAL_TASK_INITIALS.match(title.strip())
     if match is None:
-        return False
-    return "GA" in {value.strip().upper() for value in re.split(r"[:/]", match.group(0))}
+        return "PX"
+    participants = {value.strip().upper() for value in re.split(r"[:/]", match.group(0))}
+    if "GA" in participants:
+        return "GA"
+    if "KA" in participants:
+        return "KA"
+    return "PX"
+
+
+def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
+    """Keep the existing GA-specific card color after splitting the P rows."""
+    return _personal_task_group(item) == "GA"
 
 
 def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -378,10 +447,12 @@ def _task_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list
         if isinstance(values, list)
     }
     rows: list[tuple[str, list[dict[str, Any]], bool]] = []
-    for bucket, label, requested_slot in TASK_ROWS:
+    for bucket, label, requested_value in TASK_ROWS:
         values = list(by_bucket.get(bucket, []))
         if bucket == "oneH":
-            values = [item for item in values if _slot(item) == requested_slot]
+            values = [item for item in values if _slot(item) == requested_value]
+        elif bucket == "personal":
+            values = [item for item in values if _personal_task_group(item) == requested_value]
         values = _dedupe(values)
         # Completed work belongs at the end of its slot so unfinished work is
         # immediately visible in the printed report.
@@ -451,6 +522,8 @@ def _html_table(
         chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
         for chunk_index, chunk in enumerate(chunks):
             row_divider_style = INTRA_SLOT_DIVIDER_STYLE if chunk_index else SLOT_DIVIDER_STYLE
+            if not meeting and chunk_index == len(chunks) - 1:
+                row_divider_style = f"{row_divider_style};{SLOT_END_DIVIDER_STYLE}"
             cells: list[str] = []
             for item_index, item in enumerate(chunk):
                 value = (
@@ -471,7 +544,12 @@ def _html_table(
                 cell_style = f"{cell_style};{row_divider_style}"
                 background = f' bgcolor="{color}"' if color else ""
                 badges, due_badge = ("", "") if meeting else _task_badges_html(item, report_date)
-                task_content = f'{badges}{item_index + (chunk_index * 6) + 1}. {html.escape(value)}'
+                title_html = (
+                    html.escape(value)
+                    if meeting
+                    else _task_title_html(value, red_background=color == DEADLINE_COLOR)
+                )
+                task_content = f'{badges}{item_index + (chunk_index * 6) + 1}. {title_html}'
                 if due_badge:
                     task_content = (
                         '<table role="presentation" width="100%" height="100%" border="0" cellpadding="0" '
@@ -485,19 +563,25 @@ def _html_table(
                     f'<td{background} style="{cell_style}">{task_content}</td>'
                 )
             cells.extend(f'<td style="{CELL_STYLE};{row_divider_style}"></td>' for _ in range(6 - len(cells)))
+            label_divider_style = (
+                f"{SLOT_DIVIDER_STYLE};{SLOT_END_DIVIDER_STYLE}"
+                if not meeting else SLOT_DIVIDER_STYLE
+            )
             row_header = (
-                f'<th rowspan="{len(chunks)}" style="{SLOT_LABEL_STYLE};{row_divider_style}">{number}</th>'
-                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{row_divider_style}">{html.escape(label).replace(chr(10), "<br>")}</th>'
+                f'<th rowspan="{len(chunks)}" style="{SLOT_LABEL_STYLE};{label_divider_style}">{number}</th>'
+                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{label_divider_style}">{html.escape(label).replace(chr(10), "<br>")}</th>'
                 if chunk_index == 0 else ""
             )
             body.append(f"<tr>{row_header}{''.join(cells)}</tr>")
+    table_style = f"{TABLE_STYLE};{TASK_TABLE_FRAME_STYLE}" if not meeting else TABLE_STYLE
+    header_style = f"{HEADER_STYLE};{TASK_HEADER_FRAME_STYLE}" if not meeting else HEADER_STYLE
     return (
-        f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{TABLE_STYLE}">'
-        '<colgroup><col width="4%"><col width="9%"><col width="14.5%" span="6"></colgroup>'
-        f'<thead><tr><th style="{HEADER_STYLE}">NR</th><th style="{HEADER_STYLE}">{label_header}</th>'
+        f'<table role="presentation" width="100%" border="1" cellpadding="0" cellspacing="0" style="{table_style}">'
+        '<colgroup><col width="2.5%"><col width="10.5%"><col width="14.5%" span="6"></colgroup>'
+        f'<thead><tr><th style="{header_style}">NR</th><th style="{header_style}">{label_header}</th>'
         + (
             "".join(f'<th style="{HEADER_STYLE}">{header} {index}</th>' for index in range(1, 7))
-            if meeting else f'<th colspan="6" style="{HEADER_STYLE}">TASKS</th>'
+            if meeting else f'<th colspan="6" style="{header_style}">TASKS</th>'
         )
         + '</tr></thead>'
         f"<tbody>{''.join(body)}</tbody></table>"
@@ -616,6 +700,19 @@ def _excel_table_attachment(
         left=Side(style="thin", color="000000"), right=Side(style="thin", color="000000"),
         top=Side(style="thin", color="CBD5E1"), bottom=Side(style="thin", color="000000"),
     )
+    medium_grid_side = Side(style="medium", color="111827")
+
+    def task_grid_border(
+        current: Border, *, category_start: bool = False, category_end: bool = False,
+        outer_left: bool = False, outer_right: bool = False,
+    ) -> Border:
+        """Add the task-grid hierarchy without changing fills, fonts, or task content."""
+        return Border(
+            left=medium_grid_side if outer_left else current.left,
+            right=medium_grid_side if outer_right else current.right,
+            top=medium_grid_side if category_start else current.top,
+            bottom=medium_grid_side if category_end else current.bottom,
+        )
     header_fill = PatternFill("solid", fgColor="EAF0FF")
     fills = {
         status: PatternFill("solid", fgColor=color.removeprefix("#"))
@@ -681,14 +778,37 @@ def _excel_table_attachment(
             cell.fill = header_fill
             cell.border = border
             cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+            if not meeting:
+                cell.border = task_grid_border(
+                    cell.border,
+                    category_start=True,
+                    category_end=True,
+                    outer_left=column == 1,
+                    # C is the anchor of merged C:H; its right border becomes
+                    # the visible right edge of the merged TASKS heading.
+                    outer_right=column in (3, 8),
+                )
         if not meeting:
             sheet.merge_cells(start_row=row_number, start_column=3, end_row=row_number, end_column=8)
+            # Reapply the perimeter after merging C:H; openpyxl rebuilds merged-cell
+            # borders and otherwise drops the right edge from H.
+            for column in range(1, 9):
+                cell = sheet.cell(row_number, column)
+                cell.border = task_grid_border(
+                    cell.border,
+                    category_start=True,
+                    category_end=True,
+                    outer_left=column == 1,
+                    outer_right=column in (3, 8),
+                )
         row_number += 1
         for number, (label, values, personal) in enumerate(rows, 1):
             chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
             first_row = row_number
             for chunk_index, chunk in enumerate(chunks):
                 row_border = intra_slot_divider_border if chunk_index else slot_divider_border
+                category_start = chunk_index == 0
+                category_end = chunk_index == len(chunks) - 1
                 if chunk_index == 0:
                     sheet.cell(row_number, 1, number)
                     label_cell = sheet.cell(row_number, 2, label)
@@ -710,14 +830,23 @@ def _excel_table_attachment(
                                 labels.append(f"[{due_day:%d.%m.%Y}]")
                         if labels:
                             value = f"{' '.join(labels)}\n{value}"
-                    cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
+                    cell_value = f"{item_index - 2 + chunk_index * 6}. {value}"
+                    deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
+                    ga_personal = personal and _is_personal_task_for_ga(item)
                     if not meeting:
-                        deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                        if deadline:
+                        cell_value = _excel_task_title(
+                            cell_value,
+                            red_background=deadline and not ga_personal,
+                        )
+                    cell = sheet.cell(row_number, item_index, cell_value)
+                    if not meeting:
+                        if ga_personal:
+                            cell.fill = ga_fill
+                        elif deadline:
                             cell.fill = deadline_fill
                             cell.font = Font(color="FFFFFF", bold=True)
                         else:
-                            cell.fill = ga_fill if personal and _is_personal_task_for_ga(item) else fills[_task_status(item)]
+                            cell.fill = fills[_task_status(item)]
                         if _is_eight_am_task(item):
                             cell.border = eight_am_border
                     elif _is_non_routine_meeting(item):
@@ -738,6 +867,14 @@ def _excel_table_attachment(
                     )
                     if not is_highlighted_meeting_cell and not is_eight_am_task_cell:
                         cell.border = row_border
+                    if not meeting:
+                        cell.border = task_grid_border(
+                            cell.border,
+                            category_start=category_start,
+                            category_end=category_end,
+                            outer_left=column == 1,
+                            outer_right=column == 8,
+                        )
                     cell.alignment = Alignment(vertical="top", wrap_text=True)
                 row_number += 1
             if len(chunks) > 1:
@@ -778,7 +915,7 @@ def _excel_table_attachment(
         line_cell.font = Font(size=11)
         line_cell.alignment = Alignment(horizontal="left", vertical="center")
         sheet.row_dimensions[row].height = 22
-    widths = [6, 22, 29, 29, 29, 29, 29, 29]
+    widths = [4, 24, 29, 29, 29, 29, 29, 29]
     for index, width in enumerate(widths, 1):
         sheet.column_dimensions[chr(64 + index)].width = width
     sheet.freeze_panes = f"C{task_header_row + 1}"
@@ -799,7 +936,7 @@ def _png_table_attachment(
 ) -> tuple[str, bytes, str]:
     """Render the Today SHTYPI task grid with the same task-state colours."""
     margin = 28
-    column_widths = [58, 210, *([267] * 6)]
+    column_widths = [40, 228, *([267] * 6)]
     width = sum(column_widths) + (margin * 2)
     try:
         regular = ImageFont.truetype(os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\segoeui.ttf"), 16)
@@ -889,10 +1026,37 @@ def _png_table_attachment(
     )
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
+
+    def draw_task_title_line(
+        position: tuple[float, float], value: str, font: Any, default_color: str, *, red_background: bool
+    ) -> None:
+        cursor_x, cursor_y = position
+        text_cursor = 0
+        for match in WFC_TOKEN_RE.finditer(value):
+            prefix = value[text_cursor:match.start()]
+            if prefix:
+                draw.text((cursor_x, cursor_y), prefix, fill=default_color, font=font)
+                cursor_x += measure.textlength(prefix, font=font)
+            token = match.group(0)
+            token_width = measure.textlength(token, font=font)
+            if red_background:
+                draw.rounded_rectangle(
+                    (cursor_x - 2, cursor_y - 1, cursor_x + token_width + 2, cursor_y + 19),
+                    radius=2,
+                    fill="#FFFFFF",
+                )
+            draw.text((cursor_x, cursor_y), token, fill=DEADLINE_COLOR, font=font)
+            cursor_x += token_width
+            text_cursor = match.end()
+        suffix = value[text_cursor:]
+        if suffix:
+            draw.text((cursor_x, cursor_y), suffix, fill=default_color, font=font)
+
     draw.text((margin, 22), f"1H SHTYPI TODAY - {target_date:%d.%m.%Y}", fill="#111827", font=heading)
     draw.text((margin, 59), "Current Common View state used by the 1H report", fill="#475569", font=regular)
 
     y, x = header_top, margin
+    task_table_top = y
     for column, label in enumerate(["NR", "LLOJI DHE SLOTI"]):
         right = x + column_widths[column]
         draw.rectangle((x, y, right, y + header_height), fill="#F8FAFC", outline="#111827")
@@ -906,7 +1070,8 @@ def _png_table_attachment(
     y += header_height
 
     number = 0
-    for label, chunk, personal, chunk_index, row_height in layout:
+    category_edges = [y]
+    for layout_index, (label, chunk, personal, chunk_index, row_height) in enumerate(layout):
         if chunk_index == 0:
             number += 1
         x = margin
@@ -922,10 +1087,10 @@ def _png_table_attachment(
             fill, text_color, outline, outline_width = "#FFFFFF", "#111827", "#111827", 1
             if item is not None:
                 deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                if deadline:
-                    fill, text_color = DEADLINE_COLOR, "#FFFFFF"
-                elif personal and _is_personal_task_for_ga(item):
+                if personal and _is_personal_task_for_ga(item):
                     fill = PERSONAL_GA_COLOR
+                elif deadline:
+                    fill, text_color = DEADLINE_COLOR, "#FFFFFF"
                 else:
                     fill = STATUS_COLORS[_task_status(item)]
                 if _is_eight_am_task(item):
@@ -980,9 +1145,23 @@ def _png_table_attachment(
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 task_font = bold if fill == DEADLINE_COLOR else regular
                 for line_index, line in enumerate(wrap(value, task_font, column_widths[2 + item_index] - 12)):
-                    draw.text((x + 6, text_y + line_index * 20), line, fill=text_color, font=task_font)
+                    draw_task_title_line(
+                        (x + 6, text_y + line_index * 20),
+                        line,
+                        task_font,
+                        text_color,
+                        red_background=fill == DEADLINE_COLOR,
+                    )
             x = right
         y += row_height
+        if layout_index == len(layout) - 1 or layout[layout_index + 1][3] == 0:
+            category_edges.append(y)
+
+    # Draw hierarchy lines last so task fills and special task outlines cannot hide them.
+    draw.rectangle((margin, task_table_top, tasks_right, y), outline="#111827", width=4)
+    draw.rectangle((margin, task_table_top, tasks_right, task_table_top + header_height), outline="#111827", width=4)
+    for edge_y in category_edges:
+        draw.line((margin, edge_y, tasks_right, edge_y), fill="#111827", width=3)
 
     if meeting_pair:
         y += 20
@@ -1079,6 +1258,7 @@ def _png_table_attachment(
 async def _build_print_report(
     target_date: date, *, include_attachment: bool = False, include_meetings: bool = True,
     include_png: bool = False, first_meeting_day_label: str = "NESER",
+    report_day_label: str,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if payload is None:
@@ -1132,8 +1312,9 @@ async def _build_print_report(
     ]
     meeting_rows = meeting_sections[0][2] if meeting_sections else []
     report_date = target_date.strftime("%d.%m.%Y")
+    report_title = subject_for(target_date, report_day_label)
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
-<div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">1H SHTYPI — {report_date}</div>
+<div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
 {_one_h_checklists_html()}{_html_table(task_rows, report_date=target_date)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
@@ -1141,7 +1322,7 @@ async def _build_print_report(
         + "</div>"
     )
     plain_rows = [
-        f"1H SHTYPI - {report_date}",
+        report_title,
         "",
         "PYETJET PER 1H - BORD",
         *(
@@ -1182,7 +1363,7 @@ async def _build_print_report(
         *_comment_write_in_lines(comment_initials),
     ])
     report: dict[str, Any] = {
-        "subject": subject_for(target_date),
+        "subject": report_title,
         "target_date": target_date.isoformat(),
         "html": html_body,
         "content_html": content_html,
@@ -1207,7 +1388,8 @@ async def build_tomorrow_print_report(
     delivery_date: date, *, include_attachment: bool = False
 ) -> dict[str, Any]:
     return await _build_print_report(
-        next_working_day(delivery_date), include_attachment=include_attachment, include_meetings=True
+        next_working_day(delivery_date), include_attachment=include_attachment, include_meetings=True,
+        report_day_label="NESER",
     )
 
 
@@ -1217,7 +1399,7 @@ async def build_today_print_report(
     """Build today's task grid plus today/next-working-day meeting sections."""
     return await _build_print_report(
         report_date, include_attachment=include_attachment, include_meetings=True,
-        include_png=True, first_meeting_day_label="SOT", payload=payload
+        include_png=True, first_meeting_day_label="SOT", report_day_label="SOT", payload=payload
     )
 
 

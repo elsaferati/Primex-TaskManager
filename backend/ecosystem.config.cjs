@@ -69,6 +69,8 @@ module.exports = {
       args: "-m uvicorn app.main:app --host 0.0.0.0 --port 8000 --timeout-keep-alive 15 --backlog 2048",
       env: {
         ...sharedEnv,
+        // Tomorrow SHTYPI delivery runs in its own supervised process below.
+        TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: "false",
       },
     },
     {
@@ -83,6 +85,20 @@ module.exports = {
         STD_FEEDBACK_SYNC_ENABLED: "false",
         // The primary API exclusively owns the daily 1H SHTYPI delivery loop.
         TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: "false",
+        TODAY_PRINT_REPORT_SCHEDULER_ENABLED: "false",
+      },
+    },
+    {
+      ...apiProcess,
+      name: "primex-tomorrow-shtypi-scheduler",
+      args: "tomorrow_shtypi_scheduler.py",
+      env: {
+        ...sharedEnv,
+        // Use the fallback API so report delivery does not depend on the
+        // primary API process that previously owned this scheduler.
+        PRIMEFLOW_API_BASE_URL:
+          process.env.PRIMEFLOW_API_BASE_URL ?? "http://127.0.0.1:8080",
+        TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: "true",
         TODAY_PRINT_REPORT_SCHEDULER_ENABLED: "false",
       },
     },

@@ -34,6 +34,7 @@ from app.services.meetings_report import (
     _leave_lines,
     _render_ascii_table_html,
     _task_owners,
+    _tomorrow_common_section,
     _tomorrow_task_table,
     normalize_meetings_report_sections,
     render_section_report_docx,
@@ -577,6 +578,19 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             "FT",
         )
         self.assertEqual(_m3_task_type_label(SimpleNamespace()), "FT")
+
+    def test_tomorrow_bllok_table_uses_full_afternoon_interval(self) -> None:
+        rows = _tomorrow_common_section(
+            common_items={},
+            tomorrow=date(2026, 8, 27),
+            fallback_external=[],
+            fallback_internal=[],
+            fallback_bz=[],
+            fallback_blocked=[],
+        )
+
+        self.assertTrue(any("Bllok 14:30 - 16:00" in row for row in rows))
+        self.assertFalse(any("Bllok 14:30 - 15:30" in row for row in rows))
 
     def test_status_table_includes_type_column(self) -> None:
         task = SimpleNamespace(

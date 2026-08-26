@@ -187,11 +187,17 @@ def _unfinished_priority_task_rows(
     timezone: ZoneInfo,
     department_codes: dict[Any, str] | None = None,
 ) -> list[list[str]]:
-    """Deadline/08:00 tasks due today that were still unfinished at the M2 cutoff."""
+    """Unfinished AM or AM/PM deadline/08:00 tasks due today at the M2 cutoff."""
     selected: list[tuple[Task, datetime, str]] = []
     for task in tasks:
         due_at = _as_timezone(task.due_date, timezone)
         if due_at is None or due_at.date() != report_day:
+            continue
+
+        # M2 section 7 covers work that belonged to the morning. PM-only tasks
+        # remain outside this section even when marked as 08:00 or deadline.
+        finish_period = str(getattr(task, "finish_period", None) or "").strip().upper()
+        if finish_period not in {"AM", "AM/PM"}:
             continue
 
         # Match Common View: its 08:00 badge/filter is driven by the title marker,

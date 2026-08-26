@@ -39,6 +39,9 @@ function canCreatePimImageTestTaskForMeeting(meeting: Meeting): boolean {
   return isOneTime && Boolean(meeting.starts_at)
 }
 
+type PersonalTaskGroup = "GA" | "KA" | "PX"
+type PersonalRowId = "personalGA" | "personalKA" | "personalPX"
+
 type CommonType =
   | "late"
   | "absent"
@@ -53,6 +56,7 @@ type CommonType =
   | "oneH1550"
   | "oneHNoSlot"
   | "personal"
+  | PersonalRowId
   | "external"
   | "internal"
   | "r1"
@@ -62,8 +66,9 @@ type CommonType =
   | "diamond"
   | "bz"
 
-const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", "personal"]
-const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", "personal", "feedback"]
+const PERSONAL_ROW_IDS: readonly PersonalRowId[] = ["personalGA", "personalKA", "personalPX"]
+const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", ...PERSONAL_ROW_IDS]
+const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", ...PERSONAL_ROW_IDS, "feedback"]
 const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
   "late",
   "absent",
@@ -81,7 +86,7 @@ const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
   "oneH1550",
   "oneHNoSlot",
   "r1",
-  "personal",
+  ...PERSONAL_ROW_IDS,
   "priority",
   "diamond",
   "problem",
@@ -96,7 +101,7 @@ const COMMON_FAST_PRINT_ROW_IDS: readonly CommonType[] = [
   "oneH1550",
   "oneHNoSlot",
   "r1",
-  "personal",
+  ...PERSONAL_ROW_IDS,
 ]
 const COMMON_MEETING_PRINT_ROW_IDS: readonly CommonType[] = ["external", "internal"]
 const getCommonPrintRowRank = (id: CommonType) => {
@@ -109,8 +114,7 @@ const orderCommonRowsForPrint = <T extends { id: CommonType }>(rows: readonly T[
     .sort((a, b) => getCommonPrintRowRank(a.row.id) - getCommonPrintRowRank(b.row.id) || a.index - b.index)
     .map(({ row }) => row)
 const getCommonPrintRowSubtext = (id: CommonType) => {
-  if (id === "blocked") return "14:30 - 15:30\nRAP 15:50"
-  if (id === "personal") return "GA: (08:15 / 13:15)\nDV/LH: (10:15 / 14:30)"
+  if (id === "blocked") return "14:30 - 16:00\nRAP 15:50"
   return ""
 }
 
@@ -350,7 +354,7 @@ type CommonBucket =
   | "feedback"
   | "priority"
   | "bz"
-type FastTaskRowId = "blocked" | "oneH" | "personal" | "r1"
+type FastTaskRowId = "blocked" | "oneH" | "personal" | PersonalRowId | "r1"
 type OneHSlotRowId = "oneH" | "oneH10" | "oneH11" | "oneH1150" | "oneH1420" | "oneH1550" | "oneHNoSlot"
 type FastTaskEntry = BlockedItem | OneHItem | PersonalItem | R1Item
 type CommonWeekTableEntry =
@@ -777,12 +781,45 @@ const commonPrintTaskTitle = (entry: { title: string; assignees?: string[]; pers
   return assigneeInitials.length ? `${assigneeInitials.join("/")}: ${title}` : title
 }
 const commonPrintPersonalTaskTitle = (entry: { title: string }) => commonPrintTitleLine(entry.title)
-const personalTaskTitleHasInitials = (title: string, targetInitials: string) => {
-  const titlePrefix = commonPrintPersonalTaskTitle(title).trim().toUpperCase()
+const renderWfcText = (value: string) =>
+  value.split(/(\bWFC\b)/gi).map((part, index) =>
+    /^WFC$/i.test(part) ? (
+      <span key={`wfc-${index}`} className="task-title-wfc">{part}</span>
+    ) : (
+      part
+    )
+  )
+const highlightWfcReactNode = (node: React.ReactNode): React.ReactNode => {
+  if (typeof node === "string") return renderWfcText(node)
+  if (Array.isArray(node)) return node.map((child) => highlightWfcReactNode(child))
+  if (React.isValidElement<{ children?: React.ReactNode }>(node)) {
+    return React.cloneElement(node, undefined, highlightWfcReactNode(node.props.children))
+  }
+  return node
+}
+const commonPrintTitleHtml = (value: string) =>
+  value
+    .split(/(\bWFC\b)/gi)
+    .map((part) =>
+      /^WFC$/i.test(part)
+        ? `<span class="task-title-wfc" style="color:#DC2626;font-weight:800;">${escapePrintHtml(part)}</span>`
+        : escapePrintHtml(part)
+    )
+    .join("")
+const getPersonalTaskGroup = (entry: { title: string }): PersonalTaskGroup => {
+  const titlePrefix = commonPrintPersonalTaskTitle(entry).trim().toUpperCase()
   const match = titlePrefix.match(/^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|\/|$)/)
   const participants = (match?.[0] || "").split(/[:/]/).map((value) => value.trim())
-  return participants.includes(targetInitials.trim().toUpperCase())
+  if (participants.includes("GA")) return "GA"
+  if (participants.includes("KA")) return "KA"
+  return "PX"
 }
+const getPersonalRowGroup = (rowId: PersonalRowId): PersonalTaskGroup =>
+  rowId === "personalGA" ? "GA" : rowId === "personalKA" ? "KA" : "PX"
+const isPersonalRowId = (rowId: CommonType): rowId is PersonalRowId =>
+  PERSONAL_ROW_IDS.includes(rowId as PersonalRowId)
+const personalTasksForRow = <T extends { title: string }>(items: readonly T[], rowId: PersonalRowId) =>
+  items.filter((item) => getPersonalTaskGroup(item) === getPersonalRowGroup(rowId))
 
 const getCommonTitleMarkClass = (isDone: boolean, isAdded: boolean) => {
   if (isDone && isAdded) {
@@ -817,6 +854,11 @@ const renderCommonMarkedTitleLine = (value: string) => {
       boundaries.add(Math.min(end, range.end))
     }
   })
+  for (const match of parsed.text.slice(start, end).matchAll(/\bWFC\b/gi)) {
+    const tokenStart = start + (match.index || 0)
+    boundaries.add(tokenStart)
+    boundaries.add(tokenStart + match[0].length)
+  }
 
   const orderedBoundaries = Array.from(boundaries).sort((a, b) => a - b)
   const parts: React.ReactNode[] = []
@@ -828,13 +870,16 @@ const renderCommonMarkedTitleLine = (value: string) => {
     const isDone = parsed.doneRanges.some((range) => range.start <= partStart && range.end >= partEnd)
     const isAdded = parsed.addedRanges.some((range) => range.start <= partStart && range.end >= partEnd)
     const className = getCommonTitleMarkClass(isDone, isAdded)
+    const content = /^WFC$/i.test(segment)
+      ? <span key={`title-wfc-${idx}-${partStart}`} className="task-title-wfc">{segment}</span>
+      : segment
     parts.push(
       className ? (
         <span key={`title-mark-${idx}-${partStart}`} className={className}>
-          {segment}
+          {content}
         </span>
       ) : (
-        segment
+        content
       )
     )
   }
@@ -884,9 +929,9 @@ const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: 
     ? entry.assignees
     : normalizeAssigneeList(entry.person || entry.owner || "")
 const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId | OneHSlotRowId =>
-  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || rowId === "r1"
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1"
 const isPrintDedupeTaskRowId = (rowId: CommonType) =>
-  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || rowId === "r1"
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1"
 
 const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
   const person = "person" in entry ? entry.person : ""
@@ -4486,6 +4531,7 @@ export default function CommonViewPage() {
               }) as PrintTask
           )
 
+      const normalizedPersonalTasks = normalizeTasks(payload.items.personal)
       const taskRows: Array<{ id: CommonType; label: string; items: PrintTask[] }> = [
         ...ONE_H_SLOT_ROWS.map((slot) => ({
           id: slot.id,
@@ -4498,7 +4544,11 @@ export default function CommonViewPage() {
         })),
         { id: "blocked", label: "BLL", items: normalizeTasks(payload.items.blocked) },
         { id: "r1", label: "R1=1H", items: normalizeTasks(payload.items.r1) },
-        { id: "personal", label: "P:", items: normalizeTasks(payload.items.personal) },
+        ...PERSONAL_ROW_IDS.map((id) => ({
+          id,
+          label: `P: ${getPersonalRowGroup(id)}`,
+          items: personalTasksForRow(normalizedPersonalTasks, id),
+        })),
       ]
 
       const sortedTaskRows = taskRows.map((row) => ({
@@ -4532,10 +4582,10 @@ export default function CommonViewPage() {
                 const meetingItem = item as Record<string, unknown>
                 const title = isMeetingTable
                   ? `${commonPrintTitleLine(String(meetingItem.title || ""))}${meetingItem.time ? ` ${String(meetingItem.time)}` : ""}`.trim()
-                  : row.id === "personal"
+                  : isPersonalRowId(row.id)
                     ? commonPrintPersonalTaskTitle(item as PrintTask)
                     : commonPrintTaskTitle(item as PrintTask)
-                return `<td>${chunkIndex * 6 + cellIndex + 1}. ${escapePrintHtml(title)}</td>`
+                return `<td>${chunkIndex * 6 + cellIndex + 1}. ${isMeetingTable ? escapePrintHtml(title) : commonPrintTitleHtml(title)}</td>`
               }).join("")
               const rowHeaders =
                 chunkIndex === 0
@@ -4847,8 +4897,8 @@ export default function CommonViewPage() {
                     ? getOneHEntriesForRow(dayData.oneH, rowId)
                     : rowId === "r1"
                       ? dayData.r1
-                      : rowId === "personal"
-                        ? dayData.personal
+                      : isPersonalRowId(rowId)
+                        ? personalTasksForRow(dayData.personal, rowId)
                         : rowId === "external"
                           ? dayData.external
                           : rowId === "internal"
@@ -4894,7 +4944,7 @@ export default function CommonViewPage() {
             }${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
         )
       }
-      if (rowId === "personal") {
+      if (isPersonalRowId(rowId)) {
         return (entries as PersonalItem[]).map(
           (e) => `${getFastTaskDisplayNumber(entries as FastTaskEntry[], e)}. ${commonPrintPersonalTaskTitle(e)}${assigneesSuffix(e)}`
         )
@@ -5316,7 +5366,11 @@ export default function CommonViewPage() {
 
   const showCard = (type: CommonType) => {
     if (taskFocusFilter !== "all" && !isFastTaskRowId(type)) return false
-    const matchesType = typeFilters.size === 0 || typeFilters.has(type) || (isOneHSlotRowId(type) && typeFilters.has("oneH"))
+    const matchesType =
+      typeFilters.size === 0 ||
+      typeFilters.has(type) ||
+      (isOneHSlotRowId(type) && typeFilters.has("oneH")) ||
+      (isPersonalRowId(type) && typeFilters.has("personal"))
     if (!matchesType) return false
     if (colorFilter === "all") return true
     return isFastTaskRowId(type)
@@ -6323,6 +6377,9 @@ export default function CommonViewPage() {
     oneH1550: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
     oneHNoSlot: "DETYRA 1H QE NUK KANE SLOT TE CAKTUAR.",
     personal: "JANË DETYRA TË VENDOSURA NGA GA/KA DHE PERGJEGJESIT BARAZOHEMI VETËM ME TA ORA PËR BZ: 16:00",
+    personalGA: "DETYRA PERSONALE ME GA.",
+    personalKA: "DETYRA PERSONALE ME KA.",
+    personalPX: "DETYRA PERSONALE ME PX TJERË.",
     external: "Takime externe",
     internal: "Takime interne",
     r1: "DETYRË E RE. THIRRET ÇDO 1 ORË DERISA TË SQAROHET. PASI SQAROHET NDERROHET STATUSI NE 1H",
@@ -6634,28 +6691,36 @@ export default function CommonViewPage() {
     }))
 
     const personalSource = sortTasksByOrder(filtered.personal, isMultiDate)
-    const personalItems: SwimlaneCell[] = personalSource.map((x) => ({
-      title: x.title,
-      assignees: x.assignees || (x.person ? [x.person] : []),
-      subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
-      dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
-      accentClass: "swimlane-accent personal",
-      status: x.status,
-      isDone: x.isDone,
-      number: getFastTaskDisplayNumber(personalSource, x),
-      taskId: x.taskId,
-      userId: x.userId,
-      departmentId: x.departmentId,
-      fastTaskOrder: x.fastTaskOrder,
-      finishPeriod: x.finishPeriod,
-      entryDate: x.date,
-      isDeadlineImportant: x.isDeadlineImportant,
-      dueDate: x.dueDate,
-      startDate: x.startDate,
-      createdAt: x.createdAt,
-      completedAt: x.completedAt,
-      dateIsToday: isCommonTaskStartingOnDate(x),
-    }))
+    const buildPersonalItems = (group: PersonalTaskGroup): SwimlaneCell[] => {
+      const groupSource = personalSource.filter((item) => getPersonalTaskGroup(item) === group)
+      return groupSource.map((x) => ({
+        title: x.title,
+        assignees: x.assignees || (x.person ? [x.person] : []),
+        subtitle: `${formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate)}${x.note ? ` - ${x.note}` : ""}`,
+        dateLabel: formatFastTaskDateLabel(x.date, x.isDone, x.completedAt, x.startDate),
+        accentClass: "swimlane-accent personal",
+        status: x.status,
+        isDone: x.isDone,
+        number: getFastTaskDisplayNumber(groupSource, x),
+        taskId: x.taskId,
+        userId: x.userId,
+        departmentId: x.departmentId,
+        fastTaskOrder: x.fastTaskOrder,
+        finishPeriod: x.finishPeriod,
+        entryDate: x.date,
+        isDeadlineImportant: x.isDeadlineImportant,
+        dueDate: x.dueDate,
+        startDate: x.startDate,
+        createdAt: x.createdAt,
+        completedAt: x.completedAt,
+        dateIsToday: isCommonTaskStartingOnDate(x),
+      }))
+    }
+    const personalItemsByGroup: Record<PersonalTaskGroup, SwimlaneCell[]> = {
+      GA: buildPersonalItems("GA"),
+      KA: buildPersonalItems("KA"),
+      PX: buildPersonalItems("PX"),
+    }
 
     const externalSource = isMultiDate
       ? sortByDateTime(filtered.external, (x) => x.date, (x) => x.time, (x) => x.title)
@@ -6824,7 +6889,11 @@ export default function CommonViewPage() {
           }
         })
     const r1HeaderBreakdown = buildFastHeaderBreakdown(r1Items)
-    const personalHeaderBreakdown = buildFastHeaderBreakdown(personalItems)
+    const personalHeaderBreakdownByGroup: Record<PersonalTaskGroup, ReturnType<typeof buildFastHeaderBreakdown>> = {
+      GA: buildFastHeaderBreakdown(personalItemsByGroup.GA),
+      KA: buildFastHeaderBreakdown(personalItemsByGroup.KA),
+      PX: buildFastHeaderBreakdown(personalItemsByGroup.PX),
+    }
 
     return [
       {
@@ -6903,15 +6972,19 @@ export default function CommonViewPage() {
         headerBreakdown: r1HeaderBreakdown,
         items: r1Items,
       },
-      {
-        id: "personal",
-        label: "P:",
-        count: filtered.personal.length,
-        headerClass: "swimlane-header personal",
-        badgeClass: "swimlane-badge personal",
-        headerBreakdown: personalHeaderBreakdown,
-        items: personalItems,
-      },
+      ...PERSONAL_ROW_IDS.map((id) => {
+        const group = getPersonalRowGroup(id)
+        const items = personalItemsByGroup[group]
+        return {
+          id,
+          label: `P: ${group}`,
+          count: items.length,
+          headerClass: "swimlane-header personal",
+          badgeClass: "swimlane-badge personal",
+          headerBreakdown: personalHeaderBreakdownByGroup[group],
+          items,
+        }
+      }),
       {
         id: "priority",
         label: "PRJK",
@@ -7321,23 +7394,22 @@ export default function CommonViewPage() {
               ) : null}
               {Array.from({ length: 6 }, (_, cellIndex) => {
                 const item = taskCells[cellIndex]
-                const isPersonalTaskForGa = Boolean(
-                  item &&
-                    row.id === "personal" &&
-                    personalTaskTitleHasInitials(item.title, "GA")
-                )
+                const isPersonalTaskForGa = Boolean(item && row.id === "personalGA")
                 return (
                   <td
                     key={`${row.id}-${chunkIndex}-${cellIndex}`}
                     className={isPersonalTaskForGa ? "single-day-print-cell-personal-ga" : undefined}
                   >
-                    {item
-                      ? `${chunkIndex * 6 + cellIndex + 1}. ${
-                          row.id === "personal"
+                    {item ? (
+                      <>
+                        {chunkIndex * 6 + cellIndex + 1}.{" "}
+                        {renderWfcText(
+                          isPersonalRowId(row.id)
                             ? commonPrintPersonalTaskTitle(item)
                             : commonPrintTaskTitle(item)
-                        }`
-                      : ""}
+                        )}
+                      </>
+                    ) : ""}
                   </td>
                 )
               })}
@@ -7780,7 +7852,7 @@ export default function CommonViewPage() {
             vertical-align: middle;
           }
           .single-day-print-table td.single-day-print-cell-personal-ga {
-            background-color: #f3e8ff !important;
+            background-color: #d8b4fe !important;
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
@@ -7794,7 +7866,9 @@ export default function CommonViewPage() {
             .swimlane-row-oneH1550,
             .swimlane-row-oneHNoSlot,
             .swimlane-row-r1,
-            .swimlane-row-personal
+            .swimlane-row-personalGA,
+            .swimlane-row-personalKA,
+            .swimlane-row-personalPX
           ) {
             display: none !important;
           }
@@ -10128,6 +10202,24 @@ export default function CommonViewPage() {
           background: #ffffff;
           border-color: #ffffff;
           color: #b91c1c;
+        }
+        .task-title-wfc {
+          color: #dc2626 !important;
+          font-weight: 800;
+        }
+        .swimlane-cell.deadline-important:not(.personal-ga-task) .task-title-wfc,
+        .week-table-entry.deadline-important:not(.personal-ga-task) .task-title-wfc {
+          background: #ffffff;
+          border-radius: 2px;
+          padding: 0 2px;
+        }
+        .swimlane-cell.personal-ga-task,
+        .week-table-entry.personal-ga-task,
+        .week-table-view.neutral-all-days .week-table-entry.personal-ga-task {
+          background: #d8b4fe !important;
+          color: #111827 !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
         }
 
         /* Modern Toolbar */
@@ -13446,7 +13538,12 @@ export default function CommonViewPage() {
                         dayEntries[iso] = mergePrintTaskEntries(row.id, slotEntries)
                       }
                       else if (row.id === "r1") dayEntries[iso] = includeR1 ? mergePrintTaskEntries(row.id, dayData?.r1 || []) : []
-                      else if (row.id === "personal") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.personal || [])
+                      else if (isPersonalRowId(row.id)) {
+                        dayEntries[iso] = mergePrintTaskEntries(
+                          row.id,
+                          personalTasksForRow(dayData?.personal || [], row.id)
+                        )
+                      }
                       else if (row.id === "external") dayEntries[iso] = dayData?.external || []
                       else if (row.id === "internal") dayEntries[iso] = dayData?.internal || []
                       else if (row.id === "bz") dayEntries[iso] = dayData?.bz || []
@@ -13470,7 +13567,7 @@ export default function CommonViewPage() {
                       if (rowId === "externalHoliday") return "externalHoliday"
                       if (rowId === "blocked") return "blocked"
                       if (isOneHSlotRowId(rowId as CommonType)) return "oneh"
-                      if (rowId === "personal") return "personal"
+                      if (isPersonalRowId(rowId as CommonType)) return "personal"
                       if (rowId === "external") return "external"
                       if (rowId === "internal") return "internal"
                       if (rowId === "bz") return "bz"
@@ -13624,7 +13721,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintTaskTitle(e)}
+                                  {renderWfcText(commonPrintTaskTitle(e))}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -13687,7 +13784,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintPersonalTaskTitle(e)}
+                                  {renderWfcText(commonPrintPersonalTaskTitle(e))}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -13699,7 +13796,7 @@ export default function CommonViewPage() {
                             </div>
                           </div>
                         ))
-                      } else if (row.id === "personal") {
+                      } else if (isPersonalRowId(row.id)) {
                         return (entries as PersonalItem[]).map((e, idx: number) => (
                           <div
                             key={idx}
@@ -13709,6 +13806,7 @@ export default function CommonViewPage() {
                               commonTaskHighlightClassName(e),
                               hasEightAmIndicator(e.title) ? "eight-am-task" : "",
                               repeatedTaskClassName(e, iso),
+                              row.id === "personalGA" ? "personal-ga-task" : "",
                             ].filter(Boolean).join(" ")}
                           >
                             <div className="week-table-entry-main">
@@ -13721,7 +13819,7 @@ export default function CommonViewPage() {
                                   {hasEightAmIndicator(e.title) ? (
                                     <span className="time-indicator">08:00</span>
                                   ) : null}
-                                  {commonPrintTaskTitle(e)}
+                                  {renderWfcText(commonPrintTaskTitle(e))}
                                 </span>
                               </div>
                             <div className="week-table-avatars">
@@ -14181,6 +14279,7 @@ export default function CommonViewPage() {
                                   isFastTaskRowId(row.id) && hasEightAmIndicator(cell.title) ? "eight-am-task" : "",
                                   cell.isDone ? "done" : "",
                                   commonTaskStateClassName(cell.status, cell.isDone),
+                                  row.id === "personalGA" && !cell.placeholder ? "personal-ga-task" : "",
                                 ]
                                   .filter(Boolean)
                                   .join(" ")}
@@ -14309,7 +14408,7 @@ export default function CommonViewPage() {
                                         ].filter(Boolean).join(" ")}
                                       >
                                         {isTitleRowOpen
-                                          ? renderMarkedNoteContent(stripInitialsPrefix(cell.title), cell.title)
+                                          ? highlightWfcReactNode(renderMarkedNoteContent(stripInitialsPrefix(cell.title), cell.title))
                                           : renderCommonMarkedTitleLine(cell.title)}
                                       </span>
                                     </div>
