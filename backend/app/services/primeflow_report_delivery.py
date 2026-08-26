@@ -36,14 +36,14 @@ TERMINAL = {"SENT", "ALREADY_SENT"}
 GA_ATTACHMENT_RECIPIENTS = ("ga@primexeu.com",)
 STRIKE_INTERVAL_STARTS = {
     "10:00": time(8, 0),
-    "11:00": time(9, 0),
+    "11:00": time(10, 0),
     "11:50": time(11, 0),
     "14:10": time(11, 50),
     "14:20": time(11, 50),
     "16:00": time(14, 20),
 }
 STRIKE_INTERVAL_ENDS = {
-    "10:00": time(9, 0),
+    "10:00": time(10, 0),
     "11:00": time(11, 0),
     "11:50": time(11, 50),
     "14:10": time(14, 20),
