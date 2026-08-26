@@ -482,8 +482,10 @@ async def get_common_view(
         one_h_slot_report_start=one_h_slot_report_start,
         one_h_slot_report_end=one_h_slot_report_end,
     )
+    request_cache_control = request.headers.get("cache-control", "").lower()
+    bypass_cache = "no-cache" in request_cache_control or "no-store" in request_cache_control
     if_match = request.headers.get("if-none-match")
-    if if_match and if_match.strip('"') == etag:
+    if not bypass_cache and if_match and if_match.strip('"') == etag:
         return Response(status_code=status.HTTP_304_NOT_MODIFIED, headers={"ETag": etag})
 
     cache_key = (
@@ -492,7 +494,7 @@ async def get_common_view(
         f"{','.join(day.isoformat() for day in one_h_slot_report_dates)}|"
         f"{one_h_slot_report_start}|{one_h_slot_report_end}"
     )
-    if SERVER_CACHE_TTL_SECONDS > 0:
+    if SERVER_CACHE_TTL_SECONDS > 0 and not bypass_cache:
         cached = _cache.get(cache_key)
         if cached:
             expires_at, cached_etag, payload = cached
@@ -1273,5 +1275,7 @@ async def get_common_view(
         _cache[cache_key] = (datetime.utcnow().timestamp() + SERVER_CACHE_TTL_SECONDS, etag, payload_dict)
 
     response.headers["ETag"] = etag
+    if bypass_cache:
+        response.headers["Cache-Control"] = "no-store"
     response_payload = CommonViewResponse(**payload_dict)
     return response_payload.copy(update={"trace_id": trace_id})

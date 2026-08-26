@@ -55,14 +55,20 @@ def test_staff_comment_users_keep_fixed_order_then_pcm_weekly_plan_order() -> No
         ],
     }
 
-    assert _comment_user_initials(payload) == ["AT", "RA", "EF", "EH", "LH", "FG", "BK", "ZM"]
+    assert _comment_user_initials(payload) == ["AT", "EF", "RA", "EH", "LH", "FG", "BK", "ZM"]
 
 
 def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     initials = ["AT", "RA", "EF", "EH", "LH", "FG", "BK"]
     html = _comments_table_html(initials)
     assert 'data-user-comments-lines="true"' in html
-    assert html.count('data-user-comment-line="true"') == 3
+    assert html.count('data-user-comment-line="true"') == 2
+    assert html.count('data-comment-department=') == 3
+    assert '<strong>DEV:</strong>' in html
+    assert '<strong>GD:</strong>' in html
+    assert '<strong>PCM:</strong>' in html
+    assert html.index("<strong>AT:</strong>") < html.index("<strong>EF:</strong>")
+    assert html.index("<strong>EF:</strong>") < html.index("<strong>RA:</strong>")
     assert html.index("<strong>AT:</strong>") < html.index("<strong>BK:</strong>")
     assert html.count("data-user-comment=") == len(initials)
     assert html.count('width="100%"') >= 3
@@ -77,10 +83,11 @@ def test_staff_comments_use_compact_write_in_lines_in_all_formats() -> None:
     title_cells = [cell for row in sheet.iter_rows() for cell in row if cell.value == "KOMENTE PER STAF"]
     assert len(title_cells) == 1
     title_row = title_cells[0].row
-    assert sheet.cell(title_row + 1, 1).value.startswith("AT: ____________________")
+    assert sheet.cell(title_row + 1, 1).value.startswith("DEV: AT: ____________________")
     assert "EF: ____________________" in sheet.cell(title_row + 1, 1).value
-    assert sheet.cell(title_row + 2, 1).value.startswith("EH: ____________________")
-    assert sheet.cell(title_row + 3, 1).value.startswith("FG: ____________________")
+    assert "LH: ____________________" in sheet.cell(title_row + 1, 1).value
+    assert sheet.cell(title_row + 2, 1).value.startswith("GD: FG: ____________________")
+    assert "PCM: BK: ____________________" in sheet.cell(title_row + 2, 1).value
     values = [str(cell.value or "") for row in sheet.iter_rows() for cell in row]
     assert "INC" not in values
     assert "KOM" not in values
@@ -272,7 +279,8 @@ def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     assert report_html.count('data-task-badge="due-date"') == 1
     assert 'data-badge-position="bottom-right"' in report_html
     assert 'data-due-today="true"' in report_html
-    assert ">14.08.2026</span>" in report_html
+    assert ">SOT</span>" in report_html
+    assert ">14.08.2026</span>" not in report_html
     assert "DUE TODAY" not in report_html
     assert "background-color:#EFF6FF" in report_html
     assert "border:1px solid #93C5FD" in report_html
@@ -473,6 +481,8 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
     report = asyncio.run(build_today_print_report(date(2026, 8, 24), include_attachment=True))
 
     assert report["target_date"] == "2026-08-24"
+    assert report["subject"] == "1H SHTYPI  SOT— 24.08.2026"
+    assert "1H SHTYPI  SOT— 24.08.2026" in report["html"]
     assert "Today task" in report["html"]
     assert "Tomorrow task" not in report["html"]
     assert "Today meeting" in report["html"]
@@ -497,6 +507,8 @@ def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -
 
     tomorrow = asyncio.run(build_tomorrow_print_report(date(2026, 8, 24), include_attachment=True))
     assert tomorrow["target_date"] == "2026-08-25"
+    assert tomorrow["subject"] == "1H SHTYPI  NESER — 25.08.2026"
+    assert "1H SHTYPI  NESER — 25.08.2026" in tomorrow["html"]
     assert "Today meeting" not in tomorrow["html"]
     assert "Tomorrow meeting" in tomorrow["html"]
     assert "Following meeting" in tomorrow["html"]

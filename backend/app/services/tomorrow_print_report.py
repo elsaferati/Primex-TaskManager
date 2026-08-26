@@ -75,8 +75,9 @@ STATUS_COLORS = {
     "WAITING_CONFIRMATION": "#FFEDD5",
     "DONE": "#C4FDC4",
 }
-COMMENT_FIXED_INITIALS = ("AT", "RA", "EF", "EH", "LH", "FG")
-COMMENT_ROW_COUNT = 3
+COMMENT_DEV_INITIALS = ("AT", "EF", "RA", "EH", "LH")
+COMMENT_GD_INITIALS = ("FG",)
+COMMENT_FIXED_INITIALS = COMMENT_DEV_INITIALS + COMMENT_GD_INITIALS
 COMMENT_WRITE_IN_LINE = "_" * 20
 REQUIRED_SHTYPI_RECIPIENT = "130primex.eu@gmail.com"
 
@@ -107,8 +108,10 @@ def ensure_required_shtypi_recipient(
     return result
 
 
-def subject_for(target_date: date) -> str:
-    return f"1H SHTYPI - {target_date:%d.%m.%Y}"
+def subject_for(target_date: date, relative_day_label: str) -> str:
+    """Return the shared email subject and visible report title."""
+    separator = " — " if relative_day_label == "NESER" else "— "
+    return f"1H SHTYPI  {relative_day_label}{separator}{target_date:%d.%m.%Y}"
 
 
 def _item_date(item: dict[str, Any]) -> date | None:
@@ -209,40 +212,48 @@ def _comment_user_initials(payload: dict[str, Any]) -> list[str]:
     return result
 
 
-def _comment_rows(initials: list[str]) -> list[list[str]]:
+def _comment_department_rows(initials: list[str]) -> list[list[tuple[str, list[str]]]]:
     values = initials or list(COMMENT_FIXED_INITIALS)
-    base_size, extra = divmod(len(values), COMMENT_ROW_COUNT)
-    rows: list[list[str]] = []
-    start = 0
-    for row_index in range(COMMENT_ROW_COUNT):
-        size = base_size + int(row_index < extra)
-        rows.append(values[start:start + size])
-        start += size
-    return rows
+    dev = [value for value in COMMENT_DEV_INITIALS if value in values]
+    gd = [value for value in COMMENT_GD_INITIALS if value in values]
+    pcm = [value for value in values if value not in COMMENT_FIXED_INITIALS]
+    return [[("DEV", dev)], [("GD", gd), ("PCM", pcm)]]
 
 
 def _comment_write_in_lines(initials: list[str]) -> list[str]:
     return [
-        ",    ".join(f"{value}: {COMMENT_WRITE_IN_LINE}" for value in row)
-        for row in _comment_rows(initials)
+        "    ".join(
+            f"{department}: "
+            + ",    ".join(f"{value}: {COMMENT_WRITE_IN_LINE}" for value in members)
+            for department, members in row
+        )
+        for row in _comment_department_rows(initials)
     ]
 
 
 def _comments_table_html(initials: list[str]) -> str:
-    """Render all staff comment fields across exactly three full-width rows."""
+    """Render staff comment fields in two department-grouped rows."""
     rows: list[str] = []
-    for chunk in _comment_rows(initials):
-        cell_width = 100 / max(len(chunk), 1)
-        entries = "".join(
-            '<td data-user-comment="{initials}" width="{width:.2f}%" valign="bottom" '
-            'style="width:{width:.2f}%;padding:0 14px 8px 0;vertical-align:bottom;">'
-            '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" '
-            'style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;">'
-            '<tr><td width="1%" style="width:1%;padding:0 5px 1px 0;white-space:nowrap;">'
-            '<strong>{initials}:</strong></td><td style="width:99%;border-bottom:1px solid #111827;">&nbsp;</td>'
-            '</tr></table></td>'.format(initials=html.escape(value), width=cell_width)
-            for value in chunk
-        ) or '<td style="height:22px;">&nbsp;</td>'
+    for department_row in _comment_department_rows(initials):
+        member_count = sum(len(members) for _, members in department_row)
+        width_unit = 100 / max(member_count + len(department_row) * 0.5, 1)
+        entries = ""
+        for department, members in department_row:
+            entries += (
+                '<td data-comment-department="{department}" width="{width:.2f}%" '
+                'style="width:{width:.2f}%;padding:0 6px 8px 0;white-space:nowrap;vertical-align:bottom;">'
+                '<strong>{department}:</strong></td>'
+            ).format(department=html.escape(department), width=width_unit * 0.5)
+            entries += "".join(
+                '<td data-user-comment="{initials}" width="{width:.2f}%" valign="bottom" '
+                'style="width:{width:.2f}%;padding:0 14px 8px 0;vertical-align:bottom;">'
+                '<table role="presentation" width="100%" border="0" cellpadding="0" cellspacing="0" '
+                'style="width:100%;border-collapse:collapse;font-family:Arial,sans-serif;font-size:13px;">'
+                '<tr><td width="1%" style="width:1%;padding:0 5px 1px 0;white-space:nowrap;">'
+                '<strong>{initials}:</strong></td><td style="width:99%;border-bottom:1px solid #111827;">&nbsp;</td>'
+                '</tr></table></td>'.format(initials=html.escape(value), width=width_unit)
+                for value in members
+            )
         rows.append(
             '<table data-user-comment-line="true" role="presentation" width="100%" border="0" '
             'cellpadding="0" cellspacing="0" style="width:100%;border-collapse:collapse;table-layout:fixed;">'
@@ -330,6 +341,7 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
         due_day = _task_due_day(item)
         if due_day:
             due_today = report_date is not None and due_day == report_date
+            due_label = "SOT" if due_today else due_day.strftime("%d.%m.%Y")
             style = (
                 "display:inline-block;padding:2px 5px;border:1px solid #93C5FD;border-radius:3px;"
                 "background-color:#EFF6FF;color:#1D4ED8;font-family:Arial,sans-serif;"
@@ -341,7 +353,7 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
             due_badge = (
                 f'<span data-task-badge="due-date" data-badge-position="bottom-right" '
                 f'data-due-today="{str(due_day == report_date).lower()}" '
-                f'style="{style}">{due_day:%d.%m.%Y}</span>'
+                f'style="{style}">{due_label}</span>'
             )
     return "".join(top_badges), due_badge
 
@@ -1079,6 +1091,7 @@ def _png_table_attachment(
 async def _build_print_report(
     target_date: date, *, include_attachment: bool = False, include_meetings: bool = True,
     include_png: bool = False, first_meeting_day_label: str = "NESER",
+    report_day_label: str,
     payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     if payload is None:
@@ -1132,8 +1145,9 @@ async def _build_print_report(
     ]
     meeting_rows = meeting_sections[0][2] if meeting_sections else []
     report_date = target_date.strftime("%d.%m.%Y")
+    report_title = subject_for(target_date, report_day_label)
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
-<div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">1H SHTYPI — {report_date}</div>
+<div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
 {_one_h_checklists_html()}{_html_table(task_rows, report_date=target_date)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
@@ -1141,7 +1155,7 @@ async def _build_print_report(
         + "</div>"
     )
     plain_rows = [
-        f"1H SHTYPI - {report_date}",
+        report_title,
         "",
         "PYETJET PER 1H - BORD",
         *(
@@ -1182,7 +1196,7 @@ async def _build_print_report(
         *_comment_write_in_lines(comment_initials),
     ])
     report: dict[str, Any] = {
-        "subject": subject_for(target_date),
+        "subject": report_title,
         "target_date": target_date.isoformat(),
         "html": html_body,
         "content_html": content_html,
@@ -1207,7 +1221,8 @@ async def build_tomorrow_print_report(
     delivery_date: date, *, include_attachment: bool = False
 ) -> dict[str, Any]:
     return await _build_print_report(
-        next_working_day(delivery_date), include_attachment=include_attachment, include_meetings=True
+        next_working_day(delivery_date), include_attachment=include_attachment, include_meetings=True,
+        report_day_label="NESER",
     )
 
 
@@ -1217,7 +1232,7 @@ async def build_today_print_report(
     """Build today's task grid plus today/next-working-day meeting sections."""
     return await _build_print_report(
         report_date, include_attachment=include_attachment, include_meetings=True,
-        include_png=True, first_meeting_day_label="SOT", payload=payload
+        include_png=True, first_meeting_day_label="SOT", report_day_label="SOT", payload=payload
     )
 
 
