@@ -166,9 +166,6 @@ jobs:
           Set-Location backend
           $python = "C:\Users\Administrator\AppData\Local\Programs\Python\Python313\python.exe"
 
-          # Prevent the legacy scheduler from reloading rows while migrations run.
-          cmd /c "pm2 stop primeflow-report-scheduler || ver > NUL" | Out-Host
-
           $headOutput = @(& $python -m alembic heads)
           if ($LASTEXITCODE -ne 0) {
             $headOutput | ForEach-Object { Write-Host $_ }
@@ -181,6 +178,10 @@ jobs:
           }
           $expectedHead = ("$($headLines[0])" -split '\s+')[0]
           Write-Host "Alembic repository head: $expectedHead"
+
+          # Validate the migration graph before stopping a running service.
+          # Prevent the legacy scheduler from reloading rows while migrations run.
+          cmd /c "pm2 stop primeflow-report-scheduler || ver > NUL" | Out-Host
 
           & $python -m alembic current
           if ($LASTEXITCODE -ne 0) {
