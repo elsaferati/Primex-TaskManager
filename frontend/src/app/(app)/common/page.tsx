@@ -67,6 +67,11 @@ type CommonType =
   | "bz"
 
 const PERSONAL_ROW_IDS: readonly PersonalRowId[] = ["personalGA", "personalKA", "personalPX"]
+const PERSONAL_ROW_SCHEDULES: Readonly<Record<PersonalRowId, string>> = {
+  personalGA: "08:15 / 13:15",
+  personalKA: "08:30 / 13:15",
+  personalPX: "08:45 / 14:00",
+}
 const DEFAULT_OPEN_SWIMLANE_TITLE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", ...PERSONAL_ROW_IDS]
 const TITLE_EXPANDABLE_SWIMLANE_ROWS: CommonType[] = ["oneH10", "oneH11", "oneH1150", "oneH1420", "oneH1550", "oneHNoSlot", "r1", ...PERSONAL_ROW_IDS, "feedback"]
 const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
@@ -115,6 +120,9 @@ const orderCommonRowsForPrint = <T extends { id: CommonType }>(rows: readonly T[
     .map(({ row }) => row)
 const getCommonPrintRowSubtext = (id: CommonType) => {
   if (id === "blocked") return "14:30 - 16:00\nRAP 15:50"
+  if (id === "personalGA" || id === "personalKA" || id === "personalPX") {
+    return PERSONAL_ROW_SCHEDULES[id]
+  }
   return ""
 }
 
@@ -6421,6 +6429,7 @@ export default function CommonViewPage() {
     oneHNoSlot: "PA SLOT",
     r1:"AM: 08:50/10:00/11:00-11:50)\nPM: 14:30/16:00",
     blocked: "NUK PENGOHET.",
+    ...PERSONAL_ROW_SCHEDULES,
     personal:"NGA GA/KA/\nPERGJEGJESIT BARAZOHEMI VETËM ME TA. BZ 16:00."
   }
 

@@ -222,6 +222,11 @@ jobs:
           REM the delete/start lifecycle while avoiding repeated CLI startup cost.
           call pm2 delete ecosystem.config.cjs --only "primex-backend,primeflow-mcp,primeflow-report-scheduler,celery_worker,celery_beat" || ver > NUL
 
+          REM PM2 can only delete processes it still owns. Remove any orphaned
+          REM legacy scheduler before the new one can compete for delivery locks.
+          powershell -NoProfile -ExecutionPolicy Bypass -File scripts\ensure_single_report_scheduler.ps1 -Mode Stop
+          if errorlevel 1 exit /b 1
+
           REM Stop legacy backend process names so the current checkout owns the API port.
           set REDIS_ENABLED=true
           set REDIS_URL=redis://127.0.0.1:6379/0
@@ -337,6 +342,12 @@ jobs:
             cmd /c "pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL"
             Write-Error "PrimeFlow report scheduler is not online."
             exit 1
+          }
+          try {
+            & .\scripts\ensure_single_report_scheduler.ps1 -Mode Verify
+          } catch {
+            cmd /c "pm2 logs primeflow-report-scheduler --lines 100 --nostream || ver > NUL"
+            throw
           }
           & $python -m scripts.check_report_scheduler
           if ($LASTEXITCODE -ne 0) {
