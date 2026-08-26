@@ -183,6 +183,48 @@ function createEmptyGaAssigneeTaskState(): GaAssigneeTaskState {
   }
 }
 
+function sameStringSet(left: string[], right: string[]) {
+  if (left.length !== right.length) return false
+  const rightValues = new Set(right)
+  return left.every((value) => rightValues.has(value))
+}
+
+function sameGaAssigneeTaskState(
+  left: GaAssigneeTaskState,
+  right: GaAssigneeTaskState
+) {
+  return (
+    left.type === right.type &&
+    left.status === right.status &&
+    (isWaitingConfirmation(left.status) ? left.confirmationAssigneeId : "") ===
+      (isWaitingConfirmation(right.status) ? right.confirmationAssigneeId : "") &&
+    left.startDate === right.startDate &&
+    left.dueDate === right.dueDate &&
+    left.finishPeriod === right.finishPeriod &&
+    left.isDeadlineImportant === right.isDeadlineImportant
+  )
+}
+
+function serializeGaAssigneeTaskState(
+  assigneeId: string,
+  state: GaAssigneeTaskState
+) {
+  return {
+    assignee_id: assigneeId,
+    status: state.status,
+    confirmation_assignee_id: isWaitingConfirmation(state.status) ? state.confirmationAssigneeId : null,
+    priority: state.type === "HIGH" ? "HIGH" : "NORMAL",
+    is_bllok: state.type === "BLLOK",
+    is_1h_report: state.type === "1H",
+    is_r1: state.type === "R1",
+    is_personal: state.type === "PERSONAL",
+    start_date: state.startDate ? new Date(state.startDate).toISOString() : null,
+    due_date: state.dueDate ? new Date(state.dueDate).toISOString() : null,
+    finish_period: state.finishPeriod,
+    is_deadline_important: state.isDeadlineImportant,
+  }
+}
+
 function gaAssigneeTaskType(task: Task): GaAssigneeTaskType {
   if (task.is_bllok) return "BLLOK"
   if (task.is_1h_report) return "1H"
@@ -2144,34 +2186,41 @@ export default function GaKaNotesPage() {
       const endpoint = taskInfo?.taskId
         ? `/${noteBasePath}/${editNoteId}/task-bundle`
         : `/${noteBasePath}/${editNoteId}`
-      const body = taskInfo?.taskId
-        ? {
-            content: serializedContent,
-            description: editDescription.trim() || null,
-            ...(selectedProjectId !== (currentNote?.project_id ?? null)
-              ? { project_id: selectedProjectId }
-              : {}),
-            assignee_ids: editTaskAssigneeIds,
-            assignee_states: editTaskAssigneeIds.map((assigneeId) => {
-              const state = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
-              return {
-                assignee_id: assigneeId,
-                status: state.status,
-                confirmation_assignee_id: isWaitingConfirmation(state.status) ? state.confirmationAssigneeId : null,
-                priority: state.type === "HIGH" ? "HIGH" : "NORMAL",
-                is_bllok: state.type === "BLLOK",
-                is_1h_report: state.type === "1H",
-                is_r1: state.type === "R1",
-                is_personal: state.type === "PERSONAL",
-                start_date: state.startDate ? new Date(state.startDate).toISOString() : null,
-                due_date: state.dueDate ? new Date(state.dueDate).toISOString() : null,
-                finish_period: state.finishPeriod,
-                is_deadline_important: state.isDeadlineImportant,
-              }
-            }),
-            expected_updated_at: currentNote?.updated_at || null,
-          }
-        : { content: serializedContent }
+      const body: Record<string, unknown> = { content: serializedContent }
+      if (taskInfo?.taskId) {
+        const originalAssigneeIds = Array.from(
+          new Set(taskInfo.assignees.map((assignee) => assignee.id).filter(Boolean))
+        )
+        const assigneesChanged = !sameStringSet(editTaskAssigneeIds, originalAssigneeIds)
+        const changedStateIds = editTaskAssigneeIds.filter((assigneeId) => {
+          const editedState = editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
+          const originalState = taskInfo.assigneeStates[assigneeId]
+          return !originalState || !sameGaAssigneeTaskState(editedState, originalState)
+        })
+        const editedDescription = editDescription.trim() || null
+        const originalDescription = taskInfo.description?.trim() || null
+
+        if (editedDescription !== originalDescription) {
+          body.description = editedDescription
+        }
+        const originalProjectId = taskInfo.taskProjectId ?? currentNote?.project_id ?? null
+        if (selectedProjectId !== originalProjectId) {
+          body.project_id = selectedProjectId
+        }
+        if (assigneesChanged) {
+          body.assignee_ids = editTaskAssigneeIds
+        }
+        if (assigneesChanged || changedStateIds.length > 0) {
+          const stateIds = assigneesChanged ? editTaskAssigneeIds : changedStateIds
+          body.assignee_states = stateIds.map((assigneeId) =>
+            serializeGaAssigneeTaskState(
+              assigneeId,
+              editTaskAssigneeStates[assigneeId] ?? createEmptyGaAssigneeTaskState()
+            )
+          )
+        }
+        body.expected_updated_at = currentNote?.updated_at || null
+      }
 
       const res = await apiFetch(endpoint, {
         method: "PATCH",
@@ -2197,11 +2246,19 @@ export default function GaKaNotesPage() {
         setEditTaskAssigneeStates({})
       } else {
         let errorMessage = "Failed to update note"
-        try {
-          const errorData = (await res.json()) as { detail?: unknown }
-          errorMessage = formatApiDetail(errorData?.detail, errorMessage)
-        } catch {
-          // Keep the generic fallback message.
+        if (res) {
+          const responseText = await res.text()
+          try {
+            const errorData = JSON.parse(responseText) as { detail?: unknown }
+            errorMessage = formatApiDetail(errorData?.detail, errorMessage)
+          } catch {
+            if (responseText.trim()) {
+              errorMessage = responseText.trim().slice(0, 300)
+            }
+          }
+          if (errorMessage === "Failed to update note") {
+            errorMessage = `${errorMessage} (HTTP ${res.status})`
+          }
         }
         toast.error(errorMessage)
       }

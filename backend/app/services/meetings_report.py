@@ -4,7 +4,7 @@ import html
 import os
 import re
 import textwrap
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import or_, select
@@ -860,6 +860,9 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     tomorrow = next_working_day(report_day)
     week_start = _week_start(report_day)
     common_items = await _common_view_items(tomorrow)
+    local_day_start = datetime.combine(report_day, time.min, tzinfo=report_timezone())
+    completed_day_start = local_day_start.astimezone(timezone.utc)
+    completed_day_end = (local_day_start + timedelta(days=1)).astimezone(timezone.utc)
 
     task_stmt = (
         select(Task)
@@ -873,8 +876,20 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         )
     )
     tasks = (await db.execute(task_stmt)).scalars().all()
-    names = await _assignee_names(db, tasks)
-    assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    # Completed tasks use a separate date-bounded query. This includes tasks
+    # archived after completion without widening any other M3 section.
+    completed_tasks = (
+        await db.execute(
+            select(Task).where(
+                Task.completed_at >= completed_day_start,
+                Task.completed_at < completed_day_end,
+            )
+        )
+    ).scalars().all()
+    report_tasks_by_id = {task.id: task for task in [*tasks, *completed_tasks]}
+    report_tasks = list(report_tasks_by_id.values())
+    names = await _assignee_names(db, report_tasks)
+    assignee_ids_by_task = await _effective_task_assignee_ids(db, report_tasks)
     all_participant_ids = await _all_participant_user_ids(db)
     std_tickets_section = await std_tickets_report_section(db, report_day)
 
@@ -888,13 +903,13 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         user_id: _m3_department_code_label(department_id, department_codes)
         for user_id, department_id in (await db.execute(select(User.id, User.department_id))).all()
     }
-    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task, department_codes)
+    await apply_weekly_planner_task_order(db, report_tasks, assignee_ids_by_task, department_codes)
 
     today_todo = [task for task in tasks if _is_without_progress_for_m3_day(task, report_day)]
     daily_rlz_by_task = await _daily_rlz_values_by_task(
         db, today_todo, report_day, names, assignee_ids_by_task
     )
-    done_today = _completed_tasks_for_report_day(tasks, report_day)
+    done_today = _completed_tasks_for_report_day(completed_tasks, report_day)
 
     tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
     new_task_review_tasks = [task for task in tomorrow_tasks if not _is_system_task(task)]
@@ -1047,20 +1062,6 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 "TODO",
                 today_todo,
                 names,
-                include_department=True,
-                include_am_pm=True,
-                department_codes=department_codes,
-                daily_rlz_by_task=daily_rlz_by_task,
-                **table_kwargs,
-            )
-        ),
-        SECTION_TITLES[10]: _normalize_section(
-            _m3_status_table(
-                "DET E KRYERA SOT (AM/PM)",
-                done_today,
-                names,
-                with_status=True,
-                include_type=True,
                 include_department=True,
                 include_am_pm=True,
                 department_codes=department_codes,
