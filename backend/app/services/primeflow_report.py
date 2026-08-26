@@ -55,7 +55,7 @@ REPORT_STRIKE_LEGEND = (
     ("Green strike", "Kryer me heret", STRIKE_COLORS["green"]),
     ("Grey strike", "Kryer dje", STRIKE_COLORS["grey"]),
 )
-BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-15:30"
+BLOCKED_SECTION_TITLE_PREFIX = "BLLOK 14:30-16:00"
 
 
 class GmailVerificationError(RuntimeError):

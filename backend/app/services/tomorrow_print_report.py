@@ -8,6 +8,8 @@ from datetime import date, datetime
 from typing import Any
 
 from openpyxl import Workbook
+from openpyxl.cell.rich_text import CellRichText, TextBlock
+from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from PIL import Image, ImageDraw, ImageFont
@@ -22,12 +24,14 @@ TASK_ROWS = (
     ("oneH", "1H 11:00", "11:00"),
     ("oneH", "1H 11:50", "11:50"),
     ("oneH", "1H 14:20", "14:20"),
-    ("blocked", "BLL\n14:30 - 15:30\nRAP 15:50", None),
+    ("blocked", "BLL\n14:30 - 16:00\nRAP 15:50", None),
     ("oneH", "1H 16:00", "16:00"),
     ("oneH", "1H NO SLOT", ""),
     ("important", "DEADLINE / 08:00", None),
     ("r1", "R1=1H", None),
-    ("personal", "P:\nGA 08:15 / 13:15\n\nDV/LH 10:15 / 14:30", None),
+    ("personal", "P: GA", "GA"),
+    ("personal", "P: KA", "KA"),
+    ("personal", "P: PX", "PX"),
 )
 MEETING_ROWS = (("external", "TAK EXT"), ("internal", "TAK INT"))
 VALID_1H_SLOTS = {"10:00", "11:00", "11:50", "14:20", "16:00"}
@@ -69,6 +73,7 @@ NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
 PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|/|$)", re.I)
 NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 EIGHT_AM_MARKER_RE = re.compile(r"\b0?8:00\b")
+WFC_TOKEN_RE = re.compile(r"\bWFC\b", re.I)
 STATUS_COLORS = {
     "TODO": "#FFC4ED",
     "IN_PROGRESS": "#FFFF00",
@@ -79,13 +84,20 @@ COMMENT_DEV_INITIALS = ("AT", "EF", "RA", "EH", "LH")
 COMMENT_GD_INITIALS = ("FG",)
 COMMENT_FIXED_INITIALS = COMMENT_DEV_INITIALS + COMMENT_GD_INITIALS
 COMMENT_WRITE_IN_LINE = "_" * 20
-REQUIRED_SHTYPI_RECIPIENT = "130primex.eu@gmail.com"
+REQUIRED_SHTYPI_RECIPIENTS = (
+    "130primex.eu@gmail.com",
+    "313primex.eu@gmail.com",
+    "131primex.eu@gmail.com",
+    "info@primexeu.com",
+)
+# Kept for callers that use the original archive mailbox constant.
+REQUIRED_SHTYPI_RECIPIENT = REQUIRED_SHTYPI_RECIPIENTS[0]
 
 
 def ensure_required_shtypi_recipient(
     recipients: dict[str, list[str]],
 ) -> dict[str, list[str]]:
-    """Always include the required archive/print mailbox as a To recipient."""
+    """Always include every required SHTYPI mailbox as a To recipient."""
     result = {key: [] for key in ("to", "cc", "bcc")}
     seen: set[str] = set()
     for key in ("to", "cc", "bcc"):
@@ -96,15 +108,12 @@ def ensure_required_shtypi_recipient(
                 continue
             seen.add(normalized)
             result[key].append(email)
-    required_key = REQUIRED_SHTYPI_RECIPIENT.casefold()
-    if required_key not in seen:
-        result["to"].append(REQUIRED_SHTYPI_RECIPIENT)
-    elif all(
-        email.casefold() != required_key for email in result["to"]
-    ):
+    for required_email in REQUIRED_SHTYPI_RECIPIENTS:
+        required_key = required_email.casefold()
         for key in ("cc", "bcc"):
             result[key] = [email for email in result[key] if email.casefold() != required_key]
-        result["to"].append(REQUIRED_SHTYPI_RECIPIENT)
+        if all(email.casefold() != required_key for email in result["to"]):
+            result["to"].append(required_email)
     return result
 
 
@@ -161,12 +170,12 @@ def _task_period_label(item: dict[str, Any]) -> str:
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
-    """All deadline tasks stay red; only deadline tasks display a due date."""
+    """GA-personal purple wins over deadline red; other deadlines stay red."""
     deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-    if deadline:
-        color = DEADLINE_COLOR
-    elif personal and _is_personal_task_for_ga(item):
+    if personal and _is_personal_task_for_ga(item):
         color = PERSONAL_GA_COLOR
+    elif deadline:
+        color = DEADLINE_COLOR
     else:
         color = STATUS_COLORS[_task_status(item)]
     border = f";border:2px solid {EIGHT_AM_BORDER_COLOR}" if _is_eight_am_task(item) else ""
@@ -288,6 +297,41 @@ def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     return f"{'/'.join(owners)}: {title}" if owners else title
 
 
+def _task_title_html(value: str, *, red_background: bool) -> str:
+    """Escape a task title and make standalone WFC tokens visually distinct."""
+    parts: list[str] = []
+    cursor = 0
+    for match in WFC_TOKEN_RE.finditer(value):
+        parts.append(html.escape(value[cursor:match.start()]))
+        style = "color:#DC2626;font-weight:800;"
+        if red_background:
+            style += "background-color:#FFFFFF;border-radius:2px;padding:0 2px;"
+        parts.append(
+            f'<span data-task-token="wfc" style="{style}">{html.escape(match.group(0))}</span>'
+        )
+        cursor = match.end()
+    parts.append(html.escape(value[cursor:]))
+    return "".join(parts)
+
+
+def _excel_task_title(value: str, *, red_background: bool) -> str | CellRichText:
+    """Use rich text for WFC; Excel uses yellow on red because inline fills are unsupported."""
+    if WFC_TOKEN_RE.search(value) is None:
+        return value
+    default_font = InlineFont(color="FFFFFFFF" if red_background else "FF000000")
+    wfc_font = InlineFont(color="FFFFFF00" if red_background else "FFDC2626", b=True)
+    parts: list[str | TextBlock] = []
+    cursor = 0
+    for match in WFC_TOKEN_RE.finditer(value):
+        if match.start() > cursor:
+            parts.append(TextBlock(default_font, value[cursor:match.start()]))
+        parts.append(TextBlock(wfc_font, match.group(0)))
+        cursor = match.end()
+    if cursor < len(value):
+        parts.append(TextBlock(default_font, value[cursor:]))
+    return CellRichText(parts)
+
+
 def _is_eight_am_task(item: dict[str, Any]) -> bool:
     title = " ".join(str(item.get(key) or "") for key in ("title", "task_title"))
     if EIGHT_AM_MARKER_RE.search(title):
@@ -358,13 +402,23 @@ def _task_badges_html(item: dict[str, Any], report_date: date | None) -> tuple[s
     return "".join(top_badges), due_badge
 
 
-def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
-    """Match the GA-assignee rule used by the P row in Common View printouts."""
+def _personal_task_group(item: dict[str, Any]) -> str:
+    """Assign each personal task to exactly one ownership row."""
     title = _report_text(_first_line(item.get("title")))
     match = PERSONAL_TASK_INITIALS.match(title.strip())
     if match is None:
-        return False
-    return "GA" in {value.strip().upper() for value in re.split(r"[:/]", match.group(0))}
+        return "PX"
+    participants = {value.strip().upper() for value in re.split(r"[:/]", match.group(0))}
+    if "GA" in participants:
+        return "GA"
+    if "KA" in participants:
+        return "KA"
+    return "PX"
+
+
+def _is_personal_task_for_ga(item: dict[str, Any]) -> bool:
+    """Keep the existing GA-specific card color after splitting the P rows."""
+    return _personal_task_group(item) == "GA"
 
 
 def _dedupe(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -390,10 +444,12 @@ def _task_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list
         if isinstance(values, list)
     }
     rows: list[tuple[str, list[dict[str, Any]], bool]] = []
-    for bucket, label, requested_slot in TASK_ROWS:
+    for bucket, label, requested_value in TASK_ROWS:
         values = list(by_bucket.get(bucket, []))
         if bucket == "oneH":
-            values = [item for item in values if _slot(item) == requested_slot]
+            values = [item for item in values if _slot(item) == requested_value]
+        elif bucket == "personal":
+            values = [item for item in values if _personal_task_group(item) == requested_value]
         values = _dedupe(values)
         # Completed work belongs at the end of its slot so unfinished work is
         # immediately visible in the printed report.
@@ -483,7 +539,12 @@ def _html_table(
                 cell_style = f"{cell_style};{row_divider_style}"
                 background = f' bgcolor="{color}"' if color else ""
                 badges, due_badge = ("", "") if meeting else _task_badges_html(item, report_date)
-                task_content = f'{badges}{item_index + (chunk_index * 6) + 1}. {html.escape(value)}'
+                title_html = (
+                    html.escape(value)
+                    if meeting
+                    else _task_title_html(value, red_background=color == DEADLINE_COLOR)
+                )
+                task_content = f'{badges}{item_index + (chunk_index * 6) + 1}. {title_html}'
                 if due_badge:
                     task_content = (
                         '<table role="presentation" width="100%" height="100%" border="0" cellpadding="0" '
@@ -722,14 +783,23 @@ def _excel_table_attachment(
                                 labels.append(f"[{due_day:%d.%m.%Y}]")
                         if labels:
                             value = f"{' '.join(labels)}\n{value}"
-                    cell = sheet.cell(row_number, item_index, f"{item_index - 2 + chunk_index * 6}. {value}")
+                    cell_value = f"{item_index - 2 + chunk_index * 6}. {value}"
+                    deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
+                    ga_personal = personal and _is_personal_task_for_ga(item)
                     if not meeting:
-                        deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                        if deadline:
+                        cell_value = _excel_task_title(
+                            cell_value,
+                            red_background=deadline and not ga_personal,
+                        )
+                    cell = sheet.cell(row_number, item_index, cell_value)
+                    if not meeting:
+                        if ga_personal:
+                            cell.fill = ga_fill
+                        elif deadline:
                             cell.fill = deadline_fill
                             cell.font = Font(color="FFFFFF", bold=True)
                         else:
-                            cell.fill = ga_fill if personal and _is_personal_task_for_ga(item) else fills[_task_status(item)]
+                            cell.fill = fills[_task_status(item)]
                         if _is_eight_am_task(item):
                             cell.border = eight_am_border
                     elif _is_non_routine_meeting(item):
@@ -901,6 +971,32 @@ def _png_table_attachment(
     )
     image = Image.new("RGB", (width, height), "white")
     draw = ImageDraw.Draw(image)
+
+    def draw_task_title_line(
+        position: tuple[float, float], value: str, font: Any, default_color: str, *, red_background: bool
+    ) -> None:
+        cursor_x, cursor_y = position
+        text_cursor = 0
+        for match in WFC_TOKEN_RE.finditer(value):
+            prefix = value[text_cursor:match.start()]
+            if prefix:
+                draw.text((cursor_x, cursor_y), prefix, fill=default_color, font=font)
+                cursor_x += measure.textlength(prefix, font=font)
+            token = match.group(0)
+            token_width = measure.textlength(token, font=font)
+            if red_background:
+                draw.rounded_rectangle(
+                    (cursor_x - 2, cursor_y - 1, cursor_x + token_width + 2, cursor_y + 19),
+                    radius=2,
+                    fill="#FFFFFF",
+                )
+            draw.text((cursor_x, cursor_y), token, fill=DEADLINE_COLOR, font=font)
+            cursor_x += token_width
+            text_cursor = match.end()
+        suffix = value[text_cursor:]
+        if suffix:
+            draw.text((cursor_x, cursor_y), suffix, fill=default_color, font=font)
+
     draw.text((margin, 22), f"1H SHTYPI TODAY - {target_date:%d.%m.%Y}", fill="#111827", font=heading)
     draw.text((margin, 59), "Current Common View state used by the 1H report", fill="#475569", font=regular)
 
@@ -934,10 +1030,10 @@ def _png_table_attachment(
             fill, text_color, outline, outline_width = "#FFFFFF", "#111827", "#111827", 1
             if item is not None:
                 deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                if deadline:
-                    fill, text_color = DEADLINE_COLOR, "#FFFFFF"
-                elif personal and _is_personal_task_for_ga(item):
+                if personal and _is_personal_task_for_ga(item):
                     fill = PERSONAL_GA_COLOR
+                elif deadline:
+                    fill, text_color = DEADLINE_COLOR, "#FFFFFF"
                 else:
                     fill = STATUS_COLORS[_task_status(item)]
                 if _is_eight_am_task(item):
@@ -992,7 +1088,13 @@ def _png_table_attachment(
                 value = f"{item_index + 1 + chunk_index * 6}. {_task_title(item, personal=personal)}"
                 task_font = bold if fill == DEADLINE_COLOR else regular
                 for line_index, line in enumerate(wrap(value, task_font, column_widths[2 + item_index] - 12)):
-                    draw.text((x + 6, text_y + line_index * 20), line, fill=text_color, font=task_font)
+                    draw_task_title_line(
+                        (x + 6, text_y + line_index * 20),
+                        line,
+                        task_font,
+                        text_color,
+                        red_background=fill == DEADLINE_COLOR,
+                    )
             x = right
         y += row_height
 

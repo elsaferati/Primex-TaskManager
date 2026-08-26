@@ -33,16 +33,7 @@ from app.services.tomorrow_print_report import build_today_print_report
 
 logger = logging.getLogger(__name__)
 TERMINAL = {"SENT", "ALREADY_SENT"}
-_configured_extra_recipients = os.getenv("PRIMEFLOW_GA_EXTRA_RECIPIENTS", "").strip()
-if _configured_extra_recipients:
-    GA_ATTACHMENT_RECIPIENTS = tuple(
-        value.strip() for value in _configured_extra_recipients.split(",") if value.strip()
-    )
-else:
-    legacy_recipient = os.getenv("PRIMEFLOW_GA_ATTACHMENT_RECIPIENT", "").strip()
-    GA_ATTACHMENT_RECIPIENTS = tuple(
-        dict.fromkeys(filter(None, ("ga@primexeu.com", legacy_recipient or "130primex.eu@gmail.com")))
-    )
+GA_ATTACHMENT_RECIPIENTS = ("ga@primexeu.com",)
 STRIKE_INTERVAL_STARTS = {
     "10:00": time(8, 0),
     "11:00": time(9, 0),
@@ -64,7 +55,7 @@ STRIKE_INTERVAL_ENDS = {
 def split_ga_recipient_map(
     recipients: dict[str, list[str]],
 ) -> tuple[dict[str, list[str]], dict[str, list[str]] | None]:
-    """Separate GA/test targets so the extra tables and PNGs cannot leak."""
+    """Separate GA so the timetable, SHTYPI, and extra PNGs cannot leak."""
     regular = {key: [] for key in ("to", "cc", "bcc")}
     seen: set[str] = set()
     extra_targets = {email.casefold() for email in GA_ATTACHMENT_RECIPIENTS}

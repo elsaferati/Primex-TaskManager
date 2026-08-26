@@ -397,7 +397,7 @@ class PrimeFlowReportTests(unittest.TestCase):
             [
                 "14:10 SLOTI 28.07.2026",
                 "11:50 SLOTI PARAPRAK 28.07.2026",
-                "BLLOK 14:30-15:30 28.07.2026",
+                "BLLOK 14:30-16:00 28.07.2026",
             ],
         )
         self.assertEqual(document.task_count, 3)
@@ -432,7 +432,7 @@ class PrimeFlowReportTests(unittest.TestCase):
                     f"{previous} SLOTI PARAPRAK 28.07.2026",
                 ]
                 if current == "14:10":
-                    expected_titles.append("BLLOK 14:30-15:30 28.07.2026")
+                    expected_titles.append("BLLOK 14:30-16:00 28.07.2026")
                 self.assertEqual([section.title for section in document.sections], expected_titles)
                 self.assertEqual(document.task_count, 2)
 
@@ -533,7 +533,7 @@ class PrimeFlowReportTests(unittest.TestCase):
 
         document = build_report_document(data, date(2026, 7, 28), "14:10")
         blocked_section = document.sections[-1]
-        self.assertEqual(blocked_section.title, "BLLOK 14:30-15:30 28.07.2026")
+        self.assertEqual(blocked_section.title, "BLLOK 14:30-16:00 28.07.2026")
         self.assertEqual([employee.name for employee in blocked_section.employees], ["ZDF", "ADF", "BP"])
 
         html = render_html(document)

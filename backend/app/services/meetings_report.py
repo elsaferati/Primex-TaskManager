@@ -1912,7 +1912,7 @@ def _tomorrow_common_section(
             include_am_pm_times=True,
         ),
         "",
-        *_tomorrow_task_table("Bllok 14:30 - 15:30", blocked, with_status=with_status, task_metadata=blocked_task_metadata),
+        *_tomorrow_task_table("Bllok 14:30 - 16:00", blocked, with_status=with_status, task_metadata=blocked_task_metadata),
     ]
 
 
