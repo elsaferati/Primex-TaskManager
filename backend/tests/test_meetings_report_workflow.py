@@ -366,7 +366,7 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
 
 
 class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
-    def test_m3_completed_day_tasks_include_am_and_pm_but_exclude_system_and_reopened(self) -> None:
+    def test_m3_completed_day_tasks_include_am_pm_and_inactive_but_exclude_system_and_reopened(self) -> None:
         timezone = ZoneInfo("Europe/Tirane")
 
         def task(title: str, hour: int, **overrides) -> SimpleNamespace:
@@ -385,13 +385,17 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             task("PM done", 16),
             task("System done", 10, system_template_origin_id=uuid.uuid4()),
             task("Legacy system done", 11, system_task_slot_id=uuid.uuid4()),
+            task("Inactive done", 14, is_active=False),
             task("Reopened", 8, status="TODO"),
             task("Yesterday", 18, completed_at=datetime(2026, 8, 23, 18, 0, tzinfo=timezone)),
         ]
 
         completed = _completed_tasks_for_report_day(tasks, date(2026, 8, 24))
 
-        self.assertEqual([item.title for item in completed], ["AM done", "PM done"])
+        self.assertEqual(
+            [item.title for item in completed],
+            ["AM done", "PM done", "Inactive done"],
+        )
 
     def test_m3_completed_day_table_has_requested_columns_and_green_rows(self) -> None:
         task = SimpleNamespace(

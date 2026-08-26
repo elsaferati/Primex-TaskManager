@@ -72,6 +72,7 @@ PERSONAL_ROW_LABEL_STYLE = (
     f"{CELL_STYLE};font-size:10px;line-height:1.15;white-space:pre-line;"
     "overflow-wrap:normal;word-break:normal"
 )
+PERSONAL_TIME_STYLE = "font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap"
 DEADLINE_COLOR = "#DC2626"
 EIGHT_AM_BORDER_COLOR = "#DC2626"
 NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
@@ -519,6 +520,16 @@ def _html_table(
     header = "MEETING" if meeting else "TASK"
     label_header = "LLOJI" if meeting else "LLOJI DHE SLOTI"
     body: list[str] = []
+
+    def row_label_html(label: str, personal: bool) -> str:
+        escaped_lines = [html.escape(line) for line in label.splitlines()]
+        if personal and len(escaped_lines) > 1:
+            return (
+                f'{escaped_lines[0]}<br><span style="{PERSONAL_TIME_STYLE}">'
+                f'{" ".join(escaped_lines[1:])}</span>'
+            )
+        return "<br>".join(escaped_lines)
+
     for number, (label, values, *rest) in enumerate(rows, 1):
         personal = bool(rest and rest[0])
         chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
@@ -571,7 +582,7 @@ def _html_table(
             )
             row_header = (
                 f'<th rowspan="{len(chunks)}" style="{SLOT_LABEL_STYLE};{label_divider_style}">{number}</th>'
-                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{label_divider_style}">{html.escape(label).replace(chr(10), "<br>")}</th>'
+                f'<th rowspan="{len(chunks)}" style="{PERSONAL_ROW_LABEL_STYLE if personal else SLOT_LABEL_STYLE};{label_divider_style}">{row_label_html(label, personal)}</th>'
                 if chunk_index == 0 else ""
             )
             body.append(f"<tr>{row_header}{''.join(cells)}</tr>")
@@ -822,7 +833,15 @@ def _excel_table_attachment(
                 category_end = chunk_index == len(chunks) - 1
                 if chunk_index == 0:
                     sheet.cell(row_number, 1, number)
-                    label_cell = sheet.cell(row_number, 2, label)
+                    label_value: str | CellRichText = label
+                    if personal and "\n" in label:
+                        personal_title, personal_time = label.split("\n", 1)
+                        label_value = CellRichText([
+                            TextBlock(InlineFont(b=True, sz=10), personal_title),
+                            "\n",
+                            TextBlock(InlineFont(b=True, sz=14), personal_time),
+                        ])
+                    label_cell = sheet.cell(row_number, 2, label_value)
                     label_cell.font = Font(bold=True, size=10)
                     if personal:
                         label_cell.alignment = Alignment(vertical="top", wrap_text=True)
@@ -968,10 +987,11 @@ def _png_table_attachment(
     try:
         regular = ImageFont.truetype(os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\segoeui.ttf"), 16)
         bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 16)
+        personal_time_font = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 20)
         small_bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 14)
         heading = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 27)
     except OSError:
-        regular = bold = small_bold = heading = ImageFont.load_default()
+        regular = bold = personal_time_font = small_bold = heading = ImageFont.load_default()
     measure = ImageDraw.Draw(Image.new("RGB", (1, 1), "white"))
 
     def wrap(value: str, font: Any, max_width: int) -> list[str]:
@@ -1105,8 +1125,13 @@ def _png_table_attachment(
         for column, value in ((0, str(number) if chunk_index == 0 else ""), (1, label if chunk_index == 0 else "")):
             right = x + column_widths[column]
             draw.rectangle((x, y, right, y + row_height), fill="#FFFFFF", outline="#111827", width=2 if chunk_index == 0 else 1)
-            for line_index, line in enumerate(wrap(value, bold, column_widths[column] - 12)):
-                draw.text((x + 6, y + 6 + line_index * 20), line, fill="#111827", font=bold)
+            if personal and column == 1 and value and "\n" in value:
+                personal_title, personal_time = value.split("\n", 1)
+                draw.text((x + 6, y + 6), personal_title, fill="#111827", font=bold)
+                draw.text((x + 6, y + 27), personal_time, fill="#111827", font=personal_time_font)
+            else:
+                for line_index, line in enumerate(wrap(value, bold, column_widths[column] - 12)):
+                    draw.text((x + 6, y + 6 + line_index * 20), line, fill="#111827", font=bold)
             x = right
         for item_index in range(6):
             right = x + column_widths[2 + item_index]

@@ -494,9 +494,9 @@ def test_personal_tasks_are_split_exclusively_into_ga_ka_and_px_rows() -> None:
     assert "P: GA" in report_html
     assert "P: KA" in report_html
     assert "P: PX" in report_html
-    assert "P: GA<br>08:15 / 13:15" in report_html
-    assert "P: KA<br>08:30 / 13:15" in report_html
-    assert "P: PX<br>08:45 / 14:00" in report_html
+    assert 'P: GA<br><span style="font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap">08:15 / 13:15</span>' in report_html
+    assert 'P: KA<br><span style="font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap">08:30 / 13:15</span>' in report_html
+    assert 'P: PX<br><span style="font-size:13px;line-height:1.2;font-weight:800;white-space:nowrap">08:45 / 14:00</span>' in report_html
 
 
 def test_blocked_row_label_uses_full_afternoon_interval_and_keeps_report_time() -> None:
