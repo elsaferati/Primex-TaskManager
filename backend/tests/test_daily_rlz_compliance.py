@@ -1,6 +1,7 @@
 import asyncio
 from datetime import date, datetime
 import uuid
+from types import SimpleNamespace
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -10,6 +11,7 @@ from app.services.daily_rlz_compliance import (
     task_issue_codes,
 )
 from app.services.daily_rlz_control_delivery import render_html, render_plain, subject_for
+from app.api.routers.reports import _daily_rlz_state_out
 
 
 DAY = date(2026, 8, 12)
@@ -18,8 +20,8 @@ DAY = date(2026, 8, 12)
 @pytest.mark.parametrize(
     "status,reason,comment,due,is_1h,slot,expected",
     [
-        ("TODO", None, None, date(2026, 8, 13), False, None, ["REASON_MISSING"]),
-        ("IN_PROGRESS", None, None, date(2026, 8, 13), False, None, ["REASON_MISSING"]),
+        ("TODO", None, None, date(2026, 8, 13), False, None, ["REASON_MISSING", "COMMENT_MISSING"]),
+        ("IN_PROGRESS", None, None, date(2026, 8, 13), False, None, []),
         ("TODO", "OTHER", "Shpjegim", DAY, False, None, ["DUE_DATE_NOT_MOVED"]),
         ("IN_PROGRESS", "WAITING_CLIENT", None, date(2026, 8, 13), False, None, []),
         ("TODO", "OTHER", "Shpjegim", date(2026, 8, 13), True, None, ["ONE_H_SLOT_MISSING"]),
@@ -47,6 +49,12 @@ def test_friday_moves_to_monday():
 def test_reason_codes_are_stable_and_complete():
     assert len(REASON_LABELS) == 10
     assert REASON_LABELS["WAITING_CLIENT"] == "Në pritje të klientit"
+
+
+def test_generic_task_comment_is_not_daily_rlz_evidence():
+    state = SimpleNamespace(reason_code=None, comment=None, updated_at=None)
+    result = _daily_rlz_state_out(state, DAY, "old generic comment")
+    assert result.comment is None
 
 
 def test_edit_window_uses_tirana_and_closes_at_1700():

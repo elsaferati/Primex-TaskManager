@@ -102,10 +102,4 @@ def record_task_semantic_events(
             after={"assignee_ids": sorted(map(str, new_ids)), **metadata},
         )
         events.append(event)
-        for user_id in old_ids - new_ids:
-            db.add(DailyPlanAdjustment(
-                audit_event_id=event.id, task_id=task_id, user_id=user_id,
-                day_date=local_day, adjustment_type="REASSIGNMENT", reason=reason,
-                created_by=actor_user_id,
-            ))
     return events

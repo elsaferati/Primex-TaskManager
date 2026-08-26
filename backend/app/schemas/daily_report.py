@@ -16,6 +16,14 @@ class DailyRlzTaskStateOut(BaseModel):
     updated_at: datetime | None = None
     is_editable: bool
     editable_until: datetime
+    requires_explanation: bool = False
+    reason_required: bool = False
+    comment_required: bool = False
+    reason_missing: bool = False
+    comment_missing: bool = False
+    deadline_was_today: bool = False
+    deadline_is_overdue: bool = False
+    postponed_today: bool = False
 
 
 class DailyRlzCloseStateOut(BaseModel):

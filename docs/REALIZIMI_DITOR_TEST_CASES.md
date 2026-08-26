@@ -18,8 +18,8 @@ Raw effect uses numerator/denominator notation. “None” means the task does n
 | 12 | Completed then reopened | Baseline/TODO | DONE→TODO | REOPENED | +1 den | same | COMPLETED, REOPENED | status_changed + reopened |
 | 13 | Reassigned A→B | A baseline | Change owner | A REASSIGNED_OUT; B REASSIGNED_IN | A +1 den; B none | approval-dependent A | ASSIGNEE_CHANGED | task.assignee_changed |
 | 14 | Reassigned multiple times | A baseline | A→B→C | A OUT; B/C day history, C IN | only A den | approval-dependent A | every ASSIGNEE_CHANGED | every assignee event |
-| 15 | Planner exclusion | Baseline occurrence | Add exclusion | REMOVED_FROM_PLAN | +1 den | exclude only if approved | REMOVED_FROM_DAY | task.removed_from_day |
-| 16 | Deactivated | Baseline active | Deactivate | REMOVED_FROM_PLAN | +1 den | exclude only if approved | DEACTIVATED | task.deactivated |
+| 15 | Planner exclusion | Baseline occurrence | Add exclusion | remaining live facts (no removal outcome) | +1 den | unchanged | REMOVED_FROM_DAY technical event only | task.removed_from_day |
+| 16 | Deactivated | Baseline active | Deactivate | remaining live facts (no removal outcome) | +1 den | unchanged | DEACTIVATED technical event only | task.deactivated |
 | 17 | Reactivated | Previously inactive/day history | Reactivate | current facts + history | baseline unchanged | baseline unchanged | REACTIVATED | task.reactivated |
 | 18 | Progress only | Baseline 40% | Set 75% | IN_PROGRESS | +1 den | same | PROGRESS_CHANGED 40→75 | task.progress_changed |
 | 19 | Multiple progress updates | Baseline 0% | 0→30→65 | IN_PROGRESS | +1 den | same | two PROGRESS_CHANGED | two progress events |
@@ -40,9 +40,9 @@ Raw effect uses numerator/denominator notation. “None” means the task does n
 | 34 | Close correction/reopen | Closed | Manager reopen, correct, close | corrected live then immutable correction | current correction | current correction | REOPEN/CORRECT history | close audit events |
 | 35 | Weekly regression | Weekly PLANNED exists | Use Daily feature | weekly result unchanged | independent | independent | daily events additive | no weekly rewrite |
 | 36 | No original_due_date | Baseline occurrence exists | Complete/move | baseline rules; event chain used | baseline denominator | approval rules | semantic due/status | task.* |
-| 37 | Deleted/deactivated live task | Baseline row exists | Delete/deactivate | REMOVED_FROM_PLAN / deleted card | +1 den | approval-dependent | DEACTIVATED/DELETED | semantic + generic delete |
+| 37 | Deleted/deactivated live task | Baseline row exists | Delete/deactivate | remaining live facts / no removal outcome | +1 den | unchanged | DEACTIVATED/DELETED | semantic + generic delete |
 | 38 | Department changed later | Historical baseline owner/dept | User moves dept | old baseline remains | old dept/day stable | stable | existing history | user change does not rewrite baseline |
-| 39 | Exclusion after baseline | Planned occurrence | Add exclusion | REMOVED_FROM_PLAN | +1 den | approval-dependent | REMOVED_FROM_DAY | task.removed_from_day |
+| 39 | Exclusion after baseline | Planned occurrence | Add exclusion | remaining live facts (no removal outcome) | +1 den | unchanged | REMOVED_FROM_DAY technical event only | task.removed_from_day |
 | 40 | Manager acts for employee | Employee task planned | Manager changes due/status | corresponding outcome | employee metric | approval rules | event with manager actor | semantic task event |
 
 ## Definition-of-done scenario

@@ -25,6 +25,7 @@ from app.services.daily_realization_classifier import (
 )
 from app.services.daily_realization_metrics import calculate_daily_metrics
 from app.services.daily_realization_events import semantic_local_day
+from app.services.daily_realization_explanation import requires_daily_explanation
 
 
 def local_day(value: datetime | None) -> date | None:
@@ -40,6 +41,36 @@ def day_bounds(day: date) -> tuple[datetime, datetime]:
     start = datetime.combine(day, time.min, tzinfo=zone).astimezone(timezone.utc)
     end = datetime.combine(day, time.max, tzinfo=zone).astimezone(timezone.utc)
     return start, end
+
+
+def candidate_task_ids_for_person(
+    person_id: uuid.UUID,
+    *,
+    baseline_by_user: dict[uuid.UUID, dict[uuid.UUID, dict]],
+    current_assignees: dict[uuid.UUID, set[uuid.UUID]],
+    tasks: dict[uuid.UUID, Any],
+    events_by_task: dict[uuid.UUID, list[AuditLog]],
+    day: date,
+) -> set[uuid.UUID]:
+    """Keep baseline, current, created-today, and intermediate-owner history."""
+    candidate_ids = set(baseline_by_user.get(person_id, {}))
+    candidate_ids.update(
+        task_id for task_id, owners in current_assignees.items()
+        if person_id in owners and (
+            task_id in baseline_by_user.get(person_id, {})
+            or local_day(tasks.get(task_id).created_at if tasks.get(task_id) else None) == day
+            or bool(events_by_task.get(task_id))
+        )
+    )
+    candidate_ids.update(
+        task_id for task_id, task_events in events_by_task.items()
+        if any(
+            event.action == "task.assignee_changed"
+            and str(person_id) in set((event.before or {}).get("assignee_ids", [])) | set((event.after or {}).get("assignee_ids", []))
+            for event in task_events
+        )
+    )
+    return candidate_ids
 
 
 def timeline_from_events(*, day: date, baseline_task: dict | None, events: list[AuditLog]) -> list[dict]:
@@ -196,11 +227,11 @@ async def build_live_daily_realization(
     people = []
     department_metric_rows: list[dict] = []
     for person_id in sorted(person_ids, key=lambda value: ((users.get(value).full_name if users.get(value) else ""), str(value))):
-        candidate_ids = set(baseline_by_user.get(person_id, {}))
-        candidate_ids.update(task_id for task_id, owners in current_assignees.items() if person_id in owners and (
-            task_id in baseline_by_user.get(person_id, {}) or local_day(tasks.get(task_id).created_at if tasks.get(task_id) else None) == day
-            or bool(events_by_task.get(task_id))
-        ))
+        candidate_ids = candidate_task_ids_for_person(
+            person_id, baseline_by_user=baseline_by_user,
+            current_assignees=current_assignees, tasks=tasks,
+            events_by_task=events_by_task, day=day,
+        )
         rows = []
         metric_rows = []
         for task_id in sorted(candidate_ids, key=str):
@@ -237,12 +268,29 @@ async def build_live_daily_realization(
                 if event.action == "task.status_changed" and str((event.after or {}).get("value")).upper() == "DONE":
                     completed_day = local_day(event.created_at)
             current_due = local_day(task.due_date) if task else None
+            postponed_today = any(
+                event.action == "task.due_date_changed"
+                and semantic_local_day((event.before or {}).get("value")) == day
+                and semantic_local_day((event.after or {}).get("value"))
+                and semantic_local_day((event.after or {}).get("value")) > day
+                for event in due_events
+            )
+            deadline_was_today = bool(original_due == day or (original is None and current_due == day)) or any(
+                semantic_local_day((event.before or {}).get("value")) == day for event in due_events
+            )
+            deadline_is_overdue = bool(current_due and current_due < day)
+            completed_today = completed_day == day
+            requirement = requires_daily_explanation(
+                status=task.status if task else "TODO", selected_day=day,
+                deadline=current_due, deadline_was_today=deadline_was_today,
+                postponed_today=postponed_today,
+            )
             classification = classify_daily_task(DailyClassificationInput(
                 day=day, in_baseline=bool(original), original_due_date=original_due,
                 current_due_date=current_due, created_date=local_day(task.created_at) if task else None,
                 completed_date=completed_day, status=task.status if task else "TODO",
                 progress_delta=max(progress_delta, percentage_delta),
-                postponed=bool(original and current_due and current_due > day),
+                postponed=postponed_today or bool(original and current_due and current_due > day),
                 postponement_approved=approved, reopened=reopened,
                 blocked=bool(task and task.is_bllok and (task.status or "").upper() != "DONE"),
                 removed=removed, reassigned_out=was_assigned_out, reassigned_in=was_assigned_in,
@@ -251,6 +299,17 @@ async def build_live_daily_realization(
             issues = []
             if classification in {"NO_PROGRESS", "POSTPONED_UNAPPROVED", "BLOCKED"} and not (state and state.reason_code): issues.append("MISSING_REASON")
             if state and state.reason_code == "OTHER" and not (state.comment or "").strip(): issues.append("MISSING_REQUIRED_COMMENT")
+            reason_missing = requirement.reason_required and not (state and state.reason_code)
+            comment_missing = requirement.comment_required and not (state and (state.comment or "").strip())
+            if reason_missing and "MISSING_REASON" not in issues: issues.append("MISSING_REASON")
+            if comment_missing and "MISSING_REQUIRED_COMMENT" not in issues: issues.append("MISSING_REQUIRED_COMMENT")
+            action_required = bool(issues) or (
+                classification == "POSTPONED_UNAPPROVED"
+            ) or (
+                deadline_is_overdue and not completed_today
+            ) or (
+                deadline_was_today and not completed_today and not postponed_today
+            )
             row = {
                 "task_id": str(task_id), "match_key": (original or {}).get("match_key") or f"id:{task_id}",
                 "title": task.title if task else (original or {}).get("title", "Deleted task"),
@@ -271,6 +330,17 @@ async def build_live_daily_realization(
                     and semantic_local_day((event.after or {}).get("value")) > semantic_local_day((event.before or {}).get("value"))
                 ),
                 "adjustment_status": adjustment_status,
+                "requires_explanation": requirement.requires_explanation,
+                "reason_required": requirement.reason_required,
+                "comment_required": requirement.comment_required,
+                "reason_missing": reason_missing,
+                "comment_missing": comment_missing,
+                "deadline_was_today": deadline_was_today,
+                "deadline_is_overdue": deadline_is_overdue,
+                "postponed_today": postponed_today,
+                "deadline_completed": bool(deadline_was_today and completed_today),
+                "deadline_critical": bool((original or {}).get("is_deadline_important") or (task and task.is_deadline_important)),
+                "action_required": action_required,
                 "issues": issues,
                 "timeline": timeline_from_events(day=day, baseline_task=original, events=task_events),
             }

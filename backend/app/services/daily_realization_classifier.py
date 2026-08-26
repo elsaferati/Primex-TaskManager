@@ -32,8 +32,6 @@ def classify_daily_task(value: DailyClassificationInput) -> str:
 
     if value.in_baseline and value.reassigned_out:
         return "REASSIGNED_OUT"
-    if value.in_baseline and value.removed:
-        return "REMOVED_FROM_PLAN"
     if value.in_baseline and value.reopened:
         return "REOPENED"
     if value.in_baseline and value.postponed:
@@ -62,5 +60,5 @@ def classify_daily_task(value: DailyClassificationInput) -> str:
 
 EXCEPTION_CLASSIFICATIONS = {
     "POSTPONED", "POSTPONED_APPROVED", "POSTPONED_UNAPPROVED", "NO_PROGRESS",
-    "BLOCKED", "REOPENED", "REASSIGNED_OUT", "REASSIGNED_IN", "REMOVED_FROM_PLAN",
+    "BLOCKED", "REOPENED", "REASSIGNED_OUT", "REASSIGNED_IN",
 }

@@ -47,7 +47,7 @@ Weekly PLANNED/FINAL snapshots and existing weekly calculation APIs are unchange
 
 - `DailyPlannerSnapshot`: immutable department/day JSON baseline, source weekly snapshot, capture actor/time.
 - `AuditLog`: existing generic log, extended with semantic `task.*` actions and a timeline index.
-- `DailyPlanAdjustment`: narrowly scoped decision for one postponement/reassignment/removal audit event and employee/day.
+- `DailyPlanAdjustment`: narrowly scoped decision for one postponement audit event and employee/day. Reassignment remains task history, not an approval workflow.
 - `TaskDailyProgress`: existing day-scoped cumulative values and positive delta.
 - `TaskDailyRlzState`: existing reason/comment record.
 - `RealizationDailyCloseEvent` and `RealizationDailyApprovalEvent`: existing append-only close and manager approval histories.
@@ -70,7 +70,7 @@ Timeline labels derive deterministically from these facts: `PLANNED_FOR_DAY`, `S
 | Baseline task due moved later | `POSTPONED_APPROVED` or `POSTPONED_UNAPPROVED` |
 | Baseline owner removed | `REASSIGNED_OUT` |
 | New owner receives task | `REASSIGNED_IN` |
-| Baseline occurrence excluded/deactivated | `REMOVED_FROM_PLAN` |
+| Baseline occurrence excluded/deactivated | classified from remaining facts; technical exclusion/deactivation event may remain in timeline |
 | Completed then reopened | `REOPENED` |
 | Non-baseline overdue task completed | `COMPLETED_LATE` |
 | Non-baseline future task completed | `COMPLETED_EARLY` |
@@ -90,7 +90,15 @@ The classifier is a pure function. `TaskStatus` is unchanged.
 
 ## 11. Raw vs Adjusted realization
 
-Raw never changes its original denominator and never includes extra tasks. Adjusted denominator is `original_planned_count - approved scope changes`. Approved postponements, and approved removal/reassignment-out adjustments, can be excluded. Adjusted realization is `planned_completed_today_count / adjusted_denominator * 100`; zero is N/A.
+Raw never changes its original denominator and never includes extra tasks. Adjusted denominator is `original_planned_count - approved postponements`. Reassignment does not alter the denominator. Adjusted realization is `planned_completed_today_count / adjusted_denominator * 100`; zero is N/A.
+
+## 11a. Daily explanation rule
+
+The pure `requires_daily_explanation` rule requires both Reason and Comment for TODO, postponed work, and IN_PROGRESS work whose deadline is today, overdue, or was today before being moved. IN_PROGRESS work with a future deadline and DONE work require neither. Evidence is only `TaskDailyRlzState` for the exact task/user/day; generic `TaskUserComment` is not accepted.
+
+## 11b. Deadline control
+
+The original baseline deadline defines the population. `deadlines_today_count` includes baseline tasks whose original deadline was the selected day plus tasks added that day with a real deadline that day. A due-today task moved later remains in the population and increments `deadlines_postponed_count`. Deadline Compliance is `deadlines_completed_count / deadlines_today_count * 100`; zero returns N/A. `CLEAN_DAY` means no deadline or RLZ blockers; missing required explanation, overdue/open work, unapproved postponement, or required slot issues produce `ACTION_REQUIRED`. Plan Realization and Deadline Compliance are separate metrics.
 
 ## 12. Approval semantics
 

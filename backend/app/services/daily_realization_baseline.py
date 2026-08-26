@@ -37,6 +37,7 @@ def _daily_payload(snapshot_payload: dict[str, Any], day: date) -> dict[str, Any
                 "original_daily_plan": wanted,
                 "time_slot": occurrence.get("time_slot") or item.get("finish_period") or "ALL",
                 "status_at_capture": item.get("daily_status") or item.get("status") or "TODO",
+                "is_deadline_important": bool(item.get("is_deadline_important")),
                 "planned_due_date": str(item.get("planned_due_date")) if item.get("planned_due_date") else None,
                 "assignee_id": str(user_id),
             })

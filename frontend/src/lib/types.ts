@@ -351,6 +351,14 @@ export interface DailyReportTaskItem {
     updated_at?: string | null
     is_editable: boolean
     editable_until: string
+    requires_explanation?: boolean
+    reason_required?: boolean
+    comment_required?: boolean
+    reason_missing?: boolean
+    comment_missing?: boolean
+    deadline_was_today?: boolean
+    deadline_is_overdue?: boolean
+    postponed_today?: boolean
   } | null
 }
 
@@ -374,6 +382,14 @@ export interface DailyReportSystemOccurrence {
     updated_at?: string | null
     is_editable: boolean
     editable_until: string
+    requires_explanation?: boolean
+    reason_required?: boolean
+    comment_required?: boolean
+    reason_missing?: boolean
+    comment_missing?: boolean
+    deadline_was_today?: boolean
+    deadline_is_overdue?: boolean
+    postponed_today?: boolean
   } | null
 }
 
@@ -767,6 +783,16 @@ export interface DailyRealizationMetrics {
   adjusted_denominator: number
   raw_plan_realization: number | null
   adjusted_plan_realization: number | null
+  deadlines_today_count: number
+  deadlines_completed_count: number
+  deadlines_postponed_count: number
+  deadlines_open_count: number
+  overdue_open_count: number
+  deadline_compliance_percentage: number | null
+  critical_deadlines_today_count: number
+  critical_deadlines_completed_count: number
+  critical_deadlines_open_count: number
+  daily_control_state: "CLEAN_DAY" | "ACTION_REQUIRED"
 }
 
 export interface DailyRealizationTimelineEvent {
@@ -801,6 +827,15 @@ export interface DailyRealizationTask {
   adjustment_status?: string | null
   issues: string[]
   timeline: DailyRealizationTimelineEvent[]
+  requires_explanation: boolean
+  reason_required: boolean
+  comment_required: boolean
+  reason_missing: boolean
+  comment_missing: boolean
+  deadline_was_today: boolean
+  deadline_is_overdue: boolean
+  postponed_today: boolean
+  action_required: boolean
 }
 
 export interface DailyRealizationPerson {

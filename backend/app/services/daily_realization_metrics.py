@@ -9,14 +9,7 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, i
     outcomes = Counter(str(row.get("classification") or "") for row in items)
     original = sum(bool(row.get("in_original_plan")) for row in items)
     planned_done = outcomes["REALIZED_AS_PLANNED"]
-    approved_scope = sum(
-        outcomes[name]
-        for name in ("POSTPONED_APPROVED",)
-    ) + sum(
-        1 for row in items
-        if row.get("in_original_plan") and row.get("adjustment_status") == "APPROVED"
-        and row.get("classification") in {"REMOVED_FROM_PLAN", "REASSIGNED_OUT"}
-    )
+    approved_scope = outcomes["POSTPONED_APPROVED"]
     adjusted_denominator = max(0, original - approved_scope)
     total_completed = sum(
         outcomes[name]
@@ -26,6 +19,15 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, i
     )
     raw = round(planned_done * 100.0 / original, 1) if original else None
     adjusted = round(planned_done * 100.0 / adjusted_denominator, 1) if adjusted_denominator else None
+    deadline_rows = [row for row in items if row.get("deadline_was_today")]
+    deadline_completed = sum(bool(row.get("deadline_completed")) for row in deadline_rows)
+    deadline_postponed = sum(bool(row.get("postponed_today")) for row in deadline_rows)
+    deadline_open = max(0, len(deadline_rows) - deadline_completed - deadline_postponed)
+    overdue_open = sum(bool(row.get("deadline_is_overdue")) and not bool(row.get("deadline_completed")) for row in items)
+    critical_rows = [row for row in deadline_rows if row.get("deadline_critical")]
+    critical_completed = sum(bool(row.get("deadline_completed")) for row in critical_rows)
+    critical_open = max(0, len(critical_rows) - critical_completed - sum(bool(row.get("postponed_today")) for row in critical_rows))
+    action_required = any(bool(row.get("action_required")) for row in items) or deadline_open > 0 or overdue_open > 0
     return {
         "original_planned_count": original,
         "planned_completed_today_count": planned_done,
@@ -47,4 +49,14 @@ def calculate_daily_metrics(rows: Iterable[Mapping[str, object]]) -> dict[str, i
         "adjusted_denominator": adjusted_denominator,
         "raw_plan_realization": raw,
         "adjusted_plan_realization": adjusted,
+        "deadlines_today_count": len(deadline_rows),
+        "deadlines_completed_count": deadline_completed,
+        "deadlines_postponed_count": deadline_postponed,
+        "deadlines_open_count": deadline_open,
+        "overdue_open_count": overdue_open,
+        "deadline_compliance_percentage": round(deadline_completed * 100.0 / len(deadline_rows), 1) if deadline_rows else None,
+        "critical_deadlines_today_count": len(critical_rows),
+        "critical_deadlines_completed_count": critical_completed,
+        "critical_deadlines_open_count": critical_open,
+        "daily_control_state": "ACTION_REQUIRED" if action_required else "CLEAN_DAY",
     }

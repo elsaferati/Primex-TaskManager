@@ -11,7 +11,8 @@ from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.services.daily_realization_baseline import _daily_payload, ensure_daily_baseline
 from app.services.daily_realization_classifier import DailyClassificationInput, classify_daily_task
 from app.services.daily_realization_events import semantic_local_day
-from app.services.daily_realization_live import day_bounds, local_day, timeline_from_events
+from app.services.daily_realization_explanation import requires_daily_explanation
+from app.services.daily_realization_live import candidate_task_ids_for_person, day_bounds, local_day, timeline_from_events
 from app.services.daily_realization_metrics import calculate_daily_metrics
 
 
@@ -42,7 +43,6 @@ def case(**overrides):
     (case(reopened=True), "REOPENED"),
     (case(reassigned_out=True), "REASSIGNED_OUT"),
     (case(in_baseline=False, reassigned_in=True), "REASSIGNED_IN"),
-    (case(removed=True), "REMOVED_FROM_PLAN"),
     (case(blocked=True), "BLOCKED"),
     (case(progress_delta=35), "IN_PROGRESS"),
     (case(current_due_date=date(2026, 8, 27), postponed=True, postponement_approved=True), "POSTPONED_APPROVED"),
@@ -86,6 +86,23 @@ def test_zero_denominators_are_na_not_false_success():
     metrics = calculate_daily_metrics([])
     assert metrics["raw_plan_realization"] is None
     assert metrics["adjusted_plan_realization"] is None
+
+
+def test_deadline_metrics_keep_postponed_original_deadline_in_population():
+    metrics = calculate_daily_metrics([
+        {"classification": "REALIZED_AS_PLANNED", "in_original_plan": True,
+         "deadline_was_today": True, "deadline_completed": True},
+        {"classification": "POSTPONED_APPROVED", "in_original_plan": True,
+         "deadline_was_today": True, "postponed_today": True},
+        {"classification": "NO_PROGRESS", "in_original_plan": True,
+         "deadline_was_today": True, "action_required": True},
+    ])
+    assert metrics["deadlines_today_count"] == 3
+    assert metrics["deadlines_completed_count"] == 1
+    assert metrics["deadlines_postponed_count"] == 1
+    assert metrics["deadlines_open_count"] == 1
+    assert metrics["deadline_compliance_percentage"] == 33.3
+    assert metrics["daily_control_state"] == "ACTION_REQUIRED"
 
 
 def audit(action, at, old, new):
@@ -155,3 +172,41 @@ def test_tirana_midnight_boundary_is_not_naive_utc():
 def test_semantic_due_date_direction_uses_local_day_not_iso_string_order():
     assert semantic_local_day("2026-08-25T22:30:00+00:00") == DAY
     assert semantic_local_day("2026-08-27T00:30:00+02:00") == date(2026, 8, 27)
+
+
+@pytest.mark.parametrize(("status", "deadline", "was_today", "postponed", "required"), [
+    ("TODO", date(2026, 8, 27), False, False, True),
+    ("TODO", DAY, False, False, True),
+    ("IN_PROGRESS", date(2026, 8, 27), False, False, False),
+    ("IN_PROGRESS", DAY, False, False, True),
+    ("IN_PROGRESS", date(2026, 8, 25), False, False, True),
+    ("IN_PROGRESS", date(2026, 8, 27), True, False, True),
+    ("DONE", DAY, True, True, False),
+    ("TODO", date(2026, 8, 27), True, True, True),
+])
+def test_daily_explanation_matrix(status, deadline, was_today, postponed, required):
+    requirement = requires_daily_explanation(
+        status=status, selected_day=DAY, deadline=deadline,
+        deadline_was_today=was_today, postponed_today=postponed,
+    )
+    assert requirement.requires_explanation is required
+    assert requirement.reason_required is required
+    assert requirement.comment_required is required
+
+
+def test_reassignment_a_to_b_to_c_keeps_intermediate_owner_candidate():
+    task_id = uuid.uuid4()
+    a_id, b_id, c_id = uuid.uuid4(), uuid.uuid4(), uuid.uuid4()
+    events = [
+        SimpleNamespace(id=uuid.uuid4(), action="task.assignee_changed", created_at=datetime(2026, 8, 26, 10, tzinfo=timezone.utc), actor_user_id=None,
+                        before={"assignee_ids": [str(a_id)]}, after={"assignee_ids": [str(b_id)]}),
+        SimpleNamespace(id=uuid.uuid4(), action="task.assignee_changed", created_at=datetime(2026, 8, 26, 14, tzinfo=timezone.utc), actor_user_id=None,
+                        before={"assignee_ids": [str(b_id)]}, after={"assignee_ids": [str(c_id)]}),
+    ]
+    events_by_task = {task_id: events}
+    current = {task_id: {c_id}}
+    for owner in (a_id, b_id, c_id):
+        assert task_id in candidate_task_ids_for_person(
+            owner, baseline_by_user={a_id: {task_id: {}}},
+            current_assignees=current, tasks={}, events_by_task=events_by_task, day=DAY,
+        )
