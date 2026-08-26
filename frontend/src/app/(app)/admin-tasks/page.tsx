@@ -710,7 +710,7 @@ const DEFAULT_GA_TIME_ENTRY_FORMAT: GaTimeEntryFormat = {
 
 const GA_TIME_BACKGROUND_COLORS = [
   "#FACC15",
-  "#F472B6",
+  "#A855F7",
   "#EF4444",
   "#22C55E",
   "#3B82F6",
@@ -718,7 +718,8 @@ const GA_TIME_BACKGROUND_COLORS = [
 
 const GA_TIME_STRONG_BACKGROUND_COLORS: Record<string, string> = {
   "#FEF3C7": "#FACC15",
-  "#FCE7F3": "#F472B6",
+  "#FCE7F3": "#A855F7",
+  "#F472B6": "#A855F7",
   "#FEE2E2": "#EF4444",
   "#DCFCE7": "#22C55E",
   "#DBEAFE": "#3B82F6",
@@ -970,7 +971,7 @@ function GaTimeRichTextEditor({
           <button
             key={color.value}
             type="button"
-            className="h-5 w-5 rounded-full border border-slate-400"
+            className="h-4 w-4 rounded-full border border-slate-400"
             style={{ backgroundColor: color.value }}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => applyCommand("foreColor", color.value)}
@@ -1199,7 +1200,7 @@ function GaTimeEntryEditor({
               key={color}
               type="button"
               className={cn(
-                "h-5 w-5 shrink-0 rounded-full border border-slate-300",
+                "h-4 w-4 shrink-0 rounded-full border border-slate-300",
                 format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
               )}
               style={{ backgroundColor: color }}
@@ -1276,7 +1277,7 @@ function GaTimeRowCommentEditor({
               key={color}
               type="button"
               className={cn(
-                "h-5 w-5 shrink-0 rounded-full border border-slate-300",
+                "h-4 w-4 shrink-0 rounded-full border border-slate-300",
                 format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
               )}
               style={{ backgroundColor: color }}
@@ -4154,7 +4155,7 @@ export default function AdminTasksPage() {
     const isCollapsed = collapsedAdminSections[sectionId]
     return (
       <Card className={sectionCardClass}>
-        <CardHeader className={cn(sectionHeaderClass, "relative pr-14", headerClassName)}>
+        <CardHeader className={cn(sectionHeaderClass, "relative pl-14", headerClassName)}>
           <div>
             <CardTitle className="text-base font-semibold text-slate-900">{title}</CardTitle>
             {description ? <div className="mt-1 text-xs text-slate-500">{description}</div> : null}
@@ -4164,7 +4165,7 @@ export default function AdminTasksPage() {
             type="button"
             variant="outline"
             size="sm"
-            className="absolute right-3 top-3 h-8 w-8 p-0 text-lg font-semibold leading-none print:hidden"
+            className="absolute left-3 top-3 h-8 w-8 p-0 text-lg font-semibold leading-none print:hidden"
             aria-label={isCollapsed ? `Open ${title}` : `Close ${title}`}
             aria-expanded={!isCollapsed}
             onClick={() => {
@@ -5765,8 +5766,8 @@ export default function AdminTasksPage() {
         })
       return (
           <Table
-        containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-        className="min-w-[820px] text-[10px] sm:min-w-[1020px]"
+        containerClassName="all-tasks-table-scroll mt-3 rounded-lg bg-white"
+        className="all-tasks-table min-w-[820px] text-[10px] sm:min-w-[1020px]"
       >
         <TableHeader>
           <TableRow className="bg-slate-50">
@@ -6291,8 +6292,8 @@ export default function AdminTasksPage() {
                   <thead>
                     <tr>
                       <th className="ga-time-header ga-time-nr">NR</th>
-                      <th className="ga-time-header ga-time-time">Time</th>
-                      <th className="ga-time-header ga-time-comment">Koment</th>
+                      <th className="ga-time-header ga-time-time">TIME</th>
+                      <th className="ga-time-header ga-time-comment">KOMENT</th>
                       {commonWeekISOs.map((iso) => {
                         const d = fromISODate(iso)
                         const dayCode = getDayCode(d)
@@ -6302,7 +6303,7 @@ export default function AdminTasksPage() {
                           </th>
                         )
                       })}
-                      <th className="ga-time-header ga-time-comment">Koment</th>
+                      <th className="ga-time-header ga-time-comment">KOMENT</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -6467,7 +6468,7 @@ export default function AdminTasksPage() {
             {gaTimeLoading ? <span>Loading GA time slots...</span> : null}
             {gaTimeError ? <span className="text-red-600">{gaTimeError}</span> : null}
           </div>
-          <div className="mt-3 overflow-x-auto ga-time-table">
+          <div className="mt-3 ga-time-table ga-time-table-scroll">
             <table className="ga-time-table-table ga-time-table-live">
               <colgroup>
                 <col className="ga-time-nr-column" />
@@ -6479,8 +6480,8 @@ export default function AdminTasksPage() {
               <thead>
                 <tr>
                   <th className="ga-time-header ga-time-nr">NR</th>
-                  <th className="ga-time-header ga-time-time">Time</th>
-                  <th className="ga-time-header ga-time-comment">Koment</th>
+                  <th className="ga-time-header ga-time-time">TIME</th>
+                  <th className="ga-time-header ga-time-comment">KOMENT</th>
                   {commonWeekISOs.map((iso) => {
                     const d = fromISODate(iso)
                     const dayCode = getDayCode(d)
@@ -6490,7 +6491,7 @@ export default function AdminTasksPage() {
                       </th>
                     )
                   })}
-                  <th className="ga-time-header ga-time-comment">Koment</th>
+                  <th className="ga-time-header ga-time-comment">KOMENT</th>
                 </tr>
               </thead>
               <tbody>
@@ -7084,7 +7085,7 @@ export default function AdminTasksPage() {
 
   return (
     <div className="mx-4 bg-slate-50/30" data-print-target={printTarget || ""}>
-      <div className="w-full max-w-none space-y-6 px-0 py-4">
+      <div className="-mx-4 w-[calc(100%+2rem)] max-w-none space-y-6 px-1 py-4 sm:mx-0 sm:w-full sm:px-0">
         <div className="space-y-8">
           <AdminCommonWeekTable />
         </div>
@@ -7686,6 +7687,61 @@ export default function AdminTasksPage() {
           --feedback-bg: #e2e8f0;
           --priority-bg: #fef3c7;
         }
+        .admin-week-table .all-tasks-table-scroll {
+          overflow: visible;
+        }
+        .admin-week-table .all-tasks-table {
+          width: 100%;
+          border: 2px solid #020617;
+          border-collapse: collapse;
+        }
+        .admin-week-table .all-tasks-table th,
+        .admin-week-table .all-tasks-table td {
+          border: 1px solid #111827 !important;
+        }
+        .admin-week-table .all-tasks-table thead th {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          border-top: 2px solid #020617 !important;
+          border-bottom: 0 !important;
+          background: #f8fafc;
+          text-transform: uppercase;
+          box-shadow:
+            inset 0 -2px 0 #020617,
+            0 2px 3px rgba(15, 23, 42, 0.2);
+        }
+        .admin-week-table .all-tasks-table thead th:first-child {
+          border-left: 2px solid #020617 !important;
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table thead th:last-child {
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table tbody td:first-child:not([colspan]) {
+          border-left: 2px solid #020617 !important;
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table tbody td[colspan] {
+          border-left: 2px solid #020617 !important;
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table tbody td:last-child {
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table tbody tr:last-child td {
+          border-bottom: 2px solid #020617 !important;
+        }
+        @media (max-width: 1023px) {
+          .admin-week-table .all-tasks-table-scroll {
+            width: 100%;
+            max-width: 100%;
+            max-height: calc(100vh - 16px);
+            overflow: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+          }
+        }
         .admin-week-table .week-table {
           width: 100%;
           border-collapse: collapse;
@@ -7879,8 +7935,25 @@ export default function AdminTasksPage() {
           width: 100%;
           table-layout: fixed;
           border-collapse: collapse;
-          border: 1px solid #e2e8f0;
+          border: 2px solid #020617;
           font-size: 11px;
+        }
+        .admin-week-table .ga-time-table-scroll {
+          overflow: visible;
+        }
+        @media (max-width: 1023px) {
+          .admin-week-table .ga-time-table-scroll {
+            width: 100%;
+            max-width: 100%;
+            max-height: calc(100vh - 16px);
+            overflow: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+          }
+          .admin-week-table .ga-time-table-live {
+            width: 1080px;
+            min-width: 1080px;
+          }
         }
         .admin-week-table .ga-time-nr-column {
           width: 30px;
@@ -7895,16 +7968,39 @@ export default function AdminTasksPage() {
           width: calc((100% - 436px) / 5);
         }
         .admin-week-table .ga-time-header {
-          border: 1px solid #e2e8f0;
+          border: 1px solid #111827;
+          border-top: 2px solid #020617;
+          border-bottom: 0;
           background: #f8fafc;
           padding: 8px 6px;
           text-align: left;
+          text-transform: uppercase;
           font-weight: 700;
           font-size: 10px;
           vertical-align: bottom;
           position: sticky;
           top: 0;
-          z-index: 2;
+          z-index: 20;
+          box-shadow:
+            inset 0 -2px 0 #020617,
+            0 2px 3px rgba(15, 23, 42, 0.2);
+        }
+        .admin-week-table .ga-time-table-table thead th:first-child {
+          border-left: 2px solid #020617;
+          border-right: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-table thead th:last-child {
+          border-right: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-table tbody td:first-child {
+          border-left: 2px solid #020617;
+          border-right: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-table tbody td:last-child {
+          border-right: 2px solid #020617;
+        }
+        .admin-week-table .ga-time-table-table tbody tr:last-child td {
+          border-bottom: 2px solid #020617;
         }
         .admin-week-table .ga-time-nr {
           width: 30px;
@@ -7983,7 +8079,7 @@ export default function AdminTasksPage() {
           justify-content: center;
         }
         .admin-week-table .ga-time-slot-label {
-          border: 1px solid #e2e8f0;
+          border: 1px solid #111827;
           background: #f1f5f9;
           font-weight: 700;
           font-size: 10px;
@@ -7997,7 +8093,7 @@ export default function AdminTasksPage() {
           background: #f8fafc;
         }
         .admin-week-table .ga-time-cell {
-          border: 1px solid #e2e8f0;
+          border: 1px solid #111827;
           padding: 6px;
           vertical-align: top;
           min-width: 0;
@@ -8137,6 +8233,15 @@ export default function AdminTasksPage() {
           @page {
             margin: 4mm;
             size: A4 landscape;
+          }
+          .admin-week-table .all-tasks-table-scroll {
+            max-height: none !important;
+            overflow: visible !important;
+          }
+          .admin-week-table .all-tasks-table thead th {
+            position: static !important;
+            border-bottom: 2px solid #111827 !important;
+            box-shadow: none !important;
           }
           .print-only {
             display: block !important;
@@ -8290,9 +8395,26 @@ export default function AdminTasksPage() {
             overflow-wrap: anywhere;
             word-break: break-word;
           }
+          .admin-week-table .ga-time-table-table thead .ga-time-header {
+            border-top: 2px solid #111827 !important;
+            border-bottom: 2px solid #111827 !important;
+          }
+          .admin-week-table .ga-time-table-table thead th:first-child,
+          .admin-week-table .ga-time-table-table tbody td:first-child {
+            border-left: 2px solid #111827 !important;
+            border-right: 2px solid #111827 !important;
+          }
+          .admin-week-table .ga-time-table-table thead th:last-child,
+          .admin-week-table .ga-time-table-table tbody td:last-child {
+            border-right: 2px solid #111827 !important;
+          }
+          .admin-week-table .ga-time-table-table tbody tr:last-child td {
+            border-bottom: 2px solid #111827 !important;
+          }
           .admin-week-table .ga-time-header {
             background: #e5e7eb !important;
             color: #111827 !important;
+            box-shadow: none !important;
           }
           .admin-week-table .ga-time-nr {
             width: 26px !important;
