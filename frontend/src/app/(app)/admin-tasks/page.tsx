@@ -5765,8 +5765,8 @@ export default function AdminTasksPage() {
         })
       return (
           <Table
-        containerClassName="mt-3 rounded-lg border border-slate-200 bg-white"
-        className="min-w-[820px] text-[10px] sm:min-w-[1020px]"
+        containerClassName="all-tasks-table-scroll mt-3 rounded-lg bg-white"
+        className="all-tasks-table min-w-[820px] text-[10px] sm:min-w-[1020px]"
       >
         <TableHeader>
           <TableRow className="bg-slate-50">
@@ -7084,7 +7084,7 @@ export default function AdminTasksPage() {
 
   return (
     <div className="mx-4 bg-slate-50/30" data-print-target={printTarget || ""}>
-      <div className="w-full max-w-none space-y-6 px-0 py-4">
+      <div className="-mx-4 w-[calc(100%+2rem)] max-w-none space-y-6 px-1 py-4 sm:mx-0 sm:w-full sm:px-0">
         <div className="space-y-8">
           <AdminCommonWeekTable />
         </div>
@@ -7686,6 +7686,61 @@ export default function AdminTasksPage() {
           --feedback-bg: #e2e8f0;
           --priority-bg: #fef3c7;
         }
+        .admin-week-table .all-tasks-table-scroll {
+          overflow: visible;
+        }
+        .admin-week-table .all-tasks-table {
+          width: 100%;
+          border: 2px solid #020617;
+          border-collapse: collapse;
+        }
+        .admin-week-table .all-tasks-table th,
+        .admin-week-table .all-tasks-table td {
+          border: 1px solid #111827 !important;
+        }
+        .admin-week-table .all-tasks-table thead th {
+          position: sticky;
+          top: 0;
+          z-index: 20;
+          border-top: 2px solid #020617 !important;
+          border-bottom: 0 !important;
+          background: #f8fafc;
+          text-transform: uppercase;
+          box-shadow:
+            inset 0 -2px 0 #020617,
+            0 2px 3px rgba(15, 23, 42, 0.2);
+        }
+        .admin-week-table .all-tasks-table thead th:first-child {
+          border-left: 2px solid #020617 !important;
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table thead th:last-child {
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table tbody td:first-child:not([colspan]) {
+          border-left: 2px solid #020617 !important;
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table tbody td[colspan] {
+          border-left: 2px solid #020617 !important;
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table tbody td:last-child {
+          border-right: 2px solid #020617 !important;
+        }
+        .admin-week-table .all-tasks-table tbody tr:last-child td {
+          border-bottom: 2px solid #020617 !important;
+        }
+        @media (max-width: 1023px) {
+          .admin-week-table .all-tasks-table-scroll {
+            width: 100%;
+            max-width: 100%;
+            max-height: calc(100vh - 16px);
+            overflow: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+          }
+        }
         .admin-week-table .week-table {
           width: 100%;
           border-collapse: collapse;
@@ -7887,8 +7942,16 @@ export default function AdminTasksPage() {
         }
         @media (max-width: 1023px) {
           .admin-week-table .ga-time-table-scroll {
+            width: 100%;
+            max-width: 100%;
             max-height: calc(100vh - 16px);
             overflow: auto;
+            overscroll-behavior: contain;
+            -webkit-overflow-scrolling: touch;
+          }
+          .admin-week-table .ga-time-table-live {
+            width: 1080px;
+            min-width: 1080px;
           }
         }
         .admin-week-table .ga-time-nr-column {
@@ -8169,6 +8232,15 @@ export default function AdminTasksPage() {
           @page {
             margin: 4mm;
             size: A4 landscape;
+          }
+          .admin-week-table .all-tasks-table-scroll {
+            max-height: none !important;
+            overflow: visible !important;
+          }
+          .admin-week-table .all-tasks-table thead th {
+            position: static !important;
+            border-bottom: 2px solid #111827 !important;
+            box-shadow: none !important;
           }
           .print-only {
             display: block !important;
