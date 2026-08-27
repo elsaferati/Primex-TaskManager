@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime, time
 from decimal import Decimal
+from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -214,6 +215,40 @@ class RealizationObservationOut(RealizationObservationCreate):
 
 class RealizationObservationVoid(RealizationSchema):
     reason: str = Field(min_length=1, max_length=4000)
+
+
+class RealizationManagerReviewUpsert(RealizationSchema):
+    marker: Literal["POSITIVE", "NEGATIVE"]
+    comment: str = Field(min_length=1, max_length=4000)
+
+    @model_validator(mode="after")
+    def validate_comment(self) -> "RealizationManagerReviewUpsert":
+        self.comment = self.comment.strip()
+        if not self.comment:
+            raise ValueError("Komenti është i detyrueshëm")
+        return self
+
+
+class RealizationManagerReviewItem(RealizationSchema):
+    id: uuid.UUID
+    dimension: Literal["PLANNING", "REALIZATION"]
+    marker: Literal["POSITIVE", "NEGATIVE"]
+    label: str
+    comment: str
+    created_by_user_id: uuid.UUID | None
+    created_by_name: str
+    created_at: datetime
+    active: bool
+    voided_at: datetime | None = None
+
+
+class RealizationManagerReviewOut(RealizationSchema):
+    period_id: uuid.UUID
+    user_id: uuid.UUID
+    can_edit: bool
+    planning: RealizationManagerReviewItem | None
+    realization: RealizationManagerReviewItem | None
+    history: list[RealizationManagerReviewItem] = Field(default_factory=list)
 
 
 class RealizationFinalDecision(RealizationSchema):

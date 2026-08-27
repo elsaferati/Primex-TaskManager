@@ -1,5 +1,24 @@
 # REALIZIMI DITOR
 
+## Vlerësimi cilësor M3 i përgjegjësit
+
+Në fund të pamjes së personit, menaxheri i departamentit ose administratori mund të
+regjistrojë veçmas një vlerësim për **Planifikimin** dhe një për **Realizimin**.
+Secili vlerësim është opsional: mungesa e një observimi do të thotë **Pa vërejtje**,
+jo rezultat pozitiv dhe jo marker neutral.
+
+Vlerësimi mund të jetë **Mirë** ose **Duhet përmirësim** dhe në të dy rastet kërkon
+koment shpjegues. Ai ruhet si `RealizationObservation` me burimin
+`M3_MANAGER_REVIEW`, scope `PERSON`, kategorinë `QUALITY`, visibility
+`PERSON_AND_MANAGER`, si dhe dimensionin në `evidence_json`. Ndryshimi ose heqja
+void-on observimin aktiv dhe ruan historinë, autorin dhe kohën; nuk bëhet hard delete.
+
+Review-i i një dite lidhet vetëm me `RealizationPeriod` ditor të asaj date. Ai nuk
+ndryshon Plan Realization, Deadline Compliance, klasifikimet, Daily outcome ose
+Daily Close/STALE, dhe nuk bllokon mbylljen e ditës. Backend-i lejon shkrim vetëm
+për ADMIN ose MANAGER të departamentit të personit; STAFF mund të lexojë vetëm
+review-n e vet sipas visibility.
+
 ## 1. Purpose
 
 Daily Realization answers what was planned for each employee, what was completed, what changed, why work remained unfinished, and how much of the original daily plan was realized. It extends the existing Realization domain; it is not a parallel reporting system.

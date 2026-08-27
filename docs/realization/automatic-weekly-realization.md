@@ -1,5 +1,23 @@
 # Automatic weekly Realization implementation
 
+## M3 manager review
+
+Weekly M3 includes an optional, qualitative responsible-manager review for the
+person's **Planning** and **Realization** dimensions. Each dimension is stored as
+auditable `RealizationObservation` evidence for that weekly `period_id`; it is
+separate from every Daily review and the two dimensions never overwrite each other.
+
+Only `POSITIVE` (shown as **Mirë**) and `NEGATIVE` (shown as **Duhet përmirësim**)
+are accepted, and both require a non-empty comment. No row means **Pa vërejtje**;
+the system does not create a neutral/default observation. Edits supersede/void the
+previous active observation so manager, timestamp, comment, and history remain
+explainable.
+
+This management judgment is excluded from automatic evidence calculations. It does
+not change weekly progress, Plan Realization, Deadline Compliance, task
+classification, outcome, grade, or symbol. Department managers are restricted to
+their own department, STAFF cannot write reviews, and ADMIN retains broad access.
+
 ## Boundary
 
 Realization is an additive read model over existing PrimeFlow evidence. The

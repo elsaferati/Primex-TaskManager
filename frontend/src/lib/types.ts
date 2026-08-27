@@ -762,6 +762,31 @@ export interface RealizationTaskFact {
   rlz_impact?: string
 }
 
+export type RealizationManagerReviewDimension = "PLANNING" | "REALIZATION"
+export type RealizationManagerReviewMarker = "POSITIVE" | "NEGATIVE"
+
+export interface RealizationManagerReviewItem {
+  id: string
+  dimension: RealizationManagerReviewDimension
+  marker: RealizationManagerReviewMarker
+  label: "Mirë" | "Duhet përmirësim"
+  comment: string
+  created_by_user_id?: string | null
+  created_by_name: string
+  created_at: string
+  active: boolean
+  voided_at?: string | null
+}
+
+export interface RealizationManagerReviewResponse {
+  period_id: string
+  user_id: string
+  can_edit: boolean
+  planning: RealizationManagerReviewItem | null
+  realization: RealizationManagerReviewItem | null
+  history: RealizationManagerReviewItem[]
+}
+
 export interface DailyRealizationMetrics {
   original_planned_count: number
   planned_completed_today_count: number

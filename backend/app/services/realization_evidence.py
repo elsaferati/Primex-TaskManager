@@ -19,6 +19,7 @@ from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_daily_rlz_state import TaskDailyRlzState
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
+from app.services.realization_manager_review import M3_MANAGER_REVIEW_SOURCE
 from app.services.daily_rlz_compliance import REASON_LABELS
 from app.services.realization_people import (
     full_period_leave_user_ids,
@@ -425,7 +426,10 @@ async def collect_weekly_evidence(
     evidence_observations = [
         row
         for row in observations
-        if row.source_type != "realization_observation_verification"
+        if row.source_type not in {
+            "realization_observation_verification",
+            M3_MANAGER_REVIEW_SOURCE,
+        }
     ]
     cancellation_by_task: dict[uuid.UUID, tuple[str, str]] = {}
     verified_absence_by_user_date: dict[tuple[uuid.UUID, date], str] = {}

@@ -20,6 +20,7 @@ from app.models.realization import (
     RealizationPersonResult,
 )
 from app.models.system_task_template import SystemTaskTemplate
+from app.services.realization_manager_review import M3_MANAGER_REVIEW_SOURCE
 from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_rlz_state import TaskDailyRlzState
@@ -622,7 +623,10 @@ async def calculate_daily_period(
         except (TypeError, ValueError):
             continue
     for observation in observation_rows:
-        if observation.source_type == "realization_observation_verification" or observation.user_id not in people:
+        if observation.source_type in {
+            "realization_observation_verification",
+            M3_MANAGER_REVIEW_SOURCE,
+        } or observation.user_id not in people:
             continue
         verified = observation.id in verified_ids or (
             observation.is_system_generated and (observation.evidence_json or {}).get("verified") is True

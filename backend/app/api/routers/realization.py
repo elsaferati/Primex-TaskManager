@@ -19,6 +19,7 @@ from app.models.enums import (
     RealizationMarker,
     RealizationObservationCategory,
     RealizationObservationVisibility,
+    RealizationPeriodType,
     RealizationPeriodStatus,
     RealizationScopeType,
     RealizationSymbol,
@@ -60,6 +61,8 @@ from app.schemas.realization import (
     RealizationObservationOut,
     RealizationObservationVerify,
     RealizationObservationVoid,
+    RealizationManagerReviewOut,
+    RealizationManagerReviewUpsert,
     RealizationPeriodOut,
     RealizationPersonResultOut,
     RealizationPersonWorkflowOut,
@@ -120,6 +123,13 @@ from app.services.realization_periods import (
 from app.services.realization_people import (
     full_period_leave_user_ids,
     load_active_users_and_common_leave,
+)
+from app.services.realization_manager_review import (
+    M3_MANAGER_REVIEW_DIMENSIONS,
+    M3_MANAGER_REVIEW_SOURCE,
+    build_manager_review_response,
+    clear_manager_review,
+    upsert_manager_review,
 )
 from app.services.realization_pulse import aggregate_monthly_pulses
 from app.services.system_task_schedule import _is_working_day
@@ -431,6 +441,7 @@ async def _weekly_response(
     for observation in active_observations:
         if (
             observation.source_type == "realization_observation_verification"
+            or observation.source_type == M3_MANAGER_REVIEW_SOURCE
             or observation.user_id is None
         ):
             continue
@@ -1421,6 +1432,7 @@ async def export_realization_excel(
     for observation in export_observations:
         if (
             observation.source_type == "realization_observation_verification"
+            or observation.source_type == M3_MANAGER_REVIEW_SOURCE
             or observation.user_id is None
         ):
             continue
@@ -2797,12 +2809,181 @@ async def lock_period(
     return RealizationPeriodOut.model_validate(period)
 
 
+async def _manager_review_context(
+    db: AsyncSession,
+    *,
+    period_id: uuid.UUID,
+    subject_user_id: uuid.UUID,
+    actor: User,
+    editing: bool,
+) -> tuple[RealizationPeriod, User, bool]:
+    period = await _period(db, period_id, for_update=editing)
+    if period.period_type not in {
+        RealizationPeriodType.DAILY.value,
+        RealizationPeriodType.WEEKLY.value,
+    }:
+        raise HTTPException(status_code=422, detail="M3 review supports Daily and Weekly periods only")
+    if period.department_id is None:
+        raise HTTPException(status_code=422, detail="M3 review requires a department period")
+    subject = (
+        await db.execute(select(User).where(User.id == subject_user_id))
+    ).scalar_one_or_none()
+    if subject is None or subject.department_id != period.department_id:
+        raise HTTPException(status_code=404, detail="Reviewed employee not found in this period")
+
+    manager_in_scope = (
+        actor.role == UserRole.MANAGER
+        and actor.department_id is not None
+        and actor.department_id == period.department_id
+    )
+    can_edit = actor.role == UserRole.ADMIN or manager_in_scope
+    can_view = can_edit or actor.role == UserRole.MANAGER or (
+        actor.role == UserRole.STAFF and actor.id == subject_user_id
+    )
+    if editing and not can_edit:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not editing and not can_view:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return period, subject, can_edit
+
+
+@router.get(
+    "/periods/{period_id}/users/{subject_user_id}/manager-review",
+    response_model=RealizationManagerReviewOut,
+)
+async def get_manager_review(
+    period_id: uuid.UUID,
+    subject_user_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationManagerReviewOut:
+    _period_row, _subject, can_edit = await _manager_review_context(
+        db,
+        period_id=period_id,
+        subject_user_id=subject_user_id,
+        actor=user,
+        editing=False,
+    )
+    return RealizationManagerReviewOut.model_validate(
+        await build_manager_review_response(
+            db,
+            period_id=period_id,
+            user_id=subject_user_id,
+            can_edit=can_edit,
+        )
+    )
+
+
+@router.put(
+    "/periods/{period_id}/users/{subject_user_id}/manager-review/{dimension}",
+    response_model=RealizationManagerReviewOut,
+)
+async def put_manager_review(
+    period_id: uuid.UUID,
+    subject_user_id: uuid.UUID,
+    dimension: str,
+    payload: RealizationManagerReviewUpsert,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationManagerReviewOut:
+    dimension = dimension.upper()
+    if dimension not in M3_MANAGER_REVIEW_DIMENSIONS:
+        raise HTTPException(status_code=422, detail="Review dimension must be PLANNING or REALIZATION")
+    period, _subject, can_edit = await _manager_review_context(
+        db,
+        period_id=period_id,
+        subject_user_id=subject_user_id,
+        actor=user,
+        editing=True,
+    )
+    review = await upsert_manager_review(
+        db,
+        period_id=period.id,
+        user_id=subject_user_id,
+        department_id=period.department_id,
+        dimension=dimension,
+        marker=payload.marker,
+        comment=payload.comment,
+        actor_id=user.id,
+    )
+    add_audit_log(
+        db=db,
+        actor_user_id=user.id,
+        entity_type="realization_observation",
+        entity_id=review.id,
+        action="m3_manager_review_saved",
+        after={
+            "period_id": str(period.id),
+            "user_id": str(subject_user_id),
+            "dimension": dimension,
+            "marker": payload.marker,
+        },
+    )
+    # A qualitative M3 review is evidence only: it intentionally does not
+    # recalculate realization facts or invalidate a Daily Close snapshot.
+    await db.commit()
+    return RealizationManagerReviewOut.model_validate(
+        await build_manager_review_response(
+            db, period_id=period.id, user_id=subject_user_id, can_edit=can_edit
+        )
+    )
+
+
+@router.delete(
+    "/periods/{period_id}/users/{subject_user_id}/manager-review/{dimension}",
+    response_model=RealizationManagerReviewOut,
+)
+async def delete_manager_review(
+    period_id: uuid.UUID,
+    subject_user_id: uuid.UUID,
+    dimension: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+) -> RealizationManagerReviewOut:
+    dimension = dimension.upper()
+    if dimension not in M3_MANAGER_REVIEW_DIMENSIONS:
+        raise HTTPException(status_code=422, detail="Review dimension must be PLANNING or REALIZATION")
+    period, _subject, can_edit = await _manager_review_context(
+        db,
+        period_id=period_id,
+        subject_user_id=subject_user_id,
+        actor=user,
+        editing=True,
+    )
+    cleared = await clear_manager_review(
+        db,
+        period_id=period.id,
+        user_id=subject_user_id,
+        dimension=dimension,
+        actor_id=user.id,
+    )
+    if not cleared:
+        raise HTTPException(status_code=404, detail="Manager review not found")
+    for review in cleared:
+        add_audit_log(
+            db=db,
+            actor_user_id=user.id,
+            entity_type="realization_observation",
+            entity_id=review.id,
+            action="m3_manager_review_cleared",
+            before={"dimension": dimension, "marker": review.marker},
+        )
+    await db.commit()
+    return RealizationManagerReviewOut.model_validate(
+        await build_manager_review_response(
+            db, period_id=period.id, user_id=subject_user_id, can_edit=can_edit
+        )
+    )
+
+
 @router.post("/observations", response_model=RealizationObservationOut)
 async def create_observation(
     payload: RealizationObservationCreate,
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ) -> RealizationObservationOut:
+    if payload.source_type == M3_MANAGER_REVIEW_SOURCE:
+        raise HTTPException(status_code=422, detail="Use the dedicated M3 manager-review endpoint")
     if payload.period_id is None:
         raise HTTPException(status_code=422, detail="period_id is required")
     period = await _period(db, payload.period_id, for_update=True)
@@ -2872,6 +3053,8 @@ async def verify_observation(
     ).scalar_one_or_none()
     if original is None or original.period_id is None:
         raise HTTPException(status_code=404, detail="Observation not found")
+    if original.source_type == M3_MANAGER_REVIEW_SOURCE:
+        raise HTTPException(status_code=422, detail="M3 manager reviews are not verification evidence")
     if original.source_type == "realization_observation_verification":
         raise HTTPException(status_code=422, detail="Verification events cannot be verified")
     period = await _period(db, original.period_id, for_update=True)
@@ -2942,6 +3125,8 @@ async def void_observation(
     ).scalar_one_or_none()
     if observation is None or observation.period_id is None:
         raise HTTPException(status_code=404, detail="Observation not found")
+    if observation.source_type == M3_MANAGER_REVIEW_SOURCE:
+        raise HTTPException(status_code=422, detail="Use the dedicated M3 manager-review endpoint")
     period = await _period(db, observation.period_id, for_update=True)
     try:
         require_unlocked(period)
