@@ -10,19 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { useAuth } from "@/lib/auth"
 import type { DailyReportResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
+import { DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
 
-export const DAILY_RLZ_REASONS = [
-  ["TOOK_LONGER", "Mori më shumë kohë"],
-  ["OTHER_URGENCY", "Urgjencë tjetër"],
-  ["WAITING_CLIENT", "Në pritje të klientit"],
-  ["PRIORITY_CHANGE", "Ndryshim prioriteti"],
-  ["TECHNICAL_PROBLEM", "Problem teknik"],
-  ["MISSING_INFORMATION", "Mungesë informacioni"],
-  ["REQUEST_CHANGE", "Ndryshim kërkese"],
-  ["NEW_REQUESTS", "Kerkesa te reja"],
-  ["ABSENCE", "Mungesë"],
-  ["OTHER", "Tjetër"],
-] as const
+export { DAILY_RLZ_REASONS } from "@/lib/daily-rlz-ui"
 
 const DAILY_RLZ_EMPTY_REASON = "__EMPTY__"
 const DAILY_RLZ_VALIDATION_EVENT = "primeflow:daily-rlz-validation"
