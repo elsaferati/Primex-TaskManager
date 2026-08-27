@@ -771,7 +771,6 @@ export interface DailyRealizationMetrics {
   approved_postponement_count: number
   unapproved_postponement_count: number
   waiting_confirmation_count: number
-  blocked_count: number
   additional_completed_count: number
   completed_late_count: number
   completed_early_count: number
@@ -814,6 +813,7 @@ export interface DailyRealizationTask {
   project_title?: string | null
   source_type: string
   original_daily_plan?: string | null
+  baseline_due_date?: string | null
   current_due_date?: string | null
   current_status: string
   classification: string
@@ -822,6 +822,8 @@ export interface DailyRealizationTask {
   completed_delta: number
   reason_code?: string | null
   comment?: string | null
+  is_bllok: boolean
+  one_h_report_slot?: string | null
   last_change?: string | null
   postponement_count: number
   adjustment_status?: string | null
@@ -835,6 +837,7 @@ export interface DailyRealizationTask {
   deadline_was_today: boolean
   deadline_is_overdue: boolean
   postponed_today: boolean
+  had_postponement_event: boolean
   action_required: boolean
 }
 
@@ -844,7 +847,7 @@ export interface DailyRealizationPerson {
   department_id: string
   tasks: DailyRealizationTask[]
   metrics: DailyRealizationMetrics
-  close_state: "OPEN" | "CLOSED" | "STALE" | "REOPENED"
+  close_state: "NOT_SAVED" | "CLOSED_EDIT_WINDOW" | "SAVED" | "STALE" | "REOPENED"
 }
 
 export interface DailyRealizationLive {

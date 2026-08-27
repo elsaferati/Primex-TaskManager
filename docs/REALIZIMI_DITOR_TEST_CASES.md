@@ -16,8 +16,8 @@ Raw effect uses numerator/denominator notation. “None” means the task does n
 | 10 | Created and completed today | Not in baseline | Create + complete | ADDITIONAL_COMPLETED | None | None | ADDED_TO_DAY, COMPLETED | created + status_changed |
 | 11 | Created today unfinished | Not in baseline | Create | ADDED_DURING_DAY | None | None | ADDED_TO_DAY | created |
 | 12 | Completed then reopened | Baseline/TODO | DONE→TODO | REOPENED | +1 den | same | COMPLETED, REOPENED | status_changed + reopened |
-| 13 | Reassigned A→B | A baseline | Change owner | A REASSIGNED_OUT; B REASSIGNED_IN | A +1 den; B none | approval-dependent A | ASSIGNEE_CHANGED | task.assignee_changed |
-| 14 | Reassigned multiple times | A baseline | A→B→C | A OUT; B/C day history, C IN | only A den | approval-dependent A | every ASSIGNEE_CHANGED | every assignee event |
+| 13 | Reassigned A→B | A baseline | Change owner | A REASSIGNED_OUT; B REASSIGNED_IN | A +1 den; B none | unchanged; no adjustment | ASSIGNEE_CHANGED | task.assignee_changed |
+| 14 | Reassigned multiple times | A baseline | A→B→C | A OUT; B/C day history, C IN | only A den | unchanged; no adjustment | every ASSIGNEE_CHANGED | every assignee event |
 | 15 | Planner exclusion | Baseline occurrence | Add exclusion | remaining live facts (no removal outcome) | +1 den | unchanged | REMOVED_FROM_DAY technical event only | task.removed_from_day |
 | 16 | Deactivated | Baseline active | Deactivate | remaining live facts (no removal outcome) | +1 den | unchanged | DEACTIVATED technical event only | task.deactivated |
 | 17 | Reactivated | Previously inactive/day history | Reactivate | current facts + history | baseline unchanged | baseline unchanged | REACTIVATED | task.reactivated |
@@ -48,3 +48,11 @@ Raw effect uses numerator/denominator notation. “None” means the task does n
 ## Definition-of-done scenario
 
 Eight baseline rows, five `REALIZED_AS_PLANNED`, one `IN_PROGRESS` at +70%, one `POSTPONED_UNAPPROVED`, one `NO_PROGRESS`, and two `ADDITIONAL_COMPLETED` produce: plan 8, planned done 5, in progress 1, postponed 1, no progress 1, extra done 2, raw 62.5%, total completed 7. The extra rows do not enter either raw numerator or denominator.
+
+## FINAL manager report checks
+
+The FINAL delivery tests assert the 16:10/16:40/17:05 schedule,
+case-insensitive required-recipient de-duplication, FINAL subject, manager and
+employee KPI sections, Deadline Control, close/approval/control labels,
+day-scoped Reason/Comment, semantic status colors, BLL metadata without
+BLOCKED, and correction deltas against the immutable FINAL snapshot.

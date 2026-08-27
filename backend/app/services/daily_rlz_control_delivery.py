@@ -30,8 +30,15 @@ FINAL_REQUIRED_RECIPIENTS = ("ga@primexeu.com", "130primex.eu@gmail.com")
 
 def final_recipient_map(recipients: dict[str, list[str]]) -> dict[str, list[str]]:
     """Ensure scheduled FINAL always reaches the mandated manager addresses."""
-    result = {key: list(recipients.get(key, [])) for key in ("to", "cc", "bcc")}
-    seen = {str(email).casefold() for values in result.values() for email in values}
+    result = {key: [] for key in ("to", "cc", "bcc")}
+    seen: set[str] = set()
+    for key in ("to", "cc", "bcc"):
+        for raw in recipients.get(key, []):
+            email = str(raw).strip()
+            normalized = email.casefold()
+            if email and normalized not in seen:
+                result[key].append(email)
+                seen.add(normalized)
     for email in FINAL_REQUIRED_RECIPIENTS:
         if email.casefold() not in seen:
             result["to"].append(email)
@@ -49,80 +56,6 @@ def subject_for(day: date, report_time: str = REPORT_SLOT, variant: str = "PRECH
     return f"[PrimeFlow] {labels.get(variant, labels['PRECHECK'])} - {day:%d/%m/%Y} - {report_time}"
 
 
-def _full_plain(report: dict, report_time: str) -> str:
-    summary = report["summary"]
-    lines = [
-        subject_for(date.fromisoformat(report["day"]), report_time, report["variant"]),
-        report.get("narrative") or "Krahasimi i planit javor me realizimin faktik të ditës.",
-        "",
-        f"Plan sot: {summary.get('planned_today', 0)} | Kryer sot: {summary.get('completed_today', 0)} | ",
-        f"Pa kryer: {summary.get('unfinished', 0)} | Ekstra: {summary.get('extras', 0)} | ",
-        f"Për nesër: {summary.get('carryover_next_day', 0)} | Shtyrë: {summary.get('postponed', 0)}",
-        "",
-    ]
-    for person in report.get("people") or []:
-        lines.append(f"{person['department']} — {person['employee']}")
-        lines.append(
-            person.get("narrative")
-            or f"Ditor {person.get('daily_progress_percent', 0)}% | Javor {person.get('weekly_progress_percent', 0)}% | RLZ {person['rlz_close_state']['status']} | Aprovimi {person['manager_approval']['status']}"
-        )
-        for task in person.get("tasks") or []:
-            flags = ", ".join(task.get("flags") or []) or "pa ndryshim"
-            lines.append(f"  - [{task['status']}] {_task_title(task['title'])} ({flags})")
-            lines.append(
-                f"    Afati: {task.get('planned_due_date') or '—'} → {task.get('due_date') or '—'} | "
-                f"Arsyeja: {task.get('reason_label') or '—'} | Koment: {task.get('comment') or '—'}"
-            )
-        lines.append("")
-    return "\n".join(lines)
-
-
-def _full_html(report: dict, report_time: str) -> str:
-    summary = report["summary"]
-    cards = "".join(
-        f'<td style="padding:9px;border:4px solid #fff;background:{bg};text-align:center;font-family:Arial">'
-        f'<b style="font-size:21px;color:{fg}">{value}</b><br><span style="font-size:11px;color:#475569">{html.escape(label)}</span></td>'
-        for label, value, bg, fg in (
-            ("Plan sot", summary.get("planned_today", 0), "#dbeafe", "#1d4ed8"),
-            ("Kryer sot", summary.get("completed_today", 0), "#dcfce7", "#15803d"),
-            ("Pa kryer", summary.get("unfinished", 0), "#fee2e2", "#b91c1c"),
-            ("Ekstra", summary.get("extras", 0), "#e0e7ff", "#4338ca"),
-            ("Për nesër", summary.get("carryover_next_day", 0), "#fef3c7", "#b45309"),
-            ("Shtyrë", summary.get("postponed", 0), "#ffedd5", "#c2410c"),
-        )
-    )
-    people = []
-    for person in report.get("people") or []:
-        rows = []
-        for task in person.get("tasks") or []:
-            color = "#dcfce7" if task["status"] == "DONE" else "#ffffcc" if task["status"] == "IN_PROGRESS" else "#fce7f3"
-            rows.append(
-                f'<tr><td style="border:1px solid #cbd5e1;padding:7px;font-weight:700">{html.escape(_task_title(task["title"]))}</td>'
-                f'<td style="border:1px solid #cbd5e1;padding:7px;background:{color}">{html.escape(task["status"])}</td>'
-                f'<td style="border:1px solid #cbd5e1;padding:7px">{html.escape(", ".join(task.get("flags") or []) or "—")}</td>'
-                f'<td style="border:1px solid #cbd5e1;padding:7px">{html.escape(task.get("planned_due_date") or "—")} → {html.escape(task.get("due_date") or "—")}</td>'
-                f'<td style="border:1px solid #cbd5e1;padding:7px">{html.escape(task.get("reason_label") or "—")}</td>'
-                f'<td style="border:1px solid #cbd5e1;padding:7px">{html.escape(task.get("comment") or "—")}</td></tr>'
-            )
-        people.append(
-            f'<h3 style="margin:18px 0 4px">{html.escape(person["employee"])} <span style="font-size:12px;color:#64748b">— {html.escape(person["department"])}</span></h3>'
-            f'<p style="margin:3px 0 8px;color:#475569">{html.escape(person.get("narrative") or "")} Ditor {person.get("daily_progress_percent", 0)}% · Javor {person.get("weekly_progress_percent", 0)}% · RLZ {html.escape(person["rlz_close_state"]["status"])} · Aprovimi {html.escape(person["manager_approval"]["status"])}</p>'
-            '<table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font:12px Arial">'
-            '<tr style="background:#e2e8f0"><th>Task</th><th>Status</th><th>Ndryshimi</th><th>Afati</th><th>Arsyeja</th><th>Komenti</th></tr>'
-            + "".join(rows)
-            + '</table>'
-        )
-    subject = subject_for(date.fromisoformat(report["day"]), report_time, report["variant"])
-    return (
-        '<!doctype html><html><body style="margin:0;background:#f8fafc;font-family:Arial;color:#0f172a">'
-        '<table width="100%"><tr><td align="center"><table width="900" style="max-width:100%;background:#fff;border-collapse:collapse">'
-        f'<tr><td style="padding:18px 20px;background:#2563eb;color:#fff"><h2 style="margin:0">{html.escape(subject)}</h2>'
-        f'<p style="margin:5px 0 0">{html.escape(report.get("narrative") or "Krahasimi i planit javor me realizimin faktik të ditës.")}</p></td></tr>'
-        f'<tr><td style="padding:12px"><table width="100%"><tr>{cards}</tr></table>{"".join(people)}</td></tr>'
-        '</table></td></tr></table></body></html>'
-    )
-
-
 def _close_state_reason(status: str) -> str:
     return {
         "NOT_SAVED": "Gjendja për RLZ javor nuk është ruajtur.",
@@ -136,9 +69,152 @@ def _task_title(title: str) -> str:
     return next((line.strip() for line in title.splitlines() if line.strip()), title)
 
 
+CLASSIFICATION_LABELS = {
+    "REALIZED_AS_PLANNED": "Kryer sipas planit", "IN_PROGRESS": "Në progres",
+    "NO_PROGRESS": "Pa progres", "POSTPONED_APPROVED": "Shtyrë · aprovuar",
+    "POSTPONED_UNAPPROVED": "Shtyrë · pa aprovuar", "WAITING_CONFIRMATION": "Në pritje konfirmimi",
+    "COMPLETED_LATE": "Kryer me vonesë", "COMPLETED_EARLY": "Kryer para kohe",
+    "ADDITIONAL_COMPLETED": "Punë shtesë e kryer", "ADDED_DURING_DAY": "Shtuar gjatë ditës",
+    "REOPENED": "Rihapur", "REASSIGNED_OUT": "Transferuar", "REASSIGNED_IN": "Transferuar",
+}
+
+
+def _percent(value) -> str:
+    return "N/A" if value is None else f"{value}%"
+
+
+def _deadline_display(task: dict) -> str:
+    changes = [row for row in task.get("timeline", []) if row.get("type") in {"POSTPONED", "POSTPONED_AGAIN", "MOVED_BACK_TO_TODAY", "MOVED_EARLIER"}]
+    values: list[str] = []
+    for row in changes:
+        old, new = row.get("old_value"), row.get("new_value")
+        if old and (not values or values[-1] != str(old)[:10]):
+            values.append(str(old)[:10])
+        if new and (not values or values[-1] != str(new)[:10]):
+            values.append(str(new)[:10])
+    if values:
+        return " → ".join(values)
+    baseline, current = task.get("planned_due_date"), task.get("due_date")
+    return str(current or baseline or "—") if baseline == current or not baseline else f"{baseline} → {current or '—'}"
+
+
+def _manager_plain(report: dict, report_time: str) -> str:
+    summary = report["summary"]
+    lines = [
+        subject_for(date.fromisoformat(report["day"]), report_time, report["variant"]),
+        f"Employees {summary.get('employees_checked', 0)} | Plan {summary.get('original_planned_count', 0)} | "
+        f"Done from Plan {summary.get('planned_completed_today_count', 0)} | In Progress {summary.get('in_progress_count', 0)} | "
+        f"Postponed {summary.get('postponed_count', 0)} | No Progress {summary.get('no_progress_count', 0)} | "
+        f"Extra {summary.get('additional_completed_count', 0)} | Total Completed Today {summary.get('total_completed_today_count', 0)} | "
+        f"Plan Realization {_percent(summary.get('raw_plan_realization'))}",
+        f"Deadline Today {summary.get('deadlines_today_count', 0)} | Completed {summary.get('deadlines_completed_count', 0)} | "
+        f"Postponed {summary.get('deadlines_postponed_count', 0)} | Open {summary.get('deadlines_open_count', 0)} | "
+        f"Overdue {summary.get('overdue_open_count', 0)} | Critical Open {summary.get('critical_deadlines_open_count', 0)} | "
+        f"Deadline Compliance {_percent(summary.get('deadline_compliance_percentage'))}",
+        summary.get("daily_control_state", "CLEAN_DAY"), "",
+    ]
+    for person in report.get("people", []):
+        metrics = person["metrics"]
+        lines.extend([
+            f"{person['employee']} — {person['department']}",
+            f"Plan {metrics['original_planned_count']} | Done {metrics['planned_completed_today_count']} | "
+            f"In Progress {metrics['in_progress_count']} | Postponed {metrics['postponed_count']} | "
+            f"No Progress {metrics['no_progress_count']} | Extra {metrics['additional_completed_count']} | "
+            f"Total Done {metrics['total_completed_today_count']} | Plan RLZ {_percent(metrics['raw_plan_realization'])}",
+            f"Deadline Today {metrics['deadlines_today_count']} | Completed {metrics['deadlines_completed_count']} | "
+            f"Postponed {metrics['deadlines_postponed_count']} | Open {metrics['deadlines_open_count']} | "
+            f"Deadline Compliance {_percent(metrics['deadline_compliance_percentage'])}",
+            f"RLZ {person['rlz_close_state']['status']} | Manager Approval {person['manager_approval']['status']} | {person['control_state']}",
+        ])
+        for task in person.get("tasks", []):
+            label = CLASSIFICATION_LABELS.get(task.get("classification"), task.get("classification") or "—")
+            lines.append(f"  [{task.get('status')}] {_task_title(task['title'])} — {label}{' · BLL' if task.get('is_bllok') else ''}")
+            lines.append(
+                f"    Plan {task.get('original_daily_plan') or 'Extra'} | Deadline {_deadline_display(task)} | "
+                f"Reason {task.get('reason_label') or ('MUNGON ARSYEJA' if task.get('reason_missing') else '—')} | "
+                f"Comment {task.get('comment') or ('MUNGON KOMENTI' if task.get('comment_missing') else '—')} | "
+                f"1H {task.get('one_h_report_slot') or '—'} | Approval {task.get('adjustment_status') or '—'}"
+            )
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _status_color(task: dict) -> str:
+    classification = task.get("classification")
+    if classification in {"REALIZED_AS_PLANNED", "ADDITIONAL_COMPLETED", "COMPLETED_LATE", "COMPLETED_EARLY"}:
+        return "#C4FDC4"
+    if classification == "IN_PROGRESS":
+        return "#FFFF00"
+    if classification == "WAITING_CONFIRMATION":
+        return "#FFEDD5"
+    if classification in {"POSTPONED_APPROVED", "POSTPONED_UNAPPROVED"}:
+        return "#FED7AA"
+    return "#FFC4ED"
+
+
+def _manager_html(report: dict, report_time: str) -> str:
+    summary = report["summary"]
+    subject = subject_for(date.fromisoformat(report["day"]), report_time, report["variant"])
+    kpis = (
+        ("EMPLOYEES", summary.get("employees_checked", 0)), ("PLAN", summary.get("original_planned_count", 0)),
+        ("DONE FROM PLAN", summary.get("planned_completed_today_count", 0)), ("IN PROGRESS", summary.get("in_progress_count", 0)),
+        ("POSTPONED", summary.get("postponed_count", 0)), ("NO PROGRESS", summary.get("no_progress_count", 0)),
+        ("EXTRA", summary.get("additional_completed_count", 0)), ("TOTAL DONE", summary.get("total_completed_today_count", 0)),
+        ("PLAN REALIZATION", _percent(summary.get("raw_plan_realization"))),
+    )
+    deadline_kpis = (
+        ("DEADLINE TODAY", summary.get("deadlines_today_count", 0)), ("COMPLETED", summary.get("deadlines_completed_count", 0)),
+        ("POSTPONED", summary.get("deadlines_postponed_count", 0)), ("OPEN", summary.get("deadlines_open_count", 0)),
+        ("OVERDUE", summary.get("overdue_open_count", 0)), ("CRITICAL OPEN", summary.get("critical_deadlines_open_count", 0)),
+        ("DEADLINE COMPLIANCE", _percent(summary.get("deadline_compliance_percentage"))),
+    )
+    def cards(values):
+        return "".join(f'<td style="padding:8px;border:3px solid #fff;background:#EFF6FF;text-align:center"><b style="font-size:18px;color:#1D4ED8">{html.escape(str(value))}</b><br><span style="font-size:10px;color:#475569">{html.escape(label)}</span></td>' for label, value in values)
+    overview_rows = "".join(
+        f'<tr><td style="padding:6px;border:1px solid #CBD5E1;font-weight:700">{html.escape(person["employee"])}</td>'
+        f'<td style="padding:6px;border:1px solid #CBD5E1">{html.escape(person["department"])}</td>'
+        + "".join(f'<td style="padding:6px;border:1px solid #CBD5E1;text-align:center">{html.escape(str(value))}</td>' for value in (
+            person["metrics"]["original_planned_count"], person["metrics"]["planned_completed_today_count"],
+            person["metrics"]["in_progress_count"], person["metrics"]["postponed_count"], person["metrics"]["no_progress_count"],
+            person["metrics"]["additional_completed_count"], person["metrics"]["total_completed_today_count"],
+            _percent(person["metrics"]["raw_plan_realization"]), person["metrics"]["deadlines_today_count"],
+            person["metrics"]["deadlines_open_count"], _percent(person["metrics"]["deadline_compliance_percentage"]),
+            person["rlz_close_state"]["status"], person["manager_approval"]["status"], person["control_state"],
+        )) + '</tr>' for person in report.get("people", [])
+    )
+    detail = []
+    for person in report.get("people", []):
+        m = person["metrics"]
+        task_rows = []
+        for task in person.get("tasks", []):
+            classification = CLASSIFICATION_LABELS.get(task.get("classification"), task.get("classification") or "—")
+            reason = task.get("reason_label") or ("MUNGON ARSYEJA" if task.get("reason_missing") else "—")
+            comment = task.get("comment") or ("MUNGON KOMENTI" if task.get("comment_missing") else "—")
+            warning = "#FEE2E2" if task.get("reason_missing") or task.get("comment_missing") or task.get("deadline_is_overdue") else "#FFFFFF"
+            deadline_border = "#DC2626" if task.get("deadline_critical") and not task.get("deadline_completed") else "#CBD5E1"
+            task_rows.append(
+                f'<tr><td style="padding:6px;border:1px solid #CBD5E1;font-weight:700">{html.escape(_task_title(task["title"]))}<br><span style="font-size:10px;color:#64748B">{html.escape(task.get("project_title") or task.get("source_type") or "—")}{" · BLL" if task.get("is_bllok") else ""}</span></td>'
+                f'<td style="padding:6px;border:1px solid #CBD5E1;background:{_status_color(task)}">{html.escape(str(task.get("status") or "—"))}<br>{html.escape(classification)}</td>'
+                f'<td style="padding:6px;border:2px solid {deadline_border}">Plan {html.escape(task.get("original_daily_plan") or "Extra")}<br>Deadline {html.escape(_deadline_display(task))}</td>'
+                f'<td style="padding:6px;border:1px solid #CBD5E1">+{html.escape(str(task.get("progress_today") or task.get("completed_delta") or 0))}</td>'
+                f'<td style="padding:6px;border:1px solid #CBD5E1;background:{warning}">{html.escape(reason)}</td>'
+                f'<td style="padding:6px;border:1px solid #CBD5E1;background:{warning}">{html.escape(comment)}</td>'
+                f'<td style="padding:6px;border:1px solid #CBD5E1">1H {html.escape(task.get("one_h_report_slot") or "—")}<br>Approval {html.escape(task.get("adjustment_status") or "—")}<br>Last {html.escape(task.get("last_change") or "—")}<br>{html.escape(", ".join(task.get("issues", [])) or "—")}</td></tr>'
+            )
+        detail.append(
+            f'<h3 style="margin:20px 0 6px">{html.escape(person["employee"])} — {html.escape(person["department"])}</h3>'
+            f'<p style="margin:0 0 8px">Plan {m["original_planned_count"]} · Done {m["planned_completed_today_count"]} · In Progress {m["in_progress_count"]} · Postponed {m["postponed_count"]} · No Progress {m["no_progress_count"]} · Extra {m["additional_completed_count"]} · Total Done {m["total_completed_today_count"]} · Plan RLZ {_percent(m["raw_plan_realization"])} · Adjusted {_percent(m["adjusted_plan_realization"])}<br>Deadline Today {m["deadlines_today_count"]} · Completed {m["deadlines_completed_count"]} · Postponed {m["deadlines_postponed_count"]} · Open {m["deadlines_open_count"]} · Overdue {m["overdue_open_count"]} · Critical Open {m["critical_deadlines_open_count"]} · Compliance {_percent(m["deadline_compliance_percentage"])}<br>RLZ {html.escape(person["rlz_close_state"]["status"])} · Manager Approval {html.escape(person["manager_approval"]["status"])} · <b>{html.escape(person["control_state"])}</b></p>'
+            '<table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font:11px Arial"><tr style="background:#E2E8F0"><th>Task/source</th><th>Status/outcome</th><th>Plan/deadline</th><th>Progress</th><th>Arsyeja</th><th>Komenti</th><th>Control</th></tr>'
+            + "".join(task_rows) + '</table>'
+        )
+    control = summary.get("daily_control_state", "CLEAN_DAY")
+    control_bg = "#DCFCE7" if control == "CLEAN_DAY" else "#FEF3C7"
+    return '<!doctype html><html><body style="margin:0;background:#F8FAFC;font-family:Arial;color:#0F172A"><table width="100%"><tr><td align="center"><table width="1100" style="max-width:100%;background:#FFF;border-collapse:collapse"><tr><td style="padding:18px 20px;background:#2563EB;color:#FFF"><h2 style="margin:0">' + html.escape(subject) + '</h2></td></tr><tr><td style="padding:12px"><table width="100%"><tr>' + cards(kpis) + '</tr></table><h3>Deadline Control</h3><table width="100%"><tr>' + cards(deadline_kpis) + '</tr></table><div style="margin:12px 0;padding:10px;background:' + control_bg + ';font-weight:800;text-align:center">' + html.escape(control) + '</div><table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font:10px Arial"><tr style="background:#E2E8F0"><th>Employee</th><th>Department</th><th>Plan</th><th>Done</th><th>Progress</th><th>Postponed</th><th>No Progress</th><th>Extra</th><th>Total</th><th>Plan RLZ</th><th>Deadline</th><th>Open</th><th>Compliance</th><th>RLZ</th><th>Approval</th><th>Control</th></tr>' + overview_rows + '</table>' + ''.join(detail) + '</td></tr></table></td></tr></table></body></html>'
+
+
 def render_plain(report: dict, report_time: str = REPORT_SLOT) -> str:
     if report.get("variant", "PRECHECK") != "PRECHECK":
-        return _full_plain(report, report_time)
+        return _manager_plain(report, report_time)
     summary = report["summary"]
     lines = [
         subject_for(date.fromisoformat(report["day"]), report_time, "PRECHECK"), "",
@@ -178,7 +254,7 @@ def render_html(report: dict, report_time: str = REPORT_SLOT) -> str:
     """Outlook-safe colored RLZ control email, aligned with other PrimeFlow reports."""
 
     if report.get("variant", "PRECHECK") != "PRECHECK":
-        return _full_html(report, report_time)
+        return _manager_html(report, report_time)
 
     summary = report["summary"]
     metrics = (
@@ -348,7 +424,9 @@ async def deliver_daily_rlz_control(
     if variant == "FINAL" and trigger_type == "SCHEDULED":
         recipients_by_kind = final_recipient_map(recipients_by_kind)
     recipients = sum(recipients_by_kind.values(), [])
-    report_time = report_time or (scheduled_for.strftime("%H:%M") if scheduled_for else REPORT_SLOT)
+    report_time = report_time or (
+        scheduled_for.strftime("%H:%M") if scheduled_for else DEFAULT_VARIANT_TIMES.get(variant, REPORT_SLOT)
+    )
     subject = subject_for(day, report_time, variant)
     now = tirana_now()
     async with SessionLocal() as db:

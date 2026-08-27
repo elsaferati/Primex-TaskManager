@@ -19,6 +19,7 @@ from app.models.task import Task
 from app.models.task_assignee import TaskAssignee
 from app.models.task_daily_progress import TaskDailyProgress
 from app.models.task_daily_rlz_state import TaskDailyRlzState
+from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.daily_realization_classifier import (
     DailyClassificationInput, EXCEPTION_CLASSIFICATIONS, classify_daily_task,
@@ -26,6 +27,8 @@ from app.services.daily_realization_classifier import (
 from app.services.daily_realization_metrics import calculate_daily_metrics
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
+from app.services.daily_realization_close_state import resolve_daily_close_state
+from app.services.one_h_slots import effective_slot_date
 
 
 def local_day(value: datetime | None) -> date | None:
@@ -52,14 +55,16 @@ def candidate_task_ids_for_person(
     events_by_task: dict[uuid.UUID, list[AuditLog]],
     day: date,
 ) -> set[uuid.UUID]:
-    """Keep baseline, current, created-today, and intermediate-owner history."""
+    """Keep baseline, operational carryover, created-today, and owner history."""
     candidate_ids = set(baseline_by_user.get(person_id, {}))
     candidate_ids.update(
         task_id for task_id, owners in current_assignees.items()
         if person_id in owners and (
             task_id in baseline_by_user.get(person_id, {})
-            or local_day(tasks.get(task_id).created_at if tasks.get(task_id) else None) == day
+            or local_day(getattr(tasks.get(task_id), "created_at", None)) == day
+            or local_day(getattr(tasks.get(task_id), "completed_at", None)) == day
             or bool(events_by_task.get(task_id))
+            or is_overdue_open_task(tasks.get(task_id), day=day)
         )
     )
     candidate_ids.update(
@@ -71,6 +76,59 @@ def candidate_task_ids_for_person(
         )
     )
     return candidate_ids
+
+
+def is_overdue_open_task(task: Any | None, *, day: date) -> bool:
+    """Return whether a current task is unresolved operational carryover."""
+    if task is None or not bool(task.is_active):
+        return False
+    return (
+        str(task.status or "").upper() in {"TODO", "IN_PROGRESS", "WAITING_CONFIRMATION"}
+        and bool(local_day(task.due_date) and local_day(task.due_date) < day)
+    )
+
+
+def assignees_at_timestamp(
+    *,
+    current_assignees: set[uuid.UUID],
+    assignee_events: list[AuditLog],
+    timestamp: datetime | None,
+) -> set[uuid.UUID]:
+    """Reconstruct ownership at a fact timestamp by reversing later changes."""
+    owners = set(current_assignees)
+    if timestamp is None:
+        return owners
+    for event in sorted(assignee_events, key=lambda row: (row.created_at, str(row.id)), reverse=True):
+        if event.created_at <= timestamp:
+            continue
+        owners = {
+            uuid.UUID(str(value))
+            for value in (event.before or {}).get("assignee_ids", [])
+        }
+    return owners
+
+
+def credited_completion_day(
+    *,
+    person_id: uuid.UUID,
+    day: date,
+    completion_at: datetime | None,
+    current_assignees: set[uuid.UUID],
+    assignee_events: list[AuditLog],
+    baseline_owner: bool = False,
+) -> date | None:
+    """Credit a completion only to an owner at the completion timestamp."""
+    completed_day = local_day(completion_at)
+    if completed_day != day:
+        return None
+    owners = assignees_at_timestamp(
+        current_assignees=current_assignees,
+        assignee_events=assignee_events,
+        timestamp=completion_at,
+    )
+    if person_id in owners or (not owners and baseline_owner):
+        return completed_day
+    return None
 
 
 def timeline_from_events(*, day: date, baseline_task: dict | None, events: list[AuditLog]) -> list[dict]:
@@ -175,9 +233,13 @@ async def build_live_daily_realization(
         events_by_task[event.entity_id].append(event)
         task_ids.add(event.entity_id)
 
+    load_task_ids = scoped_task_ids | task_ids
     current_rows = (await db.execute(
         select(Task).outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id).where(or_(
-            Task.id.in_(task_ids) if task_ids else False,
+            # scoped_task_ids also contains every task currently assigned to a
+            # department user. candidate_task_ids_for_person narrows these to
+            # unresolved overdue carryover or other day evidence.
+            Task.id.in_(load_task_ids) if load_task_ids else False,
             and_(
                 Task.created_at >= start_utc, Task.created_at <= end_utc,
                 or_(
@@ -223,6 +285,10 @@ async def build_live_daily_realization(
     adjustments = {(row.user_id, row.audit_event_id): row for row in (await db.execute(select(DailyPlanAdjustment).where(
         DailyPlanAdjustment.user_id.in_(person_ids), DailyPlanAdjustment.day_date == day,
     ))).scalars().all()} if person_ids else {}
+    slot_updates = {row.task_id: row.updated_at for row in (await db.execute(select(TaskOneHReportSlot).where(
+        TaskOneHReportSlot.task_id.in_(task_ids),
+        TaskOneHReportSlot.report_date == effective_slot_date(day),
+    ))).scalars().all()} if task_ids else {}
 
     people = []
     department_metric_rows: list[dict] = []
@@ -255,13 +321,24 @@ async def build_live_daily_realization(
             if original and original.get("planned_due_date"):
                 try: original_due = date.fromisoformat(str(original["planned_due_date"])[:10])
                 except ValueError: pass
-            if original_due is None and original: original_due = day
-            completed_day = local_day(task.completed_at) if task else None
+            completion_at = task.completed_at if task else None
+            completed_day = local_day(completion_at)
             if progress.get(task_id) and str(progress[task_id].daily_status or "").upper() == "DONE":
                 completed_day = day
+                completion_at = progress[task_id].updated_at or completion_at
             for event in task_events:
                 if event.action == "task.status_changed" and str((event.after or {}).get("value")).upper() == "DONE":
                     completed_day = local_day(event.created_at)
+                    completion_at = event.created_at
+            credited_completed_day = credited_completion_day(
+                person_id=person_id,
+                day=day,
+                completion_at=completion_at,
+                current_assignees=current_assignees.get(task_id, set()),
+                assignee_events=assignee_events,
+                baseline_owner=bool(original),
+            )
+            completion_credited = credited_completed_day == day
             current_due = local_day(task.due_date) if task else None
             had_postponement_event = any(
                 event.action == "task.due_date_changed"
@@ -275,16 +352,16 @@ async def build_live_daily_realization(
                 semantic_local_day((event.before or {}).get("value")) == day for event in due_events
             )
             deadline_is_overdue = bool(current_due and current_due < day)
-            completed_today = completed_day == day
+            completed_today = completion_credited
             requirement = requires_daily_explanation(
                 status=task.status if task else "TODO", selected_day=day,
                 deadline=current_due, deadline_was_today=deadline_was_today,
                 postponed_today=postponed_today,
             )
             classification = classify_daily_task(DailyClassificationInput(
-                day=day, in_baseline=bool(original), original_due_date=original_due,
+                day=day, in_baseline=bool(original), original_due_date=original_due or current_due,
                 current_due_date=current_due, created_date=local_day(task.created_at) if task else None,
-                completed_date=completed_day, status=task.status if task else "TODO",
+                completed_date=credited_completed_day, status=task.status if task else "TODO",
                 progress_delta=max(progress_delta, percentage_delta),
                 postponed=bool(postponed_today and current_due and current_due > day),
                 postponement_approved=approved, reopened=reopened,
@@ -293,7 +370,6 @@ async def build_live_daily_realization(
             state = states.get((person_id, task_id))
             issues = []
             if classification in {"NO_PROGRESS", "POSTPONED_UNAPPROVED"} and not (state and state.reason_code): issues.append("MISSING_REASON")
-            if state and state.reason_code == "OTHER" and not (state.comment or "").strip(): issues.append("MISSING_REQUIRED_COMMENT")
             reason_missing = requirement.reason_required and not (state and state.reason_code)
             comment_missing = requirement.comment_required and not (state and (state.comment or "").strip())
             if reason_missing and "MISSING_REASON" not in issues: issues.append("MISSING_REASON")
@@ -312,18 +388,24 @@ async def build_live_daily_realization(
                 "project_title": projects.get(task.project_id).title if task and task.project_id in projects else (original or {}).get("project_title"),
                 "source_type": (original or {}).get("source_type") or ("system" if task and task.system_template_origin_id else "project" if task and task.project_id else "fast"),
                 "original_daily_plan": (original or {}).get("original_daily_plan"),
+                "baseline_due_date": original_due.isoformat() if original_due else None,
                 "current_due_date": current_due.isoformat() if current_due else None,
                 "current_status": task.status if task else "DELETED",
                 "classification": classification, "in_original_plan": bool(original),
+                "completion_credited": completion_credited,
                 "progress_today": percentage_delta, "completed_delta": progress_delta,
                 "reason_code": state.reason_code if state else None, "comment": state.comment if state else None,
+                "is_bllok": bool(task and task.is_bllok),
+                "one_h_report_slot": task.one_h_report_slot if task else None,
                 "last_change": max(
                     [event.created_at for event in task_events]
+                    + ([task.updated_at] if task and task.updated_at else [])
                     + ([progress.get(task_id).updated_at] if progress.get(task_id) and progress.get(task_id).updated_at else [])
                     + ([state.updated_at] if state and state.updated_at else [])
-                    + ([latest_due_adjustment.decided_at or latest_due_adjustment.created_at] if latest_due_adjustment else []),
+                    + ([latest_due_adjustment.decided_at or latest_due_adjustment.created_at] if latest_due_adjustment else [])
+                    + ([slot_updates.get(task_id)] if slot_updates.get(task_id) else []),
                     default=None,
-                ).isoformat() if (task_events or progress.get(task_id) or state or latest_due_adjustment) else None,
+                ).isoformat() if (task or task_events or progress.get(task_id) or state or latest_due_adjustment or slot_updates.get(task_id)) else None,
                 "postponement_count": sum(
                     1 for event in due_events
                     if semantic_local_day((event.after or {}).get("value"))
@@ -370,10 +452,20 @@ async def build_live_daily_realization(
     close_by_user = {}
     for close, _ in latest_close:
         close_by_user.setdefault(str(close.user_id), close)
+    from app.services.daily_rlz_compliance import is_editable_day
     for person in people:
         close = close_by_user.get(person["user_id"])
         latest_change = max((datetime.fromisoformat(row["last_change"]) for row in person["tasks"] if row.get("last_change")), default=None)
-        person["close_state"] = "REOPENED" if close and close.action == "REOPEN" else "STALE" if close and latest_change and latest_change > close.created_at else "SAVED" if close else "OPEN"
+        person["close_state"], _, _ = resolve_daily_close_state(
+            latest_action=close.action if close else None,
+            close_created_at=close.created_at if close else None,
+            latest_relevant_change=latest_change,
+            editable=is_editable_day(day),
+        )
+        if person["close_state"] != "SAVED":
+            person["metrics"]["daily_control_state"] = "ACTION_REQUIRED"
+    if any(person["metrics"].get("daily_control_state") == "ACTION_REQUIRED" for person in people):
+        department_metrics["daily_control_state"] = "ACTION_REQUIRED"
     return {
         "day": day.isoformat(), "department_id": str(department_id),
         "timezone": settings.REALIZATION_TIMEZONE,

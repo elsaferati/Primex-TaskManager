@@ -26,6 +26,7 @@ from app.services.daily_realization_approval import daily_approval_state
 from app.services.daily_realization_live import day_bounds, local_day
 from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
+from app.services.daily_realization_close_state import resolve_daily_close_state
 
 EDIT_CUTOFF = time(17, 0)
 RLZ_CLOSE_OPEN = time(15, 30)
@@ -92,7 +93,7 @@ def task_issue_codes(*, status: str, due_date: date | None, requires_one_h_slot:
         issues.append("REASON_MISSING")
     if requirement.comment_required and not (comment or "").strip():
         issues.append("COMMENT_MISSING")
-    if reason_code == "OTHER" and not (comment or "").strip() and "COMMENT_MISSING" not in issues:
+    if requirement.comment_required and reason_code == "OTHER" and not (comment or "").strip() and "COMMENT_MISSING" not in issues:
         issues.append("COMMENT_MISSING")
     if not is_system_task and (due_date is None or due_date <= day):
         issues.append("DUE_DATE_NOT_MOVED")
@@ -160,16 +161,22 @@ async def relevant_tasks(db: AsyncSession, *, user_id: uuid.UUID, day: date) -> 
         AuditLog.created_at >= day_bounds(day)[0], AuditLog.created_at <= day_bounds(day)[1],
     ))).scalars().all()
     event_ids: set[uuid.UUID] = set(baseline_ids)
+    assignment_history_ids: set[uuid.UUID] = set()
     for event in event_rows:
         before, after = event.before or {}, event.after or {}
         owners = set(before.get("assignee_ids", [])) | set(after.get("assignee_ids", []))
         old_day = semantic_local_day(before.get("value")); new_day = semantic_local_day(after.get("value"))
+        if str(user_id) in owners:
+            assignment_history_ids.add(event.entity_id)
         if str(user_id) in owners or old_day == day or new_day == day:
             event_ids.add(event.entity_id)
     missing_ids = event_ids - set(result)
     if missing_ids:
         extra = (await db.execute(select(Task).outerjoin(TaskAssignee, TaskAssignee.task_id == Task.id).where(
-            Task.id.in_(missing_ids), or_(Task.assigned_to == user_id, TaskAssignee.user_id == user_id, Task.id.in_(baseline_ids))
+            Task.id.in_(missing_ids), or_(
+                Task.assigned_to == user_id, TaskAssignee.user_id == user_id,
+                Task.id.in_(baseline_ids), Task.id.in_(assignment_history_ids),
+            )
         ).distinct())).scalars().all()
         result.update({task.id: task for task in extra})
     if primary_statement is not None and hasattr(db, "statement"):
@@ -308,9 +315,12 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
         changed = adjustment.decided_at or adjustment.created_at
         if changed and (latest_change is None or changed > latest_change):
             latest_change = changed
-    saved = bool(latest_close and latest_close.action in {"CLOSE", "CORRECT"})
-    stale = bool(saved and latest_change and latest_close and latest_change > latest_close.created_at)
-    close_status = "STALE" if stale else "SAVED" if saved else "CLOSED_EDIT_WINDOW" if not is_editable_day(day, now) else "NOT_SAVED"
+    close_status, saved, stale = resolve_daily_close_state(
+        latest_action=latest_close.action if latest_close else None,
+        close_created_at=latest_close.created_at if latest_close else None,
+        latest_relevant_change=latest_change,
+        editable=is_editable_day(day, now),
+    )
     manager_approval = await daily_approval_state(
         db, user_id=user_id, day=day, personal_close_status=close_status
     )
