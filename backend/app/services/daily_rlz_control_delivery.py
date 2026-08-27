@@ -12,7 +12,7 @@ from app.db import SessionLocal
 from app.models.primeflow_report_delivery_run import PrimeFlowReportDeliveryRun
 from app.models.primeflow_report_schedule import PrimeFlowReportSchedule
 from app.models.primeflow_report_snapshot import PrimeFlowReportSnapshot
-from app.services.daily_rlz_compliance import build_daily_rlz_control, tirana_now
+from app.services.daily_rlz_compliance import REASON_LABELS, build_daily_rlz_control, tirana_now
 from app.services.daily_realization_report import (
     add_optional_ai_narrative,
     build_daily_realization_report,
@@ -72,15 +72,24 @@ def _task_title(title: str) -> str:
 CLASSIFICATION_LABELS = {
     "REALIZED_AS_PLANNED": "Kryer sipas planit", "IN_PROGRESS": "Në progres",
     "NO_PROGRESS": "Pa progres", "POSTPONED_APPROVED": "Shtyrë · aprovuar",
-    "POSTPONED_UNAPPROVED": "Shtyrë · pa aprovuar", "WAITING_CONFIRMATION": "Në pritje konfirmimi",
+    "POSTPONED_UNAPPROVED": "Shtyrë · pret aprovim", "WAITING_CONFIRMATION": "Në pritje konfirmimi",
     "COMPLETED_LATE": "Kryer me vonesë", "COMPLETED_EARLY": "Kryer para kohe",
-    "ADDITIONAL_COMPLETED": "Punë shtesë e kryer", "ADDED_DURING_DAY": "Shtuar gjatë ditës",
-    "REOPENED": "Rihapur", "REASSIGNED_OUT": "Transferuar", "REASSIGNED_IN": "Transferuar",
+    "ADDITIONAL_COMPLETED": "Ekstra e kryer", "ADDED_DURING_DAY": "Shtuar gjatë ditës",
+    "REOPENED": "Rihapur", "REASSIGNED_OUT": "Transferuar jashtë", "REASSIGNED_IN": "Transferuar brenda",
+}
+
+CLOSE_STATE_LABELS = {
+    "NOT_SAVED": "Pa ruajtur", "SAVED": "Ruajtur", "STALE": "Ka ndryshime",
+    "REOPENED": "Rihapur", "CLOSED_EDIT_WINDOW": "Afati përfundoi", "CLOSED": "Ruajtur",
+}
+APPROVAL_LABELS = {
+    "APPROVED": "Aprovuar", "PENDING": "Pret aprovim", "REJECTED": "Refuzuar",
+    "STALE": "Duhet rishikuar", "NOT_REQUIRED": "Nuk kërkohet", "REVOKED": "Pret aprovim",
 }
 
 
 def _percent(value) -> str:
-    return "N/A" if value is None else f"{value}%"
+    return "—" if value is None else f"{value}%"
 
 
 def _deadline_display(task: dict) -> str:
@@ -98,42 +107,108 @@ def _deadline_display(task: dict) -> str:
     return str(current or baseline or "—") if baseline == current or not baseline else f"{baseline} → {current or '—'}"
 
 
+def _human_close_state(value: str | None) -> str:
+    return CLOSE_STATE_LABELS.get(str(value or ""), "Gjendje për kontroll")
+
+
+def _human_approval(value: str | None) -> str:
+    return APPROVAL_LABELS.get(str(value or ""), "Nuk kërkohet")
+
+
+def _human_control(value: str | None) -> str:
+    return "KËRKON VEPRIM" if value == "ACTION_REQUIRED" else "DITA NË RREGULL"
+
+
+def _short_date(value: str | None) -> str:
+    text_value = str(value or "—")
+    if len(text_value) >= 10 and text_value[4:5] == "-" and text_value[7:8] == "-":
+        return f"{text_value[8:10]}.{text_value[5:7]}"
+    return text_value
+
+
+def _short_deadline_display(task: dict) -> str:
+    return " → ".join(_short_date(value.strip()) for value in _deadline_display(task).split("→"))
+
+
+def _task_issue_state(task: dict) -> dict[str, bool]:
+    issues = set(task.get("issues") or [])
+    return {
+        "reason": bool(task.get("reason_missing")) or bool(issues & {"MISSING_REASON", "REASON_MISSING"}),
+        "comment": bool(task.get("comment_missing")) or bool(issues & {"MISSING_REQUIRED_COMMENT", "COMMENT_MISSING"}),
+        "due": "DUE_DATE_NOT_MOVED" in issues,
+        "slot": "ONE_H_SLOT_MISSING" in issues,
+    }
+
+
+def _reason_label(task: dict) -> str | None:
+    return task.get("reason_label") or REASON_LABELS.get(task.get("reason_code"))
+
+
+def _control_summary(summary: dict) -> str:
+    messages = []
+    not_saved = summary.get("employees_not_saved", 0)
+    missing = summary.get("tasks_missing_reason", 0) + summary.get("tasks_missing_comment", 0)
+    open_deadlines = summary.get("deadlines_open_count", 0)
+    if not_saved:
+        messages.append(f"{not_saved} {'person nuk e ka' if not_saved == 1 else 'persona nuk e kanë'} ruajtur RLZ")
+    if missing:
+        messages.append(f"{missing} {'fushë sqarimi mungon' if missing == 1 else 'fusha sqarimi mungojnë'}")
+    if open_deadlines:
+        messages.append(f"{open_deadlines} deadline {'është ende i hapur' if open_deadlines == 1 else 'janë ende të hapura'}")
+    return " · ".join(messages[:2]) or "Kontrollo rastet që kërkojnë vëmendje"
+
+
 def _manager_plain(report: dict, report_time: str) -> str:
     summary = report["summary"]
     lines = [
         subject_for(date.fromisoformat(report["day"]), report_time, report["variant"]),
-        f"Employees {summary.get('employees_checked', 0)} | Plan {summary.get('original_planned_count', 0)} | "
-        f"Done from Plan {summary.get('planned_completed_today_count', 0)} | In Progress {summary.get('in_progress_count', 0)} | "
-        f"Postponed {summary.get('postponed_count', 0)} | No Progress {summary.get('no_progress_count', 0)} | "
-        f"Extra {summary.get('additional_completed_count', 0)} | Total Completed Today {summary.get('total_completed_today_count', 0)} | "
-        f"Plan Realization {_percent(summary.get('raw_plan_realization'))}",
-        f"Deadline Today {summary.get('deadlines_today_count', 0)} | Completed {summary.get('deadlines_completed_count', 0)} | "
-        f"Postponed {summary.get('deadlines_postponed_count', 0)} | Open {summary.get('deadlines_open_count', 0)} | "
-        f"Overdue {summary.get('overdue_open_count', 0)} | Critical Open {summary.get('critical_deadlines_open_count', 0)} | "
+        "PËRMBLEDHJA E REALIZIMIT",
+        f"Stafi {summary.get('employees_checked', 0)} | Planifikuar {summary.get('original_planned_count', 0)} | "
+        f"Kryer nga plani {summary.get('planned_completed_today_count', 0)} | Në progres {summary.get('in_progress_count', 0)} | "
+        f"Shtyrë {summary.get('postponed_count', 0)} | Pa progres {summary.get('no_progress_count', 0)} | "
+        f"Ekstra {summary.get('additional_completed_count', 0)} | Total kryer {summary.get('total_completed_today_count', 0)} | "
+        f"Plan RLZ {_percent(summary.get('raw_plan_realization'))} | E rregulluar {_percent(summary.get('adjusted_plan_realization'))}",
+        "KONTROLLI I AFATEVE",
+        f"Deadline sot {summary.get('deadlines_today_count', 0)} | Kryer {summary.get('deadlines_completed_count', 0)} | "
+        f"Shtyrë {summary.get('deadlines_postponed_count', 0)} | Hapur {summary.get('deadlines_open_count', 0)} | "
+        f"Të vonuara {summary.get('overdue_open_count', 0)} | Kritike hapur {summary.get('critical_deadlines_open_count', 0)} | "
         f"Deadline Compliance {_percent(summary.get('deadline_compliance_percentage'))}",
-        summary.get("daily_control_state", "CLEAN_DAY"), "",
+        f"{_human_control(summary.get('daily_control_state'))}: {_control_summary(summary)}", "",
     ]
     for person in report.get("people", []):
         metrics = person["metrics"]
         lines.extend([
             f"{person['employee']} — {person['department']}",
-            f"Plan {metrics['original_planned_count']} | Done {metrics['planned_completed_today_count']} | "
-            f"In Progress {metrics['in_progress_count']} | Postponed {metrics['postponed_count']} | "
-            f"No Progress {metrics['no_progress_count']} | Extra {metrics['additional_completed_count']} | "
-            f"Total Done {metrics['total_completed_today_count']} | Plan RLZ {_percent(metrics['raw_plan_realization'])}",
-            f"Deadline Today {metrics['deadlines_today_count']} | Completed {metrics['deadlines_completed_count']} | "
-            f"Postponed {metrics['deadlines_postponed_count']} | Open {metrics['deadlines_open_count']} | "
+            f"Plan {metrics['original_planned_count']} | Kryer {metrics['planned_completed_today_count']} | "
+            f"Në progres {metrics['in_progress_count']} | Shtyrë {metrics['postponed_count']} | "
+            f"Pa progres {metrics['no_progress_count']} | Ekstra {metrics['additional_completed_count']} | "
+            f"Total kryer {metrics['total_completed_today_count']} | Plan RLZ {_percent(metrics['raw_plan_realization'])}",
+            f"Deadline sot {metrics['deadlines_today_count']} | Kryer {metrics['deadlines_completed_count']} | "
+            f"Shtyrë {metrics['deadlines_postponed_count']} | Hapur {metrics['deadlines_open_count']} | "
             f"Deadline Compliance {_percent(metrics['deadline_compliance_percentage'])}",
-            f"RLZ {person['rlz_close_state']['status']} | Manager Approval {person['manager_approval']['status']} | {person['control_state']}",
+            f"RLZ: {_human_close_state(person['rlz_close_state'].get('status'))} | "
+            f"Aprovimi: {_human_approval(person['manager_approval'].get('status'))} | {_human_control(person['control_state'])}",
         ])
         for task in person.get("tasks", []):
-            label = CLASSIFICATION_LABELS.get(task.get("classification"), task.get("classification") or "—")
-            lines.append(f"  [{task.get('status')}] {_task_title(task['title'])} — {label}{' · BLL' if task.get('is_bllok') else ''}")
+            label = CLASSIFICATION_LABELS.get(task.get("classification"), "Rezultat ditor")
+            issue_state = _task_issue_state(task)
+            reason = _reason_label(task)
+            if issue_state["reason"] or issue_state["comment"]:
+                missing = "Mungon arsyeja dhe komenti" if issue_state["reason"] and issue_state["comment"] else "Mungon arsyeja" if issue_state["reason"] else "Mungon komenti"
+                explanation = f"Kërkon sqarim — {missing}"
+            else:
+                explanation = " · ".join(value for value in (reason, task.get("comment")) if value) or "—"
+            controls = []
+            if task.get("one_h_report_slot"): controls.append(f"1H {task['one_h_report_slot']}")
+            if task.get("adjustment_status"): controls.append(_human_approval(task.get("adjustment_status")))
+            if task.get("deadline_is_overdue"): controls.append("Afat i kaluar")
+            if task.get("deadline_critical") and not task.get("deadline_completed"): controls.append("Kritike")
+            if issue_state["due"]: controls.append("Afati duhet përditësuar")
+            if issue_state["slot"]: controls.append("Mungon 1H sloti")
+            lines.append(f"  {_task_title(task['title'])} — {label}{' · BLL' if task.get('is_bllok') else ''}")
             lines.append(
-                f"    Plan {task.get('original_daily_plan') or 'Extra'} | Deadline {_deadline_display(task)} | "
-                f"Reason {task.get('reason_label') or ('MUNGON ARSYEJA' if task.get('reason_missing') else '—')} | "
-                f"Comment {task.get('comment') or ('MUNGON KOMENTI' if task.get('comment_missing') else '—')} | "
-                f"1H {task.get('one_h_report_slot') or '—'} | Approval {task.get('adjustment_status') or '—'}"
+                f"    Plan {task.get('original_daily_plan') or 'Ekstra'} | Afati {_deadline_display(task)} | "
+                f"Sqarimi {explanation} | Kontrolli {' · '.join(controls) or '—'}"
             )
         lines.append("")
     return "\n".join(lines)
@@ -152,64 +227,166 @@ def _status_color(task: dict) -> str:
     return "#FFC4ED"
 
 
+def _section_title(label: str) -> str:
+    return f'<div style="margin:18px 0 8px;background-color:#EEF2FF;border-left:5px solid #2563EB;padding:10px 12px;font:700 14px Arial;color:#111827">{html.escape(label)}</div>'
+
+
+def _kpi_table(values: list[tuple[str, object, str]], *, plan_metrics: dict | None = None) -> str:
+    rows = []
+    for start in range(0, len(values), 4):
+        cells = []
+        for label, value, accent in values[start:start + 4]:
+            secondary = ""
+            if label == "PLAN RLZ" and plan_metrics is not None:
+                raw = plan_metrics.get("raw_plan_realization")
+                adjusted = plan_metrics.get("adjusted_plan_realization")
+                completed = max(0, min(100, float(raw or 0)))
+                remaining = 100 - completed
+                secondary = (
+                    f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:6px"><tr>'
+                    f'<td width="{completed:.2f}%" bgcolor="#2563EB" style="height:5px;background:#2563EB"></td>'
+                    f'<td width="{remaining:.2f}%" bgcolor="#E2E8F0" style="height:5px;background:#E2E8F0"></td></tr></table>'
+                    + (f'<div style="margin-top:4px;font-size:9px;color:#64748B">E rregulluar: {_percent(adjusted)}</div>' if adjusted is not None else "")
+                )
+            cells.append(
+                f'<td width="25%" valign="top" style="padding:9px 10px;border:1px solid #CBD5E1;border-top:3px solid {accent};background:#FFFFFF;text-align:center">'
+                f'<div style="font:700 20px Arial;color:#111827">{html.escape(str(value))}</div>'
+                f'<div style="margin-top:2px;font:700 10px Arial;color:#64748B;letter-spacing:.3px">{html.escape(label)}</div>{secondary}</td>'
+            )
+        rows.append("<tr>" + "".join(cells) + "</tr>")
+    return '<table role="presentation" width="100%" cellspacing="4" cellpadding="0" style="table-layout:fixed;border-collapse:separate">' + "".join(rows) + "</table>"
+
+
+def _source_label(value: str | None) -> str:
+    return {"project": "Projekt", "fast": "Fast", "system": "Sistem"}.get(str(value or "").lower(), "Burim tjetër")
+
+
+def _task_control(task: dict) -> str:
+    issue_state = _task_issue_state(task)
+    values = []
+    if task.get("one_h_report_slot"):
+        values.append(f"1H {html.escape(str(task['one_h_report_slot']))}")
+    if task.get("adjustment_status"):
+        values.append(html.escape(_human_approval(task.get("adjustment_status"))))
+    if task.get("deadline_is_overdue"):
+        values.append('<span style="color:#DC2626;font-weight:700">Afat i kaluar</span>')
+    if task.get("deadline_critical") and not task.get("deadline_completed"):
+        values.append('<span style="color:#DC2626;font-weight:700">Kritike</span>')
+    if issue_state["due"]:
+        values.append("Afati duhet përditësuar")
+    if issue_state["slot"]:
+        values.append("Mungon 1H sloti")
+    return "<br>".join(values) or "—"
+
+
+def _explanation_html(task: dict) -> tuple[str, str]:
+    issue_state = _task_issue_state(task)
+    if issue_state["reason"] or issue_state["comment"]:
+        detail = "Mungon arsyeja dhe komenti" if issue_state["reason"] and issue_state["comment"] else "Mungon arsyeja" if issue_state["reason"] else "Mungon komenti"
+        return "#FFFBEB", f'<div style="font-weight:700;color:#92400E">⚠ Kërkon sqarim</div><div style="margin-top:3px;color:#92400E">{detail}</div>'
+    reason = _reason_label(task)
+    content = f'<div style="font-weight:700;color:#111827">{html.escape(reason)}</div>' if reason else ""
+    if task.get("comment"):
+        content += f'<div style="margin-top:3px;color:#64748B">{html.escape(str(task["comment"]))}</div>'
+    return "#FFFFFF", content or "—"
+
+
+def _person_control_summary(person: dict) -> str:
+    missing = sum(any(_task_issue_state(task)[key] for key in ("reason", "comment")) for task in person.get("tasks", []))
+    open_deadlines = person["metrics"].get("deadlines_open_count", 0)
+    values = []
+    if missing:
+        values.append(f"{missing} {'detyrë kërkon' if missing == 1 else 'detyra kërkojnë'} sqarim")
+    if open_deadlines:
+        values.append(f"{open_deadlines} deadline {'i hapur' if open_deadlines == 1 else 'të hapura'}")
+    return " · ".join(values) or "Kontrollo gjendjen e RLZ"
+
+
 def _manager_html(report: dict, report_time: str) -> str:
     summary = report["summary"]
-    subject = subject_for(date.fromisoformat(report["day"]), report_time, report["variant"])
-    kpis = (
-        ("EMPLOYEES", summary.get("employees_checked", 0)), ("PLAN", summary.get("original_planned_count", 0)),
-        ("DONE FROM PLAN", summary.get("planned_completed_today_count", 0)), ("IN PROGRESS", summary.get("in_progress_count", 0)),
-        ("POSTPONED", summary.get("postponed_count", 0)), ("NO PROGRESS", summary.get("no_progress_count", 0)),
-        ("EXTRA", summary.get("additional_completed_count", 0)), ("TOTAL DONE", summary.get("total_completed_today_count", 0)),
-        ("PLAN REALIZATION", _percent(summary.get("raw_plan_realization"))),
-    )
-    deadline_kpis = (
-        ("DEADLINE TODAY", summary.get("deadlines_today_count", 0)), ("COMPLETED", summary.get("deadlines_completed_count", 0)),
-        ("POSTPONED", summary.get("deadlines_postponed_count", 0)), ("OPEN", summary.get("deadlines_open_count", 0)),
-        ("OVERDUE", summary.get("overdue_open_count", 0)), ("CRITICAL OPEN", summary.get("critical_deadlines_open_count", 0)),
-        ("DEADLINE COMPLIANCE", _percent(summary.get("deadline_compliance_percentage"))),
-    )
-    def cards(values):
-        return "".join(f'<td style="padding:8px;border:3px solid #fff;background:#EFF6FF;text-align:center"><b style="font-size:18px;color:#1D4ED8">{html.escape(str(value))}</b><br><span style="font-size:10px;color:#475569">{html.escape(label)}</span></td>' for label, value in values)
-    overview_rows = "".join(
-        f'<tr><td style="padding:6px;border:1px solid #CBD5E1;font-weight:700">{html.escape(person["employee"])}</td>'
-        f'<td style="padding:6px;border:1px solid #CBD5E1">{html.escape(person["department"])}</td>'
-        + "".join(f'<td style="padding:6px;border:1px solid #CBD5E1;text-align:center">{html.escape(str(value))}</td>' for value in (
-            person["metrics"]["original_planned_count"], person["metrics"]["planned_completed_today_count"],
-            person["metrics"]["in_progress_count"], person["metrics"]["postponed_count"], person["metrics"]["no_progress_count"],
-            person["metrics"]["additional_completed_count"], person["metrics"]["total_completed_today_count"],
-            _percent(person["metrics"]["raw_plan_realization"]), person["metrics"]["deadlines_today_count"],
-            person["metrics"]["deadlines_open_count"], _percent(person["metrics"]["deadline_compliance_percentage"]),
-            person["rlz_close_state"]["status"], person["manager_approval"]["status"], person["control_state"],
-        )) + '</tr>' for person in report.get("people", [])
-    )
-    detail = []
+    report_day = date.fromisoformat(report["day"])
+    variant = report.get("variant", "FINAL")
+    variant_label = "FINAL" if variant == "FINAL" else "KORRIGJIM"
+    variant_description = "Raporti përfundimtar i realizimit ditor" if variant == "FINAL" else "Korrigjimet pas raportit përfundimtar"
+    realization = [
+        ("PLANIFIKUAR", summary.get("original_planned_count", 0), "#2563EB"),
+        ("KRYER NGA PLANI", summary.get("planned_completed_today_count", 0), "#86D486"),
+        ("NË PROGRES", summary.get("in_progress_count", 0), "#D6D600"),
+        ("PA PROGRES", summary.get("no_progress_count", 0), "#E89BD0"),
+        ("SHTYRË", summary.get("postponed_count", 0), "#A78BFA"),
+        ("EKSTRA", summary.get("additional_completed_count", 0), "#2563EB"),
+        ("TOTAL KRYER", summary.get("total_completed_today_count", 0), "#86D486"),
+        ("PLAN RLZ", _percent(summary.get("raw_plan_realization")), "#2563EB"),
+    ]
+    deadline_values = [
+        ("DEADLINE SOT", summary.get("deadlines_today_count", 0), "#64748B"),
+        ("KRYER", summary.get("deadlines_completed_count", 0), "#86D486"),
+        ("SHTYRË", summary.get("deadlines_postponed_count", 0), "#A78BFA"),
+        ("ENDE HAPUR", summary.get("deadlines_open_count", 0), "#DC2626" if summary.get("deadlines_open_count", 0) else "#CBD5E1"),
+        ("TË VONUARA", summary.get("overdue_open_count", 0), "#DC2626" if summary.get("overdue_open_count", 0) else "#CBD5E1"),
+        ("KRITIKE HAPUR", summary.get("critical_deadlines_open_count", 0), "#DC2626" if summary.get("critical_deadlines_open_count", 0) else "#CBD5E1"),
+        ("DEADLINE COMPLIANCE", _percent(summary.get("deadline_compliance_percentage")), "#2563EB"),
+        ("GJENDJA", _human_control(summary.get("daily_control_state")), "#F59E0B" if summary.get("daily_control_state") == "ACTION_REQUIRED" else "#86D486"),
+    ]
+    overview = []
+    details = []
     for person in report.get("people", []):
         m = person["metrics"]
+        close_label = _human_close_state(person.get("rlz_close_state", {}).get("status"))
+        close_color = "#15803D" if close_label == "Ruajtur" else "#B45309" if close_label in {"Pa ruajtur", "Ka ndryshime"} else "#DC2626"
+        overview.append(
+            '<tr>'
+            f'<td style="padding:7px;border-bottom:1px solid #CBD5E1"><b>{html.escape(person["employee"])}</b><br><span style="font-size:9px;color:#64748B">{html.escape(person["department"])}</span><br><span style="font-size:9px;color:{close_color}">{close_label}</span></td>'
+            + "".join(f'<td align="center" style="padding:7px 3px;border-bottom:1px solid #CBD5E1">{value}</td>' for value in (
+                m.get("original_planned_count", 0), m.get("planned_completed_today_count", 0), m.get("in_progress_count", 0),
+                m.get("no_progress_count", 0), m.get("additional_completed_count", 0), _percent(m.get("raw_plan_realization")),
+            ))
+            + f'<td style="padding:7px 4px;border-bottom:1px solid #CBD5E1;font-size:9px;color:{"#B45309" if person.get("control_state") == "ACTION_REQUIRED" else "#15803D"}">{_human_control(person.get("control_state"))}</td></tr>'
+        )
         task_rows = []
         for task in person.get("tasks", []):
-            classification = CLASSIFICATION_LABELS.get(task.get("classification"), task.get("classification") or "—")
-            reason = task.get("reason_label") or ("MUNGON ARSYEJA" if task.get("reason_missing") else "—")
-            comment = task.get("comment") or ("MUNGON KOMENTI" if task.get("comment_missing") else "—")
-            warning = "#FEE2E2" if task.get("reason_missing") or task.get("comment_missing") or task.get("deadline_is_overdue") else "#FFFFFF"
-            deadline_border = "#DC2626" if task.get("deadline_critical") and not task.get("deadline_completed") else "#CBD5E1"
+            explanation_bg, explanation = _explanation_html(task)
+            classification = CLASSIFICATION_LABELS.get(task.get("classification"), "Rezultat ditor")
+            deadline_problem = task.get("deadline_is_overdue") or (task.get("deadline_critical") and not task.get("deadline_completed"))
+            source = f'{html.escape(task.get("project_title") or "Pa projekt")} · {_source_label(task.get("source_type"))}'
+            if task.get("is_bllok"):
+                source += ' · <span style="color:#2563EB;font-weight:700">BLL</span>'
             task_rows.append(
-                f'<tr><td style="padding:6px;border:1px solid #CBD5E1;font-weight:700">{html.escape(_task_title(task["title"]))}<br><span style="font-size:10px;color:#64748B">{html.escape(task.get("project_title") or task.get("source_type") or "—")}{" · BLL" if task.get("is_bllok") else ""}</span></td>'
-                f'<td style="padding:6px;border:1px solid #CBD5E1;background:{_status_color(task)}">{html.escape(str(task.get("status") or "—"))}<br>{html.escape(classification)}</td>'
-                f'<td style="padding:6px;border:2px solid {deadline_border}">Plan {html.escape(task.get("original_daily_plan") or "Extra")}<br>Deadline {html.escape(_deadline_display(task))}</td>'
-                f'<td style="padding:6px;border:1px solid #CBD5E1">+{html.escape(str(task.get("progress_today") or task.get("completed_delta") or 0))}</td>'
-                f'<td style="padding:6px;border:1px solid #CBD5E1;background:{warning}">{html.escape(reason)}</td>'
-                f'<td style="padding:6px;border:1px solid #CBD5E1;background:{warning}">{html.escape(comment)}</td>'
-                f'<td style="padding:6px;border:1px solid #CBD5E1">1H {html.escape(task.get("one_h_report_slot") or "—")}<br>Approval {html.escape(task.get("adjustment_status") or "—")}<br>Last {html.escape(task.get("last_change") or "—")}<br>{html.escape(", ".join(task.get("issues", [])) or "—")}</td></tr>'
+                '<tr>'
+                f'<td width="38%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;font:700 11px/1.25 Arial;color:#111827">{html.escape(_task_title(task["title"]))}<div style="margin-top:3px;font:400 9px/1.25 Arial;color:#64748B">{source}</div></td>'
+                f'<td width="14%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;background:{_status_color(task)};font:700 10px/1.25 Arial;color:#111827">{html.escape(classification)}</td>'
+                f'<td width="16%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;font:10px/1.35 Arial;color:{"#DC2626" if deadline_problem else "#111827"}"><span style="font-size:9px;color:#64748B">Plan</span><br>{html.escape(_short_date(task.get("original_daily_plan")) if task.get("in_original_plan", not task.get("extra")) else "Ekstra")}<br><span style="font-size:9px;color:#64748B">Afati</span><br><b>{html.escape(_short_deadline_display(task))}</b></td>'
+                f'<td width="20%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;background:{explanation_bg};font:10px/1.3 Arial">{explanation}</td>'
+                f'<td width="12%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;font:9px/1.35 Arial;color:#475569">{_task_control(task)}</td></tr>'
             )
-        detail.append(
-            f'<h3 style="margin:20px 0 6px">{html.escape(person["employee"])} — {html.escape(person["department"])}</h3>'
-            f'<p style="margin:0 0 8px">Plan {m["original_planned_count"]} · Done {m["planned_completed_today_count"]} · In Progress {m["in_progress_count"]} · Postponed {m["postponed_count"]} · No Progress {m["no_progress_count"]} · Extra {m["additional_completed_count"]} · Total Done {m["total_completed_today_count"]} · Plan RLZ {_percent(m["raw_plan_realization"])} · Adjusted {_percent(m["adjusted_plan_realization"])}<br>Deadline Today {m["deadlines_today_count"]} · Completed {m["deadlines_completed_count"]} · Postponed {m["deadlines_postponed_count"]} · Open {m["deadlines_open_count"]} · Overdue {m["overdue_open_count"]} · Critical Open {m["critical_deadlines_open_count"]} · Compliance {_percent(m["deadline_compliance_percentage"])}<br>RLZ {html.escape(person["rlz_close_state"]["status"])} · Manager Approval {html.escape(person["manager_approval"]["status"])} · <b>{html.escape(person["control_state"])}</b></p>'
-            '<table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font:11px Arial"><tr style="background:#E2E8F0"><th>Task/source</th><th>Status/outcome</th><th>Plan/deadline</th><th>Progress</th><th>Arsyeja</th><th>Komenti</th><th>Control</th></tr>'
+        person_control = person.get("control_state") == "ACTION_REQUIRED"
+        details.append(
+            '<div style="height:18px;line-height:18px">&nbsp;</div>'
+            f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="background:#EEF2FF;border-left:5px solid #2563EB;padding:10px 12px"><div style="font:700 14px Arial;color:#111827">{html.escape(person["employee"].upper())}</div><div style="margin-top:2px;font:10px Arial;color:#64748B">{html.escape(person["department"])}</div></td></tr></table>'
+            f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:7px 0 8px;background:#F8FAFC"><tr><td style="padding:7px;font:10px Arial"><b>Plan</b> {m.get("original_planned_count", 0)} &nbsp; <b>Kryer</b> {m.get("planned_completed_today_count", 0)} &nbsp; <b>Në progres</b> {m.get("in_progress_count", 0)} &nbsp; <b>Pa progres</b> {m.get("no_progress_count", 0)} &nbsp; <b>Ekstra</b> {m.get("additional_completed_count", 0)} &nbsp; <b>Plan RLZ</b> {_percent(m.get("raw_plan_realization"))}</td></tr><tr><td style="padding:0 7px 7px;font:10px Arial"><b>Deadline</b> {m.get("deadlines_completed_count", 0)} / {m.get("deadlines_today_count", 0)} &nbsp; <b>Compliance</b> {_percent(m.get("deadline_compliance_percentage"))} &nbsp; <b>Gjendja:</b> <span style="color:{"#B45309" if person_control else "#15803D"};font-weight:700">{_human_control(person.get("control_state"))}</span> &nbsp; <b>RLZ:</b> {close_label} &nbsp; <b>Aprovimi:</b> {_human_approval(person.get("manager_approval", {}).get("status"))}</td></tr>'
+            + (f'<tr><td style="padding:0 7px 7px;font:9px Arial;color:#64748B">{html.escape(_person_control_summary(person))}</td></tr>' if person_control else "")
+            + '</table><table width="100%" cellspacing="0" cellpadding="0" style="table-layout:fixed;border-collapse:collapse"><tr style="background:#F8FAFC">'
+            '<th width="38%" style="padding:6px;text-align:left;border-bottom:2px solid #CBD5E1;font:700 10px Arial">DETYRA</th><th width="14%" style="padding:6px;text-align:left;border-bottom:2px solid #CBD5E1;font:700 10px Arial">REZULTATI</th><th width="16%" style="padding:6px;text-align:left;border-bottom:2px solid #CBD5E1;font:700 10px Arial">PLAN / AFATI</th><th width="20%" style="padding:6px;text-align:left;border-bottom:2px solid #CBD5E1;font:700 10px Arial">SQARIMI</th><th width="12%" style="padding:6px;text-align:left;border-bottom:2px solid #CBD5E1;font:700 10px Arial">KONTROLLI</th></tr>'
             + "".join(task_rows) + '</table>'
         )
-    control = summary.get("daily_control_state", "CLEAN_DAY")
-    control_bg = "#DCFCE7" if control == "CLEAN_DAY" else "#FEF3C7"
-    return '<!doctype html><html><body style="margin:0;background:#F8FAFC;font-family:Arial;color:#0F172A"><table width="100%"><tr><td align="center"><table width="1100" style="max-width:100%;background:#FFF;border-collapse:collapse"><tr><td style="padding:18px 20px;background:#2563EB;color:#FFF"><h2 style="margin:0">' + html.escape(subject) + '</h2></td></tr><tr><td style="padding:12px"><table width="100%"><tr>' + cards(kpis) + '</tr></table><h3>Deadline Control</h3><table width="100%"><tr>' + cards(deadline_kpis) + '</tr></table><div style="margin:12px 0;padding:10px;background:' + control_bg + ';font-weight:800;text-align:center">' + html.escape(control) + '</div><table width="100%" cellspacing="0" cellpadding="0" style="border-collapse:collapse;font:10px Arial"><tr style="background:#E2E8F0"><th>Employee</th><th>Department</th><th>Plan</th><th>Done</th><th>Progress</th><th>Postponed</th><th>No Progress</th><th>Extra</th><th>Total</th><th>Plan RLZ</th><th>Deadline</th><th>Open</th><th>Compliance</th><th>RLZ</th><th>Approval</th><th>Control</th></tr>' + overview_rows + '</table>' + ''.join(detail) + '</td></tr></table></td></tr></table></body></html>'
+    action = summary.get("daily_control_state") == "ACTION_REQUIRED"
+    control_box = (
+        f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin-top:8px"><tr><td style="padding:9px 12px;background:{"#FFFBEB" if action else "#F0FDF4"};border:1px solid {"#FCD34D" if action else "#BBF7D0"};font:700 11px Arial;color:{"#92400E" if action else "#166534"}">{"⚠" if action else "✓"} {_human_control(summary.get("daily_control_state"))}<div style="margin-top:3px;font-weight:400;color:#64748B">{html.escape(_control_summary(summary)) if action else "Nuk ka veprime të hapura për këtë ditë."}</div></td></tr></table>'
+    )
+    return (
+        '<!doctype html><html><body style="margin:0;background:#F8FAFC;color:#111827;font-family:Arial,sans-serif">'
+        '<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td align="center" style="padding:14px 8px">'
+        '<table role="presentation" width="940" cellspacing="0" cellpadding="0" style="width:940px;max-width:100%;background:#FFFFFF;border-collapse:collapse;border-top:5px solid #2563EB"><tr><td style="padding:15px 18px 10px">'
+        '<div style="font:700 11px Arial;color:#2563EB;letter-spacing:1px">PRIMEFLOW</div>'
+        f'<div style="margin-top:4px;font:700 20px Arial;color:#111827">REALIZIMI DITOR — {variant_label}</div>'
+        f'<div style="margin-top:5px;font:12px Arial;color:#64748B">{report_day:%d.%m.%Y} · {html.escape(report_time)}<br>{variant_description}</div>'
+        + _section_title("PËRMBLEDHJA E REALIZIMIT") + _kpi_table(realization, plan_metrics=summary)
+        + _section_title("KONTROLLI I AFATEVE") + _kpi_table(deadline_values) + control_box
+        + _section_title("PËRMBLEDHJA SIPAS STAFIT")
+        + '<table width="100%" cellspacing="0" cellpadding="0" style="table-layout:fixed;border-collapse:collapse;font:10px Arial"><tr style="background:#F8FAFC"><th width="30%" style="padding:7px;text-align:left;border-bottom:2px solid #CBD5E1">STAFI</th><th>PLAN</th><th>KRYER</th><th>NË PROGRES</th><th>PA PROGRES</th><th>EKSTRA</th><th>PLAN RLZ</th><th>GJENDJA</th></tr>' + "".join(overview) + '</table>'
+        + _section_title("DETAJET SIPAS STAFIT") + "".join(details)
+        + '</td></tr></table></td></tr></table></body></html>'
+    )
 
 
 def render_plain(report: dict, report_time: str = REPORT_SLOT) -> str:

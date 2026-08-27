@@ -1,5 +1,7 @@
 import os
 import asyncio
+import copy
+import re
 import uuid
 from datetime import date
 from types import SimpleNamespace
@@ -84,9 +86,9 @@ def test_final_email_contains_complete_manager_story_and_semantic_colors():
     report = _report()
     plain, html = render_plain(report, "16:40"), render_html(report, "16:40")
     assert subject_for(DAY, "16:40", "FINAL") == "[PrimeFlow] Realizimi ditor FINAL - 17/08/2026 - 16:40"
-    for value in ("Plan Realization", "Deadline Compliance", "ACTION_REQUIRED", "Manager Approval", "Integrimi", "Në pritje të klientit", "Fillestar"):
+    for value in ("Plan RLZ", "Deadline Compliance", "KËRKON VEPRIM", "Aprovimi", "Integrimi", "Në pritje të klientit", "Fillestar"):
         assert value in plain
-    for value in ("DONE FROM PLAN", "IN PROGRESS", "DEADLINE TODAY", "Deadline Control", "Elsa", "Development"):
+    for value in ("KRYER NGA PLANI", "NË PROGRES", "DEADLINE SOT", "KONTROLLI I AFATEVE", "Elsa", "Development"):
         assert value in html
     assert "#FFFF00" in html
     assert "BLOCKED" not in html
@@ -136,8 +138,54 @@ def test_final_manager_report_shows_overdue_task_causing_action_required():
     report["summary"].update(report["people"][0]["metrics"])
     plain, html = render_plain(report, "16:40"), render_html(report, "16:40")
     assert "Detyrë e vonuar" in plain and "Detyrë e vonuar" in html
-    assert "ACTION_REQUIRED" in plain and "ACTION_REQUIRED" in html
-    assert "2026-08-16" in plain and "2026-08-16" in html
+    assert "KËRKON VEPRIM" in plain and "KËRKON VEPRIM" in html
+    assert "ACTION_REQUIRED" not in plain and "ACTION_REQUIRED" not in html
+    assert "2026-08-16" in plain and "16.08" in html
+
+
+def test_final_html_is_compact_humanized_and_retains_manager_evidence():
+    report = _report()
+    base = report["people"][0]["tasks"][0]
+    base.update({
+        "reason_code": "REQUEST_CHANGE", "reason_label": "Ndryshim kërkese",
+        "comment": "Klienti kërkoi që fillimisht të ndryshojë plani.",
+        "one_h_report_slot": "14:20", "adjustment_status": "PENDING",
+        "timeline": [{"type": "POSTPONED", "old_value": "2026-08-17", "new_value": "2026-08-18"}],
+    })
+    missing = {
+        **base, "task_id": "task-missing", "title": "Detyrë që kërkon sqarim",
+        "status": "TODO", "classification": "NO_PROGRESS", "reason_code": None,
+        "reason_label": None, "comment": None, "reason_missing": True, "comment_missing": True,
+        "issues": ["MISSING_REASON", "MISSING_REQUIRED_COMMENT", "DUE_DATE_NOT_MOVED", "ONE_H_SLOT_MISSING"],
+        "deadline_is_overdue": True, "deadline_critical": True, "one_h_report_slot": None,
+    }
+    done = {**base, "task_id": "task-done", "title": "Detyrë e kryer", "classification": "REALIZED_AS_PLANNED", "status": "DONE"}
+    report["people"][0]["tasks"] = [base, missing, done]
+    report["people"][0]["rlz_close_state"] = {"status": "NOT_SAVED"}
+    second = copy.deepcopy(report["people"][0])
+    second.update({"user_id": "user-2", "employee": "Laurent Hoxha"})
+    second["tasks"] = [{**base, "task_id": "task-second", "title": "Detyra e Laurent"}]
+    report["people"].append(second)
+
+    rendered = render_html(report, "16:40")
+
+    assert 'width="940"' in rendered
+    assert "PËRMBLEDHJA E REALIZIMIT" in rendered
+    assert "PËRMBLEDHJA SIPAS STAFIT" in rendered
+    assert "DETAJET SIPAS STAFIT" in rendered
+    header_rows = re.findall(r"<tr[^>]*>(?:(?!</tr>).)*<th(?:(?!</tr>).)*</tr>", rendered)
+    assert header_rows and max(row.count("<th") for row in header_rows) == 8
+    assert any(row.count("<th") == 5 for row in header_rows)
+    for label in ("STAFI", "PLAN", "KRYER", "NË PROGRES", "PA PROGRES", "EKSTRA", "PLAN RLZ", "GJENDJA"):
+        assert f">{label}</th>" in rendered
+    for label in ("DETYRA", "REZULTATI", "PLAN / AFATI", "SQARIMI", "KONTROLLI"):
+        assert f">{label}</th>" in rendered
+    for color in ("#2563EB", "#C4FDC4", "#FFFF00", "#FFC4ED", "#DC2626"):
+        assert color in rendered
+    for forbidden in ("MISSING_REASON", "COMMENT_MISSING", "MISSING_REQUIRED_COMMENT", "DUE_DATE_NOT_MOVED", "ONE_H_SLOT_MISSING", "NOT_SAVED", "ACTION_REQUIRED", "REQUEST_CHANGE", "PRIORITY_CHANGE"):
+        assert forbidden not in rendered
+    for visible in ("Kërkon sqarim", "Mungon arsyeja dhe komenti", "Pa ruajtur", "KËRKON VEPRIM", "Elsa", "Laurent Hoxha", "Integrimi", "Detyrë që kërkon sqarim", "Detyrë e kryer", "Detyra e Laurent", "Plan RLZ", "DEADLINE COMPLIANCE", "Ndryshim kërkese", "Klienti kërkoi", "17.08 → 18.08", "1H 14:20", "Pret aprovim"):
+        assert visible in rendered
 
 
 def test_final_builder_consumes_live_metrics_and_day_scoped_compliance(monkeypatch):
