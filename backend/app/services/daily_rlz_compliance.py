@@ -330,6 +330,7 @@ async def build_daily_rlz_compliance(db: AsyncSession, *, user_id: uuid.UUID, da
         "compliant": not blockers, "rlz_close_state": {
             "status": close_status, "saved": saved, "stale": stale,
             "saved_at": latest_close.created_at.isoformat() if saved and latest_close else None,
+            "closed_by_user_id": str(latest_close.actor_user_id) if saved and latest_close and latest_close.actor_user_id else None,
             "is_editable": is_closable_day(day, now),
             "closable_from": closable_from(day).isoformat(),
             "editable_until": editable_until(day).isoformat(),

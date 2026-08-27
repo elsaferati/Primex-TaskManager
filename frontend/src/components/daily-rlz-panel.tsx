@@ -1,12 +1,13 @@
 "use client"
 
 import * as React from "react"
-import { AlertTriangle, CheckCircle2, Save } from "lucide-react"
+import { AlertTriangle, CheckCircle2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Textarea } from "@/components/ui/textarea"
 import { useAuth } from "@/lib/auth"
 import type { DailyReportResponse } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -174,9 +175,17 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
   const { apiFetch, user } = useAuth()
   const [saving, setSaving] = React.useState(false)
   const [blockers, setBlockers] = React.useState<Blocker[]>([])
+  const [closeOpen, setCloseOpen] = React.useState(false)
+  const [dailyComment, setDailyComment] = React.useState("")
+  const [prepared, setPrepared] = React.useState<null | {
+    periodId: string
+    resultId: string
+    pulse: string | null
+    metrics: Record<string, number | null>
+  }>(null)
   const state = report?.rlz_close_state
 
-  const save = async () => {
+  const prepareClose = async () => {
     if (!user?.id || !user.department_id) return
     setSaving(true)
     try {
@@ -200,9 +209,29 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
       const daily = await dailyResponse.json()
       const person = daily.people?.find((entry: { user_id: string }) => entry.user_id === user.id)
       if (!person) throw new Error("Rezultati yt ditor i Realization nuk u gjet")
-      const response = await apiFetch(`/realization/periods/${daily.period.id}/results/${person.id}/close-day`, {
+      const liveResponse = await apiFetch(`/realization/daily?department_id=${user.department_id}&day=${day}&user_id=${user.id}`)
+      const livePayload = await liveResponse.json().catch(() => ({}))
+      if (!liveResponse.ok) throw new Error(livePayload?.detail || "Përmbledhja ditore nuk u gjet")
+      const livePerson = livePayload.live?.people?.find((entry: { user_id: string }) => entry.user_id === user.id)
+      setPrepared({
+        periodId: daily.period.id,
+        resultId: person.id,
+        pulse: person.facts_json?.pulse?.pulse || null,
+        metrics: livePerson?.metrics || {},
+      })
+      setDailyComment("")
+      setCloseOpen(true)
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Dita nuk mund të përgatitej") }
+    finally { setSaving(false) }
+  }
+
+  const closeDay = async () => {
+    if (!prepared || !dailyComment.trim()) return
+    setSaving(true)
+    try {
+      const response = await apiFetch(`/realization/periods/${prepared.periodId}/results/${prepared.resultId}/close-day`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ daily_comment: "Daily Report My View", confirmed_pulse: person.facts_json?.pulse?.pulse || null }),
+        body: JSON.stringify({ daily_comment: dailyComment.trim(), confirmed_pulse: prepared.pulse }),
       })
       const payload = await response.json().catch(() => ({}))
       if (!response.ok) {
@@ -212,28 +241,69 @@ export function DailyRlzSaveButton({ day, report, onSaved }: {
           publishValidationErrors(nextBlockers)
           return
         }
-        throw new Error(payload?.detail?.message || payload?.detail || "Gjendja nuk u ruajt")
+        throw new Error(payload?.detail?.message || payload?.detail || "Dita nuk u mbyll")
       }
-      toast.success("Ruajtur për RLZ")
+      toast.success("Dita u mbyll")
+      setCloseOpen(false)
+      setPrepared(null)
       await onSaved()
-    } catch (error) { toast.error(error instanceof Error ? error.message : "Gjendja nuk u ruajt") }
+    } catch (error) { toast.error(error instanceof Error ? error.message : "Dita nuk u mbyll") }
     finally { setSaving(false) }
   }
 
+  const closeTime = state?.saved_at ? new Intl.DateTimeFormat("sq-AL", {
+    timeZone: "Europe/Tirane", hour: "2-digit", minute: "2-digit",
+  }).format(new Date(state.saved_at)) : null
+  const actionLabel = state?.status === "STALE" ? "Rimbyll ditën" : state?.status === "REOPENED" ? "Mbyll përsëri ditën" : "Mbyll ditën"
+  const metrics = prepared?.metrics || {}
+  const realization = [
+    ["PLAN", metrics.original_planned_count], ["KRYER", metrics.planned_completed_today_count],
+    ["NË PROGRES", metrics.in_progress_count], ["SHTYRË", metrics.postponed_count],
+    ["PA PROGRES", metrics.no_progress_count], ["EKSTRA", metrics.additional_completed_count],
+  ] as const
+  const deadlines = [
+    ["Deadline sot", metrics.deadlines_today_count], ["Kryer", metrics.deadlines_completed_count],
+    ["Shtyrë", metrics.deadlines_postponed_count], ["Hapur", metrics.deadlines_open_count],
+  ] as const
+
   return <>
     <div className="ml-auto flex flex-wrap items-center justify-end gap-2 print:hidden">
-      {state?.status === "SAVED" ? <span className="text-xs font-medium text-emerald-700"><CheckCircle2 className="mr-1 inline h-4 w-4"/>Ruajtur për RLZ</span> : null}
-      {state?.status === "STALE" ? <span className="max-w-[310px] text-xs font-medium text-amber-700"><AlertTriangle className="mr-1 inline h-4 w-4"/>Ka ndryshime pas ruajtjes. Ruaje përsëri për RLZ.</span> : null}
-      <Button type="button" className="h-8 bg-blue-600 px-3 text-xs hover:bg-blue-700" onClick={() => void save()}
+      {state?.status === "SAVED" ? <span className="text-xs font-medium text-emerald-700"><CheckCircle2 className="mr-1 inline h-4 w-4"/>Dita e mbyllur{closeTime ? ` · ${closeTime}` : ""}</span> : null}
+      {state?.status === "NOT_SAVED" ? <span className="text-xs font-medium text-slate-600">Dita e hapur</span> : null}
+      {state?.status === "STALE" ? <span className="max-w-[310px] text-xs font-medium text-amber-700"><AlertTriangle className="mr-1 inline h-4 w-4"/>Ka ndryshime pas mbylljes<span className="block font-normal">Realizimi ka ndryshuar pas mbylljes së ditës.</span></span> : null}
+      {state?.status === "REOPENED" ? <span className="text-xs font-medium text-blue-700">Dita është rihapur</span> : null}
+      {state?.status === "CLOSED_EDIT_WINDOW" ? <span className="text-xs font-medium text-rose-700">Afati i mbylljes ka përfunduar</span> : null}
+      {state?.status !== "SAVED" && state?.status !== "CLOSED_EDIT_WINDOW" ? <Button type="button" className="h-8 bg-blue-600 px-3 text-xs hover:bg-blue-700" onClick={() => void prepareClose()}
         disabled={saving || !state?.is_editable}>
-        <Save className="mr-1 h-4 w-4"/>{saving ? "Duke ruajtur..." : "Ruaj gjendjen për RLZ"}
-      </Button>
+        {saving ? "Duke kontrolluar…" : actionLabel}
+      </Button> : null}
     </div>
+    <Dialog open={closeOpen} onOpenChange={open => { if (!saving) setCloseOpen(open) }}>
+      <DialogContent className="sm:max-w-xl">
+        <DialogHeader>
+          <DialogTitle>MBYLL DITËN</DialogTitle>
+          <DialogDescription>{day.split("-").reverse().join(".")}<br/>Kontrollo realizimin para se ta mbyllësh ditën.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="grid grid-cols-3 gap-2 rounded-xl border bg-slate-50 p-3 sm:grid-cols-6">
+            {realization.map(([label, value]) => <div key={label}><p className="text-[9px] font-semibold text-slate-500">{label}</p><p className="text-lg font-bold tabular-nums">{value ?? 0}</p></div>)}
+          </div>
+          <div className="rounded-xl border border-blue-100 bg-blue-50/50 p-3">
+            <div className="flex items-center justify-between"><span className="text-xs font-semibold text-blue-700">PLAN RLZ</span><strong>{metrics.raw_plan_realization == null ? "—" : `${metrics.raw_plan_realization}%`}</strong></div>
+            <div className="mt-3 grid grid-cols-4 gap-2">{deadlines.map(([label, value]) => <div key={label}><p className="text-[10px] text-slate-500">{label}</p><b className="tabular-nums">{value ?? 0}</b></div>)}</div>
+          </div>
+          <div className="space-y-1.5">
+            <label htmlFor="daily-close-comment" className="text-xs font-semibold uppercase tracking-wide text-slate-700">Përmbledhja e ditës</label>
+            <Textarea id="daily-close-comment" autoFocus rows={4} value={dailyComment} onChange={event => setDailyComment(event.target.value)} placeholder="Shkruaj shkurt çfarë duhet ditur për ditën e sotme..." />
+          </div>
+        </div>
+        <DialogFooter><Button variant="outline" onClick={() => setCloseOpen(false)} disabled={saving}>Anulo</Button><Button className="bg-blue-600 hover:bg-blue-700" onClick={() => void closeDay()} disabled={saving || !dailyComment.trim()}>{saving ? "Duke mbyllur…" : "Mbyll ditën"}</Button></DialogFooter>
+      </DialogContent>
+    </Dialog>
     <Dialog open={blockers.length > 0} onOpenChange={open => { if (!open) setBlockers([]) }}><DialogContent>
-      <DialogHeader><DialogTitle>Nuk mund ta ruash gjendjen për RLZ</DialogTitle></DialogHeader>
-      <p className="text-sm">Plotëso pikat e mëposhtme para se të vazhdosh.</p>
-      <div className="max-h-[55vh] space-y-3 overflow-y-auto">{blockers.map(blocker => <div key={blocker.task_id} className="rounded border border-red-200 bg-red-50 p-3">
-        <p className="font-semibold">{blockerTitle(blocker.title)}</p><ul className="mt-1 list-disc pl-5 text-sm">{blocker.issues.map(issue => <li key={issue.code}>{issue.message}{issue.code === "DUE_DATE_NOT_MOVED" && blocker.minimum_due_date ? ` · Shtyje në ${blocker.minimum_due_date} ose më vonë` : ""}</li>)}</ul>
+      <DialogHeader><DialogTitle>DITA NUK MUND TË MBYLLET</DialogTitle><DialogDescription>Plotëso pikat e mëposhtme para se ta mbyllësh ditën.</DialogDescription></DialogHeader>
+      <div className="max-h-[55vh] space-y-3 overflow-y-auto">{blockers.map((blocker, index) => <div key={blocker.task_id} className="rounded border border-red-200 bg-red-50 p-3">
+        <p className="font-semibold">{index + 1}. {blockerTitle(blocker.title)}</p><ul className="mt-1 list-disc pl-5 text-sm">{blocker.issues.map(issue => <li key={issue.code}>{issue.message}{issue.code === "DUE_DATE_NOT_MOVED" && blocker.minimum_due_date ? ` · Shtyje në ${blocker.minimum_due_date} ose më vonë` : ""}</li>)}</ul>
       </div>)}</div>
     </DialogContent></Dialog>
   </>

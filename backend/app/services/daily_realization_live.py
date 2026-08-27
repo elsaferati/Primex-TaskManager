@@ -170,6 +170,21 @@ def timeline_from_events(*, day: date, baseline_task: dict | None, events: list[
     return rows
 
 
+def manager_decision_timeline_item(adjustment: DailyPlanAdjustment, *, decided_by_name: str | None) -> dict | None:
+    if not adjustment.decided_at or adjustment.status not in {"APPROVED", "REJECTED"}:
+        return None
+    return {
+        "id": f"adjustment:{adjustment.id}",
+        "type": f"POSTPONEMENT_{adjustment.status}",
+        "timestamp": adjustment.decided_at.isoformat(),
+        "actor_user_id": str(adjustment.decided_by) if adjustment.decided_by else None,
+        "actor_name": decided_by_name,
+        "old_value": None,
+        "new_value": adjustment.status,
+        "metadata": {"reason": adjustment.reason, "comment": adjustment.decision_comment},
+    }
+
+
 async def build_live_daily_realization(
     db: AsyncSession, *, department_id: uuid.UUID, day: date,
     user_id: uuid.UUID | None = None, exceptions_only: bool = False,
@@ -285,6 +300,12 @@ async def build_live_daily_realization(
     adjustments = {(row.user_id, row.audit_event_id): row for row in (await db.execute(select(DailyPlanAdjustment).where(
         DailyPlanAdjustment.user_id.in_(person_ids), DailyPlanAdjustment.day_date == day,
     ))).scalars().all()} if person_ids else {}
+    decision_user_ids = {row.decided_by for row in adjustments.values() if row.decided_by}
+    if decision_user_ids:
+        users.update({
+            row.id: row
+            for row in (await db.execute(select(User).where(User.id.in_(decision_user_ids)))).scalars().all()
+        })
     slot_updates = {row.task_id: row.updated_at for row in (await db.execute(select(TaskOneHReportSlot).where(
         TaskOneHReportSlot.task_id.in_(task_ids),
         TaskOneHReportSlot.report_date == effective_slot_date(day),
@@ -313,6 +334,15 @@ async def build_live_daily_realization(
                 None,
             )
             adjustment_status = latest_due_adjustment.status if latest_due_adjustment else None
+            decision_user = users.get(latest_due_adjustment.decided_by) if latest_due_adjustment and latest_due_adjustment.decided_by else None
+            manager_decision = ({
+                "status": latest_due_adjustment.status,
+                "reason": latest_due_adjustment.reason,
+                "comment": latest_due_adjustment.decision_comment,
+                "decided_by_user_id": str(latest_due_adjustment.decided_by) if latest_due_adjustment.decided_by else None,
+                "decided_by_name": decision_user.full_name if decision_user else None,
+                "decided_at": latest_due_adjustment.decided_at.isoformat() if latest_due_adjustment.decided_at else None,
+            } if latest_due_adjustment else None)
             approved = adjustment_status == "APPROVED"
             reopened = any(event.action == "task.reopened" for event in task_events)
             progress_delta = float(progress.get(task_id).completed_delta if progress.get(task_id) else 0)
@@ -413,6 +443,7 @@ async def build_live_daily_realization(
                     and semantic_local_day((event.after or {}).get("value")) > semantic_local_day((event.before or {}).get("value"))
                 ),
                 "adjustment_status": adjustment_status,
+                "manager_decision": manager_decision,
                 "requires_explanation": requirement.requires_explanation,
                 "reason_required": requirement.reason_required,
                 "comment_required": requirement.comment_required,
@@ -433,6 +464,17 @@ async def build_live_daily_realization(
                 if actor_raw:
                     actor = users.get(uuid.UUID(actor_raw))
                     timeline_item["actor_name"] = actor.full_name if actor else None
+            for due_event in due_events:
+                adjustment = adjustments.get((person_id, due_event.id))
+                if not adjustment:
+                    continue
+                adjustment_user = users.get(adjustment.decided_by) if adjustment.decided_by else None
+                decision_item = manager_decision_timeline_item(
+                    adjustment, decided_by_name=adjustment_user.full_name if adjustment_user else None
+                )
+                if decision_item:
+                    row["timeline"].append(decision_item)
+            row["timeline"].sort(key=lambda item: (item.get("timestamp") is not None, item.get("timestamp") or "", item["id"]))
             metric_rows.append(row)
             if not exceptions_only or classification in EXCEPTION_CLASSIFICATIONS or issues:
                 rows.append(row)
@@ -452,6 +494,11 @@ async def build_live_daily_realization(
     close_by_user = {}
     for close, _ in latest_close:
         close_by_user.setdefault(str(close.user_id), close)
+    close_actor_ids = {close.actor_user_id for close in close_by_user.values() if close.actor_user_id}
+    close_actor_names = {
+        row.id: row.full_name
+        for row in (await db.execute(select(User).where(User.id.in_(close_actor_ids)))).scalars().all()
+    } if close_actor_ids else {}
     from app.services.daily_rlz_compliance import is_editable_day
     for person in people:
         close = close_by_user.get(person["user_id"])
@@ -462,6 +509,19 @@ async def build_live_daily_realization(
             latest_relevant_change=latest_change,
             editable=is_editable_day(day),
         )
+        stale_adjustment = next((
+            row for row in person["tasks"]
+            if close and (row.get("manager_decision") or {}).get("decided_at")
+            and datetime.fromisoformat(row["manager_decision"]["decided_at"]) > close.created_at
+        ), None)
+        person["close_state_details"] = {
+            "status": person["close_state"],
+            "closed_at": close.created_at.isoformat() if close and close.action in {"CLOSE", "CORRECT"} else None,
+            "closed_by_user_id": str(close.actor_user_id) if close and close.actor_user_id else None,
+            "closed_by_name": close_actor_names.get(close.actor_user_id) if close else None,
+            "action": close.action if close else None,
+            "stale_cause": "MANAGER_POSTPONEMENT_DECISION" if person["close_state"] == "STALE" and stale_adjustment else None,
+        }
         if person["close_state"] != "SAVED":
             person["metrics"]["daily_control_state"] = "ACTION_REQUIRED"
     if any(person["metrics"].get("daily_control_state") == "ACTION_REQUIRED" for person in people):

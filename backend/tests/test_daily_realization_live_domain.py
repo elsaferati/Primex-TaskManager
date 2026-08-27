@@ -14,7 +14,7 @@ from app.services.daily_realization_events import semantic_local_day
 from app.services.daily_realization_explanation import requires_daily_explanation
 from app.services.daily_realization_live import (
     candidate_task_ids_for_person, credited_completion_day, day_bounds, local_day,
-    timeline_from_events,
+    manager_decision_timeline_item, timeline_from_events,
 )
 from app.services.daily_realization_metrics import calculate_daily_metrics
 from app.services.daily_realization_close_state import resolve_daily_close_state
@@ -129,6 +129,23 @@ def test_timeline_preserves_every_postponement_in_deterministic_order():
     assert [(row["old_value"], row["new_value"]) for row in rows[1:]] == [
         ("2026-08-26", "2026-08-27"), ("2026-08-27", "2026-08-29"), ("2026-08-29", "2026-08-30"),
     ]
+
+
+@pytest.mark.parametrize(("status", "event_type"), [
+    ("APPROVED", "POSTPONEMENT_APPROVED"), ("REJECTED", "POSTPONEMENT_REJECTED"),
+])
+def test_manager_decision_becomes_human_timeline_evidence(status, event_type):
+    manager_id = uuid.uuid4()
+    adjustment = SimpleNamespace(
+        id=uuid.uuid4(), status=status,
+        decided_at=datetime(2026, 8, 26, 15, 5, tzinfo=timezone.utc),
+        decided_by=manager_id, reason="Kapaciteti", decision_comment="Vazhdo më 28.08",
+    )
+    item = manager_decision_timeline_item(adjustment, decided_by_name="Marie")
+    assert item["type"] == event_type
+    assert item["actor_user_id"] == str(manager_id)
+    assert item["actor_name"] == "Marie"
+    assert item["metadata"] == {"reason": "Kapaciteti", "comment": "Vazhdo më 28.08"}
 
 
 def test_timeline_recognizes_move_back_to_today():

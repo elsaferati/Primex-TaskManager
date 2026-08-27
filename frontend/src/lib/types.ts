@@ -400,7 +400,7 @@ export interface DailyReportResponse {
   system_today: DailyReportSystemOccurrence[]
   system_overdue: DailyReportSystemOccurrence[]
   rlz_close_state?: {
-    status: "NOT_SAVED" | "SAVED" | "STALE" | "CLOSED_EDIT_WINDOW"
+    status: "NOT_SAVED" | "SAVED" | "STALE" | "REOPENED" | "CLOSED_EDIT_WINDOW"
     saved: boolean
     stale: boolean
     saved_at?: string | null
@@ -802,7 +802,16 @@ export interface DailyRealizationTimelineEvent {
   actor_name?: string | null
   old_value?: unknown
   new_value?: unknown
-  metadata?: { reason?: string | null; time_slot?: string | null }
+  metadata?: { reason?: string | null; comment?: string | null; time_slot?: string | null }
+}
+
+export interface DailyRealizationManagerDecision {
+  status: "PENDING" | "APPROVED" | "REJECTED"
+  reason?: string | null
+  comment?: string | null
+  decided_by_user_id?: string | null
+  decided_by_name?: string | null
+  decided_at?: string | null
 }
 
 export interface DailyRealizationTask {
@@ -827,6 +836,7 @@ export interface DailyRealizationTask {
   last_change?: string | null
   postponement_count: number
   adjustment_status?: string | null
+  manager_decision?: DailyRealizationManagerDecision | null
   issues: string[]
   timeline: DailyRealizationTimelineEvent[]
   requires_explanation: boolean
@@ -848,6 +858,14 @@ export interface DailyRealizationPerson {
   tasks: DailyRealizationTask[]
   metrics: DailyRealizationMetrics
   close_state: "NOT_SAVED" | "CLOSED_EDIT_WINDOW" | "SAVED" | "STALE" | "REOPENED"
+  close_state_details?: {
+    status: DailyRealizationPerson["close_state"]
+    closed_at?: string | null
+    closed_by_user_id?: string | null
+    closed_by_name?: string | null
+    action?: string | null
+    stale_cause?: "MANAGER_POSTPONEMENT_DECISION" | null
+  }
 }
 
 export interface DailyRealizationLive {

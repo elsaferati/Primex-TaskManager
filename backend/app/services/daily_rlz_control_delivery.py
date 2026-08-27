@@ -20,6 +20,7 @@ from app.services.daily_realization_report import (
 )
 from app.services.primeflow_report import GmailService
 from app.services.primeflow_report_delivery import configured_recipients
+from app.services.note_markup import marked_task_html, marked_task_plain_lines, parse_marked_note_content
 
 REPORT_TYPE = "rlz_daily_control"
 SCHEDULE_TYPE = "RLZ_DAILY_CONTROL"
@@ -58,15 +59,16 @@ def subject_for(day: date, report_time: str = REPORT_SLOT, variant: str = "PRECH
 
 def _close_state_reason(status: str) -> str:
     return {
-        "NOT_SAVED": "Gjendja për RLZ javor nuk është ruajtur.",
-        "CLOSED_EDIT_WINDOW": "Gjendja nuk u ruajt para mbylljes së afatit.",
-        "STALE": "Ka ndryshime pas ruajtjes; gjendja duhet ruajtur përsëri për RLZ javor.",
-        "SAVED": "Gjendja është ruajtur, por kanë mbetur pika të paplotësuara.",
+        "NOT_SAVED": "Dita është ende e hapur.",
+        "CLOSED_EDIT_WINDOW": "Dita nuk u mbyll brenda afatit.",
+        "STALE": "Ka ndryshime pas mbylljes; dita duhet rimbyllur.",
+        "SAVED": "Dita është mbyllur, por kanë mbetur pika të paplotësuara.",
     }.get(status, "Gjendja për RLZ javor kërkon kontroll.")
 
 
 def _task_title(title: str) -> str:
-    return next((line.strip() for line in title.splitlines() if line.strip()), title)
+    clean = parse_marked_note_content(title).text
+    return next((line.strip() for line in clean.splitlines() if line.strip()), clean)
 
 
 CLASSIFICATION_LABELS = {
@@ -79,8 +81,8 @@ CLASSIFICATION_LABELS = {
 }
 
 CLOSE_STATE_LABELS = {
-    "NOT_SAVED": "Pa ruajtur", "SAVED": "Ruajtur", "STALE": "Ka ndryshime",
-    "REOPENED": "Rihapur", "CLOSED_EDIT_WINDOW": "Afati përfundoi", "CLOSED": "Ruajtur",
+    "NOT_SAVED": "DITA E HAPUR", "SAVED": "DITA E MBYLLUR", "STALE": "KA NDRYSHIME PAS MBYLLJES",
+    "REOPENED": "DITA ËSHTË RIHAPUR", "CLOSED_EDIT_WINDOW": "AFATI I MBYLLJES KA PËRFUNDUAR", "CLOSED": "DITA E MBYLLUR",
 }
 APPROVAL_LABELS = {
     "APPROVED": "Aprovuar", "PENDING": "Pret aprovim", "REJECTED": "Refuzuar",
@@ -115,8 +117,32 @@ def _human_approval(value: str | None) -> str:
     return APPROVAL_LABELS.get(str(value or ""), "Nuk kërkohet")
 
 
+def _task_result_label(task: dict) -> str:
+    if task.get("adjustment_status") == "REJECTED":
+        return "Shtyrë · refuzuar"
+    return CLASSIFICATION_LABELS.get(task.get("classification"), "Rezultat ditor")
+
+
 def _human_control(value: str | None) -> str:
     return "KËRKON VEPRIM" if value == "ACTION_REQUIRED" else "DITA NË RREGULL"
+
+
+def _close_evidence(person: dict) -> str:
+    state = person.get("rlz_close_state") or {}
+    saved_at = state.get("saved_at")
+    pieces: list[str] = []
+    if saved_at:
+        try:
+            pieces.append(datetime.fromisoformat(saved_at).astimezone(tirana_now().tzinfo).strftime("%H:%M"))
+        except (TypeError, ValueError):
+            pass
+    if state.get("closed_by_name"):
+        pieces.insert(0, str(state["closed_by_name"]))
+    return f' · {" · ".join(pieces)}' if pieces else ""
+
+
+def _close_evidence_html(person: dict) -> str:
+    return html.escape(_close_evidence(person))
 
 
 def _short_date(value: str | None) -> str:
@@ -150,7 +176,7 @@ def _control_summary(summary: dict) -> str:
     missing = summary.get("tasks_missing_reason", 0) + summary.get("tasks_missing_comment", 0)
     open_deadlines = summary.get("deadlines_open_count", 0)
     if not_saved:
-        messages.append(f"{not_saved} {'person nuk e ka' if not_saved == 1 else 'persona nuk e kanë'} ruajtur RLZ")
+        messages.append(f"{not_saved} {'person nuk e ka' if not_saved == 1 else 'persona nuk e kanë'} mbyllur ditën")
     if missing:
         messages.append(f"{missing} {'fushë sqarimi mungon' if missing == 1 else 'fusha sqarimi mungojnë'}")
     if open_deadlines:
@@ -186,11 +212,11 @@ def _manager_plain(report: dict, report_time: str) -> str:
             f"Deadline sot {metrics['deadlines_today_count']} | Kryer {metrics['deadlines_completed_count']} | "
             f"Shtyrë {metrics['deadlines_postponed_count']} | Hapur {metrics['deadlines_open_count']} | "
             f"Deadline Compliance {_percent(metrics['deadline_compliance_percentage'])}",
-            f"RLZ: {_human_close_state(person['rlz_close_state'].get('status'))} | "
+            f"RLZ: {_human_close_state(person['rlz_close_state'].get('status'))}{_close_evidence(person)} | "
             f"Aprovimi: {_human_approval(person['manager_approval'].get('status'))} | {_human_control(person['control_state'])}",
         ])
-        for task in person.get("tasks", []):
-            label = CLASSIFICATION_LABELS.get(task.get("classification"), "Rezultat ditor")
+        for ordinal, task in enumerate(person.get("tasks", []), 1):
+            label = _task_result_label(task)
             issue_state = _task_issue_state(task)
             reason = _reason_label(task)
             if issue_state["reason"] or issue_state["comment"]:
@@ -200,12 +226,27 @@ def _manager_plain(report: dict, report_time: str) -> str:
                 explanation = " · ".join(value for value in (reason, task.get("comment")) if value) or "—"
             controls = []
             if task.get("one_h_report_slot"): controls.append(f"1H {task['one_h_report_slot']}")
-            if task.get("adjustment_status"): controls.append(_human_approval(task.get("adjustment_status")))
+            if task.get("adjustment_status"):
+                decision = task.get("manager_decision") or {}
+                approval = _human_approval(task.get("adjustment_status"))
+                if decision.get("decided_by_name"):
+                    decision_time = ""
+                    if decision.get("decided_at"):
+                        try:
+                            decision_time = datetime.fromisoformat(decision["decided_at"]).astimezone(tirana_now().tzinfo).strftime("%H:%M")
+                        except (TypeError, ValueError):
+                            pass
+                    approval += f" · {decision['decided_by_name']}{f' · {decision_time}' if decision_time else ''}"
+                if decision.get("comment"):
+                    approval += f" · Koment: {decision['comment']}"
+                controls.append(approval)
             if task.get("deadline_is_overdue"): controls.append("Afat i kaluar")
             if task.get("deadline_critical") and not task.get("deadline_completed"): controls.append("Kritike")
             if issue_state["due"]: controls.append("Afati duhet përditësuar")
             if issue_state["slot"]: controls.append("Mungon 1H sloti")
-            lines.append(f"  {_task_title(task['title'])} — {label}{' · BLL' if task.get('is_bllok') else ''}")
+            task_lines = marked_task_plain_lines(task.get("title"), ordinal)
+            lines.extend(f"  {line}" for line in task_lines)
+            lines.append(f"    Rezultati {label}{' · BLL' if task.get('is_bllok') else ''}")
             lines.append(
                 f"    Plan {task.get('original_daily_plan') or 'Ekstra'} | Afati {_deadline_display(task)} | "
                 f"Sqarimi {explanation} | Kontrolli {' · '.join(controls) or '—'}"
@@ -266,8 +307,20 @@ def _task_control(task: dict) -> str:
     values = []
     if task.get("one_h_report_slot"):
         values.append(f"1H {html.escape(str(task['one_h_report_slot']))}")
+    decision = task.get("manager_decision") or {}
     if task.get("adjustment_status"):
-        values.append(html.escape(_human_approval(task.get("adjustment_status"))))
+        decision_line = html.escape(_human_approval(task.get("adjustment_status")))
+        if decision.get("decided_by_name"):
+            decision_time = ""
+            if decision.get("decided_at"):
+                try:
+                    decision_time = datetime.fromisoformat(decision["decided_at"]).astimezone(tirana_now().tzinfo).strftime("%H:%M")
+                except (TypeError, ValueError):
+                    decision_time = ""
+            decision_line += f'<br><span style="font-size:8px;color:#64748B">{html.escape(decision["decided_by_name"])}{f" · {decision_time}" if decision_time else ""}</span>'
+        if decision.get("comment"):
+            decision_line += f'<br><span style="font-size:8px;color:#64748B">{html.escape(decision["comment"])}</span>'
+        values.append(decision_line)
     if task.get("deadline_is_overdue"):
         values.append('<span style="color:#DC2626;font-weight:700">Afat i kaluar</span>')
     if task.get("deadline_critical") and not task.get("deadline_completed"):
@@ -333,10 +386,10 @@ def _manager_html(report: dict, report_time: str) -> str:
     for person in report.get("people", []):
         m = person["metrics"]
         close_label = _human_close_state(person.get("rlz_close_state", {}).get("status"))
-        close_color = "#15803D" if close_label == "Ruajtur" else "#B45309" if close_label in {"Pa ruajtur", "Ka ndryshime"} else "#DC2626"
+        close_color = "#15803D" if close_label == "DITA E MBYLLUR" else "#B45309" if close_label in {"DITA E HAPUR", "KA NDRYSHIME PAS MBYLLJES"} else "#DC2626"
         overview.append(
             '<tr>'
-            f'<td style="padding:7px;border-bottom:1px solid #CBD5E1"><b>{html.escape(person["employee"])}</b><br><span style="font-size:9px;color:#64748B">{html.escape(person["department"])}</span><br><span style="font-size:9px;color:{close_color}">{close_label}</span></td>'
+            f'<td style="padding:7px;border-bottom:1px solid #CBD5E1"><b>{html.escape(person["employee"])}</b><br><span style="font-size:9px;color:#64748B">{html.escape(person["department"])}</span><br><span style="font-size:9px;color:{close_color}">{close_label}{_close_evidence_html(person)}</span></td>'
             + "".join(f'<td align="center" style="padding:7px 3px;border-bottom:1px solid #CBD5E1">{value}</td>' for value in (
                 m.get("original_planned_count", 0), m.get("planned_completed_today_count", 0), m.get("in_progress_count", 0),
                 m.get("no_progress_count", 0), m.get("additional_completed_count", 0), _percent(m.get("raw_plan_realization")),
@@ -344,16 +397,16 @@ def _manager_html(report: dict, report_time: str) -> str:
             + f'<td style="padding:7px 4px;border-bottom:1px solid #CBD5E1;font-size:9px;color:{"#B45309" if person.get("control_state") == "ACTION_REQUIRED" else "#15803D"}">{_human_control(person.get("control_state"))}</td></tr>'
         )
         task_rows = []
-        for task in person.get("tasks", []):
+        for ordinal, task in enumerate(person.get("tasks", []), 1):
             explanation_bg, explanation = _explanation_html(task)
-            classification = CLASSIFICATION_LABELS.get(task.get("classification"), "Rezultat ditor")
+            classification = _task_result_label(task)
             deadline_problem = task.get("deadline_is_overdue") or (task.get("deadline_critical") and not task.get("deadline_completed"))
             source = f'{html.escape(task.get("project_title") or "Pa projekt")} · {_source_label(task.get("source_type"))}'
             if task.get("is_bllok"):
                 source += ' · <span style="color:#2563EB;font-weight:700">BLL</span>'
             task_rows.append(
                 '<tr>'
-                f'<td width="38%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;font:700 11px/1.25 Arial;color:#111827">{html.escape(_task_title(task["title"]))}<div style="margin-top:3px;font:400 9px/1.25 Arial;color:#64748B">{source}</div></td>'
+                f'<td width="38%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;font:700 11px/1.25 Arial;color:#111827">{marked_task_html(task.get("title"), ordinal)}<div style="margin:4px 0 0 22px;font:400 9px/1.25 Arial;color:#64748B">{source}</div></td>'
                 f'<td width="14%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;background:{_status_color(task)};font:700 10px/1.25 Arial;color:#111827">{html.escape(classification)}</td>'
                 f'<td width="16%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;font:10px/1.35 Arial;color:{"#DC2626" if deadline_problem else "#111827"}"><span style="font-size:9px;color:#64748B">Plan</span><br>{html.escape(_short_date(task.get("original_daily_plan")) if task.get("in_original_plan", not task.get("extra")) else "Ekstra")}<br><span style="font-size:9px;color:#64748B">Afati</span><br><b>{html.escape(_short_deadline_display(task))}</b></td>'
                 f'<td width="20%" valign="top" style="padding:6px;border-bottom:1px solid #CBD5E1;background:{explanation_bg};font:10px/1.3 Arial">{explanation}</td>'
@@ -362,7 +415,7 @@ def _manager_html(report: dict, report_time: str) -> str:
         person_control = person.get("control_state") == "ACTION_REQUIRED"
         details.append(
             '<div style="height:18px;line-height:18px">&nbsp;</div>'
-            f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="background:#EEF2FF;border-left:5px solid #2563EB;padding:10px 12px"><div style="font:700 14px Arial;color:#111827">{html.escape(person["employee"].upper())}</div><div style="margin-top:2px;font:10px Arial;color:#64748B">{html.escape(person["department"])}</div></td></tr></table>'
+            f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0"><tr><td style="background:#EEF2FF;border-left:5px solid #2563EB;padding:10px 12px"><div style="font:700 14px Arial;color:#111827">{html.escape(person["employee"].upper())}</div><div style="margin-top:2px;font:10px Arial;color:#64748B">{html.escape(person["department"])}</div><div style="margin-top:4px;font:700 10px Arial;color:{close_color}">{close_label}{_close_evidence_html(person)}</div></td></tr></table>'
             f'<table role="presentation" width="100%" cellspacing="0" cellpadding="0" style="margin:7px 0 8px;background:#F8FAFC"><tr><td style="padding:7px;font:10px Arial"><b>Plan</b> {m.get("original_planned_count", 0)} &nbsp; <b>Kryer</b> {m.get("planned_completed_today_count", 0)} &nbsp; <b>Në progres</b> {m.get("in_progress_count", 0)} &nbsp; <b>Pa progres</b> {m.get("no_progress_count", 0)} &nbsp; <b>Ekstra</b> {m.get("additional_completed_count", 0)} &nbsp; <b>Plan RLZ</b> {_percent(m.get("raw_plan_realization"))}</td></tr><tr><td style="padding:0 7px 7px;font:10px Arial"><b>Deadline</b> {m.get("deadlines_completed_count", 0)} / {m.get("deadlines_today_count", 0)} &nbsp; <b>Compliance</b> {_percent(m.get("deadline_compliance_percentage"))} &nbsp; <b>Gjendja:</b> <span style="color:{"#B45309" if person_control else "#15803D"};font-weight:700">{_human_control(person.get("control_state"))}</span> &nbsp; <b>RLZ:</b> {close_label} &nbsp; <b>Aprovimi:</b> {_human_approval(person.get("manager_approval", {}).get("status"))}</td></tr>'
             + (f'<tr><td style="padding:0 7px 7px;font:9px Arial;color:#64748B">{html.escape(_person_control_summary(person))}</td></tr>' if person_control else "")
             + '</table><table width="100%" cellspacing="0" cellpadding="0" style="table-layout:fixed;border-collapse:collapse"><tr style="background:#F8FAFC">'
@@ -436,7 +489,7 @@ def render_html(report: dict, report_time: str = REPORT_SLOT) -> str:
     summary = report["summary"]
     metrics = (
         ("Punonjës të kontrolluar", summary["employees_checked"], "#dbeafe", "#1d4ed8"),
-        ("Pa ruajtur", summary["employees_not_saved"], "#fee2e2", "#b91c1c"),
+        ("Ditë të hapura", summary["employees_not_saved"], "#fee2e2", "#b91c1c"),
         ("Me ndryshime", summary["employees_stale"], "#fef3c7", "#b45309"),
         ("Pa aprovim", summary.get("employees_approval_pending", 0), "#fee2e2", "#b91c1c"),
         ("Aprovim stale", summary.get("employees_approval_stale", 0), "#fef3c7", "#b45309"),
@@ -455,9 +508,9 @@ def render_html(report: dict, report_time: str = REPORT_SLOT) -> str:
     )
 
     state_colors = {
-        "NOT_SAVED": ("#fee2e2", "#dc2626", "Pa ruajtur"),
-        "CLOSED_EDIT_WINDOW": ("#fee2e2", "#991b1b", "Pa ruajtur"),
-        "STALE": ("#fef3c7", "#d97706", "Duhet ruajtur përsëri"),
+        "NOT_SAVED": ("#fee2e2", "#dc2626", "Dita e hapur"),
+        "CLOSED_EDIT_WINDOW": ("#fee2e2", "#991b1b", "Afati i mbylljes përfundoi"),
+        "STALE": ("#fef3c7", "#d97706", "Duhet rimbyllur"),
         "SAVED": ("#dcfce7", "#16a34a", "Ruajtur"),
     }
     people_html: list[str] = []
@@ -545,7 +598,7 @@ def render_html(report: dict, report_time: str = REPORT_SLOT) -> str:
 <table role="presentation" width="760" cellspacing="0" cellpadding="0" border="0" style="width:760px;max-width:100%;background:#ffffff;border:1px solid #e5e7eb;border-collapse:collapse;">
 <tr><td bgcolor="#2563eb" style="background-color:#2563eb;padding:18px 20px;font-family:Arial,sans-serif;">
 <div style="font-size:22px;line-height:1.25;font-weight:800;color:#ffffff;">{html.escape(subject)}</div>
-<div style="font-size:13px;color:#dbeafe;margin-top:4px;">Raporti automatik tregon kush nuk e ka ruajtur gjendjen dhe çfarë ka mbetur pa plotësuar.</div>
+<div style="font-size:13px;color:#dbeafe;margin-top:4px;">Raporti automatik tregon kush nuk e ka mbyllur ditën dhe çfarë ka mbetur pa plotësuar.</div>
 </td></tr>
 <tr><td style="padding:14px 16px;background:#ffffff;font-family:Arial,sans-serif;">
 <table role="presentation" width="100%" cellspacing="0" cellpadding="0" border="0" style="width:100%;border-collapse:collapse;"><tr>{metric_cells}</tr></table>

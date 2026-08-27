@@ -42,7 +42,7 @@ function normalizeAddedRanges(text: string, ranges: TextMarkRange[]) {
   return merged
 }
 
-function getNoteMarkClass(isDone: boolean, isAdded: boolean) {
+export function getNoteMarkClass(isDone: boolean, isAdded: boolean) {
   if (isDone && isAdded) {
     return "rounded bg-blue-100 px-1 text-emerald-900 ring-1 ring-blue-300 line-through decoration-emerald-700 decoration-2"
   }
@@ -246,4 +246,71 @@ export function renderMarkedNoteContent(content?: string | null, emptyFallback: 
   }
 
   return parts.length > 0 ? parts : parsed.text
+}
+
+function renderParsedMarkedRange(
+  parsed: ReturnType<typeof parseMarkedNoteContent>,
+  startOffset: number,
+  endOffset: number,
+) {
+  const boundaries = new Set([startOffset, endOffset])
+  for (const range of [...parsed.doneRanges, ...parsed.addedRanges]) {
+    if (range.end > startOffset && range.start < endOffset) {
+      boundaries.add(Math.max(startOffset, range.start))
+      boundaries.add(Math.min(endOffset, range.end))
+    }
+  }
+
+  const ordered = Array.from(boundaries).sort((a, b) => a - b)
+  return ordered.slice(0, -1).map((start, index) => {
+    const end = ordered[index + 1]
+    const segment = parsed.text.slice(start, end)
+    const isDone = parsed.doneRanges.some((range) => range.start <= start && range.end >= end)
+    const isAdded = parsed.addedRanges.some((range) => range.start <= start && range.end >= end)
+    const className = getNoteMarkClass(isDone, isAdded)
+    return className ? <span key={`${start}-${end}`} className={className}>{segment}</span> : segment
+  })
+}
+
+/** PX Notes task presentation: first meaningful line is primary, details keep their line breaks. */
+export function MarkedTaskBlock({
+  content,
+  ordinal,
+  className,
+}: {
+  content?: string | null
+  ordinal?: number
+  className?: string
+}) {
+  const parsed = parseMarkedNoteContent(content)
+  const lineRanges: Array<{ start: number; end: number; meaningful: boolean }> = []
+  let start = 0
+  for (const line of parsed.text.split("\n")) {
+    lineRanges.push({ start, end: start + line.length, meaningful: Boolean(line.trim()) })
+    start += line.length + 1
+  }
+  const titleIndex = lineRanges.findIndex((line) => line.meaningful)
+
+  if (titleIndex < 0) return <span className={className}>—</span>
+
+  return (
+    <div className={["flex min-w-0 items-start gap-2", className].filter(Boolean).join(" ")}>
+      {ordinal != null ? (
+        <span className="w-6 shrink-0 text-right text-sm font-bold tabular-nums text-slate-500">
+          {ordinal}.
+        </span>
+      ) : null}
+      <div className="min-w-0 flex-1 whitespace-pre-wrap break-words">
+        {lineRanges.map((line, index) => {
+          if (index < titleIndex) return null
+          const contentNode = renderParsedMarkedRange(parsed, line.start, line.end)
+          return index === titleIndex ? (
+            <div key={line.start} className="font-semibold leading-5 text-slate-900">{contentNode}</div>
+          ) : (
+            <div key={line.start} className="min-h-[1.15rem] text-xs font-normal leading-[1.15rem] text-slate-700">{contentNode}</div>
+          )
+        })}
+      </div>
+    </div>
+  )
 }

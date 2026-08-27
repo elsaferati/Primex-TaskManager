@@ -135,7 +135,7 @@ def test_control_html_is_colored_and_explains_why_rlz_was_not_saved():
     rendered = render_html(report)
 
     assert 'bgcolor="#2563eb"' in rendered
-    assert "Gjendja për RLZ javor nuk është ruajtur." in rendered
+    assert "Dita është ende e hapur." in rendered
     assert "ÇFARË KA MBETUR" in rendered
     assert "Mungon arsyeja" in rendered
     assert "Empty" in rendered

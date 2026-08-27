@@ -14,6 +14,7 @@ from app.services.daily_realization_report import _build_authoritative_report, _
 from app.services.daily_rlz_control_delivery import (
     DEFAULT_VARIANT_TIMES, _deadline_display, final_recipient_map, render_html, render_plain, subject_for,
 )
+from app.services.note_markup import marked_task_html, marked_task_plain_lines, parse_marked_note_content
 
 DAY = date(2026, 8, 17)
 
@@ -92,6 +93,47 @@ def test_final_email_contains_complete_manager_story_and_semantic_colors():
         assert value in html
     assert "#FFFF00" in html
     assert "BLOCKED" not in html
+
+
+def test_marked_task_renderer_preserves_px_notes_semantics_and_structure():
+    content = "LH: RLZ DITOR\n[[done]]Kontrollo planin[[/done]]\n[[added]]Dërgo raportin[[/added]]"
+    parsed = parse_marked_note_content(content)
+    rendered = marked_task_html(content, 1)
+    assert parsed.text.splitlines() == ["LH: RLZ DITOR", "Kontrollo planin", "Dërgo raportin"]
+    assert marked_task_plain_lines(content, 1) == ["1. LH: RLZ DITOR", "   Kontrollo planin", "   Dërgo raportin"]
+    assert "font:700 11px" in rendered
+    assert "text-decoration:line-through" in rendered
+    assert "background:#BFDBFE" in rendered
+    assert "[[done]]" not in rendered and "[[added]]" not in rendered
+
+
+def test_final_email_numbers_tasks_per_employee_and_shows_manager_decision_evidence():
+    report = _report()
+    first = report["people"][0]
+    first["rlz_close_state"] = {
+        "status": "SAVED", "saved_at": "2026-08-17T14:18:00+00:00", "closed_by_name": "Elsa",
+    }
+    task = first["tasks"][0]
+    task.update({
+        "title": "Titulli\n[[done]]Pika e kryer[[/done]]\n[[added]]Pika e re[[/added]]",
+        "adjustment_status": "APPROVED",
+        "manager_decision": {
+            "status": "APPROVED", "reason": "Kapaciteti", "comment": "Vazhdo më 28.08.",
+            "decided_by_name": "Marie", "decided_at": "2026-08-17T13:05:00+00:00",
+        },
+    })
+    second = copy.deepcopy(first)
+    second.update({"user_id": "user-2", "employee": "Laurent"})
+    second["tasks"] = [{**task, "task_id": "task-2", "title": "Detyra e dytë"}]
+    report["people"].append(second)
+    rendered = render_html(report, "16:40")
+    assert rendered.count('width="22"') == 2
+    assert rendered.count(">1.</td>") == 2
+    assert "text-decoration:line-through" in rendered and "background:#BFDBFE" in rendered
+    assert "Aprovuar" in rendered and "Marie" in rendered and "15:05" in rendered
+    assert "Vazhdo më 28.08." in rendered
+    assert "DITA E MBYLLUR" in rendered and "Elsa · 16:18" in rendered
+    assert "[[done]]" not in rendered and "[[added]]" not in rendered
 
 
 def test_bll_is_metadata_not_blocked_or_red():
@@ -184,7 +226,7 @@ def test_final_html_is_compact_humanized_and_retains_manager_evidence():
         assert color in rendered
     for forbidden in ("MISSING_REASON", "COMMENT_MISSING", "MISSING_REQUIRED_COMMENT", "DUE_DATE_NOT_MOVED", "ONE_H_SLOT_MISSING", "NOT_SAVED", "ACTION_REQUIRED", "REQUEST_CHANGE", "PRIORITY_CHANGE"):
         assert forbidden not in rendered
-    for visible in ("Kërkon sqarim", "Mungon arsyeja dhe komenti", "Pa ruajtur", "KËRKON VEPRIM", "Elsa", "Laurent Hoxha", "Integrimi", "Detyrë që kërkon sqarim", "Detyrë e kryer", "Detyra e Laurent", "Plan RLZ", "DEADLINE COMPLIANCE", "Ndryshim kërkese", "Klienti kërkoi", "17.08 → 18.08", "1H 14:20", "Pret aprovim"):
+    for visible in ("Kërkon sqarim", "Mungon arsyeja dhe komenti", "DITA E HAPUR", "KËRKON VEPRIM", "Elsa", "Laurent Hoxha", "Integrimi", "Detyrë që kërkon sqarim", "Detyrë e kryer", "Detyra e Laurent", "Plan RLZ", "DEADLINE COMPLIANCE", "Ndryshim kërkese", "Klienti kërkoi", "17.08 → 18.08", "1H 14:20", "Pret aprovim"):
         assert visible in rendered
 
 

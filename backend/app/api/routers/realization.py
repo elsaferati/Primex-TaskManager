@@ -1832,7 +1832,15 @@ async def decide_daily_plan_adjustment(
         after={"status": normalized, "reason": adjustment.reason, "comment": adjustment.decision_comment},
     )
     await db.commit()
-    return {"id": str(adjustment.id), "status": adjustment.status, "decided_at": adjustment.decided_at.isoformat()}
+    return {
+        "id": str(adjustment.id),
+        "status": adjustment.status,
+        "reason": adjustment.reason,
+        "comment": adjustment.decision_comment,
+        "decided_by_user_id": str(adjustment.decided_by) if adjustment.decided_by else None,
+        "decided_by_name": user.full_name,
+        "decided_at": adjustment.decided_at.isoformat(),
+    }
 
 
 @router.post("/daily/calculate", response_model=RealizationDailyOut)
@@ -1893,7 +1901,7 @@ async def prepare_daily_realization(
     if not is_closable_day(day):
         raise HTTPException(status_code=409, detail={
             "code": "DAILY_RLZ_CLOSE_WINDOW_NOT_OPEN",
-            "message": "Gjendja ditore RLZ mund të ruhet nga ora 15:30 deri në 17:00.",
+            "message": "Dita mund të mbyllet nga ora 15:30 deri në 17:00.",
             "closable_from": closable_from(day).isoformat(),
         })
     department = (
@@ -1908,7 +1916,7 @@ async def prepare_daily_realization(
         if planned is None:
             raise HTTPException(
                 status_code=409,
-                detail="PLANNED snapshot is required before saving Daily RLZ",
+                detail="PLANNED snapshot is required before closing Daily RLZ",
             )
         period = await _period(db, period.id, for_update=True)
         await calculate_daily_period(
@@ -1986,7 +1994,7 @@ async def close_realization_day(
     if result.user_id == user.id and not is_closable_day(period.start_date):
         raise HTTPException(status_code=409, detail={
             "code": "DAILY_RLZ_CLOSE_WINDOW_CLOSED",
-            "message": "Gjendja ditore RLZ mund të ruhet nga ora 15:30 deri në 17:00.",
+            "message": "Dita mund të mbyllet nga ora 15:30 deri në 17:00.",
         })
     require_unlocked(period)
     planned, _ = await _pinned_snapshots(db, period)
@@ -2012,7 +2020,7 @@ async def close_realization_day(
             status_code=409,
             detail={
                 "code": "RLZ_DAILY_REPORT_VALIDATION_FAILED",
-                "message": "Plotëso detyrat para ruajtjes.",
+                "message": "Plotëso detyrat para mbylljes së ditës.",
                 "blockers": daily_report_state["blockers"],
             },
         )
@@ -2058,7 +2066,7 @@ async def close_realization_day(
         RealizationDailyCloseAction.CORRECT.value,
     }
     if latest_is_closed and not daily_report_state["rlz_close_state"]["stale"]:
-        raise HTTPException(status_code=409, detail="The day is already closed and has no later Daily Report changes")
+        raise HTTPException(status_code=409, detail="Dita është mbyllur dhe nuk ka ndryshime të reja")
     if latest_is_closed and user.role != UserRole.STAFF:
         raise HTTPException(status_code=409, detail="Manager/admin correction requires the explicit reopen flow")
     action = (

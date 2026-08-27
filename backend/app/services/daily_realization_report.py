@@ -98,6 +98,8 @@ async def _build_authoritative_report(db: AsyncSession, *, day: date, variant: s
             })
         metrics = dict(live_person.get("metrics") or calculate_daily_metrics(tasks))
         close_state = compliance["rlz_close_state"]
+        if close_state.get("closed_by_user_id") == str(user.id):
+            close_state = {**close_state, "closed_by_name": user.full_name or user.username or user.email}
         approval = compliance["manager_approval"]
         control_state = metrics.get("daily_control_state", "CLEAN_DAY")
         if compliance.get("blockers") or close_state["status"] not in {"SAVED", "CLOSED"} or approval.get("status") not in {"APPROVED", "NOT_REQUIRED"}:
@@ -258,7 +260,7 @@ def report_delta(final_report: dict[str, Any], current_report: dict[str, Any]) -
             previous = before.get((person["user_id"], task["task_id"]))
             material = {
                 key: task.get(key)
-                for key in ("status", "due_date", "reason_code", "comment", "one_h_report_slot", "flags")
+                for key in ("status", "due_date", "reason_code", "comment", "one_h_report_slot", "flags", "adjustment_status", "manager_decision")
             }
             old_material = {
                 key: previous.get(key)
