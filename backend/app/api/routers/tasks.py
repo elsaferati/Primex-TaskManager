@@ -1591,8 +1591,6 @@ async def update_fast_task_order(
     for task_id in ordered_task_ids:
         task = tasks_by_id[task_id]
         ensure_task_editor(user, task)
-        if task.department_id is not None:
-            ensure_department_access(user, task.department_id)
         if not _is_common_view_orderable_task(task):
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Only Common View tasks can be reordered")
         assignee_ids = assignee_map.get(task.id, set())
@@ -1684,16 +1682,8 @@ async def create_task(
 
     is_development_project = _is_development_department(task_project_department)
 
-    # Allow GA managers (department code GA) to create tasks for any department (for fast tasks etc.)
-    if department_id is not None and payload.ga_note_origin_id is None and payload.plan_note_origin_id is None:
-        ga_manager_cross = (
-            user.role == UserRole.MANAGER
-            and getattr(user, "department", None) is not None
-            and getattr(user.department, "code", "") is not None
-            and user.department.code.upper() == "GA"
-        )
-        if not ga_manager_cross and not is_fast:
-            ensure_department_access(user, department_id)
+    # Task creation is intentionally global: every authenticated user may
+    # create a task in any department and assign it to any active user.
 
     if dependency_task_id is not None:
         if payload.project_id is None:
@@ -2570,30 +2560,8 @@ async def update_task(
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
     is_assigned_to_task = await _is_user_assigned_to_task(db, task, user.id)
-    is_confirmation_assignee = task.confirmation_assignee_id is not None and task.confirmation_assignee_id == user.id
-    
-    # Check if user has permission to edit this task:
-    # Allow: Admin, Manager, creator, assignee, confirmation assignee, or same-department member.
-    # Department access matches create_task so PCM/project/fast task boards remain editable
-    # by staff who collaborate on tasks they did not personally create or own.
-    can_edit = False
-    if user.role in (UserRole.ADMIN, UserRole.MANAGER):
-        can_edit = True
-    elif task.created_by and task.created_by == user.id:
-        can_edit = True
-    elif is_assigned_to_task:
-        can_edit = True
-    elif is_confirmation_assignee:
-        can_edit = True
-    elif (
-        task.department_id is not None
-        and user.department_id is not None
-        and user.department_id == task.department_id
-    ):
-        can_edit = True
 
-    if not can_edit:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
+    ensure_task_editor(user, task)
 
     question_status_requested = payload.status if task.question_origin_id is not None else None
     question_status_override: TaskStatus | None = None
@@ -2776,7 +2744,6 @@ async def update_task(
     dependency_set = _payload_has_field(payload, "dependency_task_id")
 
     if dependency_set:
-        ensure_manager_or_admin(user)
         if payload.dependency_task_id is None:
             task.dependency_task_id = None
         else:
@@ -2790,15 +2757,12 @@ async def update_task(
             task.dependency_task_id = payload.dependency_task_id
 
     if payload.project_id is not None:
-        ensure_manager_or_admin(user)
         project = await _project_for_id(db, payload.project_id)
         if task.department_id != project.department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project department mismatch")
         task.project_id = payload.project_id
 
     if payload.department_id is not None and payload.department_id != task.department_id:
-        ensure_manager_or_admin(user)
-        ensure_department_access(user, payload.department_id)
         task.department_id = payload.department_id
 
     # A non-null confirmer in the parsed payload is authoritative even if the

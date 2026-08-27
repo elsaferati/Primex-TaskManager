@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import uuid
 from datetime import date, datetime, timezone
+from types import SimpleNamespace
 from typing import Any
 
 from sqlalchemy import select
@@ -10,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.models.daily_planner_snapshot import DailyPlannerSnapshot
+from app.models.enums import UserRole
 from app.models.user import User
 from app.services.realization_periods import normalize_week_start, select_weekly_snapshots
 
@@ -64,8 +66,17 @@ async def ensure_daily_baseline(
     # Local import avoids coupling model/service import order to the API router.
     from app.api.routers.planners import _build_weekly_snapshot_payload
 
+    # This is an internal audit capture, not a planner page request. A staff
+    # member may legitimately mutate a cross-department task, so building the
+    # affected department's baseline must not be narrowed back to the actor's
+    # own department or rejected by the planner's UI access checks.
+    snapshot_actor = SimpleNamespace(
+        id=actor.id,
+        role=UserRole.ADMIN,
+        department_id=actor.department_id,
+    )
     _, _, planner_payload = await _build_weekly_snapshot_payload(
-        db=db, user=actor, department_id=department_id,
+        db=db, user=snapshot_actor, department_id=department_id,
         week_start_date=normalize_week_start(day), is_this_week=False,
     )
     weekly, _ = await select_weekly_snapshots(

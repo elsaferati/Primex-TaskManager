@@ -320,14 +320,7 @@ export default function TaskDetailsPage() {
   }
 
   const isNoteOriginTask = Boolean(task?.ga_note_origin_id || task?.plan_note_origin_id)
-  const canAssign =
-    !task?.plan_note_origin_id &&
-    (
-      user?.role === "ADMIN" ||
-      user?.role === "MANAGER" ||
-      Boolean(task?.ga_note_origin_id) ||
-      (task && user?.department_id && task.department_id === user.department_id)
-    )
+  const canAssign = !task?.plan_note_origin_id
 
   const save = async () => {
     if (!task) return
@@ -781,12 +774,8 @@ export default function TaskDetailsPage() {
                         <DialogTitle>Select Assignees</DialogTitle>
                       </DialogHeader>
                       <div className="mt-4 max-h-[400px] overflow-y-auto space-y-2">
-                        {users
-                          .filter((u) => !u.department_id || u.department_id === task.department_id)
-                          .length ? (
-                            users
-                              .filter((u) => !u.department_id || u.department_id === task.department_id)
-                              .map((u) => {
+                        {users.length ? (
+                            users.map((u) => {
                                 const isSelected = assignees.includes(u.id)
                                 return (
                                   <div
@@ -818,10 +807,9 @@ export default function TaskDetailsPage() {
                         <Button
                           variant="outline"
                           onClick={() => {
-                            const departmentUsers = users.filter((u) => !u.department_id || u.department_id === task.department_id)
-                            setAssignees(departmentUsers.map((u) => u.id))
+                            setAssignees(users.map((u) => u.id))
                           }}
-                          disabled={!users.filter((u) => !u.department_id || u.department_id === task.department_id).length}
+                          disabled={!users.length}
                         >
                           All users
                         </Button>

@@ -3,8 +3,6 @@ import uuid
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from fastapi import HTTPException
-
 from app.api.access import ensure_task_editor
 from app.models.enums import UserRole
 
@@ -23,7 +21,7 @@ class TestTaskUpdatePermissions(unittest.IsolatedAsyncioTestCase):
         )
         ensure_task_editor(user, task)  # type: ignore[arg-type]
 
-    def test_other_department_staff_cannot_edit(self) -> None:
+    def test_other_department_staff_can_edit(self) -> None:
         user = SimpleNamespace(role=UserRole.STAFF, department_id=uuid.uuid4(), id=uuid.uuid4())
         task = SimpleNamespace(
             created_by=uuid.uuid4(),
@@ -33,9 +31,7 @@ class TestTaskUpdatePermissions(unittest.IsolatedAsyncioTestCase):
             plan_note_origin_id=None,
             assignees=[],
         )
-        with self.assertRaises(HTTPException) as ctx:
-            ensure_task_editor(user, task)  # type: ignore[arg-type]
-        self.assertEqual(ctx.exception.status_code, 403)
+        ensure_task_editor(user, task)  # type: ignore[arg-type]
 
     async def test_control_ko_sync_does_not_overwrite_assigned_to(self) -> None:
         from app.api.routers import tasks as tasks_router
