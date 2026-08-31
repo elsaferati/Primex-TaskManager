@@ -35,6 +35,7 @@ from app.services.meetings_report import (
     _meeting_occurs_on_date,
     _meeting_status_checkbox_table,
     _m3_am_pm_label,
+    _m3_department_code_label,
     _m3_department_label,
     _m3_finance_ga_sections,
     _m3_task_type_label,
