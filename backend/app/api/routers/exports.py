@@ -3264,7 +3264,7 @@ async def export_department_internal_meetings_xlsx(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal meetings checklist not found")
 
     slot_specs = [
-        ("M1", "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)"),
+        ("M1", "M1 PER ZHVILLIM (BLIC 08:05 - 08:15 MAX)"),
         ("M2", "M2 PER ZHVILLIM (11:45-12:00 MAX)"),
         ("M3", "M3 (ME TRELLO) PER ZHVILLIM (15:45-16:00 MAX)"),
         ("TESTIMI_I_AGENT", "TESTIMI I AGENT"),
