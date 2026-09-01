@@ -70,6 +70,10 @@ def _tirana_day_utc_bounds(day: date) -> tuple[datetime, datetime]:
     return day_start_local.astimezone(timezone.utc), day_end_local.astimezone(timezone.utc)
 
 
+def _has_global_report_scope(user: User) -> bool:
+    return user.role in {UserRole.ADMIN, UserRole.MANAGER}
+
+
 def _resolve_effective_department_id(
     *,
     current_user: User,
@@ -77,7 +81,7 @@ def _resolve_effective_department_id(
 ) -> uuid.UUID | None:
     if requested_department_id is not None:
         return requested_department_id
-    if current_user.role != UserRole.ADMIN:
+    if not _has_global_report_scope(current_user):
         return current_user.department_id
     return None
 
@@ -96,7 +100,7 @@ def _enforce_daily_report_target_scope(
     effective_department_id: uuid.UUID | None,
     target_user: User,
 ) -> None:
-    if current_user.role == UserRole.ADMIN and effective_department_id is None:
+    if _has_global_report_scope(current_user) and effective_department_id is None:
         return
     if effective_department_id is None or target_user.department_id != effective_department_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Forbidden")
@@ -699,8 +703,6 @@ async def correct_daily_rlz_state(
     task = await db.get(Task, task_id)
     if not subject or not task:
         raise HTTPException(status_code=404, detail="User or task not found")
-    if user.role == UserRole.MANAGER and subject.department_id != user.department_id:
-        raise HTTPException(status_code=403, detail="Forbidden")
     subject_assigned = task.assigned_to == subject.id or bool(await db.scalar(select(TaskAssignee.task_id).where(
         TaskAssignee.task_id == task_id, TaskAssignee.user_id == subject.id,
     )))
@@ -750,8 +752,6 @@ async def daily_rlz_control(
 ) -> dict:
     if user.role == UserRole.STAFF:
         raise HTTPException(status_code=403, detail="Forbidden")
-    if user.role == UserRole.MANAGER:
-        department_id = user.department_id
     return await build_daily_rlz_control(db, day=day, department_id=department_id, user_id=user_id)
 
 
@@ -769,7 +769,7 @@ async def daily_ga_table(
 
     if department_id is not None:
         ensure_department_access(user, department_id)
-    elif user.role != UserRole.ADMIN:
+    elif not _has_global_report_scope(user):
         department_id = user.department_id
 
     if user_id is None:

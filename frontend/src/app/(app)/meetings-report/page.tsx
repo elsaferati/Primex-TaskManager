@@ -272,8 +272,7 @@ async function responseError(res: Response) {
 export default function MeetingsReportPage() {
   const { apiFetch, loading: authLoading, user } = useAuth()
   const canAccess = !authLoading && Boolean(user)
-  const isAdmin = user?.role === "ADMIN"
-  const canManageDelivery = isAdmin || user?.role === "MANAGER"
+  const canManageDelivery = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [reportDate, setReportDate] = React.useState(todayIso())
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)
@@ -326,7 +325,7 @@ export default function MeetingsReportPage() {
   }, [apiFetch, applyDraft, canAccess, reportDate])
 
   const loadSettings = React.useCallback(async () => {
-    if (!canAccess || !isAdmin) return
+    if (!canAccess || !canManageDelivery) return
     try {
       const res = await apiFetch(`${API}/settings`)
       if (!res.ok) throw new Error(await responseError(res))
@@ -334,7 +333,7 @@ export default function MeetingsReportPage() {
     } catch (error) {
       if (canAccess) toast.error(`Unable to load ${REPORT_LABEL} settings`, { description: String(error) })
     }
-  }, [apiFetch, applySettings, canAccess, isAdmin])
+  }, [apiFetch, applySettings, canAccess, canManageDelivery])
 
   const loadHistory = React.useCallback(async () => {
     if (!canAccess) return
@@ -354,9 +353,9 @@ export default function MeetingsReportPage() {
     if (canAccess) {
       void loadDraft()
       void loadHistory()
-      if (isAdmin) void loadSettings()
+      if (canManageDelivery) void loadSettings()
     }
-  }, [canAccess, isAdmin, loadDraft, loadHistory, loadSettings])
+  }, [canAccess, canManageDelivery, loadDraft, loadHistory, loadSettings])
 
   const generate = async () => {
     if (!canAccess) return
@@ -471,7 +470,7 @@ export default function MeetingsReportPage() {
   }
 
   const saveSettings = async () => {
-    if (!settings || !isAdmin) return
+    if (!settings || !canManageDelivery) return
     setSavingSettings(true)
     try {
       const res = await apiFetch(`${API}/settings`, {
@@ -515,7 +514,7 @@ export default function MeetingsReportPage() {
         <TabsList className="h-10 rounded-md">
           <TabsTrigger value="report"><Pencil /> Report</TabsTrigger>
           <TabsTrigger value="history"><History /> Send history</TabsTrigger>
-          {isAdmin ? <TabsTrigger value="settings"><Settings /> Settings</TabsTrigger> : null}
+          {canManageDelivery ? <TabsTrigger value="settings"><Settings /> Settings</TabsTrigger> : null}
         </TabsList>
 
         <TabsContent value="report" className="space-y-5">
@@ -645,7 +644,7 @@ export default function MeetingsReportPage() {
           </div>
         </TabsContent>
 
-        {isAdmin ? (
+        {canManageDelivery ? (
           <TabsContent value="settings">
             {settings ? (
               <div className="space-y-5 rounded-md border bg-white p-5">

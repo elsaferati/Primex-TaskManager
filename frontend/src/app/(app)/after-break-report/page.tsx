@@ -150,9 +150,9 @@ async function responseError(res: Response) {
 export default function AfterBreakReportPage() {
   const { apiFetch, loading: authLoading, user } = useAuth()
   const canAccess = !authLoading && Boolean(user)
-  const isAdmin = String(user?.role || "").toUpperCase() === "ADMIN"
+  const isManagerOrAdmin = ["ADMIN", "MANAGER"].includes(String(user?.role || "").toUpperCase())
   const canEdit = Boolean(user)
-  const canManageDelivery = isAdmin
+  const canManageDelivery = isManagerOrAdmin
   const [reportDate, setReportDate] = React.useState(todayIso())
   const [draft, setDraft] = React.useState<Draft | null>(null)
   const [loading, setLoading] = React.useState(false)

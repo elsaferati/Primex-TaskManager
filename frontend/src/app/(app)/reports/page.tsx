@@ -36,6 +36,7 @@ type PreviewResponse = {
 
 export default function ReportsPage() {
   const { user, apiFetch } = useAuth()
+  const canViewAllDepartments = user?.role === "ADMIN" || user?.role === "MANAGER"
   const [departments, setDepartments] = React.useState<Department[]>([])
   const [users, setUsers] = React.useState<User[]>([])
   const [projects, setProjects] = React.useState<Project[]>([])
@@ -91,14 +92,14 @@ export default function ReportsPage() {
       if (dRes.ok) {
         const deps = (await dRes.json()) as Department[]
         setDepartments(deps)
-        setDepartmentId(user?.department_id || deps[0]?.id || ALL_DEPARTMENTS_VALUE)
+        setDepartmentId(canViewAllDepartments ? ALL_DEPARTMENTS_VALUE : (user?.department_id || deps[0]?.id || ALL_DEPARTMENTS_VALUE))
       }
       if (uRes.ok) setUsers((await uRes.json()) as User[])
       if (pRes.ok) setProjects((await pRes.json()) as Project[])
       if (sRes.ok) setStatuses((await sRes.json()) as TaskStatus[])
     }
     if (user) void boot()
-  }, [apiFetch, user])
+  }, [apiFetch, canViewAllDepartments, user])
 
   const allFastTaskKindsSelected = selectedFastTaskKinds.length === ALL_FAST_TASK_KINDS.length
 
@@ -119,8 +120,8 @@ export default function ReportsPage() {
   const buildReportParams = React.useCallback(
     (options: { includeProject?: boolean; includeFastTaskKind?: boolean } = {}) => {
       const qs = new URLSearchParams()
-      if (user?.role === "ADMIN" && departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) {
-        qs.set("department_id", departmentId)
+      if (canViewAllDepartments) {
+        if (departmentId && departmentId !== ALL_DEPARTMENTS_VALUE) qs.set("department_id", departmentId)
       } else if (user?.department_id) {
         qs.set("department_id", user.department_id)
       }
@@ -148,6 +149,7 @@ export default function ReportsPage() {
       selectedFastTaskKinds,
       statusId,
       user,
+      canViewAllDepartments,
       userId,
       ALL_DEPARTMENTS_VALUE,
       ALL_FAST_TASK_KINDS.length,
@@ -307,7 +309,7 @@ export default function ReportsPage() {
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-3">
-            {user.role === "ADMIN" ? (
+            {canViewAllDepartments ? (
               <div className="space-y-2">
                 <Label>Department</Label>
                 <Select value={departmentId} onValueChange={setDepartmentId}>
@@ -334,7 +336,7 @@ export default function ReportsPage() {
                 <SelectContent>
                   <SelectItem value={ALL_USERS_VALUE}>All users</SelectItem>
                   {users
-                    .filter((u) => (user.role === "ADMIN" ? true : u.department_id === user.department_id))
+                    .filter((u) => (canViewAllDepartments ? true : u.department_id === user.department_id))
                     .map((u) => (
                       <SelectItem key={u.id} value={u.id}>
                         {u.full_name || u.username}
@@ -352,7 +354,7 @@ export default function ReportsPage() {
                 <SelectContent>
                   <SelectItem value={ALL_PROJECTS_VALUE}>All projects</SelectItem>
                   {projects
-                    .filter((p) => (user.role === "ADMIN" ? true : p.department_id === user.department_id))
+                    .filter((p) => (canViewAllDepartments ? true : p.department_id === user.department_id))
                     .map((p) => (
                     <SelectItem key={p.id} value={p.id}>
                       {p.name || p.title}
@@ -371,7 +373,7 @@ export default function ReportsPage() {
                   <SelectItem value={ALL_STATUSES_VALUE}>All statuses</SelectItem>
                   {statuses
                     .filter((s) =>
-                      user.role === "ADMIN"
+                      canViewAllDepartments
                         ? departmentId && departmentId !== ALL_DEPARTMENTS_VALUE
                           ? s.department_id === departmentId
                           : true

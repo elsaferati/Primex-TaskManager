@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_manager_or_admin
 from app.db import get_db
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
@@ -172,7 +172,7 @@ def _delivery_history(row: AfterBreakReportDraft) -> dict:
 @router.get("/settings")
 async def get_settings(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_manager_or_admin),
 ) -> dict:
     return _settings(await _get_or_create_settings(db))
 
@@ -181,7 +181,7 @@ async def get_settings(
 async def update_settings(
     payload: SettingsPayload,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_manager_or_admin),
 ) -> dict:
     if any(day < 0 or day > 6 for day in payload.weekdays):
         raise HTTPException(status_code=400, detail="Weekdays must be numbers from 0 to 6")
@@ -204,7 +204,7 @@ async def update_settings(
 async def get_delivery_history(
     limit: int = 50,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_manager_or_admin),
 ) -> list[dict]:
     capped_limit = min(max(limit, 1), 100)
     rows = (
@@ -336,7 +336,7 @@ async def preview_draft(
 async def send_draft(
     draft_id: uuid.UUID,
     db: AsyncSession = Depends(get_db),
-    user: User = Depends(require_admin),
+    user: User = Depends(require_manager_or_admin),
 ) -> dict:
     row = await db.get(AfterBreakReportDraft, draft_id)
     if row is None:

@@ -9,4 +9,4 @@ class ReportUser(Protocol):
 
 
 def can_manage_reports(user: ReportUser) -> bool:
-    return user.role.value == "ADMIN" or (user.full_name or "").strip().casefold() == "laurent hoxha"
+    return user.role.value in {"ADMIN", "MANAGER"} or (user.full_name or "").strip().casefold() == "laurent hoxha"
