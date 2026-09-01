@@ -993,7 +993,7 @@ function taskStatusValue(task: Task): Task["status"] {
 
 function statusBadgeClasses(status: Task["status"]) {
   if (status === "DONE") return "bg-green-100 text-green-700 border-green-200"
-  if (status === "WAITING_CLIENT") return "bg-[#F5E6B3] text-[#7A5A00] border-[#D4A72C]"
+  if (status === "WAITING_CLIENT") return "bg-[#E2C15B] text-[#4F3A00] border-[#B8860B]"
   if (status === "WAITING_CONFIRMATION") return "bg-blue-100 text-blue-700 border-blue-200"
   if (status === "IN_PROGRESS") return "bg-amber-100 text-amber-800 border-amber-200"
   return "bg-slate-100 text-slate-700 border-slate-200"

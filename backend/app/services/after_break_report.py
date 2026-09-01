@@ -40,6 +40,7 @@ from app.services.meetings_report import (
     _m3_finance_ga_sections,
     _m3_task_type_label,
     _normalize_section,
+    _normalize_report_status,
     _render_group_label_html,
     _render_section_block_html,
     _task_owners,
@@ -52,6 +53,7 @@ from app.services.meetings_report import (
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
 UNFINISHED_PRIORITY_TABLE_LABEL = "DET TE PAKRYERA, 08:00/DEADLINE"
+WAITING_CLIENT_TABLE_LABEL = "DT WFE"
 DONE_AM_TABLE_LABEL = "DET E KRYERA NE AM"
 UNHELD_MEETINGS_TABLE_LABEL = "TAK INT/EXT TE PAMBAJTURA"
 SECTION_TITLES = [
@@ -67,6 +69,7 @@ SECTION_TITLES = [
     "NOTES TE REJA ( NOT DISSCUSED)",
     "GA MBYLLJA E DET",
     "HV MBYLLJA E DET",
+    WAITING_CLIENT_TABLE_LABEL,
 ]
 MANUAL_SECTION_TITLES = set(SECTION_TITLES[:4])
 DISPLAY_SECTION_TITLES = [
@@ -74,6 +77,7 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[9],  # Undiscussed notes first among auto-filled sections.
     SECTION_TITLES[6],  # Unheld internal/external meetings immediately after notes.
     SECTION_TITLES[4],
+    SECTION_TITLES[12],  # Active tasks waiting for the client, after unfinished priority work.
     SECTION_TITLES[5],
     SECTION_TITLES[7],
     SECTION_TITLES[8],
@@ -94,6 +98,9 @@ UNFINISHED_PRIORITY_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("LLOJI", 18), ("TITULLI", 45), ("AFATI", 16),
 ]
 DONE_AM_COLUMNS = [
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
+]
+WAITING_CLIENT_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("TITULLI", 58),
 ]
 PERSONAL_GROUPS = [
@@ -195,6 +202,10 @@ def _unfinished_priority_task_rows(
     """Unfinished AM or AM/PM deadline/08:00 tasks due today at the M2 cutoff."""
     selected: list[tuple[Task, datetime, str]] = []
     for task in tasks:
+        # Waiting-for-client work has its own DT WFE section below; do not
+        # duplicate it in the unfinished 08:00/deadline table.
+        if _normalize_report_status(task.status) == TaskStatus.WAITING_CLIENT.value:
+            continue
         due_at = _as_timezone(task.due_date, timezone)
         if due_at is None or due_at.date() != report_day:
             continue
@@ -300,6 +311,83 @@ def _done_am_task_rows(
         ]
         for index, (task, _completed_at) in enumerate(done_am, start=1)
     ]
+
+
+def _waiting_client_task_rows(
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    department_codes: dict[Any, str] | None = None,
+) -> list[list[str]]:
+    """All active tasks currently waiting for action or information from the client."""
+    waiting = [
+        task for task in tasks
+        if _normalize_report_status(task.status) == TaskStatus.WAITING_CLIENT.value
+    ]
+    waiting.sort(key=lambda task: common_view_task_sort_key(task, names, assignee_ids_by_task))
+    return [
+        [
+            str(index),
+            _task_owners(task, names, assignee_ids_by_task),
+            _m3_department_label(task, department_codes),
+            _m3_am_pm_label(task),
+            _m3_task_type_label(task),
+            _display_title(task.title),
+        ]
+        for index, task in enumerate(waiting, start=1)
+    ]
+
+
+async def apply_waiting_client_task_table(
+    db: AsyncSession, sections: list[dict[str, str]]
+) -> list[dict[str, str]]:
+    """Refresh DT WFE in existing M2 drafts without replacing manual sections."""
+    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    names = await _assignee_names(db, tasks)
+    assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task)
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
+    rows = _waiting_client_task_rows(tasks, names, assignee_ids_by_task, department_codes)
+    body = _normalize_section(
+        _ascii_table(WAITING_CLIENT_TABLE_LABEL, WAITING_CLIENT_COLUMNS, rows)
+    )
+    refreshed = [
+        {
+            **section,
+            "body": body,
+        }
+        if section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
+        or section.get("title") == WAITING_CLIENT_TABLE_LABEL
+        else section
+        for section in sections
+    ]
+    # Normalize older drafts too: keep one DT WFE section and place it after
+    # the unfinished priority section, even when the draft was created with the old order.
+    waiting_sections = [
+        section for section in refreshed
+        if section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
+        or section.get("title") == WAITING_CLIENT_TABLE_LABEL
+    ]
+    if waiting_sections:
+        waiting = waiting_sections[0]
+        refreshed = [
+            section for section in refreshed
+            if not (
+                section.get("section_key") == WAITING_CLIENT_TABLE_LABEL
+                or section.get("title") == WAITING_CLIENT_TABLE_LABEL
+            )
+        ]
+        unfinished_index = next(
+            (index for index, section in enumerate(refreshed)
+             if section.get("section_key") == UNFINISHED_PRIORITY_TABLE_LABEL
+             or section.get("title") == UNFINISHED_PRIORITY_TABLE_LABEL),
+            len(refreshed) - 1,
+        )
+        refreshed.insert(unfinished_index + 1, waiting)
+    return refreshed
 
 
 def _unheld_meeting_section(
@@ -540,6 +628,8 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
             body = f"{UNFINISHED_PRIORITY_TABLE_LABEL}: 0"
         elif title == SECTION_TITLES[5]:
             body = f"{DONE_AM_TABLE_LABEL}: 0"
+        elif title == SECTION_TITLES[12]:
+            body = f"{WAITING_CLIENT_TABLE_LABEL}: 0"
         elif title == SECTION_TITLES[6]:
             body = f"{UNHELD_MEETINGS_TABLE_LABEL}: 0"
         elif title == SECTION_TITLES[7]:
@@ -717,6 +807,12 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
         cutoff_timezone,
         department_codes,
     )
+    waiting_client_rows = _waiting_client_task_rows(
+        tasks,
+        names,
+        assignee_ids_by_task,
+        department_codes,
+    )
     meetings = (await db.execute(select(Meeting).where(Meeting.starts_at.is_not(None)))).scalars().all()
     today_meetings = [meeting for meeting in meetings if _meeting_occurs_on_date(meeting, report_day)]
     meeting_statuses = (
@@ -778,6 +874,16 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             ),
         },
         {
+            "title": SECTION_TITLES[12],
+            "body": _normalize_section(
+                _ascii_table(
+                    WAITING_CLIENT_TABLE_LABEL,
+                    WAITING_CLIENT_COLUMNS,
+                    waiting_client_rows,
+                )
+            ),
+        },
+        {
             "title": SECTION_TITLES[6],
             "body": _normalize_section(unheld_meeting_section),
         },
@@ -798,6 +904,7 @@ async def build_after_break_report_sections(db: AsyncSession, report_day: date) 
             SECTION_TITLES[3]: 0,
             SECTION_TITLES[4]: len(unfinished_priority_rows),
             SECTION_TITLES[5]: len(done_am_rows),
+            SECTION_TITLES[12]: len(waiting_client_rows),
             SECTION_TITLES[6]: unheld_meeting_count,
             SECTION_TITLES[7]: len(section_1),
             SECTION_TITLES[8]: len(section_2),

@@ -3879,7 +3879,7 @@ export default function ProjectPage() {
                   const statusRowClass = statusValue === "DONE"
                     ? "border-green-200 border-l-green-500 bg-green-50/30 opacity-80"
                     : statusValue === "WAITING_CLIENT"
-                      ? "border-[#D4A72C] border-l-[#B8860B] bg-[#F5E6B3]/60"
+                      ? "border-[#B8860B] border-l-[#B8860B] bg-[#E2C15B]/75"
                     : statusValue === "WAITING_CONFIRMATION"
                       ? "border-blue-200 border-l-blue-500 bg-blue-50/40"
                       : statusValue === "IN_PROGRESS"

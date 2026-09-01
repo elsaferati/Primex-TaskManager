@@ -59,7 +59,7 @@ const TASK_PRIORITY_STYLES: Record<string, string> = {
 const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: string }> = {
   TODO: { label: "TODO", dot: "bg-slate-500", pill: "bg-slate-100 text-slate-700" },
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
-  WAITING_CLIENT: { label: "Waiting for Client", dot: "bg-[#B8860B]", pill: "bg-[#F5E6B3] text-[#7A5A00]" },
+  WAITING_CLIENT: { label: "Waiting for Client", dot: "bg-[#B8860B]", pill: "bg-[#E2C15B] text-[#4F3A00]" },
   WAITING_CONFIRMATION: { label: "Waiting Confirmation", dot: "bg-blue-600", pill: "bg-blue-50 text-blue-700" },
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
 }
@@ -3116,6 +3116,13 @@ export default function GaKaNotesPage() {
                     </TableRow>
                     <TableRow className="h-8">
                       <TableCell className="p-1">
+                        <div className="h-4 w-4 rounded-sm border border-[#B8860B] bg-[#E2C15B]" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Task: Waiting for Client</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
                         <div className="w-4 h-4 rounded-sm border border-slate-300 bg-emerald-200" />
                       </TableCell>
                       <TableCell className="text-sm font-semibold">Task: Done</TableCell>
@@ -3226,7 +3233,7 @@ export default function GaKaNotesPage() {
                   </SelectItem>
                   <SelectItem
                     value="WAITING_CLIENT"
-                    className="bg-[#F5E6B3] text-[#7A5A00] focus:bg-[#EBD58D] focus:text-[#7A5A00]"
+                    className="bg-[#E2C15B] text-[#4F3A00] focus:bg-[#D6AF3D] focus:text-[#4F3A00]"
                   >
                     Waiting for Client
                   </SelectItem>
@@ -3629,11 +3636,13 @@ export default function GaKaNotesPage() {
                           ? "bg-pink-200"
                           : aggregatedStatus === "IN_PROGRESS"
                             ? "bg-yellow-200"
-                            : aggregatedStatus === "DONE"
-                              ? "bg-emerald-200"
-                              : aggregatedStatus === "WAITING_CONFIRMATION"
-                                ? "bg-amber-50"
-                                : "bg-slate-100"
+                            : aggregatedStatus === "WAITING_CLIENT"
+                              ? "bg-[#E2C15B] text-[#4F3A00]"
+                              : aggregatedStatus === "DONE"
+                                ? "bg-emerald-200"
+                                : aggregatedStatus === "WAITING_CONFIRMATION"
+                                  ? "bg-amber-50"
+                                  : "bg-slate-100"
                         : "bg-sky-200"
 
                     // Only show department if:

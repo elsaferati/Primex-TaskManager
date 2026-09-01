@@ -263,6 +263,9 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   const resolvedStatus = (titleStatus || statusValue).toUpperCase().replace(/_/g, " ")
   const typeIndex = headers.findIndex((header) => normalizeHeader(header) === "TYPE")
   const typeValue = typeIndex >= 0 ? cells[typeIndex]?.trim().toUpperCase() : ""
+  if (resolvedStatus.includes("WAITING CLIENT") || resolvedStatus.includes("WAITING FOR CLIENT")) {
+    return "bg-[#E2C15B] text-[#4F3A00]"
+  }
   if (resolvedStatus.includes("WAITING")) return "bg-orange-100 text-orange-900"
   if (resolvedStatus.includes("IN PROGRESS")) return "bg-yellow-100"
   if (resolvedStatus === "TODO") return "bg-pink-200"
@@ -273,6 +276,13 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   if (normalizedLabel.includes("LATE")) return "bg-red-100"
   if (normalizedLabel.includes("TODO") || normalizedLabel.includes("DETYRAT E REJA") || normalizedLabel.includes("DET TE REJA")) return "bg-pink-200"
   if (normalizedLabel.includes("IN PROGRESS")) return "bg-yellow-100"
+  if (
+    normalizedLabel.includes("DT WFE") ||
+    normalizedLabel.includes("WAITING CLIENT") ||
+    normalizedLabel.includes("WAITING FOR CLIENT")
+  ) {
+    return "bg-[#E2C15B] text-[#4F3A00]"
+  }
   if (normalizedLabel.includes("WAITING")) return "bg-orange-100 text-orange-900"
   if (normalizedLabel.includes("DONE") || normalizedLabel.includes("DET E KRYERA NE AM")) return "bg-green-100"
   // NOTES stay blue; DISK yes/no colors only the DISK cell (see diskCellTone).

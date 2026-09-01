@@ -32,6 +32,13 @@ type Preview = { subject: string; target_date: string; html: string }
 
 const days = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
+function secondSendTime(first: string) {
+  const [hours, minutes] = first.split(":").map(Number)
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return "—"
+  const total = (hours * 60 + minutes + 20) % (24 * 60)
+  return `${String(Math.floor(total / 60)).padStart(2, "0")}:${String(total % 60).padStart(2, "0")}`
+}
+
 function toRecipientText(values?: string[]) {
   return (values || []).join(", ")
 }
@@ -179,7 +186,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
             ><span className={settings.is_active ? "absolute right-1 top-1 size-6 rounded-full bg-white shadow" : "absolute left-1 top-1 size-6 rounded-full bg-white shadow"} /></button>
           </div>
           <div className="grid gap-3 md:grid-cols-[180px_220px_1fr]">
-            <div><Label>Send time</Label><Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} /></div>
+            <div><Label>Send times</Label><Input type="time" value={settings.send_time} onChange={(event) => setSettings({ ...settings, send_time: event.target.value })} /><p className="mt-1 text-xs text-muted-foreground">{settings.send_time} and {secondSendTime(settings.send_time)}</p></div>
             <div><Label>Timezone</Label><Input value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} /></div>
             <div><Label>Days</Label><div className="flex flex-wrap gap-2">{days.map((label, day) => <Button key={label} type="button" variant={settings.weekdays.includes(day) ? "default" : "outline"} onClick={() => toggleDay(day)}>{label}</Button>)}</div></div>
           </div>

@@ -18,6 +18,7 @@ from app.services.meeting_point_manual_sync import merge_common_view_manual_sect
 from app.services.morning_report import (
     MANUAL_SECTION_TITLES,
     SECTION_TITLES,
+    apply_ga_hv_dv_tasks_table,
     build_morning_report_sections,
     normalize_morning_report_sections,
     render_html,
@@ -225,6 +226,7 @@ async def get_draft(
     # Apply section migrations to saved reports too.  Otherwise retired prompts
     # remain visible in a previously generated or sent report indefinitely.
     sections = normalize_morning_report_sections(row.sections)
+    sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
     sections = await merge_common_view_manual_sections(db, sections, "morning", row.sections)
     if sections != row.sections:
         row.sections = sections
@@ -336,9 +338,11 @@ async def preview_draft(
     row = await db.get(MorningReportDraft, draft_id)
     if row is None:
         raise HTTPException(status_code=404, detail="Draft not found")
+    sections = normalize_morning_report_sections(row.sections)
+    sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
     return {
-        "plain_text": render_plain_text(row.subject, row.report_date, row.sections),
-        "html": render_html(row.subject, row.report_date, row.sections),
+        "plain_text": render_plain_text(row.subject, row.report_date, sections),
+        "html": render_html(row.subject, row.report_date, sections),
     }
 
 
@@ -354,13 +358,16 @@ async def send_draft(
     recipients = normalize_recipients(row.recipients)
     if not recipients["to"]:
         raise HTTPException(status_code=400, detail="Add at least one To recipient before sending")
-    plain_text = render_plain_text(row.subject, row.report_date, row.sections)
-    html_body = render_html(row.subject, row.report_date, row.sections)
+    sections = normalize_morning_report_sections(row.sections)
+    sections = await apply_ga_hv_dv_tasks_table(db, sections, row.report_date)
+    row.sections = sections
+    plain_text = render_plain_text(row.subject, row.report_date, sections)
+    html_body = render_html(row.subject, row.report_date, sections)
     try:
         _validate_gmail_config()
         message = await send_morning_report(
             row.subject, recipients, plain_text, html_body,
-            report_day=row.report_date, sections=row.sections,
+            report_day=row.report_date, sections=sections,
         )
     except Exception as exc:
         row.last_error = str(exc)[:2000]

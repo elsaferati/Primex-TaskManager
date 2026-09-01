@@ -182,7 +182,7 @@ const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }
   },
   WAITING_CLIENT: {
     label: "Waiting for Client",
-    className: "border-[#D4A72C] bg-[#F5E6B3] text-[#7A5A00]",
+    className: "border-[#B8860B] bg-[#E2C15B] text-[#4F3A00]",
   },
   WAITING_CONFIRMATION: {
     label: "Waiting Confirmation",

@@ -396,7 +396,8 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
             before={"value": "2026-08-28T08:00:00+02:00"},
             after={"value": "2026-09-04T08:00:00+02:00"},
         )
-        self.assertFalse(_is_postponed_for_m3_day(task, [start_only], report_day))
+        task.start_date = datetime(2026, 9, 4, 8, 0, tzinfo=ZoneInfo("Europe/Tirane"))
+        self.assertTrue(_is_postponed_for_m3_day(task, [start_only], report_day))
 
         moved_back = SimpleNamespace(due_date=datetime(2026, 8, 28, 16, 0, tzinfo=ZoneInfo("Europe/Tirane")))
         self.assertFalse(_is_postponed_for_m3_day(moved_back, [due_event], report_day))

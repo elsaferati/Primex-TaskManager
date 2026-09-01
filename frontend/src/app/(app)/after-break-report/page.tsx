@@ -48,6 +48,7 @@ function sectionGroupLabel(section: Section, index: number) {
   if (index < 4) return "Manual questions"
   const knownAuto = [
     "DET TE PAKRYERA, 08:00/DEADLINE",
+    "DT WFE",
     "DET E KRYERA NE AM",
     "TAK INT/EXT TE PAMBAJTURA",
     "A KEMI NEW SYSTEM TASKS/ PYETJE PER KONFIRMIM?",

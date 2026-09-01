@@ -33,20 +33,30 @@ from app.services.meetings_report import (
     _is_open,
     _leave_lines,
     _local_date,
+    _m3_am_pm_label,
+    _m3_department_label,
+    _m3_task_type_label,
     _meeting_lines,
     _meeting_occurs_on_date,
     _normalize_section,
+    _normalize_report_status,
     _strip_status_markers,
     _task_lines,
     _task_metadata_by_title,
+    _task_owners,
     _tomorrow_meeting_table,
     _tomorrow_task_table,
     weekly_planner_user_sort_keys,
+    common_view_task_sort_key,
     send_section_report,
 )
 
 REPORT_TYPE = "morning_report"
 REPORT_LABEL = "Hapja e dites M1"
+GA_TASKS_TITLE = "GA TASKS"
+HV_TASKS_TITLE = "HV TASKS"
+DV_TASKS_TITLE = "DV TASKS"
+GA_HV_DV_TASKS_TITLE = "GA/HV/DV TASKS"  # Legacy combined-section title.
 SECTION_TITLES = [
     # Manual answer first
     "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
@@ -56,8 +66,15 @@ SECTION_TITLES = [
     "(GA) NOTES TE REJA ( NOT DISSCUSED)?",
     "PV/FESTA EXT/TAK EXT/ TAK INT/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
+    GA_TASKS_TITLE,
+    HV_TASKS_TITLE,
+    DV_TASKS_TITLE,
 ]
+DISPLAY_SECTION_TITLES = [SECTION_TITLES[0], SECTION_TITLES[6], SECTION_TITLES[7], SECTION_TITLES[8], *SECTION_TITLES[1:6]]
 MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
+GA_HV_DV_TASK_COLUMNS = [
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("STATUS", 18), ("TITULLI", 52),
+]
 EMAIL_TASK_SOURCES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("EM: INFO PX", re.compile(r"^\s*EM\s*:\s*INFO\s+PX\b", re.I)),
     ("EM: IT", re.compile(r"^\s*EM\s*:\s*IT\b", re.I)),
@@ -112,6 +129,8 @@ def _default_body(title: str) -> str:
                 "BLLOK: 0",
             ]
         )
+    if title in {GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE}:
+        return f"{title}: 0"
     return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WAITING FOR CLIENT: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
 
 
@@ -173,6 +192,8 @@ def _canonical_section_title(raw_title: str) -> str | None:
         return SECTION_TITLES[2]
     if "BZMEGA" in compact and "BLLOK" in compact:
         return SECTION_TITLES[4]
+    if compact == _compact_section_title(GA_HV_DV_TASKS_TITLE):
+        return GA_TASKS_TITLE
     if "KUSHKADETPERSONALISHT" in compact:
         return SECTION_TITLES[5]
     return None
@@ -219,7 +240,7 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
     # Keep Common View–synced manuals after built-in manuals and before auto sections.
     known = [
         by_title.get(title, {"section_key": title, "title": title, "body": _default_body(title)})
-        for title in SECTION_TITLES
+        for title in DISPLAY_SECTION_TITLES
     ]
     if not extras:
         return known
@@ -348,6 +369,77 @@ def _emails_section(
         )
         lines.append("")
     return _normalize_section(lines), count
+
+
+def _ga_hv_dv_task_rows(
+    tasks: list[Task],
+    names: dict[Any, str],
+    assignee_ids_by_task: dict[Any, set[Any]],
+    report_day: date,
+    department_codes: dict[Any, str] | None = None,
+    target_initials: str | None = None,
+) -> list[list[str]]:
+    """Open, non-late tasks assigned to GA, HV, or DV and scheduled for the report day."""
+    targets = {target_initials} if target_initials else {"GA", "HV", "DV"}
+
+    def belongs_to_target(task: Task) -> bool:
+        assignee_ids = set(assignee_ids_by_task.get(task.id, set()))
+        if task.assigned_to:
+            assignee_ids.add(task.assigned_to)
+        return any(_initials(names.get(user_id)) in targets for user_id in assignee_ids)
+
+    selected = [
+        task
+        for task in tasks
+        if _is_open(task)
+        and _belongs_to_day(task, report_day)
+        and (_local_date(task.due_date) is None or _local_date(task.due_date) >= report_day)
+        and belongs_to_target(task)
+    ]
+    selected.sort(key=lambda task: common_view_task_sort_key(task, names, assignee_ids_by_task))
+    return [
+        [
+            str(index),
+            _task_owners(task, names, assignee_ids_by_task),
+            _m3_department_label(task, department_codes),
+            _m3_am_pm_label(task),
+            _m3_task_type_label(task),
+            _normalize_report_status(task.status),
+            _display_title(task.title),
+        ]
+        for index, task in enumerate(selected, start=1)
+    ]
+
+
+async def apply_ga_hv_dv_tasks_table(
+    db: AsyncSession,
+    sections: list[dict[str, str]],
+    report_day: date,
+) -> list[dict[str, str]]:
+    """Refresh the auto-filled GA/HV/DV table in an existing M1 draft."""
+    tasks = (await db.execute(select(Task).where(Task.is_active.is_(True)))).scalars().all()
+    names = await _assignee_names(db, tasks)
+    assignee_ids_by_task = await _effective_task_assignee_ids(db, tasks)
+    department_codes = {
+        department_id: code
+        for department_id, code in (await db.execute(select(Department.id, Department.code))).all()
+    }
+    await apply_weekly_planner_task_order(db, tasks, assignee_ids_by_task, department_codes)
+    rows_by_title = {
+        GA_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "GA"),
+        HV_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "HV"),
+        DV_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "DV"),
+    }
+    bodies = {
+        title: _normalize_section(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, rows))
+        for title, rows in rows_by_title.items()
+    }
+    return [
+        {**section, "body": bodies.get(section.get("section_key") or section.get("title") or "", section.get("body") or "")}
+        if (section.get("section_key") or section.get("title")) in bodies
+        else section
+        for section in sections
+    ]
 
 
 async def _day_context_section(
@@ -511,6 +603,20 @@ async def build_morning_report_sections(
         department_codes,
         all_participant_ids,
     )
+    task_rows_by_title = {
+        title: _ga_hv_dv_task_rows(
+            tasks, names, assignee_ids_by_task, report_day, department_codes, initials
+        )
+        for title, initials in (
+            (GA_TASKS_TITLE, "GA"),
+            (HV_TASKS_TITLE, "HV"),
+            (DV_TASKS_TITLE, "DV"),
+        )
+    }
+    task_tables = {
+        title: _normalize_section(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, rows))
+        for title, rows in task_rows_by_title.items()
+    }
     day_context, day_context_count = await _day_context_section(
         db,
         entries,
@@ -534,6 +640,10 @@ async def build_morning_report_sections(
     attendance = _attendance_section(entries, names, report_day)
     sections = [
         {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
+        *[
+            {"title": title, "body": task_tables[title]}
+            for title in (GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE)
+        ],
         {"title": SECTION_TITLES[1], "body": email_tasks},
         {"title": SECTION_TITLES[2], "body": attendance},
         {"title": SECTION_TITLES[3], "body": _notes_section(note_rows)},
@@ -544,6 +654,7 @@ async def build_morning_report_sections(
         "report_day": report_day.isoformat(),
         "counts": {
             SECTION_TITLES[0]: 0,
+            **{title: len(rows) for title, rows in task_rows_by_title.items()},
             SECTION_TITLES[1]: email_task_count,
             SECTION_TITLES[2]: sum(
                 1

@@ -249,20 +249,38 @@ def _audit_local_date(value: Any) -> date | None:
 
 
 def _is_postponed_for_m3_day(task: Task, events: list[AuditLog], report_day: date) -> bool:
-    """Mirror Realization's final daily ``Shtyre`` deadline rule for M3 only."""
-    current_due = _local_date(task.due_date)
-    if current_due is None or current_due <= report_day:
-        return False
+    """Return true when today's audit trail moved due/start date to a later day."""
     return any(
-        event.action == "task.due_date_changed"
+        event.action in {"task.due_date_changed", "task.start_date_changed"}
         and _audit_local_date((event.before or {}).get("value")) == report_day
         and (
-            changed_due := _audit_local_date((event.after or {}).get("value"))
+            changed_date := _audit_local_date((event.after or {}).get("value"))
+        ) is not None
+        and changed_date > report_day
+        and (
+            _local_date(task.due_date if event.action == "task.due_date_changed" else task.start_date)
+            == changed_date
         )
-        is not None
-        and changed_due > report_day
         for event in events
     )
+
+
+def _postponement_events_for_m3_task(
+    task: Task, events: list[AuditLog], report_day: date
+) -> list[AuditLog]:
+    return [
+        event for event in events
+        if event.action in {"task.due_date_changed", "task.start_date_changed"}
+        and _audit_local_date((event.before or {}).get("value")) == report_day
+        and (
+            changed_date := _audit_local_date((event.after or {}).get("value"))
+        ) is not None
+        and changed_date > report_day
+        and (
+            _local_date(task.due_date if event.action == "task.due_date_changed" else task.start_date)
+            == changed_date
+        )
+    ]
 
 
 def _daily_baseline_task_ids(snapshots: list[DailyPlannerSnapshot]) -> set[uuid.UUID]:
@@ -282,7 +300,7 @@ async def _postponed_tasks_for_m3_day(
     db: AsyncSession,
     report_day: date,
     tasks: list[Task],
-) -> tuple[list[Task], dict[Any, tuple[str, str]]]:
+) -> tuple[list[Task], dict[Any, tuple[str, str]], list[Task], dict[Any, tuple[str, str]]]:
     """Load report-day postponed tasks without changing Realization state or code."""
     snapshots = (
         await db.execute(
@@ -291,7 +309,7 @@ async def _postponed_tasks_for_m3_day(
     ).scalars().all()
     baseline_task_ids = _daily_baseline_task_ids(list(snapshots))
     if not baseline_task_ids:
-        return [], {}
+        return [], {}, [], {}
 
     local_start = datetime.combine(report_day, time.min, tzinfo=report_timezone())
     start_utc = local_start.astimezone(timezone.utc)
@@ -302,7 +320,7 @@ async def _postponed_tasks_for_m3_day(
             .where(
                 AuditLog.entity_type == "task",
                 AuditLog.entity_id.in_(baseline_task_ids),
-                AuditLog.action == "task.due_date_changed",
+                AuditLog.action.in_(("task.due_date_changed", "task.start_date_changed")),
                 AuditLog.created_at >= start_utc,
                 AuditLog.created_at < end_utc,
             )
@@ -315,18 +333,38 @@ async def _postponed_tasks_for_m3_day(
 
     postponed: list[Task] = []
     date_ranges: dict[Any, tuple[str, str]] = {}
+    postponed_both: list[Task] = []
+    both_date_ranges: dict[Any, tuple[str, str]] = {}
     for task in tasks:
         if task.id not in baseline_task_ids:
             continue
-        if not _is_postponed_for_m3_day(task, events_by_task.get(task.id, []), report_day):
-            continue
-        postponed.append(task)
-        current_due = _local_date(task.due_date)
-        date_ranges[task.id] = (
-            report_day.strftime("%d.%m.%Y"),
-            current_due.strftime("%d.%m.%Y") if current_due else "-",
+        matching_events = _postponement_events_for_m3_task(
+            task, events_by_task.get(task.id, []), report_day
         )
-    return postponed, date_ranges
+        if not matching_events:
+            continue
+        due_events = [e for e in matching_events if e.action == "task.due_date_changed"]
+        start_events = [e for e in matching_events if e.action == "task.start_date_changed"]
+        if due_events and start_events:
+            postponed_both.append(task)
+            start_before = _audit_local_date((start_events[-1].before or {}).get("value"))
+            start_after = _audit_local_date((start_events[-1].after or {}).get("value"))
+            due_before = _audit_local_date((due_events[-1].before or {}).get("value"))
+            due_after = _audit_local_date((due_events[-1].after or {}).get("value"))
+            both_date_ranges[task.id] = (
+                f"START: {start_before.strftime('%d.%m.%Y') if start_before else '-'} | DUE: {due_before.strftime('%d.%m.%Y') if due_before else '-'}",
+                f"START: {start_after.strftime('%d.%m.%Y') if start_after else '-'} | DUE: {due_after.strftime('%d.%m.%Y') if due_after else '-'}",
+            )
+        elif due_events:
+            postponed.append(task)
+            matching_event = due_events[-1]
+            before_date = _audit_local_date((matching_event.before or {}).get("value"))
+            after_date = _audit_local_date((matching_event.after or {}).get("value"))
+            date_ranges[task.id] = (
+                before_date.strftime("%d.%m.%Y") if before_date else report_day.strftime("%d.%m.%Y"),
+                after_date.strftime("%d.%m.%Y") if after_date else "-",
+            )
+    return postponed, date_ranges, postponed_both, both_date_ranges
 
 
 def _local_time(value: datetime | None) -> str:
@@ -1093,7 +1131,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         db, today_todo, report_day, names, assignee_ids_by_task
     )
     done_today = _completed_tasks_for_report_day(completed_tasks, report_day)
-    postponed_today, postponed_date_ranges = await _postponed_tasks_for_m3_day(
+    postponed_today, postponed_date_ranges, postponed_both_today, postponed_both_date_ranges = await _postponed_tasks_for_m3_day(
         db, report_day, tasks
     )
     product_delta_today = _product_delta_tasks_for_m3_day(report_tasks, report_day)
@@ -1258,7 +1296,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         ),
         SECTION_TITLES[11]: _normalize_section(
             _m3_status_table(
-                "SHTYRE",
+                "SHTYER DUE DATE",
                 postponed_today,
                 names,
                 with_status=True,
@@ -1269,6 +1307,19 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 date_range_by_task=postponed_date_ranges,
                 **table_kwargs,
             )
+            + ["", "SHTYER START DHE DUE DATE:"]
+            + _m3_status_table(
+                "",
+                postponed_both_today,
+                names,
+                with_status=True,
+                include_type=True,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
+                date_range_by_task=postponed_both_date_ranges,
+                **table_kwargs,
+            )[1:]
         ),
         SECTION_TITLES[10]: _normalize_section(
             _m3_status_table(
@@ -2274,7 +2325,7 @@ h2{{font-size:14px;margin:22px 0 8px;color:#0f172a}}
 .report-table{{width:100%;border-collapse:collapse;table-layout:auto;font:12px/1.3 Arial,sans-serif}}
 .report-table th{{background:#e5e7eb;color:#111827;text-align:left;font-weight:700;border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
 .report-table td{{border:1px solid #cbd5e1;padding:4px 5px;vertical-align:top}}
-.report-table .n{{white-space:nowrap}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
+.report-table .n{{white-space:nowrap}}.report-table tr.todo td{{background:#fbcfe8;color:#111827}}.report-table tr.in-progress td{{background:#fef3c7;color:#111827}}.report-table tr.waiting td{{background:#ffedd5;color:#9a3412}}.report-table tr.waiting-client td{{background:#e2c15b;color:#4f3a00}}.report-table tr.done td{{background:#d4ffe1;color:#111827}}.report-table tr.late td{{background:#fee2e2;color:#111827}}.report-table tr.deadline td{{background:#dc2626;color:#fff}}.report-table tr.eight-am td{{background:#fff;color:#111827;border-top:3px solid #dc2626;border-bottom:3px solid #dc2626}}.report-table tr.eight-am td:first-child{{border-left:3px solid #dc2626}}.report-table tr.eight-am td:last-child{{border-right:3px solid #dc2626}}.report-table tr.notes td{{background:#dbeafe;color:#111827}}.report-table .disk-yes,.report-table .held{{background:#dcfce7!important;color:#166534!important;font-weight:700;text-align:center}}.report-table .disk-no,.report-table .canceled{{background:#fee2e2!important;color:#991b1b!important;font-weight:700;text-align:center}}.report-table tr.highlight td{{border-top:3px solid #2563eb;border-bottom:3px solid #2563eb}}.report-table tr.highlight td:first-child{{border-left:3px solid #2563eb}}.report-table tr.highlight td:last-child{{border-right:3px solid #2563eb}}.report-table tr.highlight .title{{color:#2563eb;font-weight:700}}
 @media only screen and (max-width:600px){{
 body{{padding:8px!important}}
 h1{{font-size:18px!important;line-height:1.2!important}}
@@ -2368,8 +2419,8 @@ def _table_tone_from_label(label: str) -> str:
         return "todo"
     if normalized == "IN PROGRESS":
         return "in-progress"
-    if normalized in {"WAITING FOR CLIENT", "WAITING CLIENT", "WAITING_CLIENT"}:
-        return "waiting"
+    if normalized in {"WAITING FOR CLIENT", "WAITING CLIENT", "WAITING_CLIENT", "DT WFE"}:
+        return "waiting-client"
     if normalized in {"WAITING CONFIRMATION", "WAITING_CONFIRMATION"}:
         return "waiting"
     if normalized in {"DONE", "DET E KRYERA NE AM"}:
@@ -2429,6 +2480,8 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
         return "#fef3c7", "#111827"
     if tone == "waiting":
         return "#ffedd5", "#9a3412"
+    if tone == "waiting-client":
+        return "#e2c15b", "#4f3a00"
     if tone == "done":
         return "#d4ffe1", "#111827"
     if tone == "late":
@@ -2497,6 +2550,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     for row_index, row in enumerate(body_rows):
         row_tone = row_tones[row_index] if row_index < len(row_tones) else tone
         is_highlighted_meeting = highlighted_meeting_rows[row_index] if row_index < len(highlighted_meeting_rows) else False
+        row_background, row_foreground = _table_tone_styles(row_tone)
         is_canceled = (
             canceled_index is not None
             and len(row) > canceled_index
@@ -2543,8 +2597,14 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                 f"{html.escape(current_cell).replace(chr(10), '<br>')}</td>"
             )
         row_classes = " ".join(filter(None, (row_tone, "highlight" if is_highlighted_meeting else "")))
+        row_style = (
+            f' bgcolor="{row_background}" style="background-color:{row_background}!important;'
+            f'color:{row_foreground}!important;"'
+            if row_tone
+            else ""
+        )
         body_html_parts.append(
-            f"<tr class=\"{row_classes}\">"
+            f"<tr{row_style} class=\"{row_classes}\">"
             + "".join(row_cells)
             + "</tr>"
         )

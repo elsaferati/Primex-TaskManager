@@ -55,6 +55,7 @@ type CommonType =
   | "oneH1420"
   | "oneH1550"
   | "oneHNoSlot"
+  | "waitingClient"
   | "personal"
   | PersonalRowId
   | "external"
@@ -82,6 +83,7 @@ const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
   "external",
   "internal",
   "bz",
+  "waitingClient",
   "oneH10",
   "oneH11",
   "oneH1150",
@@ -98,6 +100,7 @@ const COMMON_PRINT_ROW_ORDER: readonly CommonType[] = [
   "feedback",
 ]
 const COMMON_FAST_PRINT_ROW_IDS: readonly CommonType[] = [
+  "waitingClient",
   "oneH10",
   "oneH11",
   "oneH1150",
@@ -362,7 +365,7 @@ type CommonBucket =
   | "feedback"
   | "priority"
   | "bz"
-type FastTaskRowId = "blocked" | "oneH" | "personal" | PersonalRowId | "r1"
+type FastTaskRowId = "blocked" | "oneH" | "personal" | PersonalRowId | "r1" | "waitingClient"
 type OneHSlotRowId = "oneH" | "oneH10" | "oneH11" | "oneH1150" | "oneH1420" | "oneH1550" | "oneHNoSlot"
 type FastTaskEntry = BlockedItem | OneHItem | PersonalItem | R1Item
 type CommonWeekTableEntry =
@@ -639,7 +642,7 @@ const COMMON_COLOR_FILTER_OPTIONS: {
   { value: "red", label: "Red", swatch: "#dc2626" },
   { value: "green", label: "Green", swatch: "#d4ffe1" },
   { value: "orange", label: "Orange", swatch: "#ffedd5" },
-  { value: "gold", label: "Gold", swatch: "#F5E6B3" },
+  { value: "gold", label: "Gold", swatch: "#E2C15B" },
 ]
 
 type MeetingColumnKey = "nr" | "day" | "topic" | "check" | "owner" | "time"
@@ -940,9 +943,9 @@ const entryAssignees = (entry: { assignees?: string[]; person?: string; owner?: 
     ? entry.assignees
     : normalizeAssigneeList(entry.person || entry.owner || "")
 const isFastTaskRowId = (rowId: CommonType): rowId is FastTaskRowId | OneHSlotRowId =>
-  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1"
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
 const isPrintDedupeTaskRowId = (rowId: CommonType) =>
-  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1"
+  rowId === "blocked" || isOneHSlotRowId(rowId) || rowId === "personal" || isPersonalRowId(rowId) || rowId === "r1" || rowId === "waitingClient"
 
 const getFastTaskAssigneeKey = (entry: FastTaskEntry) => {
   const person = "person" in entry ? entry.person : ""
@@ -4811,6 +4814,7 @@ export default function CommonViewPage() {
         absent: AbsentItem[]
         leave: LeaveItem[]
         externalHoliday: ExternalHolidayItem[]
+        waitingClient: FastTaskEntry[]
         blocked: BlockedItem[]
         oneH: OneHItem[]
         personal: PersonalItem[]
@@ -4840,6 +4844,7 @@ export default function CommonViewPage() {
             },
           ],
           externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
+          waitingClient: [],
           blocked: [],
           oneH: [],
           personal: [],
@@ -4858,13 +4863,19 @@ export default function CommonViewPage() {
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
         externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
-        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso), false),
-        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
-        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso), false),
+        waitingClient: sortTasksByOrder(
+          [...filtered.blocked, ...filtered.oneH, ...filtered.personal, ...filtered.r1].filter(
+            (x) => x.date === iso && (x.status || "").toUpperCase() === "WAITING_CLIENT"
+          ),
+          false
+        ),
+        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
+        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
+        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
-        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso), false),
+        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
         problems: [
           ...filtered.problems.filter((x) => !x.everyday && x.date === iso),
           ...dailyProblems,
@@ -4902,27 +4913,29 @@ export default function CommonViewPage() {
               ? dayData.leave
               : rowId === "externalHoliday"
                 ? dayData.externalHoliday
-                : rowId === "blocked"
-                  ? dayData.blocked
-                  : isOneHSlotRowId(rowId)
-                    ? getOneHEntriesForRow(dayData.oneH, rowId)
-                    : rowId === "r1"
-                      ? dayData.r1
-                      : isPersonalRowId(rowId)
-                        ? personalTasksForRow(dayData.personal, rowId)
-                        : rowId === "external"
-                          ? dayData.external
-                          : rowId === "internal"
-                            ? dayData.internal
-                            : rowId === "bz"
-                              ? dayData.bz
-                              : rowId === "priority"
-                                ? dayData.priority
-                                : rowId === "problem"
-                                  ? dayData.problems
-                                  : rowId === "feedback"
-                                    ? dayData.feedback
-                                    : []
+                : rowId === "waitingClient"
+                  ? dayData.waitingClient
+                  : rowId === "blocked"
+                    ? dayData.blocked
+                    : isOneHSlotRowId(rowId)
+                      ? getOneHEntriesForRow(dayData.oneH, rowId)
+                      : rowId === "r1"
+                        ? dayData.r1
+                        : isPersonalRowId(rowId)
+                          ? personalTasksForRow(dayData.personal, rowId)
+                          : rowId === "external"
+                            ? dayData.external
+                            : rowId === "internal"
+                              ? dayData.internal
+                              : rowId === "bz"
+                                ? dayData.bz
+                                : rowId === "priority"
+                                  ? dayData.priority
+                                  : rowId === "problem"
+                                    ? dayData.problems
+                                    : rowId === "feedback"
+                                      ? dayData.feedback
+                                      : []
       if (!entries.length) return []
 
       if (rowId === "late") {
@@ -4941,6 +4954,11 @@ export default function CommonViewPage() {
       }
       if (rowId === "externalHoliday") {
         return (entries as ExternalHolidayItem[]).map((e, idx: number) => `${idx + 1}. ${e.title}${e.note ? ` - ${e.note}` : ""}`)
+      }
+      if (rowId === "waitingClient") {
+        return (entries as FastTaskEntry[]).map(
+          (e, idx: number) => `${idx + 1}. ${commonPrintTitleLine(e.title)}${assigneesSuffix(e)}`
+        )
       }
       if (rowId === "blocked") {
         return (entries as BlockedItem[]).map(
@@ -5377,6 +5395,10 @@ export default function CommonViewPage() {
 
   const showCard = (type: CommonType) => {
     if (taskFocusFilter !== "all" && !isFastTaskRowId(type)) return false
+    if (type === "waitingClient") {
+      if (typeFilters.size === 0) return true
+      return (["blocked", "oneH", "personal", "r1"] as CommonType[]).some((taskType) => typeFilters.has(taskType))
+    }
     const matchesType =
       typeFilters.size === 0 ||
       typeFilters.has(type) ||
@@ -6379,6 +6401,7 @@ export default function CommonViewPage() {
     absent: "Mungese",
     leave: "Pushim vjetor ose feste",
     externalHoliday: "Festa zyrtare / External holiday",
+    waitingClient: "Detyra qe jane ne pritje te veprimit, informacionit ose konfirmimit nga klienti.",
     blocked: "JANE DETYRA ME PRIORITET TE LARTE MERRET VETËM ME ATË DETYRË ",
     oneH: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
     oneH10: "CDO DETYRE NGA GA KA STATUS 1H - THIRRET ÇDO 1 ORË NË TEAMS. THIRRET GA DHE PËRGJEGJËSAT. RAPORTOHET PROGRESI.",
@@ -6545,10 +6568,25 @@ export default function CommonViewPage() {
   const swimlaneRows = React.useMemo<SwimlaneRow[]>(() => {
     const includeOneH = typeFilters.size === 0 || typeFilters.has("oneH")
     const includeR1 = typeFilters.size === 0 || typeFilters.has("r1")
-    const oneHTotal = filtered.oneH.length
-    const r1Total = filtered.r1.length
-    const oneHDone = filtered.oneH.filter((x) => x.isDone).length
-    const r1Done = filtered.r1.filter((x) => x.isDone).length
+    const includeBlocked = typeFilters.size === 0 || typeFilters.has("blocked")
+    const includePersonal = typeFilters.size === 0 || typeFilters.has("personal")
+    const isWaitingClientTask = (entry: FastTaskEntry) =>
+      (entry.status || "").trim().toUpperCase() === "WAITING_CLIENT"
+    const waitingClientSource = sortTasksByOrder(
+      [
+        ...(includeBlocked ? filtered.blocked : []),
+        ...(includeOneH ? filtered.oneH : []),
+        ...(includePersonal ? filtered.personal : []),
+        ...(includeR1 ? filtered.r1 : []),
+      ].filter(isWaitingClientTask),
+      isMultiDate
+    )
+    const activeOneH = filtered.oneH.filter((entry) => !isWaitingClientTask(entry))
+    const activeR1 = filtered.r1.filter((entry) => !isWaitingClientTask(entry))
+    const oneHTotal = activeOneH.length
+    const r1Total = activeR1.length
+    const oneHDone = activeOneH.filter((x) => x.isDone).length
+    const r1Done = activeR1.filter((x) => x.isDone).length
 
     const lateSource = isMultiDate
       ? sortByDate(filtered.late, (x) => x.date, (x) => x.person)
@@ -6652,7 +6690,7 @@ export default function CommonViewPage() {
       entryDate: x.date,
     }))
 
-    const blockedSource = sortTasksByOrder(filtered.blocked, isMultiDate)
+    const blockedSource = sortTasksByOrder(filtered.blocked.filter((entry) => !isWaitingClientTask(entry)), isMultiDate)
     const blockedItems: SwimlaneCell[] = blockedSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
@@ -6677,7 +6715,7 @@ export default function CommonViewPage() {
       dateIsToday: isCommonTaskStartingOnDate(x),
     }))
 
-    const oneHSource = includeOneH ? sortTasksByOrder(filtered.oneH, isMultiDate) : []
+    const oneHSource = includeOneH ? sortTasksByOrder(activeOneH, isMultiDate) : []
     const oneHItems: SwimlaneCell[] = oneHSource.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.person ? [x.person] : []),
@@ -6702,7 +6740,7 @@ export default function CommonViewPage() {
       dateIsToday: isCommonTaskStartingOnDate(x),
     }))
 
-    const personalSource = sortTasksByOrder(filtered.personal, isMultiDate)
+    const personalSource = sortTasksByOrder(filtered.personal.filter((entry) => !isWaitingClientTask(entry)), isMultiDate)
     const buildPersonalItems = (group: PersonalTaskGroup): SwimlaneCell[] => {
       const groupSource = personalSource.filter((item) => getPersonalTaskGroup(item) === group)
       return groupSource.map((x) => ({
@@ -6780,7 +6818,7 @@ export default function CommonViewPage() {
       assignees: x.assignees,
     }))
 
-    const r1Source = includeR1 ? sortTasksByOrder(filtered.r1, isMultiDate) : []
+    const r1Source = includeR1 ? sortTasksByOrder(activeR1, isMultiDate) : []
     const r1Items: SwimlaneCell[] = r1Source.map((x) => ({
       title: x.title,
       assignees: x.assignees || (x.owner ? [x.owner] : []),
@@ -6857,6 +6895,29 @@ export default function CommonViewPage() {
       taskId: item.taskId,
       userId: item.userId,
       entryDate: item.date,
+    }))
+    const waitingClientItems: SwimlaneCell[] = waitingClientSource.map((entry, index) => ({
+      title: entry.title,
+      assignees: entryAssignees(entry),
+      subtitle: `${formatFastTaskDateLabel(entry.date, entry.isDone, entry.completedAt, entry.startDate)}${entry.note ? ` - ${entry.note}` : ""}`,
+      dateLabel: formatFastTaskDateLabel(entry.date, entry.isDone, entry.completedAt, entry.startDate),
+      accentClass: "swimlane-accent waiting-client",
+      status: entry.status,
+      isDone: entry.isDone,
+      number: index + 1,
+      taskId: entry.taskId,
+      userId: entry.userId,
+      departmentId: entry.departmentId,
+      fastTaskOrder: entry.fastTaskOrder,
+      finishPeriod: entry.finishPeriod,
+      oneHReportSlot: entry.oneHReportSlot,
+      entryDate: entry.date,
+      isDeadlineImportant: entry.isDeadlineImportant,
+      dueDate: entry.dueDate,
+      startDate: entry.startDate,
+      createdAt: entry.createdAt,
+      completedAt: entry.completedAt,
+      dateIsToday: isCommonTaskStartingOnDate(entry),
     }))
 
     const buildFastHeaderBreakdown = (items: SwimlaneCell[]) => {
@@ -6965,9 +7026,18 @@ export default function CommonViewPage() {
         items: bzItems,
       },
       {
+        id: "waitingClient",
+        label: "WAITING FOR CLIENT",
+        count: waitingClientItems.length,
+        headerClass: "swimlane-header waiting-client",
+        badgeClass: "swimlane-badge waiting-client",
+        headerBreakdown: buildFastHeaderBreakdown(waitingClientItems),
+        items: waitingClientItems,
+      },
+      {
         id: "blocked",
         label: "BLL",
-        count: filtered.blocked.length,
+        count: blockedItems.length,
         headerClass: "swimlane-header blocked",
         badgeClass: "swimlane-badge blocked",
         headerBreakdown: blockedHeaderBreakdown,
@@ -7050,6 +7120,7 @@ export default function CommonViewPage() {
       absent: AbsentItem[]
       leave: LeaveItem[]
       externalHoliday: ExternalHolidayItem[]
+      waitingClient: FastTaskEntry[]
       blocked: BlockedItem[]
       oneH: OneHItem[]
       personal: PersonalItem[]
@@ -7081,6 +7152,7 @@ export default function CommonViewPage() {
             },
           ],
           externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
+          waitingClient: [],
           blocked: [],
           oneH: [],
           personal: [],
@@ -7100,13 +7172,19 @@ export default function CommonViewPage() {
         absent: filtered.absent.filter((x) => x.date === iso),
         leave: filtered.leave.filter((x) => iso >= x.startDate && iso <= x.endDate),
         externalHoliday: filtered.externalHoliday.filter((x) => x.date === iso),
-        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso), false),
-        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso), false),
-        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso), false),
+        waitingClient: sortTasksByOrder(
+          [...filtered.blocked, ...filtered.oneH, ...filtered.personal, ...filtered.r1].filter(
+            (x) => x.date === iso && (x.status || "").toUpperCase() === "WAITING_CLIENT"
+          ),
+          false
+        ),
+        blocked: sortTasksByOrder(filtered.blocked.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
+        oneH: sortTasksByOrder(filtered.oneH.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
+        personal: sortTasksByOrder(filtered.personal.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
         external: sortByTime(filtered.external.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         internal: sortByTime(filtered.internal.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
         bz: sortByTime(filtered.bz.filter((x) => x.date === iso), (x) => x.time, (x) => x.title),
-        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso), false),
+        r1: sortTasksByOrder(filtered.r1.filter((x) => x.date === iso && (x.status || "").toUpperCase() !== "WAITING_CLIENT"), false),
         problems: [
           ...filtered.problems.filter((x) => !x.everyday && x.date === iso),
           ...dailyProblems,
@@ -7870,6 +7948,7 @@ export default function CommonViewPage() {
           }
           /* A one-day Common View printout is the compact fast-task report. */
           .single-day-print .swimlane-row:not(
+            .swimlane-row-waitingClient,
             .swimlane-row-blocked,
             .swimlane-row-oneH10,
             .swimlane-row-oneH11,
@@ -8020,6 +8099,7 @@ export default function CommonViewPage() {
           .swimlane-header.leave { background: var(--leave-bg) !important; color: #15803d !important; }
           .swimlane-header.externalHoliday { background: var(--externalHoliday-bg) !important; color: #be185d !important; }
           .swimlane-header.blocked { background: var(--blocked-bg) !important; color: #9f1239 !important; }
+          .swimlane-header.waiting-client { background: #e2c15b !important; color: #4f3a00 !important; }
           .swimlane-header.oneh { background: var(--oneh-bg) !important; color: #0369a1 !important; }
           .swimlane-header.personal { background: var(--personal-bg) !important; color: #7e22ce !important; }
           .swimlane-header.external { background: var(--external-bg) !important; color: #0369a1 !important; }
@@ -8035,6 +8115,7 @@ export default function CommonViewPage() {
           .swimlane-badge.leave { border-color: var(--leave-accent) !important; color: #15803d !important; }
           .swimlane-badge.externalHoliday { border-color: var(--externalHoliday-accent) !important; color: #be185d !important; }
           .swimlane-badge.blocked { border-color: var(--blocked-accent) !important; color: #9f1239 !important; }
+          .swimlane-badge.waiting-client { border-color: #b8860b !important; color: #4f3a00 !important; }
           .swimlane-badge.oneh { border-color: var(--oneh-accent) !important; color: #0369a1 !important; }
           .swimlane-badge.personal { border-color: var(--personal-accent) !important; color: #7e22ce !important; }
           .swimlane-badge.external { border-color: var(--external-accent) !important; color: #0369a1 !important; }
@@ -9169,7 +9250,7 @@ export default function CommonViewPage() {
           border-left-color: #ffffff;
         }
         .swimlane-cell.task-state-waiting-client {
-          background: #f5e6b3;
+          background: #e2c15b;
           border-left-color: #ffffff;
         }
         .swimlane-cell.task-state-in-progress {
@@ -9557,6 +9638,10 @@ export default function CommonViewPage() {
         .week-table-row.blocked .week-table-label {
           background: var(--blocked-bg);
         }
+        .week-table-row.waiting-client .week-table-label {
+          background: #e2c15b;
+          color: #4f3a00;
+        }
         .week-table-row.oneh .week-table-label {
           background: var(--oneh-bg);
         }
@@ -9631,7 +9716,7 @@ export default function CommonViewPage() {
           background: #ffedd5;
         }
         .week-table-entry.task-state-waiting-client {
-          background: #f5e6b3;
+          background: #e2c15b;
         }
         .week-table-entry.task-state-todo {
           background: #fbcfe8;
@@ -10129,6 +10214,7 @@ export default function CommonViewPage() {
         .swimlane-header.leave { background: var(--leave-bg); color: #15803d; }
         .swimlane-header.externalHoliday { background: var(--externalHoliday-bg); color: #be185d; }
         .swimlane-header.blocked { background: var(--blocked-bg); color: #9f1239; }
+        .swimlane-header.waiting-client { background: #e2c15b; color: #4f3a00; }
         .swimlane-header.oneh { background: var(--oneh-bg); color: #0369a1; }
         .swimlane-header.personal { background: var(--personal-bg); color: #7e22ce; }
         .swimlane-header.external { background: var(--external-bg); color: #0369a1; }
@@ -10144,6 +10230,7 @@ export default function CommonViewPage() {
         .swimlane-badge.leave { border-color: var(--leave-accent); color: #15803d; }
         .swimlane-badge.externalHoliday { border-color: var(--externalHoliday-accent); color: #be185d; }
         .swimlane-badge.blocked { border-color: var(--blocked-accent); color: #9f1239; }
+        .swimlane-badge.waiting-client { border-color: #b8860b; color: #4f3a00; }
         .swimlane-badge.oneh { border-color: var(--oneh-accent); color: #0369a1; }
         .swimlane-badge.personal { border-color: var(--personal-accent); color: #7e22ce; }
         .swimlane-badge.external { border-color: var(--external-accent); color: #0369a1; }
@@ -10159,6 +10246,7 @@ export default function CommonViewPage() {
         .swimlane-accent.leave { border-left: 4px solid var(--leave-accent); }
         .swimlane-accent.externalHoliday { border-left: 4px solid var(--externalHoliday-accent); }
         .swimlane-accent.blocked { border-left: 0; }
+        .swimlane-accent.waiting-client { border-left: 0; }
         .swimlane-accent.oneh { border-left: 0; }
         .swimlane-accent.personal { border-left: 0; }
         .swimlane-accent.external { border-left: 4px solid var(--external-accent); }
@@ -13546,6 +13634,7 @@ export default function CommonViewPage() {
                       else if (row.id === "absent") dayEntries[iso] = dayData?.absent || []
                       else if (row.id === "leave") dayEntries[iso] = dayData?.leave || []
                       else if (row.id === "externalHoliday") dayEntries[iso] = dayData?.externalHoliday || []
+                      else if (row.id === "waitingClient") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.waitingClient || [])
                       else if (row.id === "blocked") dayEntries[iso] = mergePrintTaskEntries(row.id, dayData?.blocked || [])
                       else if (isOneHSlotRowId(row.id)) {
                         const oneHEntries = includeOneH ? dayData?.oneH || [] : []
@@ -13587,6 +13676,7 @@ export default function CommonViewPage() {
                       if (rowId === "absent") return "absence"
                       if (rowId === "leave") return "leave"
                       if (rowId === "externalHoliday") return "externalHoliday"
+                      if (rowId === "waitingClient") return "waiting-client"
                       if (rowId === "blocked") return "blocked"
                       if (isOneHSlotRowId(rowId as CommonType)) return "oneh"
                       if (isPersonalRowId(rowId as CommonType)) return "personal"
@@ -13783,8 +13873,8 @@ export default function CommonViewPage() {
                             ) : null}
                           </div>
                         ))
-                      } else if (isOneHSlotRowId(row.id) || row.id === "r1") {
-                        return (entries as (OneHItem | R1Item)[]).map((e, idx: number) => (
+                      } else if (isOneHSlotRowId(row.id) || row.id === "r1" || row.id === "waitingClient") {
+                        return (entries as FastTaskEntry[]).map((e, idx: number) => (
                           <div
                             key={idx}
                             className={[
@@ -13798,7 +13888,9 @@ export default function CommonViewPage() {
                             <div className="week-table-entry-main">
                                   <span>
                                   <span className="week-table-line-number">{idx + 1}.</span>
-                                  <span className="oneh-slot-indicator">{getOneHReportSlotLabel(e.oneHReportSlot)}</span>
+                                  {(row.id !== "waitingClient" || e.oneHReportSlot) ? (
+                                    <span className="oneh-slot-indicator">{getOneHReportSlotLabel(e.oneHReportSlot)}</span>
+                                  ) : null}
                                   <span className="period-indicator">{getCommonTaskPeriodLabel(e.finishPeriod)}</span>
                                   {e.isDeadlineImportant ? (
                                     <span className="deadline-indicator">{getDeadlineIndicatorLabel(e.dueDate)}</span>
@@ -14367,7 +14459,7 @@ export default function CommonViewPage() {
                                           </span>
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
-                                        {isFastTaskRowId(row.id)
+                                        {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
                                         {reviewButton}
@@ -14399,7 +14491,7 @@ export default function CommonViewPage() {
                                           </span>
                                         ) : null}
                                         {(row.id === "external" || row.id === "internal") ? renderSwimlaneMeetingStatusControl(cell) : null}
-                                        {isFastTaskRowId(row.id)
+                                        {isFastTaskRowId(row.id) && row.id !== "waitingClient"
                                           ? renderFastTaskReorderControls(row.items, cell)
                                           : null}
                                         {reviewButton}
