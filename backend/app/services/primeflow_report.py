@@ -26,8 +26,13 @@ from app.config import settings
 logger = logging.getLogger(__name__)
 REPORT_TYPE = "primeflow_1h"
 SLOTS = ("10:00", "11:00", "11:50", "14:10", "14:20", "16:00")
-STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "DONE": 2}
-STATUS_MARKERS = {"IN_PROGRESS": "🟡 IN PROGRESS", "TODO": "⚪ TODO", "DONE": "✅ DONE"}
+STATUS_ORDER = {"IN_PROGRESS": 0, "TODO": 1, "WAITING_CLIENT": 2, "DONE": 3}
+STATUS_MARKERS = {
+    "IN_PROGRESS": "🟡 IN PROGRESS",
+    "TODO": "⚪ TODO",
+    "WAITING_CLIENT": "🟣 WAITING FOR CLIENT",
+    "DONE": "✅ DONE",
+}
 REMINDER_CATEGORY_NORMALIZED = "pyetjet per 1h"
 BOARD_REMINDER_SECTION_TITLE = "PYETJET PER 1H - BORD"
 REMINDER_SECTION_TITLE = "STAFF - HAPAT PER 1H"
@@ -48,6 +53,7 @@ TRANSIENT_CODES = {429, 500, 502, 503, 504}
 STATUS_COLORS = {
     "TODO": ("#fbcfe8", "#111827", "#ec4899"),
     "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
+    "WAITING_CLIENT": ("#f5e6b3", "#7a5a00", "#d4a72c"),
     "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
 }
 REPORT_STRIKE_LEGEND = (

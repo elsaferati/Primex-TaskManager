@@ -84,7 +84,7 @@ type TaskChecklist = {
   items: ChecklistItem[]
 }
 
-const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
+const TASK_STATUSES = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 const TASK_PRIORITIES = ["NORMAL", "HIGH"] as const
 const PROJECT_TASK_TYPES = ["NORMAL", "HIGH", "1H", "R1", "PERSONAL", "BLLOK"] as const
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
@@ -95,6 +95,7 @@ const ME_FILTER = "__me__"
 const TASK_STATUS_LABELS: Record<(typeof TASK_STATUSES)[number], string> = {
   TODO: "To Do",
   IN_PROGRESS: "In Progress",
+  WAITING_CLIENT: "Waiting for Client",
   WAITING_CONFIRMATION: "Waiting Confirmation",
   DONE: "Done",
 }
@@ -2736,6 +2737,7 @@ export default function ProjectPage() {
     const buckets: Record<(typeof TASK_STATUSES)[number], Task[]> = {
       TODO: [],
       IN_PROGRESS: [],
+      WAITING_CLIENT: [],
       WAITING_CONFIRMATION: [],
       DONE: [],
     }
@@ -2743,6 +2745,8 @@ export default function ProjectPage() {
       const statusValue = (task.status || "TODO") as (typeof TASK_STATUSES)[number]
       if (statusValue === "IN_PROGRESS") {
         buckets.IN_PROGRESS.push(task)
+      } else if (statusValue === "WAITING_CLIENT") {
+        buckets.WAITING_CLIENT.push(task)
       } else if (statusValue === "WAITING_CONFIRMATION") {
         buckets.WAITING_CONFIRMATION.push(task)
       } else if (statusValue === "DONE") {
@@ -2761,6 +2765,7 @@ export default function ProjectPage() {
     }
     buckets.TODO.sort(sortNewestFirst)
     buckets.IN_PROGRESS.sort(sortNewestFirst)
+    buckets.WAITING_CLIENT.sort(sortNewestFirst)
     buckets.WAITING_CONFIRMATION.sort(sortNewestFirst)
     buckets.DONE.sort(sortNewestFirst)
     return buckets
@@ -3873,6 +3878,8 @@ export default function ProjectPage() {
                   const statusValue = (task.status || "TODO") as (typeof TASK_STATUSES)[number]
                   const statusRowClass = statusValue === "DONE"
                     ? "border-green-200 border-l-green-500 bg-green-50/30 opacity-80"
+                    : statusValue === "WAITING_CLIENT"
+                      ? "border-[#D4A72C] border-l-[#B8860B] bg-[#F5E6B3]/60"
                     : statusValue === "WAITING_CONFIRMATION"
                       ? "border-blue-200 border-l-blue-500 bg-blue-50/40"
                       : statusValue === "IN_PROGRESS"

@@ -202,7 +202,7 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const STATUS_OPTIONS = ["OPEN", "INACTIVE"] as const
-const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
+const ALL_TODAY_TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 
 const NO_PROJECT_TYPES = [
   { id: "normal", label: "Normal", description: "General tasks without a project." },
@@ -900,6 +900,7 @@ function systemFrequencyShortLabel(freq?: SystemTaskTemplate["frequency"] | stri
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "WAITING_CLIENT") return "Waiting for Client"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "TO DO"
   if (status === "DONE") return "Done"
@@ -915,6 +916,7 @@ function normalizeDailyReportStatusKey(status?: string | null) {
   if (normalized === "OPEN") return "TODO"
   if (normalized === "TODO" || normalized === "TO_DO") return "TODO"
   if (normalized === "IN_PROGRESS" || normalized === "INPROGRESS") return "IN_PROGRESS"
+  if (normalized === "WAITING_CLIENT" || normalized === "WAITING_FOR_CLIENT") return "WAITING_CLIENT"
   if (normalized === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
   if (normalized === "DONE") return "DONE"
   return normalized
@@ -923,6 +925,7 @@ function normalizeDailyReportStatusKey(status?: string | null) {
 function dailyReportStatusChipLabel(key: string) {
   if (key === "TODO") return "TO DO"
   if (key === "IN_PROGRESS") return "IN PROGRESS"
+  if (key === "WAITING_CLIENT") return "WAITING FOR CLIENT"
   if (key === "WAITING_CONFIRMATION") return "WAITING CONFIRMATION"
   if (key === "DONE") return "DONE"
   return key.replace(/_/g, " ")
@@ -982,6 +985,7 @@ function getCompleteTaskTitle(task: Task, sourceContent?: string | null) {
 
 function taskStatusValue(task: Task): Task["status"] {
   if (task.status === "DONE" || task.completed_at) return "DONE"
+  if (task.status === "WAITING_CLIENT") return "WAITING_CLIENT"
   if (task.status === "WAITING_CONFIRMATION") return "WAITING_CONFIRMATION"
   if (task.status === "IN_PROGRESS") return "IN_PROGRESS"
   return "TODO"
@@ -989,6 +993,7 @@ function taskStatusValue(task: Task): Task["status"] {
 
 function statusBadgeClasses(status: Task["status"]) {
   if (status === "DONE") return "bg-green-100 text-green-700 border-green-200"
+  if (status === "WAITING_CLIENT") return "bg-[#F5E6B3] text-[#7A5A00] border-[#D4A72C]"
   if (status === "WAITING_CONFIRMATION") return "bg-blue-100 text-blue-700 border-blue-200"
   if (status === "IN_PROGRESS") return "bg-amber-100 text-amber-800 border-amber-200"
   return "bg-slate-100 text-slate-700 border-slate-200"
@@ -1040,6 +1045,7 @@ function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
   if (status === "TODO") return "TO DO"
   if (status === "IN_PROGRESS") return "IN PROGRESS"
+  if (status === "WAITING_CLIENT") return "Waiting for Client"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "NOT_DONE") return "Not Done"
   if (status === "DONE") return "Done"
@@ -3225,7 +3231,7 @@ export default function DepartmentKanban() {
       projectTitle?: string | null
       description: string
       status: string
-      statusKey?: "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE"
+      statusKey?: "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE"
       bz: string
       kohaBz: string
       tyo: string
@@ -3249,13 +3255,14 @@ export default function DepartmentKanban() {
     const statusOrder = {
       TODO: 0,
       IN_PROGRESS: 1,
-      WAITING_CONFIRMATION: 2,
-      DONE: 3,
+      WAITING_CLIENT: 2,
+      WAITING_CONFIRMATION: 3,
+      DONE: 4,
     } as const
     type StatusKey = keyof typeof statusOrder
     const normalizeTaskStatusKey = (task: Task): StatusKey => {
       const raw = task.status?.toUpperCase() || ""
-      if (raw === "TODO" || raw === "IN_PROGRESS" || raw === "WAITING_CONFIRMATION" || raw === "DONE") {
+      if (raw === "TODO" || raw === "IN_PROGRESS" || raw === "WAITING_CLIENT" || raw === "WAITING_CONFIRMATION" || raw === "DONE") {
         return raw
       }
       if (task.completed_at) return "DONE"
@@ -3628,8 +3635,9 @@ export default function DepartmentKanban() {
     const statusOrder: Record<string, number> = {
       TODO: 0,
       IN_PROGRESS: 1,
-      WAITING_CONFIRMATION: 2,
-      DONE: 3,
+      WAITING_CLIENT: 2,
+      WAITING_CONFIRMATION: 3,
+      DONE: 4,
     }
     for (const row of dailyUserReportDisplayRows) {
       const key = normalizeDailyReportStatusKey(row.status)
@@ -3709,7 +3717,7 @@ export default function DepartmentKanban() {
       projectTitle?: string | null
       description: string
       status: string
-      statusKey?: "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE"
+      statusKey?: "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE"
       bz: string
       kohaBz: string
       tyo: string
@@ -3734,13 +3742,14 @@ export default function DepartmentKanban() {
       const statusOrder = {
         TODO: 0,
         IN_PROGRESS: 1,
-        WAITING_CONFIRMATION: 2,
-        DONE: 3,
+        WAITING_CLIENT: 2,
+        WAITING_CONFIRMATION: 3,
+        DONE: 4,
       } as const
       type StatusKey = keyof typeof statusOrder
       const normalizeTaskStatusKey = (task: Task): StatusKey => {
         const raw = task.status?.toUpperCase() || ""
-        if (raw === "TODO" || raw === "IN_PROGRESS" || raw === "WAITING_CONFIRMATION" || raw === "DONE") {
+        if (raw === "TODO" || raw === "IN_PROGRESS" || raw === "WAITING_CLIENT" || raw === "WAITING_CONFIRMATION" || raw === "DONE") {
           return raw
         }
         if (task.completed_at) return "DONE"

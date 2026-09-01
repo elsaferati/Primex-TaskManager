@@ -261,6 +261,8 @@ def _status_color(task: dict) -> str:
         return "#C4FDC4"
     if classification == "IN_PROGRESS":
         return "#FFFF00"
+    if classification == "WAITING_CLIENT":
+        return "#F5E6B3"
     if classification == "WAITING_CONFIRMATION":
         return "#FFEDD5"
     if classification in {"POSTPONED_APPROVED", "POSTPONED_UNAPPROVED"}:

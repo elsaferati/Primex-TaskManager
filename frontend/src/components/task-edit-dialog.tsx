@@ -25,6 +25,7 @@ import { fetchUsersLookupCached } from "@/lib/users-cache"
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To do" },
   { value: "IN_PROGRESS", label: "In progress" },
+  { value: "WAITING_CLIENT", label: "Waiting for Client" },
   { value: "WAITING_CONFIRMATION", label: "Waiting for Confirmation" },
   { value: "DONE", label: "Done" },
 ] as const
@@ -58,6 +59,8 @@ const ONE_H_REPORT_SLOT_OPTIONS = [
   { value: "16:00", label: "16:00" },
 ] as const
 const ONE_H_REPORT_SLOT_SET = new Set<string>(ONE_H_REPORT_SLOT_OPTIONS.map((option) => option.value))
+const EMAIL_TASK_TITLE_RE = /\bEM\b/i
+const EIGHT_AM_TITLE_RE = /\b0?8:00\b/
 
 type TaskStatusValue = typeof TASK_STATUS_OPTIONS[number]["value"]
 type FastTaskTypeValue = typeof FAST_TASK_TYPES[number]["value"]
@@ -66,6 +69,16 @@ type ProjectTaskTypeValue = typeof PROJECT_TASK_TYPES[number]["value"]
 function getOneHReportSlotValue(value?: string | null) {
   const normalized = (value || "").trim()
   return ONE_H_REPORT_SLOT_SET.has(normalized) ? normalized : ONE_H_REPORT_SLOT_NONE_VALUE
+}
+
+function isEmailTaskTitle(title: string) {
+  return EMAIL_TASK_TITLE_RE.test(title)
+}
+
+function normalizeEmailTaskTitle(title: string) {
+  const trimmed = title.trim()
+  if (!isEmailTaskTitle(trimmed) || EIGHT_AM_TITLE_RE.test(trimmed)) return trimmed
+  return `08:00 ${trimmed}`
 }
 
 function getCurrentFastTaskType(task: Task | null): FastTaskTypeValue {
@@ -178,7 +191,7 @@ export function TaskEditDialog({
   const handleSave = React.useCallback(async () => {
     if (!task) return
 
-    const nextTitle = title.trim()
+    const nextTitle = normalizeEmailTaskTitle(title)
     if (!isNoteOriginTask && nextTitle.length < 2) {
       toast.error("Title must be at least 2 characters.")
       return
@@ -222,7 +235,7 @@ export function TaskEditDialog({
       // updates and keeps restricted GA-note fields (such as title) out of a
       // date/type-only edit.
       const updates: Record<string, unknown> = {
-        ...(!isNoteOriginTask && title !== (task.title || "") ? { title: nextTitle } : {}),
+        ...(!isNoteOriginTask && nextTitle !== (task.title || "") ? { title: nextTitle } : {}),
         ...(showDescriptionField && description !== (task.description || "")
           ? { description: nextDescription }
           : {}),
@@ -464,7 +477,17 @@ export function TaskEditDialog({
               || (isProjectTask(task) && (projectTaskType === "1H" || projectTaskType === "R1"))) ? (
               <div className="space-y-2">
                 <Label>{fastTaskType === "R1" || projectTaskType === "R1" ? "R1 report time" : "1H report time"}</Label>
-                <Select value={oneHReportSlot} onValueChange={setOneHReportSlot}>
+                <Select
+                  value={oneHReportSlot}
+                  onValueChange={(value) => {
+                    if (EIGHT_AM_TITLE_RE.test(normalizeEmailTaskTitle(title)) && value !== "10:00") {
+                      toast.warning("08:00 tasks are 1H tasks and must use the 10:00 slot.")
+                      setOneHReportSlot("10:00")
+                      return
+                    }
+                    setOneHReportSlot(value)
+                  }}
+                >
                   <SelectTrigger disabled={saving}>
                     <SelectValue placeholder="Select time" />
                   </SelectTrigger>

@@ -83,6 +83,7 @@ WFC_TOKEN_RE = re.compile(r"\bWFC\b", re.I)
 STATUS_COLORS = {
     "TODO": "#FFC4ED",
     "IN_PROGRESS": "#FFFF00",
+    "WAITING_CLIENT": "#F5E6B3",
     "WAITING_CONFIRMATION": "#FFEDD5",
     "DONE": "#C4FDC4",
 }

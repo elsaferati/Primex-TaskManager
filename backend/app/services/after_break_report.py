@@ -99,6 +99,7 @@ DONE_AM_COLUMNS = [
 PERSONAL_GROUPS = [
     ("TODO", "TODO"),
     ("IN PROGRESS", "IN_PROGRESS"),
+    ("WAITING FOR CLIENT", "WAITING_CLIENT"),
     ("WAITING CONFIRMATION", "WAITING_CONFIRMATION"),
     ("DONE", "DONE"),
 ]
@@ -544,7 +545,7 @@ def normalize_after_break_report_sections(sections: list[dict[str, Any]] | None)
         elif title == SECTION_TITLES[7]:
             body = "\n".join(["NEW SYSTEM TASKS: 0", "", "PYETJE PER KONFIRMIM: 0"])
         elif title == SECTION_TITLES[8]:
-            body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WAITING CONFIRMATION: 0", "", "DONE: 0"])
+            body = "\n".join(["TODO: 0", "", "IN PROGRESS: 0", "", "WAITING FOR CLIENT: 0", "", "WAITING CONFIRMATION: 0", "", "DONE: 0"])
         elif title in {SECTION_TITLES[10], SECTION_TITLES[11]}:
             body = "TODO: 0\n\nIN PROGRESS: 0\n\nDONE: 0\n\nLATE: 0"
         else:

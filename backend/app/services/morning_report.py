@@ -112,7 +112,7 @@ def _default_body(title: str) -> str:
                 "BLLOK: 0",
             ]
         )
-    return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
+    return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WAITING FOR CLIENT: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
 
 
 def _is_manual_email_line(line: str) -> bool:

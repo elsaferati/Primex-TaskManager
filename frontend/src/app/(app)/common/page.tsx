@@ -554,11 +554,12 @@ const commonTaskStateClassName = (status?: string | null, isDone?: boolean) => {
   if (normalized === "DONE") return "task-state-done"
   if (normalized === "IN_PROGRESS") return "task-state-in-progress"
   if (normalized === "WAITING_CONFIRMATION") return "task-state-waiting"
+  if (normalized === "WAITING_CLIENT") return "task-state-waiting-client"
   if (normalized === "TODO") return "task-state-todo"
   return ""
 }
 
-type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange"
+type CommonColorFilter = "all" | "pink" | "yellow" | "red" | "green" | "orange" | "gold"
 type CommonTaskFocusFilter = "all" | "new" | "eightAm" | "deadline"
 
 const getCommonTaskColor = (entry: {
@@ -574,6 +575,7 @@ const getCommonTaskColor = (entry: {
   if (isCommonTaskDueOnDate(entry)) return "red"
   if (normalized === "IN_PROGRESS") return "yellow"
   if (normalized === "WAITING_CONFIRMATION") return "orange"
+  if (normalized === "WAITING_CLIENT") return "gold"
   if (normalized === "TODO") return "pink"
   return null
 }
@@ -637,6 +639,7 @@ const COMMON_COLOR_FILTER_OPTIONS: {
   { value: "red", label: "Red", swatch: "#dc2626" },
   { value: "green", label: "Green", swatch: "#d4ffe1" },
   { value: "orange", label: "Orange", swatch: "#ffedd5" },
+  { value: "gold", label: "Gold", swatch: "#F5E6B3" },
 ]
 
 type MeetingColumnKey = "nr" | "day" | "topic" | "check" | "owner" | "time"
@@ -9165,6 +9168,10 @@ export default function CommonViewPage() {
           background: #ffedd5;
           border-left-color: #ffffff;
         }
+        .swimlane-cell.task-state-waiting-client {
+          background: #f5e6b3;
+          border-left-color: #ffffff;
+        }
         .swimlane-cell.task-state-in-progress {
           background:rgb(255, 253, 195);
           border-left-color: #ffffff;
@@ -9623,6 +9630,9 @@ export default function CommonViewPage() {
         .week-table-entry.task-state-waiting {
           background: #ffedd5;
         }
+        .week-table-entry.task-state-waiting-client {
+          background: #f5e6b3;
+        }
         .week-table-entry.task-state-todo {
           background: #fbcfe8;
         }
@@ -9877,6 +9887,7 @@ export default function CommonViewPage() {
         .week-table-view.neutral-all-days .week-table-entry.starts-selected-day:not(.task-state-done),
         .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-in-progress,
         .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-waiting,
+        .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-waiting-client,
         .week-table-view.neutral-all-days .week-table-entry.starts-selected-day.task-state-todo {
           background: linear-gradient(90deg, rgba(239, 246, 255, 0.98), rgba(255, 255, 255, 0.98)) !important;
           border: 2px solid #2563eb;
@@ -9917,6 +9928,7 @@ export default function CommonViewPage() {
         .week-table-view.neutral-all-days .week-table-entry.deadline-important:not(.task-state-done),
         .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-in-progress,
         .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-waiting,
+        .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-waiting-client,
         .week-table-view.neutral-all-days .week-table-entry.deadline-important.task-state-todo {
           background: linear-gradient(90deg, rgba(254, 242, 242, 0.98), rgba(255, 255, 255, 0.98)) !important;
           border: 2px solid #dc2626;
@@ -9934,6 +9946,7 @@ export default function CommonViewPage() {
         .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-done,
         .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-in-progress,
         .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-waiting,
+        .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-waiting-client,
         .week-table-view.neutral-all-days .week-table-entry.repeat-task-muted.task-state-todo {
           color: #9ca3af;
         }
