@@ -1470,6 +1470,9 @@ export default function WeeklyPlannerPage() {
     if (normalized === "WAITING_CONFIRMATION") {
       return "border-[#C2410C] bg-[#FFEDD5] text-[#9A3412]"
     }
+    if (normalized === "WAITING_CLIENT") {
+      return "border-[#D4A72C] bg-[#F5E6B3] text-[#7A5A00]"
+    }
     if (normalized === "DONE") {
       return "border-[#000000] bg-[#C4FDC4] text-[#000000]"
     }
@@ -1498,6 +1501,9 @@ export default function WeeklyPlannerPage() {
       if (normalizedDaily === "WAITING_CONFIRMATION") {
         return getStatusCardClasses("WAITING_CONFIRMATION")
       }
+      if (normalizedDaily === "WAITING_CLIENT") {
+        return getStatusCardClasses("WAITING_CLIENT")
+      }
       if (normalizedDaily) {
         return getStatusCardClasses("TODO")
       }
@@ -1519,6 +1525,9 @@ export default function WeeklyPlannerPage() {
 
       if (normalized === "WAITING_CONFIRMATION") {
         return getStatusCardClasses("TODO")
+      }
+      if (normalized === "WAITING_CLIENT") {
+        return getStatusCardClasses("WAITING_CLIENT")
       }
       return getStatusCardClasses(normalized === "TODO" ? "TODO" : "IN_PROGRESS")
     },
@@ -1552,6 +1561,9 @@ export default function WeeklyPlannerPage() {
       if (normalizedDaily === "WAITING_CONFIRMATION") {
         return "WAITING_CONFIRMATION"
       }
+      if (normalizedDaily === "WAITING_CLIENT") {
+        return "WAITING_CLIENT"
+      }
       if (normalizedDaily) {
         return "TODO"
       }
@@ -1573,6 +1585,9 @@ export default function WeeklyPlannerPage() {
 
       if (normalized === "WAITING_CONFIRMATION") {
         return "TODO"
+      }
+      if (normalized === "WAITING_CLIENT") {
+        return "WAITING_CLIENT"
       }
       return normalized === "TODO" ? "TODO" : "IN_PROGRESS"
     },
@@ -2171,6 +2186,7 @@ export default function WeeklyPlannerPage() {
             .task-status-todo { background-color: #FFC4ED; }
             .task-status-in-progress { background-color: #FFFF00; }
             .task-status-waiting { background-color: #FFEDD5; border-color: #C2410C; color: #9A3412; }
+            .task-status-waiting-client { background-color: #F5E6B3; border-color: #D4A72C; color: #7A5A00; }
             .task-status-done { background-color: #C4FDC4; }
             .task-status-new-open { background-color: #dbeafe; border-color: #1d4ed8; }
             .task-status-new-done { background-color: #6ee7b7; border-color: #059669; }
@@ -2646,11 +2662,13 @@ export default function WeeklyPlannerPage() {
       if (isNew) {
         if (statusValue === "DONE") return "task-status-new-done"
         if (statusValue === "WAITING_CONFIRMATION") return "task-status-waiting"
+        if (statusValue === "WAITING_CLIENT") return "task-status-waiting-client"
         if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
         return "task-status-new-open"
       }
       if (statusValue === "DONE") return "task-status-done"
       if (statusValue === "WAITING_CONFIRMATION") return "task-status-waiting"
+      if (statusValue === "WAITING_CLIENT") return "task-status-waiting-client"
       if (statusValue === "IN_PROGRESS") return "task-status-in-progress"
       return "task-status-todo"
     }

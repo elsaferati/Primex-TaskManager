@@ -180,6 +180,10 @@ const PROJECT_STATUS_BADGES: Record<string, { label: string; className: string }
     label: "In progress",
     className: "border-amber-200 bg-amber-50 text-amber-700",
   },
+  WAITING_CLIENT: {
+    label: "Waiting for Client",
+    className: "border-[#D4A72C] bg-[#F5E6B3] text-[#7A5A00]",
+  },
   WAITING_CONFIRMATION: {
     label: "Waiting Confirmation",
     className: "border-blue-200 bg-blue-50 text-blue-700",

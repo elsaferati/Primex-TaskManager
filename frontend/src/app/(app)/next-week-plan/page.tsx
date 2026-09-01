@@ -55,6 +55,7 @@ const TASK_PRIORITY_STYLES: Record<string, string> = {
 const TASK_STATUS_STYLES: Record<string, { label: string; dot: string; pill: string }> = {
   TODO: { label: "TODO", dot: "bg-slate-500", pill: "bg-slate-100 text-slate-700" },
   IN_PROGRESS: { label: "In progress", dot: "bg-amber-500", pill: "bg-amber-50 text-amber-700" },
+  WAITING_CLIENT: { label: "Waiting for Client", dot: "bg-[#B8860B]", pill: "bg-[#F5E6B3] text-[#7A5A00]" },
   WAITING_CONFIRMATION: { label: "Waiting Confirmation", dot: "bg-blue-600", pill: "bg-blue-50 text-blue-700" },
   DONE: { label: "Done", dot: "bg-emerald-500", pill: "bg-emerald-50 text-emerald-700" },
 }
@@ -68,7 +69,7 @@ const ADDED_MARK_START = "[[added]]"
 const ADDED_MARK_END = "[[/added]]"
 const NOTE_MARK_TOKEN_RE = /\[\[(done|added)\]\]|\[\[\/(done|added)\]\]/g
 
-type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
+type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
 type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed"
 type ContentFilter = "all" | "emails"
 type NextWeekFilter = "all" | "checked" | "unchecked"
@@ -687,6 +688,7 @@ function normalizeTaskStatus(value?: string | null): NormalizedTaskStatus {
   const normalized = value.trim().toLowerCase().replace(/\s+/g, "_")
   if (["todo", "to_do", "to-do", "to do"].includes(normalized)) return "TODO"
   if (["in_progress", "in-progress", "in progress"].includes(normalized)) return "IN_PROGRESS"
+  if (["waiting_client", "waiting-client", "waiting for client"].includes(normalized)) return "WAITING_CLIENT"
   if (["waiting_confirmation", "waiting-confirmation", "waiting confirmation"].includes(normalized)) return "WAITING_CONFIRMATION"
   if (["done"].includes(normalized)) return "DONE"
   return "UNKNOWN"
@@ -702,9 +704,11 @@ function aggregateTaskStatus(statuses: Array<string | null | undefined>): Normal
   if (allDone) return "DONE"
   const allWaiting = normalized.every((status) => status === "WAITING_CONFIRMATION")
   if (allWaiting) return "WAITING_CONFIRMATION"
+  const allWaitingClient = normalized.every((status) => status === "WAITING_CLIENT")
+  if (allWaitingClient) return "WAITING_CLIENT"
   const anyInProgress = normalized.some((status) => status === "IN_PROGRESS")
   if (anyInProgress) return "IN_PROGRESS"
-  const anyWaiting = normalized.some((status) => status === "WAITING_CONFIRMATION")
+  const anyWaiting = normalized.some((status) => status === "WAITING_CONFIRMATION" || status === "WAITING_CLIENT")
   const anyTodo = normalized.some((status) => status === "TODO")
   if (anyWaiting && anyTodo) return "IN_PROGRESS"
   if (anyWaiting) return "WAITING_CONFIRMATION"

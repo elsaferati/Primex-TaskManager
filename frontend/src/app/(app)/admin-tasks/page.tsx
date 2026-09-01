@@ -39,7 +39,7 @@ const FINISH_PERIOD_NONE_VALUE = "__none__"
 const PRIORITY_OPTIONS: TaskPriority[] = ["NORMAL", "HIGH", "BLLOK"]
 const FINISH_PERIOD_OPTIONS: TaskFinishPeriod[] = ["AM", "PM"]
 const FINISH_PERIOD_NONE_LABEL = "None (all day)"
-const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"] as const
+const TASK_STATUS_OPTIONS = ["TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"] as const
 const SYSTEM_STATUS_OPTIONS = ["OPEN", "DONE"] as const
 type AdminTasksSectionId = "all-tasks" | "common" | "ga-time"
 const NO_PROJECT_TYPES = [
@@ -491,6 +491,7 @@ function getDisplayPriority(task: Task): TaskPriority {
 function reportStatusLabel(status?: Task["status"] | null) {
   if (!status) return "-"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "WAITING_CLIENT") return "Waiting for Client"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "TODO") return "To Do"
   if (status === "DONE") return "Done"
@@ -507,6 +508,7 @@ function formatSystemOccurrenceStatus(status?: string | null) {
   if (!status) return "-"
   if (status === "TODO") return "To Do"
   if (status === "IN_PROGRESS") return "In Progress"
+  if (status === "WAITING_CLIENT") return "Waiting for Client"
   if (status === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (status === "NOT_DONE") return "Not Done"
   if (status === "DONE") return "Done"
@@ -709,6 +711,7 @@ const DEFAULT_GA_TIME_ENTRY_FORMAT: GaTimeEntryFormat = {
 }
 
 const GA_TIME_BACKGROUND_COLORS = [
+  "#FFFFFF",
   "#FACC15",
   "#A855F7",
   "#EF4444",
@@ -727,6 +730,16 @@ const GA_TIME_STRONG_BACKGROUND_COLORS: Record<string, string> = {
 
 const normalizeGaTimeBackgroundColor = (color: string) =>
   GA_TIME_STRONG_BACKGROUND_COLORS[color.toUpperCase()] || color
+
+const gaTimeTextColorForBackground = (backgroundColor: string, textColor: string) => {
+  const normalizedBackground = normalizeGaTimeBackgroundColor(backgroundColor).toUpperCase()
+  // Red cells use white text by default for contrast, but an explicit text
+  // colour chosen in the editor must still be respected (for example black).
+  const normalizedText = textColor.trim().toUpperCase()
+  return normalizedBackground === "#EF4444" && normalizedText === DEFAULT_GA_TIME_ENTRY_FORMAT.text_color
+    ? "#FFFFFF"
+    : textColor
+}
 
 const GA_TIME_TEXT_COLORS = [
   { label: "Black", value: "#000000" },
@@ -834,10 +847,37 @@ function normalizeGaTimeRichTextValue(value: string) {
   if (!value) return ""
   if (typeof document === "undefined") return ""
   if (GA_TIME_RICH_TEXT_TAG_PATTERN.test(value)) return sanitizeGaTimeRichTextHtml(value)
-  return escapeHtml(value)
+  // contentEditable exposes plain text entities through innerHTML. Decode
+  // those entities before escaping once, otherwise each autosave can turn
+  // `&nbsp;` into visible `&amp;amp;nbsp;` text.
+  const decoded = document.createElement("div")
+  let plainValue = value
+  for (let pass = 0; pass < 3 && /&(?:amp;)*(?:nbsp|amp|lt|gt|quot);/i.test(plainValue); pass += 1) {
+    decoded.innerHTML = plainValue
+    plainValue = decoded.textContent || ""
+  }
+  return escapeHtml(plainValue)
     .replace(/\r\n/g, "\n")
     .replace(/\r/g, "\n")
     .replace(/\n/g, "<br>")
+}
+
+function applyGaTimeAutomaticContrast(value: string, backgroundColor: string) {
+  if (normalizeGaTimeBackgroundColor(backgroundColor).toUpperCase() !== "#EF4444") return value
+  if (typeof document === "undefined" || !GA_TIME_RICH_TEXT_TAG_PATTERN.test(value)) return value
+  const container = document.createElement("div")
+  container.innerHTML = normalizeGaTimeRichTextValue(value)
+  container.querySelectorAll("span[data-ga-color], span[style*='color'], font[color]").forEach((node) => {
+    const element = node as HTMLElement
+    const inlineColor = normalizeGaTimeInlineColor(
+      element.getAttribute("data-ga-color") || element.getAttribute("color") || element.style.color || ""
+    )
+    if (inlineColor !== "#FF0000") return
+    element.setAttribute("data-ga-color", "#FFFFFF")
+    element.style.color = "#FFFFFF"
+    element.removeAttribute("color")
+  })
+  return container.innerHTML
 }
 
 function getPlainGaTimeRichText(value: string) {
@@ -850,10 +890,11 @@ function getPlainGaTimeRichText(value: string) {
   return container.textContent || ""
 }
 
-function GaTimeRichTextContent({ value }: { value: string }) {
+function GaTimeRichTextContent({ value, backgroundColor }: { value: string; backgroundColor?: string }) {
   if (!value) return null
   if (typeof document === "undefined") return <>{getPlainGaTimeRichText(value)}</>
-  return <span dangerouslySetInnerHTML={{ __html: normalizeGaTimeRichTextValue(value) }} />
+  const html = applyGaTimeAutomaticContrast(value, backgroundColor || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color)
+  return <span dangerouslySetInnerHTML={{ __html: normalizeGaTimeRichTextValue(html) }} />
 }
 
 function GaTimeRichTextEditor({
@@ -875,10 +916,27 @@ function GaTimeRichTextEditor({
 }) {
   const editorRef = React.useRef<HTMLDivElement | null>(null)
   const lastEditorValueRef = React.useRef<string | null>(null)
+  const selectionRef = React.useRef<Range | null>(null)
+
+  const rememberSelection = React.useCallback(() => {
+    const editor = editorRef.current
+    const selection = window.getSelection()
+    if (!editor || !selection?.rangeCount || !selection.anchorNode || !editor.contains(selection.anchorNode)) return
+    const range = selection.getRangeAt(0)
+    // A toolbar press can momentarily report a collapsed caret. Keep the
+    // previously captured highlighted range in that case.
+    if (range.collapsed) return
+    selectionRef.current = range.cloneRange()
+  }, [])
 
   React.useEffect(() => {
     const editor = editorRef.current
     if (!editor || value === lastEditorValueRef.current) return
+    // Do not rewrite a focused contentEditable on every parent update: doing
+    // so resets the caret/selection and makes typing jump or lose characters.
+    if (document.activeElement === editor) {
+      return
+    }
     const normalized = normalizeGaTimeRichTextValue(value)
     if (editor.innerHTML !== normalized) editor.innerHTML = normalized
     lastEditorValueRef.current = normalized
@@ -910,6 +968,46 @@ function GaTimeRichTextEditor({
     const editor = editorRef.current
     if (!editor || disabled) return
     editor.focus()
+    if (selectionRef.current && editor.contains(selectionRef.current.commonAncestorContainer)) {
+      const selection = window.getSelection()
+      selection?.removeAllRanges()
+      selection?.addRange(selectionRef.current)
+    }
+    const selection = window.getSelection()
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null
+    // execCommand('foreColor') is inconsistent across browsers and can lose
+    // the selection when the toolbar is clicked. Wrap the selected contents
+    // explicitly so the chosen colour is persisted in the editor HTML.
+    if (command === "foreColor" && commandValue && range && !range.collapsed && editor.contains(range.commonAncestorContainer)) {
+      const colored = document.createElement("span")
+      colored.setAttribute("data-ga-color", commandValue.toUpperCase())
+      colored.style.color = commandValue
+      colored.appendChild(range.extractContents())
+      // Remove older color wrappers before adding the new one. Repeatedly
+      // wrapping an already-coloured selection can otherwise grow the HTML
+      // until it exceeds the database content limit.
+      colored.querySelectorAll("span[data-ga-color], span[style*='color'], font[color]").forEach((node) => {
+        const nested = node as HTMLElement
+        if (nested.getAttribute("data-ga-size") === "large") {
+          nested.removeAttribute("data-ga-color")
+          nested.style.removeProperty("color")
+          nested.removeAttribute("color")
+          return
+        }
+        const parent = nested.parentNode
+        if (!parent) return
+        while (nested.firstChild) parent.insertBefore(nested.firstChild, nested)
+        parent.removeChild(nested)
+      })
+      range.insertNode(colored)
+      const selected = document.createRange()
+      selected.selectNodeContents(colored)
+      selection?.removeAllRanges()
+      selection?.addRange(selected)
+      selectionRef.current = selected.cloneRange()
+      emitCurrentValue(false)
+      return
+    }
     document.execCommand(command, false, commandValue)
     // Keep the browser's active range intact so the same selected text can
     // receive several formats (for example bold, red, and larger).
@@ -929,15 +1027,24 @@ function GaTimeRichTextEditor({
           backgroundColor: normalizeGaTimeBackgroundColor(
             cellFormat?.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color
           ),
-          color: cellFormat?.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+          color: gaTimeTextColorForBackground(
+            cellFormat?.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+            cellFormat?.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color
+          ),
           fontWeight: cellFormat?.is_bold ? 700 : 400,
           fontStyle: cellFormat?.is_italic ? "italic" : "normal",
         }}
         className={cn(
           "w-full rounded-md border border-slate-300 bg-white px-2 py-1 text-xs leading-5 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-200 empty:before:pointer-events-none empty:before:text-slate-400 empty:before:content-[attr(data-placeholder)]",
+          normalizeGaTimeBackgroundColor(
+            cellFormat?.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color
+          ).toUpperCase() === "#EF4444" && "ga-time-editor-contrast",
           multiline ? "min-h-[72px] whitespace-pre-wrap" : "min-h-8"
         )}
         onInput={() => emitCurrentValue(false)}
+        onSelect={rememberSelection}
+        onMouseUp={rememberSelection}
+        onKeyUp={rememberSelection}
         onBlur={() => {
           emitCurrentValue(true)
           onEditorBlur?.()
@@ -973,8 +1080,15 @@ function GaTimeRichTextEditor({
             type="button"
             className="h-4 w-4 rounded-full border border-slate-400"
             style={{ backgroundColor: color.value }}
-            onMouseDown={(event) => event.preventDefault()}
-            onClick={() => applyCommand("foreColor", color.value)}
+            onMouseDown={(event) => {
+              event.preventDefault()
+              rememberSelection()
+              applyCommand("foreColor", color.value)
+            }}
+            onClick={(event) => {
+              // Keyboard activation has no preceding mouse-down event.
+              if (event.detail === 0) applyCommand("foreColor", color.value)
+            }}
             disabled={disabled}
             aria-label={`${color.label} text`}
             title={`${color.label} text`}
@@ -983,7 +1097,10 @@ function GaTimeRichTextEditor({
         <button
           type="button"
           className="h-7 min-w-7 rounded border border-slate-300 bg-white px-2 text-xs font-bold text-slate-700"
-          onMouseDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => {
+            rememberSelection()
+            event.preventDefault()
+          }}
           onClick={() => applyCommand("bold")}
           disabled={disabled}
           title="Bold selected text"
@@ -994,7 +1111,10 @@ function GaTimeRichTextEditor({
         <button
           type="button"
           className="h-7 min-w-7 rounded border border-slate-300 bg-white px-2 text-xs italic text-slate-700"
-          onMouseDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => {
+            rememberSelection()
+            event.preventDefault()
+          }}
           onClick={() => applyCommand("italic")}
           disabled={disabled}
           title="Italic selected text"
@@ -1005,7 +1125,10 @@ function GaTimeRichTextEditor({
         <button
           type="button"
           className="h-7 min-w-8 rounded border border-slate-300 bg-white px-2 text-sm font-semibold text-slate-700"
-          onMouseDown={(event) => event.preventDefault()}
+          onMouseDown={(event) => {
+            rememberSelection()
+            event.preventDefault()
+          }}
           onClick={() => applyCommand("fontSize", "4")}
           disabled={disabled}
           title="Make selected text bigger"
@@ -1122,7 +1245,9 @@ function useGaTimeAutoSave({
       return
     }
     setStatus("pending")
-    const timeoutId = window.setTimeout(() => void saveLatest(), 700)
+    // Give normal typing pauses time to finish before autosaving; saving too
+    // aggressively causes a parent update while the contentEditable is active.
+    const timeoutId = window.setTimeout(() => void saveLatest(), 1500)
     return () => window.clearTimeout(timeoutId)
   }, [content, format, hasChanges, saveLatest])
 
@@ -1144,7 +1269,10 @@ const gaTimeEntryStyle = (entry: Partial<GaTimeEntryFormat>): React.CSSPropertie
   backgroundColor: normalizeGaTimeBackgroundColor(
     entry.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color
   ),
-  color: entry.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color,
+  color: gaTimeTextColorForBackground(
+    entry.background_color || DEFAULT_GA_TIME_ENTRY_FORMAT.background_color,
+    entry.text_color || DEFAULT_GA_TIME_ENTRY_FORMAT.text_color
+  ),
   fontWeight: entry.is_bold ? 700 : 400,
   fontStyle: entry.is_italic ? "italic" : "normal",
 })
@@ -1204,7 +1332,10 @@ function GaTimeEntryEditor({
                 format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
               )}
               style={{ backgroundColor: color }}
-              onClick={() => setFormat((current) => ({ ...current, background_color: color }))}
+              onClick={() => {
+                setFormat((current) => ({ ...current, background_color: color }))
+                if (color === "#EF4444") setContent((current) => applyGaTimeAutomaticContrast(current, color))
+              }}
               aria-label={`Cell color ${color}`}
               title={`Cell color ${color}`}
             />
@@ -1281,7 +1412,10 @@ function GaTimeRowCommentEditor({
                 format.background_color === color && "ring-2 ring-blue-500 ring-offset-1"
               )}
               style={{ backgroundColor: color }}
-              onClick={() => setFormat((current) => ({ ...current, background_color: color }))}
+              onClick={() => {
+                setFormat((current) => ({ ...current, background_color: color }))
+                if (color === "#EF4444") setComment((current) => applyGaTimeAutomaticContrast(current, color))
+              }}
               aria-label={`Comment cell color ${color}`}
               title={`Comment cell color ${color}`}
             />
@@ -2113,7 +2247,7 @@ export default function AdminTasksPage() {
     }
   }, [apiFetch, commonWeekStart, secondarySectionsReady])
 
-  const isAdmin = user?.role === "ADMIN"
+  const isAdmin = String(user?.role || "").trim().toUpperCase() === "ADMIN"
   const ganeUser = React.useMemo(
     () =>
       users.find((person) => {
@@ -6383,7 +6517,7 @@ export default function AdminTasksPage() {
                                       className="ga-time-entry"
                                       style={gaTimeEntryStyle(entry)}
                                     >
-                                      <GaTimeRichTextContent value={entry.content} />
+                                      <GaTimeRichTextContent value={entry.content} backgroundColor={entry.background_color} />
                                     </div>
                                   ))}
                                 {!entries.length && !internalMeetings.length && !externalMeetings.length && !slot.isSpecial ? (
@@ -6605,37 +6739,44 @@ export default function AdminTasksPage() {
                       const internalMeetings = gaInternalMeetingsByCell.get(cellKey) || []
                       const externalMeetings = gaExternalMeetingsByCell.get(cellKey) || []
                       return (
-                        <td key={`${cellKey}`} className="ga-time-cell">
+                        <td
+                          key={`${cellKey}`}
+                          className="ga-time-cell"
+                          onDragOver={(event) => {
+                            if (!canEditGaTimeSlots) return
+                            event.preventDefault()
+                            event.dataTransfer.dropEffect = "move"
+                            gaTimeDropTargetRef.current = {
+                              dayOfWeek,
+                              startTime: slot.start,
+                              endTime: slot.end,
+                              beforeEntryId: null,
+                            }
+                            setGaTimeDropTarget((current) =>
+                              current?.cellKey === cellKey && current.beforeEntryId === null
+                                ? current
+                                : { cellKey, beforeEntryId: null }
+                            )
+                          }}
+                          onDrop={(event) => {
+                            if (!canEditGaTimeSlots) return
+                            event.preventDefault()
+                            const entryId =
+                              event.dataTransfer.getData("application/x-ga-time-entry") ||
+                              event.dataTransfer.getData("text/plain") ||
+                              gaTimeDraggingIdRef.current ||
+                              gaTimeDraggingId
+                            if (!entryId) return
+                            gaTimeDropHandledRef.current = true
+                            void moveGaTimeEntry(entryId, dayOfWeek, slot.start, slot.end, null)
+                          }}
+                        >
                           <div
                             className={`ga-time-cell-content ${
                               gaTimeDropTarget?.cellKey === cellKey && gaTimeDropTarget.beforeEntryId === null
                                 ? "ga-time-drop-cell"
                                 : ""
                             }`}
-                            onDragOver={(event) => {
-                              if (!canEditGaTimeSlots) return
-                              event.preventDefault()
-                              event.dataTransfer.dropEffect = "move"
-                              gaTimeDropTargetRef.current = {
-                                dayOfWeek,
-                                startTime: slot.start,
-                                endTime: slot.end,
-                                beforeEntryId: null,
-                              }
-                              setGaTimeDropTarget({ cellKey, beforeEntryId: null })
-                            }}
-                            onDrop={(event) => {
-                              if (!canEditGaTimeSlots) return
-                              event.preventDefault()
-                              const entryId =
-                                event.dataTransfer.getData("application/x-ga-time-entry") ||
-                                event.dataTransfer.getData("text/plain") ||
-                                gaTimeDraggingIdRef.current ||
-                                gaTimeDraggingId
-                              if (!entryId) return
-                              gaTimeDropHandledRef.current = true
-                              void moveGaTimeEntry(entryId, dayOfWeek, slot.start, slot.end, null)
-                            }}
                           >
                             {internalMeetings.map((meeting, index) => (
                               <div
@@ -6672,7 +6813,11 @@ export default function AdminTasksPage() {
                               return (
                                 <div
                                   key={entry.id}
-                                  className={`ga-time-entry ga-time-draggable ${
+                                    className={`ga-time-entry ga-time-draggable select-none cursor-grab active:cursor-grabbing ${
+                                      normalizeGaTimeBackgroundColor(entry.background_color || "").toUpperCase() === "#EF4444"
+                                        ? "ga-time-entry-contrast"
+                                        : ""
+                                    } ${
                                     gaTimeDraggingId === entry.id ? "ga-time-dragging" : ""
                                   } ${
                                     gaTimeDropTarget?.cellKey === cellKey &&
@@ -6710,7 +6855,11 @@ export default function AdminTasksPage() {
                                       endTime: slot.end,
                                       beforeEntryId,
                                     }
-                                    setGaTimeDropTarget({ cellKey, beforeEntryId })
+                                    setGaTimeDropTarget((current) =>
+                                      current?.cellKey === cellKey && current.beforeEntryId === beforeEntryId
+                                        ? current
+                                        : { cellKey, beforeEntryId }
+                                    )
                                   }}
                                   onDrop={(event) => {
                                     if (!canEditGaTimeSlots) return
@@ -6751,19 +6900,29 @@ export default function AdminTasksPage() {
                                   }}
                                   title="Drag to move or click to edit"
                                 >
-                                  <button
-                                    type="button"
+                                  <span
                                     className="ga-time-entry-text"
                                     style={gaTimeEntryStyle(entry)}
+                                    role="button"
+                                    tabIndex={0}
+                                    draggable={canEditGaTimeSlots && !gaTimeSaving[entry.id]}
                                     onClick={() => {
                                       if (!canEditGaTimeSlots) return
                                       setGaTimeAddingCell(null)
                                       setGaTimeCommentEditingKey(null)
                                       setGaTimeEditingId(entry.id)
                                     }}
+                                    onKeyDown={(event) => {
+                                      if (event.key !== "Enter" && event.key !== " ") return
+                                      event.preventDefault()
+                                      if (!canEditGaTimeSlots) return
+                                      setGaTimeAddingCell(null)
+                                      setGaTimeCommentEditingKey(null)
+                                      setGaTimeEditingId(entry.id)
+                                    }}
                                   >
-                                    <GaTimeRichTextContent value={entry.content} />
-                                  </button>
+                                    <GaTimeRichTextContent value={entry.content} backgroundColor={entry.background_color} />
+                                  </span>
                                   {canEditGaTimeSlots ? (
                                     <button
                                       type="button"
@@ -6778,7 +6937,7 @@ export default function AdminTasksPage() {
                                 </div>
                               )
                             })}
-                            {canEditGaTimeSlots && (!slot.isSpecial || entries.length === 0) ? (
+                            {canEditGaTimeSlots ? (
                               gaTimeAddingCell === cellKey ? (
                                 <GaTimeEntryEditor
                                   saving={Boolean(gaTimeSaving[cellKey])}
@@ -6810,7 +6969,7 @@ export default function AdminTasksPage() {
                                     setGaTimeAddingCell(cellKey)
                                   }}
                                 >
-                                  {slot.isSpecial ? "Add" : "+"}
+                                  +
                                 </button>
                               )
                             ) : null}
@@ -8115,6 +8274,10 @@ export default function AdminTasksPage() {
           padding: 4px 6px;
           font-size: 11px;
         }
+        .admin-week-table .ga-time-entry-contrast,
+        .admin-week-table .ga-time-editor-contrast {
+          color: #ffffff;
+        }
         .admin-week-table .ga-time-entry > span {
           min-width: 0;
           overflow-wrap: anywhere;
@@ -8159,7 +8322,7 @@ export default function AdminTasksPage() {
           font-size: 11px;
           color: #0f172a;
           flex: 1;
-          cursor: pointer;
+          cursor: inherit;
         }
         .admin-week-table .ga-time-entry-text:disabled {
           cursor: default;

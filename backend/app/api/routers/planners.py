@@ -624,6 +624,8 @@ def _normalize_task_status(value: str | None) -> str:
         return "TODO"
     if normalized == "INPROGRESS":
         return "IN_PROGRESS"
+    if normalized in {"WAITINGCLIENT", "WAITING_FOR_CLIENT"}:
+        return "WAITING_CLIENT"
     if normalized == "WAITINGCONFIRMATION":
         return "WAITING_CONFIRMATION"
     if normalized == "WAITING_CONFIRMATION":
@@ -634,8 +636,10 @@ def _normalize_task_status(value: str | None) -> str:
 def _status_rank(value: str | None) -> int:
     normalized = _normalize_task_status(value)
     if normalized == "DONE":
-        return 4
+        return 5
     if normalized == "WAITING_CONFIRMATION":
+        return 4
+    if normalized == "WAITING_CLIENT":
         return 3
     if normalized == "IN_PROGRESS":
         return 2
@@ -725,6 +729,8 @@ def _status_for_day(
         return "DONE"
     if normalized_daily == "IN_PROGRESS":
         return "IN_PROGRESS"
+    if normalized_daily == "WAITING_CLIENT":
+        return "WAITING_CLIENT"
     if normalized_daily == "WAITING_CONFIRMATION":
         return "WAITING_CONFIRMATION"
     if normalized_daily is not None:
@@ -739,6 +745,8 @@ def _status_for_day(
     if normalized == "DONE" and completed_date is None:
         return "DONE"
 
+    if normalized in {"WAITING_CLIENT", "WAITING_CONFIRMATION"}:
+        return normalized
     return "TODO" if normalized == "TODO" else "IN_PROGRESS"
 
 

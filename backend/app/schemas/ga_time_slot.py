@@ -25,13 +25,13 @@ class GaTimeSlotEntryIn(GaTimeSlotFormatting):
     day_of_week: int
     start_time: time
     end_time: time
-    content: str
+    content: str = Field(max_length=8000)
     user_id: uuid.UUID | None = None
     sort_order: int = Field(default=0, ge=0)
 
 
 class GaTimeSlotEntryUpdate(BaseModel):
-    content: str
+    content: str = Field(max_length=8000)
     background_color: str | None = None
     text_color: str | None = None
     is_bold: bool | None = None

@@ -20,11 +20,13 @@ from app.services.meeting_point_manual_sync import (
     is_known_report_title, is_manual_section_title, section_group_label, with_section_keys,
 )
 from app.services.meetings_report import (
+    DISPLAY_SECTION_TITLES,
     SECTION_TITLES,
     _completed_tasks_for_report_day,
     _common_meeting_lines,
     _common_task_metadata_by_title,
     _is_new_task_for_m3_day,
+    _is_postponed_for_m3_day,
     _is_system_task,
     _is_without_progress_for_m3_day,
     _meeting_lines,
@@ -36,6 +38,7 @@ from app.services.meetings_report import (
     _leave_lines,
     _render_ascii_table_html,
     _task_owners,
+    _daily_baseline_task_ids,
     _tomorrow_common_section,
     _tomorrow_task_table,
     normalize_meetings_report_sections,
@@ -366,6 +369,57 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
 
 
 class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
+    def test_det_te_shtyera_is_known_auto_section_after_pink(self) -> None:
+        postponed_title = "DET TE SHTYERA"
+
+        self.assertIn(postponed_title, SECTION_TITLES)
+        self.assertEqual(
+            DISPLAY_SECTION_TITLES.index(postponed_title),
+            DISPLAY_SECTION_TITLES.index(SECTION_TITLES[3]) + 1,
+        )
+        self.assertTrue(is_known_report_title("meetings", postponed_title))
+        self.assertFalse(is_manual_section_title("meetings", postponed_title))
+
+    def test_m3_postponement_uses_realization_final_deadline_rule(self) -> None:
+        report_day = date(2026, 8, 28)
+        task = SimpleNamespace(due_date=datetime(2026, 9, 4, 16, 0, tzinfo=ZoneInfo("Europe/Tirane")))
+        due_event = SimpleNamespace(
+            action="task.due_date_changed",
+            before={"value": "2026-08-28T16:00:00+02:00"},
+            after={"value": "2026-09-04T16:00:00+02:00"},
+        )
+
+        self.assertTrue(_is_postponed_for_m3_day(task, [due_event], report_day))
+
+        start_only = SimpleNamespace(
+            action="task.start_date_changed",
+            before={"value": "2026-08-28T08:00:00+02:00"},
+            after={"value": "2026-09-04T08:00:00+02:00"},
+        )
+        self.assertFalse(_is_postponed_for_m3_day(task, [start_only], report_day))
+
+        moved_back = SimpleNamespace(due_date=datetime(2026, 8, 28, 16, 0, tzinfo=ZoneInfo("Europe/Tirane")))
+        self.assertFalse(_is_postponed_for_m3_day(moved_back, [due_event], report_day))
+
+        future_to_later = SimpleNamespace(
+            action="task.due_date_changed",
+            before={"value": "2026-08-31T16:00:00+02:00"},
+            after={"value": "2026-09-04T16:00:00+02:00"},
+        )
+        self.assertFalse(_is_postponed_for_m3_day(task, [future_to_later], report_day))
+
+    def test_m3_postponement_scope_uses_daily_baseline_task_ids(self) -> None:
+        first_id = uuid.uuid4()
+        second_id = uuid.uuid4()
+        snapshots = [
+            SimpleNamespace(payload={"people": [
+                {"tasks": [{"task_id": str(first_id)}, {"task_id": None}]},
+                {"tasks": [{"task_id": str(second_id)}, {"task_id": str(first_id)}]},
+            ]}),
+        ]
+
+        self.assertEqual(_daily_baseline_task_ids(snapshots), {first_id, second_id})
+
     def test_m3_completed_day_tasks_include_am_pm_and_inactive_but_exclude_system_and_reopened(self) -> None:
         timezone = ZoneInfo("Europe/Tirane")
 
@@ -818,6 +872,11 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertTrue(any("This W" in row for row in rows))
         self.assertTrue(any("Last W" in row for row in rows))
         self.assertEqual(_m3_added_week_label(this_week, date(2026, 8, 10)), "This W")
+        rendered = _render_ascii_table_html(rows, "todo")
+        self.assertIn('class="created-this-week"', rendered)
+        self.assertIn('bgcolor="#bae6fd"', rendered)
+        self.assertIn('class="created-last-week"', rendered)
+        self.assertIn('bgcolor="#fde68a"', rendered)
 
     def test_new_m3_tasks_are_included_only_on_their_start_date(self) -> None:
         wednesday = date(2026, 8, 12)

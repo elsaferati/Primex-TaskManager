@@ -4,13 +4,16 @@ import html
 import os
 import re
 import textwrap
+import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 
 from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.models.audit_log import AuditLog
 from app.models.common_entry import CommonEntry
+from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.models.department import Department
 from app.models.enums import CommonApprovalStatus, CommonCategory
 from app.models.meeting import Meeting
@@ -42,12 +45,14 @@ SECTION_TITLES = [
     "N- DETYRA 1H PA SLOT?",
     "N- (GA) DET PERSONALISHT?",
     "DET E KRYERA SOT (AM/PM)",
+    "DET TE SHTYERA",
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
     SECTION_TITLES[1],  # STD tickets first among auto-filled
     SECTION_TITLES[2],
     SECTION_TITLES[3],
+    SECTION_TITLES[11],
     SECTION_TITLES[10],
     SECTION_TITLES[7],
     SECTION_TITLES[4],
@@ -219,6 +224,106 @@ def _local_date(value: datetime | date | None) -> date | None:
             return value.astimezone(report_timezone()).date()
         return value.date()
     return value
+
+
+def _audit_local_date(value: Any) -> date | None:
+    """Normalize an audited date value using the M3 report timezone."""
+    if value is None:
+        return None
+    if isinstance(value, (datetime, date)):
+        return _local_date(value)
+    raw = str(value).strip()
+    if not raw:
+        return None
+    try:
+        parsed = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        try:
+            return date.fromisoformat(raw[:10])
+        except ValueError:
+            return None
+    return _local_date(parsed)
+
+
+def _is_postponed_for_m3_day(task: Task, events: list[AuditLog], report_day: date) -> bool:
+    """Mirror Realization's final daily ``Shtyre`` deadline rule for M3 only."""
+    current_due = _local_date(task.due_date)
+    if current_due is None or current_due <= report_day:
+        return False
+    return any(
+        event.action == "task.due_date_changed"
+        and _audit_local_date((event.before or {}).get("value")) == report_day
+        and (
+            changed_due := _audit_local_date((event.after or {}).get("value"))
+        )
+        is not None
+        and changed_due > report_day
+        for event in events
+    )
+
+
+def _daily_baseline_task_ids(snapshots: list[DailyPlannerSnapshot]) -> set[uuid.UUID]:
+    """Collect task IDs which belonged to at least one user's original daily plan."""
+    task_ids: set[uuid.UUID] = set()
+    for snapshot in snapshots:
+        for person in (snapshot.payload or {}).get("people") or []:
+            for item in person.get("tasks") or []:
+                try:
+                    task_ids.add(uuid.UUID(str(item.get("task_id"))))
+                except (TypeError, ValueError):
+                    continue
+    return task_ids
+
+
+async def _postponed_tasks_for_m3_day(
+    db: AsyncSession,
+    report_day: date,
+    tasks: list[Task],
+) -> tuple[list[Task], dict[Any, tuple[str, str]]]:
+    """Load report-day postponed tasks without changing Realization state or code."""
+    snapshots = (
+        await db.execute(
+            select(DailyPlannerSnapshot).where(DailyPlannerSnapshot.day_date == report_day)
+        )
+    ).scalars().all()
+    baseline_task_ids = _daily_baseline_task_ids(list(snapshots))
+    if not baseline_task_ids:
+        return [], {}
+
+    local_start = datetime.combine(report_day, time.min, tzinfo=report_timezone())
+    start_utc = local_start.astimezone(timezone.utc)
+    end_utc = (local_start + timedelta(days=1)).astimezone(timezone.utc)
+    events = (
+        await db.execute(
+            select(AuditLog)
+            .where(
+                AuditLog.entity_type == "task",
+                AuditLog.entity_id.in_(baseline_task_ids),
+                AuditLog.action == "task.due_date_changed",
+                AuditLog.created_at >= start_utc,
+                AuditLog.created_at < end_utc,
+            )
+            .order_by(AuditLog.created_at, AuditLog.id)
+        )
+    ).scalars().all()
+    events_by_task: dict[Any, list[AuditLog]] = {}
+    for event in events:
+        events_by_task.setdefault(event.entity_id, []).append(event)
+
+    postponed: list[Task] = []
+    date_ranges: dict[Any, tuple[str, str]] = {}
+    for task in tasks:
+        if task.id not in baseline_task_ids:
+            continue
+        if not _is_postponed_for_m3_day(task, events_by_task.get(task.id, []), report_day):
+            continue
+        postponed.append(task)
+        current_due = _local_date(task.due_date)
+        date_ranges[task.id] = (
+            report_day.strftime("%d.%m.%Y"),
+            current_due.strftime("%d.%m.%Y") if current_due else "-",
+        )
+    return postponed, date_ranges
 
 
 def _local_time(value: datetime | None) -> str:
@@ -648,6 +753,7 @@ def _m3_status_table(
     assignee_ids_by_task: dict[Any, set[Any]] | None = None,
     all_participant_ids: set[Any] | None = None,
     daily_rlz_by_task: dict[Any, tuple[str, str]] | None = None,
+    date_range_by_task: dict[Any, tuple[str, str]] | None = None,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -658,6 +764,8 @@ def _m3_status_table(
         columns.append(("AM/PM", 5))
     if include_type:
         columns.append(("LLOJI", 7))
+    if date_range_by_task is not None:
+        columns.extend((("NGA", 10), ("NE", 10)))
     columns.append(("TITULLI", 64))
     if daily_rlz_by_task is not None:
         columns.extend((("ARSYEJA", 24), ("KOMENT", 36)))
@@ -688,6 +796,8 @@ def _m3_status_table(
             values.append("-")
         if include_type:
             values.append("-")
+        if date_range_by_task is not None:
+            values.extend(("-", "-"))
         values.append(empty_title)
         if daily_rlz_by_task is not None:
             values.extend(("-", "-"))
@@ -722,6 +832,7 @@ def _m3_status_table(
         department = _m3_department_label(task, department_codes) if include_department else ""
         added_week = _m3_added_week_label(task, week_start) if include_added_week else ""
         am_pm = _m3_am_pm_label(task) if include_am_pm else ""
+        postponed_from, postponed_to = (date_range_by_task or {}).get(task.id, ("-", "-"))
         display_title = _clean_task_title(task.title)
         title_lines = _wrap_fixed_width(display_title, 64)
         reason, comment = (daily_rlz_by_task or {}).get(task.id, ("-", "-"))
@@ -738,6 +849,8 @@ def _m3_status_table(
             values.append(am_pm)
         if include_type:
             values.append(task_type)
+        if date_range_by_task is not None:
+            values.extend((postponed_from, postponed_to))
         values.append(padded_titles[0])
         if daily_rlz_by_task is not None:
             values.extend((reason_lines[0], comment_lines[0]))
@@ -755,6 +868,8 @@ def _m3_status_table(
                 continuation.append("")
             if include_type:
                 continuation.append("")
+            if date_range_by_task is not None:
+                continuation.extend(("", ""))
             continuation.append(padded_titles[line_index] if line_index < len(padded_titles) else "")
             if daily_rlz_by_task is not None:
                 continuation.extend((
@@ -910,6 +1025,9 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         db, today_todo, report_day, names, assignee_ids_by_task
     )
     done_today = _completed_tasks_for_report_day(completed_tasks, report_day)
+    postponed_today, postponed_date_ranges = await _postponed_tasks_for_m3_day(
+        db, report_day, tasks
+    )
 
     tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
     new_task_review_tasks = [task for task in tomorrow_tasks if not _is_system_task(task)]
@@ -1069,6 +1187,20 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 **table_kwargs,
             )
         ),
+        SECTION_TITLES[11]: _normalize_section(
+            _m3_status_table(
+                "SHTYRE",
+                postponed_today,
+                names,
+                with_status=True,
+                include_type=True,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
+                date_range_by_task=postponed_date_ranges,
+                **table_kwargs,
+            )
+        ),
         SECTION_TITLES[10]: _normalize_section(
             _m3_status_table(
                 "DET E KRYERA SOT (AM/PM)",
@@ -1130,9 +1262,11 @@ def _normalize_report_status(value: str | None) -> str:
         return "TODO"
     if status in {"INPROGRESS", "IN-PROGRESS"}:
         return "IN_PROGRESS"
+    if status in {"WAITINGCLIENT", "WAITING_CLIENT", "WAITING_FOR_CLIENT"}:
+        return "WAITING_CLIENT"
     if status in {"WAITING", "WAITING_CONFIRMATION", "PENDING_CONFIRMATION"}:
         return "WAITING_CONFIRMATION"
-    if status in {"TODO", "IN_PROGRESS", "WAITING_CONFIRMATION", "DONE"}:
+    if status in {"TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION", "DONE"}:
         return status
     return "TODO"
 
@@ -1587,7 +1721,7 @@ async def _bz_alignment_lines(
 
     task_owners_by_template: dict[Any, list[str]] = {}
     task_status_by_template: dict[Any, str] = {}
-    status_rank = {"IN_PROGRESS": 3, "WAITING_CONFIRMATION": 2, "TODO": 1, "DONE": 0}
+    status_rank = {"IN_PROGRESS": 4, "WAITING_CLIENT": 3, "WAITING_CONFIRMATION": 2, "TODO": 1, "DONE": 0}
     for task in tasks:
         template_id = task.system_template_origin_id
         if not template_id:
@@ -2150,6 +2284,8 @@ def _table_tone_from_label(label: str) -> str:
         return "todo"
     if normalized == "IN PROGRESS":
         return "in-progress"
+    if normalized in {"WAITING FOR CLIENT", "WAITING CLIENT", "WAITING_CLIENT"}:
+        return "waiting"
     if normalized in {"WAITING CONFIRMATION", "WAITING_CONFIRMATION"}:
         return "waiting"
     if normalized in {"DONE", "DET E KRYERA NE AM"}:
@@ -2271,6 +2407,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     canceled_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "ANULUAR"), None)
     meeting_status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "MBAJTUR?"), None)
     disk_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "DISK"), None)
+    added_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "ADDED"), None)
     table_class = f"report-table report-table-{tone}" if tone else "report-table"
     body_html_parts = []
     for row_index, row in enumerate(body_rows):
@@ -2284,6 +2421,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
         row_cells = []
         for index, cell in enumerate(row):
             cell_classes = [_email_column_class_name(header[index])]
+            cell_style = ""
             current_cell = cell
             if is_canceled:
                 cell_classes.append("canceled")
@@ -2299,11 +2437,25 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                     cell_classes.append("held")
                 elif symbol == "\u2715":
                     cell_classes.append("canceled")
+            if added_index is not None and index == added_index:
+                created_week = cell.strip().upper()
+                if created_week == "THIS W":
+                    cell_classes.append("created-this-week")
+                    cell_style = (
+                        ' bgcolor="#bae6fd" style="background-color:#bae6fd!important;'
+                        'color:#0c4a6e!important;font-weight:700;"'
+                    )
+                elif created_week == "LAST W":
+                    cell_classes.append("created-last-week")
+                    cell_style = (
+                        ' bgcolor="#fde68a" style="background-color:#fde68a!important;'
+                        'color:#78350f!important;font-weight:700;"'
+                    )
             if is_highlighted_meeting:
                 if _normalized_table_header(header[index]) == "TITLE":
                     cell_classes.append("title")
             row_cells.append(
-                f"<td{_email_column_width_attr(column_widths[index])} class=\"{' '.join(filter(None, cell_classes))}\">"
+                f"<td{_email_column_width_attr(column_widths[index])}{cell_style} class=\"{' '.join(filter(None, cell_classes))}\">"
                 f"{html.escape(current_cell).replace(chr(10), '<br>')}</td>"
             )
         row_classes = " ".join(filter(None, (row_tone, "highlight" if is_highlighted_meeting else "")))

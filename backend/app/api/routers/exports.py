@@ -1101,6 +1101,8 @@ def _format_task_status(status: str | None) -> str:
         return "-"
     if status == "IN_PROGRESS":
         return "In Progress"
+    if status == "WAITING_CLIENT":
+        return "Waiting for Client"
     if status == "WAITING_CONFIRMATION":
         return "Waiting Confirmation"
     if status == "TODO":
@@ -4079,7 +4081,7 @@ async def _daily_report_rows_for_user(
         raw_status = (str(task.status or "")).upper()
         if task.completed_at or raw_status == "DONE":
             return "DONE"
-        if raw_status in {"TODO", "IN_PROGRESS", "WAITING_CONFIRMATION"}:
+        if raw_status in {"TODO", "IN_PROGRESS", "WAITING_CLIENT", "WAITING_CONFIRMATION"}:
             return raw_status
         return "TODO"
 

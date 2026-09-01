@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+import re
 import uuid
 from datetime import date, datetime, timedelta, timezone
 
@@ -64,6 +65,24 @@ from app.services.task_strike_events import (
 
 
 router = APIRouter()
+
+EMAIL_TASK_TITLE_RE = re.compile(r"\bEM\b", re.IGNORECASE)
+EIGHT_AM_TITLE_RE = re.compile(r"\b0?8:00\b")
+
+
+def _normalize_email_task_title(title: str) -> str:
+    normalized = title.strip()
+    if EMAIL_TASK_TITLE_RE.search(normalized) and not EIGHT_AM_TITLE_RE.search(normalized):
+        return f"08:00 {normalized}"
+    return normalized
+
+
+def _validate_eight_am_one_h_slot(title: str, slot: str | None) -> None:
+    if EIGHT_AM_TITLE_RE.search(title) and slot not in (None, "10:00"):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="08:00 tasks are 1H tasks and must use the 10:00 slot.",
+        )
 
 MENTION_RE = re.compile(r"@([A-Za-z0-9_\\-\\.]{3,64})")
 TOTAL_PRODUCTS_RE = re.compile(r"total_products[:=]\s*(\d+)", re.IGNORECASE)
@@ -296,6 +315,7 @@ def _should_auto_status_from_product_counts(
 _GA_NOTE_VALID_STATUSES = {
     TaskStatus.TODO.value,
     TaskStatus.IN_PROGRESS.value,
+    TaskStatus.WAITING_CLIENT.value,
     TaskStatus.WAITING_CONFIRMATION.value,
     TaskStatus.DONE.value,
 }
@@ -912,7 +932,7 @@ def _task_to_out(
 ) -> TaskOut:
     return TaskOut(
         id=task.id,
-        title=task.title,
+        title=_normalize_email_task_title(task.title),
         description=task.description,
         internal_notes=task.internal_notes,
         project_id=task.project_id,
@@ -1653,6 +1673,8 @@ async def create_task(
     user=Depends(get_current_user),
 ) -> TaskOut:
     # ensures_manager_or_admin(user) - Removed to allow all department members to create tasks
+    payload.title = _normalize_email_task_title(payload.title)
+    _validate_eight_am_one_h_slot(payload.title, payload.one_h_report_slot)
     if payload.ga_note_origin_id is not None and payload.plan_note_origin_id is not None:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -2556,6 +2578,8 @@ async def update_task(
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> TaskOut:
+    if payload.title is not None:
+        payload.title = _normalize_email_task_title(payload.title)
     task = (await db.execute(select(Task).where(Task.id == task_id))).scalar_one_or_none()
     if task is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Task not found")
@@ -3085,6 +3109,9 @@ async def update_task(
     if payload.is_r1 is not None:
         task.is_r1 = payload.is_r1
 
+    if task.is_1h_report or task.is_r1:
+        _validate_eight_am_one_h_slot(task.title, task.one_h_report_slot)
+
     await _sync_control_task_owner_from_ko(db, task=task)
 
     # Validate fast task type flags are mutually exclusive (only for fast tasks)
@@ -3557,6 +3584,7 @@ async def update_task_one_h_report_slot(
     next_slot = _normalize_one_h_report_slot(payload.one_h_report_slot)
     if payload.one_h_report_slot is not None and next_slot is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid 1H report slot")
+    _validate_eight_am_one_h_slot(task.title, next_slot)
 
     # Current-day slots roll over to the next working day at 15:59.
     slot_date = effective_slot_date(payload.report_date)

@@ -81,6 +81,7 @@ function normalizeHeader(value: string) {
     TITULLI: "TITLE",
     KUSH: "WHO",
     NGA: "FROM",
+    NE: "TO",
     DERI: "TO",
     TOTALI: "COUNT",
     LLOJI: "TYPE",

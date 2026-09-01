@@ -90,6 +90,7 @@ function formatDate(value: string) {
 function statusLabel(value?: string | null) {
   const normalized = (value || "TODO").toUpperCase()
   if (normalized === "IN_PROGRESS") return "In Progress"
+  if (normalized === "WAITING_CLIENT") return "Waiting for Client"
   if (normalized === "WAITING_CONFIRMATION") return "Waiting Confirmation"
   if (normalized === "DONE") return "Done"
   return "To Do"
@@ -119,6 +120,7 @@ function bucketBadgeClass(bucket: OpenTaskDateBucket) {
 const TASK_STATUS_OPTIONS = [
   { value: "TODO", label: "To Do" },
   { value: "IN_PROGRESS", label: "In Progress" },
+  { value: "WAITING_CLIENT", label: "Waiting for Client" },
   { value: "WAITING_CONFIRMATION", label: "Waiting Confirmation" },
   { value: "DONE", label: "Done" },
 ] as const
