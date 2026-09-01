@@ -26,6 +26,36 @@ class TaskStatus(str, enum.Enum):
     WAITING_CONFIRMATION = "WAITING_CONFIRMATION"
     DONE = "DONE"
 
+    @classmethod
+    def _missing_(cls, value: object) -> "TaskStatus | None":
+        """Heal legacy/aliased task status values.
+
+        The ``tasks.status`` column is a free-form string, so historical rows
+        (or values borrowed from the realization reason codes such as
+        ``WAITING_CLIENT``) can hold labels that are no longer part of this
+        enum. Without this, a single stale row makes Pydantic raise and 500s
+        every endpoint that serializes the task. Map the known aliases to a
+        sensible member and fall back to a case-insensitive match; genuinely
+        unknown values still raise so real typos are not silently accepted.
+        """
+        if value is None:
+            return cls.TODO
+        normalized = str(value).strip().upper()
+        aliases = {
+            "WAITING_CLIENT": cls.IN_PROGRESS,
+            "WAITING": cls.WAITING_CONFIRMATION,
+            "PENDING_CONFIRMATION": cls.WAITING_CONFIRMATION,
+            "NOT_DONE": cls.TODO,
+            "COMPLETED": cls.DONE,
+            "COMPLETED_LATE": cls.DONE,
+        }
+        if normalized in aliases:
+            return aliases[normalized]
+        for member in cls:
+            if member.value == normalized:
+                return member
+        return None
+
 
 class TaskType(str, enum.Enum):
     adhoc = "adhoc"
