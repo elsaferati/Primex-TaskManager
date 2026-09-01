@@ -19,14 +19,83 @@ from app.services.after_break_report import _personal_section
 from app.services.meetings_report import PERSONAL_GA
 from app.services.meeting_point_manual_sync import section_group_label, with_section_keys
 from app.services.morning_report import (
+    DISPLAY_SECTION_TITLES,
+    GA_TASKS_TITLE,
     SECTION_TITLES,
     _attendance_section,
     _day_context_section,
     _email_task_source_label,
+    _ga_hv_dv_task_rows,
     normalize_morning_report_sections,
     render_html,
     subject_for,
 )
+
+
+class GaHvDvTodayTaskRowsTests(unittest.TestCase):
+    @staticmethod
+    def _task(title: str, **overrides):
+        values = {
+            "id": title,
+            "title": title,
+            "status": "TODO",
+            "completed_at": None,
+            "assigned_to": "ga-user",
+            "start_date": datetime(2026, 9, 1, 8, 0),
+            "due_date": datetime(2026, 9, 1, 16, 0),
+            "phase": "MEETINGS",
+            "fast_task_order": None,
+            "is_deadline_important": False,
+            "created_at": datetime(2026, 9, 1, 7, 0),
+            "department_id": "development",
+            "finish_period": "AM",
+            "system_template_origin_id": None,
+            "project_id": None,
+            "is_bllok": False,
+            "is_r1": False,
+            "is_1h_report": False,
+            "is_personal": False,
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    def test_includes_only_today_open_non_late_tasks_for_ga_hv_dv(self) -> None:
+        report_day = date(2026, 9, 1)
+        tasks = [
+            self._task("GA today"),
+            self._task("HV today", assigned_to="hv-user", status="IN_PROGRESS"),
+            self._task("DV waiting", assigned_to="dv-user", status="WAITING_CLIENT"),
+            self._task("Other user", assigned_to="other-user"),
+            self._task("Done today", status="DONE", completed_at=datetime(2026, 9, 1, 9, 0)),
+            self._task("Late", start_date=datetime(2026, 8, 31, 8, 0), due_date=datetime(2026, 8, 31, 16, 0)),
+            self._task("Future", start_date=datetime(2026, 9, 2, 8, 0), due_date=datetime(2026, 9, 2, 16, 0)),
+            self._task("Multi-day today", start_date=datetime(2026, 8, 31, 8, 0), due_date=datetime(2026, 9, 2, 16, 0)),
+            self._task("GA secondary", assigned_to="other-user"),
+        ]
+        assignees = {task.id: {task.assigned_to} for task in tasks}
+        assignees["GA secondary"].add("ga-user")
+        names = {
+            "ga-user": "Gane Arifaj",
+            "hv-user": "Hana Vela",
+            "dv-user": "Drita Vela",
+            "other-user": "Example User",
+        }
+
+        rows = _ga_hv_dv_task_rows(
+            tasks, names, assignees, report_day, {"development": "DEV"}
+        )
+
+        self.assertEqual(
+            {row[6] for row in rows},
+            {"GA today", "HV today", "DV waiting", "Multi-day today", "GA secondary"},
+        )
+        self.assertNotIn("Done today", {row[6] for row in rows})
+        self.assertNotIn("Late", {row[6] for row in rows})
+        self.assertNotIn("Future", {row[6] for row in rows})
+
+    def test_ga_hv_dv_is_first_auto_filled_m1_section(self) -> None:
+        self.assertEqual(DISPLAY_SECTION_TITLES[0], SECTION_TITLES[0])
+        self.assertEqual(DISPLAY_SECTION_TITLES[1], GA_TASKS_TITLE)
 
 
 class FakeDraftDb:

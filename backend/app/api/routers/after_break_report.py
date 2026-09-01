@@ -17,6 +17,7 @@ from app.models.user import User
 from app.services.after_break_report import (
     MANUAL_SECTION_TITLES,
     apply_1h_confirmation_questions,
+    apply_waiting_client_task_table,
     build_after_break_report_sections,
     normalize_after_break_report_sections,
     render_html,
@@ -152,6 +153,7 @@ async def _draft_with_questions(db: AsyncSession, row: AfterBreakReportDraft) ->
     sections = with_section_keys("after_break", row.sections)
     sections = normalize_after_break_report_sections(sections)
     sections = await apply_1h_confirmation_questions(db, sections)
+    sections = await apply_waiting_client_task_table(db, sections)
     sections = await merge_common_view_manual_sections(db, sections, "after_break", row.sections)
     return _draft(row, sections)
 
@@ -326,6 +328,7 @@ async def preview_draft(
     sections = await apply_1h_confirmation_questions(
         db, normalize_after_break_report_sections(row.sections)
     )
+    sections = await apply_waiting_client_task_table(db, sections)
     return {
         "plain_text": render_plain_text(row.subject, row.report_date, sections),
         "html": render_html(row.subject, row.report_date, sections),
@@ -347,6 +350,7 @@ async def send_draft(
     sections = await apply_1h_confirmation_questions(
         db, normalize_after_break_report_sections(row.sections)
     )
+    sections = await apply_waiting_client_task_table(db, sections)
     row.sections = sections
     plain_text = render_plain_text(row.subject, row.report_date, sections)
     html_body = render_html(row.subject, row.report_date, sections)

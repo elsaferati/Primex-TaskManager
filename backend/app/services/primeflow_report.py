@@ -53,7 +53,7 @@ TRANSIENT_CODES = {429, 500, 502, 503, 504}
 STATUS_COLORS = {
     "TODO": ("#fbcfe8", "#111827", "#ec4899"),
     "IN_PROGRESS": ("#fef3c7", "#111827", "#d97706"),
-    "WAITING_CLIENT": ("#f5e6b3", "#7a5a00", "#d4a72c"),
+    "WAITING_CLIENT": ("#e2c15b", "#4f3a00", "#b8860b"),
     "DONE": ("#d4ffe1", "#14532d", "#22c55e"),
 }
 REPORT_STRIKE_LEGEND = (

@@ -12,6 +12,7 @@ from app.services.after_break_report import (
     _new_system_task_rows,
     _unheld_meeting_section,
     _unfinished_priority_task_rows,
+    _waiting_client_task_rows,
     normalize_after_break_report_sections,
 )
 from app.services.meetings_report import _render_ascii_table_html, _table_tone_from_label
@@ -43,9 +44,10 @@ class AfterBreakConfirmationCategoryTests(unittest.TestCase):
         self.assertEqual(sections[4]["title"], "NOTES TE REJA ( NOT DISSCUSED)")
         self.assertEqual(sections[5]["title"], "TAK INT/EXT TE PAMBAJTURA")
         self.assertEqual(sections[6]["title"], "DET TE PAKRYERA, 08:00/DEADLINE")
-        self.assertEqual(sections[7]["title"], "DET E KRYERA NE AM")
-        self.assertEqual(sections[10]["title"], "GA MBYLLJA E DET")
-        self.assertEqual(sections[11]["title"], "HV MBYLLJA E DET")
+        self.assertEqual(sections[7]["title"], "DT WFE")
+        self.assertEqual(sections[8]["title"], "DET E KRYERA NE AM")
+        self.assertEqual(sections[11]["title"], "GA MBYLLJA E DET")
+        self.assertEqual(sections[12]["title"], "HV MBYLLJA E DET")
 
     def test_empty_confirmation_questions(self) -> None:
         lines = _format_confirmation_questions([])
@@ -274,6 +276,49 @@ class DoneAmTaskRowsTests(unittest.TestCase):
         )
 
         self.assertEqual([row[5] for row in rows], ["First user", "Second user"])
+
+
+class WaitingClientTaskRowsTests(unittest.TestCase):
+    @staticmethod
+    def _task(title: str, status: str, **overrides):
+        values = {
+            "id": title,
+            "title": title,
+            "status": status,
+            "assigned_to": "user-1",
+            "fast_task_order": None,
+            "is_deadline_important": False,
+            "created_at": datetime(2026, 8, 24, 7, 0),
+            "department_id": "development",
+            "finish_period": "AM",
+            "system_template_origin_id": None,
+            "project_id": None,
+            "is_bllok": False,
+            "is_r1": False,
+            "is_1h_report": False,
+            "is_personal": False,
+        }
+        values.update(overrides)
+        return SimpleNamespace(**values)
+
+    def test_dt_wfe_includes_only_waiting_client_tasks(self) -> None:
+        rows = _waiting_client_task_rows(
+            [
+                self._task("Waiting task", "WAITING_CLIENT"),
+                self._task("In progress task", "IN_PROGRESS"),
+                self._task("Waiting task two", " waiting_client ", finish_period="PM"),
+            ],
+            {"user-1": "Example User"},
+            {},
+            {"development": "DEV"},
+        )
+
+        self.assertEqual([row[5] for row in rows], ["Waiting task", "Waiting task two"])
+        self.assertEqual(rows[0], ["1", "EU", "DEV", "AM", "FT", "Waiting task"])
+        self.assertEqual(rows[1][3], "PM")
+
+    def test_dt_wfe_uses_waiting_client_gold_tone(self) -> None:
+        self.assertEqual(_table_tone_from_label("DT WFE:"), "waiting-client")
 
 
 class UnheldMeetingRowsTests(unittest.TestCase):

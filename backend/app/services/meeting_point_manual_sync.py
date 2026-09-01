@@ -51,10 +51,10 @@ def report_kind_for_checklist(checklist: Checklist | None) -> ReportKind | None:
 def _report_title_sets(kind: ReportKind) -> tuple[list[str], set[str], set[str]]:
     """Return (known section titles in display order, manual titles, manual titles)."""
     if kind == "morning":
-        from app.services.morning_report import MANUAL_SECTION_TITLES, SECTION_TITLES
+        from app.services.morning_report import DISPLAY_SECTION_TITLES, MANUAL_SECTION_TITLES
 
         manuals = set(MANUAL_SECTION_TITLES)
-        return list(SECTION_TITLES), manuals, manuals
+        return list(DISPLAY_SECTION_TITLES), manuals, manuals
     if kind == "after_break":
         from app.services.after_break_report import DISPLAY_SECTION_TITLES, MANUAL_SECTION_TITLES
 
