@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
@@ -18,6 +18,7 @@ from app.services.tomorrow_print_report import (
 )
 
 logger = logging.getLogger(__name__)
+SECOND_SEND_OFFSET = timedelta(minutes=20)
 
 
 async def run_tomorrow_print_report_scheduler_once(now: datetime | None = None) -> bool:
@@ -33,14 +34,32 @@ async def run_tomorrow_print_report_scheduler_once(now: datetime | None = None) 
         delivery_date = local_now.date()
         if local_now.weekday() not in (settings.weekdays or []):
             return False
-        if local_now.time().replace(second=0, microsecond=0) < settings.send_time:
+        first_send_time = settings.send_time
+        second_send_time = (
+            datetime.combine(delivery_date, first_send_time) + SECOND_SEND_OFFSET
+        ).time()
+        current_time = local_now.time().replace(second=0, microsecond=0)
+        if current_time < first_send_time:
             return False
+
+        # Tomorrow 1H SHTYPI is delivered twice: at the configured time and
+        # again 20 minutes later. ``last_run_date`` acts as the per-day slot
+        # marker without changing the existing delivery table schema.
+        last_run_local = None
+        if settings.last_run_date is not None:
+            last_run_local = (
+                settings.last_run_date.astimezone(timezone)
+                if settings.last_run_date.tzinfo
+                else settings.last_run_date.replace(tzinfo=timezone)
+            )
+        if last_run_local is not None and last_run_local.date() == delivery_date:
+            last_time = last_run_local.time().replace(second=0, microsecond=0)
+            if current_time < second_send_time or last_time >= second_send_time:
+                return False
 
         row = (
             await db.execute(select(TomorrowPrintReportDelivery).where(TomorrowPrintReportDelivery.delivery_date == delivery_date))
         ).scalar_one_or_none()
-        if row is not None and row.status == "SENT":
-            return False
 
         recipients = ensure_required_shtypi_recipient(normalize_recipients(settings.recipients))
         if not recipients["to"]:
