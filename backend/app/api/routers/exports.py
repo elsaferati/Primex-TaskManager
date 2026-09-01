@@ -15,6 +15,7 @@ from openpyxl import Workbook
 from openpyxl.cell.rich_text import CellRichText, TextBlock
 from openpyxl.cell.text import InlineFont
 from openpyxl.worksheet.datavalidation import DataValidation
+from openpyxl.worksheet.filters import FilterColumn, Filters
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from reportlab.lib.pagesizes import letter
@@ -2335,6 +2336,41 @@ def _open_task_source_label(task: Task) -> str:
     return "FAST"
 
 
+def _open_task_is_fast(task: Task) -> bool:
+    return not task.project_id and not task.system_template_origin_id
+
+
+def _open_task_matches_type_filter(task: Task, value: str) -> bool:
+    normalized = (value or "").strip().lower()
+    if normalized == "project":
+        return bool(task.project_id)
+    if normalized == "system":
+        return bool(task.system_template_origin_id)
+    if normalized == "plan":
+        return bool(task.plan_note_origin_id)
+    if normalized == "fast":
+        return _open_task_is_fast(task)
+    if normalized == "personal":
+        return bool(task.is_personal)
+    if normalized == "hourly":
+        return bool(task.is_1h_report)
+    if normalized == "high":
+        return (task.priority or "").upper() == "HIGH"
+    if normalized == "r1":
+        return bool(task.is_r1)
+    if normalized == "blocked":
+        return bool(task.is_bllok)
+    if normalized == "normal":
+        return not (
+            task.is_bllok
+            or task.is_1h_report
+            or task.is_r1
+            or task.is_personal
+            or (task.priority or "").upper() == "HIGH"
+        )
+    return False
+
+
 def _open_task_type_label(task: Task) -> str:
     if task.system_template_origin_id:
         return "SYS"
@@ -2402,6 +2438,8 @@ async def export_open_tasks_xlsx(
     department_id: uuid.UUID | None = Query(default=None),
     user_id: uuid.UUID | None = Query(default=None),
     filter: str = Query(default="all"),
+    status_filter: str = Query(default="all"),
+    type_filter: list[str] | None = Query(default=None),
     search: str | None = Query(default=None),
     this_week_start: date | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
@@ -2536,11 +2574,18 @@ async def export_open_tasks_xlsx(
         return ", ".join([label for label in labels if label])
 
     normalized_filter = (filter or "all").strip().lower()
+    normalized_status_filter = (status_filter or "all").strip().lower()
+    normalized_type_filters = [
+        value.strip().lower() for value in (type_filter or []) if value and value.strip()
+    ]
     normalized_search = (search or "").strip().lower()
     filtered_tasks: list[Task] = []
     for task in tasks:
         due_bucket = _open_task_due_bucket(task, monday, this_week_end, next_week_start, next_week_end)
         source = _open_task_source_label(task)
+        # System tasks are always included in the export; source-based filters
+        # (project / GA-KA / plan / fast) only narrow down the other task types.
+        is_system_task = bool(task.system_template_origin_id)
         if user_id and user_id not in assignee_ids_for(task):
             continue
         if normalized_filter == "overdue" and due_bucket != "OVERDUE":
@@ -2558,14 +2603,23 @@ async def export_open_tasks_xlsx(
             continue
         if normalized_filter == "in_progress" and task_status != TaskStatusEnum.IN_PROGRESS.value:
             continue
-        if normalized_filter == "ga" and not (task.ga_note_origin_id or task.plan_note_origin_id):
+        if normalized_status_filter == "todo" and task_status != TaskStatusEnum.TODO.value:
             continue
-        if normalized_filter == "plan" and not task.plan_note_origin_id:
+        if normalized_status_filter == "in_progress" and task_status != TaskStatusEnum.IN_PROGRESS.value:
             continue
-        if normalized_filter == "project" and not task.project_id:
-            continue
-        if normalized_filter == "fast" and not (not task.project_id and not task.system_template_origin_id):
-            continue
+        if not is_system_task:
+            if normalized_filter == "ga" and not (task.ga_note_origin_id or task.plan_note_origin_id):
+                continue
+            if normalized_filter == "plan" and not task.plan_note_origin_id:
+                continue
+            if normalized_filter == "project" and not task.project_id:
+                continue
+            if normalized_filter == "fast" and not _open_task_is_fast(task):
+                continue
+            if normalized_type_filters and not any(
+                _open_task_matches_type_filter(task, value) for value in normalized_type_filters
+            ):
+                continue
         if normalized_search:
             project = project_map.get(task.project_id) if task.project_id else None
             note = ga_note_map.get(task.ga_note_origin_id) if task.ga_note_origin_id else None
@@ -2646,13 +2700,19 @@ async def export_open_tasks_xlsx(
         cell.alignment = Alignment(horizontal="left", vertical="bottom", wrap_text=True, readingOrder=1)
         cell.number_format = "@"
 
+    source_values_present: set[str] = set()
+    system_data_rows: list[int] = []
     for idx, (group, task) in enumerate(export_rows, start=1):
         project = project_map.get(task.project_id) if task.project_id else None
         department = department_map.get(task.department_id) if task.department_id else None
+        source_label = _open_task_source_label(task)
+        source_values_present.add(source_label)
+        if task.system_template_origin_id:
+            system_data_rows.append(data_row)
         values = [
             idx,
             group,
-            _open_task_source_label(task),
+            source_label,
             "Yes" if task.plan_note_origin_id else "",
             _department_short(_display_department_name(department.name if department else "")) if department else "",
             assignee_label(task),
@@ -2709,6 +2769,16 @@ async def export_open_tasks_xlsx(
         status_validation.add(f"{get_column_letter(17)}5:{get_column_letter(17)}{data_row - 1}")
 
     ws.auto_filter.ref = f"A{header_row}:{get_column_letter(last_col)}{last_row}"
+    # Pre-filter the SOURCE column so SYSTEM tasks are deselected (hidden) by
+    # default. They stay in the file, so users can re-check SYSTEM in the filter
+    # dropdown to reveal them again.
+    visible_sources = sorted(source_values_present - {"SYSTEM"})
+    if system_data_rows and visible_sources:
+        source_filter = FilterColumn(colId=2)
+        source_filter.filters = Filters(filter=visible_sources)
+        ws.auto_filter.filterColumn.append(source_filter)
+        for r_idx in system_data_rows:
+            ws.row_dimensions[r_idx].hidden = True
     ws.freeze_panes = "B5"
     ws.print_title_rows = f"{header_row}:{header_row}"
     ws.print_area = f"A1:{get_column_letter(last_col)}{last_row}"
