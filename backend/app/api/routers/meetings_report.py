@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, require_admin
+from app.api.deps import get_current_user, require_manager_or_admin
 from app.db import get_db
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
@@ -172,7 +172,7 @@ async def _normalize_saved_draft_sections(db: AsyncSession, row: MeetingsReportD
 @router.get("/settings")
 async def get_settings(
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_manager_or_admin),
 ) -> dict:
     return _settings(await _get_or_create_settings(db))
 
@@ -181,7 +181,7 @@ async def get_settings(
 async def update_settings(
     payload: SettingsPayload,
     db: AsyncSession = Depends(get_db),
-    _: User = Depends(require_admin),
+    _: User = Depends(require_manager_or_admin),
 ) -> dict:
     if any(day < 0 or day > 6 for day in payload.weekdays):
         raise HTTPException(status_code=400, detail="Weekdays must be numbers from 0 to 6")

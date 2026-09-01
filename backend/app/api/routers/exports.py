@@ -68,6 +68,10 @@ from app.services.ga_time_table import get_ga_time_table_rows
 router = APIRouter()
 
 
+def _has_global_report_scope(user: User) -> bool:
+    return user.role in {UserRole.ADMIN, UserRole.MANAGER}
+
+
 class AllTasksReportRowIn(BaseModel):
     typeLabel: str = Field(default="-")
     subtype: str = Field(default="-")
@@ -917,8 +921,7 @@ async def _query_tasks(
 ) -> list[Task]:
     stmt = select(Task)
 
-    role_value = getattr(user.role, "value", None)
-    is_admin = user.role == UserRole.ADMIN or (isinstance(role_value, str) and role_value.upper() == "ADMIN")
+    is_admin = _has_global_report_scope(user)
 
     if not is_admin:
         if user.department_id is None:
@@ -1775,7 +1778,7 @@ async def export_fast_tasks_xlsx(
 ):
     ensure_reports_access(user)
 
-    is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+    is_admin = _has_global_report_scope(user)
 
     if not is_admin and department_id is None:
         department_id = user.department_id
@@ -2022,7 +2025,7 @@ async def preview_fast_tasks(
 ):
     ensure_reports_access(user)
 
-    is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+    is_admin = _has_global_report_scope(user)
 
     if not is_admin and department_id is None:
         department_id = user.department_id
@@ -3263,7 +3266,7 @@ async def export_department_internal_meetings_xlsx(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Internal meetings checklist not found")
 
     slot_specs = [
-        ("M1", "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)"),
+        ("M1", "M1 PER ZHVILLIM (BLIC 08:05 - 08:15 MAX)"),
         ("M2", "M2 PER ZHVILLIM (11:45-12:00 MAX)"),
         ("M3", "M3 (ME TRELLO) PER ZHVILLIM (15:45-16:00 MAX)"),
         ("TESTIMI_I_AGENT", "TESTIMI I AGENT"),
@@ -4169,7 +4172,7 @@ async def export_daily_report_xlsx(
 ):
     if department_id is not None:
         ensure_department_access(user, department_id)
-    elif user.role != UserRole.ADMIN:
+    elif not _has_global_report_scope(user):
         department_id = user.department_id
 
     target_user: User | None = None
@@ -4702,7 +4705,7 @@ async def export_system_tasks_xlsx(
     user=Depends(get_current_user),
 ):
     ensure_reports_access(user)
-    is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+    is_admin = _has_global_report_scope(user)
 
     status_name: str | None = None
     if status_id is not None:
@@ -5042,7 +5045,7 @@ async def preview_system_tasks(
     user=Depends(get_current_user),
 ):
     ensure_reports_access(user)
-    is_admin = user.role == UserRole.ADMIN or (getattr(user.role, "value", "").lower() == "admin")
+    is_admin = _has_global_report_scope(user)
 
     status_name: str | None = None
     if status_id is not None:

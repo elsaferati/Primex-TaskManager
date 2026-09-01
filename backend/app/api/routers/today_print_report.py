@@ -8,7 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.api.deps import get_current_user, get_db, require_admin
+from app.api.deps import get_current_user, get_db, require_manager_or_admin
 from app.models.today_print_report_delivery import TodayPrintReportDelivery
 from app.models.today_print_report_settings import TodayPrintReportSettings
 from app.models.user import User
@@ -87,13 +87,13 @@ async def _settings_row(db: AsyncSession) -> TodayPrintReportSettings:
 
 
 @router.get("/settings")
-async def get_settings(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> dict:
+async def get_settings(db: AsyncSession = Depends(get_db), _: User = Depends(require_manager_or_admin)) -> dict:
     return _settings(await _settings_row(db))
 
 
 @router.put("/settings")
 async def update_settings(
-    payload: SettingsPayload, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)
+    payload: SettingsPayload, db: AsyncSession = Depends(get_db), _: User = Depends(require_manager_or_admin)
 ) -> dict:
     if any(day < 0 or day > 6 for day in payload.weekdays):
         raise HTTPException(status_code=400, detail="Weekdays must be numbers from 0 to 6")
@@ -115,7 +115,7 @@ async def update_settings(
 
 
 @router.get("/preview")
-async def preview(report_date: date | None = None, _: User = Depends(require_admin)) -> dict:
+async def preview(report_date: date | None = None, _: User = Depends(require_manager_or_admin)) -> dict:
     target_date = report_date or datetime.now(report_timezone()).date()
     return await build_today_print_report(target_date)
 
@@ -131,7 +131,7 @@ async def print_preview(
 
 @router.post("/send")
 async def send(
-    report_date: date | None = None, db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)
+    report_date: date | None = None, db: AsyncSession = Depends(get_db), _: User = Depends(require_manager_or_admin)
 ) -> dict:
     delivery_date = report_date or datetime.now(report_timezone()).date()
     settings = await _settings_row(db)
@@ -179,7 +179,7 @@ async def send(
 
 
 @router.get("/history")
-async def history(db: AsyncSession = Depends(get_db), _: User = Depends(require_admin)) -> list[dict]:
+async def history(db: AsyncSession = Depends(get_db), _: User = Depends(require_manager_or_admin)) -> list[dict]:
     rows = (
         await db.execute(
             select(TodayPrintReportDelivery).order_by(TodayPrintReportDelivery.created_at.desc()).limit(50)

@@ -62,7 +62,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
   const [saving, setSaving] = React.useState(false)
   const [sending, setSending] = React.useState(false)
   const previewRef = React.useRef<HTMLDivElement | null>(null)
-  const canManage = user?.role === "ADMIN"
+  const canManage = user?.role === "ADMIN" || user?.role === "MANAGER"
 
   const applySettings = React.useCallback((next: SettingsState) => {
     setSettings(next)
@@ -148,7 +148,7 @@ export function PrintReportPage({ today = false }: { today?: boolean }) {
     }
   }
 
-  if (!canManage) return <div className="rounded-lg border bg-white p-8">Administrator access is required for {reportName}.</div>
+  if (!canManage) return <div className="rounded-lg border bg-white p-8">Manager or administrator access is required for {reportName}.</div>
 
   return (
     <div className="mx-auto max-w-[1400px] space-y-5">

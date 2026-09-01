@@ -24,7 +24,7 @@ const slots = ["10:00","11:00","11:50","14:10","14:20","16:00"]
 
 export default function ReportManagementPage() {
   const { apiFetch, user } = useAuth()
-  const canAccess = user?.role === "ADMIN" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
+  const canAccess = user?.role === "ADMIN" || user?.role === "MANAGER" || user?.full_name?.trim().toLocaleLowerCase() === "laurent hoxha"
   const [recipients,setRecipients] = React.useState<Recipient[]>([])
   const [schedules,setSchedules] = React.useState<Schedule[]>([])
   const [runs,setRuns] = React.useState<Run[]>([])

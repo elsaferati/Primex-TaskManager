@@ -339,7 +339,7 @@ const INTERNAL_MEETING = {
   team: ["Elsa Ferati", "Rinesa Ahmedi", "Laurent Hoxha", "Endi Hyseni"],
   slots: {
     M1: {
-      label: "M1 PER ZHVILLIM (BLIC 08:08-08:15 MAX)",
+      label: "M1 PER ZHVILLIM (BLIC 08:05 - 08:15 MAX)",
       items: [
         "A ka mungesa, a ndryshon plani per sot?",
         "A ka shenime GA/KA ne grupe/Trello?",
