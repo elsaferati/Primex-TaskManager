@@ -2422,6 +2422,7 @@ def _normalized_table_header(value: str) -> str:
         "KRIJUAR": "ADDED",
         "ARSYEJA": "REASON",
         "KOMENT": "COMMENT",
+        "PRODUKTE": "PRODUCTS",
     }.get(normalized, normalized)
 
 
@@ -2468,6 +2469,10 @@ def _table_tone_from_type(task_type: str) -> str:
     return ""
 
 
+def _has_negative_product_delta(value: str) -> bool:
+    return bool(re.search(r"\(\s*-\d+\s*\)", value or ""))
+
+
 def _priority_task_type_rank(task_type: str) -> int:
     normalized = task_type.strip().upper()
     if normalized == "08:00":
@@ -2511,6 +2516,10 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
         return "#dc2626", "#ffffff"
     if tone == "notes":
         return "#dbeafe", "#111827"
+    if tone == "product-negative":
+        # Keep the normal in-progress background while making the entire
+        # under-plan row's text red in HTML, Word, and PNG output.
+        return "#fef3c7", "#dc2626"
     return "#f8fafc", "#111827"
 
 
@@ -2567,6 +2576,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "STATUS"), None)
     type_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TYPE"), None)
     title_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TITLE"), None)
+    products_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "PRODUCTS"), None)
     row_tones: list[str] = []
     highlighted_meeting_rows: list[bool] = []
     cleaned_body_rows: list[list[str]] = []
@@ -2585,6 +2595,8 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                 row_tone = _table_tone_from_status(marker_status) or row_tone
         else:
             is_highlighted_meeting = False
+        if products_index is not None and len(row) > products_index and _has_negative_product_delta(row[products_index]):
+            row_tone = "product-negative"
         row_tones.append(row_tone)
         highlighted_meeting_rows.append(is_highlighted_meeting)
         cleaned_body_rows.append(row)
@@ -3015,6 +3027,7 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
     status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "STATUS"), None)
     type_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TYPE"), None)
     title_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "TITLE"), None)
+    products_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "PRODUCTS"), None)
     cleaned_rows: list[list[str]] = []
     row_tones: list[str] = []
     highlights: list[bool] = []
@@ -3031,6 +3044,8 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
             title, highlighted = _split_meeting_highlight_marker(title)
             row[title_index] = title
             row_tone = _table_tone_from_status(marker_status) or row_tone
+        if products_index is not None and _has_negative_product_delta(row[products_index]):
+            row_tone = "product-negative"
         if status_index is not None:
             row = [cell for index, cell in enumerate(row) if index != status_index]
         cleaned_rows.append(row)
