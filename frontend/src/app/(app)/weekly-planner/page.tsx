@@ -1681,7 +1681,12 @@ export default function WeeklyPlannerPage() {
       const dayDone = task.day_done_products ?? null
       if (weeklyPlanned == null && dayTotal == null && dayDone == null) return null
       const toLabel = (value: number | null) => (value == null ? "-" : String(value))
-      return `${toLabel(weeklyPlanned)}/${toLabel(dayTotal)}/${toLabel(dayDone)} pcs`
+      const base = `${toLabel(weeklyPlanned)}/${toLabel(dayTotal)}/${toLabel(dayDone)} pcs`
+      // A day nobody has touched yet is already pink; only annotate real over/under delivery.
+      if (dayTotal == null || dayDone == null || dayTotal <= 0 || dayDone <= 0) return base
+      const delta = dayDone - dayTotal
+      if (delta === 0) return base
+      return `${base} (${delta > 0 ? "+" : ""}${delta})`
     }
 
     const total = task.total_products ?? task.daily_products ?? null

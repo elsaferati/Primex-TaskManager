@@ -7137,10 +7137,8 @@ export default function PcmProjectPage() {
                                     const completedNum = toNonNegativeInt(rawValue)
                                     const totalValue = editingTaskTotal || controlEdits[task.id]?.total || "0"
                                     const totalNum = toNonNegativeInt(totalValue)
-                                    // Cap completed at total
-                                    const cappedCompleted = Math.min(completedNum, totalNum)
-                                    const newCompleted = cappedCompleted.toString()
-                                    const newStatus = computeStatusFromCompleted(totalNum, cappedCompleted)
+                                    const newCompleted = completedNum.toString()
+                                    const newStatus = computeStatusFromCompleted(totalNum, completedNum)
                                     setEditingTaskCompleted(newCompleted)
                                     setControlEdits((prev) => ({
                                       ...prev,
@@ -7207,12 +7205,7 @@ export default function PcmProjectPage() {
                                     onClick={async () => {
                                       const prevCompleted = controlEdits[task.id]?.completed || "0"
                                       const prevCompletedNum = toNonNegativeInt(prevCompleted)
-                                      // Cap completed at total - don't allow exceeding total
-                                      const completedNum = Math.min(prevCompletedNum + 1, totalVal)
-                                      if (completedNum === prevCompletedNum) {
-                                        // Already at max, don't update
-                                        return
-                                      }
+                                      const completedNum = prevCompletedNum + 1
                                       const newCompleted = completedNum.toString()
                                       const newStatus = computeStatusFromCompleted(totalVal, completedNum)
                                       setControlEdits((prev) => ({
@@ -8362,12 +8355,7 @@ export default function PcmProjectPage() {
                                     onClick={async () => {
                                       const prevCompleted = controlEdits[task.id]?.completed || "0"
                                       const prevCompletedNum = toNonNegativeInt(prevCompleted)
-                                      // Cap completed at total - don't allow exceeding total
-                                      const completedNum = Math.min(prevCompletedNum + 1, totalVal)
-                                      if (completedNum === prevCompletedNum) {
-                                        // Already at max, don't update
-                                        return
-                                      }
+                                      const completedNum = prevCompletedNum + 1
                                       const newCompleted = completedNum.toString()
                                       const newStatus = computeStatusFromCompleted(totalVal, completedNum)
                                       setControlEdits((prev) => ({

@@ -70,7 +70,7 @@ const ADDED_MARK_END = "[[/added]]"
 const NOTE_MARK_TOKEN_RE = /\[\[(done|added)\]\]|\[\[\/(done|added)\]\]/g
 
 type NormalizedTaskStatus = "TODO" | "IN_PROGRESS" | "WAITING_CLIENT" | "WAITING_CONFIRMATION" | "DONE" | "UNKNOWN"
-type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed"
+type TaskStatusFilter = "all" | "notes" | "tasks" | "open" | "closed" | NormalizedTaskStatus
 type ContentFilter = "all" | "emails"
 type NextWeekFilter = "all" | "checked" | "unchecked"
 type TextMarkRange = { start: number; end: number }
@@ -2167,7 +2167,14 @@ export default function NextWeekPlanPage() {
       const hasTask = note.is_converted_to_task === true || noteTaskInfo.has(note.id)
       if (taskStatusFilter === "notes") return !hasTask && note.status !== "CLOSED"
       if (taskStatusFilter === "tasks") return hasTask
-      return true
+      const taskInfo = noteTaskInfo.get(note.id)
+      if (!taskInfo) return false
+      const aggregatedStatus =
+        taskInfo.taskStatuses?.length > 1
+          ? aggregateTaskStatus(taskInfo.taskStatuses)
+          : normalizeTaskStatus(taskInfo.taskStatus)
+      if (aggregatedStatus === "UNKNOWN") return false
+      return aggregatedStatus === taskStatusFilter
     }
     const matchesContentFilter = (note: PlanNote) => {
       if (contentFilter === "all") return true
@@ -2216,6 +2223,15 @@ export default function NextWeekPlanPage() {
 
       return searchHaystack.includes(normalizedSearchQuery)
     }
+    const taskDoneBucket = (note: PlanNote) => {
+      const taskInfo = noteTaskInfo.get(note.id)
+      if (!taskInfo) return 0
+      const aggregatedStatus =
+        taskInfo.taskStatuses?.length > 1
+          ? aggregateTaskStatus(taskInfo.taskStatuses)
+          : normalizeTaskStatus(taskInfo.taskStatus)
+      return aggregatedStatus === "DONE" ? 1 : 0
+    }
     const sorted = [...notes]
       .filter(withinRange)
       .filter(matchesTaskStatusFilter)
@@ -2227,6 +2243,11 @@ export default function NextWeekPlanPage() {
         const bIsClosed = b.status === "CLOSED"
         if (aIsClosed !== bIsClosed) {
           return aIsClosed ? 1 : -1
+        }
+        const aDoneBucket = taskDoneBucket(a)
+        const bDoneBucket = taskDoneBucket(b)
+        if (aDoneBucket !== bDoneBucket) {
+          return aDoneBucket - bDoneBucket
         }
         const aCreated = a.created_at ? new Date(a.created_at).getTime() : 0
         const bCreated = b.created_at ? new Date(b.created_at).getTime() : 0
@@ -2445,6 +2466,27 @@ export default function NextWeekPlanPage() {
                     </TableRow>
                     <TableRow className="h-8">
                       <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-yellow-200" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Task: In progress</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-slate-300 bg-amber-50" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Task: Waiting confirmation</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
+                        <div className="w-4 h-4 rounded-sm border border-emerald-200 bg-emerald-200" />
+                      </TableCell>
+                      <TableCell className="text-sm font-semibold">Task: Done</TableCell>
+                      <TableCell className="text-sm text-slate-600">Ngjyra e rreshtit (SHENIMI)</TableCell>
+                    </TableRow>
+                    <TableRow className="h-8">
+                      <TableCell className="p-1">
                         <div className="w-4 h-4 rounded-sm border border-slate-400 bg-slate-300 opacity-70" />
                       </TableCell>
                       <TableCell className="text-sm font-semibold">Mbyllur</TableCell>
@@ -2528,6 +2570,36 @@ export default function NextWeekPlanPage() {
                     className="bg-slate-200 text-slate-800 focus:bg-slate-300 focus:text-slate-900"
                   >
                     Closed
+                  </SelectItem>
+                  <SelectItem
+                    value="TODO"
+                    className="bg-pink-100 text-pink-900 focus:bg-pink-200 focus:text-pink-900"
+                  >
+                    To do
+                  </SelectItem>
+                  <SelectItem
+                    value="IN_PROGRESS"
+                    className="bg-yellow-100 text-amber-900 focus:bg-amber-200 focus:text-amber-900"
+                  >
+                    In progress
+                  </SelectItem>
+                  <SelectItem
+                    value="WAITING_CLIENT"
+                    className="bg-[#F5E6B3] text-[#7A5A00] focus:bg-[#EBD58D] focus:text-[#7A5A00]"
+                  >
+                    Waiting for Client
+                  </SelectItem>
+                  <SelectItem
+                    value="WAITING_CONFIRMATION"
+                    className="bg-amber-50 text-blue-900 focus:bg-blue-200 focus:text-blue-900"
+                  >
+                    Waiting Confirmation
+                  </SelectItem>
+                  <SelectItem
+                    value="DONE"
+                    className="bg-emerald-100 text-emerald-900 focus:bg-emerald-200 focus:text-emerald-900"
+                  >
+                    Done
                   </SelectItem>
                 </SelectContent>
               </Select>
@@ -2930,7 +3002,15 @@ export default function NextWeekPlanPage() {
                     const shenimiCellClass = isClosed
                       ? "bg-slate-300 opacity-70"
                       : hasTask
-                        ? "bg-pink-200"
+                        ? aggregatedStatus === "TODO"
+                          ? "bg-pink-200"
+                          : aggregatedStatus === "IN_PROGRESS"
+                            ? "bg-yellow-200"
+                            : aggregatedStatus === "DONE"
+                              ? "bg-emerald-200"
+                              : aggregatedStatus === "WAITING_CONFIRMATION"
+                                ? "bg-amber-50"
+                                : "bg-slate-100"
                         : "bg-sky-200"
 
                     // Only show department if:
