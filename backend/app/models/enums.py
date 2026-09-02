@@ -9,6 +9,13 @@ class UserRole(str, enum.Enum):
     STAFF = "STAFF"
 
 
+class SkillRating(str, enum.Enum):
+    A_PLUS = "A_PLUS"
+    A = "A"
+    B = "B"
+    C = "C"
+
+
 class TaskPriority(str, enum.Enum):
     NORMAL = "NORMAL"
     HIGH = "HIGH"

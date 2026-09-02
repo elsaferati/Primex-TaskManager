@@ -30,6 +30,7 @@ import {
   PanelLeftClose,
   Gem,
   Activity,
+  BrainCircuit,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -134,7 +135,12 @@ const items: NavItem[] = [
     icon: DollarSign,
     match: ["/departments/finance"]
   },
-  { 
+  {
+    href: "/skills",
+    label: "Skills Matrix",
+    icon: BrainCircuit,
+  },
+  {
     href: "/weekly-planner", 
     label: "Weekly Planner", 
     icon: CalendarDays 
