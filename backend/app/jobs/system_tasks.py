@@ -6,6 +6,7 @@ from app.db import SessionLocal
 from app.services.meeting_system_tasks import reconcile_external_meeting_system_tasks
 from app.services.system_task_instances import (
     generate_system_task_instances,
+    reconcile_system_task_assignments_for_day,
 )
 
 
@@ -23,5 +24,7 @@ async def pregenerate_system_tasks_today() -> int:
 
 
 async def reconcile_system_task_slots_daily() -> dict[str, int]:
-    created = await generate_system_tasks()
-    return {"rewound_slots": 0, "created_tasks": created}
+    async with SessionLocal() as db:
+        result = await reconcile_system_task_assignments_for_day(db=db)
+        await db.commit()
+    return result

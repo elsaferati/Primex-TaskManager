@@ -29,7 +29,6 @@ from app.schemas.common_entry import (
 )
 from app.services.audit import add_audit_log
 from app.services.notifications import add_notification, publish_notification
-from app.services.system_task_instances import remove_open_system_task_instances_for_leave
 
 
 router = APIRouter()
@@ -260,9 +259,6 @@ async def create_entry(
     )
     db.add(entry)
     await db.flush()
-
-    if entry.category == CommonCategory.annual_leave:
-        await remove_open_system_task_instances_for_leave(db, entry)
 
     add_audit_log(
         db=db,

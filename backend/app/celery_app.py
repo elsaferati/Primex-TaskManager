@@ -9,6 +9,11 @@ from celery.schedules import crontab
 from app.config import settings
 
 
+def _realization_now() -> datetime:
+    """Return the realization-local time without an unpickleable lambda."""
+    return datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE))
+
+
 celery_app = Celery(
     "primex_nexus",
     broker=settings.REDIS_URL,
@@ -29,15 +34,7 @@ celery_app.conf.beat_schedule = {
             day_of_week="mon-fri",
             hour=settings.REALIZATION_BASELINE_HOUR,
             minute=settings.REALIZATION_BASELINE_MINUTE,
-            nowfun=lambda: datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)),
-        ),
-    },
-    "generate-system-tasks-daily": {
-        "task": "app.celery_tasks.generate_system_tasks",
-        "schedule": crontab(
-            day_of_week=settings.SYSTEM_TASK_SCHEDULER_DAY_OF_WEEK,
-            hour=settings.SYSTEM_TASK_SCHEDULER_HOUR,
-            minute=settings.SYSTEM_TASK_SCHEDULER_MINUTE,
+            nowfun=_realization_now,
         ),
     },
     "process-reminders": {

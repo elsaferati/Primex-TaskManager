@@ -4567,6 +4567,10 @@ async def export_system_task_templates_xlsx(
                 deduped.append(uid)
             template_assignee_ids_map[tmpl.id] = deduped
             template_assignee_user_ids.update(deduped)
+        if getattr(tmpl, "zv1_user_id", None):
+            template_assignee_user_ids.add(tmpl.zv1_user_id)
+        if getattr(tmpl, "zv2_user_id", None):
+            template_assignee_user_ids.add(tmpl.zv2_user_id)
 
     template_assignee_initials_map: dict[uuid.UUID, str] = {}
     template_assignee_department_map: dict[uuid.UUID, uuid.UUID | None] = {}
@@ -4627,6 +4631,8 @@ async def export_system_task_templates_xlsx(
         "TITULLI",
         "PERSHKRIMI",
         "USER",
+        "ZV1",
+        "ZV2",
         "REGJ/PATH/CHECKLISTA/TRAINING/BZ GROUP",
         "BZ ME",
         "KOHA BZ",
@@ -4657,6 +4663,8 @@ async def export_system_task_templates_xlsx(
             template_assignee_initials_map.get(uid, "") for uid in template_assignee_ids
         ]
         assignee_label = ", ".join([initials for initials in assignee_initials if initials])
+        zv1_label = template_assignee_initials_map.get(getattr(template, "zv1_user_id", None), "")
+        zv2_label = template_assignee_initials_map.get(getattr(template, "zv2_user_id", None), "")
         row_idx = data_row + idx - 1
         department_label = _system_task_template_department_label(
             template,
@@ -4701,6 +4709,8 @@ async def export_system_task_templates_xlsx(
             template.title,
             _strip_html_keep_breaks(template.description),
             assignee_label,
+            zv1_label,
+            zv2_label,
             details_value,
             bz_me_value,
             bz_time_value,

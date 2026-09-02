@@ -65,6 +65,10 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
                 new=AsyncMock(return_value=5),
             ) as generate_instances,
             patch(
+                "app.api.routers.system_tasks.reconcile_system_task_assignments_for_day",
+                new=AsyncMock(return_value={}),
+            ) as reconcile_assignments,
+            patch(
                 "app.api.routers.system_tasks._template_definition_to_out",
                 new=AsyncMock(return_value={"id": str(template.id)}),
             ),
@@ -85,6 +89,11 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
             start=approved_at.date(),
             end=approved_at.date().replace(day=10),
             template_ids=[template.id],
+        )
+        reconcile_assignments.assert_awaited_once_with(
+            db=db,
+            target_day=approved_at.date(),
+            now_utc=approved_at,
         )
         db.flush.assert_awaited_once()
         db.commit.assert_awaited_once()
@@ -153,6 +162,10 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
 
         with (
             patch(
+                "app.api.routers.system_tasks._validate_replacement_users",
+                new=AsyncMock(),
+            ),
+            patch(
                 "app.api.routers.system_tasks._reset_template_slots_next_run_at",
                 new=AsyncMock(),
             ) as reset_slots,
@@ -206,6 +219,10 @@ class TestSystemTaskTemplateSlotReschedule(unittest.IsolatedAsyncioTestCase):
         user = SimpleNamespace(id=uuid.uuid4())
 
         with (
+            patch(
+                "app.api.routers.system_tasks._validate_replacement_users",
+                new=AsyncMock(),
+            ),
             patch(
                 "app.api.routers.system_tasks._reset_template_slots_next_run_at",
                 new=AsyncMock(),

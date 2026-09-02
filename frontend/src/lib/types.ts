@@ -34,6 +34,8 @@ export interface SystemTaskTemplateDefinition {
   department_ids?: string[] | null
   default_assignee_id?: string | null
   assignee_ids?: string[] | null
+  zv1_user_id?: string | null
+  zv2_user_id?: string | null
   assignees?: TaskAssignee[] | null
   assignee_slots?: SystemTaskTemplateAssigneeSlot[] | null
   scope: SystemTaskScope
@@ -55,6 +57,7 @@ export interface SystemTaskTemplateDefinition {
   show_in_weekly_planner?: boolean | null
   alignment_roles?: string[] | null
   alignment_user_ids?: string[] | null
+  status?: string | null
   is_active: boolean
   created_by_user_id?: string | null
   approval_status?: CommonApprovalStatus | null
@@ -75,6 +78,8 @@ export interface SystemTaskTemplate {
   department_id?: string | null
   department_ids?: string[] | null
   default_assignee_id?: string | null
+  zv1_user_id?: string | null
+  zv2_user_id?: string | null
   created_by?: string | null
   assignees?: TaskAssignee[] | null
   assignee_slots?: SystemTaskTemplateAssigneeSlot[] | null
@@ -175,6 +180,7 @@ export interface User {
 
 export interface UserLookup {
   id: string
+  email: string
   username?: string | null
   full_name?: string | null
   role: UserRole
