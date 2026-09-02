@@ -1138,8 +1138,10 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     await apply_weekly_planner_task_order(db, report_tasks, assignee_ids_by_task, department_codes)
 
     today_todo = [task for task in tasks if _is_without_progress_for_m3_day(task, report_day)]
+    # Both pink no-progress tasks and late system tasks show the explanation
+    # entered for this report day in Daily Report My View.
     daily_rlz_by_task = await _daily_rlz_values_by_task(
-        db, today_todo, report_day, names, assignee_ids_by_task
+        db, [*today_todo, *system_late], report_day, names, assignee_ids_by_task
     )
     done_today = _completed_tasks_for_report_day(completed_tasks, report_day)
     postponed_today, postponed_date_ranges, postponed_both_today, postponed_both_date_ranges = await _postponed_tasks_for_m3_day(
@@ -1210,6 +1212,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         include_department=True,
         include_am_pm=True,
         department_codes=department_codes,
+        daily_rlz_by_task=daily_rlz_by_task,
         **table_kwargs,
     )
     section_4 = _tomorrow_common_section(

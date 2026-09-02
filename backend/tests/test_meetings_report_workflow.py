@@ -1029,6 +1029,30 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertIn("Urgjence tjeter", rendered)
         self.assertIn("Po pres inputin", rendered)
 
+    def test_late_system_table_includes_tyo_reason_and_comment(self) -> None:
+        task = SimpleNamespace(
+            id=uuid.uuid4(), title="Late system task", status="TODO",
+            system_template_origin_id=uuid.uuid4(), department_id=None, assigned_to=None,
+            fast_task_order=None, is_deadline_important=False,
+            due_date=date(2026, 8, 29), start_date=date(2026, 8, 29),
+            completed_at=None, created_at=None, finish_period=None,
+            project_id=None, is_bllok=False, is_r1=False,
+            is_1h_report=False, is_personal=False,
+        )
+        rows = _m3_status_table(
+            "LATE",
+            [task],
+            {},
+            include_late_days=True,
+            daily_rlz_by_task={task.id: ("Urgjence tjeter", "Po pres inputin")},
+        )
+
+        header = next(row for row in rows if "T/Y/O" in row)
+        self.assertLess(header.index("T/Y/O"), header.index("TITULLI"))
+        self.assertLess(header.index("TITULLI"), header.index("ARSYEJA"))
+        self.assertLess(header.index("ARSYEJA"), header.index("KOMENT"))
+        self.assertTrue(any("Urgjence tjeter" in row and "Po pres inputin" in row for row in rows))
+
 
 class MeetingsReportCombinedPostponementTests(unittest.IsolatedAsyncioTestCase):
     async def test_combined_start_due_dates_do_not_shift_task_title_column(self) -> None:
