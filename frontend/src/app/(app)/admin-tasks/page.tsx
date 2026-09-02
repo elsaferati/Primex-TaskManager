@@ -743,9 +743,12 @@ const gaTimeTextColorForBackground = (backgroundColor: string, textColor: string
 
 const GA_TIME_TEXT_COLORS = [
   { label: "Black", value: "#000000" },
-  { label: "Red", value: "#FF0000" },
   { label: "White", value: "#FFFFFF" },
-  { label: "Blue", value: "#0000FF" },
+  { label: "Yellow", value: "#FACC15" },
+  { label: "Purple", value: "#A855F7" },
+  { label: "Red", value: "#EF4444" },
+  { label: "Green", value: "#22C55E" },
+  { label: "Blue", value: "#3B82F6" },
 ] as const
 
 const GA_TIME_RICH_TEXT_TAG_PATTERN = /<(strong|b|em|i|br|span|font)(\s|>|\/)/i
@@ -762,9 +765,20 @@ function normalizeGaTimeInlineColor(value: string) {
     WHITE: "#FFFFFF",
     "RGB(255,255,255)": "#FFFFFF",
     "#FFFFFF": "#FFFFFF",
-    BLUE: "#0000FF",
-    "RGB(0,0,255)": "#0000FF",
-    "#0000FF": "#0000FF",
+    YELLOW: "#FACC15",
+    "RGB(250,204,21)": "#FACC15",
+    "#FACC15": "#FACC15",
+    PURPLE: "#A855F7",
+    "RGB(168,85,247)": "#A855F7",
+    "#A855F7": "#A855F7",
+    "RGB(239,68,68)": "#EF4444",
+    "#EF4444": "#EF4444",
+    GREEN: "#22C55E",
+    "RGB(34,197,94)": "#22C55E",
+    "#22C55E": "#22C55E",
+    BLUE: "#3B82F6",
+    "RGB(59,130,246)": "#3B82F6",
+    "#3B82F6": "#3B82F6",
   }
   return aliases[normalized] || ""
 }
@@ -872,7 +886,7 @@ function applyGaTimeAutomaticContrast(value: string, backgroundColor: string) {
     const inlineColor = normalizeGaTimeInlineColor(
       element.getAttribute("data-ga-color") || element.getAttribute("color") || element.style.color || ""
     )
-    if (inlineColor !== "#FF0000") return
+    if (inlineColor !== "#FF0000" && inlineColor !== "#EF4444") return
     element.setAttribute("data-ga-color", "#FFFFFF")
     element.style.color = "#FFFFFF"
     element.removeAttribute("color")
@@ -1301,17 +1315,28 @@ function GaTimeEntryEditor({
     onSave,
   })
   const isSaving = saving || status === "saving"
+  const editorContainerRef = React.useRef<HTMLDivElement | null>(null)
 
-  const closeEditor = async () => {
+  const closeEditor = React.useCallback(async () => {
     if (!getPlainGaTimeRichText(content).trim()) {
       onCancel()
       return
     }
     if (!hasChanges || await saveLatest()) onCancel()
-  }
+  }, [content, hasChanges, onCancel, saveLatest])
+
+  React.useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const container = editorContainerRef.current
+      if (!container || container.contains(event.target as Node)) return
+      void closeEditor()
+    }
+    document.addEventListener("pointerdown", handlePointerDown)
+    return () => document.removeEventListener("pointerdown", handlePointerDown)
+  }, [closeEditor])
 
   return (
-    <div className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
+    <div ref={editorContainerRef} className="w-full space-y-2 rounded-md border border-blue-200 bg-white p-2">
       <GaTimeRichTextEditor
         value={content}
         onChange={setContent}
@@ -1378,17 +1403,29 @@ function GaTimeRowCommentEditor({
     onSave,
   })
   const isSaving = saving || status === "saving"
+  const editorContainerRef = React.useRef<HTMLDivElement | null>(null)
 
-  const closeEditor = async () => {
+  const closeEditor = React.useCallback(async () => {
     if (!getPlainGaTimeRichText(comment).trim()) {
       onCancel()
       return
     }
     if (!hasChanges || await saveLatest()) onCancel()
-  }
+  }, [comment, hasChanges, onCancel, saveLatest])
+
+  React.useEffect(() => {
+    const handlePointerDown = (event: PointerEvent) => {
+      const container = editorContainerRef.current
+      if (!container || container.contains(event.target as Node)) return
+      void closeEditor()
+    }
+    document.addEventListener("pointerdown", handlePointerDown)
+    return () => document.removeEventListener("pointerdown", handlePointerDown)
+  }, [closeEditor])
 
   return (
     <div
+      ref={editorContainerRef}
       className="flex min-w-[158px] flex-col gap-2 rounded-md border border-blue-200 bg-white p-2"
     >
       <GaTimeRichTextEditor
@@ -1445,6 +1482,13 @@ type GaTimeRowComment = {
 
 type GaTimeCommentColumn = "start" | "end"
 
+type GaTimeCommentDragSource = {
+  commentId: string
+  rowStart: string
+  rowEnd: string
+  column: GaTimeCommentColumn
+}
+
 type GaTimeRow = {
   id?: string | null
   start: string
@@ -1486,6 +1530,11 @@ type GaTimeTableRowResponse = {
   comment_is_italic?: boolean
   comments?: GaTimeTableRowCommentResponse[]
   end_comments?: GaTimeTableRowCommentResponse[]
+}
+
+type GaTimeCrossCellMoveResponse = {
+  rows: GaTimeTableRowResponse[]
+  entries: GaTimeSlotEntry[]
 }
 
 type CommonBucket =
@@ -2023,6 +2072,47 @@ export default function AdminTasksPage() {
   const gaTimeDropHandledRef = React.useRef(false)
   const [gaTimeCommentEditingKey, setGaTimeCommentEditingKey] = React.useState<string | null>(null)
   const [gaTimeCommentSavingKey, setGaTimeCommentSavingKey] = React.useState<string | null>(null)
+  const [gaTimeCommentDragging, setGaTimeCommentDragging] = React.useState<GaTimeCommentDragSource | null>(null)
+  const [gaTimeCommentDropTarget, setGaTimeCommentDropTarget] = React.useState<{
+    cellKey: string
+    beforeCommentId: string | null
+  } | null>(null)
+  const gaTimeCommentDraggingRef = React.useRef<GaTimeCommentDragSource | null>(null)
+  const gaTimeCommentDropTargetRef = React.useRef<(
+    | {
+        kind: "comment"
+        rowStart: string
+        rowEnd: string
+        column: GaTimeCommentColumn
+        beforeCommentId: string | null
+      }
+    | {
+        kind: "slot"
+        dayOfWeek: number
+        startTime: string
+        endTime: string
+        beforeEntryId: string | null
+      }
+  ) | null>(null)
+  const gaTimeCommentDropHandledRef = React.useRef(false)
+  const gaTimeCommentPointerDragRef = React.useRef<{
+    source: GaTimeCommentDragSource
+    pointerId: number
+    startX: number
+    startY: number
+    active: boolean
+  } | null>(null)
+  const [gaTimeCommentPointerPosition, setGaTimeCommentPointerPosition] = React.useState<{
+    x: number
+    y: number
+  } | null>(null)
+  const gaTimeCommentSuppressClickRef = React.useRef(false)
+  const gaTimeEntryCommentDropTargetRef = React.useRef<{
+    rowStart: string
+    rowEnd: string
+    column: GaTimeCommentColumn
+    beforeCommentId: string | null
+  } | null>(null)
   const [gaTimeRowsDialogOpen, setGaTimeRowsDialogOpen] = React.useState(false)
   const [gaTimeRowsDraft, setGaTimeRowsDraft] = React.useState<GaTimeRow[]>([])
   const [gaTimeRowsDraftVersion, setGaTimeRowsDraftVersion] = React.useState(0)
@@ -5110,6 +5200,317 @@ export default function AdminTasksPage() {
     }
   }, [apiFetch])
 
+  const moveGaTimeRowComment = React.useCallback(async (
+    source: GaTimeCommentDragSource,
+    targetRow: GaTimeRow,
+    targetColumn: GaTimeCommentColumn,
+    beforeCommentId: string | null
+  ) => {
+    if (gaTimeCommentSavingKey) return
+    const sourceCellKey = `${source.rowStart}|${source.rowEnd}|${source.column}`
+    const targetCellKey = `${targetRow.start}|${targetRow.end}|${targetColumn}`
+    const sourceComments = gaTimeRows.find(
+      (row) => row.start === source.rowStart && row.end === source.rowEnd
+    )
+    const sourceIndex = sourceComments
+      ? gaTimeCommentsForRow(sourceComments, source.column).findIndex((comment) => comment.id === source.commentId)
+      : -1
+    if (sourceIndex < 0) return
+    if (sourceCellKey === targetCellKey) {
+      const targetComments = gaTimeCommentsForRow(targetRow, targetColumn)
+      const currentBeforeId = targetComments[sourceIndex + 1]?.id ?? null
+      if (beforeCommentId === source.commentId || beforeCommentId === currentBeforeId) return
+    }
+
+    const savingKey = `${source.rowStart}|${source.rowEnd}`
+    setGaTimeCommentEditingKey(null)
+    setGaTimeCommentSavingKey(savingKey)
+    try {
+      const res = await apiFetch("/ga-time-slots/rows/comments/move", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          comment_id: source.commentId,
+          source_start_time: source.rowStart,
+          source_end_time: source.rowEnd,
+          source_column: source.column,
+          target_start_time: targetRow.start,
+          target_end_time: targetRow.end,
+          target_column: targetColumn,
+          before_comment_id: beforeCommentId,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(apiErrorMessage(data, "Failed to move row comment"))
+      }
+      const updatedRows = normalizeGaTimeRows((await res.json()) as GaTimeTableRowResponse[])
+      const updatedByKey = new Map(updatedRows.map((row) => [`${row.start}|${row.end}`, row]))
+      setGaTimeRows((current) => current.map((row) => updatedByKey.get(`${row.start}|${row.end}`) || row))
+    } catch (error) {
+      console.error("Failed to move GA timetable row comment", error)
+      toast.error(error instanceof Error ? error.message : "Failed to move row comment")
+    } finally {
+      setGaTimeCommentSavingKey(null)
+      gaTimeCommentDraggingRef.current = null
+      setGaTimeCommentDragging(null)
+      setGaTimeCommentPointerPosition(null)
+      setGaTimeCommentDropTarget(null)
+    }
+  }, [apiFetch, gaTimeCommentSavingKey, gaTimeRows])
+
+  const moveGaTimeCommentToSlot = React.useCallback(async (
+    source: GaTimeCommentDragSource,
+    targetDayOfWeek: number,
+    targetStartTime: string,
+    targetEndTime: string,
+    beforeEntryId: string | null
+  ) => {
+    if (gaTimeCommentSavingKey) return
+    const savingKey = `${source.rowStart}|${source.rowEnd}`
+    const targetCellKey = `${targetDayOfWeek}|${targetStartTime}`
+    setGaTimeCommentEditingKey(null)
+    setGaTimeCommentSavingKey(savingKey)
+    try {
+      const res = await apiFetch("/ga-time-slots/rows/comments/move-to-slot", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          comment_id: source.commentId,
+          source_start_time: source.rowStart,
+          source_end_time: source.rowEnd,
+          source_column: source.column,
+          target_day_of_week: targetDayOfWeek,
+          target_start_time: targetStartTime,
+          target_end_time: targetEndTime,
+          before_entry_id: beforeEntryId,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(apiErrorMessage(data, "Failed to move comment into timetable"))
+      }
+      const updated = (await res.json()) as GaTimeCrossCellMoveResponse
+      const normalizedRows = normalizeGaTimeRows(updated.rows)
+      const updatedRowsByKey = new Map(normalizedRows.map((row) => [`${row.start}|${row.end}`, row]))
+      setGaTimeRows((current) => current.map((row) => updatedRowsByKey.get(`${row.start}|${row.end}`) || row))
+      setGaTimeEntries((current) => [
+        ...current.filter((entry) => {
+          const rowStart = resolveGaTimeRowStart(normalizeSlotTime(entry.start_time), gaTimeRows)
+          return `${entry.day_of_week}|${rowStart}` !== targetCellKey
+        }),
+        ...updated.entries,
+      ])
+    } catch (error) {
+      console.error("Failed to move GA comment into timetable", error)
+      toast.error(error instanceof Error ? error.message : "Failed to move comment")
+    } finally {
+      setGaTimeCommentSavingKey(null)
+      gaTimeCommentDraggingRef.current = null
+      gaTimeCommentDropTargetRef.current = null
+      gaTimeCommentDropHandledRef.current = false
+      setGaTimeCommentDragging(null)
+      setGaTimeCommentDropTarget(null)
+      setGaTimeDropTarget(null)
+    }
+  }, [apiFetch, gaTimeCommentSavingKey, gaTimeRows])
+
+  const moveGaTimeEntryToComment = React.useCallback(async (
+    entryId: string,
+    targetRow: GaTimeRow,
+    targetColumn: GaTimeCommentColumn,
+    beforeCommentId: string | null
+  ) => {
+    const draggedEntry = gaTimeEntries.find((entry) => entry.id === entryId)
+    if (!draggedEntry || gaTimeSaving[entryId]) return
+    const sourceRowStart = resolveGaTimeRowStart(normalizeSlotTime(draggedEntry.start_time), gaTimeRows)
+    const sourceCellKey = `${draggedEntry.day_of_week}|${sourceRowStart}`
+    setGaTimeEditingId(null)
+    setGaTimeAddingCell(null)
+    setGaTimeSaving((current) => ({ ...current, [entryId]: true }))
+    try {
+      const res = await apiFetch("/ga-time-slots/rows/comments/move-from-slot", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          entry_id: entryId,
+          target_start_time: targetRow.start,
+          target_end_time: targetRow.end,
+          target_column: targetColumn,
+          before_comment_id: beforeCommentId,
+        }),
+      })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(apiErrorMessage(data, "Failed to move timetable entry into comments"))
+      }
+      const updated = (await res.json()) as GaTimeCrossCellMoveResponse
+      const normalizedRows = normalizeGaTimeRows(updated.rows)
+      const updatedRowsByKey = new Map(normalizedRows.map((row) => [`${row.start}|${row.end}`, row]))
+      setGaTimeRows((current) => current.map((row) => updatedRowsByKey.get(`${row.start}|${row.end}`) || row))
+      setGaTimeEntries((current) => [
+        ...current.filter((entry) => {
+          const rowStart = resolveGaTimeRowStart(normalizeSlotTime(entry.start_time), gaTimeRows)
+          return `${entry.day_of_week}|${rowStart}` !== sourceCellKey
+        }),
+        ...updated.entries,
+      ])
+    } catch (error) {
+      console.error("Failed to move GA timetable entry into comments", error)
+      toast.error(error instanceof Error ? error.message : "Failed to move timetable entry")
+    } finally {
+      setGaTimeSaving((current) => ({ ...current, [entryId]: false }))
+      gaTimeDraggingIdRef.current = null
+      gaTimeEntryCommentDropTargetRef.current = null
+      setGaTimeDraggingId(null)
+      setGaTimeDropTarget(null)
+      setGaTimeCommentDropTarget(null)
+    }
+  }, [apiFetch, gaTimeEntries, gaTimeRows, gaTimeSaving])
+
+  React.useEffect(() => {
+    const clearPointerDrag = () => {
+      gaTimeCommentPointerDragRef.current = null
+      gaTimeCommentDraggingRef.current = null
+      gaTimeCommentDropTargetRef.current = null
+      setGaTimeCommentDragging(null)
+      setGaTimeCommentDropTarget(null)
+      setGaTimeDropTarget(null)
+    }
+
+    const updatePointerTarget = (clientX: number, clientY: number) => {
+      const element = document.elementFromPoint(clientX, clientY) as HTMLElement | null
+      if (!element) return
+
+      const commentCell = element.closest<HTMLElement>("[data-ga-comment-cell]")
+      if (commentCell) {
+        const commentEntry = element.closest<HTMLElement>("[data-ga-comment-entry-id]")
+        let beforeCommentId: string | null = null
+        if (commentEntry) {
+          const bounds = commentEntry.getBoundingClientRect()
+          beforeCommentId = clientY < bounds.top + bounds.height / 2
+            ? commentEntry.dataset.gaCommentEntryId || null
+            : commentEntry.dataset.gaNextCommentId || null
+        }
+        const rowStart = commentCell.dataset.gaRowStart
+        const rowEnd = commentCell.dataset.gaRowEnd
+        const column = commentCell.dataset.gaCommentColumn as GaTimeCommentColumn | undefined
+        if (!rowStart || !rowEnd || !column) return
+        gaTimeCommentDropTargetRef.current = {
+          kind: "comment",
+          rowStart,
+          rowEnd,
+          column,
+          beforeCommentId,
+        }
+        const cellKey = `${rowStart}|${rowEnd}|${column}`
+        setGaTimeCommentDropTarget((current) => (
+          current?.cellKey === cellKey && current.beforeCommentId === beforeCommentId
+            ? current
+            : { cellKey, beforeCommentId }
+        ))
+        setGaTimeDropTarget(null)
+        return
+      }
+
+      const slotCell = element.closest<HTMLElement>("[data-ga-slot-cell]")
+      if (slotCell) {
+        const slotEntry = element.closest<HTMLElement>("[data-ga-slot-entry-id]")
+        let beforeEntryId: string | null = null
+        if (slotEntry) {
+          const bounds = slotEntry.getBoundingClientRect()
+          beforeEntryId = clientY < bounds.top + bounds.height / 2
+            ? slotEntry.dataset.gaSlotEntryId || null
+            : slotEntry.dataset.gaNextEntryId || null
+        }
+        const dayOfWeek = Number(slotCell.dataset.gaDayOfWeek)
+        const startTime = slotCell.dataset.gaStartTime
+        const endTime = slotCell.dataset.gaEndTime
+        if (!Number.isInteger(dayOfWeek) || !startTime || !endTime) return
+        gaTimeCommentDropTargetRef.current = {
+          kind: "slot",
+          dayOfWeek,
+          startTime,
+          endTime,
+          beforeEntryId,
+        }
+        const cellKey = `${dayOfWeek}|${startTime}`
+        setGaTimeDropTarget((current) => (
+          current?.cellKey === cellKey && current.beforeEntryId === beforeEntryId
+            ? current
+            : { cellKey, beforeEntryId }
+        ))
+        setGaTimeCommentDropTarget(null)
+      }
+    }
+
+    const handlePointerMove = (event: PointerEvent) => {
+      const drag = gaTimeCommentPointerDragRef.current
+      if (!drag || event.pointerId !== drag.pointerId) return
+      if (!drag.active) {
+        const distance = Math.hypot(event.clientX - drag.startX, event.clientY - drag.startY)
+        if (distance < 5) return
+        drag.active = true
+        gaTimeCommentDraggingRef.current = drag.source
+        gaTimeCommentDropTargetRef.current = null
+        gaTimeCommentDropHandledRef.current = false
+        setGaTimeCommentDragging(drag.source)
+        setGaTimeCommentEditingKey(null)
+        setGaTimeEditingId(null)
+        setGaTimeAddingCell(null)
+      }
+      event.preventDefault()
+      setGaTimeCommentPointerPosition({ x: event.clientX, y: event.clientY })
+      updatePointerTarget(event.clientX, event.clientY)
+    }
+
+    const handlePointerEnd = (event: PointerEvent) => {
+      const drag = gaTimeCommentPointerDragRef.current
+      if (!drag || event.pointerId !== drag.pointerId) return
+      const target = gaTimeCommentDropTargetRef.current
+      const wasActive = drag.active
+      const source = drag.source
+      clearPointerDrag()
+      if (!wasActive || !target) return
+      event.preventDefault()
+      gaTimeCommentSuppressClickRef.current = true
+      window.setTimeout(() => {
+        gaTimeCommentSuppressClickRef.current = false
+      }, 0)
+      if (target.kind === "comment") {
+        const targetRow = gaTimeRows.find(
+          (row) => row.start === target.rowStart && row.end === target.rowEnd
+        )
+        if (targetRow) {
+          void moveGaTimeRowComment(source, targetRow, target.column, target.beforeCommentId)
+        }
+      } else {
+        void moveGaTimeCommentToSlot(
+          source,
+          target.dayOfWeek,
+          target.startTime,
+          target.endTime,
+          target.beforeEntryId
+        )
+      }
+    }
+
+    const handlePointerCancel = (event: PointerEvent) => {
+      const drag = gaTimeCommentPointerDragRef.current
+      if (!drag || event.pointerId !== drag.pointerId) return
+      clearPointerDrag()
+    }
+
+    document.addEventListener("pointermove", handlePointerMove, { passive: false })
+    document.addEventListener("pointerup", handlePointerEnd)
+    document.addEventListener("pointercancel", handlePointerCancel)
+    return () => {
+      document.removeEventListener("pointermove", handlePointerMove)
+      document.removeEventListener("pointerup", handlePointerEnd)
+      document.removeEventListener("pointercancel", handlePointerCancel)
+    }
+  }, [gaTimeRows, moveGaTimeCommentToSlot, moveGaTimeRowComment])
+
   const gaTimeEntriesByCell = React.useMemo(() => {
     const map = new Map<string, GaTimeSlotEntry[]>()
     for (const entry of gaTimeEntries) {
@@ -5346,6 +5747,248 @@ export default function AdminTasksPage() {
     },
     [apiFetch]
   )
+
+  const renderGaTimeCommentCell = (
+    slot: GaTimeRow,
+    column: GaTimeCommentColumn,
+    isSpecialStartCell = false
+  ) => {
+    const comments = gaTimeCommentsForRow(slot, column)
+    const cellKey = `${slot.start}|${slot.end}|${column}`
+    const rowSavingKey = `${slot.start}|${slot.end}`
+    const newEditorKey = gaTimeCommentEditorKey(slot, "new", column)
+
+    const dropIntoComment = (beforeCommentId: string | null) => {
+      const commentSource = gaTimeCommentDraggingRef.current
+      const entryId = gaTimeDraggingIdRef.current
+      setGaTimeCommentDropTarget(null)
+      if (commentSource) {
+        void moveGaTimeRowComment(commentSource, slot, column, beforeCommentId)
+      } else if (entryId) {
+        void moveGaTimeEntryToComment(entryId, slot, column, beforeCommentId)
+      }
+    }
+
+    return (
+      <td
+        className={`ga-time-cell ga-time-comment${isSpecialStartCell ? " ga-time-special-comment" : ""}`}
+        colSpan={isSpecialStartCell ? 2 : undefined}
+        data-ga-comment-cell="true"
+        data-ga-row-start={slot.start}
+        data-ga-row-end={slot.end}
+        data-ga-comment-column={column}
+        onDragOver={(event) => {
+          if (!canEditGaTimeSlots || (!gaTimeCommentDraggingRef.current && !gaTimeDraggingIdRef.current)) return
+          event.preventDefault()
+          event.dataTransfer.dropEffect = "move"
+          if (gaTimeCommentDraggingRef.current) {
+            gaTimeCommentDropTargetRef.current = {
+              kind: "comment",
+              rowStart: slot.start,
+              rowEnd: slot.end,
+              column,
+              beforeCommentId: null,
+            }
+          } else {
+            gaTimeEntryCommentDropTargetRef.current = {
+              rowStart: slot.start,
+              rowEnd: slot.end,
+              column,
+              beforeCommentId: null,
+            }
+          }
+          setGaTimeCommentDropTarget((current) => (
+            current?.cellKey === cellKey && current.beforeCommentId === null
+              ? current
+              : { cellKey, beforeCommentId: null }
+          ))
+        }}
+        onDrop={(event) => {
+          if (!canEditGaTimeSlots || (!gaTimeCommentDraggingRef.current && !gaTimeDraggingIdRef.current)) return
+          event.preventDefault()
+          if (gaTimeCommentDraggingRef.current) gaTimeCommentDropHandledRef.current = true
+          if (gaTimeDraggingIdRef.current) gaTimeDropHandledRef.current = true
+          dropIntoComment(null)
+        }}
+      >
+        <div className={`ga-time-comment-list ${
+          gaTimeCommentDropTarget?.cellKey === cellKey && gaTimeCommentDropTarget.beforeCommentId === null
+            ? "ga-time-drop-cell"
+            : ""
+        }`}>
+          {comments.map((comment, commentIndex) => {
+            const editorKey = gaTimeCommentEditorKey(slot, comment.id, column)
+            if (gaTimeCommentEditingKey === editorKey) {
+              return (
+                <GaTimeRowCommentEditor
+                  key={comment.id}
+                  initialComment={comment.content}
+                  initialFormat={{
+                    background_color: comment.backgroundColor,
+                    text_color: comment.textColor,
+                    is_bold: comment.isBold,
+                    is_italic: comment.isItalic,
+                  }}
+                  saving={gaTimeCommentSavingKey === rowSavingKey}
+                  onSave={(content, format) => saveGaTimeRowComment(slot, comment.id, content, format, column)}
+                  onCancel={() => setGaTimeCommentEditingKey(null)}
+                />
+              )
+            }
+            return (
+              <div
+                key={comment.id}
+                className={`ga-time-comment-entry ga-time-draggable select-none ${
+                  gaTimeCommentDragging?.commentId === comment.id ? "ga-time-dragging" : ""
+                } ${
+                  gaTimeCommentDropTarget?.cellKey === cellKey &&
+                  gaTimeCommentDropTarget.beforeCommentId === comment.id
+                    ? "ga-time-drop-before"
+                    : ""
+                }`}
+                style={gaTimeEntryStyle({
+                  background_color: comment.backgroundColor,
+                  text_color: comment.textColor,
+                  is_bold: comment.isBold,
+                  is_italic: comment.isItalic,
+                })}
+                draggable={false}
+                data-ga-comment-entry-id={comment.id}
+                data-ga-next-comment-id={comments[commentIndex + 1]?.id || ""}
+                onPointerDown={(event) => {
+                  if (!canEditGaTimeSlots || gaTimeCommentSavingKey || event.button !== 0) return
+                  if ((event.target as HTMLElement).closest(".ga-time-delete")) return
+                  gaTimeCommentPointerDragRef.current = {
+                    source: {
+                      commentId: comment.id,
+                      rowStart: slot.start,
+                      rowEnd: slot.end,
+                      column,
+                    },
+                    pointerId: event.pointerId,
+                    startX: event.clientX,
+                    startY: event.clientY,
+                    active: false,
+                  }
+                }}
+                onDragOver={(event) => {
+                  if (!canEditGaTimeSlots || (!gaTimeCommentDraggingRef.current && !gaTimeDraggingIdRef.current)) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  event.dataTransfer.dropEffect = "move"
+                  const bounds = event.currentTarget.getBoundingClientRect()
+                  const isAfter = event.clientY >= bounds.top + bounds.height / 2
+                  const beforeCommentId = isAfter
+                    ? comments[commentIndex + 1]?.id ?? null
+                    : comment.id
+                  if (gaTimeCommentDraggingRef.current) {
+                    gaTimeCommentDropTargetRef.current = {
+                      kind: "comment",
+                      rowStart: slot.start,
+                      rowEnd: slot.end,
+                      column,
+                      beforeCommentId,
+                    }
+                  } else {
+                    gaTimeEntryCommentDropTargetRef.current = {
+                      rowStart: slot.start,
+                      rowEnd: slot.end,
+                      column,
+                      beforeCommentId,
+                    }
+                  }
+                  setGaTimeCommentDropTarget((current) => (
+                    current?.cellKey === cellKey && current.beforeCommentId === beforeCommentId
+                      ? current
+                      : { cellKey, beforeCommentId }
+                  ))
+                }}
+                onDrop={(event) => {
+                  if (!canEditGaTimeSlots || (!gaTimeCommentDraggingRef.current && !gaTimeDraggingIdRef.current)) return
+                  event.preventDefault()
+                  event.stopPropagation()
+                  const bounds = event.currentTarget.getBoundingClientRect()
+                  const isAfter = event.clientY >= bounds.top + bounds.height / 2
+                  const beforeCommentId = isAfter
+                    ? comments[commentIndex + 1]?.id ?? null
+                    : comment.id
+                  if (gaTimeCommentDraggingRef.current) gaTimeCommentDropHandledRef.current = true
+                  if (gaTimeDraggingIdRef.current) gaTimeDropHandledRef.current = true
+                  dropIntoComment(beforeCommentId)
+                }}
+                title="Drag to move or click to edit"
+              >
+                <span
+                  className="ga-time-comment-text"
+                  role="button"
+                  tabIndex={0}
+                  draggable={false}
+                  onClick={() => {
+                    if (gaTimeCommentSuppressClickRef.current) return
+                    if (!canEditGaTimeSlots) return
+                    setGaTimeAddingCell(null)
+                    setGaTimeEditingId(null)
+                    setGaTimeCommentEditingKey(editorKey)
+                  }}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return
+                    event.preventDefault()
+                    if (!canEditGaTimeSlots) return
+                    setGaTimeAddingCell(null)
+                    setGaTimeEditingId(null)
+                    setGaTimeCommentEditingKey(editorKey)
+                  }}
+                >
+                  <GaTimeRichTextContent value={comment.content} />
+                </span>
+                {canEditGaTimeSlots ? (
+                  <button
+                    type="button"
+                    className="ga-time-delete"
+                    disabled={gaTimeCommentSavingKey === rowSavingKey}
+                    onClick={() => void saveGaTimeRowComment(slot, comment.id, "", {
+                      background_color: comment.backgroundColor,
+                      text_color: comment.textColor,
+                      is_bold: comment.isBold,
+                      is_italic: comment.isItalic,
+                    }, column)}
+                    title="Delete comment"
+                    aria-label="Delete comment"
+                  >
+                    {gaTimeCommentSavingKey === rowSavingKey ? "..." : "\u00d7"}
+                  </button>
+                ) : null}
+              </div>
+            )
+          })}
+          {canEditGaTimeSlots ? (
+            gaTimeCommentEditingKey === newEditorKey ? (
+              <GaTimeRowCommentEditor
+                initialComment=""
+                saving={gaTimeCommentSavingKey === rowSavingKey}
+                onSave={(content, format) => saveGaTimeRowComment(slot, null, content, format, column)}
+                onCancel={() => setGaTimeCommentEditingKey(null)}
+              />
+            ) : (
+              <button
+                type="button"
+                className="ga-time-add ga-time-comment-add"
+                title="Add another comment"
+                aria-label={`Add ${column === "end" ? "end " : ""}comment for ${slot.label || slot.start}`}
+                onClick={() => {
+                  setGaTimeAddingCell(null)
+                  setGaTimeEditingId(null)
+                  setGaTimeCommentEditingKey(newEditorKey)
+                }}
+              >
+                +
+              </button>
+            )
+          ) : null}
+        </div>
+      </td>
+    )
+  }
 
   const AdminCommonWeekTable = () => {
     const weekTitleRange =
@@ -6602,6 +7245,33 @@ export default function AdminTasksPage() {
             {gaTimeLoading ? <span>Loading GA time slots...</span> : null}
             {gaTimeError ? <span className="text-red-600">{gaTimeError}</span> : null}
           </div>
+          {gaTimeCommentDragging && gaTimeCommentPointerPosition ? (() => {
+            const sourceRow = gaTimeRows.find(
+              (row) => row.start === gaTimeCommentDragging.rowStart && row.end === gaTimeCommentDragging.rowEnd
+            )
+            const sourceComment = sourceRow
+              ? gaTimeCommentsForRow(sourceRow, gaTimeCommentDragging.column).find(
+                  (comment) => comment.id === gaTimeCommentDragging.commentId
+                )
+              : null
+            return sourceComment ? (
+              <div
+                className="pointer-events-none fixed z-[100] max-w-[260px] rounded-md border border-blue-400 px-3 py-2 text-xs shadow-xl"
+                style={{
+                  left: gaTimeCommentPointerPosition.x + 12,
+                  top: gaTimeCommentPointerPosition.y + 12,
+                  ...gaTimeEntryStyle({
+                    background_color: sourceComment.backgroundColor,
+                    text_color: sourceComment.textColor,
+                    is_bold: sourceComment.isBold,
+                    is_italic: sourceComment.isItalic,
+                  }),
+                }}
+              >
+                <GaTimeRichTextContent value={sourceComment.content} />
+              </div>
+            ) : null
+          })() : null}
           <div className="mt-3 ga-time-table ga-time-table-scroll">
             <table className="ga-time-table-table ga-time-table-live">
               <colgroup>
@@ -6642,96 +7312,7 @@ export default function AdminTasksPage() {
                         ) : "\u00A0"}
                       </td>
                     ) : null}
-                    <td
-                      className={`ga-time-cell ga-time-comment${slot.isSpecial ? " ga-time-special-comment" : ""}`}
-                      colSpan={slot.isSpecial ? 2 : undefined}
-                    >
-                      <div className="ga-time-comment-list">
-                        {gaTimeCommentsForRow(slot).map((comment) => {
-                          const editorKey = gaTimeCommentEditorKey(slot, comment.id)
-                          return gaTimeCommentEditingKey === editorKey ? (
-                            <GaTimeRowCommentEditor
-                              key={comment.id}
-                              initialComment={comment.content}
-                              initialFormat={{
-                                background_color: comment.backgroundColor,
-                                text_color: comment.textColor,
-                                is_bold: comment.isBold,
-                                is_italic: comment.isItalic,
-                              }}
-                              saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
-                              onSave={(content, format) => saveGaTimeRowComment(slot, comment.id, content, format)}
-                              onCancel={() => setGaTimeCommentEditingKey(null)}
-                            />
-                          ) : (
-                            <div
-                              key={comment.id}
-                              className="ga-time-comment-entry"
-                              style={gaTimeEntryStyle({
-                                background_color: comment.backgroundColor,
-                                text_color: comment.textColor,
-                                is_bold: comment.isBold,
-                                is_italic: comment.isItalic,
-                              })}
-                            >
-                              <button
-                                type="button"
-                                className="ga-time-comment-text"
-                                onClick={() => {
-                                  if (!canEditGaTimeSlots) return
-                                  setGaTimeAddingCell(null)
-                                  setGaTimeEditingId(null)
-                                  setGaTimeCommentEditingKey(editorKey)
-                                }}
-                              >
-                                <GaTimeRichTextContent value={comment.content} />
-                              </button>
-                              {canEditGaTimeSlots ? (
-                                <button
-                                  type="button"
-                                  className="ga-time-delete"
-                                  disabled={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
-                                  onClick={() => void saveGaTimeRowComment(slot, comment.id, "", {
-                                    background_color: comment.backgroundColor,
-                                    text_color: comment.textColor,
-                                    is_bold: comment.isBold,
-                                    is_italic: comment.isItalic,
-                                  })}
-                                  title="Delete comment"
-                                  aria-label="Delete comment"
-                                >
-                                  {gaTimeCommentSavingKey === `${slot.start}|${slot.end}` ? "..." : "\u00d7"}
-                                </button>
-                              ) : null}
-                            </div>
-                          )
-                        })}
-                        {canEditGaTimeSlots ? (
-                          gaTimeCommentEditingKey === gaTimeCommentEditorKey(slot, "new") ? (
-                            <GaTimeRowCommentEditor
-                              initialComment=""
-                              saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
-                              onSave={(content, format) => saveGaTimeRowComment(slot, null, content, format)}
-                              onCancel={() => setGaTimeCommentEditingKey(null)}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="ga-time-add ga-time-comment-add"
-                              title="Add another comment"
-                              aria-label={`Add comment for ${slot.label || slot.start}`}
-                              onClick={() => {
-                                setGaTimeAddingCell(null)
-                                setGaTimeEditingId(null)
-                                setGaTimeCommentEditingKey(gaTimeCommentEditorKey(slot, "new"))
-                              }}
-                            >
-                              +
-                            </button>
-                          )
-                        ) : null}
-                      </div>
-                    </td>
+                    {renderGaTimeCommentCell(slot, "start", Boolean(slot.isSpecial))}
                     {commonWeekISOs.map((iso) => {
                       const dayOfWeek = toDayOfWeek(iso)
                       const cellKey = `${dayOfWeek}|${slot.start}`
@@ -6742,10 +7323,29 @@ export default function AdminTasksPage() {
                         <td
                           key={`${cellKey}`}
                           className="ga-time-cell"
+                          data-ga-slot-cell="true"
+                          data-ga-day-of-week={dayOfWeek}
+                          data-ga-start-time={slot.start}
+                          data-ga-end-time={slot.end}
                           onDragOver={(event) => {
                             if (!canEditGaTimeSlots) return
                             event.preventDefault()
                             event.dataTransfer.dropEffect = "move"
+                            if (gaTimeCommentDraggingRef.current) {
+                              gaTimeCommentDropTargetRef.current = {
+                                kind: "slot",
+                                dayOfWeek,
+                                startTime: slot.start,
+                                endTime: slot.end,
+                                beforeEntryId: null,
+                              }
+                              setGaTimeDropTarget((current) =>
+                                current?.cellKey === cellKey && current.beforeEntryId === null
+                                  ? current
+                                  : { cellKey, beforeEntryId: null }
+                              )
+                              return
+                            }
                             gaTimeDropTargetRef.current = {
                               dayOfWeek,
                               startTime: slot.start,
@@ -6761,6 +7361,18 @@ export default function AdminTasksPage() {
                           onDrop={(event) => {
                             if (!canEditGaTimeSlots) return
                             event.preventDefault()
+                            const commentSource = gaTimeCommentDraggingRef.current
+                            if (commentSource) {
+                              gaTimeCommentDropHandledRef.current = true
+                              void moveGaTimeCommentToSlot(
+                                commentSource,
+                                dayOfWeek,
+                                slot.start,
+                                slot.end,
+                                null
+                              )
+                              return
+                            }
                             const entryId =
                               event.dataTransfer.getData("application/x-ga-time-entry") ||
                               event.dataTransfer.getData("text/plain") ||
@@ -6827,6 +7439,8 @@ export default function AdminTasksPage() {
                                   }`}
                                   style={gaTimeEntryStyle(entry)}
                                   draggable={canEditGaTimeSlots && !gaTimeSaving[entry.id]}
+                                  data-ga-slot-entry-id={entry.id}
+                                  data-ga-next-entry-id={entries[entryIndex + 1]?.id || ""}
                                   onDragStart={(event) => {
                                     if (!canEditGaTimeSlots) return
                                     event.dataTransfer.effectAllowed = "move"
@@ -6834,6 +7448,7 @@ export default function AdminTasksPage() {
                                     event.dataTransfer.setData("text/plain", entry.id)
                                     gaTimeDraggingIdRef.current = entry.id
                                     gaTimeDropTargetRef.current = null
+                                    gaTimeEntryCommentDropTargetRef.current = null
                                     gaTimeDropHandledRef.current = false
                                     setGaTimeDraggingId(entry.id)
                                     setGaTimeEditingId(null)
@@ -6849,6 +7464,21 @@ export default function AdminTasksPage() {
                                     const beforeEntryId = isAfter
                                       ? entries[entryIndex + 1]?.id ?? null
                                       : entry.id
+                                    if (gaTimeCommentDraggingRef.current) {
+                                      gaTimeCommentDropTargetRef.current = {
+                                        kind: "slot",
+                                        dayOfWeek,
+                                        startTime: slot.start,
+                                        endTime: slot.end,
+                                        beforeEntryId,
+                                      }
+                                      setGaTimeDropTarget((current) =>
+                                        current?.cellKey === cellKey && current.beforeEntryId === beforeEntryId
+                                          ? current
+                                          : { cellKey, beforeEntryId }
+                                      )
+                                      return
+                                    }
                                     gaTimeDropTargetRef.current = {
                                       dayOfWeek,
                                       startTime: slot.start,
@@ -6865,30 +7495,56 @@ export default function AdminTasksPage() {
                                     if (!canEditGaTimeSlots) return
                                     event.preventDefault()
                                     event.stopPropagation()
+                                    const bounds = event.currentTarget.getBoundingClientRect()
+                                    const isAfter = event.clientY >= bounds.top + bounds.height / 2
+                                    const beforeEntryId = isAfter
+                                      ? entries[entryIndex + 1]?.id ?? null
+                                      : entry.id
+                                    const commentSource = gaTimeCommentDraggingRef.current
+                                    if (commentSource) {
+                                      gaTimeCommentDropHandledRef.current = true
+                                      void moveGaTimeCommentToSlot(
+                                        commentSource,
+                                        dayOfWeek,
+                                        slot.start,
+                                        slot.end,
+                                        beforeEntryId
+                                      )
+                                      return
+                                    }
                                     const entryId =
                                       event.dataTransfer.getData("application/x-ga-time-entry") ||
                                       event.dataTransfer.getData("text/plain") ||
                                       gaTimeDraggingIdRef.current ||
                                       gaTimeDraggingId
                                     if (!entryId || entryId === entry.id) return
-                                    const bounds = event.currentTarget.getBoundingClientRect()
-                                    const isAfter = event.clientY >= bounds.top + bounds.height / 2
-                                    const beforeEntryId = isAfter
-                                      ? entries[entryIndex + 1]?.id ?? null
-                                      : entry.id
                                     gaTimeDropHandledRef.current = true
                                     void moveGaTimeEntry(entryId, dayOfWeek, slot.start, slot.end, beforeEntryId)
                                   }}
                                   onDragEnd={() => {
                                     const entryId = gaTimeDraggingIdRef.current
                                     const target = gaTimeDropTargetRef.current
+                                    const commentTarget = gaTimeEntryCommentDropTargetRef.current
                                     const dropWasHandled = gaTimeDropHandledRef.current
                                     gaTimeDraggingIdRef.current = null
                                     gaTimeDropTargetRef.current = null
+                                    gaTimeEntryCommentDropTargetRef.current = null
                                     gaTimeDropHandledRef.current = false
                                     setGaTimeDraggingId(null)
                                     setGaTimeDropTarget(null)
-                                    if (!dropWasHandled && entryId && target) {
+                                    if (!dropWasHandled && entryId && commentTarget) {
+                                      const targetRow = gaTimeRows.find(
+                                        (row) => row.start === commentTarget.rowStart && row.end === commentTarget.rowEnd
+                                      )
+                                      if (targetRow) {
+                                        void moveGaTimeEntryToComment(
+                                          entryId,
+                                          targetRow,
+                                          commentTarget.column,
+                                          commentTarget.beforeCommentId
+                                        )
+                                      }
+                                    } else if (!dropWasHandled && entryId && target) {
                                       void moveGaTimeEntry(
                                         entryId,
                                         target.dayOfWeek,
@@ -6977,93 +7633,7 @@ export default function AdminTasksPage() {
                         </td>
                       )
                     })}
-                    <td className="ga-time-cell ga-time-comment">
-                      <div className="ga-time-comment-list">
-                        {gaTimeCommentsForRow(slot, "end").map((comment) => {
-                          const editorKey = gaTimeCommentEditorKey(slot, comment.id, "end")
-                          return gaTimeCommentEditingKey === editorKey ? (
-                            <GaTimeRowCommentEditor
-                              key={comment.id}
-                              initialComment={comment.content}
-                              initialFormat={{
-                                background_color: comment.backgroundColor,
-                                text_color: comment.textColor,
-                                is_bold: comment.isBold,
-                                is_italic: comment.isItalic,
-                              }}
-                              saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
-                              onSave={(content, format) => saveGaTimeRowComment(slot, comment.id, content, format, "end")}
-                              onCancel={() => setGaTimeCommentEditingKey(null)}
-                            />
-                          ) : (
-                            <div
-                              key={comment.id}
-                              className="ga-time-comment-entry"
-                              style={gaTimeEntryStyle({
-                                background_color: comment.backgroundColor,
-                                text_color: comment.textColor,
-                                is_bold: comment.isBold,
-                                is_italic: comment.isItalic,
-                              })}
-                            >
-                              <button
-                                type="button"
-                                className="ga-time-comment-text"
-                                onClick={() => {
-                                  if (!canEditGaTimeSlots) return
-                                  setGaTimeAddingCell(null)
-                                  setGaTimeEditingId(null)
-                                  setGaTimeCommentEditingKey(editorKey)
-                                }}
-                              >
-                                <GaTimeRichTextContent value={comment.content} />
-                              </button>
-                              {canEditGaTimeSlots ? (
-                                <button
-                                  type="button"
-                                  className="ga-time-delete"
-                                  disabled={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
-                                  onClick={() => void saveGaTimeRowComment(slot, comment.id, "", {
-                                    background_color: comment.backgroundColor,
-                                    text_color: comment.textColor,
-                                    is_bold: comment.isBold,
-                                    is_italic: comment.isItalic,
-                                  }, "end")}
-                                  title="Delete comment"
-                                  aria-label="Delete comment"
-                                >
-                                  {gaTimeCommentSavingKey === `${slot.start}|${slot.end}` ? "..." : "\u00d7"}
-                                </button>
-                              ) : null}
-                            </div>
-                          )
-                        })}
-                        {canEditGaTimeSlots ? (
-                          gaTimeCommentEditingKey === gaTimeCommentEditorKey(slot, "new", "end") ? (
-                            <GaTimeRowCommentEditor
-                              initialComment=""
-                              saving={gaTimeCommentSavingKey === `${slot.start}|${slot.end}`}
-                              onSave={(content, format) => saveGaTimeRowComment(slot, null, content, format, "end")}
-                              onCancel={() => setGaTimeCommentEditingKey(null)}
-                            />
-                          ) : (
-                            <button
-                              type="button"
-                              className="ga-time-add ga-time-comment-add"
-                              title="Add another comment"
-                              aria-label={`Add end comment for ${slot.label || slot.start}`}
-                              onClick={() => {
-                                setGaTimeAddingCell(null)
-                                setGaTimeEditingId(null)
-                                setGaTimeCommentEditingKey(gaTimeCommentEditorKey(slot, "new", "end"))
-                              }}
-                            >
-                              +
-                            </button>
-                          )
-                        ) : null}
-                      </div>
-                    </td>
+                    {renderGaTimeCommentCell(slot, "end")}
                   </tr>
                 ))}
               </tbody>
@@ -8229,6 +8799,12 @@ export default function AdminTasksPage() {
           color: inherit;
           font-weight: inherit;
           font-style: inherit;
+        }
+        .admin-week-table .ga-time-comment-entry.ga-time-draggable .ga-time-comment-text {
+          cursor: grab;
+        }
+        .admin-week-table .ga-time-comment-entry.ga-time-draggable .ga-time-comment-text:active {
+          cursor: grabbing;
         }
         .admin-week-table .ga-time-comment-add {
           width: 26px;
