@@ -116,15 +116,17 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
 
     async def test_internal_meeting_does_not_create_another_internal_meeting(self) -> None:
         department_id = uuid.uuid4()
+        participant_id = uuid.uuid4()
         payload = MeetingCreate(
             title="Team sync",
             starts_at=datetime(2026, 8, 25, 12, 30, tzinfo=timezone.utc),
             internal_starts_at=datetime(2026, 8, 25, 12, 0, tzinfo=timezone.utc),
             meeting_type="internal",
             department_id=department_id,
+            participant_ids=[participant_id],
         )
         user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
-        db = _FakeDb()
+        db = _FakeDb(valid_user_ids=[participant_id])
 
         result = await create_meeting(payload=payload, db=db, user=user)
 
@@ -135,6 +137,7 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
 
     async def test_external_meeting_can_skip_internal_meeting(self) -> None:
         department_id = uuid.uuid4()
+        participant_id = uuid.uuid4()
         external_starts_at = datetime(2026, 8, 25, 14, 0, tzinfo=timezone.utc)
         payload = MeetingCreate(
             title="Customer review",
@@ -143,9 +146,10 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
             create_internal_meeting=False,
             meeting_type="external",
             department_id=department_id,
+            participant_ids=[participant_id],
         )
         user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
-        db = _FakeDb()
+        db = _FakeDb(valid_user_ids=[participant_id])
 
         result = await create_meeting(payload=payload, db=db, user=user)
 
@@ -153,6 +157,20 @@ class TestMeetingCreation(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(len(meetings), 1)
         self.assertEqual(meetings[0].meeting_type, "external")
         self.assertIsNone(result.paired_internal_meeting)
+
+    async def test_meeting_requires_at_least_one_person(self) -> None:
+        payload = MeetingCreate(
+            title="Team sync",
+            meeting_type="internal",
+            department_id=uuid.uuid4(),
+        )
+        user = SimpleNamespace(id=uuid.uuid4(), role=UserRole.ADMIN, department_id=None)
+
+        with self.assertRaises(HTTPException) as raised:
+            await create_meeting(payload=payload, db=_FakeDb(), user=user)
+
+        self.assertEqual(raised.exception.status_code, 400)
+        self.assertEqual(raised.exception.detail, "Select at least one person for the meeting")
 
     async def test_external_meeting_requires_internal_time_when_pair_is_enabled(self) -> None:
         payload = MeetingCreate(

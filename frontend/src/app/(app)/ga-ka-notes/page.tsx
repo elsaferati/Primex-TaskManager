@@ -1654,6 +1654,7 @@ export default function GaKaNotesPage() {
         department_id: departmentId,
         project_id: null,
         meeting_type: "internal",
+        participant_ids: user?.id ? [user.id] : [],
       }
       const res = await apiFetch("/meetings", {
         method: "POST",
@@ -1682,6 +1683,7 @@ export default function GaKaNotesPage() {
     internalMeetingTaskPlatform,
     internalMeetingTaskStartsAt,
     internalMeetingTaskTitle,
+    user?.id,
   ])
 
   const uploadNoteAttachments = async (noteId: string, files: File[]) => {
