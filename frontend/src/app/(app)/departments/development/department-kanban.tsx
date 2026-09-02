@@ -20,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { DailyRlzCommentField, DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
+import { DailyReportMeetingsTable } from "@/components/daily-report-meetings-table"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
@@ -1265,6 +1266,7 @@ export default function DepartmentKanban() {
   const [users, setUsers] = React.useState<UserLookup[]>([])
   const [internalNotes, setInternalNotes] = React.useState<InternalNote[]>([])
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
+  const [myMeetings, setMyMeetings] = React.useState<Meeting[]>([])
   const [msConnected, setMsConnected] = React.useState(false)
   const [msEvents, setMsEvents] = React.useState<MicrosoftEvent[]>([])
   const [loadingMsEvents, setLoadingMsEvents] = React.useState(false)
@@ -2577,10 +2579,36 @@ export default function DepartmentKanban() {
       return bTime - aTime
     })
   }, [getInternalNoteStatusNotes, internalNotes, internalNotesFilter, isMineView, selectedUserId, user?.id])
-  const visibleMeetings = React.useMemo(
-    () => (isMineView && user?.id ? meetings.filter((m) => m.created_by === user.id) : meetings),
-    [meetings, isMineView, user?.id]
-  )
+  React.useEffect(() => {
+    if (!isMineView || !user?.id) {
+      setMyMeetings([])
+      return
+    }
+    let cancelled = false
+    void apiFetch(`/meetings?participant_user_id=${encodeURIComponent(user.id)}`).then(async (response) => {
+      if (!response.ok || cancelled) {
+        if (!cancelled) setMyMeetings([])
+        return
+      }
+      const participantMeetings = (await response.json()) as Meeting[]
+      if (!cancelled) setMyMeetings(participantMeetings)
+    }).catch(() => {
+      if (!cancelled) setMyMeetings([])
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [apiFetch, isMineView, user?.id])
+
+  const visibleMeetings = React.useMemo(() => {
+    if (isMineView && user?.id) {
+      return myMeetings.filter((meeting) => meeting.participant_ids?.includes(user.id))
+    }
+    if (department?.id) {
+      return meetings.filter((meeting) => meeting.department_id === department.id)
+    }
+    return meetings
+  }, [department?.id, meetings, myMeetings, isMineView, user?.id])
   const visibleExternalMeetings = React.useMemo(
     () => visibleMeetings.filter((m) => (m.meeting_type || "external") === "external"),
     [visibleMeetings]
@@ -6151,6 +6179,10 @@ export default function DepartmentKanban() {
 
   const submitMeeting = async () => {
     if (!meetingTitle.trim() || !department) return
+    if (!meetingParticipantIds.length) {
+      toast.error("Select at least one participant")
+      return
+    }
     setCreatingMeeting(true)
     try {
       let startsAt: string | null = null
@@ -6260,6 +6292,7 @@ export default function DepartmentKanban() {
         department_id: departmentId,
         project_id: null,
         meeting_type: "internal",
+        participant_ids: user?.id ? [user.id] : [],
       }
       const res = await apiFetch("/meetings", {
         method: "POST",
@@ -6292,6 +6325,7 @@ export default function DepartmentKanban() {
     internalMeetingTaskStartsAt,
     internalMeetingTaskTitle,
     user?.department_id,
+    user?.id,
   ])
 
   const startEditMeeting = (meeting: Meeting) => {
@@ -7492,6 +7526,11 @@ export default function DepartmentKanban() {
                   })}
                   <DailyRlzSaveButton day={selectedAllReportIso} report={dailyReport} onSaved={refreshDailyReport} />
                 </div>
+                <DailyReportMeetingsTable
+                  meetings={visibleMeetings}
+                  users={users}
+                  reportDateIso={selectedAllReportIso}
+                />
                 <div
                   ref={dailyReportScrollRef}
                   className={`mt-3 ${showFullDailyReportTable ? "max-h-none overflow-x-auto overflow-y-visible" : "max-h-[320px] overflow-x-auto overflow-y-auto"} ${isDraggingDailyReport ? "cursor-grabbing" : "cursor-grab"
@@ -10482,7 +10521,7 @@ export default function DepartmentKanban() {
                             </Select>
                             <div className="flex gap-2">
                               <Button
-                                disabled={!meetingTitle.trim() || creatingMeeting}
+                                disabled={!meetingTitle.trim() || !meetingParticipantIds.length || creatingMeeting}
                                 onClick={() => void submitMeeting()}
                                 className="flex-1"
                                 type="button"
@@ -11084,6 +11123,12 @@ export default function DepartmentKanban() {
             </>
           ) : printRange === "today" && showDailyUserReport ? (
             <>
+              <DailyReportMeetingsTable
+                meetings={visibleMeetings}
+                users={users}
+                reportDateIso={selectedAllReportIso}
+              />
+              <div className="h-3" />
               <table className="w-full border border-slate-900 text-[11px] daily-report-table print:table-fixed">
                 <colgroup>
                   <col className="w-[36px]" />

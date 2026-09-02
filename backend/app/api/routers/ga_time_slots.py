@@ -16,7 +16,11 @@ from app.schemas.ga_time_slot import (
     GaTimeSlotEntryIn,
     GaTimeSlotEntryOut,
     GaTimeSlotEntryUpdate,
+    GaTimeTableCommentToSlotMove,
+    GaTimeTableCrossCellMoveOut,
+    GaTimeTableEntryToCommentMove,
     GaTimeTableRowComment,
+    GaTimeTableRowCommentMove,
     GaTimeTableRowCommentUpdate,
     GaTimeTableRowCommentsUpdate,
     GaTimeTableRowIn,
@@ -115,6 +119,29 @@ def _entry_out(entry: GaTimeSlotTemplate) -> GaTimeSlotEntryOut:
         created_at=entry.created_at,
         updated_at=entry.updated_at,
     )
+
+
+def _replace_row_comments(
+    row: GaTimeTableRow,
+    start_comments: list[GaTimeTableRowComment],
+    end_comments: list[GaTimeTableRowComment],
+) -> None:
+    row.comments = [
+        *[{**comment.model_dump(mode="json"), "column": "start"} for comment in start_comments],
+        *[{**comment.model_dump(mode="json"), "column": "end"} for comment in end_comments],
+    ]
+    row.comment = "\n".join(comment.content.strip() for comment in start_comments)
+    if start_comments:
+        first = start_comments[0]
+        row.comment_background_color = first.comment_background_color
+        row.comment_text_color = first.comment_text_color
+        row.comment_is_bold = first.comment_is_bold
+        row.comment_is_italic = first.comment_is_italic
+    else:
+        row.comment_background_color = "#FFFFFF"
+        row.comment_text_color = "#0F172A"
+        row.comment_is_bold = False
+        row.comment_is_italic = False
 
 
 @router.get("/rows", response_model=list[GaTimeTableRowOut])
@@ -490,6 +517,305 @@ async def update_ga_time_table_row_comments(
     await db.commit()
     await db.refresh(target)
     return _row_out(target)
+
+
+@router.put("/rows/comments/move", response_model=list[GaTimeTableRowOut])
+async def move_ga_time_table_row_comment(
+    payload: GaTimeTableRowCommentMove,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> list[GaTimeTableRowOut]:
+    _ensure_can_edit(current_user)
+    rows = (
+        await db.execute(
+            select(GaTimeTableRow)
+            .order_by(GaTimeTableRow.sort_order, GaTimeTableRow.start_time)
+            .with_for_update()
+        )
+    ).scalars().all()
+    if not rows:
+        rows = [
+            GaTimeTableRow(
+                sort_order=row.sort_order,
+                nr_label=row.nr_label,
+                label=row.label,
+                start_time=row.start_time,
+                end_time=row.end_time,
+                is_special=row.is_special,
+                comment=row.comment,
+                comment_background_color=row.comment_background_color,
+                comment_text_color=row.comment_text_color,
+                comment_is_bold=row.comment_is_bold,
+                comment_is_italic=row.comment_is_italic,
+            )
+            for row in DEFAULT_GA_TIME_TABLE_ROWS
+        ]
+        db.add_all(rows)
+        await db.flush()
+
+    source = next(
+        (
+            row for row in rows
+            if row.start_time == payload.source_start_time
+            and row.end_time == payload.source_end_time
+        ),
+        None,
+    )
+    target = next(
+        (
+            row for row in rows
+            if row.start_time == payload.target_start_time
+            and row.end_time == payload.target_end_time
+        ),
+        None,
+    )
+    if source is None or target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time row not found")
+
+    source_out = _row_out(source)
+    source_state = {
+        "start": list(source_out.comments),
+        "end": list(source_out.end_comments),
+    }
+    if source is target:
+        target_state = source_state
+    else:
+        target_out = _row_out(target)
+        target_state = {
+            "start": list(target_out.comments),
+            "end": list(target_out.end_comments),
+        }
+
+    source_comments = source_state[payload.source_column]
+    source_index = next(
+        (index for index, comment in enumerate(source_comments) if comment.id == payload.comment_id),
+        None,
+    )
+    if source_index is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    moved_comment = source_comments.pop(source_index)
+
+    target_comments = target_state[payload.target_column]
+    if source_comments is not target_comments and len(target_comments) >= 50:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The target comment cell is full",
+        )
+    before_index = next(
+        (
+            index for index, comment in enumerate(target_comments)
+            if comment.id == payload.before_comment_id
+        ),
+        None,
+    )
+    target_comments.insert(before_index if before_index is not None else len(target_comments), moved_comment)
+
+    _replace_row_comments(source, source_state["start"], source_state["end"])
+    if target is not source:
+        _replace_row_comments(target, target_state["start"], target_state["end"])
+
+    await db.commit()
+    touched_rows = [source] if source is target else sorted([source, target], key=lambda row: row.sort_order)
+    for row in touched_rows:
+        await db.refresh(row)
+    return [_row_out(row) for row in touched_rows]
+
+
+@router.put("/rows/comments/move-to-slot", response_model=GaTimeTableCrossCellMoveOut)
+async def move_ga_time_table_comment_to_slot(
+    payload: GaTimeTableCommentToSlotMove,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GaTimeTableCrossCellMoveOut:
+    _ensure_can_edit(current_user)
+    if payload.target_start_time >= payload.target_end_time:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="End time must be after start time",
+        )
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
+
+    rows = (
+        await db.execute(
+            select(GaTimeTableRow)
+            .order_by(GaTimeTableRow.sort_order, GaTimeTableRow.start_time)
+            .with_for_update()
+        )
+    ).scalars().all()
+    source = next(
+        (
+            row for row in rows
+            if row.start_time == payload.source_start_time
+            and row.end_time == payload.source_end_time
+        ),
+        None,
+    )
+    if source is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time row not found")
+
+    source_out = _row_out(source)
+    source_state = {
+        "start": list(source_out.comments),
+        "end": list(source_out.end_comments),
+    }
+    source_comments = source_state[payload.source_column]
+    source_index = next(
+        (index for index, comment in enumerate(source_comments) if comment.id == payload.comment_id),
+        None,
+    )
+    if source_index is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Comment not found")
+    moved_comment = source_comments.pop(source_index)
+
+    target_entries = (
+        await db.execute(
+            select(GaTimeSlotTemplate)
+            .where(
+                GaTimeSlotTemplate.user_id == ga_user.id,
+                GaTimeSlotTemplate.day_of_week == payload.target_day_of_week,
+                GaTimeSlotTemplate.start_time == payload.target_start_time,
+            )
+            .order_by(GaTimeSlotTemplate.sort_order, GaTimeSlotTemplate.created_at)
+            .with_for_update()
+        )
+    ).scalars().all()
+    before_index = next(
+        (
+            index for index, entry in enumerate(target_entries)
+            if entry.id == payload.before_entry_id
+        ),
+        None,
+    )
+    new_entry = GaTimeSlotTemplate(
+        user_id=ga_user.id,
+        day_of_week=payload.target_day_of_week,
+        start_time=payload.target_start_time,
+        end_time=payload.target_end_time,
+        sort_order=0,
+        content=moved_comment.content,
+        background_color=moved_comment.comment_background_color,
+        text_color=moved_comment.comment_text_color,
+        is_bold=moved_comment.comment_is_bold,
+        is_italic=moved_comment.comment_is_italic,
+    )
+    db.add(new_entry)
+    target_entries.insert(before_index if before_index is not None else len(target_entries), new_entry)
+    for sort_order, entry in enumerate(target_entries):
+        entry.sort_order = sort_order
+        entry.end_time = payload.target_end_time
+
+    _replace_row_comments(source, source_state["start"], source_state["end"])
+    await db.commit()
+    await db.refresh(source)
+    for entry in target_entries:
+        await db.refresh(entry)
+    return GaTimeTableCrossCellMoveOut(
+        rows=[_row_out(source)],
+        entries=[_entry_out(entry) for entry in target_entries],
+    )
+
+
+@router.put("/rows/comments/move-from-slot", response_model=GaTimeTableCrossCellMoveOut)
+async def move_ga_time_table_entry_to_comment(
+    payload: GaTimeTableEntryToCommentMove,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GaTimeTableCrossCellMoveOut:
+    _ensure_can_edit(current_user)
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
+
+    entry = (
+        await db.execute(
+            select(GaTimeSlotTemplate)
+            .where(
+                GaTimeSlotTemplate.id == payload.entry_id,
+                GaTimeSlotTemplate.user_id == ga_user.id,
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if entry is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Entry not found")
+
+    rows = (
+        await db.execute(
+            select(GaTimeTableRow)
+            .order_by(GaTimeTableRow.sort_order, GaTimeTableRow.start_time)
+            .with_for_update()
+        )
+    ).scalars().all()
+    target = next(
+        (
+            row for row in rows
+            if row.start_time == payload.target_start_time
+            and row.end_time == payload.target_end_time
+        ),
+        None,
+    )
+    if target is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Time row not found")
+
+    target_out = _row_out(target)
+    target_state = {
+        "start": list(target_out.comments),
+        "end": list(target_out.end_comments),
+    }
+    target_comments = target_state[payload.target_column]
+    if len(target_comments) >= 50:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail="The target comment cell is full",
+        )
+    before_index = next(
+        (
+            index for index, comment in enumerate(target_comments)
+            if comment.id == payload.before_comment_id
+        ),
+        None,
+    )
+    target_comments.insert(
+        before_index if before_index is not None else len(target_comments),
+        GaTimeTableRowComment(
+            id=f"slot-{entry.id}",
+            content=entry.content,
+            comment_background_color=entry.background_color,
+            comment_text_color=entry.text_color,
+            comment_is_bold=entry.is_bold,
+            comment_is_italic=entry.is_italic,
+            column=payload.target_column,
+        ),
+    )
+
+    source_entries = (
+        await db.execute(
+            select(GaTimeSlotTemplate)
+            .where(
+                GaTimeSlotTemplate.user_id == ga_user.id,
+                GaTimeSlotTemplate.day_of_week == entry.day_of_week,
+                GaTimeSlotTemplate.start_time == entry.start_time,
+                GaTimeSlotTemplate.id != entry.id,
+            )
+            .order_by(GaTimeSlotTemplate.sort_order, GaTimeSlotTemplate.created_at)
+            .with_for_update()
+        )
+    ).scalars().all()
+    for sort_order, source_entry in enumerate(source_entries):
+        source_entry.sort_order = sort_order
+
+    _replace_row_comments(target, target_state["start"], target_state["end"])
+    await db.delete(entry)
+    await db.commit()
+    await db.refresh(target)
+    for source_entry in source_entries:
+        await db.refresh(source_entry)
+    return GaTimeTableCrossCellMoveOut(
+        rows=[_row_out(target)],
+        entries=[_entry_out(source_entry) for source_entry in source_entries],
+    )
 
 
 @router.get("", response_model=list[GaTimeSlotEntryOut])

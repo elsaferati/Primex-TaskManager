@@ -112,6 +112,36 @@ class GaTimeTableRowCommentsUpdate(BaseModel):
     comments: list[GaTimeTableRowComment] = Field(default_factory=list, max_length=50)
 
 
+class GaTimeTableRowCommentMove(BaseModel):
+    comment_id: str = Field(min_length=1, max_length=100)
+    source_start_time: time
+    source_end_time: time
+    source_column: Literal["start", "end"] = "start"
+    target_start_time: time
+    target_end_time: time
+    target_column: Literal["start", "end"] = "start"
+    before_comment_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
+class GaTimeTableCommentToSlotMove(BaseModel):
+    comment_id: str = Field(min_length=1, max_length=100)
+    source_start_time: time
+    source_end_time: time
+    source_column: Literal["start", "end"] = "start"
+    target_day_of_week: int = Field(ge=0, le=6)
+    target_start_time: time
+    target_end_time: time
+    before_entry_id: uuid.UUID | None = None
+
+
+class GaTimeTableEntryToCommentMove(BaseModel):
+    entry_id: uuid.UUID
+    target_start_time: time
+    target_end_time: time
+    target_column: Literal["start", "end"] = "start"
+    before_comment_id: str | None = Field(default=None, min_length=1, max_length=100)
+
+
 class GaTimeTableRowsUpdate(BaseModel):
     rows: list[GaTimeTableRowIn]
 
@@ -127,3 +157,8 @@ class GaTimeTableRowOut(GaTimeTableRowCommentFormatting):
     comment: str = ""
     comments: list[GaTimeTableRowComment] = Field(default_factory=list)
     end_comments: list[GaTimeTableRowComment] = Field(default_factory=list)
+
+
+class GaTimeTableCrossCellMoveOut(BaseModel):
+    rows: list[GaTimeTableRowOut] = Field(default_factory=list)
+    entries: list[GaTimeSlotEntryOut] = Field(default_factory=list)

@@ -51,18 +51,22 @@ def _occurrence_status_out(row: MeetingOccurrenceStatus) -> MeetingOccurrenceSta
 async def list_meetings(
     department_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
+    participant_user_id: uuid.UUID | None = None,
     include_all_departments: bool = False,
     meeting_type: str | None = None,
     db: AsyncSession = Depends(get_db),
     user=Depends(get_current_user),
 ) -> list[MeetingOut]:
     stmt = select(Meeting)
-    if department_id is None and project_id is None:
+    if department_id is None and project_id is None and participant_user_id is None:
         if include_all_departments:
             # Allow all users to see all meetings in common view
             pass
         else:
-            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="department_id or project_id required")
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="department_id, project_id, or participant_user_id required",
+            )
     elif include_all_departments:
         # Allow all users to see all meetings in common view
         pass
@@ -75,6 +79,8 @@ async def list_meetings(
         if not include_all_departments:
             ensure_department_access(user, department_id)
         stmt = stmt.where(Meeting.department_id == department_id)
+    if participant_user_id is not None:
+        stmt = stmt.join(MeetingParticipant).where(MeetingParticipant.user_id == participant_user_id)
     if meeting_type is not None:
         stmt = stmt.where(Meeting.meeting_type == meeting_type)
 
@@ -190,18 +196,22 @@ async def create_meeting(
         if project.department_id != payload.department_id:
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Project must be in department")
 
-    # Validate participant user IDs if provided
+    # Every meeting must belong to at least one person's view.
     participant_ids = payload.participant_ids or []
-    if participant_ids:
-        users_stmt = select(User).where(User.id.in_(participant_ids))
-        existing_users = (await db.execute(users_stmt)).scalars().all()
-        existing_user_ids = {u.id for u in existing_users}
-        invalid_ids = set(participant_ids) - existing_user_ids
-        if invalid_ids:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid user IDs: {list(invalid_ids)}"
-            )
+    if not participant_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Select at least one person for the meeting",
+        )
+    users_stmt = select(User).where(User.id.in_(participant_ids))
+    existing_users = (await db.execute(users_stmt)).scalars().all()
+    existing_user_ids = {u.id for u in existing_users}
+    invalid_ids = set(participant_ids) - existing_user_ids
+    if invalid_ids:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid user IDs: {list(invalid_ids)}"
+        )
 
     meeting = Meeting(
         title=payload.title,
@@ -355,17 +365,21 @@ async def update_meeting(
     # Update participants if provided
     if "participant_ids" in payload_dict:
         participant_ids = payload.participant_ids or []
+        if not participant_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Select at least one person for the meeting",
+            )
         # Validate participant user IDs
-        if participant_ids:
-            users_stmt = select(User).where(User.id.in_(participant_ids))
-            existing_users = (await db.execute(users_stmt)).scalars().all()
-            existing_user_ids = {u.id for u in existing_users}
-            invalid_ids = set(participant_ids) - existing_user_ids
-            if invalid_ids:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST,
-                    detail=f"Invalid user IDs: {list(invalid_ids)}"
-                )
+        users_stmt = select(User).where(User.id.in_(participant_ids))
+        existing_users = (await db.execute(users_stmt)).scalars().all()
+        existing_user_ids = {u.id for u in existing_users}
+        invalid_ids = set(participant_ids) - existing_user_ids
+        if invalid_ids:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid user IDs: {list(invalid_ids)}"
+            )
         
         # Delete existing participants
         await db.execute(

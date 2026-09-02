@@ -2375,7 +2375,10 @@ export default function CommonViewPage() {
     : Boolean(externalMeetingStartTime)
       && (!externalMeetingCreateInternal || Boolean(externalMeetingInternalStartTime))
   const canCreateExternalMeeting =
-    Boolean(externalMeetingTitle.trim()) && Boolean(externalMeetingDepartmentId) && hasExternalMeetingTimes
+    Boolean(externalMeetingTitle.trim())
+    && Boolean(externalMeetingDepartmentId)
+    && externalMeetingParticipantIds.length > 0
+    && hasExternalMeetingTimes
   const canSelectExternalMeetingAgentTestTask =
     externalMeetingRecurrenceType === "none" && Boolean(externalMeetingStartsAt)
 
@@ -2385,7 +2388,10 @@ export default function CommonViewPage() {
       setExternalMeetingCreatePimImageTestTask(false)
     }
   }, [canSelectExternalMeetingAgentTestTask])
-  const canCreateInternalMeeting = Boolean(internalMeetingTitle.trim()) && Boolean(internalMeetingDepartmentId)
+  const canCreateInternalMeeting =
+    Boolean(internalMeetingTitle.trim())
+    && Boolean(internalMeetingDepartmentId)
+    && internalMeetingParticipantIds.length > 0
 
   const reloadMeetingTemplates = React.useCallback(async () => {
     try {
@@ -5515,6 +5521,10 @@ export default function CommonViewPage() {
 
   const submitExternalMeeting = React.useCallback(async () => {
     if (!externalMeetingTitle.trim()) return
+    if (!externalMeetingParticipantIds.length) {
+      toast.error("Select at least one person for the meeting.")
+      return
+    }
     const departmentId = externalMeetingDepartmentId || user?.department_id
     if (!departmentId) {
       console.error("Department is required to create a meeting.")
@@ -6036,6 +6046,10 @@ export default function CommonViewPage() {
 
   const submitInternalMeeting = React.useCallback(async () => {
     if (!internalMeetingTitle.trim()) return
+    if (!internalMeetingParticipantIds.length) {
+      toast.error("Select at least one person for the meeting.")
+      return
+    }
     const departmentId = internalMeetingDepartmentId || user?.department_id
     if (!departmentId) {
       console.error("Department is required to create a meeting.")
@@ -12220,7 +12234,7 @@ export default function CommonViewPage() {
                       aria-haspopup="dialog"
                       aria-expanded={externalMeetingPersonsOpen}
                     >
-                      <span>{externalMeetingParticipantIds.length ? "Persons selected" : "Add persons (optional)"}</span>
+                      <span>{externalMeetingParticipantIds.length ? "Persons selected" : "Add persons (required)"}</span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
                         {externalMeetingParticipantIds.length ? (
                           <span className="external-person-picker-count">{externalMeetingParticipantIds.length}</span>
@@ -13159,7 +13173,7 @@ export default function CommonViewPage() {
                       aria-haspopup="dialog"
                       aria-expanded={internalMeetingPersonsOpen}
                     >
-                      <span>{internalMeetingParticipantIds.length ? "Persons selected" : "Add persons (optional)"}</span>
+                      <span>{internalMeetingParticipantIds.length ? "Persons selected" : "Add persons (required)"}</span>
                       <span style={{ display: "inline-flex", alignItems: "center", gap: "8px" }}>
                         {internalMeetingParticipantIds.length ? (
                           <span className="external-person-picker-count">{internalMeetingParticipantIds.length}</span>
