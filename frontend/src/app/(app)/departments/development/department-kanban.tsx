@@ -1144,7 +1144,10 @@ function formatTyoDisplay(value: string, dateValue?: string | null, showDate = t
 }
 
 function titleHasEightAmIndicator(title?: string | null) {
-  return typeof title === "string" && /\b08:00\b/.test(title)
+  // Email tasks (EM) belong to the 08:00 group even when the user omitted the
+  // time marker from the title. Treat them exactly like explicitly marked
+  // 08:00/8:00 tasks so the badge is visible in screen and print reports.
+  return typeof title === "string" && (/\b0?8:00\b/.test(title) || /\bEM\b/i.test(title))
 }
 
 function fastReportSubtype(task: Task) {

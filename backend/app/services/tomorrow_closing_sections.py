@@ -12,6 +12,7 @@ from app.models.daily_planner_snapshot import DailyPlannerSnapshot
 from app.models.department import Department
 from app.models.task import Task
 from app.services.after_break_report import _blue_note_rows
+from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
 from app.services.meetings_report import (
     _all_participant_user_ids,
     _assignee_names,
@@ -73,6 +74,36 @@ def _task_row(
         is_deadline=bool(task.is_deadline_important),
         is_eight_am="08:00" in title or _m3_task_type_label(task) == "08:00",
     )
+
+
+def _system_task_tyo_label(task: Task, report_day: date) -> str:
+    """Use the Daily Report due-date/business-day rules for unfinished system tasks."""
+    _, due_day = planned_range_for_daily_report(task, None)
+    return daily_report_tyo_label(
+        report_day=report_day,
+        start_day=None,
+        due_day=due_day,
+        mode="dueOnly",
+    )
+
+
+def _include_unfinished_system_task(
+    task: Task,
+    report_day: date,
+    baseline_ids: set[Any],
+) -> bool:
+    if not _is_system_task(task) or not _is_open(task):
+        return False
+    if task.id in baseline_ids:
+        return True
+
+    _, due_day = planned_range_for_daily_report(task, None)
+    if due_day is not None and due_day <= report_day:
+        return True
+
+    # Preserve the existing fallback for system tasks without a due date that
+    # are scheduled specifically for the report day.
+    return _task_day(task) == report_day
 
 
 async def build_tomorrow_closing_sections(
@@ -161,18 +192,22 @@ async def build_tomorrow_closing_sections(
         [
             task
             for task in tasks
-            if _is_system_task(task)
-            and _is_open(task)
-            and (task.id in baseline_ids or _task_day(task) == report_day)
+            if _include_unfinished_system_task(task, report_day, baseline_ids)
         ]
     )
-    system_rows = [
-        _task_row(
+    system_daily_rlz = await _daily_rlz_values_by_task(
+        db, system_unfinished, report_day, names, assignee_ids_by_task
+    )
+    system_rows: list[ClosingTableRow] = []
+    for index, task in enumerate(system_unfinished, 1):
+        row = _task_row(
             task,
             [str(index), *common_values(task)],
         )
-        for index, task in enumerate(system_unfinished, 1)
-    ]
+        row.values.insert(-1, _system_task_tyo_label(task, report_day))
+        reason, comment = system_daily_rlz.get(task.id, ("-", "-"))
+        row.values.extend([reason or "-", comment or "-"])
+        system_rows.append(row)
 
     postponed, postponed_ranges, postponed_both, postponed_both_ranges = (
         await _postponed_tasks_for_m3_day(db, report_day, tasks)
@@ -219,7 +254,10 @@ async def build_tomorrow_closing_sections(
             tables=[
                 ClosingTable(
                     label="DET SYS PA KRY",
-                    columns=["NR", "KUSH", "DEP", "AM/PM", "TITULLI"],
+                    columns=[
+                        "NR", "KUSH", "DEP", "AM/PM", "T/Y/O", "TITULLI",
+                        "ARSYEJA", "KOMENT",
+                    ],
                     rows=system_rows,
                 )
             ],

@@ -21,6 +21,7 @@ from app.services.after_break_report import (
     _personal_section,
 )
 from app.services.common_leave import parse_common_view_annual_leave
+from app.services.daily_report_logic import daily_report_tyo_label, planned_range_for_daily_report
 from app.services.meetings_report import (
     PERSONAL_GA,
     TECHNICAL_TAG,
@@ -34,6 +35,7 @@ from app.services.meetings_report import (
     _leave_lines,
     _local_date,
     _m3_am_pm_label,
+    _m3_department_code_label,
     _m3_department_label,
     _m3_task_type_label,
     _meeting_lines,
@@ -71,7 +73,8 @@ SECTION_TITLES = [
 DISPLAY_SECTION_TITLES = [SECTION_TITLES[0], SECTION_TITLES[6], *SECTION_TITLES[1:6]]
 MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
 GA_HV_DV_TASK_COLUMNS = [
-    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("STATUS", 18), ("TITULLI", 52),
+    ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7),
+    ("STATUS", 18), ("T/Y/O", 5), ("TITULLI", 52),
 ]
 EMAIL_TASK_SOURCES: tuple[tuple[str, re.Pattern[str]], ...] = (
     ("EM: INFO PX", re.compile(r"^\s*EM\s*:\s*INFO\s+PX\b", re.I)),
@@ -382,10 +385,16 @@ def _ga_hv_dv_task_rows(
     department_codes: dict[Any, str] | None = None,
     target_initials: str | None = None,
 ) -> list[list[str]]:
-    """Today's open tasks plus open overdue tasks assigned to GA, HV, or DV."""
+    """Today's open tasks plus open overdue tasks for the GA/HV/DV tables.
+
+    GA and DV are selected by assignee initials.  HV follows the M2 meaning:
+    every task owned by the Finance department, regardless of assignee.
+    """
     targets = {target_initials} if target_initials else {"GA", "HV", "DV"}
 
     def belongs_to_target(task: Task) -> bool:
+        if target_initials == "HV":
+            return _m3_department_code_label(task.department_id, department_codes) == "FIN"
         assignee_ids = set(assignee_ids_by_task.get(task.id, set()))
         if task.assigned_to:
             assignee_ids.add(task.assigned_to)
@@ -409,6 +418,7 @@ def _ga_hv_dv_task_rows(
         type_rank = 0 if task_type == "SYS" else (2 if task_type == "PRJK" else 1)
         due_day = _local_date(task.due_date)
         is_late = _is_open(task) and due_day is not None and due_day < report_day
+        is_late_system = task_type == "SYS" and is_late
         status = "LATE" if is_late else _normalize_report_status(task.status)
         status_rank = {
             "LATE": 0,
@@ -418,6 +428,7 @@ def _ga_hv_dv_task_rows(
             "WAITING_CONFIRMATION": 4,
         }.get(status, 6)
         return (
+            1 if is_late_system else 0,
             period_rank,
             type_rank,
             status_rank,
@@ -425,8 +436,15 @@ def _ga_hv_dv_task_rows(
         )
 
     selected.sort(key=m1_sort_key)
-    return [
-        [
+    rows: list[list[str]] = []
+    for index, task in enumerate(selected, start=1):
+        planned_start, planned_end = planned_range_for_daily_report(task, None)
+        tyo_mode = (
+            "range"
+            if planned_start is not None and planned_end is not None and planned_start < planned_end
+            else "dueOnly"
+        )
+        rows.append([
             str(index),
             _task_owners(task, names, assignee_ids_by_task),
             _m3_department_label(task, department_codes),
@@ -439,10 +457,15 @@ def _ga_hv_dv_task_rows(
                 and due_day < report_day
                 else _normalize_report_status(task.status)
             ),
+            daily_report_tyo_label(
+                report_day=report_day,
+                start_day=planned_start if tyo_mode == "range" else None,
+                due_day=planned_end,
+                mode=tyo_mode,
+            ),
             _display_title(task.title),
-        ]
-        for index, task in enumerate(selected, start=1)
-    ]
+        ])
+    return rows
 
 
 def _ga_hv_dv_tables_body(rows_by_title: dict[str, list[list[str]]]) -> str:
@@ -452,7 +475,7 @@ def _ga_hv_dv_tables_body(rows_by_title: dict[str, list[list[str]]]) -> str:
             lines.append("")
         rows = rows_by_title.get(title, [])
         if not rows:
-            rows = [["-", "-", "-", "-", "-", "-", "(Asnje detyre)"]]
+            rows = [["-", "-", "-", "-", "-", "-", "-", "(Asnje detyre)"]]
         lines.extend(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, rows))
     return _normalize_section(lines)
 

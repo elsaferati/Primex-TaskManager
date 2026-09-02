@@ -72,6 +72,44 @@ class PrimeFlowReportTests(unittest.TestCase):
             "Komunikimi GA temas Det nga Stafi/ KA email",
         )
 
+    def test_1150_staff_reminders_add_pre_break_document_question_before_bz(self) -> None:
+        reminders = asyncio.run(load_1h_reminder_questions("11:50"))
+
+        self.assertEqual(
+            [reminder.text for reminder in reminders],
+            [
+                "Hap doc dhe det",
+                "Share screen side by side DET/REZULTATIN",
+                "Sqaro slotin paraprak pastaj aktual",
+                "A ka me dergu dikush doc te GA/KA para pauzes?",
+                "BZ Det nga Stafi per GA",
+            ],
+        )
+        document = build_report_document(
+            {"guardrails": {"truncated": {}}, "items": {}},
+            date(2026, 9, 2),
+            "11:50",
+            reminders=reminders,
+        )
+        rendered_html = render_html(document)
+        rendered_text = render_plain_text(document)
+        self.assertIn("4. A ka me dergu dikush doc te GA/KA para pauzes?", rendered_text)
+        self.assertIn("5. BZ Det nga Stafi per GA", rendered_text)
+        self.assertLess(
+            rendered_html.index("A ka me dergu dikush doc te GA/KA para pauzes?"),
+            rendered_html.index("BZ Det nga Stafi per GA"),
+        )
+
+    def test_other_slots_keep_the_original_four_staff_reminders(self) -> None:
+        for slot in ("10:00", "11:00", "14:10"):
+            reminders = asyncio.run(load_1h_reminder_questions(slot))
+            self.assertEqual(len(reminders), 4, slot)
+            self.assertNotIn(
+                "A ka me dergu dikush doc te GA/KA para pauzes?",
+                [reminder.text for reminder in reminders],
+                slot,
+            )
+
     def test_undiscussed_notes_query_matches_open_px_notes_without_tasks(self) -> None:
         query = str(_undiscussed_px_notes_statement())
 

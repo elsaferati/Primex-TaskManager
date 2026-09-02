@@ -124,17 +124,24 @@ async def configured_recipients(report_type: str = "ONE_H") -> dict[str, list[st
     return result
 
 
-async def load_1h_reminder_questions() -> list[ReportReminderQuestion]:
-    """The 1H staff meeting steps are fixed, not editable question-library data."""
-    return [
+async def load_1h_reminder_questions(slot: str | None = None) -> list[ReportReminderQuestion]:
+    """Return the fixed 1H staff steps, with the pre-break check only at 11:50."""
+    reminders = [
         ReportReminderQuestion(text="Hap doc dhe det"),
         ReportReminderQuestion(text="Share screen side by side DET/REZULTATIN"),
         ReportReminderQuestion(text="Sqaro slotin paraprak pastaj aktual"),
+    ]
+    if slot == "11:50":
+        reminders.append(
+            ReportReminderQuestion(text="A ka me dergu dikush doc te GA/KA para pauzes?")
+        )
+    reminders.append(
         ReportReminderQuestion(
             text="BZ Det nga Stafi per GA",
             guidance="Komunikimi GA temas Det nga Stafi/ KA email",
-        ),
-    ]
+        )
+    )
+    return reminders
 
 
 def _undiscussed_px_notes_statement():
@@ -275,7 +282,7 @@ async def generate_fresh(
     data: dict | None = None,
 ) -> ReportDocument:
     data = data or await _load_common_view(day)
-    reminders = await load_1h_reminder_questions()
+    reminders = await load_1h_reminder_questions(slot)
     undiscussed_notes = await load_undiscussed_notes()
     title_overrides, description_overrides = await _text_overrides_for_1h_interval(
         data, day, slot, interval_end=strike_interval_end(day, slot),

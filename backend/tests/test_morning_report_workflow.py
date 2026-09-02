@@ -88,26 +88,62 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            {row[6] for row in rows},
+            {row[7] for row in rows},
             {
                 "GA today", "HV today", "DV waiting", "Late",
                 "Multi-day today", "GA secondary",
             },
         )
-        self.assertNotIn("Done today", {row[6] for row in rows})
-        self.assertNotIn("Future", {row[6] for row in rows})
-        status_by_title = {row[6]: row[5] for row in rows}
+        self.assertNotIn("Done today", {row[7] for row in rows})
+        self.assertNotIn("Future", {row[7] for row in rows})
+        status_by_title = {row[7]: row[5] for row in rows}
         self.assertEqual(status_by_title["Late"], "LATE")
+        tyo_by_title = {row[7]: row[6] for row in rows}
+        self.assertEqual(tyo_by_title["GA today"], "T")
+        self.assertEqual(tyo_by_title["Late"], "Y")
+        self.assertEqual(tyo_by_title["Multi-day today"], "T")
 
     def test_ga_hv_dv_is_first_auto_filled_m1_section(self) -> None:
         self.assertEqual(DISPLAY_SECTION_TITLES[0], SECTION_TITLES[0])
         self.assertEqual(DISPLAY_SECTION_TITLES[1], GA_HV_DV_TASKS_TITLE)
 
+    def test_hv_table_uses_finance_department_instead_of_hv_assignee(self) -> None:
+        report_day = date(2026, 9, 1)
+        finance_task = self._task(
+            "Finance task assigned to HS",
+            assigned_to="hs-user",
+            department_id="finance",
+        )
+        hv_assigned_dev_task = self._task(
+            "Development task assigned to HV",
+            assigned_to="hv-user",
+            department_id="development",
+        )
+        names = {
+            "hs-user": "Haxhere Spahiu",
+            "hv-user": "Hana Vela",
+        }
+        assignees = {
+            finance_task.id: {"hs-user"},
+            hv_assigned_dev_task.id: {"hv-user"},
+        }
+
+        rows = _ga_hv_dv_task_rows(
+            [finance_task, hv_assigned_dev_task],
+            names,
+            assignees,
+            report_day,
+            {"finance": "FIN", "development": "DEV"},
+            "HV",
+        )
+
+        self.assertEqual([row[7] for row in rows], ["Finance task assigned to HS"])
+
     def test_ga_hv_dv_uses_one_section_with_three_separate_tables(self) -> None:
         body = _ga_hv_dv_tables_body({
-            GA_TASKS_TITLE: [["1", "GA", "GA", "AM", "P", "TODO", "GA task"]],
+            GA_TASKS_TITLE: [["1", "GA", "GA", "AM", "P", "TODO", "T", "GA task"]],
             "HV TASKS": [],
-            "DV TASKS": [["1", "DV", "PCM", "PM", "PRJK", "LATE", "DV task"]],
+            "DV TASKS": [["1", "DV", "PCM", "PM", "PRJK", "LATE", "Y", "DV task"]],
         })
 
         self.assertEqual(body.count("GA TASKS:"), 1)
@@ -115,6 +151,14 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertEqual(body.count("DV TASKS:"), 1)
         self.assertNotIn("HV TASKS: 0", body)
         self.assertIn("(Asnje detyre)", body)
+        self.assertIn("T/Y/O", body)
+        report_html = render_html(
+            subject_for(date(2026, 9, 1)),
+            date(2026, 9, 1),
+            [{"title": GA_HV_DV_TASKS_TITLE, "body": body}],
+        )
+        self.assertIn('class="n tyo-overdue"', report_html)
+        self.assertIn("background-color:#dc2626!important", report_html)
         normalized = normalize_morning_report_sections([
             {"title": "GA TASKS", "body": "old ga"},
             {"title": "HV TASKS", "body": "old hv"},
@@ -123,6 +167,39 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertEqual(
             [section["title"] for section in normalized].count(GA_HV_DV_TASKS_TITLE), 1
         )
+
+    def test_ga_hv_dv_html_has_dark_divider_between_am_and_pm(self) -> None:
+        body = _ga_hv_dv_tables_body({
+            GA_TASKS_TITLE: [
+                ["1", "GA", "GA", "AM", "SYS", "TODO", "T", "AM task"],
+                ["2", "GA", "GA", "PM", "SYS", "TODO", "T", "PM task"],
+            ],
+            "HV TASKS": [],
+            "DV TASKS": [],
+        })
+
+        report_html = render_html(
+            subject_for(date(2026, 9, 1)),
+            date(2026, 9, 1),
+            [{"title": GA_HV_DV_TASKS_TITLE, "body": body}],
+        )
+
+        self.assertEqual(report_html.count("am-pm-divider"), 7)
+        self.assertIn("border-top:3px solid #334155!important", report_html)
+
+        unrelated_body = _ga_hv_dv_tables_body({
+            GA_TASKS_TITLE: [],
+            "HV TASKS": [],
+            "DV TASKS": [],
+        })
+        unrelated_table = body.replace("GA TASKS:", "TODO:", 1)
+        unrelated_html = render_html(
+            subject_for(date(2026, 9, 1)),
+            date(2026, 9, 1),
+            [{"title": "OTHER REPORT", "body": unrelated_table + unrelated_body}],
+        )
+        # The copied AM/PM table is not an M1 GA/HV/DV table once relabeled.
+        self.assertEqual(unrelated_html.count("am-pm-divider"), 0)
 
     def test_orders_by_period_then_type_then_status(self) -> None:
         report_day = date(2026, 9, 1)
@@ -139,7 +216,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         rows = _ga_hv_dv_task_rows(tasks, names, {}, report_day, target_initials="GA")
 
         self.assertEqual(
-            [row[6] for row in rows],
+            [row[7] for row in rows],
             [
                 "AM fast todo",
                 "AM fast progress",
@@ -147,6 +224,45 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
                 "PM system todo",
             ],
         )
+
+    def test_overdue_system_tasks_are_placed_at_the_end(self) -> None:
+        report_day = date(2026, 9, 2)
+        ga_id = uuid.uuid4()
+        names = {ga_id: "Gane Arifaj"}
+        tasks = [
+            self._task(
+                "Late AM system",
+                assigned_to=ga_id,
+                finish_period="AM",
+                system_template_origin_id=uuid.uuid4(),
+                start_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
+                due_date=datetime(2026, 9, 1, tzinfo=timezone.utc),
+            ),
+            self._task(
+                "Today PM project",
+                assigned_to=ga_id,
+                finish_period="PM",
+                project_id=uuid.uuid4(),
+                start_date=datetime(2026, 9, 2, tzinfo=timezone.utc),
+                due_date=datetime(2026, 9, 2, tzinfo=timezone.utc),
+            ),
+            self._task(
+                "Today PM system",
+                assigned_to=ga_id,
+                finish_period="PM",
+                system_template_origin_id=uuid.uuid4(),
+                start_date=datetime(2026, 9, 2, tzinfo=timezone.utc),
+                due_date=datetime(2026, 9, 2, tzinfo=timezone.utc),
+            ),
+        ]
+
+        rows = _ga_hv_dv_task_rows(tasks, names, {}, report_day, target_initials="GA")
+
+        self.assertEqual(
+            [row[7] for row in rows],
+            ["Today PM system", "Today PM project", "Late AM system"],
+        )
+        self.assertEqual(rows[-1][6], "Y")
 
 
 class FakeDraftDb:
