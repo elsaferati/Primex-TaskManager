@@ -13,10 +13,24 @@ from openpyxl.cell.text import InlineFont
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from PIL import Image, ImageDraw, ImageFont
+from docx import Document
+from docx.enum.section import WD_ORIENT
+from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT
+from docx.enum.text import WD_ALIGN_PARAGRAPH
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
+from docx.shared import Inches, Pt, RGBColor
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import settings
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient
+from app.services.tomorrow_closing_sections import (
+    ClosingSection,
+    ClosingTable,
+    ClosingTableRow,
+    build_tomorrow_closing_sections,
+)
 
 
 TASK_ROWS = (
@@ -86,6 +100,10 @@ STATUS_COLORS = {
     "WAITING_CLIENT": "#E2C15B",
     "WAITING_CONFIRMATION": "#FFEDD5",
     "DONE": "#C4FDC4",
+}
+CLOSING_TONE_COLORS = {
+    "todo": STATUS_COLORS["TODO"],
+    "notes": "#DBEAFE",
 }
 COMMENT_DEV_INITIALS = ("AT", "EF", "RA", "EH", "LH")
 COMMENT_GD_INITIALS = ("FG",)
@@ -684,6 +702,93 @@ def _dated_meetings_html(
     )
 
 
+def _closing_row_color(row: ClosingTableRow, table: ClosingTable) -> str:
+    if row.is_deadline:
+        return DEADLINE_COLOR
+    if row.status:
+        return STATUS_COLORS.get(row.status, CLOSING_TONE_COLORS.get(table.tone, "#FFFFFF"))
+    return CLOSING_TONE_COLORS.get(table.tone, "#FFFFFF")
+
+
+def _closing_sections_html(sections: list[ClosingSection]) -> str:
+    chunks: list[str] = []
+    for section in sections:
+        chunks.append(
+            '<div data-closing-section="true" style="margin:16px 0 12px;">'
+            f'<div style="background-color:#EEF2FF;border-left:5px solid #2563EB;padding:8px 10px;'
+            f'font-family:Arial,sans-serif;font-size:14px;font-weight:700;">{html.escape(section.title)}</div>'
+        )
+        for table in section.tables:
+            chunks.append(
+                f'<div style="margin:8px 0 4px;font-family:Arial,sans-serif;font-size:12px;font-weight:700;">'
+                f'{html.escape(table.label)}:</div>'
+            )
+            compact_columns = {"NR", "KUSH", "DEP", "AM/PM", "LLOJI", "NGA", "NE", "DISK", "FROM", "TIME"}
+            widths = {"ARSYEJA": "16%", "KOMENT": "20%"}
+            def header_cell(column: str) -> str:
+                width = widths.get(column)
+                width_attr = f' width="{width}"' if width else (' width="1%"' if column in compact_columns else "")
+                nowrap = "white-space:nowrap;" if column in compact_columns else ""
+                return (
+                    f'<th{width_attr} style="{HEADER_STYLE};background-color:#E2E8F0;{nowrap}">'
+                    f'{html.escape(column)}</th>'
+                )
+
+            header = "".join(header_cell(column) for column in table.columns)
+            rows = table.rows or [ClosingTableRow(values=["-"] * (len(table.columns) - 1) + ["(Asnje detyre)"])]
+            body: list[str] = []
+            for row in rows:
+                color = _closing_row_color(row, table)
+                foreground = "#FFFFFF" if color == DEADLINE_COLOR else "#111827"
+                priority_border = f";border:2px solid {EIGHT_AM_BORDER_COLOR}" if row.is_eight_am else ""
+                cells = []
+                for column, value in zip(table.columns, row.values):
+                    extra = ";white-space:nowrap;width:1%" if column in compact_columns else ""
+                    stacked_dates = column in {"NGA", "NE"} and "\n" in str(value)
+                    if stacked_dates:
+                        extra += ";padding:0"
+                    if column == "DISK":
+                        normalized = str(value).strip().upper()
+                        if normalized == "YES":
+                            extra += ";background-color:#DCFCE7;color:#166534;font-weight:700;text-align:center"
+                        elif normalized == "NO":
+                            extra += ";background-color:#FEE2E2;color:#991B1B;font-weight:700;text-align:center"
+                    if stacked_dates:
+                        first_line, second_line = str(value).split("\n", 1)
+                        cell_content = (
+                            '<div style="padding:5px;border-bottom:1px solid #94A3B8;">'
+                            f'{html.escape(first_line)}</div>'
+                            f'<div style="padding:5px;">{html.escape(second_line)}</div>'
+                        )
+                    else:
+                        cell_content = html.escape(str(value)).replace(chr(10), "<br>")
+                    cells.append(
+                        f'<td style="{CELL_STYLE};background-color:{color};color:{foreground}{priority_border}{extra}">'
+                        f'{cell_content}</td>'
+                    )
+                body.append(f'<tr data-closing-row="true">{"".join(cells)}</tr>')
+            chunks.append(
+                f'<table data-closing-table="true" role="presentation" width="100%" border="1" cellpadding="0" '
+                f'cellspacing="0" style="{TABLE_STYLE};table-layout:auto;border:3px solid #111827;">'
+                f'<thead><tr>{header}</tr></thead><tbody>{"".join(body)}</tbody></table>'
+            )
+        chunks.append("</div>")
+    return "".join(chunks)
+
+
+def _closing_sections_plain_text(sections: list[ClosingSection]) -> list[str]:
+    lines: list[str] = []
+    for section in sections:
+        lines.extend(["", section.title])
+        for table in section.tables:
+            lines.append(f"{table.label}: {' | '.join(table.columns)}")
+            if not table.rows:
+                lines.append("(Asnje detyre)")
+            else:
+                lines.extend(" | ".join(str(value) for value in row.values) for row in table.rows)
+    return lines
+
+
 def _excel_table_attachment(
     task_rows: list[tuple[str, list[dict[str, Any]], bool]],
     meeting_rows: list[tuple[str, list[dict[str, Any]], bool]],
@@ -692,6 +797,7 @@ def _excel_table_attachment(
     include_meetings: bool = True,
     comment_initials: list[str] | None = None,
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
+    closing_sections: list[ClosingSection] | None = None,
 ) -> tuple[str, bytes, str]:
     """Create the same printable grid as an XLSX attachment for email recipients."""
     workbook = Workbook()
@@ -747,6 +853,51 @@ def _excel_table_attachment(
         top=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
         bottom=Side(style="medium", color=NON_ROUTINE_MEETING_BORDER_COLOR.removeprefix("#")),
     )
+
+    def write_closing_sections(row_number: int) -> int:
+        for section in closing_sections or []:
+            sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=8)
+            section_cell = sheet.cell(row_number, 1, section.title)
+            section_cell.fill = PatternFill("solid", fgColor="EEF2FF")
+            section_cell.font = Font(bold=True, size=12)
+            section_cell.alignment = Alignment(vertical="center")
+            row_number += 1
+            for table in section.tables:
+                sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=8)
+                label_cell = sheet.cell(row_number, 1, f"{table.label}:")
+                label_cell.font = Font(bold=True)
+                row_number += 1
+                for column, value in enumerate(table.columns, 1):
+                    cell = sheet.cell(row_number, column, value)
+                    cell.font = Font(bold=True)
+                    cell.fill = header_fill
+                    cell.border = border
+                    cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+                row_number += 1
+                rows = table.rows or [
+                    ClosingTableRow(values=["-"] * (len(table.columns) - 1) + ["(Asnje detyre)"])
+                ]
+                for row in rows:
+                    color = _closing_row_color(row, table).removeprefix("#")
+                    for column, (header, value) in enumerate(zip(table.columns, row.values), 1):
+                        cell = sheet.cell(row_number, column, value)
+                        cell.fill = PatternFill("solid", fgColor=color)
+                        cell.border = eight_am_border if row.is_eight_am else border
+                        cell.alignment = Alignment(vertical="top", wrap_text=True)
+                        if color == DEADLINE_COLOR.removeprefix("#"):
+                            cell.font = Font(color="FFFFFF", bold=True)
+                        if header == "DISK":
+                            normalized = str(value).strip().upper()
+                            if normalized == "YES":
+                                cell.fill = PatternFill("solid", fgColor="DCFCE7")
+                                cell.font = Font(color="166534", bold=True)
+                            elif normalized == "NO":
+                                cell.fill = PatternFill("solid", fgColor="FEE2E2")
+                                cell.font = Font(color="991B1B", bold=True)
+                            cell.alignment = Alignment(horizontal="center", vertical="center")
+                    row_number += 1
+            row_number += 1
+        return row_number
     def write_checklists(row_number: int) -> int:
         """Write each preparation list as a title row plus one compact content row."""
         checklist_fill = PatternFill("solid", fgColor="EEF2FF")
@@ -920,7 +1071,7 @@ def _excel_table_attachment(
                 sheet.merge_cells(start_row=first_row, start_column=2, end_row=row_number - 1, end_column=2)
         return row_number
 
-    task_header_row = write_checklists(3)
+    task_header_row = write_checklists(write_closing_sections(3))
     next_row = write_section(task_rows, meeting=False, row_number=task_header_row)
     if include_meetings:
         if meeting_sections:
@@ -976,10 +1127,205 @@ def _excel_table_attachment(
     )
 
 
-def _png_table_attachment(
+def _docx_table_attachment(
+    task_rows: list[tuple[str, list[dict[str, Any]], bool]],
+    target_date: date,
+    *,
+    closing_sections: list[ClosingSection] | None = None,
+    meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
+    comment_initials: list[str] | None = None,
+) -> tuple[str, bytes, str]:
+    """Create a landscape Word report from the same rows and colours as HTML."""
+    document = Document()
+    section = document.sections[0]
+    section.orientation = WD_ORIENT.LANDSCAPE
+    section.page_width, section.page_height = Inches(11), Inches(8.5)
+    section.top_margin = section.bottom_margin = Inches(0.45)
+    section.left_margin = section.right_margin = Inches(0.45)
+    styles = document.styles
+    normal = styles["Normal"]
+    normal.font.name = "Arial"
+    normal.font.size = Pt(8)
+    normal.paragraph_format.space_after = Pt(0)
+
+    def shade(cell: Any, color: str) -> None:
+        properties = cell._tc.get_or_add_tcPr()
+        fill = properties.find(qn("w:shd"))
+        if fill is None:
+            fill = OxmlElement("w:shd")
+            properties.append(fill)
+        fill.set(qn("w:fill"), color.removeprefix("#"))
+
+    def set_cell(cell: Any, value: str, *, bold: bool = False, color: str = "000000", center: bool = False) -> None:
+        cell.text = ""
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        paragraph = cell.paragraphs[0]
+        paragraph.alignment = WD_ALIGN_PARAGRAPH.CENTER if center else WD_ALIGN_PARAGRAPH.LEFT
+        paragraph.paragraph_format.space_after = Pt(0)
+        run = paragraph.add_run(str(value))
+        run.font.name = "Arial"
+        run._element.get_or_add_rPr().get_or_add_rFonts().set(qn("w:ascii"), "Arial")
+        run.font.size = Pt(7.5)
+        run.bold = bold
+        run.font.color.rgb = RGBColor.from_string(color.removeprefix("#"))
+
+    def set_stacked_date_cell(cell: Any, value: str, *, color: str = "000000") -> None:
+        first_line, second_line = str(value).split("\n", 1)
+        cell.text = ""
+        cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
+        first = cell.paragraphs[0]
+        second = cell.add_paragraph()
+        for paragraph, line in ((first, first_line), (second, second_line)):
+            paragraph.paragraph_format.space_after = Pt(0)
+            run = paragraph.add_run(line)
+            run.font.name = "Arial"
+            run.font.size = Pt(7.5)
+            run.font.color.rgb = RGBColor.from_string(color.removeprefix("#"))
+        properties = first._p.get_or_add_pPr()
+        borders = OxmlElement("w:pBdr")
+        bottom = OxmlElement("w:bottom")
+        bottom.set(qn("w:val"), "single")
+        bottom.set(qn("w:sz"), "4")
+        bottom.set(qn("w:space"), "2")
+        bottom.set(qn("w:color"), "94A3B8")
+        borders.append(bottom)
+        properties.append(borders)
+
+    def style_header(row: Any) -> None:
+        for cell in row.cells:
+            shade(cell, "E2E8F0")
+            set_cell(cell, cell.text, bold=True, center=True)
+
+    def set_widths(table: Any, widths: list[float]) -> None:
+        table.autofit = False
+        for column, width in zip(table.columns, widths):
+            column.width = Inches(width)
+            for cell in column.cells:
+                cell.width = Inches(width)
+
+    def heading(value: str, *, size: float = 11) -> None:
+        paragraph = document.add_paragraph()
+        paragraph.paragraph_format.space_before = Pt(6)
+        paragraph.paragraph_format.space_after = Pt(3)
+        run = paragraph.add_run(value)
+        run.font.name = "Arial"
+        run.font.size = Pt(size)
+        run.bold = True
+
+    title = document.add_paragraph()
+    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    title.paragraph_format.space_after = Pt(6)
+    title_run = title.add_run(f"1H SHTYPI - {target_date:%d.%m.%Y}")
+    title_run.font.name = "Arial"
+    title_run.font.size = Pt(16)
+    title_run.bold = True
+
+    for closing_section in closing_sections or []:
+        heading(closing_section.title, size=11)
+        for closing_table in closing_section.tables:
+            heading(f"{closing_table.label}:", size=8.5)
+            table = document.add_table(rows=1, cols=len(closing_table.columns))
+            table.style = "Table Grid"
+            width_weights = {
+                "NR": .28, "KUSH": .42, "DEP": .42, "AM/PM": .48, "LLOJI": .48,
+                "NGA": 1.0, "NE": 1.0, "TITULLI": 5.6, "ARSYEJA": 1.25,
+                "KOMENT": 1.55, "DISK": .42, "NOTE": 8.0, "FROM": .58, "TIME": .58,
+            }
+            raw_widths = [width_weights.get(column, 1.0) for column in closing_table.columns]
+            scale = 10.1 / sum(raw_widths)
+            set_widths(table, [value * scale for value in raw_widths])
+            for index, column in enumerate(closing_table.columns):
+                set_cell(table.rows[0].cells[index], column, bold=True, center=True)
+            style_header(table.rows[0])
+            rows = closing_table.rows or [
+                ClosingTableRow(values=["-"] * (len(closing_table.columns) - 1) + ["(Asnje detyre)"])
+            ]
+            for data in rows:
+                row = table.add_row()
+                background = _closing_row_color(data, closing_table)
+                foreground = "FFFFFF" if background == DEADLINE_COLOR else "111827"
+                for index, (column, value) in enumerate(zip(closing_table.columns, data.values)):
+                    cell = row.cells[index]
+                    cell_background, cell_foreground = background, foreground
+                    if column == "DISK" and str(value).strip().upper() == "YES":
+                        cell_background, cell_foreground = "DCFCE7", "166534"
+                    elif column == "DISK" and str(value).strip().upper() == "NO":
+                        cell_background, cell_foreground = "FEE2E2", "991B1B"
+                    shade(cell, cell_background)
+                    if column in {"NGA", "NE"} and "\n" in str(value):
+                        set_stacked_date_cell(cell, value, color=cell_foreground)
+                    else:
+                        set_cell(cell, value, bold=column == "DISK", color=cell_foreground, center=column in {"NR", "DISK"})
+
+    heading("TASKS", size=11)
+    task_table = document.add_table(rows=1, cols=8)
+    task_table.style = "Table Grid"
+    set_widths(task_table, [.4, 1.35, 1.391, 1.391, 1.391, 1.391, 1.391, 1.391])
+    for index, value in enumerate(["NR", "LLOJI DHE SLOTI", "TASK 1", "TASK 2", "TASK 3", "TASK 4", "TASK 5", "TASK 6"]):
+        set_cell(task_table.rows[0].cells[index], value, bold=True, center=True)
+    style_header(task_table.rows[0])
+    for number, (label, values, personal) in enumerate(task_rows, 1):
+        chunks = [values[index:index + 6] for index in range(0, len(values), 6)] or [[]]
+        for chunk_index, chunk in enumerate(chunks):
+            row = task_table.add_row()
+            set_cell(row.cells[0], str(number) if chunk_index == 0 else "", center=True)
+            set_cell(row.cells[1], label if chunk_index == 0 else "", bold=True)
+            for item_index in range(6):
+                if item_index >= len(chunk):
+                    set_cell(row.cells[item_index + 2], "")
+                    continue
+                item = chunk[item_index]
+                background = _task_cell_style(item, personal=personal, report_date=target_date)[1]
+                foreground = "FFFFFF" if background == DEADLINE_COLOR else "111827"
+                shade(row.cells[item_index + 2], background)
+                set_cell(
+                    row.cells[item_index + 2],
+                    f"{item_index + 1 + chunk_index * 6}. [{_task_period_label(item)}] {_task_title(item, personal=personal)}",
+                    bold=background == DEADLINE_COLOR,
+                    color=foreground,
+                )
+
+    for meeting_date, relative, dated_rows in meeting_sections or []:
+        heading(f"TAKIMET {relative} - {meeting_date:%d.%m.%Y}", size=10)
+        meeting_table = document.add_table(rows=1, cols=2)
+        meeting_table.style = "Table Grid"
+        set_widths(meeting_table, [1.4, 8.7])
+        for index, value in enumerate(["LLOJI", "TAKIMET"]):
+            set_cell(meeting_table.rows[0].cells[index], value, bold=True, center=True)
+        style_header(meeting_table.rows[0])
+        for label, values, _ in dated_rows:
+            row = meeting_table.add_row()
+            set_cell(row.cells[0], label, bold=True)
+            set_cell(
+                row.cells[1],
+                "\n".join(
+                    f"{index}. {_report_text(_first_line(item.get('title')))} {str(item.get('time') or '').strip()}".strip()
+                    for index, item in enumerate(values, 1)
+                ) or "-",
+            )
+
+    heading("KOMENTE PER STAF", size=10)
+    for line in _comment_write_in_lines(comment_initials or list(COMMENT_FIXED_INITIALS)):
+        paragraph = document.add_paragraph(line)
+        paragraph.paragraph_format.space_after = Pt(3)
+        for run in paragraph.runs:
+            run.font.name = "Arial"
+            run.font.size = Pt(8)
+
+    output = BytesIO()
+    document.save(output)
+    return (
+        f"1H_SHTYPI_{target_date:%Y-%m-%d}.docx",
+        output.getvalue(),
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    )
+
+
+def _core_png_table_attachment(
     task_rows: list[tuple[str, list[dict[str, Any]], bool]], target_date: date,
     comment_initials: list[str] | None = None,
     meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
+    report_day_label: str = "TODAY",
 ) -> tuple[str, bytes, str]:
     """Render the Today SHTYPI task grid with the same task-state colours."""
     margin = 28
@@ -1100,7 +1446,7 @@ def _png_table_attachment(
         if suffix:
             draw.text((cursor_x, cursor_y), suffix, fill=default_color, font=font)
 
-    draw.text((margin, 22), f"1H SHTYPI TODAY - {target_date:%d.%m.%Y}", fill="#111827", font=heading)
+    draw.text((margin, 22), f"1H SHTYPI {report_day_label} - {target_date:%d.%m.%Y}", fill="#111827", font=heading)
     draw.text((margin, 59), "Current Common View state used by the 1H report", fill="#475569", font=regular)
 
     y, x = header_top, margin
@@ -1310,11 +1656,141 @@ def _png_table_attachment(
     return f"1H-SHTYPI-Today-{target_date:%Y-%m-%d}.png", output.getvalue(), "image/png"
 
 
+def _png_table_attachment(
+    task_rows: list[tuple[str, list[dict[str, Any]], bool]], target_date: date,
+    comment_initials: list[str] | None = None,
+    meeting_sections: list[tuple[date, str, list[tuple[str, list[dict[str, Any]], bool]]]] | None = None,
+    closing_sections: list[ClosingSection] | None = None,
+) -> tuple[str, bytes, str]:
+    """Render one PNG containing the closing tables and the canonical task grid."""
+    filename, core_bytes, mime_type = _core_png_table_attachment(
+        task_rows,
+        target_date,
+        comment_initials,
+        meeting_sections,
+        "NESER" if closing_sections else "TODAY",
+    )
+    if not closing_sections:
+        return filename, core_bytes, mime_type
+
+    core = Image.open(BytesIO(core_bytes)).convert("RGB")
+    width = core.width
+    margin = 28
+    try:
+        regular = ImageFont.truetype(os.getenv("PRIMEFLOW_REPORT_FONT_PATH", r"C:\Windows\Fonts\segoeui.ttf"), 16)
+        bold = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 16)
+        section_font = ImageFont.truetype(r"C:\Windows\Fonts\arialbd.ttf", 20)
+    except OSError:
+        regular = bold = section_font = ImageFont.load_default()
+    measure = ImageDraw.Draw(Image.new("RGB", (1, 1), "white"))
+
+    def wrap(value: str, font: Any, max_width: int) -> list[str]:
+        lines: list[str] = []
+        for source in str(value or "").splitlines() or [""]:
+            current = ""
+            for word in source.split() or [""]:
+                candidate = word if not current else f"{current} {word}"
+                if current and measure.textlength(candidate, font=font) > max_width:
+                    lines.append(current)
+                    current = word
+                else:
+                    current = candidate
+            lines.append(current)
+        return lines or [""]
+
+    preferred = {
+        "NR": 42, "KUSH": 62, "DEP": 58, "AM/PM": 68, "LLOJI": 68,
+        "NGA": 155, "NE": 155, "TITULLI": 760, "ARSYEJA": 230, "KOMENT": 285,
+        "DISK": 62, "NOTE": 1100, "FROM": 75, "TIME": 72,
+    }
+    layouts: list[tuple[ClosingSection, list[tuple[ClosingTable, list[int], list[tuple[ClosingTableRow, int]]]]]] = []
+    closing_height = 16
+    available = width - margin * 2
+    for section in closing_sections:
+        closing_height += 42
+        table_layouts = []
+        for table in section.tables:
+            raw = [preferred.get(column, 160) for column in table.columns]
+            scale = available / sum(raw)
+            widths = [max(48, int(value * scale)) for value in raw]
+            widths[-1] += available - sum(widths)
+            rendered_rows = table.rows or [
+                ClosingTableRow(values=["-"] * (len(table.columns) - 1) + ["(Asnje detyre)"])
+            ]
+            row_layouts: list[tuple[ClosingTableRow, int]] = []
+            for row in rendered_rows:
+                line_count = max(
+                    len(wrap(value, regular, widths[index] - 12))
+                    for index, value in enumerate(row.values)
+                )
+                row_layouts.append((row, max(38, line_count * 20 + 12)))
+            closing_height += 30 + 38 + sum(height for _, height in row_layouts) + 12
+            table_layouts.append((table, widths, row_layouts))
+        layouts.append((section, table_layouts))
+
+    closing = Image.new("RGB", (width, closing_height), "white")
+    draw = ImageDraw.Draw(closing)
+    y = 10
+    for section, table_layouts in layouts:
+        draw.rectangle((margin, y, width - margin, y + 36), fill="#EEF2FF", outline="#2563EB", width=2)
+        draw.text((margin + 10, y + 7), section.title, fill="#111827", font=section_font)
+        y += 42
+        for table, widths, row_layouts in table_layouts:
+            draw.text((margin, y + 4), f"{table.label}:", fill="#111827", font=bold)
+            y += 30
+            x = margin
+            for index, column in enumerate(table.columns):
+                right = x + widths[index]
+                draw.rectangle((x, y, right, y + 38), fill="#E2E8F0", outline="#111827")
+                draw.text((x + 5, y + 9), column, fill="#111827", font=bold)
+                x = right
+            y += 38
+            for row, row_height in row_layouts:
+                x = margin
+                background = _closing_row_color(row, table)
+                foreground = "#FFFFFF" if background == DEADLINE_COLOR else "#111827"
+                for index, (column, value) in enumerate(zip(table.columns, row.values)):
+                    right = x + widths[index]
+                    cell_bg, cell_fg = background, foreground
+                    if column == "DISK" and str(value).strip().upper() == "YES":
+                        cell_bg, cell_fg = "#DCFCE7", "#166534"
+                    elif column == "DISK" and str(value).strip().upper() == "NO":
+                        cell_bg, cell_fg = "#FEE2E2", "#991B1B"
+                    draw.rectangle(
+                        (x, y, right, y + row_height),
+                        fill=cell_bg,
+                        outline=EIGHT_AM_BORDER_COLOR if row.is_eight_am else "#111827",
+                        width=3 if row.is_eight_am else 1,
+                    )
+                    if column in {"NGA", "NE"} and "\n" in str(value):
+                        first_line, second_line = str(value).split("\n", 1)
+                        divider_y = y + row_height // 2
+                        draw.line((x, divider_y, right, divider_y), fill="#94A3B8", width=1)
+                        draw.text((x + 6, y + 5), first_line, fill=cell_fg, font=regular)
+                        draw.text((x + 6, divider_y + 5), second_line, fill=cell_fg, font=regular)
+                    else:
+                        for line_index, line in enumerate(wrap(value, bold if column == "DISK" else regular, widths[index] - 12)):
+                            draw.text((x + 6, y + 6 + line_index * 20), line, fill=cell_fg, font=bold if column == "DISK" else regular)
+                    x = right
+                y += row_height
+            y += 12
+
+    combined = Image.new("RGB", (width, closing.height + core.height), "white")
+    combined.paste(closing, (0, 0))
+    combined.paste(core, (0, closing.height))
+    output = BytesIO()
+    combined.save(output, format="PNG", optimize=True)
+    return f"1H-SHTYPI-{target_date:%Y-%m-%d}.png", output.getvalue(), mime_type
+
+
 async def _build_print_report(
     target_date: date, *, include_attachment: bool = False, include_meetings: bool = True,
     include_png: bool = False, first_meeting_day_label: str = "NESER",
     report_day_label: str,
     payload: dict[str, Any] | None = None,
+    db: AsyncSession | None = None,
+    closing_report_day: date | None = None,
+    include_docx: bool = False,
 ) -> dict[str, Any]:
     if payload is None:
         base_url = settings.PRIMEFLOW_API_BASE_URL
@@ -1366,11 +1842,16 @@ async def _build_print_report(
         for index, meeting_date in enumerate(meeting_dates)
     ]
     meeting_rows = meeting_sections[0][2] if meeting_sections else []
+    closing_sections = (
+        await build_tomorrow_closing_sections(db, closing_report_day)
+        if db is not None and closing_report_day is not None
+        else []
+    )
     report_date = target_date.strftime("%d.%m.%Y")
     report_title = subject_for(target_date, report_day_label)
     html_body = f"""<!doctype html><html><body style=\"margin:0;color:#000;font-family:Arial,sans-serif\">
 <div style=\"text-align:center;font-size:20px;font-weight:700;margin:0 0 12px\">{report_title}</div>
-{_one_h_checklists_html()}{_html_table(task_rows, report_date=target_date)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
+{_one_h_checklists_html()}{_closing_sections_html(closing_sections)}{_html_table(task_rows, report_date=target_date)}{_dated_meetings_html(meeting_sections)}{_comments_table_html(comment_initials)}</body></html>"""
     content_html = (
         '<div data-today-print-report="true" style="margin:18px 0 14px">'
         + re.sub(r"^.*?<body[^>]*>|</body>.*$", "", html_body, flags=re.S)
@@ -1391,8 +1872,9 @@ async def _build_print_report(
             for index, (question, description) in enumerate(ONE_H_STAFF_CHECKLIST, 1)
         ),
         "",
-        "TASKS",
     ]
+    plain_rows.extend(_closing_sections_plain_text(closing_sections))
+    plain_rows.extend(["", "TASKS"])
     for label, values, personal in task_rows:
         plain_rows.append(
             f"{label}: "
@@ -1429,22 +1911,41 @@ async def _build_print_report(
             _excel_table_attachment(
                 task_rows, meeting_rows, target_date, include_meetings=include_meetings,
                 comment_initials=comment_initials, meeting_sections=meeting_sections,
+                closing_sections=closing_sections,
             )
         ]
         if include_png:
             attachments.append(
-                _png_table_attachment(task_rows, target_date, comment_initials, meeting_sections)
+                _png_table_attachment(
+                    task_rows, target_date, comment_initials, meeting_sections, closing_sections
+                )
+            )
+        if include_docx:
+            attachments.append(
+                _docx_table_attachment(
+                    task_rows,
+                    target_date,
+                    closing_sections=closing_sections,
+                    meeting_sections=meeting_sections,
+                    comment_initials=comment_initials,
+                )
             )
         report["attachments"] = attachments
     return report
 
 
 async def build_tomorrow_print_report(
-    delivery_date: date, *, include_attachment: bool = False
+    delivery_date: date, *, include_attachment: bool = False, db: AsyncSession | None = None,
+    payload: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     return await _build_print_report(
         next_working_day(delivery_date), include_attachment=include_attachment, include_meetings=True,
+        include_png=include_attachment,
+        include_docx=include_attachment,
         report_day_label="NESER",
+        db=db,
+        closing_report_day=delivery_date,
+        payload=payload,
     )
 
 

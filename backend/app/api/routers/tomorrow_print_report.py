@@ -114,9 +114,13 @@ async def update_settings(payload: SettingsPayload, db: AsyncSession = Depends(g
 
 
 @router.get("/preview")
-async def preview(report_date: date | None = None, _: User = Depends(require_manager_or_admin)) -> dict:
+async def preview(
+    report_date: date | None = None,
+    db: AsyncSession = Depends(get_db),
+    _: User = Depends(require_manager_or_admin),
+) -> dict:
     delivery_date = report_date or datetime.now(report_timezone()).date()
-    return await build_tomorrow_print_report(delivery_date)
+    return await build_tomorrow_print_report(delivery_date, db=db)
 
 
 @router.post("/send")
@@ -129,7 +133,7 @@ async def send(report_date: date | None = None, db: AsyncSession = Depends(get_d
     existing = (
         await db.execute(select(TomorrowPrintReportDelivery).where(TomorrowPrintReportDelivery.delivery_date == delivery_date))
     ).scalar_one_or_none()
-    report = await build_tomorrow_print_report(delivery_date, include_attachment=True)
+    report = await build_tomorrow_print_report(delivery_date, include_attachment=True, db=db)
     if existing is None:
         existing = TomorrowPrintReportDelivery(
             delivery_date=delivery_date,

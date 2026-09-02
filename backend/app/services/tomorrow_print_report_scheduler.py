@@ -70,7 +70,9 @@ async def run_tomorrow_print_report_scheduler_once(now: datetime | None = None) 
                 "tomorrow_print_report_scheduler_generating delivery_date=%s",
                 delivery_date,
             )
-            report = await build_tomorrow_print_report(delivery_date, include_attachment=True)
+            report = await build_tomorrow_print_report(
+                delivery_date, include_attachment=True, db=db
+            )
             logger.info(
                 "tomorrow_print_report_scheduler_generated delivery_date=%s target_date=%s",
                 delivery_date,
