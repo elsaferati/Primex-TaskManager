@@ -92,7 +92,10 @@ function normalizeHeader(value: string) {
 }
 
 function isHeaderCells(cells: string[]) {
-  return cells.some((cell) => HEADER_LABELS.has(normalizeHeader(cell)))
+  // A data row can legitimately contain values such as LATE, STATUS, DATE,
+  // or TITLE. Requiring multiple recognized labels prevents those rows from
+  // being split out and rendered as separate gray table headers.
+  return cells.filter((cell) => HEADER_LABELS.has(normalizeHeader(cell))).length >= 2
 }
 
 function compactWidthForHeader(header: string) {
@@ -152,6 +155,15 @@ function isNarrowTableHeader(header: string) {
 
 function trimTableCell(value: string) {
   return value.replace(/\s+/g, " ").trim()
+}
+
+function previewTableCell(value: string, header: string) {
+  const trimmed = trimTableCell(value)
+  const normalizedHeader = normalizeHeader(header)
+  if ((normalizedHeader === "FROM" || normalizedHeader === "TO") && trimmed.startsWith("START:")) {
+    return trimmed.replace(/\s+\/\s+(?=DUE:)/, "\n")
+  }
+  return trimmed
 }
 
 function tableGridTemplates(lines: string[]) {
@@ -263,6 +275,7 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   const resolvedStatus = (titleStatus || statusValue).toUpperCase().replace(/_/g, " ")
   const typeIndex = headers.findIndex((header) => normalizeHeader(header) === "TYPE")
   const typeValue = typeIndex >= 0 ? cells[typeIndex]?.trim().toUpperCase() : ""
+  if (resolvedStatus === "LATE") return "bg-red-100"
   if (resolvedStatus.includes("WAITING CLIENT") || resolvedStatus.includes("WAITING FOR CLIENT")) {
     return "bg-[#E2C15B] text-[#4F3A00]"
   }
@@ -304,6 +317,8 @@ function meetingStatusCellTone(headers: string[], cells: string[], cellIndex: nu
   const header = normalizeHeader(headers[cellIndex] || "")
   if (header !== "MBAJTUR?" && header !== "MBAJTUR") return ""
   const value = cells[cellIndex]?.trim()
+  if (value === "\u2713") return "bg-green-100 text-green-800 font-semibold text-center"
+  if (value === "\u2715") return "bg-red-100 text-red-800 font-semibold text-center"
   if (value === "✓") return "bg-green-100 text-green-800 font-semibold text-center"
   if (value === "✕") return "bg-red-100 text-red-800 font-semibold text-center"
   return "text-center"
@@ -326,8 +341,8 @@ function priorityTaskTypeRank(headers: string[], cells: string[]) {
 function createdWeekCellTone(headers: string[], cells: string[], cellIndex: number) {
   if (normalizeHeader(headers[cellIndex] || "") !== "ADDED") return ""
   const value = cells[cellIndex]?.trim().toUpperCase()
-  if (value === "THIS W") return "!bg-sky-200 !text-sky-950 font-semibold"
-  if (value === "LAST W") return "!bg-amber-200 !text-amber-950 font-semibold"
+  if (value === "THIS W") return "!bg-[#BAE6FD] !text-[#0C4A6E] font-semibold"
+  if (value === "LAST W") return "!bg-[#FDE68A] !text-[#78350F] font-semibold"
   return ""
 }
 
@@ -667,6 +682,8 @@ export function ReportSectionPreview({
                     {visible.cells.map((cell, cellIndex) => {
                       const header = normalizeHeader(visible.headers[cellIndex] || headers[cellIndex] || "")
                       const narrow = isNarrowTableHeader(header)
+                      const displayedCell = previewTableCell(cell, header)
+                      const stackedDate = displayedCell.includes("\n")
                       const meetingFrame = highlightedMeeting
                         ? `border-y-[3px] border-y-blue-600 ${cellIndex === 0 ? "border-l-[3px] border-l-blue-600" : ""} ${cellIndex === visible.cells.length - 1 ? "border-r-[3px] border-r-blue-600" : ""}`
                         : ""
@@ -677,18 +694,39 @@ export function ReportSectionPreview({
                         <td
                           key={cellIndex}
                           className={`border-b border-r border-slate-200 py-1.5 align-top last:border-r-0 ${
-                            header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
+                            stackedDate
+                              ? "px-0"
+                              : header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
                               ? "px-1 text-center"
                               : "px-2"
                           } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
                             createdWeekCellTone(visible.headers, visible.cells, cellIndex)
                           } ${
-                            narrow ? "w-[1%] whitespace-nowrap" : "whitespace-pre-wrap break-words"
+                            stackedDate
+                              ? "w-[1%] whitespace-pre"
+                              : narrow
+                                ? "w-[1%] whitespace-nowrap"
+                                : "whitespace-pre-wrap break-words"
                           } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${meetingFrame} ${eightAmFrame} ${
                             highlightedMeeting && header === "TITLE" ? "text-blue-700 font-semibold" : ""
                           }`}
                         >
-                          {trimTableCell(cell) || "-"}
+                          {stackedDate ? (
+                            displayedCell.split("\n").map((line, lineIndex) => (
+                              <span
+                                key={`${lineIndex}-${line}`}
+                                className={`block px-2 ${
+                                  lineIndex === 0
+                                    ? "mb-0.5 border-b border-slate-400 pb-0.5"
+                                    : "pt-0.5"
+                                }`}
+                              >
+                                {line}
+                              </span>
+                            ))
+                          ) : (
+                            displayedCell || "-"
+                          )}
                         </td>
                       )
                     })}

@@ -349,8 +349,13 @@ async def _postponed_tasks_for_m3_day(
             due_before = _audit_local_date((due_events[-1].before or {}).get("value"))
             due_after = _audit_local_date((due_events[-1].after or {}).get("value"))
             both_date_ranges[task.id] = (
-                f"START: {start_before.strftime('%d.%m.%Y') if start_before else '-'} | DUE: {due_before.strftime('%d.%m.%Y') if due_before else '-'}",
-                f"START: {start_after.strftime('%d.%m.%Y') if start_after else '-'} | DUE: {due_after.strftime('%d.%m.%Y') if due_after else '-'}",
+                # ``|`` is the column delimiter used by the ASCII table
+                # renderer.  Keeping it inside a cell makes the report
+                # parser treat the DUE portion as another column and shifts
+                # the title into the TITULLI column.  Use a visual separator
+                # that is safe inside a cell instead.
+                f"START: {start_before.strftime('%d.%m.%Y') if start_before else '-'} / DUE: {due_before.strftime('%d.%m.%Y') if due_before else '-'}",
+                f"START: {start_after.strftime('%d.%m.%Y') if start_after else '-'} / DUE: {due_after.strftime('%d.%m.%Y') if due_after else '-'}",
             )
         elif due_events:
             postponed.append(task)
@@ -1227,20 +1232,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
         ),
         SECTION_TITLES[11]: _normalize_section(
             _m3_status_table(
-                "SHTYER DUE DATE",
-                postponed_today,
-                names,
-                with_status=True,
-                include_type=True,
-                include_department=True,
-                include_am_pm=True,
-                department_codes=department_codes,
-                date_range_by_task=postponed_date_ranges,
-                **table_kwargs,
-            )
-            + ["", "SHTYER START DHE DUE DATE:"]
-            + _m3_status_table(
-                "",
+                "SHTYER START DHE DUE DATE",
                 postponed_both_today,
                 names,
                 with_status=True,
@@ -1249,6 +1241,19 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_am_pm=True,
                 department_codes=department_codes,
                 date_range_by_task=postponed_both_date_ranges,
+                **table_kwargs,
+            )
+            + ["", "SHTYER DUE DATE:"]
+            + _m3_status_table(
+                "",
+                postponed_today,
+                names,
+                with_status=True,
+                include_type=True,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
+                date_range_by_task=postponed_date_ranges,
                 **table_kwargs,
             )[1:]
         ),
@@ -2270,7 +2275,13 @@ pre{{font-size:12px!important;padding:10px!important}}
 
 
 def _parse_ascii_cells(line: str) -> list[str]:
-    return [cell.strip() for cell in line.strip().strip("|").split("|")]
+    cells = [cell.strip() for cell in line.strip().strip("|").split("|")]
+    return [
+        re.sub(r"^(.+?)\s+/\s+(DUE:)", r"\1\n\2", cell, count=1)
+        if cell.startswith("START:")
+        else cell
+        for cell in cells
+    ]
 
 
 def _ascii_table_block(lines: list[str], start: int) -> tuple[list[str], int] | None:
@@ -2320,6 +2331,7 @@ def _normalized_table_header(value: str) -> str:
         "TITULLI": "TITLE",
         "KUSH": "WHO",
         "NGA": "FROM",
+        "NE": "TO",
         "DERI": "TO",
         "TOTALI": "COUNT",
         "LLOJI": "TYPE",
@@ -2331,21 +2343,30 @@ def _normalized_table_header(value: str) -> str:
 
 def _table_tone_from_label(label: str) -> str:
     normalized = label.strip().upper().rstrip(":")
-    if normalized in {"TODO", "DETYRAT E REJA", "DET TE REJA LAST WEEK DHE THIS WEEK"}:
+    if (
+        normalized == "TODO"
+        or "DETYRAT E REJA" in normalized
+        or "DET TE REJA" in normalized
+    ):
         return "todo"
-    if normalized == "IN PROGRESS":
+    if "IN PROGRESS" in normalized:
         return "in-progress"
-    if normalized in {"WAITING FOR CLIENT", "WAITING CLIENT", "WAITING_CLIENT", "DT WFE"}:
+    if (
+        "WAITING FOR CLIENT" in normalized
+        or "WAITING CLIENT" in normalized
+        or "WAITING_CLIENT" in normalized
+        or "DT WFE" in normalized
+    ):
         return "waiting-client"
-    if normalized in {"WAITING CONFIRMATION", "WAITING_CONFIRMATION"}:
+    if "WAITING" in normalized:
         return "waiting"
-    if normalized in {"DONE", "DET E KRYERA NE AM"}:
+    if normalized == "DONE" or "DET E KRYERA" in normalized:
         return "done"
-    if normalized == "LATE":
+    if "LATE" in normalized:
         return "late"
-    if normalized == "ME DEADLINE":
+    if "DEADLINE" in normalized:
         return "deadline"
-    if normalized == "NOTES":
+    if "NOTES" in normalized:
         return "notes"
     return ""
 
@@ -2407,6 +2428,48 @@ def _table_tone_styles(tone: str) -> tuple[str, str]:
     if tone == "notes":
         return "#dbeafe", "#111827"
     return "#f8fafc", "#111827"
+
+
+def _table_cell_style_override(header: str, value: str) -> tuple[str, str, bool] | None:
+    """Return per-cell styling shared by email-equivalent native exports."""
+    header_name = _normalized_table_header(header)
+    normalized = value.strip().upper()
+    if header_name == "DISK":
+        if normalized == "YES":
+            return "#DCFCE7", "#166534", True
+        if normalized == "NO":
+            return "#FEE2E2", "#991B1B", True
+    if header_name in {"MBAJTUR?", "MBAJTUR"}:
+        if value.strip() == "\u2713":
+            return "#DCFCE7", "#166534", True
+        if value.strip() == "\u2715":
+            return "#FEE2E2", "#991B1B", True
+    if header_name == "ADDED":
+        if normalized == "THIS W":
+            return "#BAE6FD", "#0C4A6E", True
+        if normalized == "LAST W":
+            return "#FDE68A", "#78350F", True
+    return None
+
+
+def _is_stacked_start_due_cell(header: str, value: str) -> bool:
+    return (
+        _normalized_table_header(header) in {"FROM", "TO"}
+        and value.startswith("START:")
+        and "\nDUE:" in value
+    )
+
+
+def _render_table_cell_html(header: str, value: str) -> str:
+    if not _is_stacked_start_due_cell(header, value):
+        return html.escape(value).replace(chr(10), "<br>")
+    start_line, due_line = value.split("\n", 1)
+    return (
+        '<div style="padding:4px 5px 2px;border-bottom:1px solid #94a3b8;">'
+        f"{html.escape(start_line)}</div>"
+        '<div style="padding:2px 5px 4px;">'
+        f"{html.escape(due_line)}</div>"
+    )
 
 
 def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = "") -> str:
@@ -2505,12 +2568,14 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                         ' bgcolor="#fde68a" style="background-color:#fde68a!important;'
                         'color:#78350f!important;font-weight:700;"'
                     )
+            if _is_stacked_start_due_cell(header[index], current_cell):
+                cell_style = ' style="padding:0!important;"'
             if is_highlighted_meeting:
                 if _normalized_table_header(header[index]) == "TITLE":
                     cell_classes.append("title")
             row_cells.append(
                 f"<td{_email_column_width_attr(column_widths[index])}{cell_style} class=\"{' '.join(filter(None, cell_classes))}\">"
-                f"{html.escape(current_cell).replace(chr(10), '<br>')}</td>"
+                f"{_render_table_cell_html(header[index], current_cell)}</td>"
             )
         row_classes = " ".join(filter(None, (row_tone, "highlight" if is_highlighted_meeting else "")))
         row_style = (
@@ -3208,6 +3273,25 @@ def render_section_report_docx(
         tc_width.set(qn("w:w"), str(width))
         tc_width.set(qn("w:type"), "dxa")
 
+    def set_table_cell_value(cell: Any, header: str, value: str) -> None:
+        if not _is_stacked_start_due_cell(header, value):
+            cell.text = value
+            return
+        start_line, due_line = value.split("\n", 1)
+        cell.text = ""
+        start_paragraph = cell.paragraphs[0]
+        start_paragraph.add_run(start_line)
+        paragraph_properties = start_paragraph._p.get_or_add_pPr()
+        paragraph_borders = OxmlElement("w:pBdr")
+        bottom_border = OxmlElement("w:bottom")
+        bottom_border.set(qn("w:val"), "single")
+        bottom_border.set(qn("w:sz"), "4")
+        bottom_border.set(qn("w:space"), "1")
+        bottom_border.set(qn("w:color"), "94A3B8")
+        paragraph_borders.append(bottom_border)
+        paragraph_properties.append(paragraph_borders)
+        cell.add_paragraph(due_line)
+
     def add_text(lines: list[str]) -> None:
         non_empty = [line for line in lines if line.strip()]
         keyed_only = bool(non_empty) and all(_is_keyed_prompt_line(line) for line in non_empty)
@@ -3258,7 +3342,10 @@ def render_section_report_docx(
             for column, value in enumerate(values):
                 header_name = _normalized_table_header(header[column])
                 cell_fill, cell_color, cell_bold = fill, color, False
-                if header_name == "DISK" and str(value).strip().upper() == "YES":
+                override = _table_cell_style_override(header_name, str(value))
+                if override is not None:
+                    cell_fill, cell_color, cell_bold = override
+                elif header_name == "DISK" and str(value).strip().upper() == "YES":
                     cell_fill, cell_color, cell_bold = "#DCFCE7", "#166534", True
                 elif header_name == "DISK" and str(value).strip().upper() == "NO":
                     cell_fill, cell_color, cell_bold = "#FEE2E2", "#991B1B", True
@@ -3269,7 +3356,7 @@ def render_section_report_docx(
                 if highlighted and header_name == "TITLE":
                     cell_color, cell_bold = "#2563EB", True
                 cell = row.cells[column]
-                cell.text = value
+                set_table_cell_value(cell, header_name, str(value))
                 outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
                 cell_style(cell, cell_fill, color=cell_color, bold=cell_bold, size=8, outline=outline)
                 set_width(cell, column_widths[column])
@@ -3389,7 +3476,13 @@ def render_section_report_png(
         column_widths = widths(block["header"])
         rows = 34 + (32 if block["caption"] else 0)
         for row in block["rows"]:
-            rows += max(31, 8 + max(len(wrap(str(value), font, max(20, column_widths[index] - 12))) for index, value in enumerate(row)) * 22)
+            row_height = max(31, 8 + max(len(wrap(str(value), font, max(20, column_widths[index] - 12))) for index, value in enumerate(row)) * 22)
+            if any(
+                _is_stacked_start_due_cell(block["header"][index], str(value))
+                for index, value in enumerate(row)
+            ):
+                row_height = max(row_height, 60)
+            rows += row_height
         return rows + 14
 
     height = 105 + sum(block_height(block) for block in layout) + margin
@@ -3441,6 +3534,11 @@ def render_section_report_png(
             for row_index, row in enumerate(block["rows"]):
                 cells = [wrap(str(value), font, max(20, column_widths[index] - 12)) for index, value in enumerate(row)]
                 row_height = max(31, 8 + max(len(cell) for cell in cells) * 22)
+                if any(
+                    _is_stacked_start_due_cell(block["header"][index], str(value))
+                    for index, value in enumerate(row)
+                ):
+                    row_height = max(row_height, 60)
                 tone = block["row_tones"][row_index] if row_index < len(block["row_tones"]) else block["tone"]
                 fill, color = _table_tone_styles(tone)
                 highlighted = block["highlights"][row_index] if row_index < len(block["highlights"]) else False
@@ -3448,7 +3546,11 @@ def render_section_report_png(
                 for index, value in enumerate(row):
                     header_name = _normalized_table_header(header[index])
                     cell_fill, cell_color, cell_font = fill, color, font
-                    if header_name == "DISK" and str(value).strip().upper() == "YES":
+                    override = _table_cell_style_override(header_name, str(value))
+                    if override is not None:
+                        cell_fill, cell_color, override_bold = override
+                        cell_font = bold if override_bold else font
+                    elif header_name == "DISK" and str(value).strip().upper() == "YES":
                         cell_fill, cell_color, cell_font = "#DCFCE7", "#166534", bold
                     elif header_name == "DISK" and str(value).strip().upper() == "NO":
                         cell_fill, cell_color, cell_font = "#FEE2E2", "#991B1B", bold
@@ -3462,8 +3564,14 @@ def render_section_report_png(
                     outlined = highlighted or tone == "eight-am"
                     outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
                     draw.rectangle((x, y, right, y + row_height), fill=cell_fill, outline=outline, width=3 if outlined else 1)
-                    for line_index, text in enumerate(cells[index]):
-                        draw.text((x + 6, y + 5 + line_index * 22), text, fill=cell_color, font=cell_font)
+                    if _is_stacked_start_due_cell(header[index], str(value)):
+                        start_line, due_line = str(value).split("\n", 1)
+                        draw.text((x + 6, y + 5), start_line, fill=cell_color, font=cell_font)
+                        draw.line((x, y + 30, right, y + 30), fill="#94A3B8", width=1)
+                        draw.text((x + 6, y + 34), due_line, fill=cell_color, font=cell_font)
+                    else:
+                        for line_index, text in enumerate(cells[index]):
+                            draw.text((x + 6, y + 5 + line_index * 22), text, fill=cell_color, font=cell_font)
                     x = right
                 y += row_height
             y += 14

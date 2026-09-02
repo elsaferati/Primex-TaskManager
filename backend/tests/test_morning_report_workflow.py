@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 import uuid
-from datetime import date, datetime, time
+from datetime import date, datetime, time, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, Mock, patch
 from zoneinfo import ZoneInfo
@@ -20,12 +20,14 @@ from app.services.meetings_report import PERSONAL_GA
 from app.services.meeting_point_manual_sync import section_group_label, with_section_keys
 from app.services.morning_report import (
     DISPLAY_SECTION_TITLES,
+    GA_HV_DV_TASKS_TITLE,
     GA_TASKS_TITLE,
     SECTION_TITLES,
     _attendance_section,
     _day_context_section,
     _email_task_source_label,
     _ga_hv_dv_task_rows,
+    _ga_hv_dv_tables_body,
     normalize_morning_report_sections,
     render_html,
     subject_for,
@@ -59,7 +61,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         values.update(overrides)
         return SimpleNamespace(**values)
 
-    def test_includes_only_today_open_non_late_tasks_for_ga_hv_dv(self) -> None:
+    def test_includes_today_open_tasks_plus_open_overdue_tasks(self) -> None:
         report_day = date(2026, 9, 1)
         tasks = [
             self._task("GA today"),
@@ -87,15 +89,64 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
 
         self.assertEqual(
             {row[6] for row in rows},
-            {"GA today", "HV today", "DV waiting", "Multi-day today", "GA secondary"},
+            {
+                "GA today", "HV today", "DV waiting", "Late",
+                "Multi-day today", "GA secondary",
+            },
         )
         self.assertNotIn("Done today", {row[6] for row in rows})
-        self.assertNotIn("Late", {row[6] for row in rows})
         self.assertNotIn("Future", {row[6] for row in rows})
+        status_by_title = {row[6]: row[5] for row in rows}
+        self.assertEqual(status_by_title["Late"], "LATE")
 
     def test_ga_hv_dv_is_first_auto_filled_m1_section(self) -> None:
         self.assertEqual(DISPLAY_SECTION_TITLES[0], SECTION_TITLES[0])
-        self.assertEqual(DISPLAY_SECTION_TITLES[1], GA_TASKS_TITLE)
+        self.assertEqual(DISPLAY_SECTION_TITLES[1], GA_HV_DV_TASKS_TITLE)
+
+    def test_ga_hv_dv_uses_one_section_with_three_separate_tables(self) -> None:
+        body = _ga_hv_dv_tables_body({
+            GA_TASKS_TITLE: [["1", "GA", "GA", "AM", "P", "TODO", "GA task"]],
+            "HV TASKS": [],
+            "DV TASKS": [["1", "DV", "PCM", "PM", "PRJK", "LATE", "DV task"]],
+        })
+
+        self.assertEqual(body.count("GA TASKS:"), 1)
+        self.assertEqual(body.count("HV TASKS:"), 1)
+        self.assertEqual(body.count("DV TASKS:"), 1)
+        self.assertNotIn("HV TASKS: 0", body)
+        self.assertIn("(Asnje detyre)", body)
+        normalized = normalize_morning_report_sections([
+            {"title": "GA TASKS", "body": "old ga"},
+            {"title": "HV TASKS", "body": "old hv"},
+            {"title": "DV TASKS", "body": "old dv"},
+        ])
+        self.assertEqual(
+            [section["title"] for section in normalized].count(GA_HV_DV_TASKS_TITLE), 1
+        )
+
+    def test_orders_by_period_then_type_then_status(self) -> None:
+        report_day = date(2026, 9, 1)
+        ga_id = uuid.uuid4()
+        names = {ga_id: "Gane Arifaj"}
+        tasks = [
+            self._task("PM system todo", assigned_to=ga_id, finish_period="PM", system_template_origin_id=uuid.uuid4()),
+            self._task("AM project late", assigned_to=ga_id, finish_period="AM", project_id=uuid.uuid4(), due_date=datetime(2026, 8, 31, tzinfo=timezone.utc)),
+            self._task("AM fast progress", assigned_to=ga_id, finish_period="AM", status="IN_PROGRESS"),
+            self._task("AM fast todo", assigned_to=ga_id, finish_period="AM", status="TODO"),
+            self._task("AM system done", assigned_to=ga_id, finish_period="AM", status="DONE", completed_at=datetime(2026, 9, 1, tzinfo=timezone.utc), system_template_origin_id=uuid.uuid4()),
+        ]
+
+        rows = _ga_hv_dv_task_rows(tasks, names, {}, report_day, target_initials="GA")
+
+        self.assertEqual(
+            [row[6] for row in rows],
+            [
+                "AM fast todo",
+                "AM fast progress",
+                "AM project late",
+                "PM system todo",
+            ],
+        )
 
 
 class FakeDraftDb:

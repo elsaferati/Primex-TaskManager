@@ -56,7 +56,7 @@ REPORT_LABEL = "Hapja e dites M1"
 GA_TASKS_TITLE = "GA TASKS"
 HV_TASKS_TITLE = "HV TASKS"
 DV_TASKS_TITLE = "DV TASKS"
-GA_HV_DV_TASKS_TITLE = "GA/HV/DV TASKS"  # Legacy combined-section title.
+GA_HV_DV_TASKS_TITLE = "GA/HV/DV TASKS"
 SECTION_TITLES = [
     # Manual answer first
     "(GA) A KA REPLY NGA GA TEK DETYRAT NGA STAFI PER GA?",
@@ -66,11 +66,9 @@ SECTION_TITLES = [
     "(GA) NOTES TE REJA ( NOT DISSCUSED)?",
     "PV/FESTA EXT/TAK EXT/ TAK INT/ BZ ME GA/BLLOK:",
     "(GA/KA) KUSH KA DET PERSONALISHT?",
-    GA_TASKS_TITLE,
-    HV_TASKS_TITLE,
-    DV_TASKS_TITLE,
+    GA_HV_DV_TASKS_TITLE,
 ]
-DISPLAY_SECTION_TITLES = [SECTION_TITLES[0], SECTION_TITLES[6], SECTION_TITLES[7], SECTION_TITLES[8], *SECTION_TITLES[1:6]]
+DISPLAY_SECTION_TITLES = [SECTION_TITLES[0], SECTION_TITLES[6], *SECTION_TITLES[1:6]]
 MANUAL_SECTION_TITLES = {SECTION_TITLES[0]}
 GA_HV_DV_TASK_COLUMNS = [
     ("NR", 2), ("KUSH", 12), ("DEP", 5), ("AM/PM", 5), ("LLOJI", 7), ("STATUS", 18), ("TITULLI", 52),
@@ -129,8 +127,8 @@ def _default_body(title: str) -> str:
                 "BLLOK: 0",
             ]
         )
-    if title in {GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE}:
-        return f"{title}: 0"
+    if title == GA_HV_DV_TASKS_TITLE:
+        return "\n\n".join(f"{task_title}: 0" for task_title in (GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE))
     return "\n\n".join(["TODO: 0", "IN PROGRESS: 0", "WAITING FOR CLIENT: 0", "WAITING CONFIRMATION: 0", "DONE: 0"])
 
 
@@ -192,8 +190,13 @@ def _canonical_section_title(raw_title: str) -> str | None:
         return SECTION_TITLES[2]
     if "BZMEGA" in compact and "BLLOK" in compact:
         return SECTION_TITLES[4]
-    if compact == _compact_section_title(GA_HV_DV_TASKS_TITLE):
-        return GA_TASKS_TITLE
+    if compact in {
+        _compact_section_title(GA_HV_DV_TASKS_TITLE),
+        _compact_section_title(GA_TASKS_TITLE),
+        _compact_section_title(HV_TASKS_TITLE),
+        _compact_section_title(DV_TASKS_TITLE),
+    }:
+        return GA_HV_DV_TASKS_TITLE
     if "KUSHKADETPERSONALISHT" in compact:
         return SECTION_TITLES[5]
     return None
@@ -233,7 +236,7 @@ def normalize_morning_report_sections(sections: list[dict[str, Any]] | None) -> 
         if title not in by_title:
             by_title[title] = {
                 "section_key": title,
-                "title": raw_title if section_key else title,
+                "title": title if title == GA_HV_DV_TASKS_TITLE else (raw_title if section_key else title),
                 "body": body,
             }
 
@@ -379,7 +382,7 @@ def _ga_hv_dv_task_rows(
     department_codes: dict[Any, str] | None = None,
     target_initials: str | None = None,
 ) -> list[list[str]]:
-    """Open, non-late tasks assigned to GA, HV, or DV and scheduled for the report day."""
+    """Today's open tasks plus open overdue tasks assigned to GA, HV, or DV."""
     targets = {target_initials} if target_initials else {"GA", "HV", "DV"}
 
     def belongs_to_target(task: Task) -> bool:
@@ -388,15 +391,40 @@ def _ga_hv_dv_task_rows(
             assignee_ids.add(task.assigned_to)
         return any(_initials(names.get(user_id)) in targets for user_id in assignee_ids)
 
+    def belongs_to_report_day(task: Task) -> bool:
+        due_day = _local_date(task.due_date)
+        is_open_overdue = _is_open(task) and due_day is not None and due_day < report_day
+        return _belongs_to_day(task, report_day) or is_open_overdue
+
     selected = [
         task
         for task in tasks
-        if _is_open(task)
-        and _belongs_to_day(task, report_day)
-        and (_local_date(task.due_date) is None or _local_date(task.due_date) >= report_day)
-        and belongs_to_target(task)
+        if _is_open(task) and belongs_to_report_day(task) and belongs_to_target(task)
     ]
-    selected.sort(key=lambda task: common_view_task_sort_key(task, names, assignee_ids_by_task))
+
+    def m1_sort_key(task: Task) -> tuple:
+        period_rank = {"AM": 0, "PM": 1, "AM/PM": 2}.get(_m3_am_pm_label(task), 3)
+        task_type = _m3_task_type_label(task)
+        # SYS first, every fast-task subtype second, and project tasks last.
+        type_rank = 0 if task_type == "SYS" else (2 if task_type == "PRJK" else 1)
+        due_day = _local_date(task.due_date)
+        is_late = _is_open(task) and due_day is not None and due_day < report_day
+        status = "LATE" if is_late else _normalize_report_status(task.status)
+        status_rank = {
+            "LATE": 0,
+            "TODO": 1,
+            "IN_PROGRESS": 2,
+            "WAITING_CLIENT": 3,
+            "WAITING_CONFIRMATION": 4,
+        }.get(status, 6)
+        return (
+            period_rank,
+            type_rank,
+            status_rank,
+            common_view_task_sort_key(task, names, assignee_ids_by_task),
+        )
+
+    selected.sort(key=m1_sort_key)
     return [
         [
             str(index),
@@ -404,11 +432,29 @@ def _ga_hv_dv_task_rows(
             _m3_department_label(task, department_codes),
             _m3_am_pm_label(task),
             _m3_task_type_label(task),
-            _normalize_report_status(task.status),
+            (
+                "LATE"
+                if _is_open(task)
+                and (due_day := _local_date(task.due_date)) is not None
+                and due_day < report_day
+                else _normalize_report_status(task.status)
+            ),
             _display_title(task.title),
         ]
         for index, task in enumerate(selected, start=1)
     ]
+
+
+def _ga_hv_dv_tables_body(rows_by_title: dict[str, list[list[str]]]) -> str:
+    lines: list[str] = []
+    for title in (GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE):
+        if lines:
+            lines.append("")
+        rows = rows_by_title.get(title, [])
+        if not rows:
+            rows = [["-", "-", "-", "-", "-", "-", "(Asnje detyre)"]]
+        lines.extend(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, rows))
+    return _normalize_section(lines)
 
 
 async def apply_ga_hv_dv_tasks_table(
@@ -430,13 +476,11 @@ async def apply_ga_hv_dv_tasks_table(
         HV_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "HV"),
         DV_TASKS_TITLE: _ga_hv_dv_task_rows(tasks, names, assignee_ids_by_task, report_day, department_codes, "DV"),
     }
-    bodies = {
-        title: _normalize_section(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, rows))
-        for title, rows in rows_by_title.items()
-    }
+    body = _ga_hv_dv_tables_body(rows_by_title)
     return [
-        {**section, "body": bodies.get(section.get("section_key") or section.get("title") or "", section.get("body") or "")}
-        if (section.get("section_key") or section.get("title")) in bodies
+        {**section, "section_key": GA_HV_DV_TASKS_TITLE, "title": GA_HV_DV_TASKS_TITLE, "body": body}
+        if _canonical_section_title(section.get("section_key") or section.get("title") or "")
+        == GA_HV_DV_TASKS_TITLE
         else section
         for section in sections
     ]
@@ -613,10 +657,7 @@ async def build_morning_report_sections(
             (DV_TASKS_TITLE, "DV"),
         )
     }
-    task_tables = {
-        title: _normalize_section(_ascii_table(title, GA_HV_DV_TASK_COLUMNS, rows))
-        for title, rows in task_rows_by_title.items()
-    }
+    task_tables = _ga_hv_dv_tables_body(task_rows_by_title)
     day_context, day_context_count = await _day_context_section(
         db,
         entries,
@@ -640,10 +681,7 @@ async def build_morning_report_sections(
     attendance = _attendance_section(entries, names, report_day)
     sections = [
         {"title": SECTION_TITLES[0], "body": "(Ploteso manualisht)"},
-        *[
-            {"title": title, "body": task_tables[title]}
-            for title in (GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE)
-        ],
+        {"title": GA_HV_DV_TASKS_TITLE, "body": task_tables},
         {"title": SECTION_TITLES[1], "body": email_tasks},
         {"title": SECTION_TITLES[2], "body": attendance},
         {"title": SECTION_TITLES[3], "body": _notes_section(note_rows)},
@@ -654,7 +692,7 @@ async def build_morning_report_sections(
         "report_day": report_day.isoformat(),
         "counts": {
             SECTION_TITLES[0]: 0,
-            **{title: len(rows) for title, rows in task_rows_by_title.items()},
+            GA_HV_DV_TASKS_TITLE: sum(len(rows) for rows in task_rows_by_title.values()),
             SECTION_TITLES[1]: email_task_count,
             SECTION_TITLES[2]: sum(
                 1

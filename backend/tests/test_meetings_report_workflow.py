@@ -35,6 +35,7 @@ from app.services.meetings_report import (
     _m3_added_week_label,
     _m3_status_table,
     _m3_task_type_label,
+    _postponed_tasks_for_m3_day,
     _leave_lines,
     _render_ascii_table_html,
     _task_owners,
@@ -42,6 +43,7 @@ from app.services.meetings_report import (
     _tomorrow_common_section,
     _tomorrow_task_table,
     normalize_meetings_report_sections,
+    render_html,
     render_section_report_docx,
     render_section_report_png,
     section_report_attachments,
@@ -268,10 +270,32 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
                     "| NR | KUSH | TITULLI                        |\n"
                     "+----+------+--------------------------------+\n"
                     "| 1  | GA   | DetyrÃ« e kryer                 |\n"
-                    "+----+------+--------------------------------+"
+                    "+----+------+--------------------------------+\n"
+                    "DET ME DEADLINE:\n+----+------+--------------------------------+\n"
+                    "| NR | KUSH | TITULLI                        |\n"
+                    "+----+------+--------------------------------+\n"
+                    "| 1  | GA   | Afat kritik                    |\n"
+                    "+----+------+--------------------------------+\n"
+                    "DET TE REJA LAST WEEK DHE THIS WEEK:\n"
+                    "+----+------+---------+--------------------------------+\n"
+                    "| NR | KUSH | KRIJUAR | TITULLI                        |\n"
+                    "+----+------+---------+--------------------------------+\n"
+                    "| 1  | GA   | This W  | Detyre e kesaj jave            |\n"
+                    "+----+------+---------+--------------------------------+\n"
+                    "| 2  | GA   | Last W  | Detyre e javes kaluar          |\n"
+                    "+----+------+---------+--------------------------------+\n"
+                    "SHTYER START DHE DUE DATE:\n"
+                    "+----+-------------------------------+-------------------------------+------------------+\n"
+                    "| NR | NGA                           | NE                            | TITULLI          |\n"
+                    "+----+-------------------------------+-------------------------------+------------------+\n"
+                    "| 1  | START: 10.08.2026 / DUE: 10.08.2026 | START: 11.08.2026 / DUE: 12.08.2026 | Detyre e shtyre |\n"
+                    "+----+-------------------------------+-------------------------------+------------------+"
                 ),
             },
         ]
+        html_output = render_html(
+            "PrimeFlow M3", date(2026, 8, 10), date(2026, 8, 11), sections
+        )
         docx_bytes = render_section_report_docx("PrimeFlow M3", "M3", date(2026, 8, 10), sections)
         png_bytes = render_section_report_png("PrimeFlow M3", "M3", date(2026, 8, 10), sections)
 
@@ -286,14 +310,28 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         self.assertIn("AUTO-FILLED FROM PRIMEFLOW", table_text)
         self.assertIn("TODO:", table_text)
         self.assertIn("DONE:", table_text)
+        self.assertIn('class="deadline"', html_output)
+        self.assertIn('bgcolor="#bae6fd"', html_output)
+        self.assertIn('bgcolor="#fde68a"', html_output)
+        self.assertIn("border-bottom:1px solid #94a3b8", html_output)
         with ZipFile(BytesIO(docx_bytes)) as archive:
             document_xml = archive.read("word/document.xml").decode("utf-8")
         self.assertIn("fbcfe8", document_xml.lower())
         self.assertIn("d4ffe1", document_xml.lower())
+        self.assertIn("dc2626", document_xml.lower())
+        self.assertIn("bae6fd", document_xml.lower())
+        self.assertIn("fde68a", document_xml.lower())
+        self.assertIn("94a3b8", document_xml.lower())
+        self.assertIn("w:pbdr", document_xml.lower())
         self.assertIn('w:w="432"', document_xml)  # Compact NR column, matching the email grid.
         image = Image.open(BytesIO(png_bytes))
         self.assertGreater(image.width, 1000)
         self.assertGreater(image.height, 400)
+        colors = set(image.convert("RGB").getdata())
+        self.assertIn((220, 38, 38), colors)
+        self.assertIn((186, 230, 253), colors)
+        self.assertIn((253, 230, 138), colors)
+        self.assertIn((148, 163, 184), colors)
 
     def test_section_report_attachments_include_word_and_png(self) -> None:
         attachments = section_report_attachments(
@@ -970,6 +1008,78 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertIn("ARSYEJA", rendered)
         self.assertIn("Urgjence tjeter", rendered)
         self.assertIn("Po pres inputin", rendered)
+
+
+class MeetingsReportCombinedPostponementTests(unittest.IsolatedAsyncioTestCase):
+    async def test_combined_start_due_dates_do_not_shift_task_title_column(self) -> None:
+        task_id = uuid.uuid4()
+        report_day = date(2026, 9, 1)
+        task = SimpleNamespace(
+            id=task_id,
+            title="Actual task title",
+            status="TODO",
+            start_date=datetime(2026, 9, 2, 8, 0, tzinfo=ZoneInfo("Europe/Tirane")),
+            due_date=datetime(2026, 9, 3, 16, 0, tzinfo=ZoneInfo("Europe/Tirane")),
+            completed_at=None,
+            system_template_origin_id=None,
+            system_task_slot_id=None,
+            project_id=None,
+            assigned_to=None,
+            fast_task_order=None,
+            is_deadline_important=False,
+            is_bllok=False,
+            is_r1=False,
+            is_1h_report=False,
+            is_personal=False,
+            department_id=None,
+            finish_period="PM",
+            created_at=None,
+        )
+        snapshot = SimpleNamespace(payload={"people": [{"tasks": [{"task_id": str(task_id)}]}]})
+        events = [
+            SimpleNamespace(
+                entity_id=task_id,
+                action="task.start_date_changed",
+                before={"value": "2026-09-01T08:00:00+02:00"},
+                after={"value": "2026-09-02T08:00:00+02:00"},
+            ),
+            SimpleNamespace(
+                entity_id=task_id,
+                action="task.due_date_changed",
+                before={"value": "2026-09-01T16:00:00+02:00"},
+                after={"value": "2026-09-03T16:00:00+02:00"},
+            ),
+        ]
+
+        class Result:
+            def __init__(self, values):
+                self.values = values
+
+            def scalars(self):
+                return self
+
+            def all(self):
+                return self.values
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=[Result([snapshot]), Result(events)]))
+        _, _, postponed_both, date_ranges = await _postponed_tasks_for_m3_day(
+            db, report_day, [task]
+        )
+
+        self.assertEqual(postponed_both, [task])
+        self.assertNotIn("|", date_ranges[task_id][0])
+        self.assertNotIn("|", date_ranges[task_id][1])
+        rows = _m3_status_table("", postponed_both, {}, date_range_by_task=date_ranges)
+        header = next(row for row in rows if "TITULLI" in row)
+        data = next(row for row in rows if "Actual task title" in row)
+        self.assertEqual(len(header.split("|")), len(data.split("|")))
+        rendered = _render_ascii_table_html(rows)
+        self.assertIn("START: 01.09.2026</div>", rendered)
+        self.assertIn("DUE: 01.09.2026</div>", rendered)
+        self.assertIn("START: 02.09.2026</div>", rendered)
+        self.assertIn("DUE: 03.09.2026</div>", rendered)
+        self.assertEqual(rendered.count("border-bottom:1px solid #94a3b8"), 2)
+        self.assertIn("Actual task title", rendered)
 
 
 if __name__ == "__main__":
