@@ -1,20 +1,29 @@
 from __future__ import annotations
 
 import unittest
-from datetime import date
+from datetime import date, datetime, timezone
 from io import BytesIO
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from docx import Document
 from openpyxl import load_workbook
 from PIL import Image
 
-from app.services.tomorrow_closing_sections import ClosingSection, ClosingTable, ClosingTableRow, _stack_start_due
+from app.services.tomorrow_closing_sections import (
+    ClosingSection,
+    ClosingTable,
+    ClosingTableRow,
+    _stack_start_due,
+    _include_unfinished_system_task,
+    _system_task_tyo_label,
+)
 from app.services.tomorrow_print_report import (
     _closing_sections_html,
     _docx_table_attachment,
     _excel_table_attachment,
     _png_table_attachment,
+    _is_overdue_tyo_value,
     build_tomorrow_print_report,
 )
 
@@ -37,9 +46,15 @@ def closing_fixture() -> list[ClosingSection]:
             title="DET SYS PA KRY",
             tables=[ClosingTable(
                 label="DET SYS PA KRY",
-                columns=["NR", "KUSH", "DEP", "AM/PM", "TITULLI"],
+                columns=[
+                    "NR", "KUSH", "DEP", "AM/PM", "T/Y/O", "TITULLI",
+                    "ARSYEJA", "KOMENT",
+                ],
                 rows=[ClosingTableRow(
-                    values=["1", "RA", "DEV", "AM", "System unfinished"],
+                    values=[
+                        "1", "RA", "DEV", "AM", "2", "System unfinished",
+                        "Pa progres", "Pres sqarim",
+                    ],
                     status="IN_PROGRESS",
                 )],
             )],
@@ -73,16 +88,80 @@ def closing_fixture() -> list[ClosingSection]:
 
 
 class TomorrowClosingFormatParityTests(unittest.TestCase):
+    def test_only_overdue_tyo_values_use_the_alert_style(self) -> None:
+        self.assertFalse(_is_overdue_tyo_value("T"))
+        self.assertFalse(_is_overdue_tyo_value("-"))
+        self.assertTrue(_is_overdue_tyo_value("Y"))
+        self.assertTrue(_is_overdue_tyo_value("2"))
+        self.assertTrue(_is_overdue_tyo_value("12"))
+
     def test_m3_start_due_value_is_stacked(self) -> None:
         self.assertEqual(
             _stack_start_due("START: 02.09.2026 / DUE: 02.09.2026"),
             "START: 02.09.2026\nDUE: 02.09.2026",
         )
 
+    def test_system_task_tyo_uses_daily_report_business_day_logic(self) -> None:
+        task = SimpleNamespace(
+            project_id=None,
+            start_date=None,
+            due_date=datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc),
+        )
+
+        # Friday to Monday is one business day late; the weekend is excluded.
+        self.assertEqual(_system_task_tyo_label(task, date(2026, 9, 7)), "Y")
+        self.assertEqual(_system_task_tyo_label(task, date(2026, 9, 8)), "2")
+
+    def test_system_task_tyo_marks_due_today_and_missing_due_date(self) -> None:
+        due_today = SimpleNamespace(
+            project_id=None,
+            start_date=None,
+            due_date=datetime(2026, 9, 7, 8, 0, tzinfo=timezone.utc),
+        )
+        no_due_date = SimpleNamespace(project_id=None, start_date=None, due_date=None)
+
+        self.assertEqual(_system_task_tyo_label(due_today, date(2026, 9, 7)), "T")
+        self.assertEqual(_system_task_tyo_label(no_due_date, date(2026, 9, 7)), "-")
+
+    def test_unfinished_overdue_system_task_is_included_without_daily_baseline(self) -> None:
+        task = SimpleNamespace(
+            id="overdue-system-task",
+            system_template_origin_id="template-1",
+            system_task_slot_id=None,
+            status="TODO",
+            completed_at=None,
+            project_id=None,
+            start_date=datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc),
+            due_date=datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc),
+            created_at=datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertTrue(_include_unfinished_system_task(task, date(2026, 9, 7), set()))
+        self.assertEqual(_system_task_tyo_label(task, date(2026, 9, 7)), "Y")
+
+    def test_old_undated_system_task_is_not_added_unless_it_is_in_baseline(self) -> None:
+        task = SimpleNamespace(
+            id="undated-system-task",
+            system_template_origin_id="template-1",
+            system_task_slot_id=None,
+            status="TODO",
+            completed_at=None,
+            project_id=None,
+            start_date=datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc),
+            due_date=None,
+            created_at=datetime(2026, 9, 4, 8, 0, tzinfo=timezone.utc),
+        )
+
+        self.assertFalse(_include_unfinished_system_task(task, date(2026, 9, 7), set()))
+        self.assertTrue(
+            _include_unfinished_system_task(task, date(2026, 9, 7), {"undated-system-task"})
+        )
+
     def test_html_xlsx_png_and_docx_contain_same_closing_sections(self) -> None:
         sections = closing_fixture()
         expected = [section.title for section in sections] + [
-            "Pink task", "System unfinished", "Moved task", "Undiscussed note"
+            "Pink task", "System unfinished", "Pa progres", "Pres sqarim",
+            "Moved task", "Undiscussed note",
         ]
 
         html = _closing_sections_html(sections)
@@ -96,7 +175,10 @@ class TomorrowClosingFormatParityTests(unittest.TestCase):
         self.assertIn('width="1%"', html)
         self.assertIn("white-space:nowrap;width:1%", html)
         self.assertIn('width="16%"', html)
-        self.assertIn("border-bottom:1px solid #94A3B8", html)
+        self.assertIn("border-bottom:3px solid #334155", html)
+        self.assertIn("T/Y/O", html)
+        self.assertIn("background-color:#DC2626;color:#FFFFFF", html)
+        self.assertIn("font-weight:800;text-align:left", html)
         self.assertIn("START: 02.09.2026</div>", html)
         self.assertIn("DUE: 02.09.2026</div>", html)
 
@@ -105,6 +187,9 @@ class TomorrowClosingFormatParityTests(unittest.TestCase):
         xlsx_text = "\n".join(str(cell.value or "") for row in workbook.active.iter_rows() for cell in row)
         for value in expected:
             self.assertIn(value, xlsx_text)
+        overdue_cell = next(cell for row in workbook.active.iter_rows() for cell in row if cell.value == "2")
+        self.assertEqual(overdue_cell.fill.fgColor.rgb, "00DC2626")
+        self.assertEqual(overdue_cell.alignment.horizontal, "left")
 
         _, png_bytes, _ = _png_table_attachment([], date(2026, 9, 3), closing_sections=sections)
         image = Image.open(BytesIO(png_bytes))
@@ -124,6 +209,8 @@ class TomorrowClosingFormatParityTests(unittest.TestCase):
         document_xml = document._element.xml
         for color in ("FFC4ED", "FFFF00", "FFEDD5", "DBEAFE", "FEE2E2"):
             self.assertIn(color, document_xml)
+        self.assertIn('w:color="334155"', document_xml)
+        self.assertIn('w:sz="12"', document_xml)
 
 
 class TomorrowClosingBuildTests(unittest.IsolatedAsyncioTestCase):

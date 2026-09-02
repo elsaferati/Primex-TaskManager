@@ -710,6 +710,23 @@ def _closing_row_color(row: ClosingTableRow, table: ClosingTable) -> str:
     return CLOSING_TONE_COLORS.get(table.tone, "#FFFFFF")
 
 
+def _empty_closing_table_row(table: ClosingTable) -> ClosingTableRow:
+    values = ["-"] * len(table.columns)
+    message_column = table.columns.index("TITULLI") if "TITULLI" in table.columns else len(values) - 1
+    values[message_column] = "(Asnje detyre)"
+    return ClosingTableRow(values=values)
+
+
+def _is_overdue_tyo_value(value: Any) -> bool:
+    normalized = str(value or "").strip().upper()
+    if normalized == "Y":
+        return True
+    try:
+        return int(normalized) >= 2
+    except ValueError:
+        return False
+
+
 def _closing_sections_html(sections: list[ClosingSection]) -> str:
     chunks: list[str] = []
     for section in sections:
@@ -723,7 +740,10 @@ def _closing_sections_html(sections: list[ClosingSection]) -> str:
                 f'<div style="margin:8px 0 4px;font-family:Arial,sans-serif;font-size:12px;font-weight:700;">'
                 f'{html.escape(table.label)}:</div>'
             )
-            compact_columns = {"NR", "KUSH", "DEP", "AM/PM", "LLOJI", "NGA", "NE", "DISK", "FROM", "TIME"}
+            compact_columns = {
+                "NR", "KUSH", "DEP", "AM/PM", "LLOJI", "NGA", "NE", "T/Y/O",
+                "DISK", "FROM", "TIME",
+            }
             widths = {"ARSYEJA": "16%", "KOMENT": "20%"}
             def header_cell(column: str) -> str:
                 width = widths.get(column)
@@ -735,7 +755,7 @@ def _closing_sections_html(sections: list[ClosingSection]) -> str:
                 )
 
             header = "".join(header_cell(column) for column in table.columns)
-            rows = table.rows or [ClosingTableRow(values=["-"] * (len(table.columns) - 1) + ["(Asnje detyre)"])]
+            rows = table.rows or [_empty_closing_table_row(table)]
             body: list[str] = []
             for row in rows:
                 color = _closing_row_color(row, table)
@@ -743,10 +763,14 @@ def _closing_sections_html(sections: list[ClosingSection]) -> str:
                 priority_border = f";border:2px solid {EIGHT_AM_BORDER_COLOR}" if row.is_eight_am else ""
                 cells = []
                 for column, value in zip(table.columns, row.values):
+                    cell_color, cell_foreground = color, foreground
                     extra = ";white-space:nowrap;width:1%" if column in compact_columns else ""
                     stacked_dates = column in {"NGA", "NE"} and "\n" in str(value)
                     if stacked_dates:
                         extra += ";padding:0"
+                    if column == "T/Y/O" and _is_overdue_tyo_value(value):
+                        cell_color, cell_foreground = DEADLINE_COLOR, "#FFFFFF"
+                        extra += ";font-weight:800;text-align:left"
                     if column == "DISK":
                         normalized = str(value).strip().upper()
                         if normalized == "YES":
@@ -756,14 +780,14 @@ def _closing_sections_html(sections: list[ClosingSection]) -> str:
                     if stacked_dates:
                         first_line, second_line = str(value).split("\n", 1)
                         cell_content = (
-                            '<div style="padding:5px;border-bottom:1px solid #94A3B8;">'
+                            '<div style="padding:5px;border-bottom:3px solid #334155;">'
                             f'{html.escape(first_line)}</div>'
                             f'<div style="padding:5px;">{html.escape(second_line)}</div>'
                         )
                     else:
                         cell_content = html.escape(str(value)).replace(chr(10), "<br>")
                     cells.append(
-                        f'<td style="{CELL_STYLE};background-color:{color};color:{foreground}{priority_border}{extra}">'
+                        f'<td style="{CELL_STYLE};background-color:{cell_color};color:{cell_foreground}{priority_border}{extra}">'
                         f'{cell_content}</td>'
                     )
                 body.append(f'<tr data-closing-row="true">{"".join(cells)}</tr>')
@@ -874,9 +898,7 @@ def _excel_table_attachment(
                     cell.border = border
                     cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
                 row_number += 1
-                rows = table.rows or [
-                    ClosingTableRow(values=["-"] * (len(table.columns) - 1) + ["(Asnje detyre)"])
-                ]
+                rows = table.rows or [_empty_closing_table_row(table)]
                 for row in rows:
                     color = _closing_row_color(row, table).removeprefix("#")
                     for column, (header, value) in enumerate(zip(table.columns, row.values), 1):
@@ -886,6 +908,10 @@ def _excel_table_attachment(
                         cell.alignment = Alignment(vertical="top", wrap_text=True)
                         if color == DEADLINE_COLOR.removeprefix("#"):
                             cell.font = Font(color="FFFFFF", bold=True)
+                        if header == "T/Y/O" and _is_overdue_tyo_value(value):
+                            cell.fill = PatternFill("solid", fgColor=DEADLINE_COLOR.removeprefix("#"))
+                            cell.font = Font(color="FFFFFF", bold=True)
+                            cell.alignment = Alignment(horizontal="left", vertical="center")
                         if header == "DISK":
                             normalized = str(value).strip().upper()
                             if normalized == "YES":
@@ -1185,9 +1211,9 @@ def _docx_table_attachment(
         borders = OxmlElement("w:pBdr")
         bottom = OxmlElement("w:bottom")
         bottom.set(qn("w:val"), "single")
-        bottom.set(qn("w:sz"), "4")
+        bottom.set(qn("w:sz"), "12")
         bottom.set(qn("w:space"), "2")
-        bottom.set(qn("w:color"), "94A3B8")
+        bottom.set(qn("w:color"), "334155")
         borders.append(bottom)
         properties.append(borders)
 
@@ -1229,7 +1255,8 @@ def _docx_table_attachment(
             width_weights = {
                 "NR": .28, "KUSH": .42, "DEP": .42, "AM/PM": .48, "LLOJI": .48,
                 "NGA": 1.0, "NE": 1.0, "TITULLI": 5.6, "ARSYEJA": 1.25,
-                "KOMENT": 1.55, "DISK": .42, "NOTE": 8.0, "FROM": .58, "TIME": .58,
+                "KOMENT": 1.55, "T/Y/O": .48, "DISK": .42, "NOTE": 8.0,
+                "FROM": .58, "TIME": .58,
             }
             raw_widths = [width_weights.get(column, 1.0) for column in closing_table.columns]
             scale = 10.1 / sum(raw_widths)
@@ -1237,9 +1264,7 @@ def _docx_table_attachment(
             for index, column in enumerate(closing_table.columns):
                 set_cell(table.rows[0].cells[index], column, bold=True, center=True)
             style_header(table.rows[0])
-            rows = closing_table.rows or [
-                ClosingTableRow(values=["-"] * (len(closing_table.columns) - 1) + ["(Asnje detyre)"])
-            ]
+            rows = closing_table.rows or [_empty_closing_table_row(closing_table)]
             for data in rows:
                 row = table.add_row()
                 background = _closing_row_color(data, closing_table)
@@ -1247,7 +1272,9 @@ def _docx_table_attachment(
                 for index, (column, value) in enumerate(zip(closing_table.columns, data.values)):
                     cell = row.cells[index]
                     cell_background, cell_foreground = background, foreground
-                    if column == "DISK" and str(value).strip().upper() == "YES":
+                    if column == "T/Y/O" and _is_overdue_tyo_value(value):
+                        cell_background, cell_foreground = DEADLINE_COLOR, "FFFFFF"
+                    elif column == "DISK" and str(value).strip().upper() == "YES":
                         cell_background, cell_foreground = "DCFCE7", "166534"
                     elif column == "DISK" and str(value).strip().upper() == "NO":
                         cell_background, cell_foreground = "FEE2E2", "991B1B"
@@ -1255,7 +1282,13 @@ def _docx_table_attachment(
                     if column in {"NGA", "NE"} and "\n" in str(value):
                         set_stacked_date_cell(cell, value, color=cell_foreground)
                     else:
-                        set_cell(cell, value, bold=column == "DISK", color=cell_foreground, center=column in {"NR", "DISK"})
+                        set_cell(
+                            cell,
+                            value,
+                            bold=column == "DISK" or (column == "T/Y/O" and _is_overdue_tyo_value(value)),
+                            color=cell_foreground,
+                            center=column in {"NR", "DISK"},
+                        )
 
     heading("TASKS", size=11)
     task_table = document.add_table(rows=1, cols=8)
@@ -1701,7 +1734,7 @@ def _png_table_attachment(
     preferred = {
         "NR": 42, "KUSH": 62, "DEP": 58, "AM/PM": 68, "LLOJI": 68,
         "NGA": 155, "NE": 155, "TITULLI": 760, "ARSYEJA": 230, "KOMENT": 285,
-        "DISK": 62, "NOTE": 1100, "FROM": 75, "TIME": 72,
+        "T/Y/O": 68, "DISK": 62, "NOTE": 1100, "FROM": 75, "TIME": 72,
     }
     layouts: list[tuple[ClosingSection, list[tuple[ClosingTable, list[int], list[tuple[ClosingTableRow, int]]]]]] = []
     closing_height = 16
@@ -1714,9 +1747,7 @@ def _png_table_attachment(
             scale = available / sum(raw)
             widths = [max(48, int(value * scale)) for value in raw]
             widths[-1] += available - sum(widths)
-            rendered_rows = table.rows or [
-                ClosingTableRow(values=["-"] * (len(table.columns) - 1) + ["(Asnje detyre)"])
-            ]
+            rendered_rows = table.rows or [_empty_closing_table_row(table)]
             row_layouts: list[tuple[ClosingTableRow, int]] = []
             for row in rendered_rows:
                 line_count = max(
@@ -1752,7 +1783,9 @@ def _png_table_attachment(
                 for index, (column, value) in enumerate(zip(table.columns, row.values)):
                     right = x + widths[index]
                     cell_bg, cell_fg = background, foreground
-                    if column == "DISK" and str(value).strip().upper() == "YES":
+                    if column == "T/Y/O" and _is_overdue_tyo_value(value):
+                        cell_bg, cell_fg = DEADLINE_COLOR, "#FFFFFF"
+                    elif column == "DISK" and str(value).strip().upper() == "YES":
                         cell_bg, cell_fg = "#DCFCE7", "#166534"
                     elif column == "DISK" and str(value).strip().upper() == "NO":
                         cell_bg, cell_fg = "#FEE2E2", "#991B1B"
@@ -1765,7 +1798,7 @@ def _png_table_attachment(
                     if column in {"NGA", "NE"} and "\n" in str(value):
                         first_line, second_line = str(value).split("\n", 1)
                         divider_y = y + row_height // 2
-                        draw.line((x, divider_y, right, divider_y), fill="#94A3B8", width=1)
+                        draw.line((x, divider_y, right, divider_y), fill="#334155", width=3)
                         draw.text((x + 6, y + 5), first_line, fill=cell_fg, font=regular)
                         draw.text((x + 6, divider_y + 5), second_line, fill=cell_fg, font=regular)
                     else:

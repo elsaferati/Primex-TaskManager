@@ -34,6 +34,7 @@ const HEADER_LABELS = new Set([
   "DATA",
   "DATE",
   "LATE",
+  "T/Y/O",
   "STATUS",
   "MBAJTUR",
   "MBAJTUR?",
@@ -108,6 +109,7 @@ function compactWidthForHeader(header: string) {
   if (value === "TIME") return "76px"
   if (value === "DATA" || value === "DATE") return "96px"
   if (value === "LATE") return "88px"
+  if (value === "T/Y/O") return "54px"
   if (value === "COUNT") return "72px"
   if (value === "TYPE" || value === "TIPI" || value === "LLOJI") return "max-content"
   if (value === "AM/PM") return "max-content"
@@ -149,6 +151,7 @@ function isNarrowTableHeader(header: string) {
     header === "LISTA" ||
     header === "COUNT" ||
     header === "LATE" ||
+    header === "T/Y/O" ||
     header === "DATA" ||
     header === "DATE" ||
     header === "TIME"
@@ -316,6 +319,37 @@ function diskCellTone(headers: string[], cells: string[], cellIndex: number) {
   if (value === "YES") return "bg-green-100 text-green-800 font-semibold text-center"
   if (value === "NO") return "bg-red-100 text-red-800 font-semibold text-center"
   return "text-center"
+}
+
+function tyoCellTone(headers: string[], cells: string[], cellIndex: number) {
+  if (normalizeHeader(headers[cellIndex] || "") !== "T/Y/O") return ""
+  const value = cells[cellIndex]?.trim().toUpperCase()
+  const overdue = value === "Y" || (/^\d+$/.test(value || "") && Number(value) >= 2)
+  return overdue ? "!bg-red-600 !text-white font-extrabold text-left" : "text-left"
+}
+
+function hasAmPmDivider(
+  label: string,
+  rows: Array<{ headers: string[]; cells: string[] }>,
+  rowIndex: number,
+) {
+  const normalizedLabel = label.trim().toUpperCase().replace(/:$/, "")
+  if (!["GA TASKS", "HV TASKS", "DV TASKS"].includes(normalizedLabel)) return false
+  const row = rows[rowIndex]
+  const periodIndex = row.headers.findIndex((header) => normalizeHeader(header) === "AM/PM")
+  if (periodIndex < 0 || row.cells[periodIndex]?.trim().toUpperCase() !== "PM") return false
+  for (let index = rowIndex - 1; index >= 0; index -= 1) {
+    const previousPeriodIndex = rows[index].headers.findIndex((header) => normalizeHeader(header) === "AM/PM")
+    const previousPeriod = previousPeriodIndex >= 0
+      ? rows[index].cells[previousPeriodIndex]?.trim().toUpperCase()
+      : ""
+    if (previousPeriod === "AM" || previousPeriod === "PM") return previousPeriod === "AM"
+  }
+  return false
+}
+
+function hasStrongStartDueDivider(label: string) {
+  return label.trim().toUpperCase().replace(/:$/, "") === "SHTYER START DHE DUE DATE"
 }
 
 function meetingStatusCellTone(headers: string[], cells: string[], cellIndex: number) {
@@ -677,11 +711,13 @@ export function ReportSectionPreview({
               })}
           </thead>
           <tbody>
-            {visibleDataRows.map((row) => {
+            {visibleDataRows.map((row, rowIndex) => {
                 const visible = withoutStatusColumn(row.headers, row.cells)
                 const tone = rowTone(row.label, row.cells, row.headers)
                 const eightAmTask = isEightAmTaskRow(row.headers, row.cells)
                 const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)
+                const amPmDivider = hasAmPmDivider(row.label, visibleDataRows, rowIndex)
+                const strongStartDueDivider = hasStrongStartDueDivider(row.label)
                 return (
                   <tr key={row.key} className={tone}>
                     {visible.cells.map((cell, cellIndex) => {
@@ -704,7 +740,7 @@ export function ReportSectionPreview({
                               : header === "DISK" || header === "MBAJTUR?" || header === "MBAJTUR"
                               ? "px-1 text-center"
                               : "px-2"
-                          } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
+                          } ${diskCellTone(visible.headers, visible.cells, cellIndex)} ${tyoCellTone(visible.headers, visible.cells, cellIndex)} ${meetingStatusCellTone(visible.headers, visible.cells, cellIndex)} ${
                             createdWeekCellTone(visible.headers, visible.cells, cellIndex)
                           } ${
                             stackedDate
@@ -714,7 +750,7 @@ export function ReportSectionPreview({
                                 : "whitespace-pre-wrap break-words"
                           } ${header === "NR" ? "w-8" : ""} ${header === "WHO" || header === "DEP" ? "w-10" : ""} ${meetingFrame} ${eightAmFrame} ${
                             highlightedMeeting && header === "TITLE" ? "text-blue-700 font-semibold" : ""
-                          }`}
+                          } ${amPmDivider ? "border-t-[3px] border-t-slate-700" : ""}`}
                         >
                           {stackedDate ? (
                             displayedCell.split("\n").map((line, lineIndex) => (
@@ -722,7 +758,9 @@ export function ReportSectionPreview({
                                 key={`${lineIndex}-${line}`}
                                 className={`block px-2 ${
                                   lineIndex === 0
-                                    ? "mb-0.5 border-b border-slate-400 pb-0.5"
+                                    ? strongStartDueDivider
+                                      ? "mb-0.5 border-b-[3px] border-slate-700 pb-0.5"
+                                      : "mb-0.5 border-b border-slate-400 pb-0.5"
                                     : "pt-0.5"
                                 }`}
                               >

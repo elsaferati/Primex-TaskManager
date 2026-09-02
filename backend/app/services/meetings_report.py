@@ -446,6 +446,12 @@ def _late_days_label(days: int) -> str:
     return f"{days} day" if days == 1 else f"{days} days"
 
 
+def _late_days_tyo_label(days: int) -> str:
+    if days <= 0:
+        return "-"
+    return "Y" if days == 1 else str(days)
+
+
 def _initials(name: str | None) -> str:
     parts = re.findall(r"[^\W\d_]+", name or "", flags=re.UNICODE)
     return "".join(part[0] for part in parts).upper() or "-"
@@ -871,11 +877,11 @@ def _m3_status_table(
         columns.extend((("NGA", 10), ("NE", 10)))
     if products_by_task is not None:
         columns.append(("PRODUKTE", 12))
+    if include_late_days:
+        columns.append(("T/Y/O", 5))
     columns.append(("TITULLI", 64))
     if daily_rlz_by_task is not None:
         columns.extend((("ARSYEJA", 24), ("KOMENT", 36)))
-    if include_late_days:
-        columns.append(("LATE", 12))
 
     border = "+" + "+".join("-" * (width + 2) for _, width in columns) + "+"
 
@@ -905,11 +911,11 @@ def _m3_status_table(
             values.extend(("-", "-"))
         if products_by_task is not None:
             values.append("-")
+        if include_late_days:
+            values.append("-")
         values.append(empty_title)
         if daily_rlz_by_task is not None:
             values.extend(("-", "-"))
-        if include_late_days:
-            values.append("-")
         rows.append(table_row(values))
         rows.append(border)
         return rows
@@ -960,11 +966,11 @@ def _m3_status_table(
             values.extend((postponed_from, postponed_to))
         if products_by_task is not None:
             values.append(products_by_task.get(task.id, "-"))
+        if include_late_days:
+            values.append(_late_days_tyo_label(_late_days(task)))
         values.append(padded_titles[0])
         if daily_rlz_by_task is not None:
             values.extend((reason_lines[0], comment_lines[0]))
-        if include_late_days:
-            values.append(_late_days_label(_late_days(task)))
         rows.append(table_row(values))
         continuation_count = max(len(padded_titles), len(reason_lines), len(comment_lines))
         for line_index in range(1, continuation_count):
@@ -981,14 +987,14 @@ def _m3_status_table(
                 continuation.extend(("", ""))
             if products_by_task is not None:
                 continuation.append("")
+            if include_late_days:
+                continuation.append("")
             continuation.append(padded_titles[line_index] if line_index < len(padded_titles) else "")
             if daily_rlz_by_task is not None:
                 continuation.extend((
                     reason_lines[line_index] if line_index < len(reason_lines) else "",
                     comment_lines[line_index] if line_index < len(comment_lines) else "",
                 ))
-            if include_late_days:
-                continuation.append("")
             rows.append(table_row(continuation))
         rows.append(border)
     return rows
@@ -2553,16 +2559,48 @@ def _is_stacked_start_due_cell(header: str, value: str) -> bool:
     )
 
 
-def _render_table_cell_html(header: str, value: str) -> str:
+def _is_m3_start_due_table(caption: str) -> bool:
+    return caption.strip().upper().rstrip(":") == "SHTYER START DHE DUE DATE"
+
+
+def _render_table_cell_html(
+    header: str,
+    value: str,
+    *,
+    strong_start_due_divider: bool = False,
+) -> str:
     if not _is_stacked_start_due_cell(header, value):
         return html.escape(value).replace(chr(10), "<br>")
     start_line, due_line = value.split("\n", 1)
+    divider = "3px solid #334155" if strong_start_due_divider else "1px solid #94a3b8"
     return (
-        '<div style="padding:4px 5px 2px;border-bottom:1px solid #94a3b8;">'
+        f'<div style="padding:4px 5px 2px;border-bottom:{divider};">'
         f"{html.escape(start_line)}</div>"
         '<div style="padding:2px 5px 4px;">'
         f"{html.escape(due_line)}</div>"
     )
+
+
+def _is_overdue_tyo_value(value: str) -> bool:
+    normalized = str(value or "").strip().upper()
+    if normalized == "Y":
+        return True
+    try:
+        return int(normalized) >= 2
+    except ValueError:
+        return False
+
+
+def _append_cell_style_attribute(attribute: str, css: str) -> str:
+    if not attribute:
+        return f' style="{css}"'
+    if attribute.endswith('"') and ' style="' in attribute:
+        return f'{attribute[:-1]}{css}"'
+    return attribute
+
+
+def _is_m1_ga_hv_dv_table(caption: str) -> bool:
+    return caption.strip().upper().rstrip(":") in {"GA TASKS", "HV TASKS", "DV TASKS"}
 
 
 def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = "") -> str:
@@ -2620,6 +2658,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
     meeting_status_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "MBAJTUR?"), None)
     disk_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "DISK"), None)
     added_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "ADDED"), None)
+    am_pm_index = next((index for index, cell in enumerate(header) if _normalized_table_header(cell) == "AM/PM"), None)
     table_class = f"report-table report-table-{tone}" if tone else "report-table"
     body_html_parts = []
     for row_index, row in enumerate(body_rows):
@@ -2630,6 +2669,26 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             canceled_index is not None
             and len(row) > canceled_index
             and bool(row[canceled_index].strip())
+        )
+        previous_period = next(
+            (
+                body_rows[previous_index][am_pm_index].strip().upper()
+                for previous_index in range(row_index - 1, -1, -1)
+                if am_pm_index is not None
+                and len(body_rows[previous_index]) > am_pm_index
+                and body_rows[previous_index][am_pm_index].strip().upper() in {"AM", "PM"}
+            ),
+            "",
+        )
+        current_period = (
+            row[am_pm_index].strip().upper()
+            if am_pm_index is not None and len(row) > am_pm_index
+            else ""
+        )
+        has_am_pm_divider = (
+            _is_m1_ga_hv_dv_table(caption)
+            and current_period == "PM"
+            and previous_period == "AM"
         )
         row_cells = []
         for index, cell in enumerate(row):
@@ -2664,14 +2723,26 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                         ' bgcolor="#fde68a" style="background-color:#fde68a!important;'
                         'color:#78350f!important;font-weight:700;"'
                     )
+            if _normalized_table_header(header[index]) == "T/Y/O" and _is_overdue_tyo_value(current_cell):
+                cell_classes.append("tyo-overdue")
+                cell_style = (
+                    ' bgcolor="#dc2626" style="background-color:#dc2626!important;'
+                    'color:#ffffff!important;font-weight:800;text-align:left;"'
+                )
             if _is_stacked_start_due_cell(header[index], current_cell):
                 cell_style = ' style="padding:0!important;"'
+            if has_am_pm_divider:
+                cell_classes.append("am-pm-divider")
+                cell_style = _append_cell_style_attribute(
+                    cell_style,
+                    "border-top:3px solid #334155!important;",
+                )
             if is_highlighted_meeting:
                 if _normalized_table_header(header[index]) == "TITLE":
                     cell_classes.append("title")
             row_cells.append(
                 f"<td{_email_column_width_attr(column_widths[index])}{cell_style} class=\"{' '.join(filter(None, cell_classes))}\">"
-                f"{_render_table_cell_html(header[index], current_cell)}</td>"
+                f"{_render_table_cell_html(header[index], current_cell, strong_start_due_divider=_is_m3_start_due_table(caption))}</td>"
             )
         row_classes = " ".join(filter(None, (row_tone, "highlight" if is_highlighted_meeting else "")))
         row_style = (
@@ -2750,7 +2821,7 @@ def _email_column_width_attr(width: str) -> str:
 
 def _email_column_class_name(header_cell: str) -> str:
     name = _normalized_table_header(header_cell)
-    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "FROM", "TO", "DATA", "DATE", "DEP", "TYPE", "AM/PM", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
+    if name in {"NR", "TIME", "ORA", "KOHA", "DISK", "LATE", "T/Y/O", "FROM", "TO", "DATA", "DATE", "DEP", "TYPE", "AM/PM", "MBAJTUR", "MBAJTUR?", "ANULUAR", "PA STATUS"}:
         return "n"
     return ""
 
@@ -2781,6 +2852,7 @@ def _email_column_widths(header: list[str]) -> list[str]:
         "DATE": "62",
         "DISK": "42",
         "LATE": "54",
+        "T/Y/O": "42",
         "KATEGORIA": "1%",
         "LISTA": "1%",
         "MBAJTUR": "58",
@@ -3372,7 +3444,13 @@ def render_section_report_docx(
         tc_width.set(qn("w:w"), str(width))
         tc_width.set(qn("w:type"), "dxa")
 
-    def set_table_cell_value(cell: Any, header: str, value: str) -> None:
+    def set_table_cell_value(
+        cell: Any,
+        header: str,
+        value: str,
+        *,
+        strong_start_due_divider: bool = False,
+    ) -> None:
         if not _is_stacked_start_due_cell(header, value):
             cell.text = value
             return
@@ -3384,9 +3462,9 @@ def render_section_report_docx(
         paragraph_borders = OxmlElement("w:pBdr")
         bottom_border = OxmlElement("w:bottom")
         bottom_border.set(qn("w:val"), "single")
-        bottom_border.set(qn("w:sz"), "4")
+        bottom_border.set(qn("w:sz"), "12" if strong_start_due_divider else "4")
         bottom_border.set(qn("w:space"), "1")
-        bottom_border.set(qn("w:color"), "94A3B8")
+        bottom_border.set(qn("w:color"), "334155" if strong_start_due_divider else "94A3B8")
         paragraph_borders.append(bottom_border)
         paragraph_properties.append(paragraph_borders)
         cell.add_paragraph(due_line)
@@ -3455,7 +3533,12 @@ def render_section_report_docx(
                 if highlighted and header_name == "TITLE":
                     cell_color, cell_bold = "#2563EB", True
                 cell = row.cells[column]
-                set_table_cell_value(cell, header_name, str(value))
+                set_table_cell_value(
+                    cell,
+                    header_name,
+                    str(value),
+                    strong_start_due_divider=_is_m3_start_due_table(caption),
+                )
                 outline = "#DC2626" if tone == "eight-am" else ("#2563EB" if highlighted else "#CBD5E1")
                 cell_style(cell, cell_fill, color=cell_color, bold=cell_bold, size=8, outline=outline)
                 set_width(cell, column_widths[column])
@@ -3666,7 +3749,12 @@ def render_section_report_png(
                     if _is_stacked_start_due_cell(header[index], str(value)):
                         start_line, due_line = str(value).split("\n", 1)
                         draw.text((x + 6, y + 5), start_line, fill=cell_color, font=cell_font)
-                        draw.line((x, y + 30, right, y + 30), fill="#94A3B8", width=1)
+                        strong_start_due_divider = _is_m3_start_due_table(str(block["caption"] or ""))
+                        draw.line(
+                            (x, y + 30, right, y + 30),
+                            fill="#334155" if strong_start_due_divider else "#94A3B8",
+                            width=3 if strong_start_due_divider else 1,
+                        )
                         draw.text((x + 6, y + 34), due_line, fill=cell_color, font=cell_font)
                     else:
                         for line_index, text in enumerate(cells[index]):

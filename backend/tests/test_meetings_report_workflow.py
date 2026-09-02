@@ -313,7 +313,7 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         self.assertIn('class="deadline"', html_output)
         self.assertIn('bgcolor="#bae6fd"', html_output)
         self.assertIn('bgcolor="#fde68a"', html_output)
-        self.assertIn("border-bottom:1px solid #94a3b8", html_output)
+        self.assertIn("border-bottom:3px solid #334155", html_output)
         with ZipFile(BytesIO(docx_bytes)) as archive:
             document_xml = archive.read("word/document.xml").decode("utf-8")
         self.assertIn("fbcfe8", document_xml.lower())
@@ -321,7 +321,8 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         self.assertIn("dc2626", document_xml.lower())
         self.assertIn("bae6fd", document_xml.lower())
         self.assertIn("fde68a", document_xml.lower())
-        self.assertIn("94a3b8", document_xml.lower())
+        self.assertIn("334155", document_xml.lower())
+        self.assertIn('w:sz="12"', document_xml.lower())
         self.assertIn("w:pbdr", document_xml.lower())
         self.assertIn('w:w="432"', document_xml)  # Compact NR column, matching the email grid.
         image = Image.open(BytesIO(png_bytes))
@@ -331,7 +332,7 @@ class MeetingsReportAliasDedupTests(unittest.TestCase):
         self.assertIn((220, 38, 38), colors)
         self.assertIn((186, 230, 253), colors)
         self.assertIn((253, 230, 138), colors)
-        self.assertIn((148, 163, 184), colors)
+        self.assertIn((51, 65, 85), colors)
 
     def test_section_report_attachments_include_word_and_png(self) -> None:
         attachments = section_report_attachments(
@@ -809,9 +810,28 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         header = next(row for row in rows if "KUSH" in row and "DEP" in row and "AM/PM" in row and "TITULLI" in row)
         self.assertLess(header.index("KUSH"), header.index("DEP"))
         self.assertLess(header.index("DEP"), header.index("AM/PM"))
+        self.assertIn("T/Y/O", header)
+        self.assertNotIn("LATE", header)
+        self.assertLess(header.index("T/Y/O"), header.index("TITULLI"))
         self.assertLess(header.index("DEP"), header.index("TITULLI"))
         self.assertTrue(any("FIN" in row and "PM" in row and "Late system task" in row for row in rows))
         self.assertEqual(_m3_department_label(task, {department_id: "GDS"}), "GD")
+
+    def test_late_system_task_table_uses_tyo_values(self) -> None:
+        task = SimpleNamespace(
+            id=uuid.uuid4(), title="Late system task", status="TODO", finish_period="AM",
+            system_template_origin_id=uuid.uuid4(), department_id=None, assigned_to=None,
+            fast_task_order=None, is_deadline_important=False, due_date=None, start_date=None,
+            completed_at=None, created_at=None,
+        )
+
+        with patch("app.services.meetings_report._late_days", return_value=1):
+            yesterday_rows = _m3_status_table("LATE", [task], {}, include_late_days=True)
+        with patch("app.services.meetings_report._late_days", return_value=3):
+            older_rows = _m3_status_table("LATE", [task], {}, include_late_days=True)
+
+        self.assertTrue(any("Y" in row and "Late system task" in row for row in yesterday_rows))
+        self.assertTrue(any("3" in row and "Late system task" in row for row in older_rows))
 
     def test_bz_table_includes_department_and_am_pm_after_who(self) -> None:
         rows = _tomorrow_task_table(
