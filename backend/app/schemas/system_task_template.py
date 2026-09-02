@@ -18,6 +18,8 @@ class SystemTaskTemplateOut(BaseModel):
     department_ids: list[uuid.UUID] | None = None
     default_assignee_id: uuid.UUID | None = None
     assignee_ids: list[uuid.UUID] | None = None
+    zv1_user_id: uuid.UUID | None = None
+    zv2_user_id: uuid.UUID | None = None
     assignees: list[TaskAssigneeOut] = Field(default_factory=list)
     assignee_slots: list["SystemTaskTemplateAssigneeSlotOut"] = Field(default_factory=list)
     scope: SystemTaskScope
@@ -57,6 +59,8 @@ class SystemTaskTemplateCreate(BaseModel):
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
     assignee_ids: list[uuid.UUID] | None = None
+    zv1_user_id: uuid.UUID | None = None
+    zv2_user_id: uuid.UUID | None = None
     assignee_slots: list["SystemTaskTemplateAssigneeSlotIn"] | None = None
     scope: SystemTaskScope | None = None
     frequency: FrequencyType
@@ -87,6 +91,8 @@ class SystemTaskTemplateUpdate(BaseModel):
     department_id: uuid.UUID | None = None
     default_assignee_id: uuid.UUID | None = None
     assignee_ids: list[uuid.UUID] | None = None
+    zv1_user_id: uuid.UUID | None = None
+    zv2_user_id: uuid.UUID | None = None
     assignee_slots: list["SystemTaskTemplateAssigneeSlotIn"] | None = None
     scope: SystemTaskScope | None = None
     frequency: FrequencyType | None = None

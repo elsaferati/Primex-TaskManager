@@ -22,6 +22,7 @@ class UserOut(BaseModel):
 
 class UserLookup(BaseModel):
     id: uuid.UUID
+    email: EmailStr
     username: str | None = None
     full_name: str | None = None
     role: UserRole

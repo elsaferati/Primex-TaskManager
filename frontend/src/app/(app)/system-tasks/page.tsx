@@ -112,6 +112,25 @@ const FINISH_PERIOD_LABELS: Record<TaskFinishPeriod, string> = {
   PM: "PM",
 }
 
+const GA_EMAIL = "ga@primexeu.com"
+const MAX_ASSIGNEES_REQUIRING_REPLACEMENTS = 9
+
+function replacementsRequired(assigneeIds: string[]) {
+  return assigneeIds.length > 0 && assigneeIds.length <= MAX_ASSIGNEES_REQUIRING_REPLACEMENTS
+}
+
+function replacementSelectionError(zv1UserId: string, zv2UserId: string, assigneeIds: string[]) {
+  if (!zv1UserId && !zv2UserId && !replacementsRequired(assigneeIds)) return null
+  if (!zv1UserId || !zv2UserId) {
+    return "ZV1 and ZV2 are required for specifically assigned tasks."
+  }
+  if (zv1UserId === zv2UserId) return "ZV1 and ZV2 must be different users."
+  if (assigneeIds.includes(zv1UserId) || assigneeIds.includes(zv2UserId)) {
+    return "ZV1 and ZV2 cannot also be assignees."
+  }
+  return null
+}
+
 function timeInputValue(value?: string | null) {
   if (!value) return ""
   const match = String(value).match(/^(\d{2}:\d{2})/)
@@ -186,8 +205,8 @@ const DAY_OF_MONTH_OPTIONS = Array.from({ length: 31 }, (_, index) => ({
 // - md (768px+): Add more columns
 // - lg (1024px+): More columns visible
 // - xl (1280px+): Full columns
-const BASE_GRID_CLASS = "grid grid-cols-[28px_minmax(150px,1fr)_80px_80px_70px_40px_60px_60px] sm:grid-cols-[32px_minmax(180px,1fr)_100px_100px_80px_50px_70px_70px] md:grid-cols-[32px_minmax(200px,1fr)_110px_110px_90px_56px_75px_70px] lg:grid-cols-[32px_minmax(200px,1fr)_120px_120px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_150px_150px_120px_64px_100px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
-const GRID_WITH_BZ_TIME_CLASS = "grid grid-cols-[28px_minmax(140px,1fr)_70px_70px_58px_70px_40px_60px_60px] sm:grid-cols-[32px_minmax(170px,1fr)_88px_88px_64px_80px_50px_70px_70px] md:grid-cols-[32px_minmax(190px,1fr)_98px_98px_72px_90px_56px_75px_70px] lg:grid-cols-[32px_minmax(190px,1fr)_108px_108px_78px_100px_56px_80px_70px] xl:grid-cols-[36px_1fr_140px_140px_84px_120px_64px_100px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
+const BASE_GRID_CLASS = "grid grid-cols-[28px_minmax(130px,1fr)_70px_70px_70px_58px_40px_60px_60px] sm:grid-cols-[32px_minmax(160px,1fr)_88px_88px_88px_72px_50px_70px_70px] md:grid-cols-[32px_minmax(180px,1fr)_98px_98px_98px_82px_56px_75px_70px] lg:grid-cols-[32px_minmax(190px,1fr)_108px_108px_108px_90px_56px_80px_70px] xl:grid-cols-[36px_1fr_130px_130px_130px_110px_64px_100px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
+const GRID_WITH_BZ_TIME_CLASS = "grid grid-cols-[28px_minmax(120px,1fr)_64px_64px_68px_54px_62px_40px_58px_58px] sm:grid-cols-[32px_minmax(150px,1fr)_80px_80px_84px_60px_72px_48px_68px_68px] md:grid-cols-[32px_minmax(170px,1fr)_90px_90px_94px_66px_82px_54px_72px_68px] lg:grid-cols-[32px_minmax(180px,1fr)_100px_100px_104px_72px_90px_56px_78px_70px] xl:grid-cols-[36px_1fr_120px_120px_125px_80px_110px_64px_95px_80px] gap-1.5 sm:gap-2 md:gap-2.5 lg:gap-3 xl:gap-4 items-center px-2 sm:px-3 md:px-4"
 
 type Section = {
   id: string
@@ -561,6 +580,8 @@ export function SystemTasksView({
     scopeFilter === "GA" ? GA_DEPARTMENTS_VALUE : ""
   )
   const [assigneeIds, setAssigneeIds] = React.useState<string[]>([])
+  const [zv1UserId, setZv1UserId] = React.useState("")
+  const [zv2UserId, setZv2UserId] = React.useState("")
   const [assigneeQuery, setAssigneeQuery] = React.useState("")
   const [assigneeError, setAssigneeError] = React.useState<string | null>(null)
   const [assigneeOpen, setAssigneeOpen] = React.useState(false)
@@ -584,6 +605,8 @@ export function SystemTasksView({
   const [editDescription, setEditDescription] = React.useState("")
   const [editDepartmentId, setEditDepartmentId] = React.useState("")
   const [editAssigneeIds, setEditAssigneeIds] = React.useState<string[]>([])
+  const [editZv1UserId, setEditZv1UserId] = React.useState("")
+  const [editZv2UserId, setEditZv2UserId] = React.useState("")
   const [editAssigneeQuery, setEditAssigneeQuery] = React.useState("")
   const [editAssigneeError, setEditAssigneeError] = React.useState<string | null>(null)
   const [editAssigneeOpen, setEditAssigneeOpen] = React.useState(false)
@@ -607,9 +630,9 @@ export function SystemTasksView({
   const isManagerOrAdmin = isAdmin || user?.role === "MANAGER"
   const canCreate = showSystemActions
 
-  // Resolve Gane user id once for GA scoping checks
+  // Email is the authoritative identity for Gane in the System Tasks workflow.
   const ganeUser = React.useMemo(
-    () => users.find((u) => u.username?.toLowerCase() === "gane.arifaj") ?? null,
+    () => users.find((u) => u.email?.trim().toLowerCase() === GA_EMAIL) ?? null,
     [users]
   )
   const ganeUserId = React.useMemo(() => ganeUser?.id ?? null, [ganeUser])
@@ -746,6 +769,8 @@ export function SystemTasksView({
       editTemplate.assignees?.map((assignee) => assignee.id) ??
       (editTemplate.default_assignee_id ? [editTemplate.default_assignee_id] : [])
     setEditAssigneeIds(editIds)
+    setEditZv1UserId(editTemplate.zv1_user_id || "")
+    setEditZv2UserId(editTemplate.zv2_user_id || "")
     setEditFrequency(editTemplate.frequency)
     setEditPriority(normalizePriority(editTemplate.priority))
     setEditFinishPeriod(editTemplate.finish_period ?? FINISH_PERIOD_NONE_VALUE)
@@ -948,7 +973,7 @@ export function SystemTasksView({
         (ganeUserId &&
           (template.default_assignee_id === ganeUserId ||
             template.assignees?.some((assignee) => assignee.id === ganeUserId))) ||
-        template.assignees?.some((assignee) => assignee.username?.toLowerCase() === "gane.arifaj")
+        template.assignees?.some((assignee) => assignee.email?.trim().toLowerCase() === GA_EMAIL)
 
       const isGaDepartment = (template: SystemTaskTemplateDefinition) =>
         template.scope === "GA" || (gaDepartmentId ? template.department_id === gaDepartmentId : false)
@@ -1162,6 +1187,11 @@ export function SystemTasksView({
       toast.error("BZ time is required when BZ is enabled.")
       return
     }
+    const replacementError = replacementSelectionError(zv1UserId, zv2UserId, assigneeIds)
+    if (replacementError) {
+      toast.error(replacementError)
+      return
+    }
     setSaving(true)
     try {
       const payload = {
@@ -1170,6 +1200,8 @@ export function SystemTasksView({
         scope,
         department_id: resolveDepartmentId(finalDeptId),
         assignee_ids: assigneeIds,
+        zv1_user_id: zv1UserId || null,
+        zv2_user_id: zv2UserId || null,
         frequency,
         priority,
         finish_period: finishPeriod === FINISH_PERIOD_NONE_VALUE ? null : finishPeriod,
@@ -1207,6 +1239,8 @@ export function SystemTasksView({
       setTitle("")
       setDescription("")
       setAssigneeIds([])
+      setZv1UserId("")
+      setZv2UserId("")
       setAssigneeQuery("")
       setAssigneeError(null)
       setDaysOfWeek([])
@@ -1300,6 +1334,11 @@ export function SystemTasksView({
       toast.error("BZ time is required when BZ is enabled.")
       return
     }
+    const replacementError = replacementSelectionError(editZv1UserId, editZv2UserId, editAssigneeIds)
+    if (replacementError) {
+      toast.error(replacementError)
+      return
+    }
     setEditSaving(true)
     try {
       const payload = {
@@ -1308,6 +1347,8 @@ export function SystemTasksView({
         scope,
         department_id: resolveDepartmentId(finalDeptId),
         assignee_ids: editAssigneeIds,
+        zv1_user_id: editZv1UserId || null,
+        zv2_user_id: editZv2UserId || null,
         frequency: editFrequency,
         priority: editPriority,
         finish_period: editFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : editFinishPeriod,
@@ -1620,6 +1661,29 @@ export function SystemTasksView({
     [renderAssigneeSummaryText, resolveAssigneeNameById]
   )
 
+  const renderReplacements = React.useCallback(
+    (template: SystemTaskTemplateDefinition) => {
+      const replacements = [
+        ["ZV1", template.zv1_user_id],
+        ["ZV2", template.zv2_user_id],
+      ] as const
+      if (!template.zv1_user_id && !template.zv2_user_id) {
+        return <span className="text-slate-400">-</span>
+      }
+      return (
+        <div className="space-y-1 text-[11px] text-slate-700">
+          {replacements.map(([label, userId]) => (
+            <div key={label} className="truncate" title={resolveAssigneeNameById(userId)}>
+              <span className="font-semibold">{label}:</span>{" "}
+              {userId ? userInitials(resolveAssigneeNameById(userId)) : "-"}
+            </div>
+          ))}
+        </div>
+      )
+    },
+    [resolveAssigneeNameById]
+  )
+
   const renderApprovalSection = React.useCallback(
     (
       title: string,
@@ -1647,7 +1711,7 @@ export function SystemTasksView({
               const priorityValue = normalizePriority(template.priority)
               const rejectedAt = template.rejected_at ? formatDateTimeDMY(template.rejected_at) : null
               return (
-                <div key={template.id} className="grid gap-3 px-4 py-3 md:grid-cols-[1fr_160px_180px_220px] md:items-center">
+                <div key={template.id} className="grid gap-3 px-4 py-3 md:grid-cols-[1fr_120px_160px_140px_220px] md:items-center">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <div className="font-medium text-slate-900">{template.title}</div>
@@ -1672,6 +1736,7 @@ export function SystemTasksView({
                     {template.finish_period || "-"}
                   </div>
                   <div>{renderManagementAssignees(template)}</div>
+                  <div>{renderReplacements(template)}</div>
                   <div className="flex flex-wrap justify-start gap-2 md:justify-end">
                     {canEditTemplate(template) ? (
                       <Button variant="outline" size="sm" onClick={() => startEdit(template)}>
@@ -1728,6 +1793,7 @@ export function SystemTasksView({
       openRejectDialog,
       rejectingTemplateId,
       renderManagementAssignees,
+      renderReplacements,
       showSystemActions,
       startEdit,
       templateDepartmentLabel,
@@ -1789,6 +1855,8 @@ export function SystemTasksView({
       "DayOfMonth",
       "MonthOfYear",
       "DefaultAssignee",
+      "ZV1",
+      "ZV2",
       "Active",
     ]
     const dayOfMonthLabel = (value?: number | null) => {
@@ -1809,6 +1877,8 @@ export function SystemTasksView({
 
     const body = rows.map((template) => {
       const assignee = template.default_assignee_id ? userMap.get(template.default_assignee_id) : null
+      const zv1 = template.zv1_user_id ? userMap.get(template.zv1_user_id) : null
+      const zv2 = template.zv2_user_id ? userMap.get(template.zv2_user_id) : null
       const departmentLabel = templateDepartmentLabel(template)
       const departmentCode = departmentLabel === "-" ? "" : departmentLabel
       return [
@@ -1822,7 +1892,9 @@ export function SystemTasksView({
         dayOfWeekLabel(template),
         dayOfMonthLabel(template.day_of_month),
         template.month_of_year ?? "",
-        assignee ? assignee.username || assignee.full_name || "" : "",
+        assignee ? assignee.username || assignee.email || assignee.full_name || "" : "",
+        zv1 ? zv1.username || zv1.email || zv1.full_name || "" : "",
+        zv2 ? zv2.username || zv2.email || zv2.full_name || "" : "",
         template.is_active ? "true" : "false",
       ]
         .map(csvEscape)
@@ -1937,6 +2009,14 @@ export function SystemTasksView({
         .map((label) => userInitials(label))
         .join(", ")
     }
+    const replacementInitials = (template: SystemTaskTemplateDefinition) => {
+      const labelFor = (userId?: string | null) => {
+        if (!userId) return "-"
+        const person = userMap.get(userId)
+        return person ? userInitials(userDisplayLabel(person)) : "-"
+      }
+      return `ZV1: ${labelFor(template.zv1_user_id)} / ZV2: ${labelFor(template.zv2_user_id)}`
+    }
 
     const rows = sections[0]?.templates ?? []
     if (rows.length === 0) {
@@ -2011,6 +2091,7 @@ export function SystemTasksView({
           <td class="ampm tight">${escapeHtml(template.finish_period || "-")}</td>
           <td class="title">${escapeHtml(template.title)}</td>
           <td>${escapeHtml(ownerLabel)}</td>
+          <td>${escapeHtml(replacementInitials(template))}</td>
           <td class="details-bz">${buildDetailsWithBzGroup(template)}</td>
           <td class="bz-me">${escapeHtml(buildBzMe(template) || "-")}</td>
           <td class="bz-kur">${escapeHtml(buildBzKur(template) || "-")}</td>
@@ -2110,7 +2191,8 @@ export function SystemTasksView({
             col.col-ampm { width: auto; }
             col.col-title { width: 20%; }
             col.col-person { width: auto; }
-            col.col-details { width: 28%; }
+            col.col-zv { width: auto; }
+            col.col-details { width: 24%; }
             col.col-bzme { width: auto; }
             col.col-bzkur { width: auto; }
             col.col-comment { width: 12%; }
@@ -2142,25 +2224,29 @@ export function SystemTasksView({
             tbody td:nth-child(-n + 5),
             thead th:nth-child(7),
             tbody td:nth-child(7),
-            thead th:nth-child(9),
-            tbody td:nth-child(9),
+            thead th:nth-child(8),
+            tbody td:nth-child(8),
             thead th:nth-child(10),
-            tbody td:nth-child(10) {
+            tbody td:nth-child(10),
+            thead th:nth-child(11),
+            tbody td:nth-child(11) {
               padding-left: 4px;
               padding-right: 4px;
             }
             .details-bz {
               white-space: pre-line;
             }
- /* Force tight columns (first 5 + Personi + BZ ME + KOHA BZ) */
+ /* Force tight columns (first 5 + Personi + ZV + BZ ME + KOHA BZ) */
             thead th:nth-child(-n + 5),
             tbody td:nth-child(-n + 5),
             thead th:nth-child(7),
             tbody td:nth-child(7),
-            thead th:nth-child(9),
-            tbody td:nth-child(9),
+            thead th:nth-child(8),
+            tbody td:nth-child(8),
             thead th:nth-child(10),
-            tbody td:nth-child(10) {
+            tbody td:nth-child(10),
+            thead th:nth-child(11),
+            tbody td:nth-child(11) {
               padding-left: 4px;
               padding-right: 4px;
               white-space: nowrap;
@@ -2261,6 +2347,7 @@ export function SystemTasksView({
               <col class="col-ampm" />
               <col class="col-title" />
               <col class="col-person" />
+              <col class="col-zv" />
               <col class="col-details" />
               <col class="col-bzme" />
               <col class="col-bzkur" />
@@ -2275,6 +2362,7 @@ export function SystemTasksView({
                 <th class="ampm-head tight"><span>AM/<br />PM</span></th>
                 <th>Titulli</th>
                 <th>USER</th>
+                <th>ZV1 / ZV2</th>
                 <th>REGJ/PATH/CHECKLISTA/TRAINING / BZ GROUP</th>
                 <th>BZ ME</th>
                 <th>KOHA BZ</th>
@@ -2365,6 +2453,10 @@ export function SystemTasksView({
 
     const header = rows[0].map((cell) => cell.trim().toLowerCase())
     const hasHeader = header.includes("title") || header.includes("frequency")
+    if (!hasHeader) {
+      toast.error("CSV import requires a header row with ZV1 and ZV2 columns.")
+      return
+    }
     const dataRows = hasHeader ? rows.slice(1) : rows
     const noHeaderHasPriority = !hasHeader && (dataRows[0]?.length ?? 0) >= 11
     const noHeaderHasFinishPeriod = !hasHeader && (dataRows[0]?.length ?? 0) >= 12
@@ -2412,6 +2504,12 @@ export function SystemTasksView({
         : noHeaderHasPriority
           ? 8
           : 7
+    const idxZv1 = getIndex("zv1", ["zv1userid", "zv1_user_id"])
+    const idxZv2 = getIndex("zv2", ["zv2userid", "zv2_user_id"])
+    if (idxZv1 < 0 || idxZv2 < 0) {
+      toast.error("CSV import requires ZV1 and ZV2 columns.")
+      return
+    }
     const idxActive = hasHeader
       ? getIndex("active")
       : noHeaderHasFinishPeriod
@@ -2516,6 +2614,8 @@ export function SystemTasksView({
       if (!raw) return null
       const byUsername = users.find((u) => (u.username || "").toLowerCase() === raw)
       if (byUsername) return byUsername.id
+      const byEmail = users.find((u) => (u.email || "").toLowerCase() === raw)
+      if (byEmail) return byEmail.id
       const byName = users.find((u) => (u.full_name || "").toLowerCase() === raw)
       return byName?.id ?? null
     }
@@ -2549,12 +2649,21 @@ export function SystemTasksView({
 
       const scopeEntry = scopeForValue(row[idxDepartment] || "")
       const dayOfWeekValue = dayOfWeekForValue(row[idxDayOfWeek] || "")
+      const assigneeId = assigneeIdForValue(row[idxAssignee] || "")
+      const zv1UserId = assigneeIdForValue(row[idxZv1] || "")
+      const zv2UserId = assigneeIdForValue(row[idxZv2] || "")
+      if (replacementSelectionError(zv1UserId, zv2UserId, assigneeId ? [assigneeId] : [])) {
+        toast.error(`Skipped "${title}": invalid ZV1/ZV2.`)
+        continue
+      }
       const payload = {
         title,
         description: row[idxDescription]?.trim() || null,
         scope: scopeEntry.scope,
         department_id: scopeEntry.departmentId,
-        default_assignee_id: assigneeIdForValue(row[idxAssignee] || ""),
+        default_assignee_id: assigneeId,
+        zv1_user_id: zv1UserId || null,
+        zv2_user_id: zv2UserId || null,
         frequency: frequencyValue,
         priority: priorityValue,
         finish_period: finishPeriodValue,
@@ -2662,6 +2771,33 @@ export function SystemTasksView({
                     className="h-9 border-blue-200 px-3 text-sm text-blue-700 hover:bg-blue-50 hover:text-blue-800"
                   >
                     {exportingExcel ? "Exporting..." : "Export Excel"}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    onClick={() => exportTemplatesCSV("all")}
+                    size="sm"
+                    className="h-9 border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    Export CSV
+                  </Button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".csv,text/csv"
+                    className="hidden"
+                    onChange={(event) => {
+                      const file = event.target.files?.[0]
+                      if (file) void importTemplatesFromFile(file)
+                      event.target.value = ""
+                    }}
+                  />
+                  <Button
+                    variant="outline"
+                    onClick={() => fileInputRef.current?.click()}
+                    size="sm"
+                    className="h-9 border-slate-200 px-3 text-sm text-slate-700 hover:bg-slate-50"
+                  >
+                    Import CSV
                   </Button>
                 </>
               ) : null}
@@ -3016,6 +3152,7 @@ export function SystemTasksView({
                             {filteredAssignees.length ? (
                               filteredAssignees.map((person) => {
                                 const isSelected = assigneeIds.includes(person.id)
+                                const isReplacement = person.id === zv1UserId || person.id === zv2UserId
                                 const nextIds = isSelected
                                   ? assigneeIds.filter((item) => item !== person.id)
                                   : [...assigneeIds, person.id]
@@ -3023,7 +3160,8 @@ export function SystemTasksView({
                                   <button
                                     key={person.id}
                                     type="button"
-                                    className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60"
+                                    disabled={isReplacement && !isSelected}
+                                    className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
                                     onMouseDown={(event) => event.preventDefault()}
                                     onClick={() => handleAssigneesChange(nextIds)}
                                   >
@@ -3041,6 +3179,50 @@ export function SystemTasksView({
                       {assigneeError ? (
                         <div className="text-[13px] font-medium text-red-600">{assigneeError}</div>
                       ) : null}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>
+                          ZV1 {replacementsRequired(assigneeIds) ? "*" : "(optional for All/10+)"}
+                        </Label>
+                        <Select value={zv1UserId} onValueChange={setZv1UserId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select first replacement" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {users.map((person) => (
+                              <SelectItem
+                                key={person.id}
+                                value={person.id}
+                                disabled={assigneeIds.includes(person.id) || person.id === zv2UserId}
+                              >
+                                {userDisplayLabel(person)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>
+                          ZV2 {replacementsRequired(assigneeIds) ? "*" : "(optional for All/10+)"}
+                        </Label>
+                        <Select value={zv2UserId} onValueChange={setZv2UserId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select second replacement" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {users.map((person) => (
+                              <SelectItem
+                                key={person.id}
+                                value={person.id}
+                                disabled={assigneeIds.includes(person.id) || person.id === zv1UserId}
+                              >
+                                {userDisplayLabel(person)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <Checkbox checked={isActive} onCheckedChange={(value) => setIsActive(Boolean(value))} />
@@ -3062,7 +3244,15 @@ export function SystemTasksView({
                       <Button variant="outline" onClick={() => setCreateOpen(false)}>
                         Cancel
                       </Button>
-                      <Button disabled={saving || !title.trim() || !departmentId} onClick={() => void submit()}>
+                      <Button
+                        disabled={
+                          saving ||
+                          !title.trim() ||
+                          !departmentId ||
+                          (replacementsRequired(assigneeIds) && (!zv1UserId || !zv2UserId))
+                        }
+                        onClick={() => void submit()}
+                      >
                         {saving ? "Saving..." : "Save task"}
                       </Button>
                     </div>
@@ -3433,6 +3623,8 @@ export function SystemTasksView({
                             {filteredEditAssignees.length ? (
                               filteredEditAssignees.map((person) => {
                                 const isSelected = editAssigneeIds.includes(person.id)
+                                const isReplacement =
+                                  person.id === editZv1UserId || person.id === editZv2UserId
                                 const nextIds = isSelected
                                   ? editAssigneeIds.filter((item) => item !== person.id)
                                   : [...editAssigneeIds, person.id]
@@ -3440,7 +3632,8 @@ export function SystemTasksView({
                                   <button
                                     key={person.id}
                                     type="button"
-                                    className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60"
+                                    disabled={isReplacement && !isSelected}
+                                    className="flex w-full items-center justify-between px-2 py-2 text-left text-sm hover:bg-muted/60 disabled:cursor-not-allowed disabled:opacity-50"
                                     onMouseDown={(event) => event.preventDefault()}
                                     onClick={() => handleEditAssigneesChange(nextIds)}
                                   >
@@ -3458,6 +3651,50 @@ export function SystemTasksView({
                       {editAssigneeError ? (
                         <div className="text-[13px] font-medium text-red-600">{editAssigneeError}</div>
                       ) : null}
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>
+                          ZV1 {replacementsRequired(editAssigneeIds) ? "*" : "(optional for All/10+)"}
+                        </Label>
+                        <Select value={editZv1UserId} onValueChange={setEditZv1UserId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select first replacement" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {users.map((person) => (
+                              <SelectItem
+                                key={person.id}
+                                value={person.id}
+                                disabled={editAssigneeIds.includes(person.id) || person.id === editZv2UserId}
+                              >
+                                {userDisplayLabel(person)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-2">
+                        <Label>
+                          ZV2 {replacementsRequired(editAssigneeIds) ? "*" : "(optional for All/10+)"}
+                        </Label>
+                        <Select value={editZv2UserId} onValueChange={setEditZv2UserId}>
+                          <SelectTrigger>
+                            <SelectValue placeholder="Select second replacement" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {users.map((person) => (
+                              <SelectItem
+                                key={person.id}
+                                value={person.id}
+                                disabled={editAssigneeIds.includes(person.id) || person.id === editZv1UserId}
+                              >
+                                {userDisplayLabel(person)}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <Checkbox checked={editIsActive} onCheckedChange={(value) => setEditIsActive(Boolean(value))} />
@@ -3480,7 +3717,12 @@ export function SystemTasksView({
                         Cancel
                       </Button>
                       <Button
-                        disabled={editSaving || !editTitle.trim() || !editDepartmentId}
+                        disabled={
+                          editSaving ||
+                          !editTitle.trim() ||
+                          !editDepartmentId ||
+                          (replacementsRequired(editAssigneeIds) && (!editZv1UserId || !editZv2UserId))
+                        }
                         onClick={() => void submitEdit()}
                       >
                         {editSaving ? "Saving..." : "Save changes"}
@@ -3705,7 +3947,7 @@ export function SystemTasksView({
           )}
         >
           {/* SCROLL WRAPPER for responsive table */}
-          <div className="print:overflow-visible">
+          <div className="overflow-x-auto lg:overflow-visible print:overflow-visible">
             {/* STICKY HEADER ROW */}
             <div className="w-full print:min-w-0">
               <div className="sticky top-[var(--system-tasks-sticky-offset)] z-30 print:static">
@@ -3720,6 +3962,7 @@ export function SystemTasksView({
                     <div>Task Title</div>
                     <div>Department</div>
                     <div>{showSystemActions ? "Assignees" : "Owner"}</div>
+                    <div>ZV1 / ZV2</div>
                     {showBzTimeColumn ? <div>BZ Time</div> : null}
                     <div className="hidden sm:block">Frequency</div>
                     <div className="hidden md:block">Finish by</div>
@@ -3825,6 +4068,8 @@ export function SystemTasksView({
                                     ? <span className="text-slate-400">-</span>
                                     : ownerLabel}
                               </div>
+
+                              <div>{renderReplacements(template)}</div>
 
                               {showBzTimeColumn ? (
                                 <div className="text-xs sm:text-sm text-slate-700 font-normal">

@@ -1,5 +1,6 @@
 import inspect
 import unittest
+import uuid
 
 from app.api.routers.realization import _weekly_response
 from app.models.enums import FrequencyType
@@ -10,7 +11,12 @@ from app.services.realization_daily import calculate_daily_period
 
 class TestSystemTaskWeeklyPlannerVisibility(unittest.TestCase):
     def test_create_payload_is_opt_in(self) -> None:
-        payload = SystemTaskTemplateCreate(title="Weekly planner task", frequency=FrequencyType.DAILY)
+        payload = SystemTaskTemplateCreate(
+            title="Weekly planner task",
+            frequency=FrequencyType.DAILY,
+            zv1_user_id=uuid.uuid4(),
+            zv2_user_id=uuid.uuid4(),
+        )
 
         self.assertIsNone(payload.show_in_weekly_planner)
 

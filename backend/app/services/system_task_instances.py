@@ -5,8 +5,7 @@ import uuid
 from datetime import date, datetime, time, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import Date as SQLDate
-from sqlalchemy import cast, delete, func, insert, select
+from sqlalchemy import delete, insert, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -22,6 +21,7 @@ from app.models.user import User
 from app.services.system_task_schedule import first_run_at, next_occurrence, template_due_time, template_tz
 
 ALL_USERS_MARKER = "[ALL_USERS]"
+GA_EMAIL = "ga@primexeu.com"
 
 
 def _safe_iso_date(value: str | None, fallback: date) -> date:
@@ -125,44 +125,6 @@ def _assignee_on_full_day_leave(
     return _date_in_ranges(occurrence_day, leave_by_user.get(assignee_id, []))
 
 
-async def remove_open_system_task_instances_for_leave(
-    db: AsyncSession,
-    entry: CommonEntry,
-) -> int:
-    """Remove pre-generated open instances covered by a newly saved full-day PV."""
-    start_date, end_date, full_day, _, _, _, is_all_users = _parse_annual_leave_entry(entry)
-    if not full_day:
-        return 0
-
-    task_local_date = cast(
-        func.timezone(
-            func.coalesce(SystemTaskTemplate.timezone, settings.APP_TIMEZONE),
-            Task.origin_run_at,
-        ),
-        SQLDate,
-    )
-    task_ids_stmt = (
-        select(Task.id)
-        .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
-        .where(Task.origin_run_at.is_not(None))
-        .where(task_local_date >= start_date, task_local_date <= end_date)
-        .where(Task.is_active.is_(True))
-        .where(Task.completed_at.is_(None), Task.status != TaskStatus.DONE.value)
-    )
-    if not is_all_users:
-        user_id = entry.assigned_to_user_id or entry.created_by_user_id
-        if user_id is None:
-            return 0
-        task_ids_stmt = task_ids_stmt.where(Task.assigned_to == user_id)
-
-    task_ids = list((await db.execute(task_ids_stmt)).scalars().all())
-    if not task_ids:
-        return 0
-
-    result = await db.execute(delete(Task).where(Task.id.in_(task_ids)))
-    return result.rowcount or 0
-
-
 def _adjust_due_datetime_local(
     *,
     tz: ZoneInfo,
@@ -176,16 +138,72 @@ def _adjust_due_datetime_local(
         due_dt = due_dt - timedelta(days=1)
     return due_dt
 
-async def _assignee_department_map(
+
+async def _system_task_user_maps(
     db: AsyncSession,
     user_ids: set[uuid.UUID],
-) -> dict[uuid.UUID, uuid.UUID | None]:
+) -> tuple[dict[uuid.UUID, uuid.UUID | None], dict[uuid.UUID, str]]:
     if not user_ids:
-        return {}
+        return {}, {}
     rows = (
-        await db.execute(select(User.id, User.department_id).where(User.id.in_(user_ids)))
+        await db.execute(select(User.id, User.department_id, User.email).where(User.id.in_(user_ids)))
     ).all()
-    return {user_id: department_id for user_id, department_id in rows}
+    return (
+        {user_id: department_id for user_id, department_id, _ in rows},
+        {user_id: (email or "").strip().lower() for user_id, _, email in rows},
+    )
+
+
+def _replacement_user_for_occurrence(
+    *,
+    template: SystemTaskTemplate | object,
+    slots: list[SystemTaskTemplateAssigneeSlot | object],
+    occurrence_day: date,
+    leave_by_user: dict[uuid.UUID, list[tuple[date, date]]],
+    all_users_ranges: list[tuple[date, date]],
+    user_email_map: dict[uuid.UUID, str],
+) -> tuple[uuid.UUID | None, SystemTaskTemplateAssigneeSlot | object | None]:
+    if not slots:
+        return None, None
+
+    primary_ids = [slot.primary_user_id for slot in slots]
+    absent_ids = {
+        user_id
+        for user_id in primary_ids
+        if _assignee_on_full_day_leave(user_id, occurrence_day, leave_by_user, all_users_ranges)
+    }
+
+    if len(primary_ids) == 1:
+        fallback_required = primary_ids[0] in absent_ids
+        source_slot = slots[0]
+    else:
+        non_gane_slots = [
+            slot for slot in slots if user_email_map.get(slot.primary_user_id, "") != GA_EMAIL
+        ]
+        relevant_slots = non_gane_slots or slots
+        fallback_required = all(slot.primary_user_id in absent_ids for slot in relevant_slots)
+        source_slot = next(
+            (slot for slot in relevant_slots if slot.primary_user_id in absent_ids),
+            relevant_slots[0],
+        )
+
+    if not fallback_required:
+        return None, None
+
+    for replacement_id in (
+        getattr(template, "zv1_user_id", None),
+        getattr(template, "zv2_user_id", None),
+    ):
+        if replacement_id is None:
+            continue
+        if not _assignee_on_full_day_leave(
+            replacement_id,
+            occurrence_day,
+            leave_by_user,
+            all_users_ranges,
+        ):
+            return replacement_id, source_slot
+    return None, None
 
 
 async def _insert_system_task_instance(
@@ -198,8 +216,9 @@ async def _insert_system_task_instance(
     start_at: datetime,
     due_utc: datetime,
     now_utc: datetime,
+    assignee_id: uuid.UUID | None = None,
 ) -> bool:
-    assignee_id = slot.primary_user_id
+    assignee_id = assignee_id or slot.primary_user_id
     task_insert = pg_insert(Task).values(
         {
             "id": uuid.uuid4(),
@@ -272,6 +291,11 @@ async def generate_system_task_instances(
         .where(SystemTaskTemplate.is_active.is_(True))
         .where(SystemTaskTemplate.approval_status == CommonApprovalStatus.approved)
         .where(SystemTaskTemplate.trigger_type.is_(None))
+        .order_by(
+            SystemTaskTemplateAssigneeSlot.template_id,
+            SystemTaskTemplateAssigneeSlot.created_at,
+            SystemTaskTemplateAssigneeSlot.id,
+        )
     )
     if template_ids is not None:
         slot_stmt = slot_stmt.where(SystemTaskTemplateAssigneeSlot.template_id.in_(template_ids))
@@ -279,17 +303,20 @@ async def generate_system_task_instances(
     if not slot_rows:
         return 0
 
-    department_map = await _assignee_department_map(
-        db,
-        {slot.primary_user_id for slot, _ in slot_rows},
-    )
-    annual_leave_entries = (
-        await db.execute(select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave))
-    ).scalars().all()
-    leave_by_user, all_users_ranges = _build_annual_leave_snapshot(annual_leave_entries)
+    all_user_ids = {slot.primary_user_id for slot, _ in slot_rows}
+    department_map, _ = await _system_task_user_maps(db, all_user_ids)
+
+    rows_by_template: dict[
+        uuid.UUID,
+        tuple[SystemTaskTemplate, list[SystemTaskTemplateAssigneeSlot]],
+    ] = {}
+    for slot, template in slot_rows:
+        if template.id not in rows_by_template:
+            rows_by_template[template.id] = (template, [])
+        rows_by_template[template.id][1].append(slot)
 
     created = 0
-    for slot, template in slot_rows:
+    for template, template_slots in rows_by_template.values():
         tz = template_tz(template)
         due_time = template_due_time(template)
         range_end = (
@@ -299,49 +326,193 @@ async def generate_system_task_instances(
             + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0))
         )
         range_start = start
-        next_run = slot.next_run_at or first_run_at(template, now_utc)
-        while True:
-            occurrence_local = next_run.astimezone(tz)
-            occurrence_day = occurrence_local.date()
-            if occurrence_day > range_end:
-                break
-            if range_start is not None and occurrence_day < range_start:
+        slots_by_occurrence: dict[datetime, list[SystemTaskTemplateAssigneeSlot]] = {}
+        for slot in template_slots:
+            next_run = slot.next_run_at or first_run_at(template, now_utc)
+            while True:
+                occurrence_day = next_run.astimezone(tz).date()
+                if occurrence_day > range_end:
+                    break
+                if range_start is None or occurrence_day >= range_start:
+                    slots_by_occurrence.setdefault(next_run, []).append(slot)
                 next_run = next_occurrence(template, next_run)
-                continue
+            slot.next_run_at = next_run
 
-            if _assignee_on_full_day_leave(
-                slot.primary_user_id,
-                occurrence_day,
-                leave_by_user,
-                all_users_ranges,
-            ):
-                next_run = next_occurrence(template, next_run)
-                continue
-
+        for occurrence_run_at in sorted(slots_by_occurrence):
+            occurrence_slots = slots_by_occurrence[occurrence_run_at]
             due_local = _adjust_due_datetime_local(
                 tz=tz,
                 due_time=due_time,
-                start_local_dt=next_run.astimezone(tz),
+                start_local_dt=occurrence_run_at.astimezone(tz),
                 duration_days=int(getattr(template, "duration_days", 1) or 1),
             )
-            inserted = await _insert_system_task_instance(
-                db,
-                slot=slot,
-                template=template,
-                department_id=department_map.get(slot.primary_user_id) or template.department_id,
-                origin_run_at=next_run,
-                start_at=next_run,
-                due_utc=due_local.astimezone(timezone.utc),
-                now_utc=now_utc,
-            )
-            if inserted:
-                created += 1
-
-            next_run = next_occurrence(template, next_run)
-
-        slot.next_run_at = next_run
+            # Weekly generation creates the complete original plan. PV/ZV is
+            # intentionally applied by the daily reconciliation shortly before work starts.
+            for source_slot in occurrence_slots:
+                assigned_user_id = source_slot.primary_user_id
+                inserted = await _insert_system_task_instance(
+                    db,
+                    slot=source_slot,
+                    template=template,
+                    department_id=department_map.get(assigned_user_id) or template.department_id,
+                    origin_run_at=occurrence_run_at,
+                    start_at=occurrence_run_at,
+                    due_utc=due_local.astimezone(timezone.utc),
+                    now_utc=now_utc,
+                    assignee_id=assigned_user_id,
+                )
+                if inserted:
+                    created += 1
 
     return created
+
+
+def _task_can_be_daily_reconciled(
+    task: Task | object,
+    *,
+    template: SystemTaskTemplate | object,
+    slot: SystemTaskTemplateAssigneeSlot | object,
+) -> bool:
+    status_value = getattr(getattr(task, "status", None), "value", getattr(task, "status", None))
+    allowed_assignees = {
+        slot.primary_user_id,
+        getattr(template, "zv1_user_id", None),
+        getattr(template, "zv2_user_id", None),
+    }
+    return (
+        status_value == TaskStatus.TODO.value
+        and getattr(task, "completed_at", None) is None
+        and int(getattr(task, "progress_percentage", 0) or 0) == 0
+        and getattr(task, "assigned_to", None) in allowed_assignees
+    )
+
+
+async def _replace_generated_task_assignee(
+    db: AsyncSession,
+    *,
+    task: Task,
+    user_id: uuid.UUID,
+    department_id: uuid.UUID | None,
+) -> None:
+    task.assigned_to = user_id
+    task.department_id = department_id
+    task.is_active = True
+    await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
+    await db.execute(
+        pg_insert(TaskAssignee)
+        .values({"task_id": task.id, "user_id": user_id})
+        .on_conflict_do_nothing(index_elements=["task_id", "user_id"])
+    )
+
+
+async def reconcile_system_task_assignments_for_day(
+    db: AsyncSession,
+    *,
+    target_day: date | None = None,
+    now_utc: datetime | None = None,
+) -> dict[str, int]:
+    """Apply the latest full-day PV/ZV state to pre-generated tasks for one day."""
+    now_utc = now_utc or datetime.now(timezone.utc)
+    app_tz = ZoneInfo(settings.APP_TIMEZONE)
+    target_day = target_day or now_utc.astimezone(app_tz).date()
+
+    # Use a wide UTC window, then compare in each template's timezone.
+    window_start = datetime.combine(target_day - timedelta(days=1), time.min, tzinfo=timezone.utc)
+    window_end = datetime.combine(target_day + timedelta(days=2), time.min, tzinfo=timezone.utc)
+    rows = (
+        await db.execute(
+            select(Task, SystemTaskTemplate, SystemTaskTemplateAssigneeSlot)
+            .join(SystemTaskTemplate, Task.system_template_origin_id == SystemTaskTemplate.id)
+            .join(SystemTaskTemplateAssigneeSlot, Task.system_task_slot_id == SystemTaskTemplateAssigneeSlot.id)
+            .where(Task.origin_run_at.is_not(None))
+            .where(Task.origin_run_at >= window_start, Task.origin_run_at < window_end)
+            .where(Task.meeting_origin_id.is_(None))
+            .where(SystemTaskTemplate.trigger_type.is_(None))
+        )
+    ).all()
+    rows = [
+        (task, template, slot)
+        for task, template, slot in rows
+        if task.origin_run_at.astimezone(template_tz(template)).date() == target_day
+    ]
+    if not rows:
+        return {"reassigned": 0, "deactivated": 0, "reactivated": 0, "created": 0, "skipped": 0}
+
+    user_ids = {slot.primary_user_id for _, _, slot in rows}
+    user_ids.update(
+        replacement_id
+        for _, template, _ in rows
+        for replacement_id in (
+            getattr(template, "zv1_user_id", None),
+            getattr(template, "zv2_user_id", None),
+        )
+        if replacement_id is not None
+    )
+    department_map, user_email_map = await _system_task_user_maps(db, user_ids)
+    annual_leave_entries = (
+        await db.execute(select(CommonEntry).where(CommonEntry.category == CommonCategory.annual_leave))
+    ).scalars().all()
+    leave_by_user, all_users_ranges = _build_annual_leave_snapshot(annual_leave_entries)
+
+    grouped: dict[
+        tuple[uuid.UUID, datetime],
+        tuple[SystemTaskTemplate, list[tuple[Task, SystemTaskTemplateAssigneeSlot]]],
+    ] = {}
+    for task, template, slot in rows:
+        key = (template.id, task.origin_run_at)
+        if key not in grouped:
+            grouped[key] = (template, [])
+        grouped[key][1].append((task, slot))
+
+    counts = {"reassigned": 0, "deactivated": 0, "reactivated": 0, "created": 0, "skipped": 0}
+    for (_, origin_run_at), (template, task_slots) in grouped.items():
+        task_slots.sort(key=lambda pair: (pair[1].created_at, pair[1].id))
+        slots = [slot for _, slot in task_slots]
+        occurrence_day = origin_run_at.astimezone(template_tz(template)).date()
+        expected: dict[uuid.UUID, uuid.UUID] = {
+            slot.id: slot.primary_user_id
+            for slot in slots
+            if not _assignee_on_full_day_leave(
+                slot.primary_user_id, occurrence_day, leave_by_user, all_users_ranges
+            )
+        }
+        replacement_id, source_slot = _replacement_user_for_occurrence(
+            template=template,
+            slots=slots,
+            occurrence_day=occurrence_day,
+            leave_by_user=leave_by_user,
+            all_users_ranges=all_users_ranges,
+            user_email_map=user_email_map,
+        )
+        if replacement_id is not None and source_slot is not None:
+            expected[source_slot.id] = replacement_id
+
+        for task, slot in task_slots:
+            if not _task_can_be_daily_reconciled(task, template=template, slot=slot):
+                counts["skipped"] += 1
+                continue
+            assigned_user_id = expected.get(slot.id)
+            if assigned_user_id is None:
+                if task.is_active:
+                    task.is_active = False
+                    await db.execute(delete(TaskAssignee).where(TaskAssignee.task_id == task.id))
+                    counts["deactivated"] += 1
+                continue
+
+            was_inactive = not task.is_active
+            was_reassigned = task.assigned_to != assigned_user_id
+            await _replace_generated_task_assignee(
+                db,
+                task=task,
+                user_id=assigned_user_id,
+                department_id=department_map.get(assigned_user_id) or template.department_id,
+            )
+            if was_inactive:
+                counts["reactivated"] += 1
+            if was_reassigned:
+                counts["reassigned"] += 1
+
+    return counts
 
 
 async def ensure_task_instances_in_range(
@@ -365,6 +536,7 @@ async def ensure_due_today_instances_best_effort(
 ) -> int:
     now_utc = now_utc or datetime.now(timezone.utc)
     created = await generate_system_task_instances(db=db, now_utc=now_utc)
+    await reconcile_system_task_assignments_for_day(db=db, now_utc=now_utc)
     await db.commit()
     return created
 

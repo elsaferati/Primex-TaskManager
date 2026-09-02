@@ -57,6 +57,7 @@ from app.services.system_task_schedule import (
 from app.services.system_task_instances import (
     ensure_slots_initialized,
     generate_system_task_instances,
+    reconcile_system_task_assignments_for_day,
 )
 from app.services.meeting_system_tasks import (
     EXTERNAL_MEETING_TASK_KIND,
@@ -67,6 +68,8 @@ from app.services.daily_realization_events import record_task_semantic_events
 
 
 router = APIRouter()
+GA_EMAIL = "ga@primexeu.com"
+MAX_ASSIGNEES_REQUIRING_REPLACEMENTS = 9
 
 
 def _enum_value(value) -> str | None:
@@ -97,6 +100,52 @@ def _user_to_assignee(user: User) -> TaskAssigneeOut:
         username=user.username,
         full_name=user.full_name,
     )
+
+
+def _is_gane_user(user: User | object) -> bool:
+    return (getattr(user, "email", None) or "").strip().lower() == GA_EMAIL
+
+
+def _replacements_required(assignee_ids: list[uuid.UUID] | None) -> bool:
+    return 0 < len(assignee_ids or []) <= MAX_ASSIGNEES_REQUIRING_REPLACEMENTS
+
+
+async def _validate_replacement_users(
+    db: AsyncSession,
+    *,
+    zv1_user_id: uuid.UUID | None,
+    zv2_user_id: uuid.UUID | None,
+    assignee_ids: list[uuid.UUID] | None,
+    required: bool,
+) -> None:
+    if zv1_user_id is None or zv2_user_id is None:
+        if required or zv1_user_id is not None or zv2_user_id is not None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="ZV1 and ZV2 are both required for specifically assigned tasks",
+            )
+        return
+    if zv1_user_id == zv2_user_id:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ZV1 and ZV2 must be different users",
+        )
+    if {zv1_user_id, zv2_user_id} & set(assignee_ids or []):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ZV1 and ZV2 cannot also be assignees",
+        )
+
+    replacement_users = (
+        await db.execute(select(User).where(User.id.in_({zv1_user_id, zv2_user_id})))
+    ).scalars().all()
+    if len(replacement_users) != 2:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Replacement user not found")
+    if any(not user.is_active for user in replacement_users):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="ZV1 and ZV2 must be active users",
+        )
 
 
 async def _validate_alignment_user_ids(db: AsyncSession, user_ids: list[uuid.UUID]) -> list[uuid.UUID]:
@@ -458,6 +507,8 @@ async def _template_definition_to_out(
         department_ids=department_ids,
         default_assignee_id=template.default_assignee_id,
         assignee_ids=template.assignee_ids,
+        zv1_user_id=getattr(template, "zv1_user_id", None),
+        zv2_user_id=getattr(template, "zv2_user_id", None),
         assignees=[
             _user_to_assignee(assignee_user_map[user_id])
             for user_id in assignee_ids
@@ -981,6 +1032,8 @@ async def list_system_task_templates(
             or None,
             default_assignee_id=t.default_assignee_id,
             assignee_ids=t.assignee_ids,
+            zv1_user_id=getattr(t, "zv1_user_id", None),
+            zv2_user_id=getattr(t, "zv2_user_id", None),
             assignees=[
                 _user_to_assignee(assignee_user_map[user_id])
                 for user_id in (t.assignee_ids or ([t.default_assignee_id] if t.default_assignee_id else []))
@@ -1305,6 +1358,14 @@ async def create_system_task_template(
     elif payload.default_assignee_id is not None:
         assignee_ids = [payload.default_assignee_id]
 
+    await _validate_replacement_users(
+        db,
+        zv1_user_id=payload.zv1_user_id,
+        zv2_user_id=payload.zv2_user_id,
+        assignee_ids=assignee_ids,
+        required=_replacements_required(assignee_ids),
+    )
+
     # Get assignee users first to determine department automatically
     assignee_users: list[User] | None = None
     if assignee_ids is not None:
@@ -1321,9 +1382,7 @@ async def create_system_task_template(
     if assignee_users and len(assignee_users) > 0:
         # Get unique departments from assignees
         assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
-        is_gane_assignee = any(
-            u.username and u.username.lower() == "gane.arifaj" for u in assignee_users
-        )
+        is_gane_assignee = any(_is_gane_user(u) for u in assignee_users)
         ga_department = None
         if is_gane_assignee:
             ga_department = (
@@ -1377,6 +1436,8 @@ async def create_system_task_template(
         department_id=department_id,
         default_assignee_id=assignee_ids[0] if assignee_ids else None,
         assignee_ids=assignee_ids,
+        zv1_user_id=payload.zv1_user_id,
+        zv2_user_id=payload.zv2_user_id,
         scope=_enum_value(scope_value),
         frequency=_enum_value(payload.frequency),
         day_of_week=days_of_week[0] if days_of_week else payload.day_of_week,
@@ -1468,6 +1529,11 @@ async def approve_system_task_template(
         start=approval_day,
         end=approval_day + timedelta(days=max(int(settings.SYSTEM_TASK_GENERATE_AHEAD_DAYS), 0)),
         template_ids=[template.id],
+    )
+    await reconcile_system_task_assignments_for_day(
+        db=db,
+        target_day=approval_day,
+        now_utc=approved_at,
     )
 
     await db.commit()
@@ -1623,6 +1689,28 @@ async def update_system_task_template(
         # Use existing assignees from template
         assignee_ids = template.assignee_ids or ([template.default_assignee_id] if template.default_assignee_id else None)
 
+    effective_assignee_ids = (
+        assignee_ids
+        if assignee_ids is not None
+        else template.assignee_ids or ([template.default_assignee_id] if template.default_assignee_id else [])
+    )
+    effective_zv1_user_id = (
+        payload.zv1_user_id if "zv1_user_id" in fields_set else getattr(template, "zv1_user_id", None)
+    )
+    effective_zv2_user_id = (
+        payload.zv2_user_id if "zv2_user_id" in fields_set else getattr(template, "zv2_user_id", None)
+    )
+    await _validate_replacement_users(
+        db,
+        zv1_user_id=effective_zv1_user_id,
+        zv2_user_id=effective_zv2_user_id,
+        assignee_ids=effective_assignee_ids,
+        required=(
+            getattr(template, "trigger_type", None) is None
+            and _replacements_required(effective_assignee_ids)
+        ),
+    )
+
     # Get assignee users first to determine department automatically
     assignee_users: list[User] | None = None
     if assignee_ids is not None:
@@ -1645,9 +1733,7 @@ async def update_system_task_template(
     if assignee_set and assignee_users and len(assignee_users) > 0:
         # Get unique departments from assignees
         assignee_departments = {u.department_id for u in assignee_users if u.department_id is not None}
-        is_gane_assignee = any(
-            u.username and u.username.lower() == "gane.arifaj" for u in assignee_users
-        )
+        is_gane_assignee = any(_is_gane_user(u) for u in assignee_users)
         ga_department = None
         if is_gane_assignee:
             ga_department = (
@@ -1704,6 +1790,10 @@ async def update_system_task_template(
     if assignee_set and assignee_ids is not None:
         template.default_assignee_id = assignee_ids[0] if assignee_ids else None
         template.assignee_ids = assignee_ids
+    if "zv1_user_id" in fields_set:
+        template.zv1_user_id = payload.zv1_user_id
+    if "zv2_user_id" in fields_set:
+        template.zv2_user_id = payload.zv2_user_id
     if payload.frequency is not None:
         template.frequency = _enum_value(payload.frequency)
     if days_set:

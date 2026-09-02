@@ -39,6 +39,7 @@ const HEADER_LABELS = new Set([
   "MBAJTUR?",
   "ANULUAR",
   "PA STATUS",
+  "PRODUKTE",
 ])
 
 export function reportSectionPreviewText(value: string) {
@@ -87,6 +88,7 @@ function normalizeHeader(value: string) {
     LLOJI: "TYPE",
     KRIJUAR: "ADDED",
     TIPI: "TYPE",
+    PRODUKTE: "PRODUCTS",
   }
   return aliases[upper] || upper
 }
@@ -276,6 +278,9 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   const typeIndex = headers.findIndex((header) => normalizeHeader(header) === "TYPE")
   const typeValue = typeIndex >= 0 ? cells[typeIndex]?.trim().toUpperCase() : ""
   if (resolvedStatus === "LATE") return "bg-red-100"
+  const productsIndex = headers.findIndex((header) => normalizeHeader(header) === "PRODUCTS")
+  const productsValue = productsIndex >= 0 ? cells[productsIndex] || "" : ""
+  if (/\(\s*-\d+\s*\)/.test(productsValue)) return "bg-yellow-100 text-red-600"
   if (resolvedStatus.includes("WAITING CLIENT") || resolvedStatus.includes("WAITING FOR CLIENT")) {
     return "bg-[#E2C15B] text-[#4F3A00]"
   }
