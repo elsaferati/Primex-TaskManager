@@ -46,6 +46,7 @@ SECTION_TITLES = [
     "N- (GA) DET PERSONALISHT?",
     "DET E KRYERA SOT (AM/PM)",
     "DET TE SHTYERA",
+    "PRODUKTE +/- SOT (PCM)",
 ]
 DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[0],  # Manual first
@@ -54,6 +55,7 @@ DISPLAY_SECTION_TITLES = [
     SECTION_TITLES[3],
     SECTION_TITLES[11],
     SECTION_TITLES[10],
+    SECTION_TITLES[12],
     SECTION_TITLES[7],
     SECTION_TITLES[4],
     SECTION_TITLES[6],
@@ -98,6 +100,7 @@ DEFAULT_MANUAL_BODY = "(Ploteso manualisht)"
 PERSONAL_GA = re.compile(r"[/:]\s*GA\b", re.I)
 TECHNICAL_TAG = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
 DUE_SUFFIX = re.compile(r"\s+due\s+\d{1,2}:\d{2}\s*$", re.I)
+COMPLETED_PRODUCTS = re.compile(r"completed_products\s*[:=]\s*(\d+)", re.I)
 TITLE_PREFIX = re.compile(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})?\s*:\s*", re.I)
 TASK_LINE_STATUS = re.compile(r"^\[([A-Z_]+)\]\s*")
 MEETING_HIGHLIGHT_MARKER = "[[mt:non_daily_weekly]]"
@@ -772,6 +775,62 @@ def _m3_added_week_label(task: Task, week_start: date | None) -> str:
     return "Last W"
 
 
+def _m3_product_counts(task: Task) -> tuple[int, int] | None:
+    """Planned and completed product counts for a PCM product task.
+
+    ``daily_products`` is the day's planned count; the completed count is stored
+    in ``internal_notes`` as ``completed_products=N``.
+    """
+    planned = getattr(task, "daily_products", None)
+    if planned is None:
+        return None
+    planned = int(planned)
+    if planned <= 0:
+        return None
+    match = COMPLETED_PRODUCTS.search(getattr(task, "internal_notes", None) or "")
+    if not match:
+        return planned, 0
+    try:
+        return planned, max(0, int(match.group(1)))
+    except ValueError:
+        return planned, 0
+
+
+def _m3_product_delta_label(task: Task) -> str:
+    counts = _m3_product_counts(task)
+    if counts is None:
+        return "-"
+    planned, done = counts
+    delta = done - planned
+    return f"{done}/{planned} ({'+' if delta > 0 else ''}{delta})"
+
+
+def _product_delta_tasks_for_m3_day(tasks: list[Task], report_day: date) -> list[Task]:
+    """PCM product tasks that closed the day above or below their planned count.
+
+    Days with no progress at all are left out: they already appear in the pink
+    ``DET PA PROGRES`` section, so repeating them here would only add noise.
+    """
+    selected: list[Task] = []
+    for task in tasks:
+        # PCM product rows are PRODUCT-phase tasks. CONTROL tasks can also
+        # carry a copied daily_products total after editing, but must not be
+        # reported as product production rows.
+        phase = str(getattr(task, "phase", None) or "PRODUCT").strip().upper()
+        if phase != "PRODUCT":
+            continue
+        counts = _m3_product_counts(task)
+        if counts is None:
+            continue
+        if _task_day(task) != report_day and _local_date(task.completed_at) != report_day:
+            continue
+        planned, done = counts
+        if done <= 0 or done == planned:
+            continue
+        selected.append(task)
+    return selected
+
+
 M3_DEPARTMENT_ORDER = WEEKLY_PLANNER_DEPARTMENT_ORDER
 
 
@@ -797,6 +856,7 @@ def _m3_status_table(
     all_participant_ids: set[Any] | None = None,
     daily_rlz_by_task: dict[Any, tuple[str, str]] | None = None,
     date_range_by_task: dict[Any, tuple[str, str]] | None = None,
+    products_by_task: dict[Any, str] | None = None,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -809,6 +869,8 @@ def _m3_status_table(
         columns.append(("LLOJI", 7))
     if date_range_by_task is not None:
         columns.extend((("NGA", 10), ("NE", 10)))
+    if products_by_task is not None:
+        columns.append(("PRODUKTE", 12))
     columns.append(("TITULLI", 64))
     if daily_rlz_by_task is not None:
         columns.extend((("ARSYEJA", 24), ("KOMENT", 36)))
@@ -841,6 +903,8 @@ def _m3_status_table(
             values.append("-")
         if date_range_by_task is not None:
             values.extend(("-", "-"))
+        if products_by_task is not None:
+            values.append("-")
         values.append(empty_title)
         if daily_rlz_by_task is not None:
             values.extend(("-", "-"))
@@ -894,6 +958,8 @@ def _m3_status_table(
             values.append(task_type)
         if date_range_by_task is not None:
             values.extend((postponed_from, postponed_to))
+        if products_by_task is not None:
+            values.append(products_by_task.get(task.id, "-"))
         values.append(padded_titles[0])
         if daily_rlz_by_task is not None:
             values.extend((reason_lines[0], comment_lines[0]))
@@ -913,6 +979,8 @@ def _m3_status_table(
                 continuation.append("")
             if date_range_by_task is not None:
                 continuation.extend(("", ""))
+            if products_by_task is not None:
+                continuation.append("")
             continuation.append(padded_titles[line_index] if line_index < len(padded_titles) else "")
             if daily_rlz_by_task is not None:
                 continuation.extend((
@@ -1071,6 +1139,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     postponed_today, postponed_date_ranges, postponed_both_today, postponed_both_date_ranges = await _postponed_tasks_for_m3_day(
         db, report_day, tasks
     )
+    product_delta_today = _product_delta_tasks_for_m3_day(report_tasks, report_day)
 
     tomorrow_tasks = [task for task in tasks if _task_day(task) == tomorrow and _is_open(task)]
     new_task_review_tasks = [task for task in tomorrow_tasks if not _is_system_task(task)]
@@ -1267,6 +1336,21 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_department=True,
                 include_am_pm=True,
                 department_codes=department_codes,
+                **table_kwargs,
+            )
+        ),
+        SECTION_TITLES[12]: _normalize_section(
+            _m3_status_table(
+                "PRODUKTE +/-",
+                product_delta_today,
+                names,
+                with_status=True,
+                include_department=True,
+                include_am_pm=True,
+                department_codes=department_codes,
+                products_by_task={
+                    task.id: _m3_product_delta_label(task) for task in product_delta_today
+                },
                 **table_kwargs,
             )
         ),
