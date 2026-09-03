@@ -38,6 +38,7 @@ from app.models.task_one_h_report_slot import TaskOneHReportSlot
 from app.models.user import User
 from app.services.one_h_slots import effective_slot_date
 from app.services.system_task_schedule import matches_template_date
+from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 
 
 router = APIRouter()
@@ -66,7 +67,7 @@ BUCKETS = [
 
 DEFAULT_MAX_ITEMS_PER_BUCKET = int(os.getenv("COMMON_VIEW_MAX_ITEMS_PER_BUCKET", "1000"))
 SERVER_CACHE_TTL_SECONDS = int(os.getenv("COMMON_VIEW_CACHE_TTL_SECONDS", "15"))
-COMMON_VIEW_CACHE_VERSION = "12"
+COMMON_VIEW_CACHE_VERSION = "13"
 
 _cache: dict[str, tuple[float, str, dict[str, Any]]] = {}
 
@@ -817,7 +818,7 @@ async def get_common_view(
             display_title = display_title or (
                 plan_note_titles.get(t.plan_note_origin_id) if t.plan_note_origin_id else None
             )
-            display_title = display_title or t.title
+            display_title = normalize_email_task_title(display_title or t.title)
             assignees = assignees_by_task.get(t.id) or []
             if not assignees and t.assigned_to:
                 user_for_task = users_map.get(t.assigned_to)
@@ -956,7 +957,7 @@ async def get_common_view(
                     )
                 if (
                     t.is_deadline_important
-                    or re.search(r"\b0?8:00\b", display_title or t.title or "")
+                    or title_has_eight_am_indicator(display_title or t.title)
                 ) and not (t.is_1h_report or t.is_bllok or t.is_r1 or t.is_personal):
                     items["important"].append(
                         {

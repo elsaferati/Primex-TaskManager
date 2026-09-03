@@ -62,23 +62,16 @@ from app.services.task_strike_events import (
     record_description_strike_events,
     record_title_strike_events,
 )
+from app.services.task_title_rules import (
+    normalize_email_task_title as _normalize_email_task_title,
+    title_has_eight_am_indicator,
+)
 
 
 router = APIRouter()
 
-EMAIL_TASK_TITLE_RE = re.compile(r"\bEM\b", re.IGNORECASE)
-EIGHT_AM_TITLE_RE = re.compile(r"\b0?8:00\b")
-
-
-def _normalize_email_task_title(title: str) -> str:
-    normalized = title.strip()
-    if EMAIL_TASK_TITLE_RE.search(normalized) and not EIGHT_AM_TITLE_RE.search(normalized):
-        return f"08:00 {normalized}"
-    return normalized
-
-
 def _validate_eight_am_one_h_slot(title: str, slot: str | None) -> None:
-    if EIGHT_AM_TITLE_RE.search(title) and slot not in (None, "10:00"):
+    if title_has_eight_am_indicator(title) and slot not in (None, "10:00"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="08:00 tasks are 1H tasks and must use the 10:00 slot.",

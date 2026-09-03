@@ -153,6 +153,7 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
             self._task("Open deadline", 15, is_deadline_important=True),
             self._task("Open AM/PM deadline", 15, is_deadline_important=True, finish_period="AM/PM"),
             self._task("Open 08:00 title", 2),
+            self._task("Open EM title", 2),
             self._task("Both 08:00", 2, is_deadline_important=True),
             self._task("PM deadline", 15, is_deadline_important=True, finish_period="PM"),
             self._task("PM 08:00", 2, finish_period="PM"),
@@ -171,17 +172,18 @@ class UnfinishedPriorityTaskRowsTests(unittest.TestCase):
         self.assertEqual(
             set(rows_by_title),
             {
-                "Open deadline", "Open AM/PM deadline", "Open 08:00 title",
+                "Open deadline", "Open AM/PM deadline", "Open 08:00 title", "08:00 Open EM title",
                 "Both 08:00", "Done after 08:00",
             },
         )
         self.assertEqual(rows_by_title["Open deadline"][3], "DEADLINE")
         self.assertEqual(rows_by_title["Open 08:00 title"][3], "08:00")
+        self.assertEqual(rows_by_title["08:00 Open EM title"][3], "08:00")
         self.assertEqual(rows_by_title["Both 08:00"][3], "DEADLINE / 08:00")
         self.assertEqual(rows_by_title["Done after 08:00"][5], "24.08.2026 02:00")
         self.assertEqual(
             [row[3] for row in rows],
-            ["08:00", "08:00", "DEADLINE / 08:00", "DEADLINE", "DEADLINE"],
+            ["08:00", "08:00", "08:00", "DEADLINE / 08:00", "DEADLINE", "DEADLINE"],
         )
 
     def test_08_rows_use_a_border_while_deadlines_keep_the_red_fill(self) -> None:

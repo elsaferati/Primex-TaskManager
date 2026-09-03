@@ -207,7 +207,7 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(draft.recipients["to"], ["report@example.com"])
         self.assertEqual(draft.gmail_message_id, "gmail-id")
 
-    async def test_scheduler_sends_fresh_m3_report_at_both_delivery_times(self) -> None:
+    async def test_scheduler_sends_fresh_m3_report_only_at_1630(self) -> None:
         timezone = ZoneInfo("Europe/Tirane")
         draft = make_draft()
         settings = SimpleNamespace(
@@ -246,12 +246,12 @@ class MeetingsReportWorkflowTests(unittest.IsolatedAsyncioTestCase):
                 datetime(2026, 8, 5, 16, 31, tzinfo=timezone)
             )
 
-        self.assertTrue(first_sent)
+        self.assertFalse(first_sent)
         self.assertTrue(second_sent)
         self.assertFalse(no_third_send)
-        self.assertEqual(draft.auto_sent_slots, ["15:50", "16:30"])
-        self.assertEqual(build.await_count, 2)
-        self.assertEqual(send.await_count, 2)
+        self.assertEqual(draft.auto_sent_slots, ["16:30"])
+        self.assertEqual(build.await_count, 1)
+        self.assertEqual(send.await_count, 1)
 
 
 class MeetingsReportAliasDedupTests(unittest.TestCase):

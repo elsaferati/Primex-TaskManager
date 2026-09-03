@@ -178,7 +178,7 @@ class TomorrowClosingFormatParityTests(unittest.TestCase):
         self.assertIn("border-bottom:3px solid #334155", html)
         self.assertIn("T/Y/O", html)
         self.assertIn("background-color:#DC2626;color:#FFFFFF", html)
-        self.assertIn("font-weight:800;text-align:left", html)
+        self.assertIn("font-weight:400;text-align:left", html)
         self.assertIn("START: 02.09.2026</div>", html)
         self.assertIn("DUE: 02.09.2026</div>", html)
 
@@ -189,6 +189,7 @@ class TomorrowClosingFormatParityTests(unittest.TestCase):
             self.assertIn(value, xlsx_text)
         overdue_cell = next(cell for row in workbook.active.iter_rows() for cell in row if cell.value == "2")
         self.assertEqual(overdue_cell.fill.fgColor.rgb, "00DC2626")
+        self.assertFalse(overdue_cell.font.bold)
         self.assertEqual(overdue_cell.alignment.horizontal, "left")
 
         _, png_bytes, _ = _png_table_attachment([], date(2026, 9, 3), closing_sections=sections)

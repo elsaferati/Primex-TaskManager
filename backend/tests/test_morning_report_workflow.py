@@ -159,6 +159,7 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         )
         self.assertIn('class="n tyo-overdue"', report_html)
         self.assertIn("background-color:#dc2626!important", report_html)
+        self.assertIn("font-weight:400;text-align:left", report_html)
         normalized = normalize_morning_report_sections([
             {"title": "GA TASKS", "body": "old ga"},
             {"title": "HV TASKS", "body": "old hv"},

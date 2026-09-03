@@ -231,7 +231,9 @@ def _planned_range_for_task(t: Task) -> tuple[date | None, date | None]:
 
 
 def _has_0800_marker(title: str | None) -> bool:
-    return bool(re.search(r"\b0?8:00\b", title or ""))
+    from app.services.task_title_rules import title_has_eight_am_indicator
+
+    return title_has_eight_am_indicator(title)
 
 
 def _finish_period_rank(value: str | None) -> int:

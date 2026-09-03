@@ -25,6 +25,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.config import settings
 from app.services.meetings_report import common_view_item_sort_key, next_working_day
 from app.services.primeflow_report import GmailService, PrimeFlowClient
+from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 from app.services.tomorrow_closing_sections import (
     ClosingSection,
     ClosingTable,
@@ -92,7 +93,6 @@ EIGHT_AM_BORDER_COLOR = "#DC2626"
 NON_ROUTINE_MEETING_BORDER_COLOR = "#2563EB"
 PERSONAL_TASK_INITIALS = re.compile(r"^[A-Z]{2,3}(?:\s*[:/]\s*[A-Z]{2,3})*(?=\s|:|/|$)", re.I)
 NOTE_MARKERS_RE = re.compile(r"\[\[\s*/?\s*(?:added|done)\s*\]\]", re.I)
-EIGHT_AM_MARKER_RE = re.compile(r"\b0?8:00\b")
 WFC_TOKEN_RE = re.compile(r"\bWFC\b", re.I)
 STATUS_COLORS = {
     "TODO": "#FFC4ED",
@@ -195,14 +195,17 @@ def _task_period_label(item: dict[str, Any]) -> str:
 def _task_cell_style(
     item: dict[str, Any], *, personal: bool, report_date: date | None = None
 ) -> tuple[str, str]:
-    """GA-personal purple wins over deadline red; other deadlines stay red."""
+    """Done green wins; otherwise GA-personal purple wins over deadline red."""
     deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-    if personal and _is_personal_task_for_ga(item):
+    status = _task_status(item)
+    if status == "DONE":
+        color = STATUS_COLORS["DONE"]
+    elif personal and _is_personal_task_for_ga(item):
         color = PERSONAL_GA_COLOR
     elif deadline:
         color = DEADLINE_COLOR
     else:
-        color = STATUS_COLORS[_task_status(item)]
+        color = STATUS_COLORS[status]
     border = f";border:2px solid {EIGHT_AM_BORDER_COLOR}" if _is_eight_am_task(item) else ""
     text_color = ";color:#fff;font-weight:700" if color == DEADLINE_COLOR else ""
     return f"{CELL_STYLE};background-color:{color}{border}{text_color}", color
@@ -316,8 +319,9 @@ def _assignees(item: dict[str, Any]) -> list[str]:
 def _task_title(item: dict[str, Any], *, personal: bool) -> str:
     title = _report_text(_first_line(item.get("title")))
     if personal:
-        return title
+        return normalize_email_task_title(title)
     title = re.sub(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})*:\s*", "", title)
+    title = normalize_email_task_title(title)
     owners = _assignees(item)
     return f"{'/'.join(owners)}: {title}" if owners else title
 
@@ -359,7 +363,7 @@ def _excel_task_title(value: str, *, red_background: bool) -> str | CellRichText
 
 def _is_eight_am_task(item: dict[str, Any]) -> bool:
     title = " ".join(str(item.get(key) or "") for key in ("title", "task_title"))
-    if EIGHT_AM_MARKER_RE.search(title):
+    if title_has_eight_am_indicator(title):
         return True
     raw_due_date = item.get("due_date") or item.get("dueDate")
     if isinstance(raw_due_date, datetime):
@@ -483,13 +487,36 @@ def _task_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list
     return rows
 
 
+def _meeting_time_sort_key(item: dict[str, Any]) -> tuple[int, int, int, str]:
+    raw_time = str(item.get("time") or "").strip()
+    match = re.search(r"(?<!\d)(\d{1,2}):(\d{2})(?!\d)", raw_time)
+    if match:
+        return (
+            0,
+            int(match.group(1)),
+            int(match.group(2)),
+            _first_line(item.get("title")).casefold(),
+        )
+    return (1, 24, 60, f"{raw_time.casefold()}|{_first_line(item.get('title')).casefold()}")
+
+
 def _meeting_rows(items: dict[str, Any], target_date: date) -> list[tuple[str, list[dict[str, Any]]]]:
     rows: list[tuple[str, list[dict[str, Any]]]] = []
     for bucket, label in MEETING_ROWS:
         values = [item for item in items.get(bucket, []) if isinstance(item, dict) and _item_date(item) == target_date]
-        values.sort(key=lambda item: (str(item.get("time") or ""), _first_line(item.get("title")).casefold()))
+        values.sort(key=_meeting_time_sort_key)
         rows.append((label, values))
     return rows
+
+
+def _flatten_meeting_rows(
+    rows: list[tuple[str, list[dict[str, Any]], bool]],
+) -> list[tuple[str, dict[str, Any]]]:
+    return [
+        (label, item)
+        for label, items, *_ in rows
+        for item in sorted(items, key=_meeting_time_sort_key)
+    ]
 
 
 def _is_non_routine_meeting(item: dict[str, Any]) -> bool:
@@ -632,25 +659,36 @@ def _dated_meetings_html(
     left, right = visible_sections
     divider_style = "border-left:4px solid #2563EB"
 
-    def meeting_cell(item: dict[str, Any] | None, index: int, divider: str) -> str:
+    def meeting_value_cells(
+        item: dict[str, Any] | None, index: int, divider: str
+    ) -> str:
         if item is None:
-            return f'<td data-meeting-cell="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
-        value = (
-            f"{_report_text(_first_line(item.get('title')))} "
-            f"{str(item.get('time') or '').strip()}"
-        ).strip()
+            return (
+                f'<td data-meeting-time="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
+                f'<td data-meeting-cell="true" style="{CELL_STYLE};{divider}">&nbsp;</td>'
+            )
+        meeting_time = str(item.get("time") or "-").strip() or "-"
+        value = _report_text(_first_line(item.get("title")))
         highlight = (
             f";border:2px solid {NON_ROUTINE_MEETING_BORDER_COLOR}"
             if _is_non_routine_meeting(item)
             else ""
         )
         return (
+            f'<td data-meeting-time="true" style="{CELL_STYLE};{divider}{highlight};white-space:nowrap">'
+            f'{html.escape(meeting_time)}</td>'
             f'<td data-meeting-cell="true" style="{CELL_STYLE};{divider}{highlight}">'
             f"{index}. {html.escape(value)}</td>"
         )
 
-    left_rows = {label: values for label, values, *_ in left[2]}
-    right_rows = {label: values for label, values, *_ in right[2]}
+    left_rows = {
+        label: sorted(values, key=_meeting_time_sort_key)
+        for label, values, *_ in left[2]
+    }
+    right_rows = {
+        label: sorted(values, key=_meeting_time_sort_key)
+        for label, values, *_ in right[2]
+    }
     labels = list(left_rows)
     labels.extend(label for label in right_rows if label not in left_rows)
     body_rows: list[str] = []
@@ -660,22 +698,30 @@ def _dated_meetings_html(
         meeting_count = max(len(left_items), len(right_items), 1)
         for index in range(meeting_count):
             row_divider = SLOT_DIVIDER_STYLE if index == 0 else INTRA_SLOT_DIVIDER_STYLE
-            label_cells = ""
-            if index == 0:
-                label_cells = (
-                    f'<th rowspan="{meeting_count}" style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE}">'
-                    f'{html.escape(label)}</th>'
-                )
-            right_label = ""
-            if index == 0:
-                right_label = (
-                    f'<th rowspan="{meeting_count}" style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE};'
-                    f'{divider_style}">{html.escape(label)}</th>'
-                )
+            left_label = (
+                f'<th rowspan="{meeting_count}" data-meeting-type="true" '
+                f'style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE}">{html.escape(label)}</th>'
+                if index == 0 else ""
+            )
+            right_label = (
+                f'<th rowspan="{meeting_count}" data-meeting-type="true" '
+                f'style="{SLOT_LABEL_STYLE};{SLOT_DIVIDER_STYLE};{divider_style}">'
+                f'{html.escape(label)}</th>'
+                if index == 0 else ""
+            )
+            left_cells = meeting_value_cells(
+                left_items[index] if index < len(left_items) else None,
+                index + 1,
+                row_divider,
+            )
+            right_cells = meeting_value_cells(
+                right_items[index] if index < len(right_items) else None,
+                index + 1,
+                row_divider,
+            )
             body_rows.append(
                 '<tr data-meeting-row="true">'
-                f'{label_cells}{meeting_cell(left_items[index] if index < len(left_items) else None, index + 1, row_divider)}'
-                f'{right_label}{meeting_cell(right_items[index] if index < len(right_items) else None, index + 1, row_divider)}'
+                f'{left_label}{left_cells}{right_label}{right_cells}'
                 '</tr>'
             )
     body = "".join(body_rows)
@@ -687,16 +733,18 @@ def _dated_meetings_html(
     return (
         '<table data-side-by-side-meetings="true" role="presentation" width="100%" border="1" '
         f'cellpadding="0" cellspacing="0" style="{TABLE_STYLE};margin-top:18px;{MEETING_TABLE_FRAME_STYLE}">'
-        '<colgroup><col width="9%"><col width="41%"><col width="9%"><col width="41%"></colgroup>'
+        '<colgroup><col width="8%"><col width="7%"><col width="35%"><col width="8%"><col width="7%"><col width="35%"></colgroup>'
         '<thead><tr>'
-        f'<th colspan="2" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};border-left:5px solid #2563EB;'
+        f'<th colspan="3" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};border-left:5px solid #2563EB;'
         f'font-size:15px;">{day_header(left)}</th>'
-        f'<th colspan="2" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};{divider_style};font-size:15px;">'
+        f'<th colspan="3" style="{HEADER_STYLE};background-color:#EEF2FF;{MEETING_HEADER_FRAME_STYLE};{divider_style};font-size:15px;">'
         f'{day_header(right)}</th></tr>'
         '<tr>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">LLOJI</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">KOHA</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">TAKIMET</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE};{divider_style}">LLOJI</th>'
+        f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">KOHA</th>'
         f'<th style="{HEADER_STYLE};{MEETING_HEADER_FRAME_STYLE}">TAKIMET</th>'
         f"</tr></thead><tbody>{body}</tbody></table>"
     )
@@ -770,7 +818,7 @@ def _closing_sections_html(sections: list[ClosingSection]) -> str:
                         extra += ";padding:0"
                     if column == "T/Y/O" and _is_overdue_tyo_value(value):
                         cell_color, cell_foreground = DEADLINE_COLOR, "#FFFFFF"
-                        extra += ";font-weight:800;text-align:left"
+                        extra += ";font-weight:400;text-align:left"
                     if column == "DISK":
                         normalized = str(value).strip().upper()
                         if normalized == "YES":
@@ -910,7 +958,7 @@ def _excel_table_attachment(
                             cell.font = Font(color="FFFFFF", bold=True)
                         if header == "T/Y/O" and _is_overdue_tyo_value(value):
                             cell.fill = PatternFill("solid", fgColor=DEADLINE_COLOR.removeprefix("#"))
-                            cell.font = Font(color="FFFFFF", bold=True)
+                            cell.font = Font(color="FFFFFF", bold=False)
                             cell.alignment = Alignment(horizontal="left", vertical="center")
                         if header == "DISK":
                             normalized = str(value).strip().upper()
@@ -1039,18 +1087,19 @@ def _excel_table_attachment(
                         if labels:
                             value = f"{' '.join(labels)}\n{value}"
                     cell_value = f"{item_index - 2 + chunk_index * 6}. {value}"
-                    deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                    ga_personal = personal and _is_personal_task_for_ga(item)
+                    background = _task_cell_style(
+                        item, personal=personal, report_date=target_date
+                    )[1]
                     if not meeting:
                         cell_value = _excel_task_title(
                             cell_value,
-                            red_background=deadline and not ga_personal,
+                            red_background=background == DEADLINE_COLOR,
                         )
                     cell = sheet.cell(row_number, item_index, cell_value)
                     if not meeting:
-                        if ga_personal:
+                        if background == PERSONAL_GA_COLOR:
                             cell.fill = ga_fill
-                        elif deadline:
+                        elif background == DEADLINE_COLOR:
                             cell.fill = deadline_fill
                             cell.font = Font(color="FFFFFF", bold=True)
                         else:
@@ -1097,6 +1146,46 @@ def _excel_table_attachment(
                 sheet.merge_cells(start_row=first_row, start_column=2, end_row=row_number - 1, end_column=2)
         return row_number
 
+    def write_meeting_section(
+        rows: list[tuple[str, list[dict[str, Any]], bool]], row_number: int
+    ) -> int:
+        sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=2)
+        sheet.merge_cells(start_row=row_number, start_column=4, end_row=row_number, end_column=8)
+        for column, value in ((1, "LLOJI"), (3, "KOHA"), (4, "TAKIMET")):
+            cell = sheet.cell(row_number, column, value)
+            cell.font = Font(bold=True)
+            cell.fill = header_fill
+            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
+        for column in range(1, 9):
+            sheet.cell(row_number, column).border = task_grid_border(
+                sheet.cell(row_number, column).border,
+                category_start=True,
+                category_end=True,
+                outer_left=column == 1,
+                outer_right=column in (4, 8),
+            )
+        row_number += 1
+
+        meeting_values = _flatten_meeting_rows(rows) or [("-", None)]
+        for index, (label, item) in enumerate(meeting_values, 1):
+            sheet.merge_cells(start_row=row_number, start_column=1, end_row=row_number, end_column=2)
+            sheet.merge_cells(start_row=row_number, start_column=4, end_row=row_number, end_column=8)
+            sheet.cell(row_number, 1, label)
+            sheet.cell(row_number, 3, str(item.get("time") or "-").strip() if item else "-")
+            sheet.cell(
+                row_number,
+                4,
+                f"{index}. {_report_text(_first_line(item.get('title')))}" if item else "-",
+            )
+            highlighted = item is not None and _is_non_routine_meeting(item)
+            for column in range(1, 9):
+                cell = sheet.cell(row_number, column)
+                cell.border = non_routine_meeting_border if highlighted and column >= 3 else border
+                cell.alignment = Alignment(vertical="top", wrap_text=True)
+            sheet.cell(row_number, 1).font = Font(bold=True)
+            row_number += 1
+        return row_number
+
     task_header_row = write_checklists(write_closing_sections(3))
     next_row = write_section(task_rows, meeting=False, row_number=task_header_row)
     if include_meetings:
@@ -1117,7 +1206,7 @@ def _excel_table_attachment(
                         outer_left=column == 1,
                         outer_right=column in (1, 8),
                     )
-                next_row = write_section(dated_rows, meeting=True, row_number=section_row + 1)
+                next_row = write_meeting_section(dated_rows, row_number=section_row + 1)
         else:
             next_row = write_section(meeting_rows, meeting=True, row_number=next_row + 1)
 
@@ -1285,7 +1374,7 @@ def _docx_table_attachment(
                         set_cell(
                             cell,
                             value,
-                            bold=column == "DISK" or (column == "T/Y/O" and _is_overdue_tyo_value(value)),
+                            bold=column == "DISK",
                             color=cell_foreground,
                             center=column in {"NR", "DISK"},
                         )
@@ -1320,21 +1409,19 @@ def _docx_table_attachment(
 
     for meeting_date, relative, dated_rows in meeting_sections or []:
         heading(f"TAKIMET {relative} - {meeting_date:%d.%m.%Y}", size=10)
-        meeting_table = document.add_table(rows=1, cols=2)
+        meeting_table = document.add_table(rows=1, cols=3)
         meeting_table.style = "Table Grid"
-        set_widths(meeting_table, [1.4, 8.7])
-        for index, value in enumerate(["LLOJI", "TAKIMET"]):
+        set_widths(meeting_table, [1.4, 1.0, 7.7])
+        for index, value in enumerate(["LLOJI", "KOHA", "TAKIMET"]):
             set_cell(meeting_table.rows[0].cells[index], value, bold=True, center=True)
         style_header(meeting_table.rows[0])
-        for label, values, _ in dated_rows:
+        for index, (label, item) in enumerate(_flatten_meeting_rows(dated_rows), 1):
             row = meeting_table.add_row()
             set_cell(row.cells[0], label, bold=True)
+            set_cell(row.cells[1], str(item.get("time") or "-").strip() or "-")
             set_cell(
-                row.cells[1],
-                "\n".join(
-                    f"{index}. {_report_text(_first_line(item.get('title')))} {str(item.get('time') or '').strip()}".strip()
-                    for index, item in enumerate(values, 1)
-                ) or "-",
+                row.cells[2],
+                f"{index}. {_report_text(_first_line(item.get('title')))}",
             )
 
     heading("KOMENTE PER STAF", size=10)
@@ -1415,36 +1502,29 @@ def _core_png_table_attachment(
         while len(meeting_pair) < 2:
             meeting_pair.append((meeting_pair[0][0], "", []))
     meeting_half_width = (width - (margin * 2)) // 2
-    meeting_label_width = 150
-    meeting_content_width = meeting_half_width - meeting_label_width
-    meeting_layout: list[tuple[str, list[dict[str, Any]], list[dict[str, Any]], int]] = []
+    meeting_label_width = 125
+    meeting_time_width = 85
+    meeting_content_width = meeting_half_width - meeting_label_width - meeting_time_width
+    meeting_layout: list[
+        tuple[tuple[str, dict[str, Any]] | None, tuple[str, dict[str, Any]] | None, int]
+    ] = []
     if meeting_pair:
-        left_rows = {label: values for label, values, *_ in meeting_pair[0][2]}
-        right_rows = {label: values for label, values, *_ in meeting_pair[1][2]}
-        meeting_labels = list(left_rows)
-        meeting_labels.extend(label for label in right_rows if label not in left_rows)
+        left_rows = _flatten_meeting_rows(meeting_pair[0][2])
+        right_rows = _flatten_meeting_rows(meeting_pair[1][2])
+        meeting_count = max(len(left_rows), len(right_rows), 1)
+        for index in range(meeting_count):
+            left_entry = left_rows[index] if index < len(left_rows) else None
+            right_entry = right_rows[index] if index < len(right_rows) else None
 
-        def meeting_values_height(values: list[dict[str, Any]]) -> int:
-            height = 0
-            for index, item in enumerate(values, 1):
-                value = (
-                    f"{index}. {_report_text(_first_line(item.get('title')))} "
-                    f"{str(item.get('time') or '').strip()}"
-                ).strip()
-                height += max(26, len(wrap(value, regular, meeting_content_width - 18)) * 20 + 8)
-            return height
+            def entry_height(entry: tuple[str, dict[str, Any]] | None) -> int:
+                if entry is None:
+                    return 44
+                value = f"{index + 1}. {_report_text(_first_line(entry[1].get('title')))}"
+                return max(44, len(wrap(value, regular, meeting_content_width - 18)) * 20 + 12)
 
-        for label in meeting_labels:
-            left_values = left_rows.get(label, [])
-            right_values = right_rows.get(label, [])
-            row_height = max(
-                44,
-                meeting_values_height(left_values) + 10,
-                meeting_values_height(right_values) + 10,
-            )
-            meeting_layout.append((label, left_values, right_values, row_height))
+            meeting_layout.append((left_entry, right_entry, max(entry_height(left_entry), entry_height(right_entry))))
     meeting_block_height = (
-        20 + 42 + 38 + sum(row[3] for row in meeting_layout)
+        20 + 42 + 38 + sum(row[2] for row in meeting_layout)
         if meeting_pair else 0
     )
     height = (
@@ -1518,13 +1598,11 @@ def _core_png_table_attachment(
             item = chunk[item_index] if item_index < len(chunk) else None
             fill, text_color, outline, outline_width = "#FFFFFF", "#111827", "#111827", 1
             if item is not None:
-                deadline = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-                if personal and _is_personal_task_for_ga(item):
-                    fill = PERSONAL_GA_COLOR
-                elif deadline:
-                    fill, text_color = DEADLINE_COLOR, "#FFFFFF"
-                else:
-                    fill = STATUS_COLORS[_task_status(item)]
+                fill = _task_cell_style(
+                    item, personal=personal, report_date=target_date
+                )[1]
+                if fill == DEADLINE_COLOR:
+                    text_color = "#FFFFFF"
                 if _is_eight_am_task(item):
                     outline, outline_width = EIGHT_AM_BORDER_COLOR, 4
             draw.rectangle((x, y, right, y + row_height), fill=fill, outline=outline, width=outline_width)
@@ -1629,49 +1707,65 @@ def _core_png_table_attachment(
         x = margin
         meeting_column_widths = [
             meeting_label_width,
+            meeting_time_width,
             meeting_content_width,
             meeting_label_width,
+            meeting_time_width,
             meeting_content_width,
         ]
-        for column, label in enumerate(["LLOJI", "TAKIMET", "LLOJI", "TAKIMET"]):
+        for column, label in enumerate(["LLOJI", "KOHA", "TAKIMET", "LLOJI", "KOHA", "TAKIMET"]):
             right = x + meeting_column_widths[column]
             draw.rectangle((x, y, right, y + 38), fill="#F8FAFC", outline="#111827", width=3)
             draw.text((x + 6, y + 9), label, fill="#111827", font=bold)
             x = right
         draw.line((center, y, center, y + 38), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
         y += 38
-        for label, left_values, right_values, row_height in meeting_layout:
+        for meeting_index, (left_entry, right_entry, row_height) in enumerate(meeting_layout, 1):
             x = margin
             row_bottom = y + row_height
-            for side_values in (left_values, right_values):
+            for entry in (left_entry, right_entry):
+                label, item = entry if entry is not None else ("", None)
                 label_right = x + meeting_label_width
                 draw.rectangle((x, y, label_right, row_bottom), fill="#FFFFFF", outline="#111827")
                 draw.text((x + 6, y + 8), label, fill="#111827", font=bold)
-                content_right = label_right + meeting_content_width
-                draw.rectangle((label_right, y, content_right, row_bottom), fill="#FFFFFF", outline="#111827")
-                item_y = y + 5
-                for index, item in enumerate(side_values, 1):
-                    value = (
-                        f"{index}. {_report_text(_first_line(item.get('title')))} "
-                        f"{str(item.get('time') or '').strip()}"
-                    ).strip()
+                time_right = label_right + meeting_time_width
+                content_right = time_right + meeting_content_width
+                draw.rectangle((label_right, y, time_right, row_bottom), fill="#FFFFFF", outline="#111827")
+                draw.rectangle((time_right, y, content_right, row_bottom), fill="#FFFFFF", outline="#111827")
+                if item is not None:
+                    outline = (
+                        NON_ROUTINE_MEETING_BORDER_COLOR
+                        if _is_non_routine_meeting(item)
+                        else "#111827"
+                    )
+                    outline_width = 3 if outline == NON_ROUTINE_MEETING_BORDER_COLOR else 1
+                    draw.rectangle(
+                        (label_right, y, time_right, row_bottom),
+                        fill="#FFFFFF",
+                        outline=outline,
+                        width=outline_width,
+                    )
+                    draw.rectangle(
+                        (time_right, y, content_right, row_bottom),
+                        fill="#FFFFFF",
+                        outline=outline,
+                        width=outline_width,
+                    )
+                    draw.text(
+                        (label_right + 6, y + 8),
+                        str(item.get("time") or "-").strip() or "-",
+                        fill="#111827",
+                        font=regular,
+                    )
+                    value = f"{meeting_index}. {_report_text(_first_line(item.get('title')))}"
                     lines = wrap(value, regular, meeting_content_width - 18)
-                    item_height = max(26, len(lines) * 20 + 8)
-                    if _is_non_routine_meeting(item):
-                        draw.rectangle(
-                            (label_right + 4, item_y, content_right - 4, item_y + item_height - 3),
-                            fill="#FFFFFF",
-                            outline=NON_ROUTINE_MEETING_BORDER_COLOR,
-                            width=3,
-                        )
                     for line_index, line in enumerate(lines):
                         draw.text(
-                            (label_right + 9, item_y + 4 + line_index * 20),
+                            (time_right + 9, y + 8 + line_index * 20),
                             line,
                             fill="#111827",
                             font=regular,
                         )
-                    item_y += item_height
                 x = content_right
             draw.line((center, y, center, row_bottom), fill=NON_ROUTINE_MEETING_BORDER_COLOR, width=5)
             y = row_bottom

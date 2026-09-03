@@ -7193,11 +7193,6 @@ export default function AdminTasksPage() {
                   </tbody>
                 </table>
               </div>
-              <div className="print-footer">
-                <span />
-                <div className="print-page-count">1/{printTotalPages}</div>
-                <div className="print-initials">PUNOI: {printInitials}</div>
-              </div>
             </div>
           </div>
           <div className="print:hidden">
@@ -8971,7 +8966,24 @@ export default function AdminTasksPage() {
           }
           @page {
             margin: 4mm;
-            size: A4 landscape;
+            size: landscape;
+          }
+          [data-print-target="ga-time"],
+          [data-print-target="ga-time"] > div,
+          [data-print-target="ga-time"] .admin-week-table,
+          [data-print-target="ga-time"] .print-section[data-print-section="ga-time"],
+          [data-print-target="ga-time"] .print-only,
+          [data-print-target="ga-time"] .print-page,
+          [data-print-target="ga-time"] .ga-time-table {
+            width: 100% !important;
+            min-width: 0 !important;
+            max-width: 100% !important;
+            margin-left: 0 !important;
+            margin-right: 0 !important;
+          }
+          [data-print-target="ga-time"] > div {
+            padding-left: 0 !important;
+            padding-right: 0 !important;
           }
           .admin-week-table .all-tasks-table-scroll {
             max-height: none !important;
@@ -9001,7 +9013,7 @@ export default function AdminTasksPage() {
             min-height: calc(210mm - 8mm);
             max-height: none;
             overflow: visible;
-            padding: 0.04in 0.02in 0.22in 0.02in;
+            padding: 0.04in 0.02in;
           }
           .print-section[data-print-section="ga-time"] .print-header {
             margin-bottom: 4px;
@@ -9121,7 +9133,7 @@ export default function AdminTasksPage() {
             height: auto;
           }
           .print-section[data-print-section="ga-time"] .ga-time-table-table tbody .ga-time-row-custom {
-            height: 5mm;
+            height: 3mm;
           }
           .admin-week-table .ga-time-table-table th,
           .admin-week-table .ga-time-table-table td {
@@ -9129,7 +9141,7 @@ export default function AdminTasksPage() {
             position: static !important;
             top: auto !important;
             z-index: auto !important;
-            padding: 4px 5px;
+            padding: 2px 3px;
             white-space: normal;
             overflow-wrap: anywhere;
             word-break: break-word;
@@ -9156,36 +9168,38 @@ export default function AdminTasksPage() {
             box-shadow: none !important;
           }
           .admin-week-table .ga-time-nr {
-            width: 26px !important;
+            width: 2.5% !important;
           }
           .admin-week-table .ga-time-nr-column {
-            width: 26px !important;
+            width: 2.5% !important;
           }
           .admin-week-table .ga-time-time-column {
-            width: 42px !important;
+            width: 4% !important;
           }
           .admin-week-table .ga-time-comment-column {
-            width: 78px !important;
+            width: 16% !important;
           }
           .admin-week-table .ga-time-day-column {
-            width: calc((100% - 224px) / 5) !important;
+            width: 12.3% !important;
           }
           .admin-week-table .ga-time-comment {
-            min-width: 78px !important;
-            width: 78px !important;
+            min-width: 0 !important;
+            width: 16% !important;
           }
           .admin-week-table .ga-time-special-comment {
             min-width: 0 !important;
             width: auto !important;
           }
           .admin-week-table .ga-time-time {
-            width: 42px !important;
+            width: 4% !important;
           }
           .admin-week-table .ga-time-slot-label {
             background: #f3f4f6 !important;
             text-align: left !important;
             direction: ltr;
             vertical-align: top !important;
+            font-size: 8px;
+            line-height: 1.1;
           }
           .print-section[data-print-section="ga-time"] .ga-time-slot-label,
           .print-section[data-print-section="ga-time"] .ga-time-cell {
@@ -9195,6 +9209,7 @@ export default function AdminTasksPage() {
           .print-section[data-print-section="ga-time"] .ga-time-cell-content {
             min-height: 100%;
             justify-content: flex-start;
+            gap: 2px;
           }
           .print-section[data-print-section="ga-time"] .ga-time-table-table tbody {
             height: 100%;
@@ -9204,12 +9219,22 @@ export default function AdminTasksPage() {
             -webkit-print-color-adjust: exact;
             print-color-adjust: exact;
             page-break-inside: avoid;
-            margin-bottom: 3px;
-            font-size: 11px;
-            padding: 3px 5px;
+            margin-bottom: 1px;
+            font-size: 8px;
+            line-height: 1.15;
+            padding: 1px 2px;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-comment-list {
+            gap: 2px;
+          }
+          .print-section[data-print-section="ga-time"] .ga-time-comment-text {
+            min-height: 0;
+            padding: 2px 3px;
+            font-size: 8px;
+            line-height: 1.15;
           }
           .print-title {
-            font-size: 16px;
+            font-size: 13px;
             font-weight: 700;
             text-transform: uppercase;
             text-align: center;
@@ -9231,12 +9256,6 @@ export default function AdminTasksPage() {
             padding-right: 0;
             font-size: 10px;
             color: #334155;
-          }
-          .print-section[data-print-section="ga-time"] .print-footer {
-            position: absolute;
-            bottom: 0.04in;
-            left: 0.04in;
-            right: 0.04in;
           }
           .print-page-count {
             grid-column: 2;

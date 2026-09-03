@@ -49,6 +49,7 @@ from app.services.meetings_report import (
     common_view_task_sort_key,
     send_section_report,
 )
+from app.services.task_title_rules import title_has_eight_am_indicator
 
 REPORT_TYPE = "after_break_report"
 REPORT_LABEL = "Permbledhja pas pauzes"
@@ -218,7 +219,7 @@ def _unfinished_priority_task_rows(
 
         # Match Common View: its 08:00 badge/filter is driven by the title marker,
         # while due_date only determines which calendar day the task belongs to.
-        is_eight_am = bool(re.search(r"\b0?8:00\b", task.title or ""))
+        is_eight_am = title_has_eight_am_indicator(task.title)
         is_deadline = bool(task.is_deadline_important)
         if not (is_eight_am or is_deadline):
             continue

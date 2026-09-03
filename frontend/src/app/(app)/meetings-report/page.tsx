@@ -663,7 +663,7 @@ export default function MeetingsReportPage() {
                   ><span className={settings.is_active ? "absolute right-1 top-1 size-6 rounded-full bg-white shadow" : "absolute left-1 top-1 size-6 rounded-full bg-white shadow"} /></button>
                 </div>
                 <div className="grid gap-4 lg:grid-cols-[180px_240px_1fr]">
-                  <div><Label>Automatic send times</Label><div className="mt-1 flex h-10 items-center rounded-md border bg-muted/40 px-3 text-sm">15:50 and 16:30</div></div>
+                  <div><Label>Automatic send time</Label><div className="mt-1 flex h-10 items-center rounded-md border bg-muted/40 px-3 text-sm">16:30</div></div>
                   <div><Label>Timezone</Label><Input className="mt-1" value={settings.timezone} onChange={(event) => setSettings({ ...settings, timezone: event.target.value })} /></div>
                   <div><Label>Delivery days</Label><div className="mt-1 flex flex-wrap gap-2">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((label, day) => <Button key={label} type="button" size="sm" variant={settings.weekdays.includes(day) ? "default" : "outline"} onClick={() => toggleWeekday(day)}>{label}</Button>)}</div></div>
                 </div>

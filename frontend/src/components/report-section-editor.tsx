@@ -325,7 +325,7 @@ function tyoCellTone(headers: string[], cells: string[], cellIndex: number) {
   if (normalizeHeader(headers[cellIndex] || "") !== "T/Y/O") return ""
   const value = cells[cellIndex]?.trim().toUpperCase()
   const overdue = value === "Y" || (/^\d+$/.test(value || "") && Number(value) >= 2)
-  return overdue ? "!bg-red-600 !text-white font-extrabold text-left" : "text-left"
+  return overdue ? "!bg-red-600 !text-white font-normal text-left" : "text-left"
 }
 
 function hasAmPmDivider(

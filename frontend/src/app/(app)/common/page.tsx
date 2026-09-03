@@ -1041,7 +1041,8 @@ const getDeadlineIndicatorLabel = (dueDate?: string | null) => {
   return `DL ${formatDateDMY(dueDate)}`
 }
 
-const hasEightAmIndicator = (title?: string | null) => /\b0?8:00\b/.test(title || "")
+const hasEightAmIndicator = (title?: string | null) =>
+  /\b0?8:00\b/.test(title || "") || /\bEM\b/i.test(title || "")
 const getFinishPeriodIndicatorLabel = (finishPeriod?: string | null) => {
   const normalized = (finishPeriod || "").trim().toUpperCase()
   return normalized === "AM" || normalized === "PM" ? normalized : ""

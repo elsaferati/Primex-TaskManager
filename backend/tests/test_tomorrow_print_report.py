@@ -10,6 +10,7 @@ from app.services.tomorrow_print_report import (
     _dated_meetings_html,
     _excel_table_attachment,
     _html_table,
+    _meeting_rows,
     _one_h_checklists_html,
     _png_table_attachment,
     _task_rows,
@@ -308,6 +309,15 @@ def test_0800_and_am_pm_badges_keep_their_distinct_designs_together() -> None:
     assert "background-color:#DC2626;border:1px solid #B91C1C;color:#FFFFFF" in report_html
 
 
+def test_em_title_without_time_is_treated_as_0800() -> None:
+    report_html = _html_table(
+        [("1H NO SLOT", [{"title": "EF: EM TEST", "status": "TODO"}], False)],
+        report_date=date(2026, 8, 14),
+    )
+
+    assert 'data-task-badge="08:00"' in report_html
+
+
 def test_deadline_and_0800_tasks_are_highlighted_in_email_and_excel() -> None:
     tasks = [
         {
@@ -375,6 +385,26 @@ def test_ga_personal_purple_overrides_deadline_red_in_email_and_excel() -> None:
     sheet = load_workbook(BytesIO(content)).active
     assert sheet["C6"].fill.fgColor.rgb.endswith("D8B4FE")
     assert sheet["C7"].fill.fgColor.rgb.endswith("DC2626")
+
+
+def test_done_task_stays_green_even_when_it_is_a_deadline() -> None:
+    task = {
+        "title": "EH: 08:00 DERGO EMAIL STD",
+        "status": "DONE",
+        "isDone": True,
+        "is_deadline_important": True,
+        "due_date": "2026-09-03",
+    }
+    rows = [("1H 10:00", [task], False)]
+
+    report_html = _html_table(rows, report_date=date(2026, 9, 3))
+    assert 'bgcolor="#C4FDC4"' in report_html
+    assert 'bgcolor="#DC2626"' not in report_html
+    assert "border:2px solid #DC2626" in report_html
+
+    _, content, _ = _excel_table_attachment(rows, [], date(2026, 9, 3))
+    sheet = load_workbook(BytesIO(content), rich_text=True).active
+    assert sheet["C6"].fill.fgColor.rgb.endswith("C4FDC4")
 
 
 def test_wfc_title_token_is_red_and_uses_white_highlight_on_red_deadline_cards() -> None:
@@ -506,7 +536,7 @@ def test_blocked_row_label_uses_full_afternoon_interval_and_keeps_report_time() 
     assert blocked_row[0] == "BLL\n14:30 - 16:00\nRAP 16:10"
 
 
-def test_excel_status_colours_match_email_and_ga_personal_overrides_status() -> None:
+def test_excel_status_colours_and_done_overrides_ga_personal() -> None:
     _, content, _ = _excel_table_attachment(
         [
             ("1H 10:00", [{"title": "TODO task", "status": "TODO"}, {"title": "Progress", "status": "IN_PROGRESS"}], False),
@@ -519,7 +549,7 @@ def test_excel_status_colours_match_email_and_ga_personal_overrides_status() -> 
     sheet = load_workbook(BytesIO(content)).active
     assert sheet["C6"].fill.fgColor.rgb.endswith("FFC4ED")
     assert sheet["D6"].fill.fgColor.rgb.endswith("FFFF00")
-    assert sheet["C7"].fill.fgColor.rgb.endswith("D8B4FE")
+    assert sheet["C7"].fill.fgColor.rgb.endswith("C4FDC4")
 
 
 def test_done_tasks_are_last_within_each_printed_row() -> None:
@@ -560,7 +590,10 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
         (
             date(2026, 8, 25),
             "SOT",
-            [("TAK EXT", [{"title": "Today one-off", "time": "10:00", "recurrence_type": "none"}], False)],
+            [
+                ("TAK EXT", [{"title": "Today one-off", "time": "10:00", "recurrence_type": "none"}], False),
+                ("TAK INT", [{"title": "Today early internal", "time": "8:15", "recurrence_type": "weekly"}], False),
+            ],
         ),
         (
             date(2026, 8, 26),
@@ -580,16 +613,45 @@ def test_email_meetings_use_grouped_today_tomorrow_columns() -> None:
     assert "TAKIMET SOT - 25.08.2026" in report_html
     assert "TAKIMET NESER - 26.08.2026" in report_html
     assert report_html.count(">LLOJI</th>") == 2
+    assert report_html.count(">KOHA</th>") == 2
     assert report_html.count(">TAKIMET</th>") == 2
+    assert report_html.count('data-meeting-time="true"') == 6
+    assert ">10:00</td>" in report_html
+    assert "Today one-off 10:00" not in report_html
     assert "border-left:4px solid #2563EB" in report_html
-    assert report_html.count("border:2px solid #2563EB") == 1
-    assert report_html.count('data-meeting-row="true"') == 2
+    assert report_html.count("border:2px solid #2563EB") == 2
+    assert report_html.count('data-meeting-row="true"') == 3
     assert report_html.count('rowspan="2"') == 2
-    assert report_html.index("Today one-off") < report_html.index("Tomorrow weekly")
+    assert report_html.index("Today one-off") < report_html.index("Today early internal")
     assert report_html.index("Tomorrow weekly") < report_html.index("Tomorrow second")
 
     _, png, _ = _png_table_attachment([], date(2026, 8, 25), meeting_sections=sections)
     assert png.startswith(b"\x89PNG\r\n\x1a\n")
+
+    _, content, _ = _excel_table_attachment(
+        [], [], date(2026, 8, 25), meeting_sections=sections
+    )
+    values = [str(cell.value or "") for row in load_workbook(BytesIO(content)).active.iter_rows() for cell in row]
+    assert "KOHA" in values
+    assert "8:15" in values
+    assert "10:00" in values
+    assert "1. Today one-off" in values
+    assert "2. Today early internal" in values
+
+
+def test_meetings_are_ordered_chronologically_even_without_leading_zero() -> None:
+    rows = _meeting_rows(
+        {
+            "external": [
+                {"title": "Late", "date": "2026-08-25", "time": "13:00"},
+                {"title": "Early", "date": "2026-08-25", "time": "8:15"},
+                {"title": "Middle", "date": "2026-08-25", "time": "10:00"},
+            ]
+        },
+        date(2026, 8, 25),
+    )
+
+    assert [item["title"] for item in rows[0][1]] == ["Early", "Middle", "Late"]
 
 
 def test_today_and_tomorrow_reports_separate_two_days_of_meetings(monkeypatch) -> None:

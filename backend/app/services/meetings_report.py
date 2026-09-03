@@ -31,6 +31,7 @@ from app.services.primeflow_report import GmailService, report_timezone
 from app.services.primeflow_report import PrimeFlowClient
 from app.services.std_feedback_tickets import std_tickets_report_section
 from app.services.system_task_schedule import matches_template_date
+from app.services.task_title_rules import normalize_email_task_title, title_has_eight_am_indicator
 
 REPORT_TYPE = "meetings_report"
 SECTION_TITLES = [
@@ -640,7 +641,7 @@ def common_view_task_sort_key(
     owner = _task_owners(task, names, assignee_ids_by_task, all_participant_ids=all_participant_ids)
     existing_order = (
         0 if bool(task.is_deadline_important) else 1,
-        0 if re.search(r"\b0?8:00\b", task.title or "") else 1,
+        0 if title_has_eight_am_indicator(task.title) else 1,
         owner.casefold(),
         task.fast_task_order if task.fast_task_order is not None else 10**9,
         _clean_task_title(task.title).casefold(),
@@ -659,7 +660,7 @@ def common_view_item_sort_key(item: dict[str, Any]) -> tuple:
     owner = _common_owner(item)
     title = _common_title(item)
     important = bool(item.get("is_deadline_important") or item.get("isDeadlineImportant"))
-    eight_am = bool(re.search(r"\b0?8:00\b", title))
+    eight_am = title_has_eight_am_indicator(title)
     order = item.get("fast_task_order")
     if order is None:
         order = item.get("fastTaskOrder")
@@ -1022,7 +1023,7 @@ def _clean_task_title(value: str | None) -> str:
     if not title_line:
         title_line = next((line for line in candidates if not re.match(r"^\d+\.", line)), "")
     title_line = DUE_SUFFIX.sub("", title_line)
-    return re.sub(r"\s+", " ", title_line).strip() or "-"
+    return normalize_email_task_title(re.sub(r"\s+", " ", title_line).strip()) or "-"
 
 
 def _empty_aware(lines: list[str]) -> str:
@@ -1154,7 +1155,11 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
     # "Detyrat e reja" is a one-day list: a task is new on its planned start
     # date, rather than on every day up to its due date.
     new_tomorrow = [task for task in new_task_review_tasks if _is_new_task_for_m3_day(task, tomorrow)]
-    at_0800 = [task for task in new_task_review_tasks if task.due_date and _local_time(task.due_date) == "08:00"]
+    at_0800 = [
+        task for task in new_task_review_tasks
+        if title_has_eight_am_indicator(task.title)
+        or (task.due_date and _local_time(task.due_date) == "08:00")
+    ]
     deadline = [task for task in new_task_review_tasks if task.is_deadline_important]
     one_h_no_slot = [task for task in tomorrow_tasks if task.is_1h_report and not task.one_h_report_slot]
     personal_ga = [
@@ -2730,7 +2735,7 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
                 cell_classes.append("tyo-overdue")
                 cell_style = (
                     ' bgcolor="#dc2626" style="background-color:#dc2626!important;'
-                    'color:#ffffff!important;font-weight:800;text-align:left;"'
+                    'color:#ffffff!important;font-weight:400;text-align:left;"'
                 )
             if _is_stacked_start_due_cell(header[index], current_cell):
                 cell_style = ' style="padding:0!important;"'

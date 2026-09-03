@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 
 DEFAULT_RECIPIENTS = {"to": ["130primex.eu@gmail.com"], "cc": [], "bcc": []}
-M3_AUTO_SEND_TIMES = (time(15, 50), time(16, 30))
+M3_AUTO_SEND_TIMES = (time(16, 30),)
 
 
 def _due_m3_send_slot(now: datetime, sent_slots: set[str]) -> str | None:
