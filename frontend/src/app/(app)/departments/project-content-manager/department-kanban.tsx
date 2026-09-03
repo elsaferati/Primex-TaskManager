@@ -198,6 +198,10 @@ const orderOneHReportRowsBySlot = <T,>(rows: T[]) => {
   let oneHIndex = 0
   return rows.map((row) => (isOneHReportRow(row) ? orderedOneHRows[oneHIndex++]! : row))
 }
+const orderDoneReportRowsLast = <T extends { statusKey?: string | null; status?: string | null }>(rows: T[]) => [
+  ...rows.filter((row) => row.statusKey !== "DONE" && row.status?.toUpperCase() !== "DONE"),
+  ...rows.filter((row) => row.statusKey === "DONE" || row.status?.toUpperCase() === "DONE"),
+]
 const buildDailyReportOneHSlotMap = (report: DailyReportResponse | null) => {
   const map: Record<string, OneHReportSlot | null> = {}
   const items = [...(report?.tasks_today || []), ...(report?.tasks_overdue || [])]
@@ -3386,7 +3390,7 @@ export default function DepartmentKanban() {
     const periodRank = (row: (typeof rows)[number]) => (row.period === "PM" ? 1 : 0)
     const typeRank = (row: (typeof rows)[number]) => (row.typeLabel === "SYS" ? 0 : 1)
 
-    return orderOneHReportRowsBySlot(
+    return orderDoneReportRowsLast(orderOneHReportRowsBySlot(
       rows
         .map((row, index) => ({ row, index }))
         .sort((a, b) => {
@@ -3413,7 +3417,7 @@ export default function DepartmentKanban() {
         return a.index - b.index
       })
         .map((entry) => entry.row)
-    )
+    ))
   }, [
     dailyReport,
     dailyReportFastTasks,
@@ -3449,10 +3453,10 @@ export default function DepartmentKanban() {
       if (used.has(entry.id)) continue
       ordered.push(entry.row)
     }
-    return orderOneHReportRowsBySlot([
+    return orderDoneReportRowsLast(orderOneHReportRowsBySlot([
       ...ordered.filter((row) => row.statusKey !== "DONE" && row.status?.toUpperCase() !== "DONE"),
       ...ordered.filter((row) => row.statusKey === "DONE" || row.status?.toUpperCase() === "DONE"),
-    ])
+    ]))
   }, [dailyReportManualOrder, dailyUserReportRows])
 
   const dailyReportAvailableStatuses = React.useMemo(() => {
