@@ -1,7 +1,7 @@
 """Add self-reported user task preferences and skills profiles.
 
 Revision ID: 0109_user_task_preferences
-Revises: 20260903_control_ko_owner
+Revises: 20260903_meeting_scheduler
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from sqlalchemy.dialects import postgresql
 
 
 revision = "0109_user_task_preferences"
-down_revision = "20260903_control_ko_owner"
+down_revision = "20260903_meeting_scheduler"
 branch_labels = None
 depends_on = None
 
