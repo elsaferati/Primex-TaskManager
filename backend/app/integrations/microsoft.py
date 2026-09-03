@@ -12,7 +12,7 @@ from app.config import settings
 GRAPH_BASE_URL = "https://graph.microsoft.com/v1.0"
 OAUTH_BASE_URL = f"https://login.microsoftonline.com/{settings.MS_TENANT_ID}/oauth2/v2.0"
 
-SCOPES = ["offline_access", "https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/Calendars.Read"]
+SCOPES = ["offline_access", "https://graph.microsoft.com/User.Read", "https://graph.microsoft.com/Calendars.ReadWrite"]
 SCOPE_STR = " ".join(SCOPES)
 
 
@@ -86,6 +86,69 @@ async def fetch_calendar_events(access_token: str, start: datetime, end: datetim
     res.raise_for_status()
     data = res.json()
     return data.get("value", [])
+
+
+async def fetch_calendar_schedule(
+    access_token: str,
+    emails: list[str],
+    start: datetime,
+    end: datetime,
+    *,
+    timezone_name: str = "UTC",
+) -> list[dict[str, Any]]:
+    """Return Microsoft free/busy details for the requested attendees."""
+    if not emails:
+        return []
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Prefer": f'outlook.timezone="{timezone_name}"',
+    }
+    body = {
+        "schedules": emails,
+        "startTime": {"dateTime": format_datetime(start).removesuffix("Z"), "timeZone": "UTC"},
+        "endTime": {"dateTime": format_datetime(end).removesuffix("Z"), "timeZone": "UTC"},
+        "availabilityViewInterval": 15,
+    }
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        res = await client.post(f"{GRAPH_BASE_URL}/me/calendar/getSchedule", json=body, headers=headers)
+    res.raise_for_status()
+    return res.json().get("value", [])
+
+
+async def create_calendar_teams_event(
+    access_token: str,
+    *,
+    subject: str,
+    start: datetime,
+    end: datetime,
+    attendees: list[dict[str, str]],
+    body_html: str | None,
+    transaction_id: str,
+) -> dict[str, Any]:
+    """Create a calendar-backed Teams event; Outlook sends invitations to attendees."""
+    payload = {
+        "subject": subject,
+        "body": {"contentType": "HTML", "content": body_html or ""},
+        "start": {"dateTime": format_datetime(start).removesuffix("Z"), "timeZone": "UTC"},
+        "end": {"dateTime": format_datetime(end).removesuffix("Z"), "timeZone": "UTC"},
+        "attendees": [
+            {
+                "emailAddress": {"address": item["email"], "name": item.get("name") or item["email"]},
+                "type": "required",
+            }
+            for item in attendees
+        ],
+        "isOnlineMeeting": True,
+        "onlineMeetingProvider": "teamsForBusiness",
+        "responseRequested": True,
+        "transactionId": transaction_id,
+    }
+    headers = {"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"}
+    async with httpx.AsyncClient(timeout=20.0) as client:
+        res = await client.post(f"{GRAPH_BASE_URL}/me/events", json=payload, headers=headers)
+    res.raise_for_status()
+    return res.json()
 
 
 def compute_expires_at(expires_in: int) -> datetime:

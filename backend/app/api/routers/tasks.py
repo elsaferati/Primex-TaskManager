@@ -19,7 +19,7 @@ from app.api.access import ensure_department_access, ensure_manager_or_admin, en
 from app.api.deps import get_current_user
 from app.config import settings
 from app.db import get_db
-from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskStatus, UserRole
+from app.models.enums import NotificationType, ProjectPhaseStatus, TaskPriority, TaskSkillCategory, TaskStatus, UserRole
 from app.models.department import Department
 from app.models.ga_note import GaNote
 from app.models.plan_note import PlanNote
@@ -928,6 +928,7 @@ def _task_to_out(
         title=_normalize_email_task_title(task.title),
         description=task.description,
         internal_notes=task.internal_notes,
+        skill_category=task.skill_category,
         project_id=task.project_id,
         dependency_task_id=task.dependency_task_id,
         department_id=task.department_id,
@@ -1330,6 +1331,7 @@ async def list_tasks(
     department_id: uuid.UUID | None = None,
     project_id: uuid.UUID | None = None,
     status: TaskStatus | None = None,
+    skill_category: TaskSkillCategory | None = None,
     assigned_to: uuid.UUID | None = None,
     created_by: uuid.UUID | None = None,
     ga_note_origin_ids: list[uuid.UUID] | None = Query(None),
@@ -1384,6 +1386,8 @@ async def list_tasks(
         stmt = stmt.where(Task.project_id == project_id)
     if status:
         stmt = stmt.where(Task.status == status.value)
+    if skill_category:
+        stmt = stmt.where(Task.skill_category == skill_category)
     if assigned_to:
         # Check both Task.assigned_to and TaskAssignee table for multiple assignees
         stmt = stmt.where(
@@ -2048,6 +2052,7 @@ async def create_task(
                     title=payload.title,
                     description=payload.description,
                     internal_notes=payload.internal_notes,
+                    skill_category=payload.skill_category,
                     project_id=payload.project_id,
                     dependency_task_id=dependency_task_id,
                     department_id=task_department_id,
@@ -2176,6 +2181,7 @@ async def create_task(
                             title=payload.title,
                             description=payload.description,
                             internal_notes=payload.internal_notes,
+                            skill_category=payload.skill_category,
                             project_id=payload.project_id,
                             dependency_task_id=dependency_task_id,
                             department_id=task_department_id,
@@ -2287,6 +2293,7 @@ async def create_task(
                 title=payload.title,
                 description=payload.description,
                 internal_notes=payload.internal_notes,
+                skill_category=payload.skill_category,
                 project_id=payload.project_id,
                 dependency_task_id=dependency_task_id,
                 department_id=task_department_id,
@@ -2387,6 +2394,7 @@ async def create_task(
                 title=payload.title,
                 description=payload.description,
                 internal_notes=payload.internal_notes,
+                skill_category=payload.skill_category,
                 project_id=payload.project_id,
                 dependency_task_id=dependency_task_id,
                 department_id=task_department_id,
@@ -2484,6 +2492,7 @@ async def create_task(
         title=payload.title,
         description=payload.description,
         internal_notes=payload.internal_notes,
+        skill_category=payload.skill_category,
         project_id=payload.project_id,
         dependency_task_id=dependency_task_id,
         department_id=task_department_id,
@@ -2831,6 +2840,8 @@ async def update_task(
         task.description = payload.description
     if internal_notes_set:
         task.internal_notes = payload.internal_notes
+    if _payload_has_field(payload, "skill_category"):
+        task.skill_category = payload.skill_category
     dependency_set = _payload_has_field(payload, "dependency_task_id")
 
     if dependency_set:
@@ -3421,6 +3432,7 @@ async def update_task(
                         title=task.title,
                         description=task.description,
                         internal_notes=task.internal_notes,
+                        skill_category=task.skill_category,
                         project_id=task.project_id,
                         dependency_task_id=task.dependency_task_id,
                         department_id=task.department_id,

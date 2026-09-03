@@ -106,6 +106,7 @@ TITLE_PREFIX = re.compile(r"^[A-Z]{1,4}(?:/[A-Z]{1,4})?\s*:\s*", re.I)
 TASK_LINE_STATUS = re.compile(r"^\[([A-Z_]+)\]\s*")
 MEETING_HIGHLIGHT_MARKER = "[[mt:non_daily_weekly]]"
 MEETING_HIGHLIGHT_PATTERN = re.compile(r"\s*\[\[\s*mt\s*:\s*non_daily_weekly\s*\]\]", re.I)
+TASK_TONE_PATTERN = re.compile(r"\s*\[\[\s*pt\s*:\s*(deadline|eight_am)\s*\]\]", re.I)
 ALL_ASSIGNEES_DISPLAY_THRESHOLD = 10
 WEEKLY_PLANNER_DEPARTMENT_ORDER = {"DEV": 0, "GD": 1, "PCM": 2}
 
@@ -864,6 +865,7 @@ def _m3_status_table(
     daily_rlz_by_task: dict[Any, tuple[str, str]] | None = None,
     date_range_by_task: dict[Any, tuple[str, str]] | None = None,
     products_by_task: dict[Any, str] | None = None,
+    include_priority_tone: bool = False,
 ) -> list[str]:
     columns: list[tuple[str, int]] = [("NR", 2), ("KUSH", 5)]
     if include_department:
@@ -954,6 +956,16 @@ def _m3_status_table(
         comment_lines = _wrap_fixed_width(comment or "-", 36) if daily_rlz_by_task is not None else []
         status = _normalize_report_status(task.status) if with_status else None
         padded_titles = _append_status_marker_to_lines(title_lines, status, 64)
+        if include_priority_tone:
+            priority_tone = (
+                "eight_am"
+                if title_has_eight_am_indicator(task.title)
+                else "deadline"
+                if bool(getattr(task, "is_deadline_important", False))
+                else ""
+            )
+            if priority_tone:
+                padded_titles[-1] = f"{padded_titles[-1].rstrip()} [[pt:{priority_tone}]]"
         values = [str(index), owner]
         if include_department:
             values.append(department)
@@ -1324,6 +1336,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_am_pm=True,
                 department_codes=department_codes,
                 date_range_by_task=postponed_both_date_ranges,
+                include_priority_tone=True,
                 **table_kwargs,
             )
             + ["", "SHTYER DUE DATE:"]
@@ -1337,6 +1350,7 @@ async def build_meetings_report_sections(db: AsyncSession, report_day: date) -> 
                 include_am_pm=True,
                 department_codes=department_codes,
                 date_range_by_task=postponed_date_ranges,
+                include_priority_tone=True,
                 **table_kwargs,
             )[1:]
         ),
@@ -1672,6 +1686,12 @@ def _meeting_title_with_highlight(meeting: Meeting) -> str:
 def _split_meeting_highlight_marker(value: str) -> tuple[str, bool]:
     highlighted = bool(MEETING_HIGHLIGHT_PATTERN.search(value or ""))
     return MEETING_HIGHLIGHT_PATTERN.sub("", value or "").strip(), highlighted
+
+
+def _split_task_tone_marker(value: str) -> tuple[str, str]:
+    match = TASK_TONE_PATTERN.search(value or "")
+    tone = match.group(1).lower().replace("_", "-") if match else ""
+    return TASK_TONE_PATTERN.sub("", value or "").strip(), tone
 
 
 def _append_meeting_highlight_marker(lines: list[str], highlighted: bool, width: int) -> list[str]:
@@ -2087,7 +2107,8 @@ def _split_status_marker(value: str) -> tuple[str, str]:
 
 
 def _strip_status_markers(value: str) -> str:
-    return re.sub(r"\s*\[\[\s*st\s*:?\s*[A-Z_]+\s*\]\]", "", value or "", flags=re.I)
+    without_status = re.sub(r"\s*\[\[\s*st\s*:?\s*[A-Z_]+\s*\]\]", "", value or "", flags=re.I)
+    return TASK_TONE_PATTERN.sub("", without_status)
 
 
 def _append_status_marker_to_lines(title_lines: list[str], status: str | None, width: int) -> list[str]:
@@ -2442,6 +2463,8 @@ def _normalized_table_header(value: str) -> str:
 
 def _table_tone_from_label(label: str) -> str:
     normalized = label.strip().upper().rstrip(":")
+    if "08:00 TASKS" in normalized:
+        return "eight-am"
     if (
         normalized == "TODO"
         or "DETYRAT E REJA" in normalized
@@ -2635,14 +2658,21 @@ def _render_ascii_table_html(lines: list[str], tone: str = "", caption: str = ""
             row_tone = _table_tone_from_type(row[type_index]) or row_tone
         if title_index is not None and len(row) > title_index:
             cleaned_title, marker_status = _split_status_marker(row[title_index])
+            cleaned_title, priority_tone = _split_task_tone_marker(cleaned_title)
             cleaned_title, is_highlighted_meeting = _split_meeting_highlight_marker(cleaned_title)
             row[title_index] = cleaned_title
             if marker_status:
                 row_tone = _table_tone_from_status(marker_status) or row_tone
+            if priority_tone:
+                row_tone = priority_tone
         else:
             is_highlighted_meeting = False
         if products_index is not None and len(row) > products_index and _has_negative_product_delta(row[products_index]):
             row_tone = "product-negative"
+        # Deadline and 08:00 report tables have an explicit visual contract;
+        # ordinary task statuses must not replace their red treatment/frame.
+        if tone in {"deadline", "eight-am"}:
+            row_tone = tone
         row_tones.append(row_tone)
         highlighted_meeting_rows.append(is_highlighted_meeting)
         cleaned_body_rows.append(row)
@@ -3121,11 +3151,16 @@ def _section_report_table_model(lines: list[str], tone: str = "") -> tuple[list[
         highlighted = False
         if title_index is not None:
             title, marker_status = _split_status_marker(row[title_index])
+            title, priority_tone = _split_task_tone_marker(title)
             title, highlighted = _split_meeting_highlight_marker(title)
             row[title_index] = title
             row_tone = _table_tone_from_status(marker_status) or row_tone
+            if priority_tone:
+                row_tone = priority_tone
         if products_index is not None and _has_negative_product_delta(row[products_index]):
             row_tone = "product-negative"
+        if tone in {"deadline", "eight-am"}:
+            row_tone = tone
         if status_index is not None:
             row = [cell for index, cell in enumerate(row) if index != status_index]
         cleaned_rows.append(row)

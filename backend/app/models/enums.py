@@ -9,6 +9,25 @@ class UserRole(str, enum.Enum):
     STAFF = "STAFF"
 
 
+class SkillRating(str, enum.Enum):
+    A_PLUS = "A_PLUS"
+    A = "A"
+    B = "B"
+    C = "C"
+
+
+class TaskSkillCategory(str, enum.Enum):
+    analysis = "analysis"
+    research = "research"
+    problem_solving = "problem_solving"
+    creativity = "creativity"
+    standards = "standards"
+    qa = "qa"
+    management = "management"
+    communication = "communication"
+    fast_tasks = "fast_tasks"
+
+
 class TaskPriority(str, enum.Enum):
     NORMAL = "NORMAL"
     HIGH = "HIGH"

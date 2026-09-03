@@ -277,9 +277,14 @@ function rowTone(label: string, cells: string[], headers: string[]) {
   const statusValue = statusIndex >= 0 ? cells[statusIndex]?.trim().toUpperCase().replace(/_/g, " ") : ""
   const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
   const titleStatus = titleIndex >= 0 ? splitStatusMarker(cells[titleIndex] || "").status : ""
+  const priorityTone = titleIndex >= 0 ? splitPriorityToneMarker(cells[titleIndex] || "").tone : ""
   const resolvedStatus = (titleStatus || statusValue).toUpperCase().replace(/_/g, " ")
   const typeIndex = headers.findIndex((header) => normalizeHeader(header) === "TYPE")
   const typeValue = typeIndex >= 0 ? cells[typeIndex]?.trim().toUpperCase() : ""
+  // Priority report treatments are table/type semantics and must win over
+  // ordinary task status colors.
+  if (priorityTone === "EIGHT_AM" || typeValue.includes("08:00") || normalizedLabel.includes("08:00 TASKS")) return "bg-white text-slate-950"
+  if (priorityTone === "DEADLINE" || typeValue.includes("DEADLINE") || normalizedLabel.includes("TASKS WITH DEADLINE")) return "bg-red-600 text-white"
   if (resolvedStatus === "LATE") return "bg-red-100"
   const productsIndex = headers.findIndex((header) => normalizeHeader(header) === "PRODUCTS")
   const productsValue = productsIndex >= 0 ? cells[productsIndex] || "" : ""
@@ -363,9 +368,11 @@ function meetingStatusCellTone(headers: string[], cells: string[], cellIndex: nu
   return "text-center"
 }
 
-function isEightAmTaskRow(headers: string[], cells: string[]) {
+function isEightAmTaskRow(headers: string[], cells: string[], label = "") {
   const typeIndex = headers.findIndex((header) => normalizeHeader(header) === "TYPE")
-  return typeIndex >= 0 && cells[typeIndex]?.trim().toUpperCase().includes("08:00")
+  const titleIndex = headers.findIndex((header) => normalizeHeader(header) === "TITLE")
+  const priorityTone = titleIndex >= 0 ? splitPriorityToneMarker(cells[titleIndex] || "").tone : ""
+  return priorityTone === "EIGHT_AM" || (typeIndex >= 0 && cells[typeIndex]?.trim().toUpperCase().includes("08:00")) || label.toUpperCase().includes("08:00 TASKS")
 }
 
 function priorityTaskTypeRank(headers: string[], cells: string[]) {
@@ -393,6 +400,14 @@ function splitStatusMarker(value: string) {
   return { text, status }
 }
 
+function splitPriorityToneMarker(value: string) {
+  const match = value.match(/\s*\[\[\s*pt\s*:\s*(deadline|eight_am)\s*\]\]/i)
+  return {
+    text: value.replace(/\s*\[\[\s*pt\s*:\s*(?:deadline|eight_am)\s*\]\]/gi, "").replace(/\s+/g, " ").trim(),
+    tone: match?.[1]?.toUpperCase() || "",
+  }
+}
+
 function splitMeetingHighlightMarker(value: string) {
   const highlighted = /\s*\[\[\s*mt\s*:\s*non_daily_weekly\s*\]\]/i.test(value)
   return {
@@ -412,7 +427,7 @@ function withoutStatusColumn(headers: string[], cells: string[]) {
   const nextHeaders = statusIndex >= 0 ? headers.filter((_, index) => index !== statusIndex) : headers
   const nextCells = cells.map((cell, index) => {
     if (statusIndex >= 0 && index === statusIndex) return null
-    if (titleIndex >= 0 && index === titleIndex) return splitMeetingHighlightMarker(splitStatusMarker(cell).text).text
+    if (titleIndex >= 0 && index === titleIndex) return splitMeetingHighlightMarker(splitPriorityToneMarker(splitStatusMarker(cell).text).text).text
     return cell
   }).filter((cell): cell is string => cell !== null)
   return { headers: nextHeaders, cells: nextCells }
@@ -714,7 +729,7 @@ export function ReportSectionPreview({
             {visibleDataRows.map((row, rowIndex) => {
                 const visible = withoutStatusColumn(row.headers, row.cells)
                 const tone = rowTone(row.label, row.cells, row.headers)
-                const eightAmTask = isEightAmTaskRow(row.headers, row.cells)
+                const eightAmTask = isEightAmTaskRow(row.headers, row.cells, row.label)
                 const highlightedMeeting = hasMeetingHighlight(row.headers, row.cells)
                 const amPmDivider = hasAmPmDivider(row.label, visibleDataRows, rowIndex)
                 const strongStartDueDivider = hasStrongStartDueDivider(row.label)

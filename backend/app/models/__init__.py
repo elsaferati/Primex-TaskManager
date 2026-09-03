@@ -23,10 +23,18 @@ from app.models.holiday import Holiday
 from app.models.internal_note import InternalNote
 from app.models.internal_meeting_session import InternalMeetingSession
 from app.models.meeting import Meeting
+from app.models.meeting_schedule_request import (
+    MeetingScheduleApproval,
+    MeetingScheduleRequest,
+    MeetingScheduleRequestParticipant,
+    MeetingSchedulingStandard,
+)
 from app.models.meetings_report_draft import MeetingsReportDraft
 from app.models.meetings_report_settings import MeetingsReportSettings
 from app.models.after_break_report_draft import AfterBreakReportDraft
 from app.models.after_break_report_settings import AfterBreakReportSettings
+from app.models.end_week_bz_report_draft import EndWeekBzReportDraft
+from app.models.end_week_bz_report_settings import EndWeekBzReportSettings
 from app.models.tomorrow_print_report_delivery import TomorrowPrintReportDelivery
 from app.models.tomorrow_print_report_settings import TomorrowPrintReportSettings
 from app.models.today_print_report_delivery import TodayPrintReportDelivery
@@ -84,6 +92,7 @@ from app.models.task_user_comment import TaskUserComment
 from app.models.task_template import TaskTemplate
 from app.models.task_template_run import TaskTemplateRun
 from app.models.user import User
+from app.models.user_task_preference import UserTaskPreference
 from app.models.weekly_plan import WeeklyPlan
 from app.models.weekly_planner_snapshot import WeeklyPlannerSnapshot
 from app.models.weekly_planner_legend_entry import WeeklyPlannerLegendEntry
@@ -120,10 +129,16 @@ __all__ = [
     "InternalNote",
     "InternalMeetingSession",
     "Meeting",
+    "MeetingScheduleApproval",
+    "MeetingScheduleRequest",
+    "MeetingScheduleRequestParticipant",
+    "MeetingSchedulingStandard",
     "MeetingsReportDraft",
     "MeetingsReportSettings",
     "AfterBreakReportDraft",
     "AfterBreakReportSettings",
+    "EndWeekBzReportDraft",
+    "EndWeekBzReportSettings",
     "TomorrowPrintReportDelivery",
     "TomorrowPrintReportSettings",
     "TodayPrintReportDelivery",
@@ -177,6 +192,7 @@ __all__ = [
     "TaskTemplate",
     "TaskTemplateRun",
     "User",
+    "UserTaskPreference",
     "WeeklyPlan",
     "WeeklyPlannerSnapshot",
     "WeeklyPlannerLegendEntry",

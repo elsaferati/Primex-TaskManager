@@ -419,6 +419,32 @@ class MeetingsReportTaskTypeColumnTests(unittest.TestCase):
         self.assertTrue(is_known_report_title("meetings", postponed_title))
         self.assertFalse(is_manual_section_title("meetings", postponed_title))
 
+    def test_postponed_deadline_and_eight_am_tasks_keep_priority_styling(self) -> None:
+        def task(title: str, *, deadline: bool = False) -> SimpleNamespace:
+            return SimpleNamespace(
+                id=uuid.uuid4(),
+                title=title,
+                status="TODO",
+                assigned_to=None,
+                completed_at=None,
+                is_deadline_important=deadline,
+                fast_task_order=None,
+                created_at=None,
+            )
+
+        lines = _m3_status_table(
+            "SHTYER START DHE DUE DATE",
+            [task("Deadline task", deadline=True), task("08:00 task")],
+            {},
+            with_status=True,
+            include_priority_tone=True,
+        )
+        html = _render_ascii_table_html(lines)
+
+        self.assertIn('class="deadline"', html)
+        self.assertIn('class="eight-am"', html)
+        self.assertNotIn("[[pt:", html)
+
     def test_m3_postponement_uses_realization_final_deadline_rule(self) -> None:
         report_day = date(2026, 8, 28)
         task = SimpleNamespace(due_date=datetime(2026, 9, 4, 16, 0, tzinfo=ZoneInfo("Europe/Tirane")))

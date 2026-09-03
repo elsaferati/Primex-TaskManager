@@ -92,6 +92,8 @@ class Settings(BaseSettings):
     GA_NOTES_MAX_FILE_MB: int = 25
 
     OPENAI_API_KEY: str | None = None
+    SKILLS_AI_MODEL: str = "gpt-5.4-nano"
+    SKILLS_AI_TIMEOUT_SECONDS: int = 20
     SPEECH_TRANSCRIBE_MODEL: str = "whisper-1"
     SPEECH_MAX_FILE_MB: int = 20
     SPEECH_ALLOWED_MIME: str | None = None

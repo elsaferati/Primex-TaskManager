@@ -149,6 +149,8 @@ class GaHvDvTodayTaskRowsTests(unittest.TestCase):
         self.assertEqual(body.count("GA TASKS:"), 1)
         self.assertEqual(body.count("HV TASKS:"), 1)
         self.assertEqual(body.count("DV TASKS:"), 1)
+        self.assertLess(body.index("HV TASKS:"), body.index("DV TASKS:"))
+        self.assertLess(body.index("DV TASKS:"), body.index("GA TASKS:"))
         self.assertNotIn("HV TASKS: 0", body)
         self.assertIn("(Asnje detyre)", body)
         self.assertIn("T/Y/O", body)

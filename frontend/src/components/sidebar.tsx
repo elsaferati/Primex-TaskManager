@@ -33,6 +33,7 @@ import {
   ChevronDown,
   ScrollText,
   TicketCheck,
+  BrainCircuit,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -101,6 +102,12 @@ const primaryItems: NavItem[] = [
 
 const navGroups: NavGroup[] = [
   {
+    id: "team",
+    label: "Ekipi",
+    icon: Users,
+    items: [{ href: "/skills", label: "Matrica e Aftësive", icon: BrainCircuit }],
+  },
+  {
     id: "tasks",
     label: "Tasks",
     icon: ListTodo,
@@ -155,6 +162,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/weekly-planner", label: "Weekly Planner", icon: CalendarDays },
       { href: "/monthly-planner", label: "Monthly Planner", icon: CalendarRange },
+      { href: "/meeting-scheduler", label: "Meeting Scheduler", icon: CalendarClock },
       {
         href: "/realization",
         label: "Realization",
@@ -185,6 +193,12 @@ const navGroups: NavGroup[] = [
         href: "/reports/px-jav-weekly",
         label: "PX JAV – Kontrolli",
         icon: FileText,
+      },
+      {
+        href: "/end-week-bz-report",
+        label: "PIKAT E BZ FIN JAV",
+        icon: MailCheck,
+        roles: ["ADMIN", "MANAGER"],
       },
       {
         href: "/admin/1h-reports",

@@ -17,15 +17,17 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
+import { TaskSkillField } from "@/components/task-skill-field"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
+import { inferSkillCategory, SKILL_CATEGORIES } from "@/lib/skills"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
-import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCategory, SkillCategoryInference, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -1144,6 +1146,11 @@ export default function GaKaNotesPage() {
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
+  const [taskSkillCategory, setTaskSkillCategory] = React.useState<SkillCategory | null>(null)
+  const [taskSkillAutoSuggested, setTaskSkillAutoSuggested] = React.useState(false)
+  const [taskSkillAiReason, setTaskSkillAiReason] = React.useState("")
+  const [taskSkillAiLoading, setTaskSkillAiLoading] = React.useState(false)
+  const skillInferenceRequestRef = React.useRef(0)
   const [taskDateLeaveItems, setTaskDateLeaveItems] = React.useState<CommonLeaveItem[]>([])
   const [noteTaskInfo, setNoteTaskInfo] = React.useState<Map<string, NoteTaskInfo>>(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
@@ -2276,6 +2283,28 @@ export default function GaKaNotesPage() {
     }
   }
 
+  const requestAiSkillCategory = React.useCallback(async (title: string, description: string) => {
+    const requestId = ++skillInferenceRequestRef.current
+    setTaskSkillAiLoading(true)
+    try {
+      const response = await apiFetch("/skills/infer-category", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title, description }),
+      })
+      if (!response.ok || requestId !== skillInferenceRequestRef.current) return false
+      const result = (await response.json()) as SkillCategoryInference
+      setTaskSkillCategory(result.category)
+      setTaskSkillAutoSuggested(true)
+      setTaskSkillAiReason(result.reason)
+      return true
+    } catch {
+      return false
+    } finally {
+      if (requestId === skillInferenceRequestRef.current) setTaskSkillAiLoading(false)
+    }
+  }, [apiFetch])
+
   const openTaskDialog = (note: GaNote) => {
     const hasProject = Boolean(note.project_id)
     const noteDepartment = note.department_id ? departments.find((d) => d.id === note.department_id) || null : null
@@ -2301,6 +2330,11 @@ export default function GaKaNotesPage() {
     setTaskAssigneeIds([])
     setTaskDepartmentIds([])
     setTaskProjectId(note.project_id ?? "NONE")
+    const inferredCategory = inferSkillCategory(defaultTitle, note.content)
+    setTaskSkillCategory(inferredCategory)
+    setTaskSkillAutoSuggested(Boolean(inferredCategory))
+    setTaskSkillAiReason("")
+    void requestAiSkillCategory(defaultTitle, note.content || "")
   }
 
   // Get available priority/type options based on whether a project is selected
@@ -2438,6 +2472,7 @@ export default function GaKaNotesPage() {
           is_1h_report: is1hReport,
           is_r1: isR1,
           is_personal: isPersonal,
+          skill_category: taskSkillCategory,
         }),
       })
       if (!taskRes.ok) {
@@ -4553,6 +4588,51 @@ export default function GaKaNotesPage() {
                 {taskDepartmentIds.length === 0 ? (
                   <p className="text-xs text-muted-foreground">Select one or more departments to guide projects (optional).</p>
                 ) : null}
+              </div>
+              <TaskSkillField
+                value={taskSkillCategory}
+                onChange={(category) => {
+                  skillInferenceRequestRef.current += 1
+                  setTaskSkillCategory(category)
+                  setTaskSkillAutoSuggested(false)
+                  setTaskSkillAiReason("")
+                }}
+                disabled={creatingTask}
+                selectedAssigneeIds={taskAssigneeIds}
+                onSelectCandidate={(candidateId) => {
+                  setTaskAssigneeIds((previous) => previous.includes(candidateId) ? previous : [...previous, candidateId])
+                  const person = users.find((item) => item.id === candidateId)
+                  if (person?.department_id) {
+                    setTaskDepartmentIds((previous) => previous.includes(person.department_id as string)
+                      ? previous
+                      : [...previous, person.department_id as string])
+                  }
+                }}
+              />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  {taskSkillAutoSuggested && taskSkillCategory
+                    ? `${taskSkillAiReason ? "Sugjeruar nga AI" : "Sugjeruar automatikisht"}: ${SKILL_CATEGORIES.find((item) => item.id === taskSkillCategory)?.label || taskSkillCategory}${taskSkillAiReason ? ` — ${taskSkillAiReason}` : ""}`
+                    : "Mund ta rianalizosh pasi të ndryshosh titullin ose përshkrimin."}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  disabled={taskSkillAiLoading}
+                  onClick={() => {
+                    const inferred = inferSkillCategory(taskTitle, taskDescription, taskDialogNote.content)
+                    setTaskSkillCategory(inferred)
+                    setTaskSkillAutoSuggested(Boolean(inferred))
+                    setTaskSkillAiReason("")
+                    void requestAiSkillCategory(taskTitle, `${taskDescription}\n${taskDialogNote.content || ""}`).then((usedAi) => {
+                      if (!usedAi && !inferred) toast.info("Nuk u identifikua një kategori e qartë; zgjidhe manualisht.")
+                    })
+                  }}
+                >
+                  {taskSkillAiLoading ? "Duke analizuar me AI…" : "Analizo me AI përsëri"}
+                </Button>
               </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setTaskDialogNoteId(null)}>

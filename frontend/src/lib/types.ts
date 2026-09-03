@@ -1,5 +1,66 @@
 export type UserRole = "ADMIN" | "MANAGER" | "STAFF"
 
+export type SkillRating = "A_PLUS" | "A" | "B" | "C"
+export type SkillCategory =
+  | "analysis"
+  | "research"
+  | "problem_solving"
+  | "creativity"
+  | "standards"
+  | "qa"
+  | "management"
+  | "communication"
+  | "fast_tasks"
+
+export interface UserSkillsProfile {
+  id?: string | null
+  user_id: string
+  exists: boolean
+  analysis?: SkillRating | null
+  research?: SkillRating | null
+  problem_solving?: SkillRating | null
+  creativity?: SkillRating | null
+  standards?: SkillRating | null
+  qa?: SkillRating | null
+  management?: SkillRating | null
+  communication?: SkillRating | null
+  fast_tasks?: SkillRating | null
+  above_average?: string | null
+  experience?: string | null
+  development?: string | null
+  ideal_projects?: string | null
+  motivation?: string | null
+  completed_count: number
+  is_complete: boolean
+  completed_at?: string | null
+  created_at?: string | null
+  updated_at?: string | null
+}
+
+export interface TeamSkillsMatrixItem extends UserSkillsProfile {
+  name: string
+  department_id?: string | null
+  department?: string | null
+}
+
+export interface SkillRecommendation {
+  rank: number
+  user_id: string
+  name: string
+  department_id?: string | null
+  department?: string | null
+  category: SkillCategory
+  rating: SkillRating
+  score: number
+}
+
+export interface SkillCategoryInference {
+  category: SkillCategory
+  confidence: "high" | "medium" | "low"
+  reason: string
+  model: string
+}
+
 export type TaskType = "adhoc" | "system" | "reminder"
 
 export type TaskPriority = "NORMAL" | "HIGH" | "BLLOK"
@@ -237,6 +298,7 @@ export interface TaskStatus {
 
 export interface Task {
   id: string
+  skill_category?: SkillCategory | null
   department_id?: string
   board_id?: string
   project_id?: string | null
@@ -653,7 +715,9 @@ export interface Meeting {
   title: string
   platform?: string | null
   starts_at?: string | null
+  ends_at?: string | null
   meeting_url?: string | null
+  microsoft_event_id?: string | null
   meeting_type?: string | null
   recurrence_type?: string | null // "none", "weekly", "monthly"
   recurrence_days_of_week?: number[] | null

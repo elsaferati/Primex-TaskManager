@@ -11,6 +11,7 @@ from app.api.routers.internal_meeting_sessions import router as internal_meeting
 from app.api.routers.internal_notes import router as internal_notes_router
 from app.api.routers.microsoft import router as microsoft_router
 from app.api.routers.meetings import router as meetings_router
+from app.api.routers.meeting_scheduler import router as meeting_scheduler_router
 from app.api.routers.notifications import router as notifications_router
 from app.api.routers.planners import router as planners_router
 from app.api.routers.reports import router as reports_router
@@ -36,6 +37,7 @@ from app.api.routers.report_delivery_runs import router as report_delivery_runs_
 from app.api.routers.primeflow_1h_reports import router as primeflow_1h_reports_router
 from app.api.routers.meetings_report import router as meetings_report_router
 from app.api.routers.after_break_report import router as after_break_report_router
+from app.api.routers.end_week_bz_report import router as end_week_bz_report_router
 from app.api.routers.morning_report import router as morning_report_router
 from app.api.routers.tomorrow_print_report import router as tomorrow_print_report_router
 from app.api.routers.today_print_report import router as today_print_report_router
@@ -44,6 +46,7 @@ from app.api.routers.weekly_planning_audit import router as weekly_planning_audi
 from app.api.routers.px_jav_weekly_report import router as px_jav_weekly_report_router
 from app.api.routers.standards import router as standards_router
 from app.api.routers.external_tickets import router as external_tickets_router
+from app.api.routers.skills import router as skills_router
 
 
 api_router = APIRouter()
@@ -58,6 +61,7 @@ api_router.include_router(internal_meeting_sessions_router, prefix="/internal-me
 api_router.include_router(internal_notes_router, prefix="/internal-notes", tags=["internal-notes"])
 api_router.include_router(microsoft_router, prefix="/microsoft", tags=["microsoft"])
 api_router.include_router(meetings_router, prefix="/meetings", tags=["meetings"])
+api_router.include_router(meeting_scheduler_router, prefix="/meeting-scheduler", tags=["meeting-scheduler"])
 api_router.include_router(notifications_router, prefix="/notifications", tags=["notifications"])
 api_router.include_router(planners_router, prefix="/planners", tags=["planners"])
 api_router.include_router(reports_router, prefix="/reports", tags=["reports"])
@@ -83,10 +87,12 @@ api_router.include_router(report_delivery_runs_router, prefix="/admin/report-del
 api_router.include_router(primeflow_1h_reports_router, prefix="/admin/primeflow-1h-reports", tags=["admin", "primeflow-1h-reports"])
 api_router.include_router(meetings_report_router, prefix="/meetings-report", tags=["meetings-report"])
 api_router.include_router(after_break_report_router, prefix="/after-break-report", tags=["after-break-report"])
+api_router.include_router(end_week_bz_report_router, prefix="/end-week-bz-report", tags=["end-week-bz-report"])
 api_router.include_router(morning_report_router, prefix="/morning-report", tags=["morning-report"])
 api_router.include_router(tomorrow_print_report_router, prefix="/tomorrow-print-report", tags=["tomorrow-print-report"])
 api_router.include_router(today_print_report_router, prefix="/today-print-report", tags=["today-print-report"])
 api_router.include_router(realization_router, prefix="/realization", tags=["realization"])
+api_router.include_router(skills_router, prefix="/skills", tags=["skills"])
 api_router.include_router(
     weekly_planning_audit_router,
     prefix="/reports/weekly-planning-audit",

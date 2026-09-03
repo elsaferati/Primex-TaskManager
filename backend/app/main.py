@@ -14,6 +14,7 @@ from app.api.routers import api_router
 from app.config import settings
 from app.services.meetings_report_scheduler import run_meetings_report_scheduler_forever
 from app.services.after_break_report_scheduler import run_after_break_report_scheduler_forever
+from app.services.end_week_bz_report_scheduler import run_end_week_bz_report_scheduler_forever
 from app.services.morning_report_scheduler import run_morning_report_scheduler_forever
 from app.services.tomorrow_print_report_scheduler import run_tomorrow_print_report_scheduler_forever
 from app.services.today_print_report_scheduler import run_today_print_report_scheduler_forever
@@ -47,6 +48,7 @@ scheduler_task: asyncio.Task | None = None
 system_task_daily_reconciliation_task: asyncio.Task | None = None
 meetings_report_scheduler_task: asyncio.Task | None = None
 after_break_report_scheduler_task: asyncio.Task | None = None
+end_week_bz_report_scheduler_task: asyncio.Task | None = None
 morning_report_scheduler_task: asyncio.Task | None = None
 tomorrow_print_report_scheduler_task: asyncio.Task | None = None
 today_print_report_scheduler_task: asyncio.Task | None = None
@@ -59,7 +61,7 @@ async def health() -> dict:
 
 @app.on_event("startup")
 async def _startup() -> None:
-    global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task
+    global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, end_week_bz_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task
     if settings.REDIS_ENABLED:
         listener_task = asyncio.create_task(start_notification_listener())
     if settings.SYSTEM_TASK_SCHEDULER_ENABLED:
@@ -69,6 +71,7 @@ async def _startup() -> None:
         )
     meetings_report_scheduler_task = asyncio.create_task(run_meetings_report_scheduler_forever())
     after_break_report_scheduler_task = asyncio.create_task(run_after_break_report_scheduler_forever())
+    end_week_bz_report_scheduler_task = asyncio.create_task(run_end_week_bz_report_scheduler_forever())
     morning_report_scheduler_task = asyncio.create_task(run_morning_report_scheduler_forever())
     if settings.TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED:
         tomorrow_print_report_scheduler_task = asyncio.create_task(run_tomorrow_print_report_scheduler_forever())
@@ -80,7 +83,7 @@ async def _startup() -> None:
 
 @app.on_event("shutdown")
 async def _shutdown() -> None:
-    global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task
+    global listener_task, scheduler_task, system_task_daily_reconciliation_task, meetings_report_scheduler_task, after_break_report_scheduler_task, end_week_bz_report_scheduler_task, morning_report_scheduler_task, tomorrow_print_report_scheduler_task, today_print_report_scheduler_task, std_feedback_sync_task
     if listener_task is not None:
         listener_task.cancel()
         try:
@@ -116,6 +119,13 @@ async def _shutdown() -> None:
         except asyncio.CancelledError:
             pass
         after_break_report_scheduler_task = None
+    if end_week_bz_report_scheduler_task is not None:
+        end_week_bz_report_scheduler_task.cancel()
+        try:
+            await end_week_bz_report_scheduler_task
+        except asyncio.CancelledError:
+            pass
+        end_week_bz_report_scheduler_task = None
     if morning_report_scheduler_task is not None:
         morning_report_scheduler_task.cancel()
         try:

@@ -135,6 +135,8 @@ jobs:
           echo REPORT_STORAGE_DIR=%REPORT_STORAGE_DIR% >> backend\.env
           echo REPORT_RETENTION_DAYS=90 >> backend\.env
           echo OPENAI_API_KEY=%OPENAI_API_KEY% >> backend\.env
+          echo SKILLS_AI_MODEL=gpt-5.4-nano >> backend\.env
+          echo SKILLS_AI_TIMEOUT_SECONDS=20 >> backend\.env
           echo REALIZATION_AI_ENABLED=true >> backend\.env
           echo REALIZATION_AI_MODEL=gpt-5.2 >> backend\.env
           echo REALIZATION_AI_TIMEOUT_SECONDS=45 >> backend\.env
