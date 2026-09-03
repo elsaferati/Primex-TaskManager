@@ -2,12 +2,14 @@ from __future__ import annotations
 
 import uuid
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import joinedload
 
 from app.api.deps import get_current_user, require_manager_or_admin
+from app.config import settings
 from app.db import get_db
 from app.models.enums import SkillRating
 from app.models.user import User
@@ -16,14 +18,31 @@ from app.schemas.skills import (
     SKILL_FIELDS,
     TEXT_FIELDS,
     SkillRecommendation,
+    SkillCategoryInferenceOut,
+    SkillCategoryInferenceRequest,
     SkillsProfileOut,
     SkillsProfileUpdate,
     TeamSkillsMatrixItem,
 )
 from app.services.skills import RATING_WEIGHTS, completed_skill_count, rank_profiles, update_completion
+from app.services.skill_category_ai import infer_task_skill_category
 
 
 router = APIRouter()
+
+
+@router.post("/infer-category", response_model=SkillCategoryInferenceOut)
+async def infer_category(
+    payload: SkillCategoryInferenceRequest,
+    _user: User = Depends(get_current_user),
+) -> SkillCategoryInferenceOut:
+    if not payload.title.strip() and not payload.description.strip():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Title or description is required")
+    try:
+        result = await infer_task_skill_category(payload.title.strip(), payload.description.strip())
+    except (RuntimeError, ValueError, httpx.HTTPError) as exc:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="AI classification is unavailable") from exc
+    return SkillCategoryInferenceOut(**result, model=settings.SKILLS_AI_MODEL)
 
 
 def _profile_data(profile: UserTaskPreference | None, user: User) -> dict:

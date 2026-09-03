@@ -64,3 +64,15 @@ class SkillRecommendation(BaseModel):
     category: str
     rating: SkillRating
     score: int
+
+
+class SkillCategoryInferenceRequest(BaseModel):
+    title: str = Field(default="", max_length=2000)
+    description: str = Field(default="", max_length=10000)
+
+
+class SkillCategoryInferenceOut(BaseModel):
+    category: str
+    confidence: str
+    reason: str
+    model: str

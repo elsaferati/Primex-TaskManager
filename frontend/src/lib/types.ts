@@ -54,6 +54,13 @@ export interface SkillRecommendation {
   score: number
 }
 
+export interface SkillCategoryInference {
+  category: SkillCategory
+  confidence: "high" | "medium" | "low"
+  reason: string
+  model: string
+}
+
 export type TaskType = "adhoc" | "system" | "reminder"
 
 export type TaskPriority = "NORMAL" | "HIGH" | "BLLOK"
