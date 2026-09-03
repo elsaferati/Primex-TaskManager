@@ -6,31 +6,31 @@ export const SKILL_CATEGORIES: ReadonlyArray<{
   shortDescription: string
   description: string
 }> = [
-  { id: "analysis", label: "Analysis", shortDescription: "Requirements, structure and process improvement", description: "Analysing requirements, understanding needs, breaking projects into concrete steps, creating work structures, and improving processes." },
-  { id: "research", label: "Research & New Ideas", shortDescription: "Research, experimentation and inspiration", description: "Researching markets, competitors, technologies and methodologies, experimenting with approaches, and developing ideas for new projects." },
-  { id: "problem_solving", label: "Problem Solving", shortDescription: "Root causes, debugging and practical solutions", description: "Finding root causes, debugging, critical thinking, fixing ineffective processes, and making decisions in ambiguous situations." },
-  { id: "creativity", label: "Creation & Creativity", shortDescription: "Concepts, content and better ways of working", description: "Creating ideas, structures, templates, content and materials, improving user experience, and finding better presentation approaches." },
-  { id: "standards", label: "Standards & Templates", shortDescription: "Procedures, documentation and consistency", description: "Creating procedures, reusable templates, team guidelines and standard working methods that support consistent quality." },
-  { id: "qa", label: "QA / Quality Control", shortDescription: "Testing, details and improvement feedback", description: "Checking requirements, testing results, finding errors or missing details, and assuring quality before delivery." },
-  { id: "management", label: "Management, Organisation & Planning", shortDescription: "Priorities, capacity, coordination and progress", description: "Planning and allocating work, coordinating people, tracking progress, resolving blockers, adjusting plans, and maintaining project structure." },
-  { id: "communication", label: "Communication & Presentation", shortDescription: "Clear explanations, meetings and feedback", description: "Presenting internally or externally, explaining solutions, preparing materials, managing discussions, and handling feedback." },
-  { id: "fast_tasks", label: "Fast Tasks", shortDescription: "Quick reactions and short-deadline work", description: "Handling urgent requests, practical short tasks, team support, rapid changes, and short deadlines." },
+  { id: "analysis", label: "Analizë", shortDescription: "Kërkesa, strukturë dhe përmirësim procesesh", description: "Analizimi i kërkesave, kuptimi i nevojave, ndarja e projekteve në hapa konkretë, krijimi i strukturave të punës dhe përmirësimi i proceseve." },
+  { id: "research", label: "Hulumtim dhe Ide të Reja", shortDescription: "Hulumtim, eksperimentim dhe frymëzim", description: "Hulumtimi i tregut, konkurrentëve, teknologjive dhe metodologjive, eksperimentimi me qasje të ndryshme dhe zhvillimi i ideve për projekte të reja." },
+  { id: "problem_solving", label: "Zgjidhje Problemesh", shortDescription: "Shkaqe rrënjësore, korrigjim dhe zgjidhje praktike", description: "Gjetja e shkaqeve rrënjësore, korrigjimi i gabimeve, mendimi kritik, përmirësimi i proceseve joefektive dhe vendimmarrja në situata të paqarta." },
+  { id: "creativity", label: "Krijim dhe Kreativitet", shortDescription: "Koncepte, përmbajtje dhe mënyra më të mira pune", description: "Krijimi i ideve, strukturave, shablloneve, përmbajtjeve dhe materialeve, përmirësimi i përvojës së përdoruesit dhe mënyrave të prezantimit." },
+  { id: "standards", label: "Standarde dhe Shabllone", shortDescription: "Procedura, dokumentim dhe qëndrueshmëri", description: "Krijimi i procedurave, shablloneve të ripërdorshme, udhëzimeve të ekipit dhe metodave standarde që sigurojnë cilësi të njëtrajtshme." },
+  { id: "qa", label: "QA / Kontroll Cilësie", shortDescription: "Testim, hollësi dhe sugjerime për përmirësim", description: "Kontrollimi i kërkesave, testimi i rezultateve, gjetja e gabimeve ose hollësive që mungojnë dhe sigurimi i cilësisë para dorëzimit." },
+  { id: "management", label: "Menaxhim, Organizim dhe Planifikim", shortDescription: "Prioritete, kapacitet, koordinim dhe progres", description: "Planifikimi dhe ndarja e punës, koordinimi i njerëzve, ndjekja e progresit, zgjidhja e pengesave, përshtatja e planeve dhe ruajtja e strukturës së projektit." },
+  { id: "communication", label: "Komunikim dhe Prezantim", shortDescription: "Shpjegime të qarta, takime dhe reagime", description: "Prezantimi brenda ose jashtë kompanisë, shpjegimi i zgjidhjeve, përgatitja e materialeve, drejtimi i diskutimeve dhe menaxhimi i reagimeve." },
+  { id: "fast_tasks", label: "Detyra të Shpejta", shortDescription: "Reagim i shpejtë dhe afate të shkurtra", description: "Trajtimi i kërkesave urgjente, detyrave të shkurtra praktike, ndihma ndaj ekipit, përshtatja e shpejtë dhe puna me afate të shkurtra." },
 ] as const
 
 export const RATING_OPTIONS: ReadonlyArray<{ value: SkillRating; label: string; explanation: string }> = [
-  { value: "A_PLUS", label: "A+", explanation: "Favourite / strongest area" },
-  { value: "A", label: "A", explanation: "Enjoy and perform well" },
-  { value: "B", label: "B", explanation: "Can do when needed" },
-  { value: "C", label: "C", explanation: "Lower preference" },
+  { value: "A_PLUS", label: "A+", explanation: "E preferuara / fusha më e fortë" },
+  { value: "A", label: "A", explanation: "Më pëlqen dhe e bëj mirë" },
+  { value: "B", label: "B", explanation: "Mund ta bëj kur nevojitet" },
+  { value: "C", label: "C", explanation: "Preferencë më e ulët" },
 ] as const
 
 export const RATING_LABEL: Record<SkillRating, string> = { A_PLUS: "A+", A: "A", B: "B", C: "C" }
 export const RATING_SCORE: Record<SkillRating, number> = { A_PLUS: 4, A: 3, B: 2, C: 1 }
 
 export const SKILL_QUESTIONS = [
-  { id: "above_average", label: "Which types of tasks do you think you perform better than average?", shortLabel: "Better than average" },
-  { id: "experience", label: "In which areas do you think you have the most experience?", shortLabel: "Experience" },
-  { id: "development", label: "In which areas would you like to develop further?", shortLabel: "Development goals" },
-  { id: "ideal_projects", label: "For which types of projects do you think you would be the ideal choice?", shortLabel: "Ideal projects" },
-  { id: "motivation", label: "Which tasks give you the most motivation and energy during work?", shortLabel: "Motivation" },
+  { id: "above_average", label: "Cilat lloje detyrash mendoni se i kryeni më mirë se mesatarja?", shortLabel: "Më mirë se mesatarja" },
+  { id: "experience", label: "Në cilat fusha mendoni se keni më shumë përvojë?", shortLabel: "Përvoja" },
+  { id: "development", label: "Në cilat fusha dëshironi të zhvilloheni më tej?", shortLabel: "Synimet e zhvillimit" },
+  { id: "ideal_projects", label: "Për cilat lloje projektesh mendoni se do të ishit zgjedhja ideale?", shortLabel: "Projektet ideale" },
+  { id: "motivation", label: "Cilat detyra ju japin më shumë motivim dhe energji gjatë punës?", shortLabel: "Motivimi" },
 ] as const

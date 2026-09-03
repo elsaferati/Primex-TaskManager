@@ -103,9 +103,9 @@ const primaryItems: NavItem[] = [
 const navGroups: NavGroup[] = [
   {
     id: "team",
-    label: "Team",
+    label: "Ekipi",
     icon: Users,
-    items: [{ href: "/skills", label: "Skills Matrix", icon: BrainCircuit }],
+    items: [{ href: "/skills", label: "Matrica e Aftësive", icon: BrainCircuit }],
   },
   {
     id: "tasks",
