@@ -51,7 +51,7 @@ from app.services.notifications import add_notification, notification_task_previ
 from app.services.ko_task_assignee_sync import ensure_ko_user_is_task_assignee
 from app.services.task_daily_progress import upsert_explicit_task_daily_status, upsert_task_daily_progress
 from app.services.task_classification import is_fast_task as is_fast_task_model, is_fast_task_fields
-from app.services.daily_report_logic import business_days_between
+from app.services.daily_report_logic import business_days_between, parse_ko_user_id
 from app.services.daily_realization_baseline import ensure_daily_baselines_for_departments
 from app.services.daily_realization_events import record_task_semantic_events, task_semantic_state
 from app.services.project_classification import (
@@ -995,21 +995,68 @@ def _parse_origin_task_id(internal_notes: str | None) -> uuid.UUID | None:
         return None
 
 
-def _strip_origin_task_id(internal_notes: str | None) -> str | None:
-    if not internal_notes:
-        return None
-    parts = [part.strip() for part in internal_notes.split(";")]
-    kept = [part for part in parts if part and not part.lower().startswith("origin_task_id")]
-    if not kept:
-        return None
-    return "; ".join(kept)
-
-
 async def _project_for_id(db: AsyncSession, project_id: uuid.UUID) -> Project:
     project = (await db.execute(select(Project).where(Project.id == project_id))).scalar_one_or_none()
     if project is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Project not found")
     return project
+
+
+async def _validate_pcm_control_origin(
+    db: AsyncSession,
+    *,
+    project: Project | None,
+    phase: str | ProjectPhaseStatus | None,
+    internal_notes: str | None,
+    require_origin: bool,
+) -> Task | None:
+    """Validate the PRODUCT source for PCM MST/TT CONTROL tasks."""
+    phase_value = phase.value if isinstance(phase, ProjectPhaseStatus) else str(phase or "")
+    if project is None or phase_value.upper() != ProjectPhaseStatus.CONTROL.value:
+        return None
+    if not _is_mst_or_tt_project(project) or project.department_id is None:
+        return None
+
+    department_code = (
+        await db.execute(select(Department.code).where(Department.id == project.department_id))
+    ).scalar_one_or_none()
+    if str(department_code or "").strip().upper() != "PCM":
+        return None
+
+    ko_user_id = parse_ko_user_id(internal_notes)
+    if ko_user_id is not None:
+        ko_user = (
+            await db.execute(select(User).where(User.id == ko_user_id, User.is_active.is_(True)))
+        ).scalar_one_or_none()
+        if ko_user is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="CONTROL task KO must be an active user",
+            )
+
+    origin_id = _parse_origin_task_id(internal_notes)
+    if origin_id is None:
+        if require_origin:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="CONTROL task requires a linked PRODUCT task",
+            )
+        return None
+
+    origin = (
+        await db.execute(select(Task).where(Task.id == origin_id))
+    ).scalar_one_or_none()
+    if (
+        origin is None
+        or not origin.is_active
+        or origin.project_id != project.id
+        or str(origin.phase or "").upper() != ProjectPhaseStatus.PRODUCT.value
+    ):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="CONTROL task must link to an active PRODUCT task in the same project",
+        )
+    return origin
 
 
 async def _sync_control_task_owner_from_ko(
@@ -1019,9 +1066,10 @@ async def _sync_control_task_owner_from_ko(
     project: Project | None = None,
 ) -> uuid.UUID | None:
     """
-    Keep KO on CONTROL MST/TT (PCM) tasks as an assignee for visibility/permissions.
+    Keep KO as the sole owner of CONTROL MST/TT (PCM) tasks.
 
-    Do not overwrite task.assigned_to — PCM UI keeps Assigned and KO as separate fields.
+    The PRODUCT executor is resolved through origin_task_id and must not be
+    duplicated in CONTROL assignment fields.
     """
     return await ensure_ko_user_is_task_assignee(db, task=task, project=project)
 
@@ -1921,6 +1969,36 @@ async def create_task(
         is_development_project=is_development_project,
     )
 
+    pcm_control_origin = await _validate_pcm_control_origin(
+        db,
+        project=project,
+        phase=phase_value,
+        internal_notes=payload.internal_notes,
+        require_origin=True,
+    )
+    if pcm_control_origin is not None:
+        # CONTROL ownership is authoritative: KO is the only assignee. This
+        # also prevents a multi-assignee request from creating duplicate
+        # CONTROL rows through the per-assignee creation branches below.
+        ko_user_id = parse_ko_user_id(payload.internal_notes)
+        if ko_user_id is None:
+            assignee_ids = []
+            assignee_users = []
+            assignee_dept_map = {}
+        else:
+            ko_user = (
+                await db.execute(select(User).where(User.id == ko_user_id, User.is_active.is_(True)))
+            ).scalar_one()
+            assignee_ids = [ko_user_id]
+            assignee_users = [ko_user]
+            assignee_dept_map = {ko_user_id: ko_user.department_id}
+            await ensure_daily_baselines_for_departments(
+                db=db,
+                department_ids={project.department_id, ko_user.department_id} if project else {ko_user.department_id},
+                day=datetime.now(ZoneInfo(settings.REALIZATION_TIMEZONE)).date(),
+                actor=user,
+            )
+
     if _should_auto_status_from_product_counts(project, phase_value):
         total, completed = _extract_total_and_completed(payload.daily_products, payload.internal_notes)
         auto_status = _compute_status_from_completed(total, completed)
@@ -2001,7 +2079,6 @@ async def create_task(
                 await db.flush()
                 await _replace_task_assignees(db, t, [assignee_id])
                 await _sync_control_task_owner_from_ko(db, task=t, project=project)
-                await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
                 if payload.alignment_user_ids:
                     seen_align: set[uuid.UUID] = set()
@@ -2130,7 +2207,6 @@ async def create_task(
                         await db.flush()
                         await _replace_task_assignees(db, t, [assignee_id])
                         await _sync_control_task_owner_from_ko(db, task=t, project=project)
-                        await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
                         if payload.alignment_user_ids:
                             seen_align: set[uuid.UUID] = set()
@@ -2242,7 +2318,6 @@ async def create_task(
             await db.flush()
             await _replace_task_assignees(db, t, [assignee_id])
             await _sync_control_task_owner_from_ko(db, task=t, project=project)
-            await ensure_ko_user_is_task_assignee(db, task=t, project=project)
 
             if payload.alignment_user_ids:
                 seen_align: set[uuid.UUID] = set()
@@ -2438,7 +2513,6 @@ async def create_task(
     )
     db.add(task)
     await db.flush()
-    await _sync_control_task_owner_from_ko(db, task=task, project=project)
 
     # Record per-day progress event for product-count driven project tasks.
     # This is per-day history; it does not retroactively change other days.
@@ -2469,7 +2543,6 @@ async def create_task(
         if assignee_ids == [] and task.system_template_origin_id and task.department_id is not None:
             task.is_active = False
     await _sync_control_task_owner_from_ko(db, task=task, project=project)
-    await ensure_ko_user_is_task_assignee(db, task=task, project=project)
 
     # If this is a project task, and the project was previously removed from the weekly planner
     # for this user/day/slot, auto-clear that exclusion so the newly created task is visible.
@@ -3105,7 +3178,25 @@ async def update_task(
     if task.is_1h_report or task.is_r1:
         _validate_eight_am_one_h_slot(task.title, task.one_h_report_slot)
 
-    await _sync_control_task_owner_from_ko(db, task=task)
+    project_for_control: Project | None = None
+    if task.project_id is not None:
+        project_for_control = (
+            await db.execute(select(Project).where(Project.id == task.project_id))
+        ).scalar_one_or_none()
+    await _validate_pcm_control_origin(
+        db,
+        project=project_for_control,
+        phase=task.phase,
+        internal_notes=task.internal_notes,
+        require_origin=(
+            _parse_origin_task_id(before.get("internal_notes")) is not None
+            or (
+                payload.phase is not None
+                and _enum_value(payload.phase) == ProjectPhaseStatus.CONTROL.value
+            )
+        ),
+    )
+    await _sync_control_task_owner_from_ko(db, task=task, project=project_for_control)
 
     # Validate fast task type flags are mutually exclusive (only for fast tasks)
     # Fast tasks: no project_id, no system_template_origin_id
@@ -3381,8 +3472,6 @@ async def update_task(
                             data={"task_id": str(new_task.id)},
                         )
                   )
-
-    await ensure_ko_user_is_task_assignee(db, task=task)
 
     # Keep the source-note conversion flag consistent whenever an active note
     # task is edited. This also repairs older rows whose flag was cleared while
@@ -3778,10 +3867,19 @@ async def delete_task(
                     .where(Task.internal_notes.ilike("%origin_task_id%"))
                 )
             ).scalars().all()
-            for control_task in control_tasks:
-                origin_id = _parse_origin_task_id(control_task.internal_notes)
-                if origin_id == task.id:
-                    control_task.internal_notes = _strip_origin_task_id(control_task.internal_notes)
+            linked_controls = [
+                control_task
+                for control_task in control_tasks
+                if control_task.is_active and _parse_origin_task_id(control_task.internal_notes) == task.id
+            ]
+            if linked_controls:
+                raise HTTPException(
+                    status_code=status.HTTP_409_CONFLICT,
+                    detail=(
+                        "This PRODUCT task has a linked CONTROL task. "
+                        "Delete the CONTROL task first."
+                    ),
+                )
 
     # Fast task groups: delete only this assignee copy, but remove the row entirely.
     if _uses_fast_task_group(task):

@@ -863,6 +863,12 @@ function taskStatusValue(task: Task): Task["status"] {
   return "TODO"
 }
 
+function controlKoUserId(task: Task): string | null {
+  if (String(task.phase || "").toUpperCase().trim() !== "CONTROL") return null
+  const match = task.internal_notes?.match(/ko_user_id[:=]\s*([a-f0-9-]+)/i)
+  return match ? match[1] : null
+}
+
 function statusBadgeClasses(status: Task["status"]) {
   if (status === "DONE") return "bg-green-100 text-green-700 border-green-200"
   if (status === "WAITING_CLIENT") return "bg-[#E2C15B] text-[#4F3A00] border-[#B8860B]"
@@ -1648,6 +1654,17 @@ export default function DepartmentKanban() {
   )
   const taskAssigneeInitials = React.useCallback(
     (task: Task) => {
+      const koUserId = controlKoUserId(task)
+      if (koUserId) {
+        const koUser = userMap.get(koUserId)
+        const koAssignee = task.assignees?.find((assignee) => assignee.id === koUserId)
+        const label = koUser
+          ? assigneeLabel(koUser)
+          : (koAssignee?.full_name || koAssignee?.username || "-")
+        const value = initials(label)
+        return value && value !== "-" ? [{ id: koUserId, label, value }] : []
+      }
+
       const ids = new Set<string>()
       if (task.assigned_to) ids.add(task.assigned_to)
       if (task.assignees) {
@@ -1890,6 +1907,8 @@ export default function DepartmentKanban() {
   const isTaskOwnedByViewUser = React.useCallback(
     (task: Task, userId?: string | null) => {
       if (!userId) return false
+      const koUserId = controlKoUserId(task)
+      if (koUserId) return koUserId === userId
       if (isTaskAssignedToUser(task, userId)) return true
       return task.confirmation_assignee_id === userId
     },

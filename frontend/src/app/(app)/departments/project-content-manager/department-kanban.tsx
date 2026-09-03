@@ -2204,6 +2204,9 @@ export default function DepartmentKanban() {
   const isTaskOwnedByViewUser = React.useCallback(
     (task: Task, userId?: string | null) => {
       if (!userId) return false
+      const phase = String(task.phase || "").toUpperCase().trim()
+      const koUserId = phase === "CONTROL" ? parseKoUserId(task.internal_notes) : null
+      if (koUserId) return koUserId === userId
       if (isTaskAssignedToUser(task, userId)) return true
       return task.confirmation_assignee_id === userId
     },
