@@ -158,6 +158,7 @@ LATE:
             _result([SimpleNamespace(id="ga-user")]),
             _result([]),
             _result([]),
+            _result([]),
         ]))
 
         png = await render_ga_time_table_png(db, date(2026, 8, 24))
@@ -199,6 +200,7 @@ LATE:
             _result([SimpleNamespace(id="ga-user")]),
             _result([]),
             _result([]),
+            _result([]),
         ]))
 
         rendered = await render_ga_time_table_html(db, date(2026, 8, 24))
@@ -232,9 +234,11 @@ LATE:
             _result([SimpleNamespace(id="ga-user")]),
             _result([entry("OLD TIMETABLE VALUE")]),
             _result([]),
+            _result([]),
             _result(list(DEFAULT_GA_TIME_TABLE_ROWS)),
             _result([SimpleNamespace(id="ga-user")]),
             _result([entry("LATEST TIMETABLE VALUE")]),
+            _result([]),
             _result([]),
         ]))
 
@@ -244,7 +248,7 @@ LATE:
         self.assertIn("OLD TIMETABLE VALUE", first)
         self.assertNotIn("OLD TIMETABLE VALUE", latest)
         self.assertIn("LATEST TIMETABLE VALUE", latest)
-        for call_index in (0, 2, 3, 4, 6, 7):
+        for call_index in (0, 2, 3, 4, 5, 7, 8, 9):
             statement = db.execute.await_args_list[call_index].args[0]
             self.assertTrue(statement.get_execution_options().get("populate_existing"))
 

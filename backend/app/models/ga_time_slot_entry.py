@@ -28,6 +28,15 @@ class GaTimeSlotEntry(Base):
     start_time: Mapped[time] = mapped_column(Time, nullable=False)
     end_time: Mapped[time] = mapped_column(Time, nullable=False)
     content: Mapped[str] = mapped_column(String(8000), nullable=False, server_default="")
+    sync_connection_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("ga_icloud_sync_connections.id", ondelete="CASCADE"),
+        index=True,
+        nullable=True,
+    )
+    source_type: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    source_external_id: Mapped[str | None] = mapped_column(String(700), nullable=True)
+    source_name: Mapped[str | None] = mapped_column(String(320), nullable=True)
 
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[datetime] = mapped_column(

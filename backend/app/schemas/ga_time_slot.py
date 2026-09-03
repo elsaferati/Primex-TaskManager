@@ -1,6 +1,6 @@
 import uuid
 import re
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Literal
 
 from pydantic import BaseModel, Field, field_validator
@@ -58,6 +58,9 @@ class GaTimeSlotEntryOut(GaTimeSlotFormatting):
     sort_order: int
     created_at: datetime
     updated_at: datetime
+    occurrence_date: date | None = None
+    source_type: Literal["calendar", "reminder"] | None = None
+    source_name: str | None = None
 
 
 class GaTimeSlotEntryPosition(BaseModel):
@@ -162,3 +165,62 @@ class GaTimeTableRowOut(GaTimeTableRowCommentFormatting):
 class GaTimeTableCrossCellMoveOut(BaseModel):
     rows: list[GaTimeTableRowOut] = Field(default_factory=list)
     entries: list[GaTimeSlotEntryOut] = Field(default_factory=list)
+
+
+class GaIcloudSyncConnectionCreate(BaseModel):
+    device_name: str = Field(default="iPhone GA", min_length=1, max_length=120)
+    calendar_name: str = Field(default="ganimete.ar@gmail.com", min_length=1, max_length=320)
+    reminder_list_name: str = Field(default="REMINDER", min_length=1, max_length=320)
+
+
+class GaIcloudSyncConnectionOut(BaseModel):
+    id: uuid.UUID
+    device_name: str
+    calendar_name: str
+    reminder_list_name: str
+    last_synced_at: datetime | None = None
+    last_imported_count: int = 0
+    created_at: datetime
+
+
+class GaIcloudSyncPairingOut(GaIcloudSyncConnectionOut):
+    import_url: str
+    pairing_token: str
+
+
+class GaIcloudCalendarItem(BaseModel):
+    id: str | None = Field(default=None, max_length=512)
+    title: str = Field(min_length=1, max_length=2000)
+    starts_at: datetime
+    ends_at: datetime | None = None
+    is_all_day: bool = False
+    calendar_name: str | None = Field(default=None, max_length=320)
+    location: str | None = Field(default=None, max_length=1000)
+
+
+class GaIcloudReminderItem(BaseModel):
+    id: str | None = Field(default=None, max_length=512)
+    title: str = Field(min_length=1, max_length=2000)
+    due_at: datetime | None = None
+    due_date: date | None = None
+    is_completed: bool = False
+    reminder_list_name: str | None = Field(default=None, max_length=320)
+    notes: str | None = Field(default=None, max_length=2000)
+
+
+class GaIcloudSyncImport(BaseModel):
+    sync_window_start: date
+    sync_window_end: date
+    timezone: str = Field(default="Europe/Berlin", min_length=1, max_length=80)
+    calendar_name: str = Field(min_length=1, max_length=320)
+    reminder_list_name: str = Field(min_length=1, max_length=320)
+    events: list[GaIcloudCalendarItem] = Field(default_factory=list, max_length=500)
+    reminders: list[GaIcloudReminderItem] = Field(default_factory=list, max_length=500)
+
+
+class GaIcloudSyncImportOut(BaseModel):
+    imported: int
+    calendar_imported: int
+    reminders_imported: int
+    skipped: int
+    synced_at: datetime

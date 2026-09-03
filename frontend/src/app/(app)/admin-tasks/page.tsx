@@ -671,6 +671,24 @@ type GaTimeSlotEntry = {
   is_italic: boolean
   created_at: string
   updated_at: string
+  occurrence_date?: string | null
+  source_type?: "calendar" | "reminder" | null
+  source_name?: string | null
+}
+
+type GaIcloudSyncConnection = {
+  id: string
+  device_name: string
+  calendar_name: string
+  reminder_list_name: string
+  last_synced_at?: string | null
+  last_imported_count: number
+  created_at: string
+}
+
+type GaIcloudSyncPairing = GaIcloudSyncConnection & {
+  import_url: string
+  pairing_token: string
 }
 
 function taskRequiresRlzCompletionComment(task: Task) {
@@ -2119,6 +2137,13 @@ export default function AdminTasksPage() {
   const [gaTimeRowsSaving, setGaTimeRowsSaving] = React.useState(false)
   const [gaTimeNewRowOpen, setGaTimeNewRowOpen] = React.useState(false)
   const [gaTimeNewRowSaving, setGaTimeNewRowSaving] = React.useState(false)
+  const [gaIcloudDialogOpen, setGaIcloudDialogOpen] = React.useState(false)
+  const [gaIcloudConnection, setGaIcloudConnection] = React.useState<GaIcloudSyncConnection | null>(null)
+  const [gaIcloudPairing, setGaIcloudPairing] = React.useState<GaIcloudSyncPairing | null>(null)
+  const [gaIcloudLoading, setGaIcloudLoading] = React.useState(false)
+  const [gaIcloudSaving, setGaIcloudSaving] = React.useState(false)
+  const [gaIcloudCalendarName, setGaIcloudCalendarName] = React.useState("ganimete.ar@gmail.com")
+  const [gaIcloudReminderList, setGaIcloudReminderList] = React.useState("REMINDER")
   const gaTimeRowsDialogRef = React.useRef<HTMLDivElement | null>(null)
   const gaTimeRowInputRefs = React.useRef<
     Record<number, { start: HTMLInputElement | null; end: HTMLInputElement | null }>
@@ -2395,6 +2420,112 @@ export default function AdminTasksPage() {
     }
     return `${fastTaskAssignees.length} selected`
   }, [fastTaskAssignees, users])
+
+  const loadGaIcloudConnection = React.useCallback(async () => {
+    setGaIcloudLoading(true)
+    try {
+      const res = await apiFetch("/ga-time-slots/icloud-sync")
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(apiErrorMessage(data, "Failed to load iPhone sync status."))
+      }
+      const data = (await res.json()) as GaIcloudSyncConnection | null
+      setGaIcloudConnection(data)
+      if (data) {
+        setGaIcloudCalendarName(data.calendar_name)
+        setGaIcloudReminderList(data.reminder_list_name)
+      }
+    } catch (error) {
+      console.error("Failed to load iPhone sync status", error)
+      toast.error(error instanceof Error ? error.message : "Failed to load iPhone sync status.")
+    } finally {
+      setGaIcloudLoading(false)
+    }
+  }, [apiFetch])
+
+  const openGaIcloudDialog = React.useCallback(() => {
+    setGaIcloudPairing(null)
+    setGaIcloudDialogOpen(true)
+    void loadGaIcloudConnection()
+  }, [loadGaIcloudConnection])
+
+  const pairGaIcloudDevice = React.useCallback(async () => {
+    const calendarName = gaIcloudCalendarName.trim()
+    const reminderListName = gaIcloudReminderList.trim()
+    if (!calendarName || !reminderListName) {
+      toast.error("Calendar and reminder list names are required.")
+      return
+    }
+    if (gaIcloudConnection) {
+      const accepted = await confirm({
+        title: "Replace iPhone connection?",
+        description: "The existing token will stop working. The new token is shown only once.",
+        confirmLabel: "Replace connection",
+        variant: "destructive",
+      })
+      if (!accepted) return
+    }
+    setGaIcloudSaving(true)
+    try {
+      const res = await apiFetch("/ga-time-slots/icloud-sync/pair", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          device_name: "iPhone GA",
+          calendar_name: calendarName,
+          reminder_list_name: reminderListName,
+        }),
+      })
+      const data = await res.json().catch(() => null)
+      if (!res.ok) throw new Error(apiErrorMessage(data, "Failed to create iPhone connection."))
+      const pairing = data as GaIcloudSyncPairing
+      setGaIcloudPairing(pairing)
+      setGaIcloudConnection(pairing)
+      toast.success("iPhone pairing created. Save the token now; it is shown only once.")
+    } catch (error) {
+      console.error("Failed to pair iPhone sync", error)
+      toast.error(error instanceof Error ? error.message : "Failed to create iPhone connection.")
+    } finally {
+      setGaIcloudSaving(false)
+    }
+  }, [apiFetch, confirm, gaIcloudCalendarName, gaIcloudConnection, gaIcloudReminderList])
+
+  const revokeGaIcloudDevice = React.useCallback(async () => {
+    if (!gaIcloudConnection) return
+    const accepted = await confirm({
+      title: "Disconnect iPhone sync?",
+      description: "Imported Calendar and Reminder entries will be removed. The phone token will stop working.",
+      confirmLabel: "Disconnect",
+      variant: "destructive",
+    })
+    if (!accepted) return
+    setGaIcloudSaving(true)
+    try {
+      const res = await apiFetch(`/ga-time-slots/icloud-sync/${gaIcloudConnection.id}`, { method: "DELETE" })
+      if (!res.ok) {
+        const data = await res.json().catch(() => null)
+        throw new Error(apiErrorMessage(data, "Failed to disconnect iPhone sync."))
+      }
+      setGaIcloudConnection(null)
+      setGaIcloudPairing(null)
+      setGaTimeEntries((entries) => entries.filter((entry) => !entry.source_type))
+      toast.success("iPhone sync disconnected.")
+    } catch (error) {
+      console.error("Failed to disconnect iPhone sync", error)
+      toast.error(error instanceof Error ? error.message : "Failed to disconnect iPhone sync.")
+    } finally {
+      setGaIcloudSaving(false)
+    }
+  }, [apiFetch, confirm, gaIcloudConnection])
+
+  const copyGaIcloudValue = React.useCallback(async (value: string, label: string) => {
+    try {
+      await navigator.clipboard.writeText(value)
+      toast.success(`${label} copied.`)
+    } catch {
+      toast.error(`Could not copy ${label.toLowerCase()}.`)
+    }
+  }, [])
 
   React.useEffect(() => {
     if (!secondarySectionsReady) return
@@ -5322,7 +5453,7 @@ export default function AdminTasksPage() {
     beforeCommentId: string | null
   ) => {
     const draggedEntry = gaTimeEntries.find((entry) => entry.id === entryId)
-    if (!draggedEntry || gaTimeSaving[entryId]) return
+    if (!draggedEntry || draggedEntry.source_type || gaTimeSaving[entryId]) return
     const sourceRowStart = resolveGaTimeRowStart(normalizeSlotTime(draggedEntry.start_time), gaTimeRows)
     const sourceCellKey = `${draggedEntry.day_of_week}|${sourceRowStart}`
     setGaTimeEditingId(null)
@@ -5645,7 +5776,7 @@ export default function AdminTasksPage() {
       beforeEntryId: string | null
     ) => {
       const draggedEntry = gaTimeEntries.find((entry) => entry.id === entryId)
-      if (!draggedEntry || gaTimeSaving[entryId]) return
+      if (!draggedEntry || draggedEntry.source_type || gaTimeSaving[entryId]) return
 
       const cellKeyForEntry = (entry: GaTimeSlotEntry) => {
         const rowStart = resolveGaTimeRowStart(normalizeSlotTime(entry.start_time), gaTimeRows)
@@ -5658,7 +5789,9 @@ export default function AdminTasksPage() {
         setGaTimeDropTarget(null)
         return
       }
-      const originalTargetEntries = gaTimeEntries.filter((entry) => cellKeyForEntry(entry) === targetCellKey)
+      const originalTargetEntries = gaTimeEntries.filter(
+        (entry) => !entry.source_type && cellKeyForEntry(entry) === targetCellKey
+      )
       const targetEntries = originalTargetEntries.filter((entry) => entry.id !== entryId)
       const beforeEntryIndex = beforeEntryId
         ? targetEntries.findIndex((entry) => entry.id === beforeEntryId)
@@ -5679,7 +5812,7 @@ export default function AdminTasksPage() {
       const sourceEntries = sourceCellKey === targetCellKey
         ? []
         : gaTimeEntries.filter(
-            (entry) => entry.id !== entryId && cellKeyForEntry(entry) === sourceCellKey
+            (entry) => !entry.source_type && entry.id !== entryId && cellKeyForEntry(entry) === sourceCellKey
           )
       const positionedEntries = [
         ...sourceEntries.map((entry, sortOrder) => ({ ...entry, sort_order: sortOrder })),
@@ -5731,6 +5864,7 @@ export default function AdminTasksPage() {
 
   const deleteGaTimeEntry = React.useCallback(
     async (entryId: string) => {
+      if (gaTimeEntries.find((entry) => entry.id === entryId)?.source_type) return
       setGaTimeDeleting((prev) => ({ ...prev, [entryId]: true }))
       try {
         const res = await apiFetch(`/ga-time-slots/${entryId}`, { method: "DELETE" })
@@ -5745,7 +5879,7 @@ export default function AdminTasksPage() {
         setGaTimeDeleting((prev) => ({ ...prev, [entryId]: false }))
       }
     },
-    [apiFetch]
+    [apiFetch, gaTimeEntries]
   )
 
   const renderGaTimeCommentCell = (
@@ -7217,10 +7351,15 @@ export default function AdminTasksPage() {
                   Next Week
                 </Button>
                 {canEditGaTimeSlots ? (
-                  <Button variant="outline" size="sm" onClick={openGaTimeRowsDialog}>
-                    <Pencil className="mr-2 h-4 w-4" />
-                    Times
-                  </Button>
+                  <>
+                    <Button variant="outline" size="sm" onClick={openGaIcloudDialog}>
+                      iPhone Sync
+                    </Button>
+                    <Button variant="outline" size="sm" onClick={openGaTimeRowsDialog}>
+                      <Pencil className="mr-2 h-4 w-4" />
+                      Times
+                    </Button>
+                  </>
                 ) : null}
                 <Button variant="outline" size="sm" onClick={() => handleSectionPrint("ga-time")}>
                   Print
@@ -7404,6 +7543,7 @@ export default function AdminTasksPage() {
                               </div>
                             ))}
                             {entries.map((entry, entryIndex) => {
+                              const isImported = Boolean(entry.source_type)
                               const isEditing = gaTimeEditingId === entry.id
                               if (isEditing) {
                                 return (
@@ -7420,7 +7560,7 @@ export default function AdminTasksPage() {
                               return (
                                 <div
                                   key={entry.id}
-                                    className={`ga-time-entry ga-time-draggable select-none cursor-grab active:cursor-grabbing ${
+                                    className={`ga-time-entry select-none ${isImported ? "cursor-default ring-1 ring-inset ring-sky-300" : "ga-time-draggable cursor-grab active:cursor-grabbing"} ${
                                       normalizeGaTimeBackgroundColor(entry.background_color || "").toUpperCase() === "#EF4444"
                                         ? "ga-time-entry-contrast"
                                         : ""
@@ -7433,11 +7573,11 @@ export default function AdminTasksPage() {
                                       : ""
                                   }`}
                                   style={gaTimeEntryStyle(entry)}
-                                  draggable={canEditGaTimeSlots && !gaTimeSaving[entry.id]}
+                                  draggable={canEditGaTimeSlots && !isImported && !gaTimeSaving[entry.id]}
                                   data-ga-slot-entry-id={entry.id}
                                   data-ga-next-entry-id={entries[entryIndex + 1]?.id || ""}
                                   onDragStart={(event) => {
-                                    if (!canEditGaTimeSlots) return
+                                    if (!canEditGaTimeSlots || isImported) return
                                     event.dataTransfer.effectAllowed = "move"
                                     event.dataTransfer.setData("application/x-ga-time-entry", entry.id)
                                     event.dataTransfer.setData("text/plain", entry.id)
@@ -7450,7 +7590,7 @@ export default function AdminTasksPage() {
                                     setGaTimeAddingCell(null)
                                   }}
                                   onDragOver={(event) => {
-                                    if (!canEditGaTimeSlots) return
+                                    if (!canEditGaTimeSlots || isImported) return
                                     event.preventDefault()
                                     event.stopPropagation()
                                     event.dataTransfer.dropEffect = "move"
@@ -7487,7 +7627,7 @@ export default function AdminTasksPage() {
                                     )
                                   }}
                                   onDrop={(event) => {
-                                    if (!canEditGaTimeSlots) return
+                                    if (!canEditGaTimeSlots || isImported) return
                                     event.preventDefault()
                                     event.stopPropagation()
                                     const bounds = event.currentTarget.getBoundingClientRect()
@@ -7549,16 +7689,18 @@ export default function AdminTasksPage() {
                                       )
                                     }
                                   }}
-                                  title="Drag to move or click to edit"
+                                  title={isImported
+                                    ? `Imported from ${entry.source_type === "calendar" ? "Calendar" : "Reminders"}: ${entry.source_name || "iPhone"}`
+                                    : "Drag to move or click to edit"}
                                 >
                                   <span
                                     className="ga-time-entry-text"
                                     style={gaTimeEntryStyle(entry)}
                                     role="button"
                                     tabIndex={0}
-                                    draggable={canEditGaTimeSlots && !gaTimeSaving[entry.id]}
+                                    draggable={canEditGaTimeSlots && !isImported && !gaTimeSaving[entry.id]}
                                     onClick={() => {
-                                      if (!canEditGaTimeSlots) return
+                                      if (!canEditGaTimeSlots || isImported) return
                                       setGaTimeAddingCell(null)
                                       setGaTimeCommentEditingKey(null)
                                       setGaTimeEditingId(entry.id)
@@ -7566,7 +7708,7 @@ export default function AdminTasksPage() {
                                     onKeyDown={(event) => {
                                       if (event.key !== "Enter" && event.key !== " ") return
                                       event.preventDefault()
-                                      if (!canEditGaTimeSlots) return
+                                      if (!canEditGaTimeSlots || isImported) return
                                       setGaTimeAddingCell(null)
                                       setGaTimeCommentEditingKey(null)
                                       setGaTimeEditingId(entry.id)
@@ -7574,7 +7716,7 @@ export default function AdminTasksPage() {
                                   >
                                     <GaTimeRichTextContent value={entry.content} backgroundColor={entry.background_color} />
                                   </span>
-                                  {canEditGaTimeSlots ? (
+                                  {canEditGaTimeSlots && !isImported ? (
                                     <button
                                       type="button"
                                       className="ga-time-delete"
@@ -7636,6 +7778,134 @@ export default function AdminTasksPage() {
           </div>
           </AdminTasksSection>
           </div>
+          <Dialog
+            open={gaIcloudDialogOpen}
+            onOpenChange={(open) => {
+              setGaIcloudDialogOpen(open)
+              if (!open) setGaIcloudPairing(null)
+            }}
+          >
+            <DialogContent className="sm:max-w-2xl">
+              <DialogHeader>
+                <DialogTitle>iPhone Calendar &amp; Reminders Sync</DialogTitle>
+                <p className="text-xs text-slate-500">
+                  Read-only import into GA Time Table. PrimeFlow never changes Calendar or Reminders on the phone.
+                </p>
+              </DialogHeader>
+              <div className="space-y-4">
+                <div className="grid gap-3 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ga-icloud-calendar">Calendar name</Label>
+                    <Input
+                      id="ga-icloud-calendar"
+                      value={gaIcloudCalendarName}
+                      onChange={(event) => setGaIcloudCalendarName(event.target.value)}
+                      disabled={gaIcloudSaving}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label htmlFor="ga-icloud-reminders">Reminder list</Label>
+                    <Input
+                      id="ga-icloud-reminders"
+                      value={gaIcloudReminderList}
+                      onChange={(event) => setGaIcloudReminderList(event.target.value)}
+                      disabled={gaIcloudSaving}
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm">
+                  {gaIcloudLoading ? (
+                    <span className="text-slate-500">Checking connection…</span>
+                  ) : gaIcloudConnection ? (
+                    <div className="space-y-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <Badge variant="secondary">Connected</Badge>
+                        <span className="font-medium">{gaIcloudConnection.device_name}</span>
+                      </div>
+                      <div className="text-xs text-slate-600">
+                        Last sync: {gaIcloudConnection.last_synced_at
+                          ? new Date(gaIcloudConnection.last_synced_at).toLocaleString()
+                          : "not run yet"}
+                        {` · ${gaIcloudConnection.last_imported_count} imported items`}
+                      </div>
+                    </div>
+                  ) : (
+                    <span className="text-slate-600">No iPhone is paired.</span>
+                  )}
+                </div>
+
+                {gaIcloudPairing ? (
+                  <div className="space-y-3 rounded-lg border border-amber-300 bg-amber-50 p-3">
+                    <div>
+                      <div className="font-semibold text-amber-950">Save these values now</div>
+                      <div className="text-xs text-amber-800">
+                        The pairing token is shown only once. Put it in the Shortcut header named X-PrimeFlow-Sync-Token.
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Import URL</Label>
+                      <div className="flex gap-2">
+                        <Input readOnly value={gaIcloudPairing.import_url} className="font-mono text-xs" />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void copyGaIcloudValue(gaIcloudPairing.import_url, "Import URL")}
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Pairing token</Label>
+                      <div className="flex gap-2">
+                        <Input readOnly value={gaIcloudPairing.pairing_token} className="font-mono text-xs" />
+                        <Button
+                          type="button"
+                          variant="outline"
+                          onClick={() => void copyGaIcloudValue(gaIcloudPairing.pairing_token, "Pairing token")}
+                        >
+                          Copy
+                        </Button>
+                      </div>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => void copyGaIcloudValue(JSON.stringify({
+                        import_url: gaIcloudPairing.import_url,
+                        pairing_token: gaIcloudPairing.pairing_token,
+                        calendar_name: gaIcloudPairing.calendar_name,
+                        reminder_list_name: gaIcloudPairing.reminder_list_name,
+                        timezone: "Europe/Berlin",
+                      }, null, 2), "Shortcut configuration")}
+                    >
+                      Copy complete Shortcut configuration
+                    </Button>
+                  </div>
+                ) : null}
+
+                <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 text-xs text-blue-950">
+                  Timed events and reminders go to their matching time row. All-day events and reminders without a time
+                  go to the untimed row for that date. Completed reminders and all other lists/calendars are ignored.
+                </div>
+
+                <div className="flex flex-wrap justify-end gap-2">
+                  <Button type="button" variant="outline" onClick={() => void loadGaIcloudConnection()} disabled={gaIcloudLoading || gaIcloudSaving}>
+                    Refresh status
+                  </Button>
+                  {gaIcloudConnection ? (
+                    <Button type="button" variant="destructive" onClick={() => void revokeGaIcloudDevice()} disabled={gaIcloudSaving}>
+                      Disconnect
+                    </Button>
+                  ) : null}
+                  <Button type="button" onClick={() => void pairGaIcloudDevice()} disabled={gaIcloudSaving || gaIcloudLoading}>
+                    {gaIcloudSaving ? "Saving…" : gaIcloudConnection ? "Create new token" : "Create pairing"}
+                  </Button>
+                </div>
+              </div>
+            </DialogContent>
+          </Dialog>
           <Dialog
             open={gaTimeRowsDialogOpen}
             onOpenChange={(open) => {
