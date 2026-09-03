@@ -5,7 +5,7 @@ from datetime import date, datetime
 
 from pydantic import BaseModel, EmailStr, Field
 
-from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskStatus
+from app.models.enums import ProjectPhaseStatus, TaskFinishPeriod, TaskPriority, TaskSkillCategory, TaskStatus
 
 
 class TaskAssigneeOut(BaseModel):
@@ -20,6 +20,7 @@ class TaskOut(BaseModel):
     title: str
     description: str | None = None
     internal_notes: str | None = None
+    skill_category: TaskSkillCategory | None = None
     project_id: uuid.UUID | None = None
     dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
@@ -68,6 +69,7 @@ class GaNoteTaskSummaryOut(BaseModel):
 
     id: uuid.UUID
     description: str | None = None
+    skill_category: TaskSkillCategory | None = None
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     assigned_to: uuid.UUID | None = None
@@ -93,6 +95,7 @@ class TaskCreate(BaseModel):
     title: str = Field(min_length=2)
     description: str | None = Field(default=None)
     internal_notes: str | None = None
+    skill_category: TaskSkillCategory | None = None
     project_id: uuid.UUID | None = None
     dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = Field(default=None)
@@ -131,6 +134,7 @@ class TaskUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2)
     description: str | None = Field(default=None)
     internal_notes: str | None = None
+    skill_category: TaskSkillCategory | None = None
     project_id: uuid.UUID | None = None
     dependency_task_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None

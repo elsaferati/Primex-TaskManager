@@ -291,6 +291,7 @@ export interface TaskStatus {
 
 export interface Task {
   id: string
+  skill_category?: SkillCategory | null
   department_id?: string
   board_id?: string
   project_id?: string | null
