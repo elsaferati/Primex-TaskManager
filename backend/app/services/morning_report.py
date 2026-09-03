@@ -470,7 +470,7 @@ def _ga_hv_dv_task_rows(
 
 def _ga_hv_dv_tables_body(rows_by_title: dict[str, list[list[str]]]) -> str:
     lines: list[str] = []
-    for title in (GA_TASKS_TITLE, HV_TASKS_TITLE, DV_TASKS_TITLE):
+    for title in (HV_TASKS_TITLE, DV_TASKS_TITLE, GA_TASKS_TITLE):
         if lines:
             lines.append("")
         rows = rows_by_title.get(title, [])

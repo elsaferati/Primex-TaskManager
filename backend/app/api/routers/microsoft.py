@@ -168,7 +168,12 @@ async def status_check(
     db: AsyncSession = Depends(get_db),
 ) -> dict:
     row = (await db.execute(select(MicrosoftToken).where(MicrosoftToken.user_id == user.id))).scalar_one_or_none()
-    return {"connected": row is not None}
+    scope = row.scope if row is not None else None
+    return {
+        "connected": row is not None,
+        "scope": scope,
+        "can_write_calendar": bool(scope and "calendars.readwrite" in scope.lower()),
+    }
 
 
 @router.delete("/disconnect")

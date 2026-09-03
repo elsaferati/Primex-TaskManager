@@ -653,7 +653,9 @@ export interface Meeting {
   title: string
   platform?: string | null
   starts_at?: string | null
+  ends_at?: string | null
   meeting_url?: string | null
+  microsoft_event_id?: string | null
   meeting_type?: string | null
   recurrence_type?: string | null // "none", "weekly", "monthly"
   recurrence_days_of_week?: number[] | null

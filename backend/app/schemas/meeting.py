@@ -11,7 +11,9 @@ class MeetingOut(BaseModel):
     title: str
     platform: str | None = None
     starts_at: datetime | None = None
+    ends_at: datetime | None = None
     meeting_url: str | None = None
+    microsoft_event_id: str | None = None
     meeting_type: str
     recurrence_type: str | None = None
     recurrence_days_of_week: list[int] | None = None
@@ -34,6 +36,7 @@ class MeetingCreate(BaseModel):
     title: str = Field(min_length=2, max_length=200)
     platform: str | None = None
     starts_at: datetime | None = None
+    ends_at: datetime | None = None
     meeting_url: str | None = None
     meeting_type: str | None = None
     recurrence_type: str | None = None
@@ -50,6 +53,7 @@ class MeetingUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=2, max_length=200)
     platform: str | None = None
     starts_at: datetime | None = None
+    ends_at: datetime | None = None
     meeting_url: str | None = None
     meeting_type: str | None = None
     recurrence_type: str | None = None
