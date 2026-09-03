@@ -17,6 +17,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
+import { TaskSkillField } from "@/components/task-skill-field"
 import { useConfirm } from "@/components/providers/confirm-dialog-provider"
 import { useAuth } from "@/lib/auth"
 import { formatDepartmentName } from "@/lib/department-name"
@@ -25,7 +26,7 @@ import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
-import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
+import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCategory, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
 
 type NoteType = "GA" | "KA"
 type NotePriority = "NORMAL" | "HIGH" | "NONE"
@@ -1144,6 +1145,7 @@ export default function GaKaNotesPage() {
   const [taskAssigneeIds, setTaskAssigneeIds] = React.useState<string[]>([])
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
+  const [taskSkillCategory, setTaskSkillCategory] = React.useState<SkillCategory | null>(null)
   const [taskDateLeaveItems, setTaskDateLeaveItems] = React.useState<CommonLeaveItem[]>([])
   const [noteTaskInfo, setNoteTaskInfo] = React.useState<Map<string, NoteTaskInfo>>(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
@@ -2301,6 +2303,7 @@ export default function GaKaNotesPage() {
     setTaskAssigneeIds([])
     setTaskDepartmentIds([])
     setTaskProjectId(note.project_id ?? "NONE")
+    setTaskSkillCategory(null)
   }
 
   // Get available priority/type options based on whether a project is selected
@@ -2438,6 +2441,7 @@ export default function GaKaNotesPage() {
           is_1h_report: is1hReport,
           is_r1: isR1,
           is_personal: isPersonal,
+          skill_category: taskSkillCategory,
         }),
       })
       if (!taskRes.ok) {
@@ -4554,6 +4558,21 @@ export default function GaKaNotesPage() {
                   <p className="text-xs text-muted-foreground">Select one or more departments to guide projects (optional).</p>
                 ) : null}
               </div>
+              <TaskSkillField
+                value={taskSkillCategory}
+                onChange={setTaskSkillCategory}
+                disabled={creatingTask}
+                selectedAssigneeIds={taskAssigneeIds}
+                onSelectCandidate={(candidateId) => {
+                  setTaskAssigneeIds((previous) => previous.includes(candidateId) ? previous : [...previous, candidateId])
+                  const person = users.find((item) => item.id === candidateId)
+                  if (person?.department_id) {
+                    setTaskDepartmentIds((previous) => previous.includes(person.department_id as string)
+                      ? previous
+                      : [...previous, person.department_id as string])
+                  }
+                }}
+              />
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setTaskDialogNoteId(null)}>
                   Cancel
