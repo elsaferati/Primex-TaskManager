@@ -12,6 +12,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.department import Department
+from app.models.ga_time_slot_entry import GaTimeSlotEntry
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.meeting import Meeting
 from app.models.task import Task
@@ -111,6 +112,28 @@ async def render_ga_time_table_png(db: AsyncSession, report_day: date) -> bytes:
             "fill": _color(entry.background_color, "#FFFFFF"),
             "color": _color(entry.text_color, "#0F172A"),
             "bold": bool(entry.is_bold),
+        })
+    dated_entries = []
+    if ga_user is not None:
+        dated_entries = (
+            await db.execute(
+                select(GaTimeSlotEntry)
+                .where(
+                    GaTimeSlotEntry.user_id == ga_user.id,
+                    GaTimeSlotEntry.sync_connection_id.is_not(None),
+                    GaTimeSlotEntry.day_date >= week_dates[0],
+                    GaTimeSlotEntry.day_date <= week_dates[-1],
+                )
+                .order_by(GaTimeSlotEntry.day_date, GaTimeSlotEntry.start_time, GaTimeSlotEntry.created_at)
+                .execution_options(populate_existing=True)
+            )
+        ).scalars().all()
+    for entry in dated_entries:
+        cell_items.setdefault((entry.day_date.weekday(), _row_start(rows, entry.start_time)), []).append({
+            "text": _plain_text(entry.content),
+            "fill": "#E0F2FE" if entry.source_type == "calendar" else "#FEF3C7",
+            "color": "#0F172A",
+            "bold": False,
         })
 
     meetings = (
@@ -315,6 +338,29 @@ async def render_ga_time_table_html(db: AsyncSession, report_day: date) -> str:
             "color": _color(entry.text_color, "#0F172A"),
             "bold": bool(entry.is_bold),
             "italic": bool(entry.is_italic),
+        })
+    dated_entries = []
+    if ga_user is not None:
+        dated_entries = (
+            await db.execute(
+                select(GaTimeSlotEntry)
+                .where(
+                    GaTimeSlotEntry.user_id == ga_user.id,
+                    GaTimeSlotEntry.sync_connection_id.is_not(None),
+                    GaTimeSlotEntry.day_date >= week_dates[0],
+                    GaTimeSlotEntry.day_date <= week_dates[-1],
+                )
+                .order_by(GaTimeSlotEntry.day_date, GaTimeSlotEntry.start_time, GaTimeSlotEntry.created_at)
+                .execution_options(populate_existing=True)
+            )
+        ).scalars().all()
+    for entry in dated_entries:
+        cell_items.setdefault((entry.day_date.weekday(), _row_start(rows, entry.start_time)), []).append({
+            "text": _plain_text(entry.content),
+            "fill": "#E0F2FE" if entry.source_type == "calendar" else "#FEF3C7",
+            "color": "#0F172A",
+            "bold": False,
+            "italic": False,
         })
     meetings = (
         await db.execute(select(Meeting).execution_options(populate_existing=True))

@@ -33,6 +33,7 @@ import {
   ChevronDown,
   ScrollText,
   TicketCheck,
+  BrainCircuit,
   type LucideIcon
 } from "lucide-react"
 import { cn } from "@/lib/utils"
@@ -100,6 +101,12 @@ const primaryItems: NavItem[] = [
 ]
 
 const navGroups: NavGroup[] = [
+  {
+    id: "team",
+    label: "Team",
+    icon: Users,
+    items: [{ href: "/skills", label: "Skills Matrix", icon: BrainCircuit }],
+  },
   {
     id: "tasks",
     label: "Tasks",

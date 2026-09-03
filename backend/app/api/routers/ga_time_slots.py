@@ -1,13 +1,16 @@
 import uuid
-from datetime import date, time
+import hmac
+from datetime import date, datetime, time, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, Header, HTTPException, Request, Response, status
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
 from app.db import get_db
 from app.models.enums import UserRole
+from app.models.ga_icloud_sync_connection import GaIcloudSyncConnection
+from app.models.ga_time_slot_entry import GaTimeSlotEntry
 from app.models.ga_time_table_row import GaTimeTableRow
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
 from app.models.user import User
@@ -16,6 +19,11 @@ from app.schemas.ga_time_slot import (
     GaTimeSlotEntryIn,
     GaTimeSlotEntryOut,
     GaTimeSlotEntryUpdate,
+    GaIcloudSyncConnectionCreate,
+    GaIcloudSyncConnectionOut,
+    GaIcloudSyncImport,
+    GaIcloudSyncImportOut,
+    GaIcloudSyncPairingOut,
     GaTimeTableCommentToSlotMove,
     GaTimeTableCrossCellMoveOut,
     GaTimeTableEntryToCommentMove,
@@ -32,6 +40,15 @@ from app.services.ga_time_table import (
     GaTimeTableRowData,
     format_ga_time_label,
     get_ga_time_table_rows,
+)
+from app.services.ga_icloud_sync import (
+    TimeRow,
+    connection_id_from_token,
+    generate_connection_token,
+    hash_connection_token,
+    prepare_calendar_item,
+    prepare_reminder_item,
+    resolve_timezone,
 )
 
 
@@ -118,6 +135,42 @@ def _entry_out(entry: GaTimeSlotTemplate) -> GaTimeSlotEntryOut:
         is_italic=entry.is_italic,
         created_at=entry.created_at,
         updated_at=entry.updated_at,
+        occurrence_date=None,
+        source_type=None,
+        source_name=None,
+    )
+
+
+def _dated_entry_out(entry: GaTimeSlotEntry) -> GaTimeSlotEntryOut:
+    return GaTimeSlotEntryOut(
+        id=entry.id,
+        user_id=entry.user_id,
+        day_of_week=entry.day_date.weekday(),
+        start_time=entry.start_time,
+        end_time=entry.end_time,
+        content=entry.content,
+        sort_order=0,
+        background_color="#E0F2FE" if entry.source_type == "calendar" else "#FEF3C7",
+        text_color="#0F172A",
+        is_bold=False,
+        is_italic=False,
+        created_at=entry.created_at,
+        updated_at=entry.updated_at,
+        occurrence_date=entry.day_date,
+        source_type=entry.source_type,
+        source_name=entry.source_name,
+    )
+
+
+def _connection_out(connection: GaIcloudSyncConnection) -> GaIcloudSyncConnectionOut:
+    return GaIcloudSyncConnectionOut(
+        id=connection.id,
+        device_name=connection.device_name,
+        calendar_name=connection.calendar_name,
+        reminder_list_name=connection.reminder_list_name,
+        last_synced_at=connection.last_synced_at,
+        last_imported_count=connection.last_imported_count,
+        created_at=connection.created_at,
     )
 
 
@@ -818,6 +871,227 @@ async def move_ga_time_table_entry_to_comment(
     )
 
 
+@router.get("/icloud-sync", response_model=GaIcloudSyncConnectionOut | None)
+async def get_icloud_sync_connection(
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GaIcloudSyncConnectionOut | None:
+    _ensure_can_edit(current_user)
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        return None
+    connection = (
+        await db.execute(
+            select(GaIcloudSyncConnection)
+            .where(
+                GaIcloudSyncConnection.ga_user_id == ga_user.id,
+                GaIcloudSyncConnection.revoked_at.is_(None),
+            )
+            .order_by(GaIcloudSyncConnection.created_at.desc())
+        )
+    ).scalars().first()
+    return _connection_out(connection) if connection else None
+
+
+@router.post("/icloud-sync/pair", response_model=GaIcloudSyncPairingOut)
+async def pair_icloud_sync_device(
+    payload: GaIcloudSyncConnectionCreate,
+    request: Request,
+    response: Response,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> GaIcloudSyncPairingOut:
+    _ensure_can_edit(current_user)
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
+
+    now = datetime.now(timezone.utc)
+    active_connections = (
+        await db.execute(
+            select(GaIcloudSyncConnection).where(
+                GaIcloudSyncConnection.ga_user_id == ga_user.id,
+                GaIcloudSyncConnection.revoked_at.is_(None),
+            )
+        )
+    ).scalars().all()
+    for active in active_connections:
+        active.revoked_at = now
+    if active_connections:
+        await db.execute(
+            delete(GaTimeSlotEntry).where(
+                GaTimeSlotEntry.sync_connection_id.in_([active.id for active in active_connections])
+            )
+        )
+
+    connection_id = uuid.uuid4()
+    pairing_token, token_hash = generate_connection_token(connection_id)
+    connection = GaIcloudSyncConnection(
+        id=connection_id,
+        ga_user_id=ga_user.id,
+        created_by_id=current_user.id,
+        device_name=payload.device_name.strip(),
+        calendar_name=payload.calendar_name.strip(),
+        reminder_list_name=payload.reminder_list_name.strip(),
+        token_hash=token_hash,
+    )
+    db.add(connection)
+    await db.commit()
+    await db.refresh(connection)
+    response.headers["Cache-Control"] = "no-store"
+    base_url = str(request.base_url).rstrip("/")
+    return GaIcloudSyncPairingOut(
+        **_connection_out(connection).model_dump(),
+        import_url=f"{base_url}/api/ga-time-slots/icloud-sync/import",
+        pairing_token=pairing_token,
+    )
+
+
+@router.delete("/icloud-sync/{connection_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def revoke_icloud_sync_connection(
+    connection_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+) -> None:
+    _ensure_can_edit(current_user)
+    ga_user = await _resolve_ga_user(db)
+    if ga_user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="GA user not found")
+    connection = (
+        await db.execute(
+            select(GaIcloudSyncConnection).where(
+                GaIcloudSyncConnection.id == connection_id,
+                GaIcloudSyncConnection.ga_user_id == ga_user.id,
+                GaIcloudSyncConnection.revoked_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if connection is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Sync connection not found")
+    connection.revoked_at = datetime.now(timezone.utc)
+    await db.execute(delete(GaTimeSlotEntry).where(GaTimeSlotEntry.sync_connection_id == connection.id))
+    await db.commit()
+
+
+@router.post("/icloud-sync/import", response_model=GaIcloudSyncImportOut)
+async def import_icloud_timetable_data(
+    payload: GaIcloudSyncImport,
+    x_primeflow_sync_token: str | None = Header(default=None, alias="X-PrimeFlow-Sync-Token"),
+    db: AsyncSession = Depends(get_db),
+) -> GaIcloudSyncImportOut:
+    token = (x_primeflow_sync_token or "").strip()
+    connection_id = connection_id_from_token(token)
+    if connection_id is None:
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid sync token")
+    connection = (
+        await db.execute(
+            select(GaIcloudSyncConnection)
+            .where(
+                GaIcloudSyncConnection.id == connection_id,
+                GaIcloudSyncConnection.revoked_at.is_(None),
+            )
+            .with_for_update()
+        )
+    ).scalar_one_or_none()
+    if connection is None or not hmac.compare_digest(connection.token_hash, hash_connection_token(token)):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid sync token")
+    if payload.sync_window_end < payload.sync_window_start:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Invalid sync window")
+    if (payload.sync_window_end - payload.sync_window_start).days > 92:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Sync window is limited to 93 days")
+    if payload.calendar_name.casefold() != connection.calendar_name.casefold():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Calendar name does not match pairing")
+    if payload.reminder_list_name.casefold() != connection.reminder_list_name.casefold():
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Reminder list does not match pairing")
+    try:
+        zone = resolve_timezone(payload.timezone)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail=str(exc)) from exc
+
+    timetable_rows = await get_ga_time_table_rows(db)
+    time_rows = [TimeRow(row.start_time, row.end_time) for row in timetable_rows]
+    prepared = []
+    skipped = 0
+    for event in payload.events:
+        source_name = (event.calendar_name or payload.calendar_name).strip()
+        if source_name.casefold() != connection.calendar_name.casefold():
+            skipped += 1
+            continue
+        item = prepare_calendar_item(
+            external_id=event.id,
+            title=event.title,
+            starts_at=event.starts_at,
+            ends_at=event.ends_at,
+            is_all_day=event.is_all_day,
+            calendar_name=source_name,
+            location=event.location,
+            zone=zone,
+            rows=time_rows,
+        )
+        if not payload.sync_window_start <= item.day_date <= payload.sync_window_end or item.day_date.weekday() > 4:
+            skipped += 1
+            continue
+        prepared.append(item)
+    for reminder in payload.reminders:
+        source_name = (reminder.reminder_list_name or payload.reminder_list_name).strip()
+        if reminder.is_completed or source_name.casefold() != connection.reminder_list_name.casefold():
+            skipped += 1
+            continue
+        item = prepare_reminder_item(
+            external_id=reminder.id,
+            title=reminder.title,
+            due_at=reminder.due_at,
+            due_date=reminder.due_date,
+            reminder_list_name=source_name,
+            notes=reminder.notes,
+            fallback_date=payload.sync_window_start,
+            zone=zone,
+            rows=time_rows,
+        )
+        if not payload.sync_window_start <= item.day_date <= payload.sync_window_end or item.day_date.weekday() > 4:
+            skipped += 1
+            continue
+        prepared.append(item)
+
+    unique_items = {(item.source_type, item.source_external_id): item for item in prepared}
+    skipped += len(prepared) - len(unique_items)
+    await db.execute(
+        delete(GaTimeSlotEntry).where(
+            GaTimeSlotEntry.sync_connection_id == connection.id,
+            GaTimeSlotEntry.day_date >= payload.sync_window_start,
+            GaTimeSlotEntry.day_date <= payload.sync_window_end,
+        )
+    )
+    entries = [
+        GaTimeSlotEntry(
+            user_id=connection.ga_user_id,
+            day_date=item.day_date,
+            start_time=item.start_time,
+            end_time=item.end_time,
+            content=item.content,
+            sync_connection_id=connection.id,
+            source_type=item.source_type,
+            source_external_id=item.source_external_id,
+            source_name=item.source_name,
+        )
+        for item in unique_items.values()
+    ]
+    db.add_all(entries)
+    synced_at = datetime.now(timezone.utc)
+    connection.last_synced_at = synced_at
+    connection.last_imported_count = len(entries)
+    await db.commit()
+    calendar_count = sum(item.source_type == "calendar" for item in unique_items.values())
+    reminder_count = sum(item.source_type == "reminder" for item in unique_items.values())
+    return GaIcloudSyncImportOut(
+        imported=len(entries),
+        calendar_imported=calendar_count,
+        reminders_imported=reminder_count,
+        skipped=skipped,
+        synced_at=synced_at,
+    )
+
+
 @router.get("", response_model=list[GaTimeSlotEntryOut])
 async def list_ga_time_slots(
     week_start: date,
@@ -827,7 +1101,7 @@ async def list_ga_time_slots(
     ga_user = await _resolve_ga_user(db)
     if ga_user is None:
         return []
-    rows = (
+    template_rows = (
         await db.execute(
             select(GaTimeSlotTemplate)
             .where(GaTimeSlotTemplate.user_id == ga_user.id)
@@ -839,7 +1113,20 @@ async def list_ga_time_slots(
             )
         )
     ).scalars().all()
-    return [_entry_out(row) for row in rows]
+    week_end = week_start + timedelta(days=6)
+    dated_rows = (
+        await db.execute(
+            select(GaTimeSlotEntry)
+            .where(
+                GaTimeSlotEntry.user_id == ga_user.id,
+                GaTimeSlotEntry.sync_connection_id.is_not(None),
+                GaTimeSlotEntry.day_date >= week_start,
+                GaTimeSlotEntry.day_date <= week_end,
+            )
+            .order_by(GaTimeSlotEntry.day_date, GaTimeSlotEntry.start_time, GaTimeSlotEntry.created_at)
+        )
+    ).scalars().all()
+    return [*[_entry_out(row) for row in template_rows], *[_dated_entry_out(row) for row in dated_rows]]
 
 
 @router.post("", response_model=GaTimeSlotEntryOut)

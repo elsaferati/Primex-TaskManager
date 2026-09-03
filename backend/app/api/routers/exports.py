@@ -37,6 +37,7 @@ from app.models.meeting import Meeting
 from app.models.project import Project
 from app.models.department import Department
 from app.models.ga_time_slot_template import GaTimeSlotTemplate
+from app.models.ga_time_slot_entry import GaTimeSlotEntry
 from app.models.system_task_template import SystemTaskTemplate
 from app.models.system_task_template_alignment_role import SystemTaskTemplateAlignmentRole
 from app.models.system_task_template_alignment_user import SystemTaskTemplateAlignmentUser
@@ -1528,6 +1529,18 @@ async def export_ga_time_xlsx(
             )
         )
     ).scalars().all()
+    dated_entries = (
+        await db.execute(
+            select(GaTimeSlotEntry)
+            .where(
+                GaTimeSlotEntry.user_id == ga_user.id,
+                GaTimeSlotEntry.sync_connection_id.is_not(None),
+                GaTimeSlotEntry.day_date >= week_dates[0],
+                GaTimeSlotEntry.day_date <= week_dates[-1],
+            )
+            .order_by(GaTimeSlotEntry.day_date, GaTimeSlotEntry.start_time, GaTimeSlotEntry.created_at)
+        )
+    ).scalars().all()
     table_rows = await get_ga_time_table_rows(db)
 
     def resolve_row_start(start_value: time | None) -> str:
@@ -1549,6 +1562,11 @@ async def export_ga_time_xlsx(
     entry_map: dict[tuple[int, str], list[str]] = {}
     for entry in entries:
         day_value = int(entry.day_of_week or 0)
+        start_label = resolve_row_start(entry.start_time)
+        key = (day_value, start_label)
+        entry_map.setdefault(key, []).append(_ga_time_plain_text(entry.content))
+    for entry in dated_entries:
+        day_value = entry.day_date.weekday()
         start_label = resolve_row_start(entry.start_time)
         key = (day_value, start_label)
         entry_map.setdefault(key, []).append(_ga_time_plain_text(entry.content))

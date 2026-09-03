@@ -33,21 +33,26 @@ class TestTaskUpdatePermissions(unittest.IsolatedAsyncioTestCase):
         )
         ensure_task_editor(user, task)  # type: ignore[arg-type]
 
-    async def test_control_ko_sync_does_not_overwrite_assigned_to(self) -> None:
+    async def test_control_ko_sync_uses_authoritative_ko_owner(self) -> None:
         from app.api.routers import tasks as tasks_router
 
+        ko_user_id = uuid.uuid4()
         task = SimpleNamespace(
             id=uuid.uuid4(),
             project_id=uuid.uuid4(),
             assigned_to=uuid.uuid4(),
             phase="CONTROL",
-            internal_notes=f"ko_user_id={uuid.uuid4()}",
+            internal_notes=f"ko_user_id={ko_user_id}",
         )
-        original_assigned = task.assigned_to
+
+        async def sync_owner(_db, *, task, project):
+            task.assigned_to = ko_user_id
+            return ko_user_id
+
         with patch.object(
             tasks_router,
             "ensure_ko_user_is_task_assignee",
-            new=AsyncMock(return_value=uuid.uuid4()),
+            new=AsyncMock(side_effect=sync_owner),
         ) as ensure_ko:
             result = await tasks_router._sync_control_task_owner_from_ko(
                 AsyncMock(),
@@ -55,8 +60,8 @@ class TestTaskUpdatePermissions(unittest.IsolatedAsyncioTestCase):
                 project=SimpleNamespace(),
             )
             ensure_ko.assert_awaited_once()
-            self.assertIsNotNone(result)
-            self.assertEqual(task.assigned_to, original_assigned)
+            self.assertEqual(result, ko_user_id)
+            self.assertEqual(task.assigned_to, ko_user_id)
 
 
 if __name__ == "__main__":

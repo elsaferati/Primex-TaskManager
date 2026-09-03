@@ -1310,18 +1310,6 @@ export default function PcmProjectPage() {
     "description"
   )
   const [newMemberId, setNewMemberId] = React.useState<string>("")
-  const [controlTitle, setControlTitle] = React.useState("")
-  const [controlAssignee, setControlAssignee] = React.useState<string>("__unassigned__")
-  const [controlKoUserId, setControlKoUserId] = React.useState<string>("__unassigned__")
-  const [controlFinishPeriod, setControlFinishPeriod] = React.useState<
-    TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE
-  >(FINISH_PERIOD_NONE_VALUE)
-  const [controlStartDate, setControlStartDate] = React.useState("")
-  const [controlProductionDate, setControlProductionDate] = React.useState("")
-  const [controlDeadlineImportant, setControlDeadlineImportant] = React.useState(false)
-  const [controlTotal, setControlTotal] = React.useState("0")
-  const [controlCompleted, setControlCompleted] = React.useState("0")
-  const [creatingControlTask, setCreatingControlTask] = React.useState(false)
   // Inline task form state for Produkte phase
   const [newInlineTaskTitle, setNewInlineTaskTitle] = React.useState("")
   const [newInlineTaskAssignee, setNewInlineTaskAssignee] = React.useState<string>("__unassigned__")
@@ -1367,7 +1355,6 @@ export default function PcmProjectPage() {
   const [editingTaskCompleted, setEditingTaskCompleted] = React.useState("")
   const [editingTaskProductionDate, setEditingTaskProductionDate] = React.useState("")
   const [savingTaskEdit, setSavingTaskEdit] = React.useState(false)
-  const [updatingKoTaskId, setUpdatingKoTaskId] = React.useState<string | null>(null)
   const mstChecklistScrollRef = React.useRef<HTMLDivElement | null>(null)
   const mstChecklistDragRef = React.useRef({
     active: false,
@@ -3256,7 +3243,7 @@ export default function PcmProjectPage() {
               headers: { "Content-Type": "application/json" },
               signal: abortController.signal,
               body: JSON.stringify({
-                assigned_to: task.assigned_to || null,
+                assigned_to: koUserId || null,
                 internal_notes: serializeInternalNotes({
                   originTaskId: task.id,
                   total: totalValue,
@@ -3291,7 +3278,7 @@ export default function PcmProjectPage() {
               title: task.title,
               project_id: project.id,
               department_id: project.department_id,
-              assigned_to: task.assigned_to || null,
+              assigned_to: null,
               status: "TODO",
               priority: task.priority || "NORMAL",
               phase: "CONTROL",
@@ -3342,66 +3329,6 @@ export default function PcmProjectPage() {
 
     void run()
   }, [apiFetch, mstPhase, project, tasks])
-
-  const migratedControlTaskIdsRef = React.useRef(new Set<string>())
-  React.useEffect(() => {
-    if (!project || mstPhase !== "CONTROL") return
-    if (!tasks.length) return
-    const userById = new Map(allUsers.map((u) => [u.id, u]))
-    const isLegacyKoCandidate = (userId?: string | null) => {
-      if (!userId) return false
-      const u = userById.get(userId)
-      const label = (u?.full_name || u?.username || u?.email || "").toLowerCase()
-      return label.includes("elsa") || label.includes("lea") || label.includes("diellza")
-    }
-
-    const migrateLegacyControlTasks = async () => {
-      for (const t of tasks) {
-        if (t.phase !== "CONTROL") continue
-        if (migratedControlTaskIdsRef.current.has(t.id)) continue
-        const originTaskId = getOriginTaskId(t.internal_notes)
-        if (!originTaskId) continue
-        const origin = tasks.find((x) => x.id === originTaskId)
-        if (!origin) continue
-
-        const desiredAssignedTo = origin.assigned_to || null
-        if (t.assigned_to === desiredAssignedTo) {
-          migratedControlTaskIdsRef.current.add(t.id)
-          continue
-        }
-
-        if (!isLegacyKoCandidate(t.assigned_to)) continue
-
-        const existingKoUserId = parseKoUserId(t.internal_notes)
-        const totals = parseTaskTotals(t.internal_notes)
-        const productionDate = parseProductionDate(t.internal_notes)
-        const internalNotes = serializeInternalNotes({
-          originTaskId,
-          total: totals.total,
-          completed: totals.completed,
-          koUserId: existingKoUserId || t.assigned_to || null,
-          productionDate: productionDate || null,
-        })
-
-        const res = await apiFetch(`/tasks/${t.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            assigned_to: desiredAssignedTo,
-            internal_notes: internalNotes,
-            due_date: productionDate ? new Date(productionDate).toISOString() : null,
-          }),
-        })
-        if (res?.ok) {
-          const updated = (await res.json()) as Task
-          setTasks((prev) => prev.map((x) => (x.id === updated.id ? updated : x)))
-          migratedControlTaskIdsRef.current.add(t.id)
-        }
-      }
-    }
-
-    void migrateLegacyControlTasks()
-  }, [allUsers, apiFetch, mstPhase, project, tasks])
 
   const activePhase = phaseValue
   const visibleTasks = React.useMemo(
@@ -6418,7 +6345,9 @@ export default function PcmProjectPage() {
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             title: editingTaskTitle.trim(),
-            assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
+            assigned_to: task.phase === "CONTROL"
+              ? (editingTaskKoUserId === "__unassigned__" ? null : editingTaskKoUserId)
+              : (editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee),
             start_date: editingTaskStartDate ? new Date(editingTaskStartDate).toISOString() : null,
             due_date: task.phase === "CONTROL" && productionDate
               ? new Date(productionDate).toISOString()
@@ -6452,7 +6381,9 @@ export default function PcmProjectPage() {
             ...prev[updated.id],
             total: editingTaskTotal || "0",
             completed,
-            assigned_to: editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee,
+            assigned_to: task.phase === "CONTROL"
+              ? (editingTaskKoUserId === "__unassigned__" ? null : editingTaskKoUserId)
+              : (editingTaskAssignee === "__unassigned__" ? null : editingTaskAssignee),
             status: nextStatus,
           },
         }))
@@ -6466,56 +6397,12 @@ export default function PcmProjectPage() {
       }
     }
 
-    const updateKoUserForTask = async (task: Task, koUserIdValue: string) => {
-      if (!project) return
-      setUpdatingKoTaskId(task.id)
-      try {
-        const currentNotes = task.internal_notes || ""
-        const originTaskId = getOriginTaskId(currentNotes)
-        const totals = parseTaskTotals(currentNotes)
-        const totalValue = controlEdits[task.id]?.total || totals.total.toString()
-        const completedValue = controlEdits[task.id]?.completed || totals.completed.toString()
-        const productionDate = parseProductionDate(currentNotes)
-        const internalNotes = serializeInternalNotes({
-          originTaskId: originTaskId || undefined,
-          total: totalValue,
-          completed: completedValue,
-          koUserId: koUserIdValue === "__unassigned__" ? null : koUserIdValue,
-          productionDate: productionDate || null,
-        })
-
-        const res = await apiFetch(`/tasks/${task.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            internal_notes: internalNotes,
-            due_date: productionDate ? new Date(productionDate).toISOString() : null,
-          }),
-        })
-        if (!res.ok) {
-          toast.error("Failed to update KO")
-          return
-        }
-        const updated = (await res.json()) as Task
-        setTasks((prev) => prev.map((t) => (t.id === updated.id ? updated : t)))
-      } catch {
-        toast.error("Failed to update KO")
-      } finally {
-        setUpdatingKoTaskId(null)
-      }
-    }
-
     const memberLabel = (id?: string | null) => {
       if (!id) return "-"
       const u = userMap.get(id)
       const label = u?.full_name || u?.username || u?.email || "-"
       return label === "-" ? "-" : initialsWithDots(label)
     }
-    const controlledBy = (assignedTo?: string | null) => {
-      const other = members.find((m) => m.id !== assignedTo) || allUsers.find((m) => m.id !== assignedTo)
-      return other ? memberLabel(other.id) : "-"
-    }
-
     return (
       <>
         <div className="space-y-5 mx-auto px-4">
@@ -6862,7 +6749,7 @@ export default function PcmProjectPage() {
                     {/* Table header */}
                     <div className="sticky top-0 z-40 -mx-6 px-6 py-3 grid grid-cols-12 gap-4 text-[11px] font-medium text-slate-400 uppercase tracking-wider bg-white border-b border-slate-100 shadow-sm">
                       <div className="col-span-3">Task</div>
-                      <div className="col-span-1">Assigned</div>
+                      <div className="col-span-1">Product Owner</div>
                       <div className="col-span-1">Start Date</div>
                       <div className="col-span-1">Due Date</div>
                       <div className="col-span-1">Finish</div>
@@ -7300,7 +7187,14 @@ export default function PcmProjectPage() {
                                         if (res?.status == 405) {
                                           toast.error("Delete endpoint not active. Restart backend.")
                                         } else {
-                                          toast.error("Failed to delete task")
+                                          let message = "Failed to delete task"
+                                          try {
+                                            const data = (await res.json()) as { detail?: string }
+                                            if (data.detail) message = data.detail
+                                          } catch {
+                                            // Keep the fallback message.
+                                          }
+                                          toast.error(message)
                                         }
                                         return
                                       }
@@ -7989,164 +7883,9 @@ export default function PcmProjectPage() {
                       <div className="col-span-1">Status</div>
                       <div className="col-span-1"></div>
                     </div>
-                    {/* Inline form row */}
-                    <div className="grid grid-cols-12 gap-4 py-4 text-sm items-center bg-slate-50/60 -mx-6 px-6 border-y border-slate-100">
-                      <div className="col-span-2">
-                        <input
-                          type="text"
-                          placeholder="Enter task name..."
-                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                          value={controlTitle}
-                          onChange={(e) => setControlTitle(e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <Select value={controlAssignee} onValueChange={setControlAssignee}>
-                          <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                            <SelectValue placeholder="-" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__unassigned__">-</SelectItem>
-                            {assignableUsers.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || u.email}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="col-span-1">
-                        <input
-                          type="date"
-                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm"
-                          value={controlStartDate}
-                          onChange={(e) => setControlStartDate(e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <input
-                          type="date"
-                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm"
-                          value={controlProductionDate}
-                          onChange={(e) => setControlProductionDate(e.target.value)}
-                        />
-                      </div>
-                      <div className="col-span-1 flex items-center gap-2 text-xs text-slate-600">
-                        <Checkbox
-                          checked={controlDeadlineImportant}
-                          onCheckedChange={(checked) => setControlDeadlineImportant(checked === true)}
-                        />
-                        <span>Important</span>
-                      </div>
-                      <div className="col-span-1">
-                        <Select
-                          value={controlFinishPeriod}
-                          onValueChange={(value) =>
-                            setControlFinishPeriod(value as TaskFinishPeriod | typeof FINISH_PERIOD_NONE_VALUE)
-                          }
-                        >
-                          <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                            <SelectValue placeholder="All day" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value={FINISH_PERIOD_NONE_VALUE}>{FINISH_PERIOD_NONE_LABEL}</SelectItem>
-                            {FINISH_PERIOD_OPTIONS.map((value) => (
-                              <SelectItem key={value} value={value}>
-                                {value}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="col-span-1">
-                        <input
-                          type="number"
-                          placeholder="0"
-                          value={controlTotal}
-                          onChange={(e) => setControlTotal(e.target.value)}
-                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                        />
-                      </div>
-                      <div className="col-span-2">
-                        <input
-                          type="number"
-                          placeholder="0"
-                          value={controlCompleted}
-                          onChange={(e) => setControlCompleted(e.target.value)}
-                          className="w-full bg-transparent border-0 border-b-2 border-slate-200 focus:border-blue-500 outline-none py-2 text-sm placeholder:text-slate-400 transition-colors"
-                        />
-                      </div>
-                      <div className="col-span-1">
-                        <Select value={controlKoUserId} onValueChange={setControlKoUserId}>
-                          <SelectTrigger className="h-9 border-0 border-b-2 border-slate-200 rounded-none bg-transparent focus:border-blue-500 shadow-none">
-                            <SelectValue placeholder="-" />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="__unassigned__">-</SelectItem>
-                            {members.map((u) => (
-                              <SelectItem key={u.id} value={u.id}>
-                                {u.full_name || u.username || u.email}
-                              </SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="col-span-1">
-                        <Button
-                          size="sm"
-                          className="rounded-full px-5 shadow-sm"
-                          onClick={async () => {
-                            if (!project || !controlTitle.trim()) return
-                            setCreatingControlTask(true)
-                            try {
-                              const res = await apiFetch("/tasks", {
-                                method: "POST",
-                                headers: { "Content-Type": "application/json" },
-                                body: JSON.stringify({
-                                  title: controlTitle.trim(),
-                                  project_id: project.id,
-                                  department_id: project.department_id,
-                                  assigned_to: controlAssignee === "__unassigned__" ? null : controlAssignee,
-                                  priority: "NORMAL",
-                                  phase: "CONTROL",
-                                  finish_period:
-                                    controlFinishPeriod === FINISH_PERIOD_NONE_VALUE ? null : controlFinishPeriod,
-                                  start_date: controlStartDate ? new Date(controlStartDate).toISOString() : null,
-                                  due_date: controlProductionDate ? new Date(controlProductionDate).toISOString() : null,
-                                  is_deadline_important: controlDeadlineImportant,
-                                  internal_notes: serializeInternalNotes({
-                                    total: controlTotal || "0",
-                                    completed: controlCompleted || "0",
-                                    koUserId: controlKoUserId === "__unassigned__" ? null : controlKoUserId,
-                                    productionDate: controlProductionDate || null,
-                                  }),
-                                }),
-                              })
-                              if (!res?.ok) {
-                                toast.error("Failed to add task")
-                                return
-                              }
-                              const created = (await res.json()) as Task
-                              setTasks((prev) => [...prev, created])
-                              setControlTitle("")
-                              setControlAssignee("__unassigned__")
-                              setControlKoUserId("__unassigned__")
-                              setControlFinishPeriod(FINISH_PERIOD_NONE_VALUE)
-                              setControlStartDate("")
-                              setControlDeadlineImportant(false)
-                              setControlTotal("0")
-                              setControlCompleted("0")
-                              toast.success("Task added")
-                            } finally {
-                              setCreatingControlTask(false)
-                            }
-                          }}
-                          disabled={creatingControlTask || !controlTitle.trim()}
-                        >
-                          {creatingControlTask ? "Saving..." : "Save"}
-                        </Button>
-                      </div>
-                      <div className="col-span-1"></div>
+                    <div className="-mx-6 border-y border-slate-100 bg-slate-50/60 px-6 py-3 text-xs text-slate-500">
+                      CONTROL tasks are created automatically from PRODUCT tasks. The PRODUCT owner remains on the
+                      source task; KO is the only assignee of the CONTROL task.
                     </div>
                     {/* Task rows */}
                     <div className="divide-y divide-slate-100">
@@ -8186,27 +7925,9 @@ export default function PcmProjectPage() {
                               )}
                             </div>
                             <div className="col-span-1 px-2 min-w-0">
-                              {isEditing ? (
-                                <Select value={editingTaskAssignee} onValueChange={setEditingTaskAssignee}>
-                                  <SelectTrigger className="h-8 w-full min-w-0 border-0 border-b-2 border-blue-500 rounded-none bg-transparent shadow-none px-1">
-                                    <SelectValue>
-                                      {editingTaskAssignee === "__unassigned__"
-                                        ? "-"
-                                        : memberLabel(editingTaskAssignee)}
-                                    </SelectValue>
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="__unassigned__">-</SelectItem>
-                                    {assignableUsers.map((u) => (
-                                      <SelectItem key={u.id} value={u.id}>
-                                        {u.full_name || u.username || u.email}
-                                      </SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              ) : (
-                                <span className="block truncate text-slate-500">{memberLabel(task.assigned_to)}</span>
-                              )}
+                              <span className="block truncate text-slate-500">
+                                {memberLabel(originTask?.assigned_to)}
+                              </span>
                             </div>
                             <div className="col-span-1 px-2">
                               {isEditing ? (
