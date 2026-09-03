@@ -24,6 +24,7 @@ import { formatDepartmentName } from "@/lib/department-name"
 import { resolveProjectTitle } from "@/lib/project-display-title"
 import { fetchUsersLookupCached } from "@/lib/users-cache"
 import { getConfirmerCandidates, isWaitingConfirmation, validateWaitingConfirmation } from "@/lib/task-confirmation"
+import { inferSkillCategory, SKILL_CATEGORIES } from "@/lib/skills"
 import { useCloudDictation } from "@/lib/useCloudDictation"
 import { useSpeechDictation } from "@/lib/useSpeechDictation"
 import type { Department, GaNote, GaNoteAttachment, PlanNote, Project, SkillCategory, Task, TaskAssignee, TaskFinishPeriod, TaskPriority, UserLookup } from "@/lib/types"
@@ -1146,6 +1147,7 @@ export default function GaKaNotesPage() {
   const [taskDepartmentIds, setTaskDepartmentIds] = React.useState<string[]>([])
   const [taskProjectId, setTaskProjectId] = React.useState("NONE")
   const [taskSkillCategory, setTaskSkillCategory] = React.useState<SkillCategory | null>(null)
+  const [taskSkillAutoSuggested, setTaskSkillAutoSuggested] = React.useState(false)
   const [taskDateLeaveItems, setTaskDateLeaveItems] = React.useState<CommonLeaveItem[]>([])
   const [noteTaskInfo, setNoteTaskInfo] = React.useState<Map<string, NoteTaskInfo>>(new Map())
   const [editNoteId, setEditNoteId] = React.useState<string | null>(null)
@@ -2303,7 +2305,9 @@ export default function GaKaNotesPage() {
     setTaskAssigneeIds([])
     setTaskDepartmentIds([])
     setTaskProjectId(note.project_id ?? "NONE")
-    setTaskSkillCategory(null)
+    const inferredCategory = inferSkillCategory(defaultTitle, note.content)
+    setTaskSkillCategory(inferredCategory)
+    setTaskSkillAutoSuggested(Boolean(inferredCategory))
   }
 
   // Get available priority/type options based on whether a project is selected
@@ -4560,7 +4564,10 @@ export default function GaKaNotesPage() {
               </div>
               <TaskSkillField
                 value={taskSkillCategory}
-                onChange={setTaskSkillCategory}
+                onChange={(category) => {
+                  setTaskSkillCategory(category)
+                  setTaskSkillAutoSuggested(false)
+                }}
                 disabled={creatingTask}
                 selectedAssigneeIds={taskAssigneeIds}
                 onSelectCandidate={(candidateId) => {
@@ -4573,6 +4580,27 @@ export default function GaKaNotesPage() {
                   }
                 }}
               />
+              <div className="flex flex-wrap items-center justify-between gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  {taskSkillAutoSuggested && taskSkillCategory
+                    ? `Sugjeruar automatikisht nga teksti: ${SKILL_CATEGORIES.find((item) => item.id === taskSkillCategory)?.label || taskSkillCategory}`
+                    : "Mund ta rianalizosh pasi të ndryshosh titullin ose përshkrimin."}
+                </span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 px-2 text-xs"
+                  onClick={() => {
+                    const inferred = inferSkillCategory(taskTitle, taskDescription, taskDialogNote.content)
+                    setTaskSkillCategory(inferred)
+                    setTaskSkillAutoSuggested(Boolean(inferred))
+                    if (!inferred) toast.info("Nuk u identifikua një kategori e qartë; zgjidhe manualisht.")
+                  }}
+                >
+                  Analizo tekstin përsëri
+                </Button>
+              </div>
               <div className="flex justify-end gap-2">
                 <Button variant="outline" onClick={() => setTaskDialogNoteId(null)}>
                   Cancel

@@ -27,6 +27,48 @@ export const RATING_OPTIONS: ReadonlyArray<{ value: SkillRating; label: string; 
 export const RATING_LABEL: Record<SkillRating, string> = { A_PLUS: "A+", A: "A", B: "B", C: "C" }
 export const RATING_SCORE: Record<SkillRating, number> = { A_PLUS: 4, A: 3, B: 2, C: 1 }
 
+const CATEGORY_KEYWORDS: Record<SkillCategory, readonly string[]> = {
+  analysis: ["analiz", "kerkesa", "kërkesa", "requirement", "proces", "plan propozim", "strukture", "strukturë", "vlereso", "vlerëso"],
+  research: ["hulumt", "research", "kerko", "kërko", "tregu", "konkurrent", "teknologji", "metodologji", "best practice", "ide e re", "eksperiment"],
+  problem_solving: ["problem", "gabim", "error", "bug", "debug", "rregullo", "fix", "shkak", "nuk punon", "zgjidhje", "investigo"],
+  creativity: ["krijo", "dizajn", "design", "kreativ", "koncept", "permbajtje", "përmbajtje", "material", "user experience", "ux"],
+  standards: ["standard", "procedure", "procedurë", "template", "shabllon", "dokumentim", "udhezim", "udhëzim", "workflow"],
+  qa: ["qa", "quality", "cilesi", "cilësi", "kontrollo", "testo", "testim", "verifiko", "review", "detaje", "para dorezimit", "para dorëzimit"],
+  management: ["menaxh", "organizo", "planifiko", "planifikim", "prioritet", "koordino", "kapacitet", "deadline", "afat", "progres", "blocker", "raport javor"],
+  communication: ["komunik", "prezant", "klient", "partner", "takim", "meeting", "diskutim", "feedback", "shpjego", "email", "telefon"],
+  fast_tasks: ["urgjent", "urgent", "menjehere", "menjëherë", "shpejt", "fast task", "sot", "asap", "afat i shkurter", "afat i shkurtër"],
+}
+
+function normalizeSkillText(value: string) {
+  return value
+    .toLocaleLowerCase("sq")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9+]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+}
+
+export function inferSkillCategory(...parts: Array<string | null | undefined>): SkillCategory | null {
+  const text = normalizeSkillText(parts.filter(Boolean).join(" "))
+  if (!text) return null
+
+  let best: SkillCategory | null = null
+  let bestScore = 0
+  for (const category of SKILL_CATEGORIES) {
+    const score = CATEGORY_KEYWORDS[category.id].reduce((total, keyword) => {
+      const normalizedKeyword = normalizeSkillText(keyword)
+      if (!normalizedKeyword || !text.includes(normalizedKeyword)) return total
+      return total + (normalizedKeyword.includes(" ") ? 3 : 1)
+    }, 0)
+    if (score > bestScore) {
+      best = category.id
+      bestScore = score
+    }
+  }
+  return best
+}
+
 export const SKILL_QUESTIONS = [
   { id: "above_average", label: "Cilat lloje detyrash mendoni se i kryeni më mirë se mesatarja?", shortLabel: "Më mirë se mesatarja" },
   { id: "experience", label: "Në cilat fusha mendoni se keni më shumë përvojë?", shortLabel: "Përvoja" },
