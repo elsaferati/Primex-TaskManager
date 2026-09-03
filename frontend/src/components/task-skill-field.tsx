@@ -27,20 +27,34 @@ export function TaskSkillField({
   const { apiFetch, user } = useAuth()
   const [recommendations, setRecommendations] = React.useState<SkillRecommendation[]>([])
   const [loading, setLoading] = React.useState(false)
-  const canViewRecommendations = user?.role === "ADMIN" || user?.role === "MANAGER"
+  const [loadError, setLoadError] = React.useState(false)
+  const canViewRecommendations = Boolean(user)
 
   React.useEffect(() => {
     if (!value || !canViewRecommendations) {
       setRecommendations([])
+      setLoadError(false)
       return
     }
     let cancelled = false
     setLoading(true)
+    setLoadError(false)
     void apiFetch(`/skills/recommendations?category=${encodeURIComponent(value)}`)
       .then(async (response) => {
-        if (!cancelled) setRecommendations(response.ok ? (await response.json()) as SkillRecommendation[] : [])
+        if (cancelled) return
+        if (!response.ok) {
+          setRecommendations([])
+          setLoadError(true)
+          return
+        }
+        setRecommendations((await response.json()) as SkillRecommendation[])
       })
-      .catch(() => { if (!cancelled) setRecommendations([]) })
+      .catch(() => {
+        if (!cancelled) {
+          setRecommendations([])
+          setLoadError(true)
+        }
+      })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
   }, [apiFetch, canViewRecommendations, value])
@@ -68,7 +82,9 @@ export function TaskSkillField({
       {canViewRecommendations && value ? (
         <div className="rounded-md border bg-muted/20 p-2.5">
           <div className="mb-2 text-xs font-medium">Kandidatët më të përshtatshëm</div>
-          {loading ? <p className="text-xs text-muted-foreground">Duke ngarkuar…</p> : recommendations.length ? (
+          {loading ? <p className="text-xs text-muted-foreground">Duke ngarkuar…</p> : loadError ? (
+            <p className="text-xs text-destructive">Rekomandimet nuk u ngarkuan. Provo përsëri pas pak.</p>
+          ) : recommendations.length ? (
             <div className="flex flex-wrap gap-2">
               {recommendations.slice(0, 5).map((item) => (
                 <button

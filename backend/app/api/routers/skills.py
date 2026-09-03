@@ -103,7 +103,7 @@ async def get_team_matrix(
 async def get_recommendations(
     category: str = Query(...),
     db: AsyncSession = Depends(get_db),
-    _manager: User = Depends(require_manager_or_admin),
+    _user: User = Depends(get_current_user),
 ) -> list[SkillRecommendation]:
     if category not in SKILL_FIELDS:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_ENTITY, detail="Unknown skill category")
