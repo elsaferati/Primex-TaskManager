@@ -289,6 +289,17 @@ export interface TaskStatus {
   is_done: boolean
 }
 
+export interface PxJavPlanningBrief {
+  dl?: string | null
+  dg?: boolean | null
+  dg_kush?: string | null
+  dg_kush_user_ids?: string[]
+  hapat?: string | null
+  kush?: string | null
+  kush_user_ids?: string[]
+  sq?: string | null
+}
+
 export interface Task {
   id: string
   department_id?: string
@@ -313,6 +324,7 @@ export interface Task {
   created_by?: string | null
   ga_note_origin_id?: string | null
   plan_note_origin_id?: string | null
+  planning_brief?: PxJavPlanningBrief | null
   system_template_origin_id?: string | null
   origin_run_at?: string | null
   system_task_slot_id?: string | null
@@ -590,9 +602,11 @@ export interface PlanNote {
   completed_at?: string | null
   is_converted_to_task: boolean
   is_discussed?: boolean
+  next_week?: boolean
   project_id?: string | null
   department_id?: string | null
   planned_for_date?: string | null
+  planning_brief?: PxJavPlanningBrief | null
   created_at: string
   updated_at: string
   attachments?: PlanNoteAttachment[]
@@ -710,6 +724,9 @@ export interface Meeting {
   ends_at?: string | null
   meeting_url?: string | null
   microsoft_event_id?: string | null
+  calendar_imported?: boolean
+  calendar_sync_status?: string | null
+  calendar_last_synced_at?: string | null
   meeting_type?: string | null
   recurrence_type?: string | null // "none", "weekly", "monthly"
   recurrence_days_of_week?: number[] | null
@@ -723,6 +740,7 @@ export interface Meeting {
   updated_at: string
   participant_ids?: string[]
   paired_internal_meeting?: Meeting | null
+  paired_external_meeting_id?: string | null
 }
 
 export interface MeetingOccurrenceStatus {

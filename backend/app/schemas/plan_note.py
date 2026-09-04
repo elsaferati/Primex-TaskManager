@@ -3,7 +3,7 @@ from __future__ import annotations
 import uuid
 from datetime import date, datetime
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, model_validator
 
 from app.models.enums import (
     GaNotePriority,
@@ -26,6 +26,29 @@ class PlanNoteAttachmentOut(BaseModel):
     created_at: datetime
 
 
+class PxJavPlanningBrief(BaseModel):
+    dl: str | None = Field(default=None, max_length=4000)
+    dg: bool | None = None
+    dg_kush: str | None = Field(default=None, max_length=4000)
+    dg_kush_user_ids: list[uuid.UUID] = Field(default_factory=list)
+    hapat: str | None = Field(default=None, max_length=10000)
+    kush: str | None = Field(default=None, max_length=4000)
+    kush_user_ids: list[uuid.UUID] = Field(default_factory=list)
+    sq: str | None = Field(default=None, max_length=4000)
+
+    @model_validator(mode="after")
+    def normalize_conditional_fields(self):
+        for field_name in ("dl", "dg_kush", "hapat", "kush", "sq"):
+            value = getattr(self, field_name)
+            setattr(self, field_name, value.strip() if value and value.strip() else None)
+        if self.dg is not True:
+            self.dg_kush = None
+            self.dg_kush_user_ids = []
+        self.dg_kush_user_ids = list(dict.fromkeys(self.dg_kush_user_ids))
+        self.kush_user_ids = list(dict.fromkeys(self.kush_user_ids))
+        return self
+
+
 class PlanNoteOut(BaseModel):
     id: uuid.UUID
     content: str
@@ -43,6 +66,7 @@ class PlanNoteOut(BaseModel):
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     planned_for_date: date | None = None
+    planning_brief: PxJavPlanningBrief | None = None
     created_at: datetime
     updated_at: datetime
     attachments: list[PlanNoteAttachmentOut] = []
@@ -64,6 +88,7 @@ class PlanNoteCreate(BaseModel):
     project_id: uuid.UUID | None = None
     department_id: uuid.UUID | None = None
     planned_for_date: date | None = None
+    planning_brief: PxJavPlanningBrief | None = None
 
 
 class PlanNoteUpdate(BaseModel):
@@ -75,6 +100,7 @@ class PlanNoteUpdate(BaseModel):
     is_discussed: bool | None = None
     next_week: bool | None = None
     planned_for_date: date | None = None
+    planning_brief: PxJavPlanningBrief | None = None
 
 
 class PlanNoteTaskDeadlineUpdate(BaseModel):

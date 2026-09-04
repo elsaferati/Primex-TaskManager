@@ -83,6 +83,8 @@ module.exports = {
         SYSTEM_TASK_SCHEDULER_ENABLED: "false",
         // The primary API owns the STD sync loop; the public fallback stays read-only.
         STD_FEEDBACK_SYNC_ENABLED: "false",
+        // The primary API exclusively owns the shared Outlook calendar sync.
+        MS_CALENDAR_SYNC_ENABLED: "false",
         // The primary API exclusively owns the daily 1H SHTYPI delivery loop.
         TOMORROW_PRINT_REPORT_SCHEDULER_ENABLED: "false",
         TODAY_PRINT_REPORT_SCHEDULER_ENABLED: "false",

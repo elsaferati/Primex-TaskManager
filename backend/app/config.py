@@ -81,6 +81,12 @@ class Settings(BaseSettings):
     MS_CLIENT_SECRET: str | None = None
     MS_TENANT_ID: str | None = None
     MS_REDIRECT_URI: str | None = None
+    MS_ORGANIZER_EMAIL: str = "info@primexeu.com"
+    MS_CALENDAR_SYNC_ENABLED: bool = True
+    MS_CALENDAR_SYNC_INTERVAL_MINUTES: int = 5
+    MS_CALENDAR_SYNC_PAST_DAYS: int = 90
+    MS_CALENDAR_SYNC_FUTURE_DAYS: int = 365
+    MS_CALENDAR_DEFAULT_DEPARTMENT_CODE: str = "DEV"
 
     FRONTEND_URL: str = "http://localhost:3000"
     FILE_ACCESS_API_BASE_URL: str = "http://192.168.10.8:5080"

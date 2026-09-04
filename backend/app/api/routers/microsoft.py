@@ -8,7 +8,7 @@ import httpx
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import RedirectResponse
 from jose import JWTError, jwt
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_current_user
@@ -20,11 +20,15 @@ from app.integrations.microsoft import (
     compute_expires_at,
     exchange_code_for_token,
     fetch_calendar_events,
+    fetch_user_profile,
+    microsoft_account_email,
     refresh_access_token,
 )
+from app.models.enums import UserRole
 from app.models.microsoft_token import MicrosoftToken
 from app.models.user import User
 from app.schemas.microsoft import MicrosoftEvent
+from app.services.microsoft_calendar_sync import get_shared_calendar_token
 
 
 router = APIRouter()
@@ -35,6 +39,14 @@ def ensure_ms_config() -> None:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Microsoft integration is not configured.",
+        )
+
+
+def ensure_calendar_admin(user: User) -> None:
+    if user.role != UserRole.ADMIN:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only an administrator can connect the shared Microsoft calendar.",
         )
 
 
@@ -82,6 +94,9 @@ async def upsert_token(db: AsyncSession, user_id: uuid.UUID, token_data: dict) -
     if not access_token or not refresh_token:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Missing access token")
 
+    # PrimeFlow uses one shared organizer mailbox. Remove legacy per-user
+    # connections so every meeting consistently uses the same calendar.
+    await db.execute(delete(MicrosoftToken).where(MicrosoftToken.user_id != user_id))
     row = (await db.execute(select(MicrosoftToken).where(MicrosoftToken.user_id == user_id))).scalar_one_or_none()
     if row is None:
         row = MicrosoftToken(
@@ -124,6 +139,7 @@ async def get_authorize_url(
     user: User = Depends(get_current_user),
 ) -> dict:
     ensure_ms_config()
+    ensure_calendar_admin(user)
     state = create_state_token(user.id, redirect_to)
     redirect_uri = resolve_redirect_uri(request)
     url = build_authorize_url(settings.MS_CLIENT_ID, redirect_uri, state)
@@ -154,8 +170,17 @@ async def oauth_callback(
     user = (await db.execute(select(User).where(User.id == user_id))).scalar_one_or_none()
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    ensure_calendar_admin(user)
 
     token_data = await exchange_code_for_token(code, redirect_uri)
+    profile = await fetch_user_profile(token_data["access_token"])
+    connected_email = microsoft_account_email(profile)
+    expected_email = settings.MS_ORGANIZER_EMAIL.strip().casefold()
+    if connected_email != expected_email:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Connect {settings.MS_ORGANIZER_EMAIL}, not {connected_email or 'another Microsoft account'}.",
+        )
     await upsert_token(db, user_id, token_data)
 
     dest = append_query_param(redirect_to, "ms", "connected")
@@ -164,15 +189,18 @@ async def oauth_callback(
 
 @router.get("/status")
 async def status_check(
+    request: Request,
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    row = (await db.execute(select(MicrosoftToken).where(MicrosoftToken.user_id == user.id))).scalar_one_or_none()
+    row = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
     scope = row.scope if row is not None else None
     return {
         "connected": row is not None,
         "scope": scope,
         "can_write_calendar": bool(scope and "calendars.readwrite" in scope.lower()),
+        "account_email": settings.MS_ORGANIZER_EMAIL,
+        "can_manage": user.role == UserRole.ADMIN,
     }
 
 
@@ -181,10 +209,9 @@ async def disconnect(
     user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ) -> dict:
-    row = (await db.execute(select(MicrosoftToken).where(MicrosoftToken.user_id == user.id))).scalar_one_or_none()
-    if row is not None:
-        await db.delete(row)
-        await db.commit()
+    ensure_calendar_admin(user)
+    await db.execute(delete(MicrosoftToken))
+    await db.commit()
     return {"connected": False}
 
 
@@ -197,9 +224,12 @@ async def get_events(
     db: AsyncSession = Depends(get_db),
 ) -> list[MicrosoftEvent]:
     ensure_ms_config()
-    row = (await db.execute(select(MicrosoftToken).where(MicrosoftToken.user_id == user.id))).scalar_one_or_none()
+    row = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
     if row is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Microsoft account not connected")
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Shared Microsoft calendar {settings.MS_ORGANIZER_EMAIL} is not connected",
+        )
 
     now = datetime.now(timezone.utc)
     if row.expires_at <= now + timedelta(seconds=30):

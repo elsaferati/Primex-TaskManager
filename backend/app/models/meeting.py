@@ -20,6 +20,10 @@ class Meeting(Base):
     ends_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     meeting_url: Mapped[str | None] = mapped_column(String(500))
     microsoft_event_id: Mapped[str | None] = mapped_column(String(500), unique=True, index=True)
+    calendar_imported: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    calendar_sync_status: Mapped[str | None] = mapped_column(String(20))
+    calendar_change_key: Mapped[str | None] = mapped_column(String(500))
+    calendar_last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     meeting_type: Mapped[str] = mapped_column(String(20), nullable=False, server_default="external")
     recurrence_type: Mapped[str | None] = mapped_column(String(20))  # "none", "weekly", "monthly"
     recurrence_days_of_week: Mapped[list[int] | None] = mapped_column(ARRAY(Integer), nullable=True)

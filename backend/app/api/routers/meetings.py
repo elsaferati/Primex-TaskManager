@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import uuid
-from datetime import date, datetime
+from dataclasses import asdict
+from datetime import date, datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, status
+import httpx
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -28,6 +30,11 @@ from app.services.meeting_system_tasks import (
     reconcile_external_meeting_system_tasks_for_meeting,
     reconcile_pim_image_test_task_for_meeting,
 )
+from app.services.microsoft_calendar_sync import (
+    get_shared_calendar_token,
+    sync_external_calendar_events,
+)
+from app.api.routers.microsoft import resolve_redirect_uri
 
 
 router = APIRouter()
@@ -105,6 +112,9 @@ async def list_meetings(
             ends_at=m.ends_at,
             meeting_url=m.meeting_url,
             microsoft_event_id=m.microsoft_event_id,
+            calendar_imported=bool(m.calendar_imported),
+            calendar_sync_status=m.calendar_sync_status,
+            calendar_last_synced_at=m.calendar_last_synced_at,
             meeting_type=m.meeting_type,
             recurrence_type=m.recurrence_type,
             recurrence_days_of_week=m.recurrence_days_of_week,
@@ -117,9 +127,55 @@ async def list_meetings(
             created_at=m.created_at,
             updated_at=m.updated_at,
             participant_ids=participants_by_meeting.get(m.id, []),
+            paired_external_meeting_id=m.paired_external_meeting_id,
         )
         for m in meetings
     ]
+
+
+@router.post("/sync-microsoft-calendar")
+async def sync_microsoft_calendar(
+    request: Request,
+    start: datetime | None = None,
+    end: datetime | None = None,
+    db: AsyncSession = Depends(get_db),
+    user=Depends(get_current_user),
+) -> dict:
+    """Import every event from the shared info calendar as a TAK EXT."""
+    now = datetime.now(timezone.utc)
+    sync_start = start or (now - timedelta(days=90))
+    sync_end = end or (now + timedelta(days=365))
+    if sync_start.tzinfo is None:
+        sync_start = sync_start.replace(tzinfo=timezone.utc)
+    if sync_end.tzinfo is None:
+        sync_end = sync_end.replace(tzinfo=timezone.utc)
+    if sync_end <= sync_start:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="end must be after start")
+    if sync_end - sync_start > timedelta(days=730):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Sync range cannot exceed 730 days")
+
+    try:
+        token = await get_shared_calendar_token(db, redirect_uri=resolve_redirect_uri(request))
+        if token is None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="The shared Microsoft calendar is not connected.",
+            )
+        result = await sync_external_calendar_events(
+            db,
+            access_token=token.access_token,
+            connected_by_user_id=token.user_id,
+            start=sync_start,
+            end=sync_end,
+        )
+    except HTTPException:
+        raise
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"Microsoft Calendar sync failed: {exc.__class__.__name__}",
+        ) from exc
+    return asdict(result)
 
 
 @router.get("/occurrence-statuses", response_model=list[MeetingOccurrenceStatusOut])
@@ -177,6 +233,32 @@ async def create_meeting(
 ) -> MeetingCreateOut:
     ensure_department_access(user, payload.department_id)
     requested_meeting_type = payload.meeting_type or "external"
+    paired_external: Meeting | None = None
+    if payload.paired_external_meeting_id is not None:
+        if requested_meeting_type != "internal":
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="Only a TAK INT can be linked to a TAK EXT",
+            )
+        paired_external = (
+            await db.execute(
+                select(Meeting).where(Meeting.id == payload.paired_external_meeting_id)
+            )
+        ).scalar_one_or_none()
+        if paired_external is None or paired_external.meeting_type != "external":
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="TAK EXT not found")
+        existing_pair = (
+            await db.execute(
+                select(Meeting.id).where(
+                    Meeting.paired_external_meeting_id == payload.paired_external_meeting_id
+                )
+            )
+        ).scalar_one_or_none()
+        if existing_pair is not None:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This TAK EXT already has a linked TAK INT",
+            )
     should_create_internal_meeting = (
         payload.create_internal_meeting
         if payload.create_internal_meeting is not None
@@ -227,6 +309,7 @@ async def create_meeting(
         recurrence_days_of_month=payload.recurrence_days_of_month,
         department_id=payload.department_id,
         project_id=payload.project_id,
+        paired_external_meeting_id=payload.paired_external_meeting_id,
         created_by=user.id,
     )
     db.add(meeting)
@@ -284,6 +367,9 @@ async def create_meeting(
             ends_at=paired_internal_meeting.ends_at,
             meeting_url=paired_internal_meeting.meeting_url,
             microsoft_event_id=paired_internal_meeting.microsoft_event_id,
+            calendar_imported=bool(paired_internal_meeting.calendar_imported),
+            calendar_sync_status=paired_internal_meeting.calendar_sync_status,
+            calendar_last_synced_at=paired_internal_meeting.calendar_last_synced_at,
             meeting_type=paired_internal_meeting.meeting_type,
             recurrence_type=paired_internal_meeting.recurrence_type,
             recurrence_days_of_week=paired_internal_meeting.recurrence_days_of_week,
@@ -296,6 +382,7 @@ async def create_meeting(
             created_at=paired_internal_meeting.created_at,
             updated_at=paired_internal_meeting.updated_at,
             participant_ids=participant_ids_list,
+            paired_external_meeting_id=paired_internal_meeting.paired_external_meeting_id,
         )
 
     return MeetingCreateOut(
@@ -306,6 +393,9 @@ async def create_meeting(
         ends_at=meeting.ends_at,
         meeting_url=meeting.meeting_url,
         microsoft_event_id=meeting.microsoft_event_id,
+        calendar_imported=bool(meeting.calendar_imported),
+        calendar_sync_status=meeting.calendar_sync_status,
+        calendar_last_synced_at=meeting.calendar_last_synced_at,
         meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
         recurrence_days_of_week=meeting.recurrence_days_of_week,
@@ -318,6 +408,7 @@ async def create_meeting(
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
+        paired_external_meeting_id=meeting.paired_external_meeting_id,
         paired_internal_meeting=paired_internal_out,
     )
 
@@ -332,6 +423,11 @@ async def update_meeting(
     meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    if meeting.calendar_imported:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Calendar meetings must be edited in Microsoft Calendar",
+        )
     # Allow admin, manager, or the person that created it to edit
     ensure_meeting_editor(user, meeting)
 
@@ -418,6 +514,9 @@ async def update_meeting(
         ends_at=meeting.ends_at,
         meeting_url=meeting.meeting_url,
         microsoft_event_id=meeting.microsoft_event_id,
+        calendar_imported=bool(meeting.calendar_imported),
+        calendar_sync_status=meeting.calendar_sync_status,
+        calendar_last_synced_at=meeting.calendar_last_synced_at,
         meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
         recurrence_days_of_week=meeting.recurrence_days_of_week,
@@ -430,6 +529,7 @@ async def update_meeting(
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
+        paired_external_meeting_id=meeting.paired_external_meeting_id,
     )
 
 
@@ -470,6 +570,9 @@ async def create_agent_test_task_for_meeting(
         ends_at=meeting.ends_at,
         meeting_url=meeting.meeting_url,
         microsoft_event_id=meeting.microsoft_event_id,
+        calendar_imported=bool(meeting.calendar_imported),
+        calendar_sync_status=meeting.calendar_sync_status,
+        calendar_last_synced_at=meeting.calendar_last_synced_at,
         meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
         recurrence_days_of_week=meeting.recurrence_days_of_week,
@@ -482,6 +585,7 @@ async def create_agent_test_task_for_meeting(
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
+        paired_external_meeting_id=meeting.paired_external_meeting_id,
     )
 
 
@@ -521,6 +625,9 @@ async def create_pim_image_test_task_for_meeting(
         ends_at=meeting.ends_at,
         meeting_url=meeting.meeting_url,
         microsoft_event_id=meeting.microsoft_event_id,
+        calendar_imported=bool(meeting.calendar_imported),
+        calendar_sync_status=meeting.calendar_sync_status,
+        calendar_last_synced_at=meeting.calendar_last_synced_at,
         meeting_type=meeting.meeting_type,
         recurrence_type=meeting.recurrence_type,
         recurrence_days_of_week=meeting.recurrence_days_of_week,
@@ -533,6 +640,7 @@ async def create_pim_image_test_task_for_meeting(
         created_at=meeting.created_at,
         updated_at=meeting.updated_at,
         participant_ids=participant_ids_list,
+        paired_external_meeting_id=meeting.paired_external_meeting_id,
     )
 
 
@@ -545,6 +653,11 @@ async def delete_meeting(
     meeting = (await db.execute(select(Meeting).where(Meeting.id == meeting_id))).scalar_one_or_none()
     if meeting is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Meeting not found")
+    if meeting.calendar_imported:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Calendar meetings must be deleted in Microsoft Calendar",
+        )
     # Only admins can delete external meetings
     ensure_admin(user)
     await deactivate_external_meeting_system_tasks(db, meeting.id)

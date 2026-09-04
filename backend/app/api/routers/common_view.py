@@ -1113,6 +1113,8 @@ async def get_common_view(
         week_days = [week_start_date + timedelta(days=i) for i in range(7)]
 
         for meeting in meetings:
+            if meeting.calendar_sync_status == "cancelled":
+                continue
             owner_user = users_map.get(meeting.created_by) if meeting.created_by else None
             owner_name = owner_user.full_name if owner_user and owner_user.full_name else owner_user.username if owner_user else "Unknown"
             department_name = (

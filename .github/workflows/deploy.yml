@@ -100,6 +100,9 @@ jobs:
           EMAIL_PASSWORD: ${{ secrets.EMAIL_PASSWORD }}
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
           REPORT_STORAGE_DIR: ${{ vars.REPORT_STORAGE_DIR }}
+          MS_CLIENT_ID: ${{ vars.MS_CLIENT_ID }}
+          MS_TENANT_ID: ${{ vars.MS_TENANT_ID }}
+          MS_CLIENT_SECRET: ${{ secrets.MS_CLIENT_SECRET }}
         run: |
           echo NEXT_PUBLIC_API_BASE_URL=https://api-flow.primexeu.com > frontend\.env.local
           echo DATABASE_URL=postgresql+asyncpg://postgres:12345678@localhost:5433/primex_nexus > backend\.env
@@ -113,6 +116,11 @@ jobs:
           echo APP_TIMEZONE=Europe/Budapest >> backend\.env
           echo CORS_ORIGINS=https://primeflow.primexeu.com,https://api-flow.primexeu.com >> backend\.env
           echo FRONTEND_URL=https://primeflow.primexeu.com >> backend\.env
+          echo MS_CLIENT_ID=%MS_CLIENT_ID% >> backend\.env
+          echo MS_TENANT_ID=%MS_TENANT_ID% >> backend\.env
+          echo MS_CLIENT_SECRET=%MS_CLIENT_SECRET% >> backend\.env
+          echo MS_REDIRECT_URI=https://api-flow.primexeu.com/api/microsoft/callback >> backend\.env
+          echo MS_ORGANIZER_EMAIL=info@primexeu.com >> backend\.env
           echo DEVELOPMENT_CLIENTS_PATH=\\192.168.10.8\Files\10_ZHVILLIM\05_CLIENTS >> backend\.env
           echo PRODUCT_CLIENTS_PATH=\\192.168.10.8\Klientat\05_CLIENTS >> backend\.env
           echo PRIMEFLOW_API_BASE_URL=https://api-flow.primexeu.com >> backend\.env

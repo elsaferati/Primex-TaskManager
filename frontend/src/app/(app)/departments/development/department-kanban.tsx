@@ -21,6 +21,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { BoldOnlyEditor } from "@/components/bold-only-editor"
 import { DailyRlzCommentField, DailyRlzReasonCell, DailyRlzSaveButton, dailyRlzStateByTask } from "@/components/daily-rlz-panel"
 import { DailyReportMeetingsTable } from "@/components/daily-report-meetings-table"
+import { PxJavPlanningBriefView } from "@/components/px-jav-planning-brief-view"
 import { useAuth } from "@/lib/auth"
 import { formatDateDMY, formatDateTimeDMY, normalizeDueDateInput, toDateInputValue } from "@/lib/dates"
 import { getDepartmentBootstrapCache, setDepartmentBootstrapCache } from "@/lib/department-bootstrap-cache"
@@ -1278,6 +1279,7 @@ export default function DepartmentKanban() {
   const [meetings, setMeetings] = React.useState<Meeting[]>([])
   const [myMeetings, setMyMeetings] = React.useState<Meeting[]>([])
   const [msConnected, setMsConnected] = React.useState(false)
+  const [msCanManage, setMsCanManage] = React.useState(false)
   const [msEvents, setMsEvents] = React.useState<MicrosoftEvent[]>([])
   const [loadingMsEvents, setLoadingMsEvents] = React.useState(false)
   const [checkingMsStatus, setCheckingMsStatus] = React.useState(false)
@@ -1410,6 +1412,11 @@ export default function DepartmentKanban() {
   const [selectEditTaskAssigneesOpen, setSelectEditTaskAssigneesOpen] = React.useState(false)
   const [updatingTask, setUpdatingTask] = React.useState(false)
   const [allTodayEditingTaskId, setAllTodayEditingTaskId] = React.useState<string | null>(null)
+  const [allTodayPlanningDetail, setAllTodayPlanningDetail] = React.useState<{
+    taskId: string
+    brief: Task["planning_brief"]
+    loading: boolean
+  } | null>(null)
   const [allTodayEditTitle, setAllTodayEditTitle] = React.useState("")
   const [allTodayEditDescription, setAllTodayEditDescription] = React.useState("")
   const [allTodayEditType, setAllTodayEditType] = React.useState<AllTodayEditTypeId>("normal")
@@ -5921,6 +5928,30 @@ export default function DepartmentKanban() {
     }
     const plainTitle = getPlainMarkedText(task.title)
     setAllTodayEditingTaskId(task.id)
+    setAllTodayPlanningDetail({
+      taskId: task.id,
+      brief: task.planning_brief ?? null,
+      loading: Boolean(task.plan_note_origin_id),
+    })
+    if (task.plan_note_origin_id) {
+      void (async () => {
+        try {
+          const detailRes = await apiFetch(`/tasks/${task.id}`)
+          if (!detailRes.ok) throw new Error("Failed to load PX JAV planning")
+          const detail = (await detailRes.json()) as Task
+          setAllTodayPlanningDetail((current) => (
+            current?.taskId === task.id
+              ? { taskId: task.id, brief: detail.planning_brief ?? null, loading: false }
+              : current
+          ))
+        } catch {
+          setAllTodayPlanningDetail((current) => (
+            current?.taskId === task.id ? { ...current, loading: false } : current
+          ))
+          toast.error("Planifikimi PX JAV nuk u ngarkua")
+        }
+      })()
+    }
     setAllTodayEditTitle(plainTitle)
     setAllTodayEditDescription(task.description || "")
     setAllTodayEditType(getAllTodayTaskType(task))
@@ -5940,6 +5971,7 @@ export default function DepartmentKanban() {
 
   const cancelAllTodayTaskEdit = () => {
     setAllTodayEditingTaskId(null)
+    setAllTodayPlanningDetail(null)
     setAllTodayEditStatus("TODO")
     setAllTodayEditTitle("")
     setAllTodayEditDescription("")
@@ -6588,8 +6620,9 @@ export default function DepartmentKanban() {
         setMsConnected(false)
         return
       }
-      const data = (await res.json()) as { connected?: boolean }
+      const data = (await res.json()) as { connected?: boolean; can_manage?: boolean }
       setMsConnected(Boolean(data.connected))
+      setMsCanManage(Boolean(data.can_manage))
     } finally {
       setCheckingMsStatus(false)
     }
@@ -8431,6 +8464,12 @@ export default function DepartmentKanban() {
                       <div className="rounded-xl border border-sky-200 bg-sky-50 px-3 py-2 text-sm text-sky-800">
                         This is your independent note task copy. Edit its status and scheduling here; shared details are managed in {allTodayEditingTask?.plan_note_origin_id ? "PX JAV" : "GA Notes"}.
                       </div>
+                    ) : null}
+                    {allTodayEditingTask?.plan_note_origin_id ? (
+                      <PxJavPlanningBriefView
+                        brief={allTodayPlanningDetail?.taskId === allTodayEditingTask.id ? allTodayPlanningDetail.brief : null}
+                        loading={allTodayPlanningDetail?.taskId === allTodayEditingTask.id && allTodayPlanningDetail.loading}
+                      />
                     ) : null}
                     <div className="space-y-2">
                       <Label className="text-slate-700">Title</Label>
@@ -10592,7 +10631,7 @@ export default function DepartmentKanban() {
                         >
                           {loadingMsEvents ? "Syncing..." : "Sync"}
                         </Button>
-                      ) : (
+                      ) : msCanManage ? (
                         <Button
                           variant="outline"
                           size="sm"
@@ -10602,8 +10641,10 @@ export default function DepartmentKanban() {
                         >
                           {checkingMsStatus ? "Checking..." : "Connect"}
                         </Button>
+                      ) : (
+                        <span className="text-xs text-amber-700">info@primexeu.com not connected</span>
                       )}
-                      {msConnected ? (
+                      {msConnected && msCanManage ? (
                         <Button
                           variant="ghost"
                           size="sm"

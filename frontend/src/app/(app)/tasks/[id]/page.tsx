@@ -518,6 +518,14 @@ export default function TaskDetailsPage() {
 
   const statusText = statusLabel(task.status)
   const priorityText = task.priority ? TASK_PRIORITY_LABELS[task.priority] || task.priority : "-"
+  const planningBrief = task.planning_brief
+  const planningUserNames = (ids?: string[], fallback?: string | null) => {
+    const names = (ids || []).map((id) => {
+      const person = users.find((item) => item.id === id)
+      return person?.full_name || person?.username || id
+    })
+    return names.length ? names.join(", ") : fallback || "—"
+  }
 
   return (
     <>
@@ -841,7 +849,49 @@ export default function TaskDetailsPage() {
             </CardContent>
           </Card>
 
-          <Card className="border-slate-200/70 bg-white/90 shadow-sm">
+          {planningBrief ? (
+            <Card className="border-violet-200 bg-violet-50/60 shadow-sm lg:col-start-1 lg:row-start-2">
+              <CardHeader>
+                <div className="flex items-center justify-between gap-3">
+                  <CardTitle className="text-sm text-violet-950">Planifikimi nga PX JAV</CardTitle>
+                  <Badge variant="outline" className="border-violet-200 bg-white text-violet-700">Vetëm për lexim</Badge>
+                </div>
+              </CardHeader>
+              <CardContent>
+                <dl className="divide-y divide-violet-100 overflow-hidden rounded-lg border border-violet-100 bg-white text-sm">
+                  <div className="grid sm:grid-cols-[120px_minmax(0,1fr)]">
+                    <dt className="bg-violet-50 px-3 py-3 text-xs font-semibold text-violet-700">DL</dt>
+                    <dd className="whitespace-pre-wrap px-3 py-3 text-slate-800">{planningBrief.dl || "—"}</dd>
+                  </div>
+                  <div className="grid sm:grid-cols-[120px_minmax(0,1fr)]">
+                    <dt className="bg-violet-50 px-3 py-3 text-xs font-semibold text-violet-700">DG</dt>
+                    <dd className="whitespace-pre-wrap px-3 py-3 text-slate-800">
+                      {typeof planningBrief.dg !== "boolean"
+                        ? "—"
+                        : planningBrief.dg
+                          ? `Po — ${planningUserNames(planningBrief.dg_kush_user_ids, planningBrief.dg_kush)}`
+                          : "Jo"}
+                    </dd>
+                  </div>
+                  <div className="grid sm:grid-cols-[120px_minmax(0,1fr)]">
+                    <dt className="bg-violet-50 px-3 py-3 text-xs font-semibold text-violet-700">HAPAT</dt>
+                    <dd className="whitespace-pre-wrap px-3 py-3 text-slate-800">{planningBrief.hapat || "—"}</dd>
+                  </div>
+                  <div className="grid sm:grid-cols-[120px_minmax(0,1fr)]">
+                    <dt className="bg-violet-50 px-3 py-3 text-xs font-semibold text-violet-700">KUSH</dt>
+                    <dd className="whitespace-pre-wrap px-3 py-3 text-slate-800">{planningUserNames(planningBrief.kush_user_ids, planningBrief.kush)}</dd>
+                  </div>
+                  <div className="grid sm:grid-cols-[120px_minmax(0,1fr)]">
+                    <dt className="bg-violet-50 px-3 py-3 text-xs font-semibold text-violet-700">SQ</dt>
+                    <dd className="whitespace-pre-wrap px-3 py-3 text-slate-800">{planningBrief.sq || "—"}</dd>
+                  </div>
+                </dl>
+                <p className="mt-3 text-xs text-violet-700">Ndryshimet e këtij planifikimi menaxhohen në PX JAV.</p>
+              </CardContent>
+            </Card>
+          ) : null}
+
+          <Card className="border-slate-200/70 bg-white/90 shadow-sm lg:col-start-2 lg:row-start-1">
             <CardHeader>
               <CardTitle className="text-sm">Task Info</CardTitle>
             </CardHeader>
